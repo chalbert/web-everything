@@ -150,6 +150,41 @@ speak from the corpus again; sizing a band from both arms pooled or from the esc
 hardest band instead of the easiest; inventing a rate for an empty band; inverting the answerable filter;
 dropping `perBand` from the payload.
 
+## Round 4 — ordinary bugs inside the new model, not the model again
+
+Round 3's reviewer ran 67 mutations and said plainly **not to re-open the model**: the fixes below are an
+arithmetic change and a deletion, and the model's own rules are what name them as wrong. Recorded because
+the distinction is the useful part — *"the model is wrong"* and *"the code does not implement the model"*
+call for different next steps, and three rounds were spent learning that.
+
+**The deficit counted ONE cell and was ranked as the whole distance.** `shortBy` took the single smallest
+cell, so a band at 4/4/4/4 reported "1 short" and a band at 3/10/10/10 reported "2 short" — and the blocker
+named the first. The reviewer followed it literally: adding one observation there left `bandsTested: 0` and
+the blocker still firing, while adding two to the band it did **not** name cleared it. Testability needs
+every cell at 5, so the distance is the **sum** of the four shortfalls. `shortCells` now lists each short
+cell with what it holds, and the blocker names them all.
+
+**Removing the clamps introduced an `Infinity`.** With `Math.max(1e-6, …)` gone from `mdd`, `d * d`
+underflows to 0 below about `1e-160` and the division returns `Infinity` — impossible on `main`, created by
+round 3. Worse than a wrong number: `Infinity` has no JSON representation, so an HTTP caller received
+`null` with no blocker explaining it. The guard is on the **result**, not a re-added input clamp, so the
+"arguments as passed" promise stays true. That is a fourth null case and the docstring says so.
+
+**`sizeableMdd` restated the estimator's rules instead of asking it, and drifted within one round.** It
+now probes — `requiredNPerGroup(0, mdd) !== null` — because at a zero base rate the only reasons left to
+refuse are `mdd`'s own. A copy of a rule cannot drift when there is no copy.
+
+**Two sentences that were still wider than the code.** *"No power figure below is populated, and that is
+the reason"* was false in both halves — `power.baseRate` **is** populated, and a band with an escalated arm
+but no clean arm is null because it has no rate, not because of the `mdd`. Deleted. And the blocker written
+to *name* the offending input printed *"`minDetectableDiff` is null"* for `NaN`, `Infinity` and
+`-Infinity`, because `JSON.stringify` renders all three as `"null"` — which names nothing and reads as a
+missing value rather than a rejected one. `String` now.
+
+Seven mutations survived round 3 and all seven redden now: swapping either clean cell's label, dropping
+either clean cell, an off-by-one in the shortfall, loosening `>= 5` to `> 5`, and ranking on `bandNeeds[0]`.
+A band with one arm and no other had no coverage at all and now has its own test.
+
 ## Still open: should the estimator enforce this module's own validity rule?
 
 The returned n is the **power** requirement and carries no validity floor — the textbook formula has none.

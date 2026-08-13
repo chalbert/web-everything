@@ -189,7 +189,7 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  * Observations per group needed to detect `mdd` at this base rate (80% power, α=0.05, two-sided).
  * The actionable number: it says whether the metric or the patience is the constraint.
  *
- * RETURNS NULL IN EXACTLY THREE CASES, and the list is the whole claim — an earlier draft opened with
+ * RETURNS NULL IN EXACTLY FOUR CASES, and the list is the whole claim — an earlier draft opened with
  * "returns null when no answer exists", which is wider than any guard here and is corrected below:
  *
  *   1. `baseRate + mdd >= 1`. The formula sizes the comparison arm at `baseRate + mdd`, so past 1 there
@@ -214,6 +214,11 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  *      with no minimum, so that substitution was reachable from the shipped surface. There is deliberately
  *      no separate `mdd >= 1` guard: with `baseRate >= 0` it is already case 1, and a redundant line that
  *      no input can reach is a line no test can defend.
+ *   4. the arithmetic does not produce a finite number. `d * d` underflows to 0 below about `mdd = 1e-160`
+ *      and the division returns `Infinity` — not a sample size, and worse than a wrong one, because
+ *      `Infinity` has no JSON representation and reaches an HTTP caller as `null` with nothing saying why.
+ *      This case was UNREACHABLE while the input clamps existed and arrived when they left; the guard is on
+ *      the RESULT so the "arguments as passed" promise below stays true.
  *
  * THE ARGUMENTS ARE GUARDED AS PASSED, before any clamp. Clamping first made the guard test a different
  * pair than the caller supplied, in both directions: `(0.9999999, 1e-6)` sums past 1 and was answered
@@ -235,7 +240,7 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  *     `p = 0.021` the power term is 276 at `mdd = 0.05` (the floor, 239, does not bind) but 104 at 0.10 and
  *     42 at 0.20, where it does.
  *
- * @returns {number|null} observations per group, or null in the three cases above.
+ * @returns {number|null} observations per group, or null in the four cases above.
  */
 export function requiredNPerGroup(baseRate, mdd = 0.05) {
   const p = typeof baseRate === 'number' ? baseRate : NaN;
@@ -244,7 +249,14 @@ export function requiredNPerGroup(baseRate, mdd = 0.05) {
   if (d <= 0 || p < 0 || p > 1) return null;
   if (p + d >= 1) return null;
   const pbar = p + d / 2;
-  return Math.ceil(((1.96 + 0.84) ** 2 * 2 * pbar * (1 - pbar)) / (d * d));
+  const n = Math.ceil(((1.96 + 0.84) ** 2 * 2 * pbar * (1 - pbar)) / (d * d));
+  // CASE 4, AND IT ARRIVED WITH THE CLAMPS LEAVING (round 3 review, finding 2). `Math.max(1e-6, …)` on `d`
+  // used to make this unreachable; without it, `d * d` UNDERFLOWS to 0 below about `mdd = 1e-160` and the
+  // division returns `Infinity`. That is not a sample size, and it is worse than a wrong one: `Infinity`
+  // has no JSON representation, so it serialises to `null` and an HTTP caller sees an empty field with
+  // nothing anywhere saying why. Guarding the RESULT rather than re-clamping the input keeps the promise
+  // above — the arguments are judged as passed — while still refusing to return a non-number.
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -308,9 +320,18 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   // Is the requested effect size sizeable AT ALL? Checked ONCE, on the input, and reported as itself —
   // never inferred later from a null. `requiredNPerGroup` returns null for four distinct reasons and only
   // one of them says anything about a band.
-  const sizeableMdd = Number.isFinite(mdd) && mdd > 0 && mdd < 1;
+  // PROBED, NOT RE-DERIVED (round 3 review, finding 2). The first cut re-stated the estimator's rules here as
+  // `isFinite && > 0 && < 1`, and that copy drifted immediately: with the input clamps gone, `d * d`
+  // underflows to 0 for `mdd` below about 1e-160, so the estimator returns a non-finite answer while this
+  // condition still said "sizeable" — every power figure null, no blocker, and `Infinity` serialising to
+  // `null` for an HTTP caller. Asking the estimator itself cannot drift. `baseRate: 0` is the canonical
+  // probe: at zero the only reasons left to refuse are `mdd`'s own.
+  const sizeableMdd = requiredNPerGroup(0, mdd) !== null;
   if (!sizeableMdd) {
-    blockers.push(`unsizeable effect — \`minDetectableDiff\` is ${JSON.stringify(mdd)}, which no sample size can be computed for; it must be a number greater than 0 and less than 1. No power figure below is populated, and that is the reason.`);
+    // `String`, NOT `JSON.stringify` — the whole point of this blocker is to NAME the input, and
+    // `JSON.stringify(NaN)`, `(Infinity)` and `(-Infinity)` are all the string "null", which names nothing
+    // and reads as a missing value rather than a rejected one.
+    blockers.push(`unsizeable effect — \`minDetectableDiff\` is ${String(mdd)}, which no sample size can be computed for. It must be a number above 0, far enough above it that its square does not underflow, and small enough that the compared arm stays below 100%.`);
   }
 
   // PER BAND. `baseRate` is the CLEAN arm's rate — the formula sizes a control at `baseRate` against a
@@ -325,20 +346,27 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
       { cell: 'clean defects', have: cln.k },
       { cell: 'clean non-defects', have: cln.n - cln.k },
     ];
-    const worst = cells.reduce((a, b) => (b.have < a.have ? b : a));
+    // THE DEFICIT IS OVER ALL FOUR CELLS, NOT THE WORST ONE (round 3 review, finding 1). Ranking on the
+    // single smallest cell was a statistic about one part driving a decision about the whole — the same
+    // shape as round 2's finding, one level in. A band at 4/4/4/4 reported "1 short" and a band at
+    // 3/10/10/10 reported "2 short", so the blocker named the first; adding 1 observation there leaves
+    // `bandsTested: 0` and the blocker still firing, while adding 2 to the band it did NOT name clears it.
+    // Testability needs EVERY cell at 5, so the distance to it is the sum of the four shortfalls.
+    const short = cells.filter((c) => c.have < 5);
     const rate = cln.n ? cln.k / cln.n : null;
     return {
       band: label,
       baseRate: rate,
-      // Null when there is no clean arm to take a rate from, or for any of the four reasons the estimator
-      // itself refuses. Which one holds is answered by `baseRate` and by the unsizeable-effect blocker —
-      // never guessed from this field. No `sizeableMdd` test here on purpose: the estimator already
-      // refuses every unsizeable `mdd`, and a redundant condition is one no mutation can redden.
+      // Null when there is no clean arm to take a rate from, or for any of the reasons the estimator itself
+      // refuses. Which one holds is answered by `baseRate` and by the unsizeable-effect blocker — never
+      // guessed from this field. No `sizeableMdd` test here on purpose: the estimator already refuses every
+      // unsizeable `mdd`, and a redundant condition is one no mutation can redden.
       requiredNPerGroup: rate === null ? null : requiredNPerGroup(rate, mdd),
-      // THE VALIDITY QUESTION, in counts. `testable` mirrors `compareProportions`'s own rule exactly.
-      testable: worst.have >= 5,
-      shortBy: Math.max(0, 5 - worst.have),
-      smallestCell: worst.cell,
+      // THE VALIDITY QUESTION, in counts. `testable` mirrors `compareProportions`'s own rule exactly: the
+      // MINIMUM of the four cells at 5 or more, which is the same as no cell being short.
+      testable: short.length === 0,
+      shortBy: short.reduce((n, c) => n + (5 - c.have), 0),
+      shortCells: Object.freeze(short.map((c) => Object.freeze({ cell: c.cell, have: c.have }))),
     };
   }).filter(Boolean);
 
@@ -350,8 +378,9 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
       ? bandNeeds.reduce((a, b) => (b.shortBy < a.shortBy ? b : a))
       : null;
     const how = nearest
-      ? `closest is band \`${nearest.band}\`, ${nearest.shortBy} short in its smallest cell (${nearest.smallestCell}: ${5 - nearest.shortBy} of the 5 needed)`
-      : `no band holds a single observation`;
+      ? `closest is band \`${nearest.band}\`, ${nearest.shortBy} observation(s) short across `
+        + `${nearest.shortCells.length} cell(s) — ${nearest.shortCells.map((c) => `${c.cell}: ${c.have} of 5`).join('; ')}`
+      : 'no band holds a single observation';
     blockers.push(
       `insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups; ${how}. `
       + 'Clearing that bar is a different question from having enough data to detect a difference; the '

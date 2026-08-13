@@ -288,7 +288,9 @@ describe('the verdict names blockers rather than producing a number it cannot su
     const out = assessCriteria({ records, nowSec: NOW });
     expect(out.power.requiredNPerGroup).toBeNull();
     const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
-    expect(blocker).toMatch(/closest is band `s`, 5 short in its smallest cell \(escalated non-defects: 0 of the 5 needed\)/);
+    // Two cells are short — escalated non-defects at 0 and clean non-defects at 1 — so the distance is 9,
+    // not the 5 the single worst cell would report. Both are named.
+    expect(blocker).toMatch(/closest is band `s`, 9 observation\(s\) short across 2 cell\(s\) — escalated non-defects: 0 of 5; clean non-defects: 1 of 5/);
     expect(blocker).not.toMatch(/null|undefined|NaN/);
     // NO MODELLED NUMBER AND NO RATE IN THE PROSE — the round-3 model change. The blocker states the
     // validity fact in counts; every sample size and every rate lives in `power.perBand`.
@@ -329,6 +331,110 @@ describe('the verdict names blockers rather than producing a number it cannot su
     // A SIZEABLE mdd raises no such blocker — otherwise the assertion above passes for the wrong reason.
     const ok = assessCriteria({ records, nowSec: NOW, mdd: 0.2 });
     expect(ok.verdict.blockers.find((b) => b.startsWith('unsizeable effect'))).toBeUndefined();
+  });
+
+  /**
+   * #1203 round 3, findings 3 and 5 — the cells and the boundary. Seven mutations survived round 3 here:
+   * swapping either CLEAN cell's label to an escalated one, dropping either clean cell from the rule
+   * entirely, `Math.max(0, …)` removed, and `testable: have >= 5` loosened to `> 5`. Nothing pinned which
+   * four cells the rule is over, what they are called, or where its boundary sits.
+   */
+  describe('the 5-and-5 rule is over four NAMED cells, at an exact boundary', () => {
+    // Every cell distinct, so a swapped label or a dropped cell cannot hide behind an equal count:
+    // escalated 9 records / 1 defect → 1 and 8; clean 7 records / 2 defects → 2 and 5.
+    const distinct = () => [
+      ...Array.from({ length: 9 }, (_, i) => pr(i, 10, true, i < 1 ? 'independent-fix' : null, 60, `e${i}`)),
+      ...Array.from({ length: 7 }, (_, i) => pr(100 + i, 10, false, i < 2 ? 'independent-fix' : null, 60, `c${i}`)),
+    ];
+
+    it('names all four cells, and counts each from its own arm', () => {
+      const out = assessCriteria({ records: distinct(), nowSec: NOW });
+      const xs = out.power.perBand.find((b) => b.band === 'xs');
+      // Two are short (1 and 2), two are not (8 and 5). Swapping any label, or dropping either clean cell,
+      // changes this list.
+      expect(xs.shortCells).toEqual([
+        { cell: 'escalated defects', have: 1 },
+        { cell: 'clean defects', have: 2 },
+      ]);
+      expect(xs.shortBy).toBe(4 + 3);
+      expect(xs.testable).toBe(false);
+    });
+
+    it('a cell at EXACTLY 5 is enough — the boundary is `>= 5`, not `> 5`', () => {
+      // Both arms exactly 5-and-5. `>` would call this untestable and `>= 4` would accept one short.
+      const exact = [
+        ...Array.from({ length: 10 }, (_, i) => pr(i, 10, true, i < 5 ? 'independent-fix' : null, 60, `e${i}`)),
+        ...Array.from({ length: 10 }, (_, i) => pr(100 + i, 10, false, i < 5 ? 'independent-fix' : null, 60, `c${i}`)),
+      ];
+      const out = assessCriteria({ records: exact, nowSec: NOW });
+      const xs = out.power.perBand.find((b) => b.band === 'xs');
+      expect(xs.testable).toBe(true);
+      expect(xs.shortBy).toBe(0);
+      expect(xs.shortCells).toEqual([]);
+      // And it agrees with the module's OWN rule, which is what `testable` claims to mirror.
+      expect(out.bands.xs.comparison.usable).toBe(true);
+      expect(out.multiplicity.bandsTested).toBe(1);
+      // One observation fewer in a single cell flips both, together.
+      const oneShort = [...exact.slice(0, 9), ...exact.slice(10)];
+      const flipped = assessCriteria({ records: oneShort, nowSec: NOW });
+      expect(flipped.power.perBand.find((b) => b.band === 'xs').testable).toBe(false);
+      expect(flipped.bands.xs.comparison.usable).toBe(false);
+    });
+
+    // #1203 round 3, finding 3. A band with an escalated arm and NO clean arm had zero coverage — two
+    // mutations survived through it. Its `requiredNPerGroup` is null because there is no rate to size
+    // against, which is a DIFFERENT reason from an unsizeable `mdd`, and the payload must not conflate them.
+    it('a band with one arm reports a null rate without borrowing the other arm’s', () => {
+      const escalatedOnly = Array.from({ length: 12 }, (_, i) => pr(i, 10, true, i < 6 ? 'independent-fix' : null, 60, `e${i}`));
+      const out = assessCriteria({ records: escalatedOnly, nowSec: NOW });
+      const xs = out.power.perBand.find((b) => b.band === 'xs');
+      expect(xs).toBeDefined();                       // the band is REPORTED, not filtered away
+      expect(xs.baseRate).toBeNull();
+      expect(xs.requiredNPerGroup).toBeNull();
+      // The clean arm is empty, so both its cells are 0 — the shortfall counts them, it does not skip them.
+      expect(xs.shortCells).toEqual([
+        { cell: 'clean defects', have: 0 },
+        { cell: 'clean non-defects', have: 0 },
+      ]);
+      expect(xs.shortBy).toBe(10);
+      // And NOT because the effect size was unsizeable — that blocker must not fire here.
+      expect(out.verdict.blockers.find((b) => b.startsWith('unsizeable effect'))).toBeUndefined();
+    });
+  });
+
+  /**
+   * #1203 round 3, finding 2 — a regression the round-3 fix introduced. Removing the `Math.max(1e-6, …)`
+   * clamp on `mdd` made `d * d` underflow to 0 below about 1e-160, so the estimator returned `Infinity`.
+   * `sizeableMdd` had re-stated the estimator's rules instead of asking it, so it still said "sizeable",
+   * no blocker fired, and `Infinity` JSON-serialises to `null` — an HTTP caller saw every power figure
+   * empty with nothing anywhere explaining why. Impossible on `main`; created by this PR.
+   */
+  it('refuses a step so small its square underflows, rather than answering Infinity', () => {
+    expect(requiredNPerGroup(0.5, 1e-200)).toBeNull();
+    expect(requiredNPerGroup(0, Number.MIN_VALUE)).toBeNull();
+    // Just above the underflow the answer is a real, finite number — so this is a boundary, not a blanket.
+    expect(Number.isFinite(requiredNPerGroup(0.5, 1e-150))).toBe(true);
+    // JSON is where the damage landed: `Infinity` has no representation and arrives as an unexplained null.
+    expect(JSON.stringify({ n: Infinity })).toBe('{"n":null}');
+  });
+
+  it('and the blocker fires for it, because the check ASKS the estimator instead of restating its rules', () => {
+    const records = Array.from({ length: 20 }, (_, i) => pr(i, 10, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `a${i}`));
+    const out = assessCriteria({ records, nowSec: NOW, mdd: 1e-200 });
+    expect(out.verdict.blockers.find((b) => b.startsWith('unsizeable effect'))).toBeDefined();
+    expect(out.power.requiredNPerGroup).toBeNull();
+  });
+
+  // #1203 round 3, finding 4. The blocker exists to NAME the input, and `JSON.stringify` renders NaN,
+  // Infinity and -Infinity all as the string "null" — which names nothing and reads as a missing value
+  // rather than a rejected one. Mutation-proven: dropping the interpolation entirely used to survive.
+  it('prints the offending value truthfully, including the ones JSON cannot represent', () => {
+    const records = Array.from({ length: 20 }, (_, i) => pr(i, 10, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `a${i}`));
+    for (const [bad, shown] of [[NaN, 'NaN'], [Infinity, 'Infinity'], [-Infinity, '-Infinity'], [0, '0'], [-0.05, '-0.05']]) {
+      const out = assessCriteria({ records, nowSec: NOW, mdd: bad });
+      const blocker = out.verdict.blockers.find((b) => b.startsWith('unsizeable effect'));
+      expect(`${shown}: ${blocker}`).toContain(`\`minDetectableDiff\` is ${shown},`);
+    }
   });
 
   // #1203 round 2, finding 4. The third branch — no band holds anything at all — was unreachable from any
@@ -407,11 +513,43 @@ describe('the verdict names blockers rather than producing a number it cannot su
       expect(out.multiplicity.bandsTested).toBe(0);          // the blocker really does fire — not vacuous
       const byBand = Object.fromEntries(out.power.perBand.map((b) => [b.band, b]));
       // The two criteria disagree on purpose: `s` is nearer, `xs` is cheaper.
-      expect(`${byBand.s.shortBy} vs ${byBand.xs.shortBy}`).toBe('1 vs 4');
+      expect(`${byBand.s.shortBy} vs ${byBand.xs.shortBy}`).toBe('1 vs 8');
       expect(byBand.s.requiredNPerGroup).toBeGreaterThan(byBand.xs.requiredNPerGroup);
       const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
-      expect(blocker).toMatch(/closest is band `s`, 1 short in its smallest cell \(escalated defects: 4 of the 5 needed\)/);
+      expect(blocker).toMatch(/closest is band `s`, 1 observation\(s\) short across 1 cell\(s\) — escalated defects: 4 of 5/);
       expect(blocker).not.toMatch(/`xs`/);
+    });
+
+    /**
+     * #1203 round 3, finding 1 — instance three of the class, and the reason `shortBy` sums all four cells.
+     * The first cut counted the deficit in the SINGLE WORST cell and then ranked and printed it as the band's
+     * whole distance to testability: a statistic about one part driving a decision about the whole.
+     *
+     * The reviewer followed the sentence literally and it did not work. Adding an observation to the band it
+     * named left `bandsTested: 0` and the blocker still firing; adding two to the band it did NOT name
+     * cleared it. Testability needs EVERY cell at 5, so the distance is the sum of the shortfalls.
+     */
+    it('sums the shortfall over ALL FOUR cells, so the named band is the one that clears first', () => {
+      // band `s`  — every cell at 4: worst cell is 1 short, but the band needs 4 observations.
+      // band `xs` — one cell at 3, the rest at 10: worst cell is 2 short, and that is the whole distance.
+      // Ranking on the worst cell alone names `s` (1 < 2). Ranking on the total names `xs` (2 < 4).
+      const deficitTrap = () => [
+        ...Array.from({ length: 8 }, (_, i) => pr(i, 60, true, i < 4 ? 'independent-fix' : null, 60, `se${i}`)),
+        ...Array.from({ length: 8 }, (_, i) => pr(100 + i, 60, false, i < 4 ? 'independent-fix' : null, 60, `sc${i}`)),
+        ...Array.from({ length: 13 }, (_, i) => pr(200 + i, 10, true, i < 3 ? 'independent-fix' : null, 60, `xe${i}`)),
+        ...Array.from({ length: 20 }, (_, i) => pr(300 + i, 10, false, i < 10 ? 'independent-fix' : null, 60, `xc${i}`)),
+      ];
+      const out = assessCriteria({ records: deficitTrap(), nowSec: NOW, mdd: 0.2 });
+      expect(out.multiplicity.bandsTested).toBe(0);          // the blocker really does fire — not vacuous
+      const byBand = Object.fromEntries(out.power.perBand.map((b) => [b.band, b]));
+      // The trap, stated as data: `s`'s worst cell is HIGHER than `xs`'s, and its total is larger too.
+      expect(byBand.s.shortCells.map((c) => c.have)).toEqual([4, 4, 4, 4]);
+      expect(byBand.xs.shortCells.map((c) => c.have)).toEqual([3]);
+      expect(`${byBand.s.shortBy} vs ${byBand.xs.shortBy}`).toBe('4 vs 2');
+      // Ranked on the total, `xs` wins. Ranked on the worst cell — the old rule — `s` would.
+      const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+      expect(blocker).toMatch(/closest is band `xs`, 2 observation\(s\) short across 1 cell\(s\) — escalated defects: 3 of 5/);
+      expect(blocker).not.toMatch(/band `s`/);
     });
 
     it('publishes `testable` alongside the sample size, so an already-met requirement cannot read as unmet', () => {
@@ -423,7 +561,9 @@ describe('the verdict names blockers rather than producing a number it cannot su
       // conclude "collect 95 and the blocker clears".
       expect(s.testable).toBe(false);
       expect(s.shortBy).toBe(1);
-      expect(s.smallestCell).toBe('escalated defects');
+      expect(s.shortCells).toEqual([{ cell: 'escalated defects', have: 4 }]);
+      // The three cells that are NOT short carry no entry — `shortCells` is the shortfall, not a census.
+      expect(s.shortCells).toHaveLength(1);
       // The blocker says so in as many words, rather than leaving the two adjacent and unexplained.
       const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
       expect(blocker).toMatch(/different question from having enough data to detect a difference/);
