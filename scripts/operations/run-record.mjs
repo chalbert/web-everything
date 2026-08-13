@@ -44,6 +44,18 @@ export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'in-flight'
 /** Ids are used as filenames, so the character set is closed — no separators, no traversal, no surprises. */
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+/**
+ * Is this string something an observer could actually poll?
+ *
+ * `.trim()` alone is not enough: a zero-width space is TRUTHY and survives it, so `'\u200b'` reached
+ * `inFlightEntries` as an observable handle and the operator was told to poll a blank one (PR #1185 review,
+ * finding 5). The test is therefore "has a visible character", not "is non-empty after trimming" — same
+ * question `inFlight()` is asking, so the validator and the constructor cannot drift apart on it.
+ */
+export function isPollableHandle(handle) {
+  return typeof handle === 'string' && /[^\s\u00a0\u1680\u180e\u2000-\u200f\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]/.test(handle);
+}
+
 /** @param {*} v @returns {boolean} */
 function isPlainObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -181,7 +193,7 @@ export function validateRunRecord(record) {
       // is optional and, when present, must actually parse; an unparseable date makes every entry read as
       // never-overdue, which is the failure that hides a stalled job.
       if (e.status === 'in-flight') {
-        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle.trim() !== ''))) {
+        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && isPollableHandle(e.handle)))) {
           errors.push(`effects[${i}] is in-flight with an invalid handle ${JSON.stringify(e.handle)} — a string or null`);
         }
         if (e.expectedBy != null && !(typeof e.expectedBy === 'string' && !Number.isNaN(Date.parse(e.expectedBy)))) {

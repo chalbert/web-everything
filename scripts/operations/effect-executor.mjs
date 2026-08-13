@@ -49,7 +49,7 @@
  */
 
 import { effectsForStep } from './engine.mjs';
-import { assertRunRecord } from './run-record.mjs';
+import { assertRunRecord, isPollableHandle } from './run-record.mjs';
 
 /**
  * The reserved effect type for an append to the #3007 verdict ledger. Named here so #3035/#3036 declare
@@ -112,8 +112,8 @@ export function notApplied(message, extra = {}) {
  * {@link inFlightEntries} reports it under `unknown`, never `running`.
  */
 export function inFlight({ handle, expectedBy = null } = {}) {
-  if (typeof handle !== 'string' || !handle.trim()) {
-    throw new TypeError('operations: `inFlight` needs a durable `handle` — a pid is not one (the OS reuses it)');
+  if (!isPollableHandle(handle)) {
+    throw new TypeError('operations: `inFlight` needs a durable `handle` with a visible character — a pid is not one (the OS reuses it)');
   }
   if (expectedBy !== null && !(typeof expectedBy === 'string' && !Number.isNaN(Date.parse(expectedBy)))) {
     throw new TypeError('operations: `inFlight.expectedBy` must be an ISO timestamp or null');

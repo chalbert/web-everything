@@ -25,6 +25,7 @@ import {
   totalJudgeSpend,
   validateRunRecord,
 } from '../run-record.mjs';
+import { inFlight } from '../effect-executor.mjs';
 import {
   createFileRunStore,
   createMemoryRunStore,
@@ -106,6 +107,26 @@ describe('the pure core', () => {
       for (const bad of [12345, {}, '', '   ', '\t\n']) {
         expect(validateRunRecord(withEffect({ handle: bad })).errors.join(' ')).toMatch(/in-flight with an invalid handle/);
       }
+    });
+
+    // `.trim()` was not enough: a zero-width space is TRUTHY and survives it, so it reached `inFlightEntries`
+    // as an observable handle and the operator was told to poll a blank one (PR #1185 review, finding 5).
+    it('refuses a handle with no VISIBLE character, however truthy it is', () => {
+      for (const invisible of ['\u200b', '\u200b\u200c', '\u00a0', '\ufeff', '\u3000', '\u2028']) {
+        expect(`${JSON.stringify(invisible)}: ${validateRunRecord(withEffect({ handle: invisible })).ok}`)
+          .toBe(`${JSON.stringify(invisible)}: false`);
+      }
+      expect(validateRunRecord(withEffect({ handle: ' sess-a ' })).ok).toBe(true); // padded, but pollable
+    });
+
+    // The validator and the constructor ask the SAME question, so they cannot drift apart on it.
+    it('agrees with `inFlight()` about what counts as a handle', () => {
+      for (const invisible of ['\u200b', '\u00a0', '   ']) {
+        expect(() => inFlight({ handle: invisible })).toThrow(/visible character/);
+        expect(validateRunRecord(withEffect({ handle: invisible })).ok).toBe(false);
+      }
+      expect(() => inFlight({ handle: 'sess-a' })).not.toThrow();
+      expect(validateRunRecord(withEffect({ handle: 'sess-a' })).ok).toBe(true);
     });
 
     // An unparseable date makes every entry read as never-overdue, which is exactly what hides a stalled job.
