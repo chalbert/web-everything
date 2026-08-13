@@ -88,11 +88,21 @@ import { realpathSync, statSync } from 'node:fs';
  * `ino` + `dev` is that identity, and it is immune to all four at once. Returns false rather than throwing on
  * an unstattable path — the caller has already refused a nonexistent cwd by then, and a stat failure here
  * must not be louder than the refusal it is helping to make.
+ *
+ * `dev` IS NOT DECORATION: inode numbers are unique per VOLUME, not globally, and a volume root is inode 2 on
+ * most filesystems — so unrelated mounted volumes routinely collide. `stat` is injected because a real
+ * collision cannot be constructed on demand, and a test that only runs where one happens to exist defends
+ * nothing on the machines where it does not (PR #1197 review, finding 1).
+ *
+ * @param {string} a
+ * @param {string} b
+ * @param {(p: string) => {ino: number, dev: number}} [stat] - injected so the `dev` branch is testable
+ *   deterministically, on any filesystem.
  */
-export function sameDirectory(a, b) {
+export function sameDirectory(a, b, stat = statSync) {
   try {
-    const x = statSync(a);
-    const y = statSync(b);
+    const x = stat(a);
+    const y = stat(b);
     return x.ino === y.ino && x.dev === y.dev;
   } catch {
     return false;
