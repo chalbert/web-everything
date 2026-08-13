@@ -20,21 +20,23 @@ shape, and it is fully mechanical to detect before any work starts.
 Given an item's `scope:`, find every module that imports a file in it, and report any importer the scope
 does not already cover.
 
-## The three cases this would have caught
+## What it can and cannot do, stated after round 1 got this wrong
 
-- **[#3090]** declared `we:scripts/lib/gate-health.mjs`. Its one consumer,
-  `we:scripts/operations/gate-health.mjs`, was NOT in scope — and that consumer's blocker sentence, not the
-  library function, was what three review rounds were actually about. The check flags it immediately: one
-  importer, not covered.
-- **[#3091]** declared four files and the discipline they share. Four separate call sites each had to honour
-  it independently, and reviewers found them one at a time across six rounds. Every one is an importer of
-  `we:scripts/operations/effect-executor.mjs`.
-- **[#3084]** declared three files and touched about twenty, because a new status vocabulary had to reach
-  every hand-back in the run lifecycle. Those hand-backs are importers.
+The first version of this card claimed the check would have caught three of four surveyed disasters and
+correctly stayed silent on the fourth. That was an artefact of hand-built test fixtures, not a property of
+the code, and an independent review took it apart:
 
-[#3071] is the honest counter-example and belongs here: its scope was **exactly right** and it still failed,
-for an unrelated reason (nothing had measured whether the work would unblock anything). This check would
-have said nothing about it, and the card should not pretend otherwise.
+- Read through the loader, **[#3090] and [#3071] have the SAME real scope** — `we:scripts/lib/gate-health.mjs`.
+  Identical input, identical verdict. No version of this check can catch one and stay silent on the other.
+- The [#3084] fixture invented an import edge that has never existed.
+
+**So the honest claim is narrower.** The check surfaces a QUESTION — *this importer exists and your scope
+does not mention it* — and it cannot tell you whether the answer matters. For [#3090] that importer hosted a
+real round-2 finding. For [#3071] the same importer was irrelevant and the item failed for a reason no scope
+check can see. Same output, opposite outcomes.
+
+It is a prompt to think at prepare time. It is **not** a predictor of review rounds, and nothing here should
+say it is.
 
 ## Shape
 

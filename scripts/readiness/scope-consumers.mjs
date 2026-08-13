@@ -240,10 +240,20 @@ export function assessScope(scope, index) {
 
 /** The blind spots, as data, so a REPORT can print them and no reader infers completeness from silence. */
 export const BLIND_SPOTS = Object.freeze([
+  // THE BIGGEST ONE, and it was missing from the first cut. Scoping #2996 found that `scripts/lane-pool.mjs`
+  // has more than ten consumers — backlog.mjs, dispatch-plan.mjs, tick-core.mjs, lease-reaper.mjs,
+  // verify-lane.mjs and others — and every one shells it as `node scripts/lane-pool.mjs …`. Not one is an
+  // ES import, so this scan sees none of them. In a repo whose scripts mostly call each other as commands,
+  // that is not an edge case; it is the common case for anything under `scripts/`.
+  'a consumer that SHELLS this file (`node scripts/x.mjs …`, execFileSync, a hook) is not an import and is invisible',
   'a non-literal specifier — import(someVariable), createRequire, eval — is invisible to a static scan',
+  'an EXTENSIONLESS or directory specifier (`./x`, `./x/`) is not resolved, so its edge is missed',
+  'a relative `require()` is not matched — only ESM `import` / `import()` / `export … from` are',
+  'a symlinked path is followed by Node and not by this scan, so one file can appear under two names',
   'a module that imports nothing can still be HANDED a value at call time; injection is invisible',
   'a consumer reaching this code through a package specifier rather than a relative path is not followed',
   'dynamic registration (a table keyed by string, a sink registry) is a real consumer edge and is not an import',
+  'a regex literal containing a quote can desynchronise the string scan and hide every import after it',
 ]);
 
 /**
@@ -283,10 +293,31 @@ export function renderVerdict(num, assessment) {
 // `scope-lease.mjs` — the same discipline `dispatch-plan.mjs` keeps, and what lets the tests above run the
 // whole verdict over a stub index with no filesystem in sight.
 
+/**
+ * Read every source file under the repo root, repo-relative. Exported so the io half is testable at all —
+ * the round-1 review found `main()` completely untested, and an untested io shell is where the two worst
+ * defects on this file lived.
+ */
+export async function readSources(ROOT, { readFileSync, readdirSync, statSync }, { join, relative, sep }) {
+  const SKIP = new Set(['node_modules', '.git', '_site', '.lanes', 'dist', 'coverage', '.operations']);
+  const sources = [];
+  (function walk(dir) {
+    for (const name of readdirSync(dir)) {
+      if (SKIP.has(name)) continue;
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) { walk(full); continue; }
+      if (!/\.[cm]?[jt]sx?$/.test(name)) continue;
+      sources.push({ file: relative(ROOT, full).split(sep).join('/'), source: readFileSync(full, 'utf8') });
+    }
+  }(ROOT));
+  return sources;
+}
+
 async function main(argv) {
   const { readFileSync, readdirSync, statSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, join, relative, sep } = await import('node:path');
+  const { createRequire } = await import('node:module');
 
   const HERE = dirname(fileURLToPath(import.meta.url));
   const ROOT = join(HERE, '..', '..');
@@ -298,60 +329,48 @@ async function main(argv) {
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
 
-  const SKIP = new Set(['node_modules', '.git', '_site', '.lanes', 'dist', 'coverage', '.operations']);
-  const sources = [];
-  (function walk(dir) {
-    for (const name of readdirSync(dir)) {
-      if (SKIP.has(name)) continue;
-      const full = join(dir, name);
-      const st = statSync(full);
-      if (st.isDirectory()) { walk(full); continue; }
-      if (!/\.[cm]?[jt]sx?$/.test(name)) continue;
-      sources.push({ file: relative(ROOT, full).split(sep).join('/'), source: readFileSync(full, 'utf8') });
-    }
-  }(ROOT));
-  const index = consumerIndex(sources);
-
-  // The cards, read straight off disk — `scope:` is a flat YAML list of `- we:path` lines, which is all this
-  // needs. A full frontmatter parse would buy nothing and would couple this to the loader.
-  const backlogDir = join(ROOT, 'backlog');
-  const cards = readdirSync(backlogDir).filter((f) => f.endsWith('.md'));
-  const scopeOf = (text) => {
-    const m = text.match(/\nscope:\n((?:[ \t]*-[ \t]*\S+\n)+)/);
-    return m ? m[1].split('\n').map((l) => l.replace(/^[ \t]*-[ \t]*/, '').trim()).filter(Boolean) : [];
-  };
-  const statusOf = (text) => (text.match(/\nstatus:[ \t]*(\S+)/) || [])[1] || '';
-
+  // ONE ITEM AT A TIME. The whole-board sweep is GONE (round-1 review). It reported 101 items and 729
+  // importers behind no npm script and no wiring, which is a volume nobody reads — and it ranked
+  // worst-first, so the actionable case (one missed caller, which is what #3090 looked like) sat under a
+  // hub module with forty. The useful moment for this check is when someone is preparing ONE card, which
+  // is the only mode left.
   const want = flags.item ? String(flags.item) : null;
-  const rows = [];
-  for (const card of cards) {
-    const num = card.split('-')[0];
-    if (want && num !== want) continue;
-    const text = readFileSync(join(backlogDir, card), 'utf8');
-    if (!want && !['open', 'active'].includes(statusOf(text))) continue;
-    const assessment = assessScope(scopeOf(text), index);
-    if (assessment.uncoveredCount) rows.push({ num, card, assessment });
+  if (!want) {
+    process.stderr.write('usage: scope-consumers.mjs --item=<NNN|hash> [--json]\n');
+    process.exitCode = 2;
+    return;
   }
-  rows.sort((a, b) => b.assessment.uncoveredCount - a.assessment.uncoveredCount);
 
-  // RETURN, NEVER `process.exit`, after writing to stdout — remedy (a) of #3061. A stdout write to a PIPE is
-  // asynchronous once the payload passes the buffer, and `process.exit` tears the process down mid-drain, so
-  // a parent CAPTURING this output silently gets the first 8 KB and a zero status. Invisible in a terminal,
-  // which is the whole reason it is a gate rather than a convention. The `--json` mode here is unbounded and
-  // would have been the first to lose its tail. Caught by `scripts/__tests__/stdout-flush.test.mjs` on this
-  // very file, which is a fair advertisement for the rule.
+  // THE SINGLE LOADER, not a regex (round-1 review, worst finding). The first cut matched only the
+  // block-list YAML form, so the 127 cards on this board that write `scope: ["we:…"]` inline parsed as NO
+  // scope — and an empty scope produces an empty verdict, so the check printed a confident "no uncovered
+  // importers" for roughly a third of everything it was pointed at. A false all-clear is worse than no
+  // check. `src/_data/backlog.js` is what `check-readiness.mjs:35` calls "the SINGLE loader" and it
+  // normalizes `scope` for every shape; this file's own card named it in scope and then did not use it.
+  const require = createRequire(import.meta.url);
+  const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
+  const item = loadBacklog().find((i) => String(i.num ?? i.id ?? '') === want || String(i.id ?? '').startsWith(`${want}-`));
+  if (!item) {
+    process.stderr.write(`no backlog item ${want}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const sources = await readSources(ROOT, { readFileSync, readdirSync, statSync }, { join, relative, sep });
+  const assessment = assessScope(item.scope, consumerIndex(sources));
+
+  // RETURN, NEVER `process.exit`, after writing to stdout — remedy (a) of #3061. A stdout write to a PIPE
+  // is asynchronous once the payload passes the buffer, and `process.exit` tears the process down
+  // mid-drain, so a parent CAPTURING this output silently gets the first 8 KB and a zero status. Caught by
+  // `scripts/__tests__/stdout-flush.test.mjs` on this very file.
   if (flags.json) {
-    process.stdout.write(`${JSON.stringify({ scanned: sources.length, items: rows.map((r) => ({ num: r.num, uncoveredCount: r.assessment.uncoveredCount, rows: r.assessment.rows })), blindSpots: BLIND_SPOTS }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ item: want, scanned: sources.length, ...assessment, blindSpots: BLIND_SPOTS }, null, 2)}\n`);
     return;
   }
-  if (!rows.length) {
-    process.stdout.write(want ? `#${want} — no uncovered importers.\n` : 'No open item has an uncovered importer of its own scope.\n');
-    return;
-  }
-  for (const r of rows) process.stdout.write(`${renderVerdict(r.num, r.assessment).join('\n')}\n\n`);
-  // EXIT 0 ON FINDINGS, deliberately — and `exitCode` is left untouched, which IS zero. This warns; it never
-  // blocks. A gate that failed here would teach authors to pad `scope:` until it went quiet, and a padded
-  // scope makes every lane-overlap decision in `dispatch-plan.mjs` worse for everybody.
+  process.stdout.write(`${renderVerdict(want, assessment).join('\n')}\n`);
+  // EXIT 0 EVEN ON FINDINGS, deliberately. This warns; it never blocks. A gate that failed here would teach
+  // authors to pad `scope:` until it went quiet, and a padded scope makes every lane-overlap decision in
+  // `dispatch-plan.mjs` worse for everybody.
 }
 
 import { pathToFileURL } from 'node:url';

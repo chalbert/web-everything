@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   relativeImportsIn, resolveSpecifier, consumerIndex, isTestFile,
   scopeConsumerGaps, scopeNamesNoTest, assessScope, blankCommentsAndStrings, BLIND_SPOTS,
+  readSources, renderVerdict,
 } from '../scope-consumers.mjs';
 
 describe('the specifier scan sees code, not prose', () => {
@@ -200,13 +201,50 @@ describe('an item with nothing to say gets nothing said about it', () => {
 });
 
 /**
- * ── THE REPLAYS. THESE ARE WHY THE MODULE EXISTS. ───────────────────────────────────────────────────────────
+ * ── WHAT THIS CHECK CAN AND CANNOT DO, ON REAL CARDS ────────────────────────────────────────────────────────
  *
- * Each reconstructs an item's `scope:` exactly as it was written, over a source index shaped like the real
- * import edges at that time, and asserts the check names the consumer the reviewers had to find by hand. A
- * check that cannot reproduce the failures that motivated it has not earned its place.
+ * The first cut of this file had four "replay" tests over HAND-BUILT fixtures, claiming the check catches
+ * #3090/#3091/#3084 and correctly stays silent on #3071. An independent review took the fixtures apart and
+ * it was right to:
+ *
+ *   - the #3071 fixture handed `assessScope` TWO scope entries when the real card has one, and the entry it
+ *     added was exactly the thing under test;
+ *   - the #3084 fixture dropped a scope entry AND invented an import edge that has never existed.
+ *
+ * Read against the loader, #3090 and #3071 have the SAME real scope — `["we:scripts/lib/gate-health.mjs"]`.
+ * Identical input, identical verdict. The check therefore CANNOT catch one and stay silent on the other, and
+ * the claim that it did was an artefact of the fixture rather than a property of the code.
+ *
+ * So the honest statement of value is narrower, and it is what the test below asserts: the check surfaces a
+ * QUESTION — "this importer exists and your scope does not mention it" — and it cannot tell you whether the
+ * answer matters. For #3090 that importer turned out to host a real finding. For #3071 the same importer was
+ * irrelevant and the item failed for an unrelated reason. Same output, opposite outcomes.
+ *
+ * That is still worth having at prepare time. It is not a predictor of review rounds, and the card and PR
+ * body no longer say it is.
  */
-describe('replaying the items whose reviews this would have shortened', () => {
+describe('against the REAL cards and the REAL import graph', () => {
+  it('says the same thing about #3090 and #3071, because their scope is the same', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const { dirname, join, relative, sep } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    // `scripts/` alone is enough for these two, and keeps the test off a full-repo walk.
+    const sources = await readSources(join(ROOT, 'scripts'), { readFileSync, readdirSync, statSync }, { join, relative: (a, b) => `scripts/${relative(a, b)}`, sep });
+    const index = consumerIndex(sources);
+
+    const scope = ['we:scripts/lib/gate-health.mjs']; // the REAL scope of both cards, read from the loader
+    const out = assessScope(scope, index);
+    // The one real consumer, which #3090's round-2 review found a genuine defect in.
+    expect(out.rows[0].uncovered).toContain('scripts/operations/gate-health.mjs');
+    // And this is the whole point of the comment above: nothing here distinguishes the item where that
+    // mattered from the item where it did not. If a future edit makes this test able to tell them apart,
+    // the claim in the docblock has changed and must be rewritten with it.
+    expect(assessScope(scope, index)).toEqual(out);
+  });
+});
+
+describe('the pure core, over fixtures that make no claim about history', () => {
   it('#3090 — the caller whose blocker sentence was the real subject was not in scope', () => {
     // The card declared the library and `retry-health.mjs` (which it never touched). Its ONE real consumer,
     // the operation that renders the "why is this blocked" sentence, was absent — and three review rounds
@@ -244,25 +282,57 @@ describe('replaying the items whose reviews this would have shortened', () => {
     expect(widened.rows.find((r) => r.file === 'we:scripts/operations/effect-executor.mjs')).toBeUndefined();
   });
 
-  it('#3084 — a new vocabulary had to reach hand-backs in files the card never named', () => {
-    const index = consumerIndex([
-      { file: 'scripts/operations/cli-adapter.mjs', source: "import { inFlightEntries } from './effect-executor.mjs';" },
-      { file: 'scripts/operations/review-pr.mjs', source: "import { resolveInFlight } from './effect-executor.mjs';" },
-      { file: 'scripts/lib/judge-spawn.mjs', source: "import { OBSERVATIONS } from '../operations/effect-observer.mjs';" },
-    ]);
-    const out = assessScope(['we:scripts/operations/effect-observer.mjs', 'we:scripts/operations/wake.mjs'], index);
-    expect(out.rows.find((r) => r.file === 'we:scripts/operations/effect-observer.mjs').uncovered)
-      .toEqual(['scripts/lib/judge-spawn.mjs']);
-  });
+  // TWO TESTS WERE DELETED HERE, not repaired, and it is worth saying why rather than leaving a silent gap.
+  //
+  //   - a `#3084` case asserted the check names `judge-spawn.mjs` as an importer of `effect-observer.mjs`.
+  //     That import edge has never existed; the fixture invented it. A test that passes only because its
+  //     input is fictional proves the assertion, not the code.
+  //   - a `#3071` case claimed to be "the honest negative" — the item the check must stay silent on. It
+  //     handed `assessScope` a two-entry scope when the real card has one, and the entry it added was
+  //     exactly the thing under test. Read through the loader, #3071 and #3090 have the SAME real scope, so
+  //     no input can make the check speak about one and not the other.
+  //
+  // The real-card assertion at the top of this file replaces both, and says the narrower thing that is
+  // true. Neither deletion is a coverage loss: the properties they claimed to hold were not properties.
 
-  // THE HONEST NEGATIVE. #3071's scope was exactly right and the work still failed, because nothing had
-  // measured whether it would unblock anything. This check must say NOTHING about it — a checklist that
-  // manufactures a hit on every past failure is worthless as a signal.
-  it('#3071 — scope was correct, and the check correctly finds nothing', () => {
+  // A scope entry can be silenced by NAMING the importer — the check is satisfiable, not a permanent nag.
+  // Fixture-based and makes no claim about any real card.
+  it('naming an uncovered importer removes the row', () => {
     const index = consumerIndex([
       { file: 'scripts/operations/gate-health.mjs', source: "import { assessCriteria } from '../lib/gate-health.mjs';" },
     ]);
-    const out = assessScope(['we:scripts/lib/gate-health.mjs', 'we:scripts/operations/gate-health.mjs'], index);
-    expect(out.uncoveredCount).toBe(0);
+    expect(assessScope(['we:scripts/lib/gate-health.mjs'], index).uncoveredCount).toBe(1);
+    expect(assessScope(['we:scripts/lib/gate-health.mjs', 'we:scripts/operations/gate-health.mjs'], index).uncoveredCount).toBe(0);
+  });
+});
+
+/**
+ * `renderVerdict` had ZERO tests in the first cut — five mutations survived through it, including dropping
+ * the blind-spot block entirely. It is the only thing an operator reads, so the caveats being IN it is the
+ * property that matters, not that they exist in a docblock.
+ */
+describe('what the operator is actually shown', () => {
+  const index = consumerIndex([{ file: 'scripts/b.mjs', source: "import { x } from './a.mjs';" }]);
+
+  it('prints the caveats with every finding, never a bare list', () => {
+    const lines = renderVerdict('123', assessScope(['we:scripts/a.mjs'], index)).join('\n');
+    expect(lines).toMatch(/NOT EXHAUSTIVE/);
+    for (const b of BLIND_SPOTS) expect(lines).toContain(b);
+    // The one that matters most in this repo, named explicitly so a future edit cannot quietly drop it.
+    expect(lines).toMatch(/SHELLS this file/);
+  });
+
+  it('says a missing importer is a question, not an error', () => {
+    const lines = renderVerdict('123', assessScope(['we:scripts/a.mjs'], index)).join('\n');
+    expect(lines).toMatch(/QUESTION, not an error/);
+  });
+
+  it('an empty scope says the dispatcher already covers it, rather than claiming all-clear', () => {
+    expect(renderVerdict('123', assessScope([], index)).join('\n')).toMatch(/no `scope:`/);
+  });
+
+  it('a clean scope says what was checked, so "nothing" cannot be read as "not run"', () => {
+    const clean = assessScope(['we:scripts/a.mjs', 'we:scripts/b.mjs'], index);
+    expect(renderVerdict('123', clean).join('\n')).toMatch(/every importer of the 2 scoped file\(s\) is already in scope/);
   });
 });
