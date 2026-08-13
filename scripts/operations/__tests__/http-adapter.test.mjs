@@ -42,6 +42,7 @@ import { OPERATIONS, resolveOperation } from '../run.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
+import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -276,6 +277,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     [REVIEW_PR_OP]: 'review-pr.mjs',
     [SUGGEST_NEXT_OP]: 'suggest-next.mjs',
     [GATE_HEALTH_OP]: 'gate-health.mjs',
+    [DISPATCH_LANE_OP]: 'dispatch-lane.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {

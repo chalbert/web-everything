@@ -23,8 +23,9 @@
  * the pass continues. The alternative is a waker that stops waking everything the first time one run is odd,
  * which is worse than a waker that reports and carries on.
  *
- * IT SHIPS NO OBSERVER. Nothing in the repo dispatches yet, so a concrete `claude agents`-backed observer
- * would have no work to watch. The table is injected, exactly like the executor's sinks.
+ * THE TABLE IS INJECTED, exactly like the executor's sinks — this module knows nothing about what any handle
+ * means. The CLI block at the bottom registers the ONE observer that exists today, the `claude agents`-backed
+ * one that `dispatch-lane` (#3037) dispatches against; before it there was nothing in the repo to watch.
  *
  * IO: reads and writes run records through an INJECTED store, and calls INJECTED observers and sinks. The CLI
  * block at the bottom is the only part that touches the real ones.
@@ -38,6 +39,7 @@ import { applyPendingEffects } from './effect-executor.mjs';
 import { observeRun } from './effect-observer.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
+import { createDispatchObservers } from './dispatch-lane-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -237,11 +239,11 @@ export function renderPass(pass) {
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  // NO OBSERVERS ARE REGISTERED HERE, and that is the honest state: nothing in the repo dispatches yet, so
-  // every OBSERVABLE in-flight entry a pass finds today is reported as `no-observer` rather than silently
-  // ignored (a handle-less one is `no-handle`). The
-  // first real dispatch registers its observer alongside its sink.
-  const observers = {};
+  // ONE OBSERVER IS REGISTERED, and it arrived with the first thing that dispatches (#3037). Until then this
+  // table was empty on purpose — an observer with no work to watch is an implementation with no caller — and
+  // the note here said the first real dispatch would register its observer alongside its sink. This is that.
+  // Any OTHER in-flight type is still reported as `no-observer` rather than silently ignored.
+  const observers = createDispatchObservers();
   wakePass({
     store: createFileRunStore(),
     observers,

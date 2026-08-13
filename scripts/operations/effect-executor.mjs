@@ -264,8 +264,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
     //     `pending` entry is invisible to both and can only be hand-edited. See the `inFlight` docblock.
     // COUNT THE ATTEMPT, and record WHO made it. This is instrumentation, not policy: nothing reads these to
     // decide anything, and #3083 — where retry gets a cap, a backoff and an owner — is unruled. They are here
-    // now because they cannot be recovered later. Today's corpus holds zero retry observations (nothing
-    // dispatches yet), so every one that ever exists starts accumulating from whenever this lands.
+    // now because they cannot be recovered later. The corpus held zero retry observations when this landed
+    // (nothing dispatched yet — `dispatch-lane`, #3037, is the first), so every one that ever exists has been
+    // accumulating from that point.
     //
     // `attemptedBy` separates two populations that a naive count conflates and that mean OPPOSITE things:
     // an AUTOMATIC retry succeeding says the failure was flaky and a small budget would have caught it; a
