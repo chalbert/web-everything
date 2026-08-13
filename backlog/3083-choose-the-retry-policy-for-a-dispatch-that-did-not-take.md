@@ -12,6 +12,41 @@ scope:
 
 # Choose the retry policy for a dispatch that did not take
 
+> **RULED 2026-08-13 (operator, in session). The mechanism is settled; the NUMBERS are deliberately not.**
+>
+> **Declared per EFFECT** — beside `idempotent`, which is the same shape for the same reason: only the effect
+> knows whether it is a cheap comment or a forty-minute build. Scoping it to "operations that spend on AI"
+> was considered and rejected as the wrong axis: spend and retry are different questions, and every effect is
+> retryable.
+>
+> **Enforced in the EXECUTOR**, the one chokepoint every caller passes through. Enforcing in the waker would
+> bound today's timer and leave the next automatic caller unbounded — and "the next caller must remember" is
+> the class of rule this repo keeps proving does not hold.
+>
+> **Default: the machine does not retry; a person still may.** An effect that declares nothing is retried by
+> people exactly as before, and not by the timer. Unlimited automatic retry IS the defect — measured at
+> eleven dispatches over ten ticks at exit 0. A first draft defaulted to "unlimited, blast radius zero"; that
+> was risk-management dressed as a recommendation, and merit says the timer needs permission.
+>
+> **Exhaustion returns a DISPOSITION, not a boolean.** Initially `retry` and `ask-human`. The set is closed
+> and versioned, and may grow — a blocker identified, needs splitting — but **an outcome earns its place only
+> when it changes what happens next**, either machine-actioned or actionable by a person reading it.
+> Otherwise it is a label on a shrug, which is exactly how the waker's `unresolved` cost three rounds. An
+> unknown member read from an older record routes to a human; never ignored, never crashed.
+>
+> **Only `retry` is automatic.** Everything else goes to a person. That is what stops the set becoming a way
+> for the machine to keep deciding things about itself.
+>
+> **The numbers stay unset**, and now for a measured reason rather than caution: #3090 found that the
+> sample-size estimator answers `1` above a 97% base rate, so the tool meant to say "we have enough" cannot
+> yet. The collector (#3091) is accumulating; the floor needs deriving from a fixed estimator.
+>
+> **Follow-up, not part of this:** on exhaustion, ask a juror to diagnose rather than only reporting. Better
+> suited to a judge than the convergence question refused in #3079 — it runs ONCE and reads an ERROR, not the
+> work's own plausible output. Two constraints: it may grant ONE bounded extension, never repeatedly, and any
+> failure or unrecognised answer routes to the human. It may RECOMMEND a different approach in prose; it may
+> not apply one, because applying one is the converge loop with write access and its own review.
+
 The executor's `failed` means *"the sink threw `notApplied` — I am CERTAIN nothing landed"*, and its
 pre-flight lets such an entry straight back through to the sink. That is correct and always has been, because
 until now the only thing that re-entered `applyPendingEffects` after a failure was **a person re-running the
