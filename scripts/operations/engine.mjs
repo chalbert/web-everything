@@ -171,6 +171,30 @@ export function unappliedEffects(run, stepIndex = null) {
     .sort((a, b) => (a.stepIndex - b.stepIndex) || (a.index - b.index));
 }
 
+/**
+ * WHAT AN EFFECT STEP RECORDS (#3082) — the finding a later step reads through `reads: ['findings.<step>']`.
+ *
+ * Keyed by ORDINAL, not by type. A step may declare the same type twice ("post two comments"), so a
+ * type-keyed shape would silently drop one and lie about which result a reader is looking at. The ordinal is
+ * already the identity the executor keys on, and it is stable across a replay.
+ *
+ * Each entry carries only what a reader can act on: whether it landed, what it returned, and why not if it
+ * did not. The rest of the run-record entry — the payload, the idempotency flag, the handle — is bookkeeping
+ * for the executor, and a later step reading it would be reaching around the model rather than through it.
+ */
+function effectFinding(run, stepIndex) {
+  const entries = (run.effects ?? []).filter((e) => e.stepIndex === stepIndex).sort((a, b) => a.index - b.index);
+  return {
+    applied: entries.every((e) => e.status === 'applied'),
+    effects: entries.map((e) => ({
+      type: e.type,
+      status: e.status,
+      result: e.result ?? null,
+      error: e.error ?? null,
+    })),
+  };
+}
+
 /** Record a step's result: its finding, and the run verdict when the declaration says this step sets it. */
 function withFinding(run, declaration, stepName, value) {
   const findings = { ...run.findings, [stepName]: frozenCopy(value) ?? null };
@@ -224,7 +248,10 @@ function resolvePending(run, declaration, resume) {
     if (outstanding.length > 0) {
       return run; // still waiting — idempotent no-op, exactly like a judge with no answer yet.
     }
-    return { ...run, pending: null, cursor: stepIndex + 1 };
+    // THE STEP RECORDS WHAT IT PRODUCED, like every other kind (#3082). Before this an effect step was the
+    // one kind that wrote no finding, so nothing downstream could see what an effect returned — a failing
+    // build advanced the run past the step that existed to react to it, and the human was asked "Land it?".
+    return { ...withFinding(run, declaration, stepName, effectFinding(run, stepIndex)), pending: null, cursor: stepIndex + 1 };
   }
 
   if (resume == null) return run; // nothing to resume with — the run stays suspended. `advance` is idempotent.
@@ -377,7 +404,7 @@ export function advance(run, { registry = defaultRegistry, resume = null } = {})
       // Zero declared effects is a legitimate outcome (nothing to do) — resolve it in the same call rather
       // than suspending on an empty list the executor would have nothing to apply.
       return unappliedEffects(next, stepIndex).length === 0
-        ? { ...next, pending: null, cursor: stepIndex + 1 }
+        ? { ...withFinding(next, declaration, stepName, effectFinding(next, stepIndex)), pending: null, cursor: stepIndex + 1 }
         : next;
     }
 
