@@ -53,6 +53,7 @@ import {
   renderPanelVerdictTable,
   buildValidatorMandate,
   PROSE_IMPRECISION_RULE,
+  GUARANTEE_NEEDS_A_TEST_RULE,
   combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
   renderDrainRunSummary,
@@ -85,6 +86,7 @@ import {
   floorGrowOnlyJurors,
   absentMandatoryLenses,
 } from '../review-core.mjs';
+import { DECISION_PROSE_ADAPTER } from '../decision-prose-adapter.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster, IMPACT_LEVELS } from '../jury-core.mjs';
 import { CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { readFileSync } from 'node:fs';
@@ -2148,6 +2150,48 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
  * and the one whose accept the panel's accept is GATED on — never received it. A rule the last gate does not
  * have is a rule the loop does not have.
  */
+/**
+ * The opposite number of the prose rule: wording is never a bounce, but a PROMISE is not wording. Added
+ * because it is what the good reviewers were already doing by hand — ten undefended properties in one file in
+ * one week, every one with a comment describing it and no test.
+ */
+describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
+  it('reaches every adversary the prose rule reaches', () => {
+    for (const [name, text] of Object.entries({
+      base: buildMandate({}),
+      panel: buildPanelMandate({ lens: 'correctness' }),
+      validator: buildValidatorMandate({ lens: 'correctness' }),
+      adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }),
+    })) {
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: true`);
+    }
+  });
+
+  it('appears exactly once, same as its neighbour', () => {
+    const text = buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs'] });
+    expect(text.split(GUARANTEE_NEEDS_A_TEST_RULE).length - 1).toBe(1);
+  });
+
+  // FRAMED AS COVERAGE, not as prose — otherwise the rule beside it makes this unraisable.
+  it('routes the finding as COVERAGE, so the prose rule does not swallow it', () => {
+    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/COVERAGE finding/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/not a prose one/);
+  });
+
+  // The technique, not just the instruction: reviewers who found these did it by mutation.
+  it('names the technique and the commonest shape', () => {
+    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/BREAK the guarded line/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/DEFAULTS/);
+  });
+
+  it('does not contradict the prose rule — both are present and distinct', () => {
+    const text = buildValidatorMandate({ lens: 'correctness' });
+    expect(text).toContain(PROSE_IMPRECISION_RULE);
+    expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
+    expect(PROSE_IMPRECISION_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+  });
+});
+
 describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', () => {
   it('reaches the panel reviewer', () => {
     expect(buildPanelMandate({ lens: 'correctness' })).toContain(PROSE_IMPRECISION_RULE);
@@ -2176,15 +2220,31 @@ describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', (
   // copies and left all 270 tests green. `toContain` cannot tell one copy from two, so the count has to be
   // taken everywhere the rule is supposed to appear exactly once.
   it('appears exactly ONCE in EVERY mandate that carries it, not once per builder', () => {
+    // EVERY RENDERING, not every builder under default args (PR #1184 review, finding 1). A second copy
+    // inside `buildPanelMandate`'s optional GROUND TRUTH block — #2450's live drain path — left all 271
+    // tests green, because the default call never reaches that branch.
     const built = {
       base: buildMandate({}),
       panel: buildPanelMandate({ lens: 'correctness' }),
+      panelWithNetFiles: buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs', 'b.mjs'] }),
+      panelRound2: buildPanelMandate({ lens: 'correctness', round: 2, goal: 'ship the thing' }),
       validator: buildValidatorMandate({ lens: 'correctness' }),
       adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }),
     };
     for (const [name, text] of Object.entries(built)) {
       expect(`${name}: ${text.split(PROSE_IMPRECISION_RULE).length - 1}`).toBe(`${name}: 1`);
     }
+  });
+
+  // ABSENCE, ASSERTED (PR #1184 review, finding 2). Adding the rule to `buildEditorMandate` — the exact thing
+  // the comment says not to do — left all 271 tests green. A `toContain` cannot tell a prohibition from a
+  // command, which is why this file already exports `EDITOR_WRITE_TARGET_PR_CLONE` for the same purpose.
+  it('is DELIBERATELY absent where it would be wrong, and that is asserted rather than asked for', () => {
+    // The editor acts on findings a reviewer raised; a reviewer that stops raising prose findings already
+    // fixes its half, and telling the editor to weigh prose lightly would be telling it to skip repairs.
+    expect(buildEditorMandate({ findings: [] })).not.toContain(PROSE_IMPRECISION_RULE);
+    // For a DECISION, framing IS the substance — the rule would be actively wrong.
+    expect(DECISION_PROSE_ADAPTER.buildMandate({ mandate: 'correctness' })).not.toContain(PROSE_IMPRECISION_RULE);
   });
 
   it('says what it has to say — bounce on behaviour, note on wording', () => {
