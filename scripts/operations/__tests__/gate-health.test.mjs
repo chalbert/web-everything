@@ -462,3 +462,91 @@ describe('the design effect reaches the interval assessCriteria builds', () => {
     expect(text).toMatch(/More observations from the same commits will not help/);
   });
 });
+
+/**
+ * A STATISTIC MUST BE COMPUTED OVER THE POPULATION ITS DECISION USES (PR #1196 review, blocking 1).
+ *
+ * The first cut applied the CORPUS design effect to every band, with a comment justifying it. But
+ * `separated` — and therefore `conclusive` — is decided per band, so singleton defect sources in bands that
+ * never conclude dragged the average under the limit and cleared the blocker for a band whose own defect
+ * signals were all one commit.
+ */
+describe('the design effect is computed per band, not corpus-wide', () => {
+  /**
+   * One band whose defects all trace to ONE commit, plus a spread of singleton-sourced defects in a
+   * different size band. Corpus-wide the mean is dragged down; per band the clustered one is still refused.
+   */
+  // Sized so the arithmetic actually leaks: deff = Σm²/Σm, so one cluster of 8 against 60 singletons is
+  // (64 + 60) / (8 + 60) = 1.82 — UNDER the limit corpus-wide, while the clustered band's own is 8.
+  const leakyCorpus = () => {
+    const out = [];
+    let n = 0;
+    // Band A (~100 lines): every defect from one commit.
+    for (let i = 0; i < 20; i += 1, n += 1) out.push(pr(n, 100, true, i < 8 ? 'independent-fix' : null, 60, i < 8 ? 'one-commit' : null));
+    for (let i = 0; i < 20; i += 1, n += 1) out.push(pr(n, 100, false, null, 60, null));
+    // Band B (~1500 lines): 60 defects, each its own commit — dilutes the corpus average under the limit.
+    for (let i = 0; i < 70; i += 1, n += 1) out.push(pr(n, 1500, i % 2 === 0, i < 60 ? 'independent-fix' : null, 60, i < 60 ? `uniq-${i}` : null));
+    return out;
+  };
+
+  it('a band whose own defects are one commit does not conclude, however diluted the corpus is', () => {
+    const out = assessCriteria({ records: leakyCorpus(), nowSec: NOW });
+    // The corpus average is pulled below the limit by band B's singletons …
+    expect(out.clustering.designEffect).toBeLessThan(2);
+    // … while the clustered band is still judged on its own sources.
+    const clustered = Object.values(out.bands).find((b) => b.clustering.distinctSources === 1);
+    expect(clustered).toBeDefined();
+    expect(clustered.clustering.clustered).toBe(true);
+    // And if it would otherwise have separated, that separation is suppressed and named.
+    if (clustered.comparison.separated) {
+      expect(out.verdict.bandsShowingADifference.length).toBe(0);
+      expect(out.verdict.blockers.join(' ')).toMatch(/too clustered to conclude/);
+    }
+  });
+
+  it('each band carries its OWN clustering, not a copy of the corpus figure', () => {
+    const out = assessCriteria({ records: leakyCorpus(), nowSec: NOW });
+    const effects = Object.values(out.bands).filter((b) => b.clustering.observations > 0)
+      .map((b) => b.clustering.designEffect);
+    // At least two bands with defects, and they do not all share one number.
+    expect(effects.length).toBeGreaterThan(1);
+    expect(new Set(effects).size).toBeGreaterThan(1);
+  });
+
+  /**
+   * A STRONG EFFECT CAN OUTRUN MILD CLUSTERING, so the widening alone is not enough. 23 defects in ten pairs
+   * plus one triple is deff 2.13 — over the limit — and an effect that large still separates at that width.
+   * Past `MAX_DESIGN_EFFECT` the widening has stopped being informative, so the separation is suppressed and
+   * named rather than reported.
+   */
+  it('SUPPRESSES a band that separates but is over the design-effect limit', () => {
+    const out = [];
+    let n = 0;
+    // Escalated: 40 defects in 20 pairs. Clean: 5 defects from one commit — singletons there would dilute
+    // the band's own effect back under the limit, which is the very leak this suite is about.
+    for (let i = 0; i < 60; i += 1, n += 1) {
+      const defect = i < 40;
+      out.push(pr(n, 100, true, defect ? 'independent-fix' : null, 60, defect ? `pair-${Math.floor(i / 2)}` : null));
+    }
+    for (let i = 0; i < 60; i += 1, n += 1) {
+      const defect = i < 5;
+      out.push(pr(n, 100, false, defect ? 'independent-fix' : null, 60, defect ? 'clean-commit' : null));
+    }
+    const a = assessCriteria({ records: out, nowSec: NOW });
+    const band = Object.values(a.bands).find((b) => b.clustering.observations > 0);
+    expect(band.clustering.clustered).toBe(true);
+    expect(band.comparison.separated).toBe(true);          // the interval alone would report a difference …
+    expect(a.verdict.bandsShowingADifference).toEqual([]);  // … and it is suppressed
+    expect(a.verdict.conclusive).toBe(false);
+    expect(a.verdict.blockers.join(' ')).toMatch(/too clustered to conclude/);
+  });
+
+  it('an unclustered band is unaffected — its own effect is 1', () => {
+    const records = Array.from({ length: 60 }, (_, i) =>
+      pr(i, 100, i % 2 === 0, i < 20 ? 'independent-fix' : null, 60, i < 20 ? `uniq-${i}` : null));
+    const out = assessCriteria({ records, nowSec: NOW });
+    const band = Object.values(out.bands).find((b) => b.clustering.observations > 0);
+    expect(band.clustering.designEffect).toBe(1);
+    expect(band.clustering.clustered).toBe(false);
+  });
+});

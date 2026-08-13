@@ -251,13 +251,27 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   const testable = SIZE_BANDS.map(([l]) => l).filter((l) => compareGroups(strata[l]).comparison.usable);
   const alpha = testable.length ? 0.05 / testable.length : 0.05;
   const bands = {};
-  // THE WIDENING, applied where the interval is actually built. Every band gets the corpus-level design
-  // effect: the clustering is a property of how the defect signals were sourced, not of a size band.
+  // PER BAND, from that band's OWN defect sources (PR #1196 review, blocking 1). The first cut applied the
+  // corpus-level effect to every band and justified it in a comment — "the clustering is a property of how
+  // the defect signals were sourced, not of a size band". But `separated`, and therefore `conclusive`, is
+  // decided PER BAND, so a corpus average leaks: singleton sources in bands that never conclude drag the
+  // mean under the limit and clear the blocker for a band whose own signals are all one commit.
+  //
+  // A statistic has to be computed over the same population as the decision it informs.
   for (const [label] of SIZE_BANDS) {
-    bands[label] = compareGroups(strata[label], { alpha, designEffect: cluster.designEffect });
+    const band = strata[label];
+    const bandCluster = clusterEffectiveN([...(band.escalated ?? []), ...(band.clean ?? [])]);
+    bands[label] = {
+      ...compareGroups(band, { alpha, designEffect: bandCluster.designEffect }),
+      clustering: bandCluster,
+    };
   }
 
-  const separated = Object.entries(bands).filter(([, b]) => b.comparison.separated);
+  // A BAND TOO CLUSTERED TO CONCLUDE DOES NOT COUNT AS SEPARATED, however wide its interval came out. Past
+  // `MAX_DESIGN_EFFECT` the widening stops being informative, and that judgement belongs to the band whose
+  // decision it is.
+  const separated = Object.entries(bands).filter(([, b]) => b.comparison.separated && !b.clustering.clustered);
+  const suppressed = Object.entries(bands).filter(([, b]) => b.comparison.separated && b.clustering.clustered);
   const defects = usableRecords.filter((r) => r.followUp === 'independent-fix').length;
   const baseRate = usableRecords.length ? defects / usableRecords.length : 0;
 
@@ -265,7 +279,14 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   if (obs.fullyObservedShare < 0.8) {
     blockers.push(`censoring — only ${Math.round(obs.fullyObservedShare * 100)}% of PRs have a closed ${windowDays}-day follow-up window, and the groups age differently (median ${obs.medianAgeDaysEscalated}d escalated vs ${obs.medianAgeDaysClean}d clean)`);
   }
-  if (cluster.clustered) {
+  for (const [label, b] of suppressed) {
+    blockers.push(
+      `band ${label} is too clustered to conclude — its ${b.clustering.observations} defect signals trace to `
+      + `${b.clustering.distinctSources} commit(s) (design effect ${b.clustering.designEffect.toFixed(1)}×, over the `
+      + `${MAX_DESIGN_EFFECT}× limit). More observations from the same commits will not help; more SOURCES will`,
+    );
+  }
+  if (cluster.clustered && !suppressed.length) {
     // NAMES THE CLUSTERING SPECIFICALLY, and is distinguishable from "not enough observations" — which is a
     // separate blocker with its own counts. Conflating them told a reader to collect more data when more data
     // from the same commits would not have helped.
