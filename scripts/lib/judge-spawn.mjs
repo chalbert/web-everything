@@ -73,7 +73,31 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
+
+/**
+ * Are these two paths the SAME DIRECTORY? By inode + device, never by comparing the strings.
+ *
+ * Every previous version of the driver's-lane check compared spellings, and a reviewer found another spelling
+ * each time: `..` walked through a substring test, a symlink walked through `resolve`, a case-variant walked
+ * through the JS `realpathSync`, and a macOS FIRMLINK walks through `realpathSync.native` — since 10.15,
+ * `/Users/x` and `/System/Volumes/Data/Users/x` are one directory with two on-disk names, and `.native`
+ * faithfully returns whichever you asked for. Four axes, four rounds, one root cause: a path is a NAME, and
+ * the question is about IDENTITY.
+ *
+ * `ino` + `dev` is that identity, and it is immune to all four at once. Returns false rather than throwing on
+ * an unstattable path — the caller has already refused a nonexistent cwd by then, and a stat failure here
+ * must not be louder than the refusal it is helping to make.
+ */
+export function sameDirectory(a, b) {
+  try {
+    const x = statSync(a);
+    const y = statSync(b);
+    return x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * `realpathSync.native`, with NO fallback. The JS `realpathSync` resolves symlinks but echoes the caller's
@@ -175,7 +199,9 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
   if (!lane) refuse(`\`cwd\` resolves to ${JSON.stringify(path)}, which is not a lane clone`);
   let selfLane = null;
   try { selfLane = laneRootOf(realpath(resolvePath(String(selfCwd || '.')))); } catch { selfLane = null; }
-  if (selfLane && lane === selfLane) {
+  // IDENTITY, not spelling — see `sameDirectory`. The string compare is kept as the fast path because it is
+  // exact when it fires; `sameDirectory` catches the aliases it cannot see.
+  if (selfLane && (lane === selfLane || sameDirectory(lane, selfLane))) {
     refuse(`\`cwd\` is inside the DRIVER'S OWN lane (${JSON.stringify(lane)}) — the juror would be pointed at the `
       + 'working tree its caller is mid-run in, and its mandate is to mutate that tree');
   }
