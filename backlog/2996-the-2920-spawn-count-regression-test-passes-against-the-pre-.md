@@ -4,6 +4,9 @@ kind: task
 status: open
 dateOpened: "2026-08-08"
 tags: [testing, gate]
+scope:
+  - we:scripts/__tests__/lane-pool-ahead-provably-pushed-single-spawn.test.mjs
+  - we:scripts/lane-pool.mjs
 ---
 
 # The #2920 spawn-count regression test passes against the pre-fix code too
@@ -49,6 +52,30 @@ case as well as a working regression guard.
 A test that passes against the bug it exists to catch is worse than no test: it reports
 coverage that is not there. The two SEMANTICS tests in the same file are genuine and should
 stay — this is only about the spawn-count assertion.
+
+## Scope note (prepared #2996)
+
+Claim VERIFIED by hand: swapped `aheadIsProvablyPushed` in a lane clone back to its pre-#2920
+per-remote-head `merge-base --is-ancestor` loop (`865a6015^:we:scripts/lane-pool.mjs`) and ran the
+named test unmodified — all 3 tests, including the spawn-count assertion, still PASS. Confirmed
+why: the pre-fix body has the identical `if (remoteShas.has(head)) return true;` short-circuit
+ahead of its loop, so pushing HEAD straight to `refs/heads/lane/landed` (making HEAD itself a live
+remote tip) trips that same short-circuit in both versions — the old fan-out is never reached
+either way.
+
+`aheadIsProvablyPushed` has no `export` (`we:scripts/lane-pool.mjs` exports nothing — grep
+confirms) and is called only from `refreshLane` inside the same file. Every other file that
+mentions `we:scripts/lane-pool.mjs` (`we:scripts/backlog.mjs`, `we:scripts/lane-drain.mjs`,
+`we:scripts/readiness/dispatch-plan.mjs`, `we:scripts/conveyor/tick-core.mjs`,
+`we:scripts/conveyor/lease-reaper.mjs`, `we:scripts/merge-ai-prs.mjs`,
+`we:scripts/push-if-green.mjs`, `we:scripts/verify-lane.mjs`, `we:scripts/guard-lane.mjs`,
+`we:scripts/converge-daemon-pass.mjs`, and the other `we:scripts/__tests__/` files) invokes it as
+a spawned CLI subprocess, never via an ES `import` — so a fix confined to this one internal
+function doesn't reach them; considered and rejected.
+`we:scripts/__tests__/lane-pool-acquire-stale-origin.test.mjs` already has the exact "advance the
+remote branch one commit past the lane" mover pattern the fix should reuse (its "ANCESTOR branch"
+test, ~line 93-128) — cited as a pattern reference, not touched, since the fix only changes the
+fixture in the OTHER file.
 
 ## Done when
 
