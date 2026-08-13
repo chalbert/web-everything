@@ -199,22 +199,132 @@ describe('the verdict names blockers rather than producing a number it cannot su
     // The silent half of the bug, and the worse one. 0.96 never reached the clamp — it returned a
     // plausible 93 for an effect that cannot occur, so nothing looked wrong.
     expect(requiredNPerGroup(0.96, 0.05)).toBeNull();
-    // Exactly at the boundary an answer still exists: p + d === 1, so the arm is 1.0, not past it.
-    expect(requiredNPerGroup(0.95, 0.05)).toBe(153);
     // The refusal tracks `mdd`, not a hardcoded rate — the same base rate answers with a smaller step.
     expect(requiredNPerGroup(0.96, 0.1)).toBeNull();
-    // p̄ = 0.97 → 7.84 · 2 · 0.0291 / 0.0004 = 1140.5, rounded up. Derived by hand, not read off the output.
+    // p̄ = 0.97 → 7.84 · 2 · 0.0291 / 0.0004 = 1140.72, rounded up. Derived by hand, not read off the
+    // output. (An earlier comment said 1140.5; the ceiling is 1141 either way, but a derivation offered
+    // as the reason to trust a constant has to be right.)
     expect(requiredNPerGroup(0.96, 0.02)).toBe(1141);
   });
 
+  // #1203 review, finding 4. An earlier cut of this fix used `p + d > 1` and pinned 153 here, on the
+  // reasoning that "at p + d === 1 the arm is 1.0, not past it". The arm being exactly 1.0 IS the problem:
+  // its variance q(1 - q) is zero, so there is no normal approximation to invert and no n at which this
+  // module's own `compareProportions` would accept it — zero failures at every n. 153 was the PR's own
+  // "credible wrong number" one row down, and the backlog card was telling the next author to derive a
+  // constant from it.
+  it('refuses at the boundary too, where the comparison arm is a point mass at 1.0', () => {
+    expect(requiredNPerGroup(0.95, 0.05)).toBeNull();
+    expect(requiredNPerGroup(0.5, 0.5)).toBeNull();
+    expect(requiredNPerGroup(0, 1)).toBeNull();
+    // Just below it an answer still exists, so the refusal is a boundary and not a blanket.
+    expect(requiredNPerGroup(0.94, 0.05)).toBe(212);
+  });
+
+  // #1203 review, finding 3. The clamps ran BEFORE the guard, so it tested a different pair than the
+  // caller passed — and disagreed in both directions. Both of these were live: the first was answered
+  // (7839997) although the true sum exceeds 1, the second refused although the true sum is exactly 1.
+  // With the clamps gone the stated rule is the implemented rule. Mutation-proven: re-adding either clamp
+  // reddens this test.
+  it('guards the arguments AS PASSED, not a clamped version of them', () => {
+    expect(requiredNPerGroup(0.9999999, 1e-6)).toBeNull();  // sums to 1.0000009 — impossible
+    expect(requiredNPerGroup(1, 0.05)).toBeNull();
+    expect(requiredNPerGroup(-0.5, 0.05)).toBeNull();       // was 153, via a clamp up to 1e-6
+    expect(requiredNPerGroup(1.5, 0.05)).toBeNull();
+    // A base rate of exactly 0 is NOT refused: p̄ = d / 2 is non-degenerate, and a rise from 0 can occur.
+    // p̄ = 0.025 → 7.84 · 2 · 0.025 · 0.975 / 0.0025 = 152.88, rounded up.
+    expect(requiredNPerGroup(0, 0.05)).toBe(153);
+  });
+
+  // THE ABSENCE OF THE CLAMP, pinned on its own. Re-adding `Math.min(1 - 1e-6, …)` leaves every assertion
+  // above green: once the boundary became `>=`, a clamped base rate and a raw one agree on null for every
+  // `mdd` at or above 1e-6, so the clamp is invisible in any realistic range. It is NOT invisible below
+  // that, and a surviving mutation is a finding whether or not the input is realistic — this is the case
+  // that distinguishes them. `mdd = 5e-8` is deliberately absurd; the assertion is a regression guard
+  // against the clamp coming back, not a scenario anyone should run.
+  it('does not clamp the base rate before computing, either', () => {
+    // p̄ from the raw 0.9999999 → 470399965. From a clamped 0.999999 → 6115194039, thirteen times larger.
+    expect(requiredNPerGroup(0.9999999, 5e-8)).toBe(470399965);
+  });
+
+  // #1203 review, finding 2 and finding 5. `Number(mdd) || 0.05` silently replaced an explicit zero, and
+  // `Number(baseRate) || 0` silently replaced NaN — both reachable, neither tested. Mutation-proven:
+  // restoring either `||` fallback reddens this test.
+  it('refuses a step it cannot size rather than substituting a default for it', () => {
+    expect(requiredNPerGroup(0.5, 0)).toBeNull();           // was 1565 — a 5-point answer to a 0-point ask
+    expect(requiredNPerGroup(0.5, -0.05)).toBeNull();       // was 3919999999997, via a clamp to 1e-6
+    expect(requiredNPerGroup(NaN, 0.05)).toBeNull();        // was 153
+    expect(requiredNPerGroup(undefined, 0.05)).toBeNull();  // was 153
+    expect(requiredNPerGroup(0.5, NaN)).toBeNull();
+    expect(requiredNPerGroup(0.5, Infinity)).toBeNull();
+    // The DEFAULT still applies — refusing an omitted `mdd` would break every existing caller.
+    expect(requiredNPerGroup(0.5)).toBe(1565);
+  });
+
   it('the blocker says no sample size would do, rather than printing a null', () => {
-    // 39 of 40 defects → a 97.5% base rate, and no band reaches 5-and-5, so both conditions hold at once.
+    // 39 of 40 defects → a 97.5% corpus rate, and no band reaches 5-and-5, so both conditions hold at once.
+    // The clean arm of the single occupied band is 19/20 → 95%, which also refuses, so the categorical
+    // sentence is licensed here: EVERY band refuses.
     const records = Array.from({ length: 40 }, (_, i) => pr(i, 100, i % 2 === 0, i < 39 ? 'independent-fix' : null, 60, `s${i}`));
     const out = assessCriteria({ records, nowSec: NOW });
     expect(out.power.requiredNPerGroup).toBeNull();
+    expect(out.power.perBand.every((b) => b.requiredNPerGroup === null)).toBe(true);
     const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
-    expect(blocker).toMatch(/no sample size would detect a 5-point rise/);
+    expect(blocker).toMatch(/no sample size would detect a 5-point rise in ANY band/);
     expect(blocker).not.toMatch(/null|undefined|NaN/);
+  });
+
+  /**
+   * #1203 review, finding 1 — the regression the previous cut introduced, and the reason this test exists.
+   *
+   * `baseRate` is pooled over every band and both arms; the blocker asks a per-band question. Answering it
+   * from the pooled rate turned a soft under-estimate into a categorical "no sample size would detect a
+   * 20-point rise" for an input where one band needs 63 observations per group. The tool told the operator
+   * that collecting more data was futile, which is the opposite of true.
+   */
+  describe('the blocker sizes from the population its own sentence names', () => {
+    // THREE occupied bands, deliberately, so the assertions below can tell apart "used the corpus",
+    // "used the wrong band" and "used the band's escalated arm":
+    //   xl — clean arm 39/40 = 97.5% → refuses at a 20-point step (1.175 exceeds 1)
+    //   m  — clean arm  5/10 = 50.0% → 95 per group
+    //   xs — clean arm  1/10 = 10.0% → 63 per group, the reachable one
+    // Pooled across all three and both arms the rate is 80%, which with a 20-point step lands exactly on
+    // the boundary and REFUSES. So the corpus says "impossible" while two bands say "63" and "95" — the
+    // regression, reproduced.
+    const skewed = () => [
+      ...Array.from({ length: 80 }, (_, i) => pr(i, 2000, i % 2 === 0, i < 79 ? 'independent-fix' : null, 60, `a${i}`)),
+      ...Array.from({ length: 20 }, (_, i) => pr(100 + i, 200, i % 2 === 0, (i % 2 === 0 || i <= 9) ? 'independent-fix' : null, 60, `b${i}`)),
+      ...Array.from({ length: 20 }, (_, i) => pr(200 + i, 10, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `c${i}`)),
+    ];
+
+    it('names the REACHABLE band instead of claiming no sample size would do', () => {
+      const out = assessCriteria({ records: skewed(), nowSec: NOW, mdd: 0.2 });
+      expect(out.multiplicity.bandsTested).toBe(0);          // the blocker really does fire — not vacuous
+      const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+      // `xs` at 63, not `m` at 95 — the band that needs the FEWEST, so "how far off are we" is answerable.
+      expect(blocker).toMatch(/nearest band is `xs`/);
+      expect(blocker).toMatch(/~63 PRs per group there would detect a 20-point difference/);
+      // The categorical claim must NOT appear while any band admits an answer.
+      expect(blocker).not.toMatch(/no sample size would detect/);
+    });
+
+    it('sizes each band from its own CLEAN arm, not from the corpus and not from both arms pooled', () => {
+      const out = assessCriteria({ records: skewed(), nowSec: NOW, mdd: 0.2 });
+      const byBand = Object.fromEntries(out.power.perBand.map((b) => [b.band, b]));
+      // Clean-arm rates. Pooling `xs` across arms would give 2/20 = 10% as well — so `m` is the one that
+      // discriminates: clean 5/10 = 50% needs 95, but pooled across arms 15/20 = 75% needs only 50, which
+      // would also steal "nearest band" from `xs` in the test above.
+      expect(byBand.xs.baseRate).toBeCloseTo(0.1, 10);
+      expect(byBand.xs.requiredNPerGroup).toBe(63);
+      expect(byBand.m.baseRate).toBeCloseTo(0.5, 10);
+      expect(byBand.m.requiredNPerGroup).toBe(95);
+      expect(byBand.xl.requiredNPerGroup).toBeNull();
+      // Empty bands carry no entry at all, rather than a rate invented from zero observations.
+      expect(out.power.perBand.map((b) => b.band).sort()).toEqual(['m', 'xl', 'xs']);
+      // The corpus figure is a DIFFERENT number over a different population, and both are reported.
+      expect(out.power.baseRate).toBeCloseTo(0.8, 10);
+      expect(out.power.requiredNPerGroup).toBeNull();
+    });
   });
 
   // The multiplicity correction had no test at all — making it a no-op stayed green.

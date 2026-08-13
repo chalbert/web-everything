@@ -189,21 +189,49 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  * Observations per group needed to detect `mdd` at this base rate (80% power, α=0.05, two-sided).
  * The actionable number: it says whether the metric or the patience is the constraint.
  *
- * Returns `null` when no answer exists. The formula sizes the comparison arm at `baseRate + mdd`, so
- * once that exceeds 1 there is no such arm to detect and any number returned describes an impossible
- * effect. It used to return one — `pbar` hit its clamp, `pbar * (1 - pbar)` collapsed, and the whole
- * numerator with it, so a 98% base rate answered `1`. A refusal is visible; a small wrong number is not.
+ * RETURNS NULL IN EXACTLY THREE CASES, and the list is the whole claim — an earlier draft opened with
+ * "returns null when no answer exists", which is wider than any guard here and is corrected below:
  *
- * The low end is NOT covered by this guard and is not claimed to be: `pbar = p + d / 2` places the
- * comparison arm above the base rate, so the formula is one-directional by construction and a
- * `baseRate - mdd` below 0 is outside what it models either way.
+ *   1. `baseRate + mdd >= 1`. The formula sizes the comparison arm at `baseRate + mdd`, so past 1 there
+ *      is no such arm and any number describes an impossible effect. It used to return one — `pbar` hit
+ *      its clamp, `pbar * (1 - pbar)` collapsed and the numerator with it, so a 98% base rate answered
+ *      `1`. The comparison is `>=`, NOT `>`: at exactly 1 the arm is a point mass at 1.0, its variance
+ *      `q(1 - q)` is exactly zero, and "80% power, two-sided" is not defined against a point mass. The
+ *      formula still emitted 153 there only because `pbar` averages the degenerate arm with the live one
+ *      — the same averaging that produced the `1`. Such an arm also yields zero failures at every n, so
+ *      `compareProportions` below would refuse it forever; the estimator must not name an n at which
+ *      this module's own validity rule can never be met.
+ *   2. either argument is not finite.
+ *   3. `mdd <= 0`, or `baseRate` outside `[0, 1]`. A zero effect needs infinite n — that is a refusal,
+ *      not a default. `Number(mdd) || 0.05` silently turned an explicit `mdd = 0` into a sample size for
+ *      a 5-point effect the caller never asked about, and `minDetectableDiff` is a declared numeric input
+ *      with no minimum, so that substitution was reachable from the shipped surface.
  *
- * @returns {number|null} observations per group, or null when `baseRate + mdd` exceeds 1.
+ * THE ARGUMENTS ARE GUARDED AS PASSED, before any clamp. Clamping first made the guard test a different
+ * pair than the caller supplied, in both directions: `(0.9999999, 1e-6)` sums past 1 and was answered
+ * because the upper clamp pulled the base rate back, and `(0, 1)` sums to exactly 1 and was refused
+ * because the lower clamp pushed it up. There are now no clamps, so the stated rule is the implemented one.
+ *
+ * WHAT THIS STILL DOES NOT COVER, so nobody reads the refusals as completeness:
+ *
+ *   - **The low end.** `pbar = p + d / 2` places the comparison arm ABOVE the base rate, so the formula is
+ *     one-directional by construction and a `baseRate - mdd` below 0 is outside what it models.
+ *   - **This module's own ≥5-successes-and-≥5-failures rule** (see `compareProportions`). The returned n
+ *     is the POWER requirement and nothing else; the textbook formula carries no validity floor, and at
+ *     high base rates the two diverge. `requiredNPerGroup(0.94, 0.05)` is 212, but an arm at 0.99 expects
+ *     only 2.12 failures at n=212, so `compareProportions` still refuses there. A caller that needs both
+ *     must apply `n >= 5 / min(p, 1 - p, p + d, 1 - (p + d))` itself. Folding that floor in here would
+ *     change shipped constants (`requiredNPerGroup(0.044, 0.2)` 49 → 114) and is a modelling call, not a
+ *     bug fix — filed on the card rather than decided in a review round.
+ *
+ * @returns {number|null} observations per group, or null in the three cases above.
  */
 export function requiredNPerGroup(baseRate, mdd = 0.05) {
-  const p = Math.max(1e-6, Math.min(1 - 1e-6, Number(baseRate) || 0));
-  const d = Math.max(1e-6, Number(mdd) || 0.05);
-  if (p + d > 1) return null;
+  const p = Number(baseRate);
+  const d = Number(mdd);
+  if (!Number.isFinite(p) || !Number.isFinite(d)) return null;
+  if (d <= 0 || p < 0 || p > 1) return null;
+  if (p + d >= 1) return null;
   const pbar = p + d / 2;
   return Math.ceil(((1.96 + 0.84) ** 2 * 2 * pbar * (1 - pbar)) / (d * d));
 }
@@ -239,14 +267,45 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   if (cluster.clustered) {
     blockers.push(`clustered observations — ${cluster.observations} defect signals trace to ${cluster.distinctSources} commits (largest is ${Math.round(cluster.largestClusterShare * 100)}% of them), so the interval is narrower than the data supports`);
   }
+  // CORPUS-WIDE, and named as such. `baseRate` above is pooled across all five bands AND across both arms,
+  // so this figure describes the corpus, not any band and not any one arm. Kept because it is the headline
+  // an operator quotes, but the BLOCKER no longer speaks from it — see `bandNeeds`.
   const required = requiredNPerGroup(baseRate, mdd);
+
+  // PER BAND, AND FROM THE CLEAN ARM (PR #1203 review, finding 1). The blocker asks a per-band question —
+  // "PRs per group per band" — and answering it from the pooled rate made a categorical claim out of a
+  // population the decision does not use. Demonstrated: 80 records at 98.75% plus 20 at 10% pools to 81%,
+  // which refuses outright, while the `xs` band's own 10% needs 63 per group. The old text said "~33 per
+  // group per band" — an under-estimate pointing the right way; the categorical version points the wrong
+  // way and reads as "collecting more data is futile", which is the worst thing this module can say.
+  //
+  // The CLEAN arm specifically, not the band pooled across arms: the formula sizes a comparison against a
+  // control at `baseRate` and a treatment at `baseRate + mdd`, so the control arm's rate is the base rate
+  // it means. Pooling the two arms feeds the comparison its own answer.
+  const bandNeeds = SIZE_BANDS.map(([label]) => {
+    const { n, k } = bands[label].clean;
+    if (!n) return null;
+    const rate = k / n;
+    return { band: label, baseRate: rate, requiredNPerGroup: requiredNPerGroup(rate, mdd) };
+  }).filter(Boolean);
+
   if (!testable.length) {
-    // `required` is null when a `mdd`-point rise would take the base rate past 1 — say that, rather than
-    // printing "~null PRs" or a number for an effect that cannot occur.
-    const need = required === null
-      ? `no sample size would detect a ${Math.round(mdd * 100)}-point rise from a ${(100 * baseRate).toFixed(1)}% base rate — it would exceed 100%`
-      : `~${required} PRs per group per band would be needed to detect a ${Math.round(mdd * 100)}-point difference`;
-    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% base rate; ${need}`);
+    const answerable = bandNeeds.filter((b) => b.requiredNPerGroup !== null);
+    // The REACHABLE one — the band that needs the fewest. "No sample size would do" is a claim about every
+    // band at once, so it may only be made when every band refuses.
+    const easiest = answerable.length
+      ? answerable.reduce((a, b) => (b.requiredNPerGroup < a.requiredNPerGroup ? b : a))
+      : null;
+    const step = Math.round(mdd * 100);
+    let need;
+    if (easiest) {
+      need = `the nearest band is \`${easiest.band}\`, whose clean arm sits at ${(100 * easiest.baseRate).toFixed(1)}% — ~${easiest.requiredNPerGroup} PRs per group there would detect a ${step}-point difference`;
+    } else if (bandNeeds.length) {
+      need = `no sample size would detect a ${step}-point rise in ANY band — every band's clean arm is already within ${step} points of 100%`;
+    } else {
+      need = `no band holds a single clean-arm observation, so there is no rate to size against`;
+    }
+    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% corpus-wide base rate; ${need}`);
   }
 
   // `obs.observed` is the working set, not a result. Returning it put all 300 records inside the finding a
@@ -257,7 +316,10 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
     observability: { ...observability, observed: observed.length },
     clustering: cluster,
     multiplicity: { bandsTested: testable.length, alphaPerBand: alpha, uncorrectedFamilyWise: 1 - (0.95 ** (testable.length || 1)) },
-    power: { baseRate, minDetectableDiff: mdd, requiredNPerGroup: required },
+    // `baseRate`/`requiredNPerGroup` are CORPUS-WIDE — pooled across bands and across arms. `perBand` is the
+    // pair the blocker speaks from: one entry per band that has any clean-arm record, sized from that arm's
+    // own rate. A reader wanting "how far off are we" wants `perBand`; the corpus figure is the headline.
+    power: { baseRate, minDetectableDiff: mdd, requiredNPerGroup: required, perBand: bandNeeds },
     // Null until the escalation record carries the policy-contract version. The caveat rides with the
     // numbers because a web caller renders the numbers, not prose.
     parameterSet,
