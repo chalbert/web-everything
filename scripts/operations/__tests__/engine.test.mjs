@@ -20,6 +20,8 @@ import { describe, it, expect } from 'vitest';
 import { importGraph } from './import-graph.mjs';
 import { advance, advanceWhileRunning, isComplete, projectReads, runStatus, startRun } from '../engine.mjs';
 import { createRegistry, op } from '../registry.mjs';
+import { createMemoryRunStore } from '../run-store.mjs';
+import { applyPendingEffects } from '../effect-executor.mjs';
 import { compute, confirm, effect, judge } from '../step-kinds.mjs';
 import { newRunRecord } from '../run-record.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
@@ -362,5 +364,91 @@ describe('the engine fails closed', () => {
     r.register(op('many', body));
     expect(() => advanceWhileRunning(startRun({ op: 'many', id: 'run-many', registry: r }), { registry: r, maxSteps: 2 }))
       .toThrow(/did not settle within 2 steps/);
+  });
+});
+
+/**
+ * AN EFFECT STEP RECORDS WHAT IT PRODUCED (#3082). It was the one kind that wrote no finding, so nothing
+ * downstream could see an effect's `result` — `reads:` is rooted at `input|findings|verdict` and there was no
+ * finding to read. PR #1186's reviewer built the declaration that gap makes impossible and ran a failing
+ * build through it: the run advanced past the failure, the step that existed to react saw nothing, and the
+ * human was asked "Land it?".
+ */
+describe('an effect step writes a finding', () => {
+  const decl = (sinkResult, { second = false } = {}) => {
+    const r = createRegistry();
+    r.register(op('deploy', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({
+        reads: ['input.pr'],
+        effects: () => (second
+          ? [{ type: 'start.build', payload: {} }, { type: 'start.build', payload: { again: true } }]
+          : [{ type: 'start.build', payload: {} }]),
+      }),
+      react: compute({ reads: ['findings.go'], fn: (v) => v.findings.go }),
+    }));
+    return r;
+  };
+
+  async function run(registry, sinks, id = 'run-p') {
+    const store = createMemoryRunStore();
+    let rec = advanceWhileRunning(startRun({ op: 'deploy', id, input: { pr: 7 }, registry }), { registry });
+    rec = (await applyPendingEffects(rec, { sinks, store })).run;
+    return advanceWhileRunning(rec, { registry });
+  }
+
+  // THE PROBE FROM THE REVIEW, which returned "(NOTHING)" before this.
+  it('a later step can read what an effect returned', async () => {
+    const rec = await run(decl(), { 'start.build': async () => ({ exit: 1, log: 'BUILD FAILED' }) });
+    expect(rec.findings.react.effects[0].result).toEqual({ exit: 1, log: 'BUILD FAILED' });
+  });
+
+  it('says whether every effect landed, so a reader does not have to work it out', async () => {
+    const rec = await run(decl(), { 'start.build': async () => ({ exit: 0 }) });
+    expect(rec.findings.go.applied).toBe(true);
+    expect(rec.findings.go.effects).toHaveLength(1);
+  });
+
+  // KEYED BY ORDINAL, not by type: a step may declare the same type twice, and a type-keyed shape would drop
+  // one and lie about which result a reader is looking at.
+  it('keeps both results when a step declares the same type twice', async () => {
+    let n = 0;
+    const rec = await run(decl(null, { second: true }), { 'start.build': async () => ({ n: ++n }) });
+    expect(rec.findings.go.effects.map((e) => e.result)).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+
+  // Only what a reader can act on. The payload, the idempotency flag and the handle are the executor's
+  // bookkeeping, and a step reaching for them would be going around the model rather than through it.
+  it('carries the outcome and nothing else', async () => {
+    const rec = await run(decl(), { 'start.build': async () => ({ exit: 0 }) });
+    expect(Object.keys(rec.findings.go.effects[0]).sort()).toEqual(['error', 'result', 'status', 'type']);
+  });
+
+  // A step with nothing to do settles in one call and still records that it did nothing.
+  it('records an empty finding for a step that declares no effects', () => {
+    const r = createRegistry();
+    r.register(op('noop', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [] }),
+      react: compute({ reads: ['findings.go'], fn: (v) => v.findings.go }),
+    }));
+    const rec = advanceWhileRunning(startRun({ op: 'noop', id: 'run-n', input: { pr: 7 }, registry: r }), { registry: r });
+    expect(rec.findings.go).toEqual({ applied: true, effects: [] });
+  });
+
+  // The finding is written on the path a REPLAY takes too — `resolvePending`, not only the declare path.
+  it('is written when a half-applied step finishes on a later pass', async () => {
+    const registry = decl();
+    const store = createMemoryRunStore();
+    let rec = advanceWhileRunning(startRun({ op: 'deploy', id: 'run-h', input: { pr: 7 }, registry }), { registry });
+    // First pass fails, so the step does not settle and no finding is written yet.
+    rec = (await applyPendingEffects(rec, {
+      sinks: { 'start.build': async () => { throw Object.assign(new Error('nope'), { notApplied: true }); } },
+      store,
+    })).run;
+    expect(advance(rec, { registry }).findings.go).toBeUndefined();
+    // Second pass lands it.
+    rec = (await applyPendingEffects(rec, { sinks: { 'start.build': async () => ({ exit: 0 }) }, store })).run;
+    expect(advanceWhileRunning(rec, { registry }).findings.go.applied).toBe(true);
   });
 });
