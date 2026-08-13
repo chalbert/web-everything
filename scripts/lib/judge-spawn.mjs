@@ -73,7 +73,45 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
+
+/**
+ * Are these two paths the SAME DIRECTORY? By inode + device, never by comparing the strings.
+ *
+ * Every previous version of the driver's-lane check compared spellings, and a reviewer found another spelling
+ * each time: `..` walked through a substring test, a symlink walked through `resolve`, a case-variant walked
+ * through the JS `realpathSync`, and a macOS FIRMLINK walks through `realpathSync.native` — since 10.15,
+ * `/Users/x` and `/System/Volumes/Data/Users/x` are one directory with two on-disk names, and `.native`
+ * faithfully returns whichever you asked for. Four axes, four rounds, one root cause: a path is a NAME, and
+ * the question is about IDENTITY.
+ *
+ * `ino` + `dev` is that identity, and it is immune to all four at once. Returns false rather than throwing on
+ * an unstattable path — the caller has already refused a nonexistent cwd by then, and a stat failure here
+ * must not be louder than the refusal it is helping to make.
+ */
+export function sameDirectory(a, b) {
+  try {
+    const x = statSync(a);
+    const y = statSync(b);
+    return x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `realpathSync.native`, with NO fallback. The JS `realpathSync` resolves symlinks but echoes the caller's
+ * SPELLING back, so two spellings of one directory compare unequal — see {@link assertLaneCwd}.
+ *
+ * A `?? realpathSync` fallback was the first cut and it silently restored the bug on any platform taking that
+ * branch: no error, no warning, an isolation check quietly absent. `.native` has shipped on every platform
+ * since Node 9.2, so the branch was dead — and a dead branch that reopens a security-shaped hole is worse
+ * than a startup failure that says so.
+ */
+export const REAL_PATH = realpathSync.native;
+if (typeof REAL_PATH !== 'function') {
+  throw new Error('judge-spawn: `fs.realpathSync.native` is unavailable — the lane check cannot distinguish two spellings of one directory without it');
+}
 
 /** The CLI a juror runs as. Named once so a test can assert it and a caller can override the path. */
 export const JUDGE_CLI = 'claude';
@@ -108,44 +146,35 @@ export function assertNoForbiddenArgv(argv = []) {
 }
 
 /**
- * A tool-bearing juror MUST run in a lane of its OWN. Refuses the spawn otherwise. Pure over the path strings.
+ * A tool-bearing juror MUST run in a lane of its OWN. Refuses the spawn otherwise.
  *
- * THIS IS THE GUARANTEE, not a reminder — and it exists because the first version of this feature ASSERTED an
- * isolation property it did not have. It claimed the spawn's cwd was a lane; nothing set it, so the default
- * `process.cwd()` meant a review launched from the primary checkout handed a juror unscoped `Bash` pointed at
- * the shared tree. It also claimed `guard-lane` would deny writes there, but `--safe-mode` disables hooks, so
- * that guard never ran inside the juror at all.
+ * FOUR EARLIER VERSIONS OF THIS CHECK WERE WRONG, each caught by a reviewer who ran it. They are recorded
+ * because every one of them looked correct, and because the next person reaching for a simpler check will
+ * reach for one of these:
  *
- * THE FIRST FIX WAS ALSO NOT ENOUGH (PR #1178 review, blocking 1), and how it failed is the reason this
- * function now takes three arguments instead of one. It refused a cwd that was not a lane — but `judgeSpawn`
- * still DEFAULTED `cwd` to `process.cwd()`, and the normal deployment runs the review inside a lane. So an
- * omitted cwd silently passed the check by donating the DRIVER'S OWN lane: the juror got unscoped `Bash`
- * pointed at the very working tree the parent was mid-review of, which is a tree the juror's own mandate tells
- * it to mutate (check out the parent commit, edit source, re-run the suite to expose a decorative test). The
- * lane may also carry another session's live lease. "A lane is disposable and never shared" is true of a lane
- * nobody is using; it is false of the one the driver is standing in.
+ *   - ASSERTED, not enforced. The comment claimed the cwd was a lane and that `guard-lane` would deny a
+ *     shared-tree write. Nothing set the cwd, and `--safe-mode` disables hooks, so neither was true.
+ *   - `path.includes('/.lanes/')` — `…/.lanes/../webeverything` walks straight through the string.
+ *   - `resolve()` — normalizes text, never touches the filesystem, so a symlink wearing a lane's shape passes
+ *     while the child lands in the shared primary checkout.
+ *   - `cwd` defaulting to `process.cwd()` — a review normally runs INSIDE a lane, so an omitted cwd passed by
+ *     donating the driver's own tree. That is the tree the juror's mandate tells it to check out, edit and
+ *     re-test, and it may carry another session's lease. "A lane is disposable and never shared" is true of a
+ *     lane nobody is using; false of the one the driver is standing in.
+ *   - full-path equality against the driver — a SUBDIRECTORY of the driver's lane is the same working tree,
+ *     and on a case-insensitive filesystem so is a differently-cased spelling.
  *
- * So three things are refused, and each closes a hole the reviewer reproduced:
- *   1. NO cwd at all. There is no safe default — inheriting one is exactly the defect above — so a
- *      tool-bearing spawn must be handed a lane explicitly.
- *   2. A cwd that is not a lane, checked on the REAL path. The first predecessor was a raw
- *      `path.includes('/.lanes/')`, which `…/.lanes/../webeverything` walked straight through. The second used
- *      `resolve`, which normalizes text and never touches the filesystem — so a symlink wearing a lane's shape
- *      passed while the child landed in the shared primary checkout. `realpathSync` follows the link.
- *   3. A cwd inside the DRIVER'S own lane. Same tree, same hazard, and it is the shape an omitted cwd used to
- *      produce. Compared by LANE ROOT rather than by full path: an exact compare let a subdirectory through
- *      (same working tree, same lease) and, on a case-insensitive filesystem, let a case-variant of the very
- *      same directory through.
- *
- * Enforcing it here needs neither hooks nor cooperation: no lane of its own, no tools.
+ * `realpathSync.NATIVE`, not `realpathSync`, and that distinction is the whole of the last bullet: the JS
+ * implementation resolves symlinks but echoes back the caller's SPELLING, so `/users/…/lane-13` and
+ * `/Users/…/lane-13` compare unequal while naming one directory. The native one returns the on-disk name.
  *
  * @param {string|null} cwd - the lane handed to the juror.
  * @param {string[]|null} allowedTools - null/undefined means a tool-free juror, which is unaffected.
- * @param {string} [selfCwd] - the DRIVER's directory, injected so this stays testable.
- * @param {(p: string) => string} [realpath] - injected for the same reason. The default follows symlinks; a
- *   test passes identity so it can keep reasoning about path STRINGS instead of building real directories.
+ * @param {string} [selfCwd] - the DRIVER's directory, injected so this is testable.
+ * @param {(p: string) => string} [realpath] - injected for the same reason; a test passes identity to reason
+ *   about path strings without building real directories.
  */
-export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpath = realpathSync) {
+export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpath = REAL_PATH) {
   if (allowedTools === null || allowedTools === undefined) return;
   const refuse = (why) => {
     throw new Error(
@@ -159,10 +188,7 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
     refuse('no `cwd` was supplied, and there is no safe default — inheriting the driver\'s directory is the '
       + 'defect this exists to prevent');
   }
-  // REAL PATH, not just a resolved one (PR #1178 round 4, finding 2). `resolve` normalizes `..` and `.`
-  // textually and never touches the filesystem, so a symlink wearing a lane's shape passed `laneRootOf` while
-  // the child landed in the shared primary checkout — reproduced end to end. `realpathSync` follows the link.
-  // It THROWS on a path that does not exist, which is the right answer too: a juror cannot run there.
+  // A path that does not exist throws, which is the right answer: a juror cannot run there either.
   let path;
   try {
     path = realpath(resolvePath(String(cwd)));
@@ -171,13 +197,11 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
   }
   const lane = laneRootOf(path);
   if (!lane) refuse(`\`cwd\` resolves to ${JSON.stringify(path)}, which is not a lane clone`);
-  // LANE ROOTS, not full paths (PR #1178 round 4, finding 1). An exact path compare let a SUBDIRECTORY of the
-  // driver's lane through — same git working tree, same lease — and on a case-insensitive filesystem it let
-  // a case-variant of the very same directory through. Both were reproduced with the child reporting the
-  // driver's own tree. Comparing the lane each path belongs to asks the question the refusal is actually for.
   let selfLane = null;
   try { selfLane = laneRootOf(realpath(resolvePath(String(selfCwd || '.')))); } catch { selfLane = null; }
-  if (selfLane && lane === selfLane) {
+  // IDENTITY, not spelling — see `sameDirectory`. The string compare is kept as the fast path because it is
+  // exact when it fires; `sameDirectory` catches the aliases it cannot see.
+  if (selfLane && (lane === selfLane || sameDirectory(lane, selfLane))) {
     refuse(`\`cwd\` is inside the DRIVER'S OWN lane (${JSON.stringify(lane)}) — the juror would be pointed at the `
       + 'working tree its caller is mid-run in, and its mandate is to mutate that tree');
   }
@@ -189,7 +213,10 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
  * directory that happens to be named `.lanes`.
  */
 export function laneRootOf(resolvedPath) {
-  const m = /^(.*[/\\]\.lanes[/\\][^/\\]+[/\\]lane-\d+)(?:[/\\]|$)/.exec(String(resolvedPath));
+  // NON-GREEDY, so this is the OUTERMOST lane on the path. A greedy `.*` returned the innermost, so a cwd of
+  // `…/lane-1/.lanes/y/lane-2` reported a different lane from a driver at `…/lane-1` and the spawn was
+  // allowed — while sitting inside the driver's own working tree (PR #1188 review, finding 4).
+  const m = /^(.*?[/\\]\.lanes[/\\][^/\\]+[/\\]lane-\d+)(?:[/\\]|$)/.exec(String(resolvedPath));
   return m ? m[1] : null;
 }
 
