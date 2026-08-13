@@ -177,9 +177,12 @@ function withEntry(run, key, patch) {
  * @param {Record<string, Function>|Map<string, Function>} opts.sinks - effect type → `async (payload, ctx) => result`.
  * @param {{read: Function, write: Function}} opts.store - the run store handle (see `run-store.mjs`).
  * @param {number} [opts.stepIndex] - apply a specific step's effects instead of the pending one.
+ * @param {'human'|'auto'} [opts.attemptedBy] - who re-entered. Recorded, never acted on; see the attempt
+ *   counter below for why the two populations must not be averaged. Defaults to `human`, because every
+ *   caller that existed before the waker was one.
  * @returns {Promise<{run: object, applied: string[], skipped: string[], halted: (object|null), error: (Error|null)}>}
  */
-export async function applyPendingEffects(run, { sinks, store, stepIndex = null } = {}) {
+export async function applyPendingEffects(run, { sinks, store, stepIndex = null, attemptedBy = 'human' } = {}) {
   assertRunRecord(run, 'run record passed to applyPendingEffects');
   if (!store || typeof store.write !== 'function') {
     throw new TypeError('operations: applyPendingEffects needs a `store` handle — the record must be durable between effects');
@@ -253,9 +256,23 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
     //     handle-less entry is refused on replay exactly as `pending` is. What it buys is VISIBILITY: the
     //     crash lands in `inFlightEntries().unknown` and is closable through `resolveInFlight`, where a
     //     `pending` entry is invisible to both and can only be hand-edited. See the `inFlight` docblock.
+    // COUNT THE ATTEMPT, and record WHO made it. This is instrumentation, not policy: nothing reads these to
+    // decide anything, and #3083 — where retry gets a cap, a backoff and an owner — is unruled. They are here
+    // now because they cannot be recovered later. Today's corpus holds zero retry observations (nothing
+    // dispatches yet), so every one that ever exists starts accumulating from whenever this lands.
+    //
+    // `attemptedBy` separates two populations that a naive count conflates and that mean OPPOSITE things:
+    // an AUTOMATIC retry succeeding says the failure was flaky and a small budget would have caught it; a
+    // HUMAN retry succeeding usually says someone fixed the cause, and no budget would ever have helped.
+    // Averaging them yields a default that is too high. One field, unrecoverable if omitted.
+    const attempted = {
+      attempts: (Number(live.attempts) || 0) + 1,
+      lastAttemptAt: new Date().toISOString(),
+      attemptedBy: attemptedBy === 'auto' ? 'auto' : 'human',
+    };
     current = live.dispatch
-      ? withEntry(current, live.key, { status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
-      : withEntry(current, live.key, { status: 'pending', error: null });
+      ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
+      : withEntry(current, live.key, { ...attempted, status: 'pending', error: null });
     store.write(current);
 
     try {
