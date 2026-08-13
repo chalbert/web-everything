@@ -26,18 +26,38 @@ Four items surveyed against what their PRs actually had to touch:
 | [#3090] | `size: 1`, 2 files | touched a caller that was NOT in scope; one declared file never touched | 3 |
 | [#3091] | `size: 2`, 4 files | 4 call sites each had to honour one discipline independently; reviewers found them one at a time | 6 |
 | [#3071] | `size: 3`, 1 file | scope was exactly right — and the work was still pointless, because nothing had measured whether the fix would unblock anything (it would not) | 2, then stood down |
-| [#3084] | `size: 2`, 3 files | ~20 files, because a new status vocabulary had to reach every hand-back in the run lifecycle | 4+ |
+| ~~[#3084]~~ | ~~`size: 2`, 3 files~~ | **RETRACTED — see below. It touched exactly its 3 declared files.** | 4+ |
 
 Ranked by how often the gap preceded a long review:
 
-1. **A statistic or status computed over one population, applied to another population's decision** — 3 of 4.
+1. **A statistic or status computed over one population, applied to another population's decision** — 2 of 3.
    Partially scriptable at best; this is the judgment half.
-2. **The card names the file being changed and omits its existing consumers** — 3 of 4. **Fully scriptable**,
+2. **The card names the file being changed and omits its existing consumers** — 2 of 3. **Fully scriptable**,
    and checkable BEFORE work starts.
-3. **Declared `scope:` drifts from what was touched** — 3 of 4. Trivially scriptable, but only *after* the
+3. **Declared `scope:` drifts from what was touched** — **1 of 3**, once the retraction below is applied.
+   Trivially scriptable, but only *after* the
    fact, so it is a measurement rather than a gate.
 4. **No feasibility number before sizing** — 1 of 4, and decisive there: [#3071] was two rounds of correct
    work on the least-binding of three constraints.
+
+## RETRACTION — the #3084 row was false, and how it got here matters
+
+**#3084 touched exactly its three declared files** plus its own card
+(`git diff --name-only 227eef7c^1 227eef7c`). The "~20 files" in the first version of this table was
+GitHub's `changedFiles` count read against a stale `baseRefOid` after the drain rebased that lane; the 25
+extra files belong to [#3072], [#3080] and [#3081]. The "new status vocabulary reaching every hand-back" is
+[#3073]'s work, in a different PR.
+
+A number was read off a UI, used as evidence for this epic's central ranking, and propagated into agent
+memory — **without once being checked against the commit range.** An independent review caught it. The row
+is struck rather than deleted, because an epic arguing that unverified claims cause long reviews should not
+quietly delete its own.
+
+**Consequence for the ranking, stated rather than buried:** the surveyed set is three items, not four, and
+"scope drifts from what was touched" drops from 3 of 4 to **1 of 3** — which is no longer strong evidence
+for anything. The two gaps that survive are still supported by [#3090] and [#3091].
+
+**The rule it produces:** never cite a changed-file count from a PR page. Derive it from the commit range.
 
 ## What already exists — do not rebuild it
 

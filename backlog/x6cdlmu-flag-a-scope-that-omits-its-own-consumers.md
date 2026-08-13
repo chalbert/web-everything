@@ -18,7 +18,9 @@ scope does not cover. Three of four surveyed disasters looked like that shape, a
 
 ## No `scope:`, deliberately
 
-The three files this card used to scope are deleted by this PR, so leaving them would be a dangling scope —
+Two of the three files this card used to scope are deleted by this PR (`we:scripts/check-readiness.mjs`, the
+third, is alive on `main` and untouched — an independent review caught that overstatement). Leaving the
+block would still be a dangling scope —
 naming paths that do not exist, which is the defect this repo's citation gate catches elsewhere. Removing it
 also puts the item in the state that is TRUE of it: `unshaped-no-scope`, which is what the dispatcher should
 think, because the next attempt has a modelling question to settle before anything can be scoped at all.
@@ -26,9 +28,11 @@ think, because the next attempt has a modelling question to settle before anythi
 ## Why it was stood down
 
 **The foundation is wrong, and it was discovered by using it rather than by reasoning about it.** Preparing
-[#2996] turned up that `we:scripts/lane-pool.mjs` has ten-plus consumers — `we:scripts/backlog.mjs`,
-`we:scripts/readiness/dispatch-plan.mjs`, `we:scripts/conveyor/tick-core.mjs`, `we:scripts/conveyor/lease-reaper.mjs`, `we:scripts/verify-lane.mjs` and more — and **not one of them
-is an ES import.** Every one shells it as a subprocess (`node` + the path) rather than importing it. A static ESM import scan finds
+[#2996] turned up that `we:scripts/lane-pool.mjs` has more than ten consumers and **not one of them is an ES
+import** — every one spawns it as a subprocess. (The first version of this paragraph named five and two of
+them were wrong: the reference in `we:scripts/backlog.mjs` is a help string and the ones in
+`we:scripts/verify-lane.mjs` are comments. An independent review caught that. The aggregate claim
+reproduces; the hand-picked list was sloppy, which is its own small instance of the same disease.) Every one shells it as a subprocess (`node` + the path) rather than importing it. A static ESM import scan finds
 zero. In a repo whose scripts overwhelmingly invoke each other as subprocesses, the import graph is simply
 not the consumer graph.
 
