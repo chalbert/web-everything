@@ -187,6 +187,29 @@ export const DEFAULT_MANDATE = 'correctness';
  * Exported so a test can prove it reaches EVERY mandate built from `buildMandate`, and so a caller building a
  * different transport can assert its presence rather than re-typing a paraphrase that drifts.
  */
+/**
+ * WHAT TO DO WITH A COMMENT THAT PROMISES SOMETHING. Sits beside {@link PROSE_IMPRECISION_RULE} and is
+ * deliberately its opposite number: that one says wording is never worth a bounce, this one says a PROMISE is
+ * not wording.
+ *
+ * It exists because it is what the good reviewers were already doing by instinct. Over one week, ten separate
+ * properties in one file were found undefended by a reviewer deleting the behaviour and watching the suite
+ * stay green — among them all three "hand this back to a human" cases in the waker, which is the safety
+ * property that machinery's whole ruling rests on. Every one had a comment describing it. None had a test.
+ *
+ * FRAMED AS COVERAGE, NOT AS PROSE, and that is load-bearing: a missing test is a real gap in the diff, so it
+ * routes through the ordinary disposition machinery. Reading it as a prose finding would put it straight back
+ * under the rule above and it would never be raised.
+ */
+export const GUARANTEE_NEEDS_A_TEST_RULE = [
+  'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX. For each guarantee the diff states in',
+  'prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find the test that defends it, then',
+  'BREAK the guarded line and confirm a NAMED test reddens. A guarantee no test defends is a COVERAGE finding,',
+  'not a prose one, and it is worth raising: prose is the only thing in a diff that nothing checks. Watch',
+  'DEFAULTS in particular — a default value quietly satisfying a check written for the explicit value is the',
+  'single most common shape here.',
+].join(' ');
+
 export const PROSE_IMPRECISION_RULE = [
   'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
   'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
@@ -231,6 +254,7 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
       'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
       'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
       PROSE_IMPRECISION_RULE,
+      GUARANTEE_NEEDS_A_TEST_RULE,
     ],
   });
 }
