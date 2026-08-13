@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -39,6 +39,7 @@ import {
   judgeSpawn,
   assertLaneCwd,
   laneRootOf,
+  REAL_PATH,
 } from '../judge-spawn.mjs';
 
 const SHAPE = {
@@ -687,6 +688,26 @@ describe('assertLaneCwd follows symlinks', () => {
     const link = join(dir, 'shortcut');
     symlinkSync(realLane, link, 'dir');
     expect(() => assertLaneCwd(link, ['Bash'], realLane)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // THE CASE-VARIANT HOLE, which survived two "fixed" claims (PR #1178 round 5, finding 1). `realpathSync`
+  // echoes the caller's SPELLING; only `realpathSync.native` returns the on-disk name, so before the fix
+  // `/users/…` and `/Users/…` compared as different lanes and the juror got the driver's own tree.
+  //
+  // Skipped where the filesystem is case-SENSITIVE, because there the two spellings really are different
+  // directories and there is nothing to catch.
+  it("REFUSES a differently-cased spelling of the DRIVER'S own lane", () => {
+    const flipped = realLane.replace(/\/private\//i, '/PRIVATE/').replace(/\/var\//i, '/VAR/')
+      .replace(/\/tmp\//i, '/TMP/').replace(/\/Users\//i, '/users/');
+    let caseInsensitive = false;
+    try { caseInsensitive = existsSync(flipped) && flipped !== realLane; } catch { caseInsensitive = false; }
+    if (!caseInsensitive) return; // case-sensitive filesystem: two spellings, two directories, nothing to close
+    expect(() => assertLaneCwd(flipped, ['Bash'], realLane)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // The same distinction, isolated from the filesystem: the default must be the one that renames.
+  it('uses realpathSync.native, which returns the on-disk spelling rather than the caller\'s', () => {
+    expect(REAL_PATH).toBe(realpathSync.native);
   });
 
   it('REFUSES a path that does not exist — a juror cannot run there either', () => {
