@@ -215,8 +215,8 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
         `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
         'cannot be observed — it is indistinguishable from an unknown outcome. It is not declared idempotent, so ' +
         'restarting it could double-apply. Refusing. Find out what happened to it, then close it out with ' +
-        '`resolveInFlight(run, key, { status: \'applied\' | \'failed\' })` and re-run. No command-line surface ' +
-        'exposes it yet, so that means a short script over the run store.',
+        `\`node scripts/operations/wake.mjs --resolve=${run.id} --key=${entry.key} --status=applied|failed\` ` +
+        '(or `resolveInFlight(run, key, { status })` from a script) and re-run.',
       );
     }
     if (typeof lookup(entry.type) !== 'function') {
@@ -355,8 +355,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
 
 /**
  * Resolve an `in-flight` entry once the work it started reports back (#3073) — the only supported way out of
- * that status. No CLI flag or HTTP route reaches it yet, so an operator calls it from a short script; #3070,
- * which polls these entries, is the first caller that will.
+ * that status. #3070's waker is the first caller, and it also exposes the operator's surface:
+ * `node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=applied|failed`
+ * (`we:scripts/operations/wake.mjs#closeOutEntry`). No HTTP route reaches it.
  *
  * REFUSES on any other status. Resolving an entry that is `pending` would be a guess about an unknown outcome,
  * which is exactly what the replay guard refuses; resolving one that is `applied` would rewrite a settled fact.

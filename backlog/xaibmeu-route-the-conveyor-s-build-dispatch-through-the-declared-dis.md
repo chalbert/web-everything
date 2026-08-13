@@ -34,8 +34,25 @@ delete the hand-spawn prose.
 - **Land #x9ylkp7 first or with this.** Until the observer can resolve a finished build, every real dispatch
   leaves an entry the waker re-reports forever and eventually exits non-zero on.
 
+## It carries the other half of #3037's acceptance
+
+Ruled by the independent review of PR #1211, and written into #3037's own acceptance rather than left in a
+footnote: **the clause "a lane IS dispatched through the declared operation … with the same scope-lease
+arbitration … verified against a real queue" is REASSIGNED here.** #3037 delivered the declaration, the
+structural holds and the durable handle; nothing has ever been dispatched, and the lease is taken by the agent
+running `lane-pool acquire` from the brief — a path that has not executed. This item is where that clause is
+met, so #3037 is not fully accepted until this one is.
+
+Named classes of defect only a live run can catch (from the same review, so they are checked here and not
+rediscovered): a background session's permission mode (the agent's first act is `bash` inside a `$( … )`, and a
+prompt there stalls it holding a handle that reads `running` forever); whether `--session-id` really pins the id
+that `claude agents` reports back; whether `-n` is the session-name flag; what the child inherits from a
+conveyor runner's environment (`spawnAgent` passes no `env`); and the agent's lane acquisition racing the
+parent's assignment, which is the entire reason the in-flight guard exists.
+
 ## Acceptance
 
 The conveyor dispatches builds only through the declared operation, one live dispatch has been observed end to
-end (agent started, handle recorded, run resumable after a restart), and the SKILL no longer instructs a
-hand-rolled `Agent` spawn for a build.
+end (agent started, handle recorded, run resumable after a restart), the scope-lease arbitration has been
+exercised by that live agent's own `acquire`, and the SKILL no longer instructs a hand-rolled `Agent` spawn for
+a build.

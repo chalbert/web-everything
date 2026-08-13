@@ -83,6 +83,36 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
 export const BRIEF_PLACEHOLDERS = Object.freeze(['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE']);
 
 /**
+ * How long an in-flight dispatch record keeps HOLDING its item past the deadline it was given, before this
+ * operation will dispatch that item again. See {@link dispatchStillHolds} for why any such window exists.
+ */
+export const DISPATCH_HOLD_GRACE_MINUTES = 30;
+
+/**
+ * DETECTION is wider than SUBSTITUTION, and the gap is the whole point (PR #1211 review, F3).
+ *
+ * Substitution is keyed to the five names spelled EXACTLY `{{NAME}}`. If detection used the same shape, every
+ * near-miss spelling — `{{ ITEM_NUM }}`, `{{item_num}}`, `{{ITEM-NUM}}` — would match nothing at all: not
+ * substituted, and not reported either, since `unknownTokens` is fed by the same scan. A one-character typo in
+ * the brief would then reach a dispatched agent verbatim and silently, which is the failure this fill exists to
+ * prevent. So the scan admits whitespace, lower case and dashes, and {@link fillBrief} decides per match what
+ * the wider shape means.
+ */
+export const BRIEF_TOKEN_RE = /\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g;
+
+/**
+ * The canonical placeholder a detected token name is a MISSPELLING OF, or null when it names nothing this
+ * operation fills. Case- and dash-insensitive, because those are where typos actually live.
+ *
+ * @param {string} name - the token name, without braces.
+ * @returns {string|null}
+ */
+export function canonicalPlaceholder(name) {
+  const norm = String(name ?? '').trim().replace(/-/g, '_').toUpperCase();
+  return BRIEF_PLACEHOLDERS.includes(norm) ? norm : null;
+}
+
+/**
  * What a placeholder VALUE may contain. An allowlist, and narrow on purpose.
  *
  * WHY IT IS NOT COSMETIC. The brief tells the agent to run `lane-pool.mjs acquire … --scope={{SCOPE}}
@@ -123,12 +153,21 @@ export function sessionSlugFor(num) {
  * WHAT IT REFUSES — a value that is missing, blank, or outside {@link BRIEF_VALUE_RE}. Both are holes an agent
  * cannot recover from: it acquires no lane, or it runs a brief carrying shell metacharacters.
  *
- * WHAT IT DOES **NOT** REFUSE — an UNKNOWN `{{TOKEN}}`, and this is a correction of the first cut, which threw
- * on any leftover. The real brief's own prose carries two (`{{PLACEHOLDERS}}` and `{{LIKE_THIS}}`, both inside
- * code spans, both explaining the fill convention to a reader), so that check refused EVERY dispatch of EVERY
- * item — and no test caught it, because every test used a synthetic five-token template. The check was also
- * mis-weighted: an unfilled token in prose costs an agent one confusing line, while a false refusal costs the
- * whole dispatch. So unknown tokens are REPORTED (`unknownTokens`, which rides the run record) and never fatal.
+ * WHAT IT DOES **NOT** REFUSE — an UNKNOWN `{{TOKEN}}`, one that names none of the five. This is a correction of
+ * the first cut, which threw on any leftover. The real brief's own prose carries two (`{{PLACEHOLDERS}}` and
+ * `{{LIKE_THIS}}`, both inside code spans, both explaining the fill convention to a reader), so that check
+ * refused EVERY dispatch of EVERY item — and no test caught it, because every test used a synthetic five-token
+ * template. The check was also mis-weighted: a token in prose that names nothing costs an agent one confusing
+ * line, while a false refusal costs the whole dispatch. So unknown tokens are REPORTED (`unknownTokens`, which
+ * rides the run record) and never fatal.
+ *
+ * WHAT IT REFUSES AGAIN, and this is the correction of THAT correction (PR #1211 review, F3): a MISSPELLED
+ * placeholder — a token that names one of the five in any other spelling (`{{ ITEM_NUM }}`, `{{item_num}}`,
+ * `{{ITEM-NUM}}`). The over-broad first fix made those neither substituted NOR reported, because the scan regex
+ * matched only the exact shape; a one-character typo in the brief would reach the agent verbatim and invisible.
+ * The property is the bar the reviewer set and it is enforced here: **no placeholder of this operation's own,
+ * in any spelling, may reach a dispatched agent unsubstituted — and the refusal names which one.** A token that
+ * names nothing we fill is still merely reported, so the real brief's prose still dispatches.
  *
  * @param {string} template - the brief's markdown.
  * @param {Record<string, string|number>} values - keyed by placeholder NAME (`ITEM_NUM`, not `{{ITEM_NUM}}`).
@@ -152,12 +191,65 @@ export function fillBrief(template, values = {}) {
     }
   }
   const unknown = new Set();
-  const prompt = text.replace(/\{\{([A-Z0-9_]+)\}\}/g, (whole, name) => {
-    if (BRIEF_PLACEHOLDERS.includes(name)) return String(values[name]);
+  const misspelled = new Set();
+  const prompt = text.replace(BRIEF_TOKEN_RE, (whole, name) => {
+    // The EXACT shape is the only one that substitutes. `whole` is compared rather than `name` alone because
+    // the scan strips the surrounding whitespace into the match but not into the capture, so `{{ ITEM_NUM }}`
+    // and `{{ITEM_NUM}}` arrive with the same `name` and must NOT be treated the same.
+    if (whole === `{{${name}}}` && BRIEF_PLACEHOLDERS.includes(name)) return String(values[name]);
+    const canonical = canonicalPlaceholder(name);
+    if (canonical) { misspelled.add(`${whole} (meaning {{${canonical}}})`); return whole; }
     unknown.add(whole);
     return whole;
   });
+  if (misspelled.size) {
+    throw new Error(
+      `dispatch-lane: the brief carries a MISSPELLED placeholder — ${[...misspelled].sort().join(', ')}. No `
+      + 'substitution reaches it, so the dispatched agent would run the token verbatim (a lane leased under a '
+      + 'literal `{{ SESSION_SLUG }}` is a lease nothing ever releases). Refusing to dispatch. Spell it exactly '
+      + `as one of ${BRIEF_PLACEHOLDERS.map((n) => `{{${n}}}`).join(', ')}.`,
+    );
+  }
   return { prompt, unknownTokens: [...unknown].sort() };
+}
+
+/**
+ * Does an in-flight dispatch record still HOLD its item against a fresh dispatch? (PR #1211 review, F1.)
+ *
+ * THE WEDGE THIS BREAKS. Three shipped decisions composed into a permanent, per-item lockout: the observer
+ * never answers `succeeded` (`claude agents` reports liveness, not outcome — #x9ylkp7), `unresolved` writes
+ * nothing, so the entry stays `in-flight` forever; and the double-dispatch guard refused any item with ANY
+ * in-flight record. Run records are never pruned, so ONE successful dispatch per item was the ceiling — and the
+ * conveyor's normal loop (dispatch → PR → review bounces → re-dispatch) could never run.
+ *
+ * WHY AGE IS THE RIGHT AXIS. The guard exists to cover exactly one window: the seconds between this operation
+ * starting an agent and that agent leasing its lane, during which the tick core can see nothing wrong and a
+ * second invocation would get the same cleared row. That window is minutes wide. An entry past its own
+ * `expectedBy` plus a grace margin is by construction not in it — the agent it describes either finished (and
+ * the observer cannot say so) or died, and either way a second one cannot collide with it in a lane. So the
+ * guard keeps its whole purpose and loses only the part that was never protecting anything.
+ *
+ * FAIL-CLOSED ON A DATE IT CANNOT READ. No usable instant, or a record carrying neither `expectedBy` nor
+ * `startedAt`, means the age is unknown — and an unknown age holds, because the cost of a wrong "aged out" is
+ * two agents in one clone and the cost of a wrong "still holding" is a refusal an operator can see and act on.
+ *
+ * @param {{expectedBy?: string|null, startedAt?: string|null}} entry - an in-flight dispatch record summary.
+ * @param {string} at - the instant the read was taken, ISO. The io shell supplies it; this stays pure.
+ * @param {{expectedWithinMinutes?: number, graceMinutes?: number}} [o]
+ * @returns {boolean}
+ */
+export function dispatchStillHolds(entry, at, { expectedWithinMinutes = DEFAULT_EXPECTED_WITHIN_MINUTES, graceMinutes = DISPATCH_HOLD_GRACE_MINUTES } = {}) {
+  const now = Date.parse(String(at ?? ''));
+  if (Number.isNaN(now)) return true;
+  const expectedBy = Date.parse(String(entry?.expectedBy ?? ''));
+  const startedAt = Date.parse(String(entry?.startedAt ?? ''));
+  // `expectedBy` is the deadline the sink recorded. A handle-less INDETERMINATE entry never got one, so its
+  // deadline is reconstructed from `startedAt` and the same estimate the dispatch would have used.
+  const deadline = Number.isNaN(expectedBy)
+    ? (Number.isNaN(startedAt) ? NaN : startedAt + (Number(expectedWithinMinutes) > 0 ? Number(expectedWithinMinutes) : DEFAULT_EXPECTED_WITHIN_MINUTES) * 60_000)
+    : expectedBy;
+  if (Number.isNaN(deadline)) return true;
+  return now < deadline + (Number(graceMinutes) >= 0 ? Number(graceMinutes) : DISPATCH_HOLD_GRACE_MINUTES) * 60_000;
 }
 
 /** A launch/suppression row from the tick core, or null. Shape-checked, never trusted blind. */
@@ -200,6 +292,11 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     throw new Error(`dispatch-lane.read: the reader could not resolve ${JSON.stringify(num)} to an item id`);
   }
 
+  // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, read from the run store by the io shell. Split below, but read
+  // here so the PARTIAL-GUARD count can ride `base` — every exit from this function reports it.
+  const inFlight = raw.inFlightDispatches && typeof raw.inFlightDispatches === 'object' ? raw.inFlightDispatches : { runs: [], unreadable: 0 };
+  const allRuns = Array.isArray(inFlight.runs) ? inFlight.runs : [];
+
   const base = {
     asked: String(num ?? ''),
     num: resolvedNum,
@@ -230,6 +327,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // and the only bookkeeping this operation actually earns. Null on a non-dispatch.
     dispatchedGuard: raw.dispatchedGuard && typeof raw.dispatchedGuard === 'object' ? raw.dispatchedGuard : null,
     expectedWithinMinutes: Number(expectedWithinMinutes) > 0 ? Number(expectedWithinMinutes) : DEFAULT_EXPECTED_WITHIN_MINUTES,
+    // HOW PARTIAL THE DOUBLE-DISPATCH GUARD WAS. `inFlightDispatchesFor` skips a run record it cannot read
+    // rather than wedging every dispatch behind one corrupt file — a real trade, and its docblock promised the
+    // count "rides the result so a caller can see the guard was partial". It did not: the number was read and
+    // dropped (PR #1211 review, F4). It rides `base` now, so it reaches the verdict on EVERY exit, dispatch or
+    // not. The guard's failure mode is two agents in one lane clone; a silently-partial one is the last thing
+    // that should be invisible.
+    unreadableRunRecords: Number(inFlight.unreadable) > 0 ? Number(inFlight.unreadable) : 0,
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is
@@ -237,9 +341,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // session bookkeeping, which defaults to empty here, and the LANE is leased by the agent seconds after it
   // starts. So two back-to-back invocations get the same cleared row, the same lane, and two agents in one
   // clone. The run store is the only thing that remembers the first one, and it remembers it across a restart.
-  const inFlight = raw.inFlightDispatches && typeof raw.inFlightDispatches === 'object' ? raw.inFlightDispatches : { runs: [], unreadable: 0 };
-  const liveRuns = Array.isArray(inFlight.runs) ? inFlight.runs : [];
-  if (liveRuns.length) {
+  //
+  // BUT ONLY WHILE IT COULD STILL BE THAT WINDOW — see `dispatchStillHolds`. Holding on EVERY in-flight record
+  // made one completed dispatch lock its item out forever, because nothing ever resolves the entry
+  // (`unresolved` writes nothing) and run records are never pruned.
+  const holdingRuns = allRuns.filter((r) => dispatchStillHolds(r, raw.observedAt, { expectedWithinMinutes: base.expectedWithinMinutes }));
+  const agedOutRuns = allRuns.filter((r) => !holdingRuns.includes(r));
+  if (holdingRuns.length) {
     return {
       ...base,
       dispatching: false,
@@ -250,11 +358,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       itemSpecPath: null,
       scope: [],
       dispatchedGuard: null,
-      inFlightRuns: liveRuns,
+      inFlightRuns: holdingRuns,
+      agedOutRuns,
       holdReason:
-        `this operation already has a dispatch in flight for #${resolvedNum} (run ${liveRuns.map((r) => r.runId).join(', ')}) — `
-        + 'it has not been observed finishing. Resolve or close out that run before dispatching again; starting a second '
-        + 'agent would put two of them in one lane clone.',
+        `this operation already has a dispatch in flight for #${resolvedNum} (run ${holdingRuns.map((r) => r.runId).join(', ')}) — `
+        + 'it has not been observed finishing and is still inside its expected window. Resolve or close out that run '
+        + '(`node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=failed`) before dispatching '
+        + 'again; starting a second agent would put two of them in one lane clone.',
     };
   }
 
@@ -262,6 +372,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     return {
       ...base,
       inFlightRuns: [],
+      agedOutRuns,
       dispatching: false,
       lane: null,
       sessionSlug: null,
@@ -314,6 +425,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     scope,
     holdReason: null,
     inFlightRuns: [],
+    // The records this dispatch went PAST. They are still `in-flight` on disk and still need closing out; the
+    // verdict says so rather than letting an aged-out guard disappear silently.
+    agedOutRuns,
     prompt: brief.prompt,
     // REPORTED, never fatal — see `fillBrief`. Two of these are the brief's own prose today.
     briefUnknownTokens: brief.unknownTokens,
@@ -368,12 +482,25 @@ export function dispatchLaneOperation({ readTick } = {}) {
       reads: ['findings.read'],
       fn: (view) => {
         const read = view.findings.read;
+        const agedOut = Array.isArray(read.agedOutRuns) ? read.agedOutRuns : [];
         return {
           dispatching: read.dispatching === true,
           num: read.num,
           lane: read.lane,
           sessionSlug: read.sessionSlug,
-          reason: read.dispatching ? `cleared for build on lane ${read.lane}` : read.holdReason,
+          reason: read.dispatching
+            ? `cleared for build on lane ${read.lane}`
+              + (agedOut.length
+                ? ` (past ${agedOut.length} aged-out in-flight dispatch record(s): ${agedOut.map((r) => r.runId).join(', ')} — `
+                  + 'each is still open on disk and still needs closing out)'
+                : '')
+            : read.holdReason,
+          // THE GUARD'S OWN HONESTY, both halves on the verdict where the decision is read:
+          //   - `unreadableRunRecords` — how many run records the double-dispatch guard could not read at all;
+          //   - `agedOutDispatches` — which in-flight records it deliberately dispatched past on age.
+          // Either one silently zero would make a partial guard look like a complete one.
+          unreadableRunRecords: Number(read.unreadableRunRecords) || 0,
+          agedOutDispatches: agedOut.map((r) => String(r.runId)),
           // SURFACED ON THE VERDICT, not buried in the read finding: a dispatch decided without the caller's
           // in-flight guards is weaker than one decided with them, and whoever reads the verdict is exactly who
           // needs to know that. `droppedBookkeeping` is here for the same reason — a setting the caller passed
