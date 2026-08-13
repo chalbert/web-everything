@@ -701,12 +701,14 @@ describe('assertLaneCwd follows symlinks', () => {
   // test passed with the fix reverted. Flipping a component we CREATED keeps symlink resolution out of it.
   //
   // Skipped where the filesystem is case-SENSITIVE: there the two spellings are genuinely two directories.
-  it("REFUSES a differently-cased spelling of the DRIVER'S own lane", () => {
+  it("REFUSES a differently-cased spelling of the DRIVER'S own lane", (ctx) => {
     const pool = join(dir, 'real', '.lanes', 'MixedCase');
     mkdirSync(join(pool, 'lane-8'), { recursive: true });
     const lane = join(pool, 'lane-8');
     const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-8');
-    if (!existsSync(flipped)) return; // case-sensitive filesystem — nothing to close
+    // `ctx.skip()`, never a bare `return` — a bare return reports as PASSED, so a test that no-ops on this
+    // filesystem looks identical to one that ran (PR #1197 review, finding 1).
+    if (!existsSync(flipped)) ctx.skip();
     expect(() => assertLaneCwd(flipped, ['Bash'], lane)).toThrow(/DRIVER'S OWN lane/);
   });
 
@@ -719,12 +721,12 @@ describe('assertLaneCwd follows symlinks', () => {
   // all — and an unrecognised path is refused for the wrong reason, or a driver whose own lane goes
   // unrecognised stops being compared against. `.native` is what makes the recognition correct, and the
   // recognition is what makes the refusal correct.
-  it('refuses the case-variant under either realpath, because identity does not care about spelling', () => {
+  it('refuses the case-variant under either realpath, because identity does not care about spelling', (ctx) => {
     const pool = join(dir, 'real', '.lanes', 'MixedCase');
     mkdirSync(join(pool, 'lane-9'), { recursive: true });
     const lane = join(pool, 'lane-9');
     const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-9');
-    if (!existsSync(flipped)) return;
+    if (!existsSync(flipped)) ctx.skip();
     expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync)).toThrow(/DRIVER'S OWN lane/);
     expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync.native)).toThrow(/DRIVER'S OWN lane/);
   });
@@ -739,10 +741,10 @@ describe('assertLaneCwd follows symlinks', () => {
    * Uses the REAL alias on this machine, since no temp directory can manufacture a firmlink. Skipped where
    * the alias does not exist.
    */
-  it("REFUSES a firmlink alias of the DRIVER'S own lane", () => {
+  it("REFUSES a firmlink alias of the DRIVER'S own lane", (ctx) => {
     const driver = realpathSync.native(process.cwd());
     const alias = `/System/Volumes/Data${driver}`;
-    if (!existsSync(alias) || !laneRootOf(driver)) return; // not macOS, or not running from a lane
+    if (!existsSync(alias) || !laneRootOf(driver)) ctx.skip(); // not macOS, or not running from a lane
     // The two spell differently even after `.native`, which is what defeated the previous version.
     expect(realpathSync.native(alias)).not.toBe(realpathSync.native(driver));
     expect(() => assertLaneCwd(alias, ['Bash'], driver)).toThrow(/DRIVER'S OWN lane/);
@@ -764,7 +766,16 @@ describe('assertLaneCwd follows symlinks', () => {
   // than letting a juror in, but it is a sentence claiming a guarantee that nothing defended.
   //
   // `/` and a mounted volume are on different devices on any machine that has one; skipped where none does.
-  it('compares dev as well as ino, so a SHARED inode across volumes is not one directory', () => {
+  // DETERMINISTIC, on any filesystem. The real-collision version below still runs where one exists, but this
+  // is the test that defends `dev` on a machine — CI included — where none does.
+  it('compares dev as well as ino, with a stubbed stat so this holds on every machine', () => {
+    const stat = (p) => ({ '/vol-a': { ino: 2, dev: 100 }, '/vol-b': { ino: 2, dev: 200 } }[p]);
+    expect(stat('/vol-a').ino).toBe(stat('/vol-b').ino);   // same inode …
+    expect(sameDirectory('/vol-a', '/vol-b', stat)).toBe(false); // … different device, so not one directory
+    expect(sameDirectory('/vol-a', '/vol-a', stat)).toBe(true);
+  });
+
+  it('compares dev as well as ino, so a SHARED inode across volumes is not one directory', (ctx) => {
     // A volume root is inode 2 on most filesystems, so mounted volumes routinely collide. On this machine
     // `/`, `/System/Volumes/Preboot` and `/System/Volumes/VM` are all inode 2 on three different devices —
     // the exact configuration that makes dropping the `dev` comparison collapse them into one directory.
@@ -775,7 +786,7 @@ describe('assertLaneCwd follows symlinks', () => {
     const byIno = new Map();
     for (const c of candidates) byIno.set(String(c.ino), [...(byIno.get(String(c.ino)) ?? []), c]);
     const collision = [...byIno.values()].find((g) => g.length > 1 && new Set(g.map((c) => c.dev)).size > 1);
-    if (!collision) return; // no cross-volume inode collision on this machine — nothing to distinguish
+    if (!collision) ctx.skip(); // no cross-volume collision here — the stubbed test above still defends `dev`
 
     const [a, b] = collision;
     expect(a.ino).toBe(b.ino);          // same inode …
