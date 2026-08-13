@@ -4,6 +4,69 @@ kind: task
 status: open
 dateOpened: "2026-08-08"
 tags: [gate, footgun, lane]
+scope:
+  - we:scripts/guard-lane.mjs
+  - we:scripts/guard-bash.mjs
+  - we:scripts/lib/lane-lease.mjs
+  - we:scripts/lane-pool.mjs
+  - we:scripts/backlog.mjs
+  - we:scripts/mine-golden-corpus.mjs
+  - we:scripts/__tests__/guard-lane.test.mjs
+  - we:scripts/__tests__/guard-bash.test.mjs
+  - we:scripts/__tests__/golden-corpus-snapshot.test.mjs
+  - we:scripts/lib/__tests__/lane-lease.test.mjs
+  - we:scripts/golden-corpus/hook-guard-lane/
+  - we:scripts/golden-corpus/hook-guard-bash/
+scopeRationale: >
+  File-level for the code touched, grounded in a real importer grep, not a guess. we:scripts/guard-lane.mjs
+  is Gap 1 (PreToolUse Edit|Write has no lease read at all — laneGuardDecision(real, weRoot) arity proves
+  it). we:scripts/guard-bash.mjs is Gap 2 (widen the per-holder signal past the workflowLane marker; also
+  the only place readLaneLease/laneRootFromCwd/isForeignLease live today, and readLaneLease at
+  we:scripts/guard-bash.mjs:1548 is NOT currently exported, so exporting it for we:scripts/guard-lane.mjs
+  to reuse touches this file regardless of which Gap-2 option is picked). we:scripts/lib/lane-lease.mjs is
+  the shared pure lease-decision core both guards already import (isForeignLease, leaseOwnedByCaller,
+  leaseBody) and is where a widened per-holder contract would live. we:scripts/lane-pool.mjs is IN because
+  cmdAcquire/tryClaimLane mints the lease body (leaseBody) at acquire — Gap-2 option (a), minting a slug on
+  every acquire not just workflow-lane, is a we:scripts/lane-pool.mjs change. we:scripts/backlog.mjs:50
+  imports {laneGuardDecision, resolveReal} from we:scripts/guard-lane.mjs directly (writeBacklogMd's
+  primary-checkout guard) — a real, signature-sensitive importer, not just a hook consumer.
+  we:scripts/mine-golden-corpus.mjs:32 imports {decide} from we:scripts/guard-bash.mjs to mine the
+  hook-guard-bash fixtures; new foreign-lease/unmarked-sibling deny cases need new mined fixtures, hence it
+  and both golden-corpus fixture dirs (new fixture JSON, filenames not yet known — directory-level is the
+  honest prediction) plus we:scripts/__tests__/golden-corpus-snapshot.test.mjs (replays those fixtures) are
+  IN. The two __tests__ files pin the two guards' pure decision functions directly and gain new
+  must-deny/must-allow cases per the card's "Done when" (pin the 3-row repro table as a fixture).
+  ---
+  Importers investigated and explicitly EXCLUDED (grep across we:scripts/ + we:.claude/settings.json):
+  we:scripts/lib/converge-transports.mjs:25 imports laneRootFromCwd from we:scripts/guard-bash.mjs — pure
+  cwd→lane-root path helper, not a deny/allow decision; this fix does not change what counts as "in a
+  lane", only whether a lease inside it is foreign. we:scripts/lane-stack.mjs,
+  we:scripts/converge-daemon-pass.mjs, we:scripts/conveyor/lease-reaper.mjs import only stable
+  staleness/const exports from we:scripts/lib/lane-lease.mjs (LEASE_FILENAME, isLeaseStale,
+  isReservedLease, DEFAULT_LEASE_TTL_MINUTES) — unrelated to the foreign-lease ownership gap this item
+  targets. we:scripts/readiness/scope-lease.mjs, we:scripts/readiness/scope-lease-live.mjs,
+  we:scripts/lib/lane-verify.mjs, we:scripts/lib/review-independence.mjs only mention
+  we:scripts/lib/lane-lease.mjs in comments — no actual import. we:.claude/settings.json already points
+  both PreToolUse hooks at these two file paths by stable command string ("node
+  we:scripts/guard-lane.mjs" / "node we:scripts/guard-bash.mjs"); no hook-registration change needed since
+  neither script's path moves. we:scripts/lib/judge-spawn.mjs and we:scripts/guard-lane-install.mjs only
+  reference we:scripts/guard-lane.mjs in comments/path-construction, no functional import of its decision
+  logic.
+  ---
+  Guard coverage verified BEFORE scoping (2026-08-13, against this lane's checkout):
+  we:scripts/guard-bash.mjs (line ~1548-1574, isForeignLease at we:scripts/lib/lane-lease.mjs) DOES deny
+  a destructive git op (reset --hard/clean -fd/force-push) in a lane holding a foreign SESSION's live
+  lease (#2367) or an unmarked-sibling's live lease when the lease carries the workflowLane marker
+  (#2413, fail-closed). It does NOT deny the same op from a sibling agent sharing the acquiring session's
+  own ownerSession under an UNMARKED lease (Gap 2 — confirmed live: only --purpose=workflow-lane sets
+  workflowLane; conveyor-prepare-*/conveyor-delivery/ad-hoc acquires are unmarked).
+  we:scripts/guard-lane.mjs (laneGuardDecision(real, weRoot)) reads no lease/session/owner at all — its
+  whole decision is primary-vs-lane path classification (Gap 1, confirmed by the function's own arity and
+  doc comment: "the words lease / owner / foreign do not appear in it"). we:scripts/lane-pool.mjs's OWN
+  acquire/refresh/provision/release commands are NOT part of either gap: acquire (tryClaimLane) and
+  refresh/provision (isLaneAcquirable) already refuse to touch a live-leased lane, and release
+  (leaseOwnedByCaller) already gates on ownership — the hole is only ad-hoc Bash/Edit/Write run BY an
+  agent INSIDE an already-acquired lane clone, not we:scripts/lane-pool.mjs's own commands.
 ---
 
 # Nothing stops an agent destroying work in a lane leased by a sibling of its own session — and Edit/Write has no lease check at all
