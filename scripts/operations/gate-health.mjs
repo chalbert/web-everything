@@ -112,7 +112,15 @@ export function gateHealthOperation({ loadHistory } = {}) {
             records: h.records,
             nowSec: h.nowSec,
             windowDays: Math.max(1, Math.floor(Number(view.input.windowDays) || 14)),
-            mdd: Number(view.input.minDetectableDiff) || 0.05,
+            // PASSED THROUGH, NOT SUBSTITUTED (PR #1203 review, finding 3). This line used to read
+            // `Number(...) || 0.05`, so a caller's explicit `minDetectableDiff: 0` became 0.05 before
+            // `assessCriteria` ever saw it — and the payload then reported `minDetectableDiff: 0.05` and a
+            // sample size for a 5-point effect nobody asked for. The library grew a refusal for exactly
+            // that input and the refusal was unreachable from here, which made the fix look done while the
+            // operator's symptom was unchanged. The schema already supplies the 0.05 default when the field
+            // is ABSENT; anything present is the caller's, and `assessCriteria` blocks on it if it cannot
+            // be sized.
+            mdd: view.input.minDetectableDiff,
             parameterSet: null,
           }),
         };
