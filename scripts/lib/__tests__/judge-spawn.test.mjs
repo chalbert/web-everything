@@ -691,23 +691,49 @@ describe('assertLaneCwd follows symlinks', () => {
   });
 
   // THE CASE-VARIANT HOLE, which survived two "fixed" claims (PR #1178 round 5, finding 1). `realpathSync`
-  // echoes the caller's SPELLING; only `realpathSync.native` returns the on-disk name, so before the fix
-  // `/users/…` and `/Users/…` compared as different lanes and the juror got the driver's own tree.
+  // echoes the caller's SPELLING; only `realpathSync.native` returns the on-disk name.
   //
-  // Skipped where the filesystem is case-SENSITIVE, because there the two spellings really are different
-  // directories and there is nothing to catch.
+  // THE FLIPPED COMPONENT MUST BE A REAL DIRECTORY, and the first version of this test got that wrong (PR
+  // #1188 review, blocking 1). It flipped `/var`, which on macOS is a SYMLINK to `private/var` — and both
+  // implementations resolve a symlink by reading its stored target, so both emit the same canonical
+  // lowercase path. The case difference was erased before the JS-vs-native distinction could matter, and the
+  // test passed with the fix reverted. Flipping a component we CREATED keeps symlink resolution out of it.
+  //
+  // Skipped where the filesystem is case-SENSITIVE: there the two spellings are genuinely two directories.
   it("REFUSES a differently-cased spelling of the DRIVER'S own lane", () => {
-    const flipped = realLane.replace(/\/private\//i, '/PRIVATE/').replace(/\/var\//i, '/VAR/')
-      .replace(/\/tmp\//i, '/TMP/').replace(/\/Users\//i, '/users/');
-    let caseInsensitive = false;
-    try { caseInsensitive = existsSync(flipped) && flipped !== realLane; } catch { caseInsensitive = false; }
-    if (!caseInsensitive) return; // case-sensitive filesystem: two spellings, two directories, nothing to close
-    expect(() => assertLaneCwd(flipped, ['Bash'], realLane)).toThrow(/DRIVER'S OWN lane/);
+    const pool = join(dir, 'real', '.lanes', 'MixedCase');
+    mkdirSync(join(pool, 'lane-8'), { recursive: true });
+    const lane = join(pool, 'lane-8');
+    const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-8');
+    if (!existsSync(flipped)) return; // case-sensitive filesystem — nothing to close
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane)).toThrow(/DRIVER'S OWN lane/);
   });
 
-  // The same distinction, isolated from the filesystem: the default must be the one that renames.
-  it('uses realpathSync.native, which returns the on-disk spelling rather than the caller\'s', () => {
+  // The same test, run against the OLD implementation, must FAIL — otherwise it is not testing the fix.
+  // This is the assertion the first version was missing, and it is why that version was decorative.
+  it('and that refusal is what `.native` buys — the JS implementation lets it through', () => {
+    const pool = join(dir, 'real', '.lanes', 'MixedCase');
+    mkdirSync(join(pool, 'lane-9'), { recursive: true });
+    const lane = join(pool, 'lane-9');
+    const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-9');
+    if (!existsSync(flipped)) return;
+    // Injected, so this is the real old behaviour rather than a stub of it.
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync)).not.toThrow();
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync.native)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // NO FALLBACK. A `?? realpathSync` silently restored the hole on any platform taking that branch.
+  it('uses realpathSync.native with no fallback', () => {
     expect(REAL_PATH).toBe(realpathSync.native);
+  });
+
+  // A nested pool: the greedy regex returned the INNERMOST lane, so a cwd inside the driver's own tree
+  // reported a different lane root and was allowed (PR #1188 review, finding 4).
+  it("refuses a nested lane pool inside the DRIVER'S own lane", () => {
+    const driver = '/ws/.lanes/x/lane-1';
+    expect(laneRootOf('/ws/.lanes/x/lane-1/.lanes/y/lane-2')).toBe(driver);
+    expect(() => assertLaneCwd('/ws/.lanes/x/lane-1/.lanes/y/lane-2', ['Bash'], driver, (p) => p))
+      .toThrow(/DRIVER'S OWN lane/);
   });
 
   it('REFUSES a path that does not exist — a juror cannot run there either', () => {

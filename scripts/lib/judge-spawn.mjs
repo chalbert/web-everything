@@ -76,10 +76,18 @@ import { resolve as resolvePath } from 'node:path';
 import { realpathSync } from 'node:fs';
 
 /**
- * `realpathSync.native` where the platform has it. The JS `realpathSync` resolves symlinks but echoes the
- * caller's SPELLING back, so two spellings of one directory compare unequal — see {@link assertLaneCwd}.
+ * `realpathSync.native`, with NO fallback. The JS `realpathSync` resolves symlinks but echoes the caller's
+ * SPELLING back, so two spellings of one directory compare unequal — see {@link assertLaneCwd}.
+ *
+ * A `?? realpathSync` fallback was the first cut and it silently restored the bug on any platform taking that
+ * branch: no error, no warning, an isolation check quietly absent. `.native` has shipped on every platform
+ * since Node 9.2, so the branch was dead — and a dead branch that reopens a security-shaped hole is worse
+ * than a startup failure that says so.
  */
-export const REAL_PATH = realpathSync.native ?? realpathSync;
+export const REAL_PATH = realpathSync.native;
+if (typeof REAL_PATH !== 'function') {
+  throw new Error('judge-spawn: `fs.realpathSync.native` is unavailable — the lane check cannot distinguish two spellings of one directory without it');
+}
 
 /** The CLI a juror runs as. Named once so a test can assert it and a caller can override the path. */
 export const JUDGE_CLI = 'claude';
@@ -179,7 +187,10 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
  * directory that happens to be named `.lanes`.
  */
 export function laneRootOf(resolvedPath) {
-  const m = /^(.*[/\\]\.lanes[/\\][^/\\]+[/\\]lane-\d+)(?:[/\\]|$)/.exec(String(resolvedPath));
+  // NON-GREEDY, so this is the OUTERMOST lane on the path. A greedy `.*` returned the innermost, so a cwd of
+  // `…/lane-1/.lanes/y/lane-2` reported a different lane from a driver at `…/lane-1` and the spawn was
+  // allowed — while sitting inside the driver's own working tree (PR #1188 review, finding 4).
+  const m = /^(.*?[/\\]\.lanes[/\\][^/\\]+[/\\]lane-\d+)(?:[/\\]|$)/.exec(String(resolvedPath));
   return m ? m[1] : null;
 }
 
