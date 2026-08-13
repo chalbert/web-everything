@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -39,6 +39,8 @@ import {
   judgeSpawn,
   assertLaneCwd,
   laneRootOf,
+  sameDirectory,
+  REAL_PATH,
 } from '../judge-spawn.mjs';
 
 const SHAPE = {
@@ -687,6 +689,83 @@ describe('assertLaneCwd follows symlinks', () => {
     const link = join(dir, 'shortcut');
     symlinkSync(realLane, link, 'dir');
     expect(() => assertLaneCwd(link, ['Bash'], realLane)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // THE CASE-VARIANT HOLE, which survived two "fixed" claims (PR #1178 round 5, finding 1). `realpathSync`
+  // echoes the caller's SPELLING; only `realpathSync.native` returns the on-disk name.
+  //
+  // THE FLIPPED COMPONENT MUST BE A REAL DIRECTORY, and the first version of this test got that wrong (PR
+  // #1188 review, blocking 1). It flipped `/var`, which on macOS is a SYMLINK to `private/var` — and both
+  // implementations resolve a symlink by reading its stored target, so both emit the same canonical
+  // lowercase path. The case difference was erased before the JS-vs-native distinction could matter, and the
+  // test passed with the fix reverted. Flipping a component we CREATED keeps symlink resolution out of it.
+  //
+  // Skipped where the filesystem is case-SENSITIVE: there the two spellings are genuinely two directories.
+  it("REFUSES a differently-cased spelling of the DRIVER'S own lane", () => {
+    const pool = join(dir, 'real', '.lanes', 'MixedCase');
+    mkdirSync(join(pool, 'lane-8'), { recursive: true });
+    const lane = join(pool, 'lane-8');
+    const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-8');
+    if (!existsSync(flipped)) return; // case-sensitive filesystem — nothing to close
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  // REFUSED UNDER EITHER REALPATH, and that is a change from when this test was written. The inode compare
+  // added for the firmlink axis SUBSUMES the case axis: two spellings of one directory share an inode
+  // whatever `realpath` returned. `.native` is no longer what carries this refusal — it is the fast path, and
+  // it still matters for `laneRootOf`, which is a string test and needs the on-disk spelling of `.lanes` and
+  // `lane-N` to recognise a lane at all.
+  it('refuses the case-variant under either realpath, because identity does not care about spelling', () => {
+    const pool = join(dir, 'real', '.lanes', 'MixedCase');
+    mkdirSync(join(pool, 'lane-9'), { recursive: true });
+    const lane = join(pool, 'lane-9');
+    const flipped = join(dir, 'real', '.lanes', 'mixedcase', 'lane-9');
+    if (!existsSync(flipped)) return;
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync)).toThrow(/DRIVER'S OWN lane/);
+    expect(() => assertLaneCwd(flipped, ['Bash'], lane, realpathSync.native)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  /**
+   * THE SIXTH HOLE, and the reason this check now compares IDENTITY rather than spelling. Since macOS 10.15
+   * every Mac has firmlinks, so `/Users/x` and `/System/Volumes/Data/Users/x` are ONE directory with two
+   * on-disk names — and `realpathSync.native` faithfully returns whichever you asked for, because returning
+   * the on-disk name is exactly what fixes the CASE axis. Four axes now (`..`, symlink, case, firmlink), four
+   * rounds, one root cause: a path is a name and the question is about identity.
+   *
+   * Uses the REAL alias on this machine, since no temp directory can manufacture a firmlink. Skipped where
+   * the alias does not exist.
+   */
+  it("REFUSES a firmlink alias of the DRIVER'S own lane", () => {
+    const driver = realpathSync.native(process.cwd());
+    const alias = `/System/Volumes/Data${driver}`;
+    if (!existsSync(alias) || !laneRootOf(driver)) return; // not macOS, or not running from a lane
+    // The two spell differently even after `.native`, which is what defeated the previous version.
+    expect(realpathSync.native(alias)).not.toBe(realpathSync.native(driver));
+    expect(() => assertLaneCwd(alias, ['Bash'], driver)).toThrow(/DRIVER'S OWN lane/);
+  });
+
+  it('sameDirectory answers by inode, so two names for one directory match', () => {
+    const here = realpathSync.native(process.cwd());
+    const alias = `/System/Volumes/Data${here}`;
+    expect(sameDirectory(here, here)).toBe(true);
+    expect(sameDirectory(here, join(here, '..'))).toBe(false);
+    if (existsSync(alias)) expect(sameDirectory(here, alias)).toBe(true);
+    // Unstattable paths answer false rather than throwing — the refusal above is the louder signal.
+    expect(sameDirectory(join(here, 'no-such-dir-xyz'), here)).toBe(false);
+  });
+
+  // NO FALLBACK. A `?? realpathSync` silently restored the hole on any platform taking that branch.
+  it('uses realpathSync.native with no fallback', () => {
+    expect(REAL_PATH).toBe(realpathSync.native);
+  });
+
+  // A nested pool: the greedy regex returned the INNERMOST lane, so a cwd inside the driver's own tree
+  // reported a different lane root and was allowed (PR #1188 review, finding 4).
+  it("refuses a nested lane pool inside the DRIVER'S own lane", () => {
+    const driver = '/ws/.lanes/x/lane-1';
+    expect(laneRootOf('/ws/.lanes/x/lane-1/.lanes/y/lane-2')).toBe(driver);
+    expect(() => assertLaneCwd('/ws/.lanes/x/lane-1/.lanes/y/lane-2', ['Bash'], driver, (p) => p))
+      .toThrow(/DRIVER'S OWN lane/);
   });
 
   it('REFUSES a path that does not exist — a juror cannot run there either', () => {
