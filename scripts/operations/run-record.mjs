@@ -47,13 +47,20 @@ const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /**
  * Is this string something an observer could actually poll?
  *
- * `.trim()` alone is not enough: a zero-width space is TRUTHY and survives it, so `'\u200b'` reached
- * `inFlightEntries` as an observable handle and the operator was told to poll a blank one (PR #1185 review,
- * finding 5). The test is therefore "has a visible character", not "is non-empty after trimming" — same
- * question `inFlight()` is asking, so the validator and the constructor cannot drift apart on it.
+ * AN ALLOWLIST, because two denylists in a row were wrong. `.trim()` missed a zero-width space; the fix for
+ * that was a denylist of the four code points the reviewer had named, which called itself "has a visible
+ * character" and let sixteen more through — NUL, DEL, a combining acute, a lone surrogate, bidi overrides, a
+ * variation selector. Enumerating what is unusable loses to naming what is usable; the same lesson the `gh`
+ * deny-list and the hand-rolled CommonMark parser each taught here.
+ *
+ * So: at least one ASCII alphanumeric. A handle is an identifier minted by tooling — a session id, a build
+ * id — and every one of them has a letter or a digit. This is deliberately narrower than "visible", because
+ * "visible" is not decidable (a Hangul filler is a LETTER by Unicode and renders as blank) and because the
+ * two errors are not symmetric: accepting garbage parks a run forever telling the operator to poll nonsense,
+ * while refusing a legitimate handle fails loudly at dispatch with a message naming the problem.
  */
 export function isPollableHandle(handle) {
-  return typeof handle === 'string' && /[^\s\u00a0\u1680\u180e\u2000-\u200f\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]/.test(handle);
+  return typeof handle === 'string' && /[A-Za-z0-9]/.test(handle);
 }
 
 /** @param {*} v @returns {boolean} */
