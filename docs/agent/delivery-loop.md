@@ -11,24 +11,37 @@ claim → lane → build → mutate → gate → PR → spawn an INDEPENDENT rev
 ```
 
 Two steps in that chain are the ones people skip, and they are the two that catch things: **mutate** and
-**spawn**.
+**spawn**. Mutation discipline is written up on its own elsewhere; **spawn** is the one documented
+nowhere but here, and it is the one whose wrong version looks right.
 
 ## Spawning a reviewer that is actually independent
 
 **A subagent is not a second actor.** It inherits the parent's `CLAUDE_CODE_SESSION_ID`, so the repo's
-independence check (`we:scripts/lib/review-independence.mjs`) sees the author clearing their own PR — and
-`review-set-label.mjs` refuses it. Only a headless process with its own derived id is a distinct actor.
+independence check (`we:scripts/lib/review-independence.mjs`) sees the author clearing their own PR.
+`review-set-label.mjs` then refuses — though not unconditionally: the refusal needs the PR body's
+`authored-by-actor` stamp to match, and `--to=clear-human` is exempt by design (#2895).
+
+**A headless process is.** It mints its own session id whichever way you invoke it
+(`judge-spawn.mjs:38` — three spawns carrying the parent's id in their environment each reported a
+different one). That, on its own, is what makes it independent.
+
+The three lines below are three SEPARATE properties, and it is worth not fusing them — an earlier
+version of this page wrote them as one requirement and was wrong about two:
 
 ```bash
-# 1. a lane of its OWN — never the driver's, and never the primary checkout
+# 1. a lane of its OWN — never the driver's, and never the primary checkout.
+#    This is tool isolation, not identity: two reviewers editing one tree rebase under each other.
 node scripts/lane-pool.mjs acquire --purpose=review-1234 --json
 
-# 2. a derived, reproducible actor id
+# 2. a derived id. Independence does NOT depend on this — headless is already distinct. What the
+#    derivation buys is DETERMINISM: the same seed names the same actor, so a re-review is traceable.
 node --input-type=module -e '
   import {deriveSessionId} from "./scripts/lib/judge-spawn.mjs";
   console.log(deriveSessionId("rv-1234-r1"));'
 
-# 3. the prompt goes in on STDIN. `claude -p "text"` errors.
+# 3. the mandate on STDIN. `claude -p "text"` works fine — this page previously claimed it errors and
+#    that was never tested. stdin is for size: a mandate has no ARG_MAX ceiling there, and argv stays a
+#    fixed, assertable flag list (judge-spawn.mjs:60).
 cd <that lane> && CLAUDE_CODE_SESSION_ID=<derived> \
   claude -p --session-id <derived> --model opus --permission-mode bypassPermissions < mandate.txt
 ```
@@ -90,3 +103,22 @@ Before a context clear, the cards must hold anything the conversation holds: a r
 why something was stood down, a measurement that justified a choice. PR review history is already durable on
 GitHub; the backlog is the tracker. If a fresh session reading the backlog could not continue, something is
 missing from it.
+
+## What this page got wrong the first time
+
+Kept deliberately, because the failure mode is the subject. Three claims shipped in the first version;
+independent review caught two and the third fell out of testing it:
+
+| claimed | actual |
+| --- | --- |
+| only a headless process *with its own derived id* is a distinct actor | headless is distinct either way; the derivation buys determinism |
+| `claude -p "text"` errors | it does not — never tested. stdin is about size |
+| `review-set-label.mjs` refuses it | conditional: needs the `authored-by-actor` stamp, and `clear-human` is exempt |
+
+All three sat in the paragraph explaining why the mechanism is correct, which is where this kind of
+error lives. Three genuinely separate properties — headless execution, a reproducible id, and a large
+prompt — had been written as one requirement, so a reader dropping any one of them would have drawn the
+wrong conclusion about why the remaining two mattered.
+
+The instruction that follows from it: **a claim about a mechanism is worth exactly as much as the
+command you ran to check it.** The false one here was the flat assertion, not the subtle one.
