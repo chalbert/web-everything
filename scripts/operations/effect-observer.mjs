@@ -9,9 +9,9 @@
  * caller, because only the caller knows what a `start.build` handle means.
  *
  * WHAT AN OBSERVER IS: `async (entry, ctx) => { status, result?, error? }` where `status` is one of
- * {@link OBSERVATIONS} — `running`, `finished` or `never-started`. Note what is NOT in that list: `failed`.
- * The word means opposite things to an observer and to the executor, and the collision re-ran real work twice
- * over before it was named. {@link OBSERVATIONS} has the whole account.
+ * {@link OBSERVATIONS} — `running`, `succeeded` or `unresolved`. Note what is NOT in that list: any word for
+ * "it failed". Two vocabularies that had one re-ran real work before the third removed it; the docblock on
+ * {@link OBSERVATIONS} has the whole account, and it is the load-bearing comment in this file.
  *
  * WHAT THIS DOES NOT DO, deliberately:
  *   - it ships NO concrete observer. Nothing in the repo dispatches yet, so a `claude agents`-backed observer
@@ -29,34 +29,46 @@
 import { inFlightEntries, resolveInFlight } from './effect-executor.mjs';
 
 /**
- * What an observer may answer — and NONE of these words is `failed`, which is the whole point.
+ * What an observer may answer. Three words, and the ONE thing they have in common is that none of them asks
+ * the executor to do something the model cannot express.
  *
- * `failed` was the first vocabulary, and it collided (PR #1186 rounds 1 and 2). The EXECUTOR's `failed` means
- * *"the sink threw `notApplied`, I am CERTAIN nothing landed"* — safe to retry, so the pre-flight lets it
- * straight through to the sink. An observer saying "failed" means something else entirely, and writing the
- * second into the first's slot re-ran real work: first on the waker's timer, then — after the waker learned to
- * halt — on the operator's `--resume`, which is the only recovery the run's own output offers. Halting one
- * caller does not help when the RECORD is what is wrong.
+ * TWO EARLIER VOCABULARIES WERE WRONG, both measured re-running real work (PR #1186 rounds 1-3):
+ *   - `failed` collided head-on. The executor's `failed` means "the sink threw `notApplied`, nothing landed,
+ *     safe to retry", so writing an observer's failure there re-dispatched the build — first on the waker's
+ *     timer, then, once the waker halted, on the operator's `--resume`.
+ *   - `never-started` looked like the honest home for "nothing landed", and it is — but the executor retries
+ *     `failed` with no cap and no backoff, so a persistently broken dispatch (bad credentials, exhausted
+ *     quota, missing binary) re-dispatched on EVERY tick: eleven builds over ten ticks, exit 0 each time.
  *
- * So the words say which thing happened, and each maps onto an existing status with no ambiguity left:
+ * The lesson both times: a status is a promise about what the next caller may do, and there is no status
+ * meaning "this is over and nobody should touch it". So:
  *
- *   - `running`  — still going. Ask again later. The only non-terminal answer, and the only safe default:
- *                  an observer that cannot tell must say this, because the alternative is closing out work
- *                  that is still happening.
- *   - `finished` — the work RAN and is over. Pass or fail, that is in `result`; the EFFECT was "start the
- *                  work", and starting it is what applied. Maps to `applied`, and the run advances with the
- *                  outcome in hand, which is what a declaration reads to decide what to do about a bad build.
- *   - `never-started` — the dispatch did not take. There is no session, no build, nothing ran. That is
- *                  exactly the executor's `failed`: nothing landed, safe to retry, and retrying is correct.
+ *   - `running`    — still going. Ask again later. The only safe default: an observer that cannot tell must
+ *                    say this, because the alternative is closing out work that is still happening.
+ *   - `succeeded`  — the work ran and finished CLEANLY. Records `applied` and the run advances, which is
+ *                    correct precisely because there is no bad outcome for a later step to react to.
+ *   - `unresolved` — terminal for the observer, and NOT actionable by this machine. The build failed, or the
+ *                    dispatch never took, or the answer is ambiguous. WRITES NOTHING: the entry stays
+ *                    in-flight and is reported for a person. That is the honest state, and it costs one poll
+ *                    a tick rather than one dispatch a tick.
  *
- * A caller that wants "it ran and it went badly" says `finished` with a failing `result`. There is no answer
- * that means "it ran and should be re-run", because re-running work that already ran is not an observation —
- * it is a retry policy, and nothing owns one.
+ * WHY `unresolved` COLLAPSES TWO CASES THE MODEL CANNOT TELL APART. "The build failed" and "the dispatch never
+ * started" want different answers — react to the outcome, and retry respectively — and the engine can express
+ * NEITHER today:
+ *   - an `effect` step writes no finding (`engine.mjs`), and `reads:` is rooted at `input|findings|verdict`,
+ *     so no later step can see an effect's `result`. A failing build that records `applied` advances the run
+ *     past the step that exists to react to it, and the human is asked "Land it?" with nothing to indicate
+ *     anything went wrong. Measured.
+ *   - retrying is a RETRY POLICY — how many times, how far apart, when to stop — and nothing owns one.
+ * Both are filed. Until they exist, reporting and stopping is the only answer that is not a guess.
  */
-export const OBSERVATIONS = Object.freeze(['running', 'finished', 'never-started']);
+export const OBSERVATIONS = Object.freeze(['running', 'succeeded', 'unresolved']);
 
-/** How each terminal observation lands in the run record. See {@link OBSERVATIONS} for why. */
-const TERMINAL_STATUS = Object.freeze({ finished: 'applied', 'never-started': 'failed' });
+/**
+ * How each observation lands in the run record. Only ONE of them writes: `succeeded`. `unresolved` maps to
+ * nothing on purpose — see {@link OBSERVATIONS} — so there is no status for the next caller to misread.
+ */
+const TERMINAL_STATUS = Object.freeze({ succeeded: 'applied' });
 
 /** Why an in-flight entry was not observed. Reported rather than thrown — one bad entry must not stop a pass. */
 export const SKIPS = Object.freeze({
@@ -113,13 +125,14 @@ export function planObservations(run, observers = {}, now = new Date()) {
  * @param {object} opts
  * @param {object|Map} opts.observers
  * @param {string|Date} [opts.now]
- * @returns {Promise<{run: object, resolved: object[], stillRunning: string[], skipped: object[], errors: object[]}>}
+ * @returns {Promise<{run: object, resolved: object[], stillRunning: string[], unresolved: object[], skipped: object[], errors: object[]}>}
  */
 export async function observeRun(run, { observers = {}, now = new Date() } = {}) {
   const lookup = observerLookup(observers);
   const { observe, skip } = planObservations(run, observers, now);
   const resolved = [];
   const stillRunning = [];
+  const unresolved = [];
   const errors = [];
   let current = run;
 
@@ -141,6 +154,12 @@ export async function observeRun(run, { observers = {}, now = new Date() } = {})
       continue;
     }
     if (status === 'running') { stillRunning.push(entry.key); continue; }
+    // TERMINAL BUT NOT ACTIONABLE. Nothing is written — see `OBSERVATIONS` — so no caller can read a status
+    // that licenses a retry or an advance. The entry stays in-flight and is reported for a person.
+    if (status === 'unresolved') {
+      unresolved.push({ key: entry.key, type: entry.type, error: answer.error ?? null });
+      continue;
+    }
     current = resolveInFlight(current, entry.key, {
       status: TERMINAL_STATUS[status],
       result: answer.result ?? null,
@@ -149,7 +168,7 @@ export async function observeRun(run, { observers = {}, now = new Date() } = {})
     resolved.push({ key: entry.key, type: entry.type, status, recordedAs: TERMINAL_STATUS[status] });
   }
 
-  return { run: current, resolved, stillRunning, skipped: skip, errors };
+  return { run: current, resolved, stillRunning, unresolved, skipped: skip, errors };
 }
 
 /**

@@ -41,28 +41,26 @@ running one; being overdue changes what a human is told, not what the machine as
 
 **A handle-less entry is not polled.** There is nothing to poll. It is reported, never guessed at.
 
-**There is no word for "it failed".** An observer answers `running`, `finished` or `never-started`, and that
-vocabulary is the fix for a collision that re-ran real work twice before it was named.
+**There is no word for "it failed", and that took three review rounds to arrive at.** An observer answers
+`running`, `succeeded` or `unresolved`. Only `succeeded` writes anything.
 
-`failed` means opposite things depending on who says it. The EXECUTOR's `failed` is *"the sink threw
-`notApplied`, I am certain nothing landed"* — safe to retry, so the pre-flight lets it back through to the
-sink. An OBSERVER saying "failed" means *"the work I started RAN and it failed"* — retrying re-does
-side-effecting work that already happened. The first cut wrote the second into the first's slot and the waker
-re-dispatched on every tick. The second cut halted the WAKER, and the operator's `--resume` — the only
-recovery the run's own output offers — re-dispatched instead. Halting one caller cannot fix a record that says
-the wrong thing.
+Three vocabularies were measured re-running real, non-idempotent work:
 
-So the words say WHICH thing happened, and each maps onto an existing status with nothing left to interpret:
+| attempt | what happened |
+| --- | --- |
+| observer says `failed` | the executor's `failed` means "nothing landed, safe to retry", so the waker re-dispatched the build on every tick |
+| the WAKER halts on `failed` | the record still said retry, so the operator's `--resume` — the recovery the run's own output prints — re-dispatched instead |
+| `never-started` → `failed` | honest name, same slot: eleven dispatches over ten ticks on a persistently broken dispatch, exit 0 each time |
 
-| observer says | means | recorded as |
-| --- | --- | --- |
-| `running` | still going, ask later | unchanged |
-| `finished` | the work ran and is over; pass or fail is in `result` | `applied` — the effect was "start the work", and it started |
-| `never-started` | the dispatch did not take; nothing ran | `failed` — nothing landed, so retrying is correct |
+The lesson is one sentence: **a status is a promise about what the next caller may do, and there was no status
+meaning "this is over and nobody should touch it".** Halting one caller can never fix that, because the record
+is what is wrong. So `unresolved` writes NOTHING — the entry stays in-flight, is reported for a person, and
+costs one poll a tick instead of one dispatch a tick.
 
-A caller wanting "it ran and went badly" says `finished` with a failing `result`, and the run advances with
-the outcome in hand, which is what a declaration reads to decide what to do about a bad build. There is no
-answer meaning "re-run it": that is a retry policy, and nothing owns one.
+`unresolved` deliberately collapses two cases that want different answers — *the build failed* (react to it)
+and *the dispatch never took* (retry it) — because the engine can express NEITHER today. Both are now filed:
+[#xdoahvu] (an effect step writes no finding, so nothing can read an outcome) and [#xlt67co] (retry has no
+policy and no owner). Until they exist, reporting and stopping is the only answer that is not a guess.
 
 ## Why fail-soft, per run
 
@@ -78,9 +76,9 @@ Each fault is collected into the pass report and the pass continues.
 - Advancing past an applied effect step needs `advance`, not another `applyPendingEffects` — the executor does
   not clear `pending`. Looping back into the effect branch applies nothing and spins to the turn cap.
 - A dispatch whose resolution leads to ANOTHER dispatch is legitimate. Stop the pass; the next one picks it up.
-- `failed` is the executor's word for "safe to retry". Nothing that folds an observation into the record may
-  reuse it for "it ran and failed" — that is the collision, and it survives any amount of caller-side halting
-  because the RECORD is what is wrong.
+- Every status is a promise to the NEXT caller. Before reusing one, ask what it licenses: `failed` licenses a
+  retry, `applied` licenses an advance. There is no status that licenses nothing, which is why `unresolved`
+  writes none.
 
 ## Done when
 
@@ -104,7 +102,7 @@ pass finds today is reported as `no-observer` rather than silently ignored, so t
 Scheduling is not here either. #3070 ruled the host is an interval job; this is that job's body, and the
 `StartInterval` is the operator's.
 
-Fifteen mutations reddened named tests across three rounds. Six on the first cut: persisting after the advance
+Eighteen mutations reddened named tests across four rounds. Six on the first cut: persisting after the advance
 instead of before, treating overdue as dead, obeying an answer outside the closed set, polling a handle-less
 entry, letting one unreadable record abort the pass, and letting an observer throw kill the run's pass. Then,
 after two review rounds: mapping `finished` onto the executor's `failed`, mapping `never-started` onto

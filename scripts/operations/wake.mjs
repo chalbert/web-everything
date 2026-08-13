@@ -68,6 +68,9 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     runId: run.id,
     resolved: observed.resolved,
     stillRunning: observed.stillRunning,
+    // Terminal for the observer, not actionable by this machine — the build failed, the dispatch never took,
+    // or the answer was ambiguous. Nothing was written; a person decides. See `effect-observer.mjs`.
+    unresolved: observed.unresolved,
     skipped: observed.skipped,
     errors: [...observed.errors],
     advanced: false,
@@ -186,6 +189,7 @@ export function renderPass(pass) {
     const bits = [
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
       r.stillRunning.length ? `still running ${r.stillRunning.join(', ')}` : '',
+      r.unresolved?.length ? `NEEDS A PERSON — terminal but not actionable: ${r.unresolved.map((x) => `${x.key}${x.error ? ` (${x.error})` : ''}`).join(', ')}` : '',
       r.skipped.length ? `SKIPPED ${r.skipped.map((x) => `${x.key} (${x.reason})`).join(', ')}` : '',
       r.errors.length ? `ERRORS ${r.errors.map((x) => x.error).join(' | ')}` : '',
       r.advanced ? 'advanced' : '',
