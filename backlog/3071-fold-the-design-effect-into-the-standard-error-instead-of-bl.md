@@ -78,3 +78,35 @@ statistics question, not an implementation one, and iterating on the implementat
 
 Related: #3090 — the sample-size estimator in this same module answers `1` above a 97% base rate. Worth
 fixing first, since any redesign here will lean on it.
+
+## 2026-08-13 — MEASURED: this change would unblock nothing. Parked, not just bounced.
+
+The stand-down above was argued from the review history. Someone asked the obvious question — *if it is
+worth doing, why would a third attempt work?* — so it was measured instead. `assessCriteria` over 500
+merged PRs:
+
+```
+records: 500        observable share: 0.468 (234 PRs)
+baseRate: 2.1%      requiredNPerGroup: 278 per group per band
+bandsTested: 0
+clustering: 5 observations from 2 distinct sources
+BLOCKERS: censoring · clustered observations · insufficient observations
+```
+
+**Clustering is one of three blockers and it is not the binding one.** Remove it and the verdict still
+refuses, twice over. The binding constraint is sample size: 278 per group × 2 groups × 5 bands ≈ 2,780
+observable PRs against the 234 that exist. Off by a factor of roughly twelve, and `bandsTested: 0` says
+no band is even testable today.
+
+**The widening would also be computed from 5 observations across 2 sources.** A design effect estimated
+from a cluster-size distribution that small is noise. The change would have replaced a blunt refusal with
+a precise one derived from nothing.
+
+So the ranking is settled and it is not "do the statistics properly first" — it is **do not do this yet**.
+The two failed attempts were not merely wrong about the population; they were work on the least binding of
+three constraints. What would actually move the tool is raising the observable share (currently 47%) or
+finding a defect signal denser than 2.1%, and neither is this card.
+
+**Reopen when** a band reaches `testable` on its own — at that point clustering becomes the binding
+blocker and the design effect has enough cluster sizes to be estimated. Until then the blunt refusal costs
+nothing, because the verdict would be a refusal either way.
