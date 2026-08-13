@@ -110,3 +110,21 @@ finding a defect signal denser than 2.1%, and neither is this card.
 **Reopen when** a band reaches `testable` on its own — at that point clustering becomes the binding
 blocker and the design effect has enough cluster sizes to be estimated. Until then the blunt refusal costs
 nothing, because the verdict would be a refusal either way.
+
+## 2026-08-13 — PR #1196 is CLOSED
+
+Closed on the measurement above, not on the bounce count. A `review:changes` PR nobody intends to fix
+reads to the drain and to any fresh session as work in flight, and this card already holds everything the
+PR did.
+
+Nothing is lost by the closure: `lane/design-effect` survives on the remote at `5e46e8d7` (two commits,
++365/−22 across 3 files), and both review rounds stay on the PR. **Reopen the PR rather than re-deriving
+it** if the condition above is ever met — though the reopen condition is a data condition, so a fresh
+implementation against the settled model is the likelier route.
+
+The item itself is left `status: open` deliberately: the work is still worth doing eventually, and the
+"Reopen when" line above is the trigger. It is the PR that was dead, not the idea.
+
+Related: [#3090] fixed `requiredNPerGroup` in this same module, which answered `1` above a 97% base rate.
+It does not change the ranking — at the measured 2.1% base rate the estimator was already in the range
+where it behaves, so the 278-per-group figure stands.
