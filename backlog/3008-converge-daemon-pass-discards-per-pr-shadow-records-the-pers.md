@@ -6,6 +6,12 @@ parent: "2572"
 status: open
 dateOpened: "2026-08-08"
 tags: [review, converge-daemon, shadow-mode, decision-routing, enforce-flip]
+scope:
+  - we:scripts/converge-daemon-pass.mjs
+  - we:scripts/lib/decision-routing.mjs
+  - we:scripts/lib/review-runner-core.mjs
+  - we:scripts/review-runner.mjs
+  - we:scripts/__tests__/converge-daemon.test.mjs
 ---
 
 # converge daemon pass discards per-PR shadow records — the persisted log cannot feed the ratified enforce-flip agreement metric either
@@ -196,6 +202,24 @@ lands.
   `records: []`, which means "the pass ran and genuinely found zero clearable PRs." Conflating the two
   would misread history as a wall of empty passes. No rewrite/migration of the existing append-only log
   is proposed — it is soak history, not mutable state; the contract is purely on the READER side.
+
+## `scope:` — added after the fact, and why that matters
+
+The preparation pass that produced everything above (size, `Done when`, design, interface, tasks, delivery
+shape) **did not write a `scope:` field**, so this card landed fully prepared and still **undispatchable** —
+`we:scripts/readiness/dispatch-plan.mjs` resolves it to `unshaped-no-scope` and never launches it, by design,
+because it will not dispatch blind.
+
+The entries were derived from this card's own *Interface and protocol* and *Tasks* sections rather than
+re-investigated: `we:scripts/converge-daemon-pass.mjs` (where the record is dropped),
+`we:scripts/lib/decision-routing.mjs` and `we:scripts/lib/review-runner-core.mjs` (the shape and its readers),
+`we:scripts/review-runner.mjs` (the caller named in the interface section), and the test file the tasks name.
+`we:scripts/converge-daemon-install.mjs` appears in the interface section as context and is NOT in scope — it
+installs the daemon and is untouched by a change to what one pass persists.
+
+**The lesson, recorded rather than left implicit:** acceptance criteria and a design do not make an item
+prepared. Without `scope:` nothing can pick it up, so `scope:` is the first item of preparation and not the
+last — see the story-preparation checklist in agent memory.
 
 ## Tasks
 
