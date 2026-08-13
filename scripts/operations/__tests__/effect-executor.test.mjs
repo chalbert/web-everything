@@ -775,6 +775,76 @@ describe('the attempt counter records what cannot be recovered later', () => {
         .toBe(`${passed}: ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
     }
   });
+
+  // THE BOUND EXECUTOR IS A CALLER TOO (PR #1195, raised r1, restated blocking r3, still live at r5). Every
+  // test above calls `applyPendingEffects` directly, which is the one path production does NOT take: adapters
+  // hold a `createEffectExecutor` closure. Its options destructure omitted `attemptedBy`, so the argument was
+  // accepted and discarded — `ex.apply(run, {attemptedBy: 'auto'})` recorded `unknown`. Silent, and it ate
+  // exactly the population a retry default exists for. The direct-call tests could not see it.
+  it('createEffectExecutor.apply FORWARDS attemptedBy instead of discarding it', async () => {
+    for (const [passed, expected] of [
+      ['auto', { lastAttemptBy: 'auto', autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { lastAttemptBy: 'human', autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+      // Unstated stays unstated. The closure must not invent a population the caller declined to name.
+      [undefined, { lastAttemptBy: 'unknown', autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+    ]) {
+      const store = createMemoryRunStore();
+      const calls = [];
+      const run = atEffectStep();
+      store.write(run);
+      const ex = createEffectExecutor({ sinks: sinks(calls), store });
+      const out = await ex.apply(run, { ...(passed ? { attemptedBy: passed } : {}) });
+      expect(calls).toEqual(['comment.post', 'label.swap']); // the effects really ran — not a vacuous pass
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.lastAttemptBy} ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
+    }
+  });
+});
+
+/**
+ * THE DRIVER'S DEFAULT WAS UNDEFENDED (PR #1195 round 5). `driveRun`'s `attemptedBy = 'unknown'` is the whole
+ * subject of round 4 — a network client is not a person, so the driver refuses to guess — and flipping it back
+ * to `'human'` left all 387 operations tests green. The HTTP test nearby pins the adapter's EXPLICIT argument,
+ * not the parameter default underneath it, so nothing noticed.
+ *
+ * Driven through the real `driveRun` over an effect-only declaration, so the run reaches the effect rather
+ * than suspending at a confirm with the assertion loop running zero times.
+ */
+describe('the driver labels the population only when it was told one', () => {
+  const ATTRIB_OP = 'fx-attrib';
+  const judge = async () => { throw new Error('no juror'); };
+
+  function effectOnlyRegistry() {
+    const r = createRegistry();
+    r.register(op(ATTRIB_OP, {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'note.write', payload: {} }] }),
+    }));
+    return r;
+  }
+
+  it('an unlabelled drive records `unknown`, NOT `human`', async () => {
+    for (const [passed, expected] of [
+      [undefined, { lastAttemptBy: 'unknown', autoAttempts: 0, humanAttempts: 0, unknownAttempts: 1 }],
+      ['auto', { lastAttemptBy: 'auto', autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
+      ['human', { lastAttemptBy: 'human', autoAttempts: 0, humanAttempts: 1, unknownAttempts: 0 }],
+    ]) {
+      const r = effectOnlyRegistry();
+      const store = createMemoryRunStore();
+      const calls = [];
+      const sinks = { 'note.write': async () => { calls.push('note.write'); return { ok: true }; } };
+      const run = startRun({ op: ATTRIB_OP, id: 'run-attrib', input: { pr: 7 }, registry: r });
+      store.write(run);
+
+      const out = await driveRun({ run, registry: r, store, sinks, judge, ...(passed ? { attemptedBy: passed } : {}) });
+      expect(out.stopped).toBe('complete');
+      expect(calls).toEqual(['note.write']);           // the effect really applied — not a vacuous pass
+      const e = out.run.effects[0];
+      expect(`${passed}: ${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+        .toBe(`${passed}: ${expected.lastAttemptBy} ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
+    }
+  });
 });
 
 /**

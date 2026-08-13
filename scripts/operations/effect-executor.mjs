@@ -416,7 +416,12 @@ export function createEffectExecutor({ sinks, store } = {}) {
     throw new TypeError('operations: createEffectExecutor needs a `store` handle');
   }
   return {
-    apply: (run, { stepIndex = null } = {}) => applyPendingEffects(run, { sinks, store, stepIndex }),
+    // `attemptedBy` is forwarded, not dropped. This closure is the one production path that reaches
+    // `applyPendingEffects`, so a destructure that omitted the field silently rewrote every caller's
+    // stated population back to `unknown` — an AUTO attempt, the only population a retry default is
+    // ever for, arrived at the counters indistinguishable from an unlabelled one. Losing the argument
+    // here is unrecoverable in the same way omitting the counter entirely would be.
+    apply: (run, { stepIndex = null, attemptedBy = 'unknown' } = {}) => applyPendingEffects(run, { sinks, store, stepIndex, attemptedBy }),
     types: () => (sinks instanceof Map ? [...sinks.keys()] : Object.keys(sinks)).sort(),
   };
 }
