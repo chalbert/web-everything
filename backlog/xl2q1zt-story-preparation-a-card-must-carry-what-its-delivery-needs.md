@@ -67,9 +67,11 @@ Deliberately ordered so each lands alone and is useful the day it lands. Only th
 the rest are named so the shape is visible, and will be sliced properly when their turn comes rather than
 over-specified now.
 
-1. **The consumers check** — first slice, filed. For each file in an item's `scope:`, find every module that
-   imports it and flag any importer not covered by the scope. Highest-frequency gap, fully mechanical,
-   pre-work.
+1. ~~**The consumers check**~~ — **ATTEMPTED AND STOOD DOWN.** Built, reviewed twice, deleted. The import
+   graph is not the consumer graph in this repo: `we:scripts/lane-pool.mjs` has ten-plus consumers and not
+   one is an ES import — every one shells it. Its confident all-clear was baseless 74% of the time it fired.
+   [#x6cdlmu] carries the full account and what the next attempt must settle before any code. **The gap it
+   targeted is still real**; only the detector was wrong.
 2. **Scope drift, measured at land** — compare declared `scope:` against the files a PR actually touched, and
    accumulate it. Turns gap 3 into data rather than an opinion.
 3. **Size plausibility** — declared `size` against implied breadth (named files, consumers, subsystems
