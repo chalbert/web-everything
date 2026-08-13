@@ -44,6 +44,25 @@ export const EFFECT_STATUSES = Object.freeze(['declared', 'pending', 'in-flight'
 /** Ids are used as filenames, so the character set is closed — no separators, no traversal, no surprises. */
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+/**
+ * Is this string something an observer could actually poll?
+ *
+ * AN ALLOWLIST, because two denylists in a row were wrong. `.trim()` missed a zero-width space; the fix for
+ * that was a denylist of the four code points the reviewer had named, which called itself "has a visible
+ * character" and let sixteen more through — NUL, DEL, a combining acute, a lone surrogate, bidi overrides, a
+ * variation selector. Enumerating what is unusable loses to naming what is usable; the same lesson the `gh`
+ * deny-list and the hand-rolled CommonMark parser each taught here.
+ *
+ * So: at least one ASCII alphanumeric. A handle is an identifier minted by tooling — a session id, a build
+ * id — and every one of them has a letter or a digit. This is deliberately narrower than "visible", because
+ * "visible" is not decidable (a Hangul filler is a LETTER by Unicode and renders as blank) and because the
+ * two errors are not symmetric: accepting garbage parks a run forever telling the operator to poll nonsense,
+ * while refusing a legitimate handle fails loudly at dispatch with a message naming the problem.
+ */
+export function isPollableHandle(handle) {
+  return typeof handle === 'string' && /[A-Za-z0-9]/.test(handle);
+}
+
 /** @param {*} v @returns {boolean} */
 function isPlainObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -181,7 +200,7 @@ export function validateRunRecord(record) {
       // is optional and, when present, must actually parse; an unparseable date makes every entry read as
       // never-overdue, which is the failure that hides a stalled job.
       if (e.status === 'in-flight') {
-        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && e.handle.trim() !== ''))) {
+        if (!(e.handle === null || e.handle === undefined || (typeof e.handle === 'string' && isPollableHandle(e.handle)))) {
           errors.push(`effects[${i}] is in-flight with an invalid handle ${JSON.stringify(e.handle)} — a string or null`);
         }
         if (e.expectedBy != null && !(typeof e.expectedBy === 'string' && !Number.isNaN(Date.parse(e.expectedBy)))) {

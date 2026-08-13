@@ -460,7 +460,7 @@ export function outcomePayload({ run, stopped, error = null, applied = [] }) {
     // a parked run. On that route `[]` stopped meaning "nothing is in flight", and since the payload carries
     // no `effects` either, there was no way to recover a parked run's handle over HTTP at all. Reading the
     // record answers the same on every route.
-    inFlight: (run.effects ?? []).filter((e) => e.status === 'in-flight').map((e) => e.key),
+    inFlight: run.effects.filter((e) => e.status === 'in-flight').map((e) => e.key),
     pending: run.pending, verdict: run.verdict, findings: run.findings,
     // The meter, and its total pre-summed — a consumer must not have to re-derive "what did this cost".
     telemetry: run.telemetry ?? [], spend: totalJudgeSpend(run),

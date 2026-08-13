@@ -49,7 +49,7 @@
  */
 
 import { effectsForStep } from './engine.mjs';
-import { assertRunRecord } from './run-record.mjs';
+import { assertRunRecord, isPollableHandle } from './run-record.mjs';
 
 /**
  * The reserved effect type for an append to the #3007 verdict ledger. Named here so #3035/#3036 declare
@@ -112,8 +112,8 @@ export function notApplied(message, extra = {}) {
  * {@link inFlightEntries} reports it under `unknown`, never `running`.
  */
 export function inFlight({ handle, expectedBy = null } = {}) {
-  if (typeof handle !== 'string' || !handle.trim()) {
-    throw new TypeError('operations: `inFlight` needs a durable `handle` — a pid is not one (the OS reuses it)');
+  if (!isPollableHandle(handle)) {
+    throw new TypeError('operations: `inFlight` needs a durable `handle` with a visible character — a pid is not one (the OS reuses it)');
   }
   if (expectedBy !== null && !(typeof expectedBy === 'string' && !Number.isNaN(Date.parse(expectedBy)))) {
     throw new TypeError('operations: `inFlight.expectedBy` must be an ISO timestamp or null');
@@ -200,7 +200,7 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
     // UNLESS THE HANDLE IS LOST, which is the case the whole distinction rests on: in-flight is resumable
     // because it can be OBSERVED. A handle-less entry cannot be, so it has degraded back into "might have
     // started, cannot check" — the definition of `pending` — and falls under the same refusal.
-    if (entry.status === 'in-flight' && entry.handle) continue;
+    if (entry.status === 'in-flight' && isPollableHandle(entry.handle)) continue;
     if (entry.status === 'in-flight' && !entry.idempotent) {
       throw new Error(
         `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
@@ -237,7 +237,7 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
     if (live.status === 'applied') { skipped.push(live.key); continue; }
     // Only an OBSERVABLE in-flight entry is reported and left alone. A handle-less one reached here because it
     // is idempotent, and falls through to be dispatched again — which is what `idempotent` licenses.
-    if (live.status === 'in-flight' && live.handle) {
+    if (live.status === 'in-flight' && isPollableHandle(live.handle)) {
       // Still going. Report and HALT — the same ordering rule a failure gets. Re-calling the sink would start
       // the work a SECOND time, which is the double-apply the `pending` refusal exists to prevent; here we can
       // avoid it outright because the entry says the first attempt is still alive. Something outside this
@@ -355,7 +355,10 @@ export function inFlightEntries(run, now = new Date()) {
   const unknown = [];
   for (const e of (run && run.effects) || []) {
     if (e.status !== 'in-flight') continue;
-    if (!e.handle) { unknown.push(e); continue; }
+    // THE SAME QUESTION THE VALIDATOR ASKS, not a bare truthiness (PR #1191 review, finding 2). This is the
+    // function the item named as the failure site, and it was the one place still asking differently — so a
+    // handle the validator refuses still bucketed `running` when a record reached here another way.
+    if (!isPollableHandle(e.handle)) { unknown.push(e); continue; }
     const due = e.expectedBy ? Date.parse(e.expectedBy) : NaN;
     (!Number.isNaN(due) && due < at ? overdue : running).push(e);
   }
