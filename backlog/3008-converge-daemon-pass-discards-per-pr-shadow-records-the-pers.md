@@ -107,8 +107,9 @@ gate.
   `records[0].subject === 'we#42'`, `.wouldClear === false`, `.reason === 'self-clear-refused: …'` — the
   specific PR and its refusal reason are recoverable from the persisted log, not just the pass-level
   `wouldClear` count.
-- Given `summary` is `null` (review-runner produced no parseable JSON, `we:scripts/converge-daemon-pass.mjs:269`)
-  or `summary.ranPass === false` with no `records` key at all (the daemon's own pre-flight `refuse()`
+- Given `summary` is `null` (review-runner produced no parseable JSON,
+  `we:scripts/converge-daemon-pass.mjs:267-268`) or `summary.ranPass === false` with no `records` key at
+  all (the daemon's own pre-flight `refuse()`
   path, `we:scripts/converge-daemon-pass.mjs:226-233`, never calls review-runner), `buildPassRecord`
   returns `records: []` — never `undefined`/`null`, never throws.
 - `we:scripts/__tests__/converge-daemon.test.mjs`'s `describe('buildPassRecord', …)` block (currently
@@ -157,7 +158,8 @@ if it changes) in the PR body so a reviewer can weigh in before it lands.
 **Do NOT build the #2838/#2893 ledger here.** This item stays scoped to "make the existing per-pass log
 honest and complete about the PRs it saw." `we:scripts/lib/decision-routing.mjs`'s `recordIsMatch` /
 `computeAgreementMetric` (lines 345-348, 374) and the `ShadowOutcomeRecord` shape (a `match`/`outcome`
-per record, compared against an actual human decision) are #2893's job, `blockedBy: 2892`. **Reserve
+per record, compared against an actual human decision) are #2893's job, `blockedBy: ["2892", "2864",
+"2964"]`. **Reserve
 those exact field names** (`match`, `outcome`) — do not add them here, even as placeholders. A per-PR
 record that says "the shadow pass would-clear PR 42" is a **different population** than a record that
 says "the shadow pass's PR-42 verdict matched the human's actual PR-42 decision" (the latter needs a
