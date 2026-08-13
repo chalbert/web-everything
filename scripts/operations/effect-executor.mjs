@@ -265,10 +265,25 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
     // an AUTOMATIC retry succeeding says the failure was flaky and a small budget would have caught it; a
     // HUMAN retry succeeding usually says someone fixed the cause, and no budget would ever have helped.
     // Averaging them yields a default that is too high. One field, unrecoverable if omitted.
+    // PER POPULATION, not one count plus a last-writer label (PR #1195 review, blocking 1). The first cut
+    // kept a cumulative `attempts` and OVERWROTE `attemptedBy` on each attempt, so an effect retried by both
+    // populations was filed wholly into whichever went last, carrying the other's attempts in its count.
+    // Both directions corrupt the corpus:
+    //   - human, human, then auto succeeds → filed as an automatic success at attempt 3. The truth is that
+    //     exactly ONE automatic attempt was made and it worked first time. That is the pooled inflation this
+    //     whole file exists to prevent.
+    //   - auto, auto, then a human fixes the cause → filed as human, and TWO genuine automatic failures —
+    //     evidence that a budget buys nothing — vanish from the automatic population entirely.
+    // Counting each population separately means a mixed entry contributes honestly to both.
+    const isAuto = attemptedBy === 'auto';
     const attempted = {
       attempts: (Number(live.attempts) || 0) + 1,
+      autoAttempts: (Number(live.autoAttempts) || 0) + (isAuto ? 1 : 0),
+      humanAttempts: (Number(live.humanAttempts) || 0) + (isAuto ? 0 : 1),
       lastAttemptAt: new Date().toISOString(),
-      attemptedBy: attemptedBy === 'auto' ? 'auto' : 'human',
+      // NAMED for what it is. `attemptedBy` read as "who attempted this", which is false for a mixed entry;
+      // it has only ever meant who attempted it LAST, and the last attempt is the one whose outcome settled.
+      lastAttemptBy: isAuto ? 'auto' : 'human',
     };
     current = live.dispatch
       ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })

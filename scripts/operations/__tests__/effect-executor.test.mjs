@@ -711,7 +711,9 @@ describe('the attempt counter records what cannot be recovered later', () => {
     const out = await applyPendingEffects(run, { sinks: sinks(), store });
     const entry = out.run.effects[0];
     expect(entry.attempts).toBe(1);
-    expect(entry.attemptedBy).toBe('human');
+    expect(entry.lastAttemptBy).toBe('human');
+    expect(entry.humanAttempts).toBe(1);
+    expect(entry.autoAttempts).toBe(0);
     expect(Number.isNaN(Date.parse(entry.lastAttemptAt))).toBe(false);
   });
 
@@ -748,7 +750,41 @@ describe('the attempt counter records what cannot be recovered later', () => {
       const run = atEffectStep();
       store.write(run);
       const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
-      expect(`${passed}: ${out.run.effects[0].attemptedBy}`).toBe(`${passed}: ${expected}`);
+      expect(`${passed}: ${out.run.effects[0].lastAttemptBy}`).toBe(`${passed}: ${expected}`);
     }
+  });
+});
+
+/**
+ * A MIXED-PROVENANCE ENTRY, at the executor boundary (PR #1195 review, blocking 1). One count plus a
+ * last-writer label filed the whole entry under whichever population went last; each population now carries
+ * its own count, so a mixed entry contributes honestly to both.
+ */
+describe('an effect retried by both populations counts in both', () => {
+  const failing = { 'comment.post': async () => { throw notApplied('refused'); }, 'label.swap': async () => ({ ok: true }) };
+  const working = { 'comment.post': async () => ({ ok: true }), 'label.swap': async () => ({ ok: true }) };
+
+  it('human, human, then AUTO succeeds — one automatic attempt, not three', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'auto' })).run;
+    expect(run.effects[0]).toMatchObject({
+      attempts: 3, humanAttempts: 2, autoAttempts: 1, lastAttemptBy: 'auto', status: 'applied',
+    });
+  });
+
+  it('auto, auto, then a HUMAN succeeds — the two automatic failures survive', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
+    run = (await applyPendingEffects(run, { sinks: failing, store, attemptedBy: 'auto' })).run;
+    run = (await applyPendingEffects(run, { sinks: working, store })).run;
+    expect(run.effects[0]).toMatchObject({
+      attempts: 3, autoAttempts: 2, humanAttempts: 1, lastAttemptBy: 'human', status: 'applied',
+    });
   });
 });

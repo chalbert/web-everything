@@ -658,7 +658,7 @@ describe('the waker labels its own attempts as automatic', () => {
     store.write(run);
     // The dispatch itself is applied by the CLI path, so it is human.
     run = (await applyPendingEffects(run, { sinks, store })).run;
-    expect(run.effects[0].attemptedBy).toBe('human');
+    expect(run.effects[0].lastAttemptBy).toBe('human');
 
     // The waker resolves it and applies the REST of the step — those are its attempts, and they are auto.
     await wakeRun(run, {
@@ -666,7 +666,8 @@ describe('the waker labels its own attempts as automatic', () => {
       store, registry, sinks,
     });
     const after = store.read('run-w');
-    expect(after.effects[1].attemptedBy).toBe('auto');
+    expect(after.effects[1].lastAttemptBy).toBe('auto');
+    expect(after.effects[1].autoAttempts).toBe(1);
     expect(after.effects[1].attempts).toBe(1);
   });
 
@@ -678,6 +679,6 @@ describe('the waker labels its own attempts as automatic', () => {
     let run = advanceWhileRunning(startRun({ op: OP, id: 'run-h', input: { pr: 7 }, registry }), { registry });
     store.write(run);
     run = (await applyPendingEffects(run, { sinks, store })).run;
-    expect(run.effects.map((e) => e.attemptedBy)).toEqual(['human', 'human']);
+    expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['human', 'human']);
   });
 });

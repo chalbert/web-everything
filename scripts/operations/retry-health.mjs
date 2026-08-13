@@ -16,6 +16,11 @@
  *     flaky, and a budget of 2 would have caught it. This is the population a default is FOR.
  *   - HUMAN — an operator re-ran after fixing the cause. Succeeding on attempt 2 usually means the world
  *     changed, and no budget would ever have helped. Counting these inflates the answer.
+ *
+ * ONE ENTRY CAN BELONG TO BOTH, and the first cut got this wrong: it filed a mixed entry wholly under
+ * whichever population attempted LAST, carrying the other's attempts in its count. Each population now has
+ * its own count, and the SUCCESS belongs only to whoever made the final attempt — the other's attempts all
+ * failed, which is itself evidence.
  * A default derived from the pooled distribution is too high, and too high is the expensive direction: the
  * measured failure mode was eleven dispatches over ten ticks at exit 0.
  *
@@ -47,18 +52,30 @@ export function attemptObservations(runs = []) {
     for (const e of (run?.effects ?? [])) {
       const attempts = Number(e?.attempts);
       if (!Number.isInteger(attempts) || attempts < 1) continue;
-      out.push({
-        runId: run.id,
-        op: run.op,
-        key: e.key,
-        type: e.type,
-        attempts,
-        by: e.attemptedBy === 'auto' ? 'auto' : 'human',
-        // Only a SETTLED entry answers the question. One still in flight has not succeeded or failed yet, and
-        // counting it as a failure at attempt N would read a slow success as a permanent one.
-        settled: e.status === 'applied' || e.status === 'failed',
-        succeeded: e.status === 'applied',
-      });
+      // Only a SETTLED entry answers the question. One still in flight has not succeeded or failed yet, and
+      // counting it as a failure at attempt N would read a slow success as a permanent one.
+      const settled = e.status === 'applied' || e.status === 'failed';
+      const lastBy = e.lastAttemptBy === 'auto' ? 'auto' : 'human';
+      // ONE ENTRY, UP TO TWO OBSERVATIONS — one per population that touched it. A mixed entry contributes
+      // honestly to both instead of being filed wholly into whichever attempted last.
+      //
+      // `succeeded` belongs ONLY to the population that made the final attempt, because that is the attempt
+      // whose outcome settled. The other population's attempts are real and all of them failed, which is
+      // exactly the evidence a budget needs.
+      for (const by of ['auto', 'human']) {
+        const n = Number(by === 'auto' ? e.autoAttempts : e.humanAttempts);
+        if (!Number.isInteger(n) || n < 1) continue;
+        out.push({
+          runId: run.id,
+          op: run.op,
+          key: e.key,
+          type: e.type,
+          attempts: n,
+          by,
+          settled,
+          succeeded: settled && e.status === 'applied' && lastBy === by,
+        });
+      }
     }
   }
   return out;

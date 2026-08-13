@@ -23,16 +23,22 @@ const runWith = (entries, id = 'r') => ({
   id, op: 'deploy', effects: entries.map((e, i) => ({ key: `${id}#0#${i}`, type: 'start.build', ...e })),
 });
 
-/** `n` settled entries that each succeeded on attempt `attempts`. */
+/** `n` settled entries that each succeeded on attempt `attempts`, all attempts by one population. */
 const settled = (n, attempts, by, status = 'applied') =>
-  Array.from({ length: n }, () => ({ attempts, attemptedBy: by, status }));
+  Array.from({ length: n }, () => ({
+    attempts,
+    autoAttempts: by === 'auto' ? attempts : 0,
+    humanAttempts: by === 'auto' ? 0 : attempts,
+    lastAttemptBy: by,
+    status,
+  }));
 
 describe('attemptObservations', () => {
   it('reads only entries that carry an attempt count', () => {
     const runs = [runWith([
-      { attempts: 2, attemptedBy: 'auto', status: 'applied' },
-      { status: 'declared' },                       // never attempted
-      { attempts: 0, attemptedBy: 'auto', status: 'failed' },  // not a real attempt
+      { attempts: 2, autoAttempts: 2, humanAttempts: 0, lastAttemptBy: 'auto', status: 'applied' },
+      { status: 'declared' },                                                        // never attempted
+      { attempts: 0, autoAttempts: 0, humanAttempts: 0, lastAttemptBy: 'auto', status: 'failed' }, // not one
     ])];
     expect(attemptObservations(runs)).toHaveLength(1);
   });
@@ -40,15 +46,52 @@ describe('attemptObservations', () => {
   // An in-flight entry has not succeeded or failed yet. Counting it as a failure at attempt N would read a
   // SLOW success as a permanent one — the same mistake the waker made three times with `overdue`.
   it('does not treat an unsettled entry as an outcome', () => {
-    const runs = [runWith([{ attempts: 3, attemptedBy: 'auto', status: 'in-flight' }])];
+    const runs = [runWith([{ attempts: 3, autoAttempts: 3, humanAttempts: 0, lastAttemptBy: 'auto', status: 'in-flight' }])];
     const [o] = attemptObservations(runs);
     expect(o.settled).toBe(false);
     expect(distributionFor(attemptObservations(runs), 'auto').settled).toBe(0);
   });
 
-  it('defaults an unlabelled attempt to human, never to auto', () => {
+  it('ignores an entry with no per-population counts, rather than guessing a population', () => {
     const runs = [runWith([{ attempts: 1, status: 'applied' }])];
-    expect(attemptObservations(runs)[0].by).toBe('human');
+    expect(attemptObservations(runs)).toEqual([]);
+  });
+
+  /**
+   * A MIXED ENTRY BELONGS TO BOTH POPULATIONS (PR #1195 review, blocking 1). The first cut kept one
+   * cumulative count and overwrote the label each attempt, so an effect retried by both was filed wholly
+   * under whichever went last — carrying the other's attempts in its count. Both directions corrupted the
+   * corpus, and neither was pinned: inverting the label to sticky-on-FIRST kept all 91 tests green.
+   */
+  it('a human-then-AUTO success records ONE automatic attempt, not three', () => {
+    const runs = [runWith([{ attempts: 3, autoAttempts: 1, humanAttempts: 2, lastAttemptBy: 'auto', status: 'applied' }])];
+    const auto = distributionFor(attemptObservations(runs), 'auto');
+    // The truth: exactly one automatic attempt was ever made, and it worked first time. Filed as attempt 3,
+    // the reader would demand a budget of 3 to cover a case a budget of 1 covers.
+    expect(auto.succeeded).toBe(1);
+    expect(auto.successAtAttempt).toEqual({ 1: 1 });
+    // The human attempts are real and both failed — that is the human population's evidence, not the auto's.
+    const human = distributionFor(attemptObservations(runs), 'human');
+    expect(human.settled).toBe(1);
+    expect(human.succeeded).toBe(0);
+  });
+
+  it('an auto-then-HUMAN success keeps the two automatic FAILURES instead of erasing them', () => {
+    const runs = [runWith([{ attempts: 3, autoAttempts: 2, humanAttempts: 1, lastAttemptBy: 'human', status: 'applied' }])];
+    const auto = distributionFor(attemptObservations(runs), 'auto');
+    // Two genuine automatic attempts, neither of which worked — evidence that a budget buys nothing here.
+    expect(auto.settled).toBe(1);
+    expect(auto.succeeded).toBe(0);
+    expect(distributionFor(attemptObservations(runs), 'human').succeeded).toBe(1);
+  });
+
+  it('the success belongs only to whoever made the FINAL attempt', () => {
+    const both = (lastAttemptBy) => distributionFor(
+      attemptObservations([runWith([{ attempts: 2, autoAttempts: 1, humanAttempts: 1, lastAttemptBy, status: 'applied' }])]),
+      'auto',
+    ).succeeded;
+    expect(both('auto')).toBe(1);
+    expect(both('human')).toBe(0);
   });
 });
 
