@@ -688,3 +688,67 @@ describe('a parked run reports the same thing on every route', () => {
     expect(renderOutcome({ outcome: again }).lines.join('\n')).toMatch(/1 effect\(s\) have landed/);
   });
 });
+
+/**
+ * THE UNRECOVERABLE HALF (#xou38cr; PR #1195 review, blocking 1). The first cut tested the READER — which can
+ * be rewritten from scratch whenever #3083 is ruled — and left the COLLECTOR bare. Four separate mutations to
+ * the recording lines each kept 367 tests green, including deleting the single argument that is the only
+ * thing in the repo producing an `auto` observation. Delete it and the gate stays green, the waker keeps
+ * working, and every automatic retry is filed as human forever.
+ *
+ * That inverts the item's own argument for existing. These tests defend the half that cannot be recovered.
+ */
+describe('the attempt counter records what cannot be recovered later', () => {
+  const sinks = (calls = []) => ({
+    'comment.post': async () => { calls.push('comment.post'); return { ok: true }; },
+    'label.swap': async () => { calls.push('label.swap'); return { ok: true }; },
+  });
+
+  it('stamps attempts, who made them, and when — on the first attempt', async () => {
+    const store = createMemoryRunStore();
+    const run = atEffectStep();
+    store.write(run);
+    const out = await applyPendingEffects(run, { sinks: sinks(), store });
+    const entry = out.run.effects[0];
+    expect(entry.attempts).toBe(1);
+    expect(entry.attemptedBy).toBe('human');
+    expect(Number.isNaN(Date.parse(entry.lastAttemptAt))).toBe(false);
+  });
+
+  // THE COUNTER MUST COUNT. Frozen at 1 it looks right on every single-attempt run, which is why the
+  // mutation survived.
+  it('INCREMENTS across a genuine fail then retry', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    const failing = { ...sinks(), 'comment.post': async () => { throw notApplied('refused'); } };
+    run = (await applyPendingEffects(run, { sinks: failing, store })).run;
+    expect(run.effects[0].attempts).toBe(1);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    expect(run.effects[0].attempts).toBe(2);
+    expect(run.effects[0].status).toBe('applied');
+  });
+
+  // A SKIPPED entry is not an attempt. Counting it would inflate every replay.
+  it('does not count an already-applied effect that a replay skips', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    const before = run.effects.map((e) => e.attempts);
+    run = (await applyPendingEffects(run, { sinks: sinks(), store })).run;
+    expect(run.effects.map((e) => e.attempts)).toEqual(before);
+  });
+
+  // THE POPULATION SPLIT, at the executor boundary. `auto` and `human` mean opposite things and the label is
+  // unrecoverable once written.
+  it('records the caller that re-entered, not a fixed value', async () => {
+    for (const [passed, expected] of [['auto', 'auto'], ['human', 'human'], [undefined, 'human'], ['nonsense', 'human']]) {
+      const store = createMemoryRunStore();
+      const run = atEffectStep();
+      store.write(run);
+      const out = await applyPendingEffects(run, { sinks: sinks(), store, ...(passed ? { attemptedBy: passed } : {}) });
+      expect(`${passed}: ${out.run.effects[0].attemptedBy}`).toBe(`${passed}: ${expected}`);
+    }
+  });
+});

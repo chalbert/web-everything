@@ -29,6 +29,17 @@
  */
 export const MIN_OBSERVATIONS = 20;
 
+/**
+ * And a floor on the SUCCESSES, because `wouldCatch`'s denominator is the success count, not the settled
+ * count (PR #1195 review, blocking 2). Without it 10,000 automatic failures and exactly ONE success at
+ * attempt 7 cleared every guard and suggested a budget of 7 — a recommendation resting on a single
+ * observation, offered with no hedge.
+ *
+ * A coverage fraction over n successes cannot distinguish 95% from 100% until n is at least 20, so this is
+ * the same number for the same reason, applied to the denominator that is actually used.
+ */
+export const MIN_SUCCESSES = 20;
+
 /** Every effect entry across the given runs that carries an attempt count. */
 export function attemptObservations(runs = []) {
   const out = [];
@@ -99,7 +110,7 @@ export function distributionFor(observations, by) {
  * much human data there is, because the human population cannot answer this question. That asymmetry is the
  * whole design: a large, useless corpus must not read as evidence.
  */
-export function assessRetryBudget(runs = [], { min = MIN_OBSERVATIONS } = {}) {
+export function assessRetryBudget(runs = [], { min = MIN_OBSERVATIONS, minSuccesses = MIN_SUCCESSES } = {}) {
   const observations = attemptObservations(runs);
   const auto = distributionFor(observations, 'auto');
   const human = distributionFor(observations, 'human');
@@ -113,6 +124,12 @@ export function assessRetryBudget(runs = [], { min = MIN_OBSERVATIONS } = {}) {
   }
   if (auto.succeeded === 0 && auto.settled >= min) {
     blockers.push('no automatic retry has ever succeeded — a budget above 1 would have bought nothing so far.');
+  } else if (auto.succeeded > 0 && auto.succeeded < minSuccesses) {
+    blockers.push(
+      `only ${auto.succeeded} automatic retry/retries have ever SUCCEEDED — need at least ${minSuccesses}. `
+      + 'The suggestion is a coverage fraction over the successes, so a large settled count does not help: '
+      + `${auto.settled} settled with ${auto.succeeded} success(es) still rests the answer on ${auto.succeeded}.`,
+    );
   }
 
   // Only offered when the evidence carries it. The smallest budget reaching 95% of eventual successes is a

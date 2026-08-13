@@ -15,6 +15,7 @@ import {
   renderRetryHealth,
   requiredObservations,
   MIN_OBSERVATIONS,
+  MIN_SUCCESSES,
 } from '../retry-health.mjs';
 
 /** A run holding one effect entry with the given attempt shape. */
@@ -115,7 +116,30 @@ describe('it refuses rather than guesses', () => {
     expect(r.blockers.join(' ')).toMatch(/no automatic retry has ever succeeded/);
   });
 
+  // A COVERAGE FRACTION'S DENOMINATOR IS THE SUCCESSES, not the settled count (PR #1195 review, blocking 2).
+  // The settled floor did not guard it, so 10,000 automatic failures and exactly ONE success at attempt 7
+  // cleared every check and suggested a budget of 7 — an answer resting on a single observation.
+  it('REFUSES when the successes are too few, however large the settled count', () => {
+    const runs = [runWith([...settled(9999, 3, 'auto', 'failed'), ...settled(1, 7, 'auto')])];
+    const r = assessRetryBudget(runs);
+    expect(r.auto.settled).toBe(10000);
+    expect(r.auto.succeeded).toBe(1);
+    expect(r.conclusive).toBe(false);
+    expect(r.suggestedBudget).toBeNull();
+    expect(r.blockers.join(' ')).toMatch(/have ever SUCCEEDED/);
+  });
+
+  it('the success floor is separate from the settled floor, and both must clear', () => {
+    // Enough successes, not enough settled — still refused.
+    const thin = assessRetryBudget([runWith(settled(MIN_SUCCESSES, 1, 'auto'))], { min: 999 });
+    expect(thin.conclusive).toBe(false);
+    // Enough settled, not enough successes — also refused.
+    const skew = assessRetryBudget([runWith([...settled(100, 2, 'auto', 'failed'), ...settled(3, 1, 'auto')])]);
+    expect(skew.conclusive).toBe(false);
+  });
+
   it('suggests the SMALLEST budget reaching 95% of automatic successes', () => {
+    // 20 successes clears both floors; 19 at attempt 1 is 95%.
     const runs = [runWith([...settled(19, 1, 'auto'), ...settled(1, 5, 'auto')])];
     const r = assessRetryBudget(runs);
     expect(r.conclusive).toBe(true);
