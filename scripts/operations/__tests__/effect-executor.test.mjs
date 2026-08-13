@@ -21,7 +21,7 @@ import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs
 import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, inFlight, inFlightEntries, notApplied, resolveInFlight } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry, op } from '../registry.mjs';
-import { driveRun, outcomePayload, renderOutcome } from '../cli-adapter.mjs';
+import { driveRun, outcomePayload, renderOutcome, runOperationCli } from '../cli-adapter.mjs';
 import { effect } from '../step-kinds.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
 
@@ -776,11 +776,13 @@ describe('the attempt counter records what cannot be recovered later', () => {
     }
   });
 
-  // THE BOUND EXECUTOR IS A CALLER TOO (PR #1195, raised r1, restated blocking r3, still live at r5). Every
-  // test above calls `applyPendingEffects` directly, which is the one path production does NOT take: adapters
-  // hold a `createEffectExecutor` closure. Its options destructure omitted `attemptedBy`, so the argument was
-  // accepted and discarded — `ex.apply(run, {attemptedBy: 'auto'})` recorded `unknown`. Silent, and it ate
-  // exactly the population a retry default exists for. The direct-call tests could not see it.
+  // THE BOUND EXECUTOR IS A CALLER TOO (PR #1195, raised r1, restated blocking r3, still live at r5). Its
+  // options destructure omitted `attemptedBy`, so the argument was accepted and discarded —
+  // `ex.apply(run, {attemptedBy: 'auto'})` recorded `unknown`, silently.
+  //
+  // NOT A PRODUCTION PATH, and round 6 was right to say so. Nothing outside this test file constructs a
+  // bound executor; the CLI, the HTTP adapter and the waker all call `applyPendingEffects` directly. This
+  // guards a façade the file header offers to adapters, against the day one uses it — not a live leak.
   it('createEffectExecutor.apply FORWARDS attemptedBy instead of discarding it', async () => {
     for (const [passed, expected] of [
       ['auto', { lastAttemptBy: 'auto', autoAttempts: 1, humanAttempts: 0, unknownAttempts: 0 }],
@@ -845,6 +847,48 @@ describe('the driver labels the population only when it was told one', () => {
         .toBe(`${passed}: ${expected.lastAttemptBy} ${expected.autoAttempts}/${expected.humanAttempts}/${expected.unknownAttempts}`);
     }
   });
+
+  /**
+   * THE COMMAND LINE IS THE ONLY SOURCE OF `human` DATA, AND IT WAS UNDEFENDED (PR #1195 round 6, blocking 1).
+   * `cli-adapter.mjs` passes `attemptedBy: 'human'` on one line. Changing that literal to `'auto'` left the
+   * FULL suite green — 7478 tests — with every attempt a person makes at a terminal filed into the automatic
+   * population. That is the one direction the corpus must never be poisoned in: a human retry succeeding
+   * usually means someone fixed the cause, so folding those in makes automatic retry look like it works and
+   * drives #3083's eventual budget UP. Unrecoverable — the label is all that survives.
+   *
+   * The waker's identical argument got a test and the HTTP adapter's got a test; the third entry point did
+   * not. The test that LOOKED like it covered this (`the same effect driven from the command line is
+   * recorded as human`, in wake.test.mjs) hand-passed `'human'` to `applyPendingEffects` and never imported
+   * the CLI at all — a statement about one population asserted over a different one, which is this PR's own
+   * recurring defect appearing in a test name.
+   *
+   * So this drives `runOperationCli` — parse, start, drive, render — and never names a population itself.
+   */
+  it('an effect applied through the REAL command line is recorded as `human`', async () => {
+    const CLI_OP = 'fx-cli-attrib';
+    const r = createRegistry();
+    const declaration = op(CLI_OP, {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'note.write', payload: {} }] }),
+    });
+    r.register(declaration);
+    const store = createMemoryRunStore();
+    const calls = [];
+    const out = await runOperationCli({
+      declaration,
+      registry: r,
+      store,
+      sinks: { 'note.write': async () => { calls.push('note.write'); return { ok: true }; } },
+      judge: async () => { throw new Error('no juror'); },
+      argv: ['--pr=7'],
+      newRunId: () => 'run-cli-attrib',
+    });
+    expect(out.stopped).toBe('complete');
+    expect(calls).toEqual(['note.write']);           // the effect really applied — not a vacuous pass
+    const e = store.read('run-cli-attrib').effects[0];
+    expect(`${e.lastAttemptBy} ${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`)
+      .toBe('human 0/1/0');
+  });
 });
 
 /**
@@ -878,5 +922,44 @@ describe('an effect retried by both populations counts in both', () => {
     expect(run.effects[0]).toMatchObject({
       attempts: 3, autoAttempts: 2, humanAttempts: 1, lastAttemptBy: 'human', status: 'applied',
     });
+  });
+
+  // THE INVARIANT #3083's READER WILL NEED (PR #1195 round 6, finding 4). `attempts` and the three
+  // per-population counters each read their own prior value, so nothing in the code said whether the total
+  // and the sum are the same number. They are, for any entry created at or after this change — every
+  // attempt increments exactly one population. Stated here as an executable claim rather than a comment,
+  // because the reader has to pick a denominator and a wrong one is the defect class this item bounced on.
+  it('`attempts` equals the sum of the three populations, across a mixed sequence', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    store.write(run);
+    for (const by of ['auto', 'human', undefined, 'auto', 'nonsense']) {
+      run = (await applyPendingEffects(run, { sinks: failing, store, ...(by ? { attemptedBy: by } : {}) })).run;
+    }
+    const e = run.effects[0];
+    expect(e.attempts).toBe(5);
+    expect(e.autoAttempts + e.humanAttempts + e.unknownAttempts).toBe(e.attempts);
+    expect(`${e.autoAttempts}/${e.humanAttempts}/${e.unknownAttempts}`).toBe('2/1/2');
+  });
+
+  // THE ORPHAN KEY. An intermediate build of this branch wrote a cumulative `attempts` plus a last-writer
+  // `attemptedBy` and no per-population fields, and `.operations/` is gitignored so those records outlive a
+  // rebase locally. Left in place, such an entry answers "who attempted this" twice, with two different
+  // fields and possibly two different values.
+  it('clears the superseded `attemptedBy` field rather than leaving it beside `lastAttemptBy`', async () => {
+    const store = createMemoryRunStore();
+    let run = atEffectStep();
+    // The pre-split shape, as that build would have written it.
+    run = { ...run, effects: run.effects.map((e, i) => (i === 0 ? { ...e, attempts: 3, attemptedBy: 'human' } : e)) };
+    store.write(run);
+    run = (await applyPendingEffects(run, { sinks: working, store, attemptedBy: 'auto' })).run;
+    const e = run.effects[0];
+    expect(e.lastAttemptBy).toBe('auto');
+    expect(e.attemptedBy).toBeUndefined();
+    // The legacy total is CARRIED, not reset — the three attempts happened, they just belong to no
+    // population. This is the one shape where the invariant above does not hold, and it is why the
+    // invariant is scoped to entries created at or after this change.
+    expect(e.attempts).toBe(4);
+    expect(e.autoAttempts + e.humanAttempts + e.unknownAttempts).toBe(1);
   });
 });

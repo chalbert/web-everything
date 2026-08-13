@@ -282,6 +282,16 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
     //     evidence that a budget buys nothing — vanish from the automatic population entirely.
     // Counting each population separately means a mixed entry contributes honestly to both.
     const by = attemptedBy === 'auto' || attemptedBy === 'human' ? attemptedBy : 'unknown';
+    // THE INVARIANT, so #3083's reader does not have to guess its own denominator: for any entry created at
+    // or after this change, `attempts === autoAttempts + humanAttempts + unknownAttempts`. Every attempt
+    // increments exactly one population, and `by` is always one of the three.
+    //
+    // It can only be violated by an entry that already carries `attempts` and no per-population fields —
+    // reachable from an INTERMEDIATE build of this branch, which wrote a cumulative `attempts` plus a
+    // last-writer `attemptedBy`, and whose records survive locally because `.operations/` is gitignored.
+    // On a record written before any of this the four are all absent, all start at 0 together, and nothing
+    // is misfiled. The old `attemptedBy` key is dropped rather than left beside `lastAttemptBy`, so such a
+    // record cannot present two answers to the same question.
     const attempted = {
       attempts: (Number(live.attempts) || 0) + 1,
       autoAttempts: (Number(live.autoAttempts) || 0) + (by === 'auto' ? 1 : 0),
@@ -291,6 +301,7 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
       // NAMED for what it is. `attemptedBy` read as "who attempted this", which is false for a mixed entry;
       // it has only ever meant who attempted it LAST, and the last attempt is the one whose outcome settled.
       lastAttemptBy: by,
+      attemptedBy: undefined,
     };
     current = live.dispatch
       ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
@@ -416,11 +427,17 @@ export function createEffectExecutor({ sinks, store } = {}) {
     throw new TypeError('operations: createEffectExecutor needs a `store` handle');
   }
   return {
-    // `attemptedBy` is forwarded, not dropped. This closure is the one production path that reaches
-    // `applyPendingEffects`, so a destructure that omitted the field silently rewrote every caller's
-    // stated population back to `unknown` — an AUTO attempt, the only population a retry default is
-    // ever for, arrived at the counters indistinguishable from an unlabelled one. Losing the argument
-    // here is unrecoverable in the same way omitting the counter entirely would be.
+    // `attemptedBy` is forwarded, not dropped. A destructure that omitted the field accepted a caller's
+    // stated population and silently recorded `unknown` instead.
+    //
+    // SCOPE, STATED HONESTLY (PR #1195 round 6, blocking 2): this closure has NO production caller. All
+    // three real entry points — the CLI, the HTTP adapter and the waker — call `applyPendingEffects`
+    // directly, so nothing in production ever had an argument eaten here. An earlier version of this
+    // comment called it "the one production path that reaches applyPendingEffects", which was false and
+    // was the same defect this item keeps bouncing on: a statement about one population (test callers)
+    // used to describe another (production callers). The fix is still right — the façade is offered to
+    // adapters and would mislabel the moment one used it, and mislabelled retry data cannot be recovered
+    // — but it guards a surface nothing production reaches today.
     apply: (run, { stepIndex = null, attemptedBy = 'unknown' } = {}) => applyPendingEffects(run, { sinks, store, stepIndex, attemptedBy }),
     types: () => (sinks instanceof Map ? [...sinks.keys()] : Object.keys(sinks)).sort(),
   };

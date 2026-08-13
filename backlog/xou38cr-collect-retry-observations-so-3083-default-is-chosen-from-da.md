@@ -107,12 +107,36 @@ Both were reported in earlier rounds, both live in the half that cannot be rebui
 reader:
 
 - **`createEffectExecutor.apply` was discarding `attemptedBy`.** Its options destructure omitted the field,
-  so the one path production actually takes — adapters hold the bound closure, not the raw function —
-  accepted a stated population and silently recorded `unknown`. Every direct-call test passed. It now
-  forwards, and a named test drives the closure with each value.
+  so a caller's stated population was accepted and silently recorded as `unknown`. It now forwards, and a
+  named test drives the closure with each value. **Correction (round 6):** an earlier version of this
+  paragraph called that closure *"the one path production actually takes — adapters hold the bound closure,
+  not the raw function"*. That is **false**. `createEffectExecutor` has no production caller at all: the
+  CLI, the HTTP adapter and the waker each call `applyPendingEffects` directly. No population was ever
+  eaten in production, because production never reaches the closure. The fix is still right — it guards a
+  façade the module offers to adapters — but the severity claim was this item's own recurring defect,
+  a statement about one population (test callers) used to describe another (production callers).
 - **`driveRun`'s `unknown` default had no test.** Flipping it back to `human` left all 387 operations tests
   green: the nearby HTTP test pins that adapter's explicit argument, not the parameter default beneath it.
   A test now drives the real `driveRun` over an effect-only declaration with no `attemptedBy` at all.
+
+### And the closure the two above missed
+
+- **The CLI's `attemptedBy: 'human'` was the undefended one** (round 6, blocking). Changing that one literal
+  to `'auto'` left the FULL suite green — 7478 tests — with every attempt a person makes at a terminal
+  filed into the automatic population. That is the direction that matters: a human retry succeeding usually
+  means someone fixed the cause, so folding those in makes automatic retry look like it works and drives
+  [#3083]'s eventual budget up. The waker's identical argument had a test and the HTTP adapter's had a test;
+  the only source of `human` data had none. The test that looked like it covered this hand-passed `'human'`
+  to `applyPendingEffects` and never imported the CLI — the recurring defect appearing in a test name. It is
+  renamed for what it drives, and a new test runs the real `runOperationCli` end to end.
+
+### The invariant the reader will need
+
+`attempts === autoAttempts + humanAttempts + unknownAttempts` for any entry created at or after this
+change, now stated in the code and pinned by a test. It can only be violated by a record from an
+intermediate build of this branch, which wrote a cumulative `attempts` and a last-writer `attemptedBy` with
+no per-population fields; `.operations/` is gitignored, so those survive locally across a rebase. That
+superseded `attemptedBy` key is now cleared on write, so no entry answers "who attempted this" twice.
 
 ### Still true, and stated at the write site
 

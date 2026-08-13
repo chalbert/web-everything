@@ -671,9 +671,15 @@ describe('the waker labels its own attempts as automatic', () => {
     expect(after.effects[1].attempts).toBe(1);
   });
 
-  // The same executor, driven by the CLI path, must produce the other label — otherwise the split is
-  // decorative and the dataset is one population wearing two names.
-  it('the same effect driven from the command line is recorded as `human`', async () => {
+  // The same executor, TOLD `human`, must produce the other label — otherwise the split is decorative and
+  // the dataset is one population wearing two names.
+  //
+  // NAMED FOR WHAT IT ACTUALLY DRIVES (PR #1195 round 6). This was called "driven from the command line"
+  // and its comment said "driven by the CLI path", but it hand-passes `'human'` to `applyPendingEffects`
+  // and never imports `cli-adapter.mjs` — so it asserted nothing about the CLI, and the CLI's own literal
+  // could be changed to `'auto'` with the whole suite green. The real CLI path is covered by `an effect
+  // applied through the REAL command line is recorded as human` in effect-executor.test.mjs.
+  it('the executor told `human` records it, whatever the caller', async () => {
     const store = createMemoryRunStore();
     const sinks = { 'start.build': async () => ({ ok: true }), 'note.write': async () => ({ ok: true }) };
     let run = advanceWhileRunning(startRun({ op: OP, id: 'run-h', input: { pr: 7 }, registry }), { registry });
