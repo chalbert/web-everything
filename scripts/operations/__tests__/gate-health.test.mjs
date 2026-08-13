@@ -261,16 +261,84 @@ describe('the verdict names blockers rather than producing a number it cannot su
     expect(requiredNPerGroup(0.5)).toBe(1565);
   });
 
-  it('the blocker says no sample size would do, rather than printing a null', () => {
-    // 39 of 40 defects → a 97.5% corpus rate, and no band reaches 5-and-5, so both conditions hold at once.
-    // The clean arm of the single occupied band is 19/20 → 95%, which also refuses, so the categorical
-    // sentence is licensed here: EVERY band refuses.
+  // #1203 round 2, finding 7. The guard coerced, and `Number(null)` / `Number([])` are both 0 — so a base
+  // rate nobody supplied was silently replaced by 0 and answered 153. That is the same silent substitution
+  // the docstring says was removed, surviving through `Number()` instead of through `|| 0`. It is now a
+  // `typeof` check. Mutation-proven: restoring `Number(baseRate)` reddens this test.
+  it('refuses a non-number rather than coercing one into existence', () => {
+    // `'0.1'` earns its place: every other value here coerces to 0, 1 or NaN, all of which the domain and
+    // boundary guards refuse anyway — so with only those, coercing `mdd` is invisible. At `p = 0.5` a
+    // coerced `'0.1'` answers 389 while `typeof` refuses. (`'0.5'` would NOT distinguish them: 0.5 + 0.5
+    // lands exactly on the boundary and is refused either way.)
+    for (const bad of [null, [], '0.5', '0.1', {}, true, '']) {
+      expect(`${JSON.stringify(bad)}: ${requiredNPerGroup(bad, 0.05)}`).toBe(`${JSON.stringify(bad)}: null`);
+      expect(`${JSON.stringify(bad)}: ${requiredNPerGroup(0.5, bad)}`).toBe(`${JSON.stringify(bad)}: null`);
+    }
+    // THE ONE EXCEPTION, and it is stated in the docstring rather than left to be discovered: an OMITTED
+    // `mdd` takes the documented default, so these two agree. An omitted `baseRate` has no default.
+    expect(requiredNPerGroup(0.5, undefined)).toBe(1565);
+    expect(requiredNPerGroup(0.5)).toBe(1565);
+    expect(requiredNPerGroup(undefined, 0.05)).toBeNull();
+  });
+
+  it('the blocker reports the shortfall in counts, and prints no null', () => {
+    // 39 of 40 defects. All 20 escalated records are defects, so the `escalated non-defects` cell holds 0 —
+    // the whole 5 short, and the smallest of the four cells.
     const records = Array.from({ length: 40 }, (_, i) => pr(i, 100, i % 2 === 0, i < 39 ? 'independent-fix' : null, 60, `s${i}`));
     const out = assessCriteria({ records, nowSec: NOW });
     expect(out.power.requiredNPerGroup).toBeNull();
-    expect(out.power.perBand.every((b) => b.requiredNPerGroup === null)).toBe(true);
     const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
-    expect(blocker).toMatch(/no sample size would detect a 5-point rise in ANY band/);
+    expect(blocker).toMatch(/closest is band `s`, 5 short in its smallest cell \(escalated non-defects: 0 of the 5 needed\)/);
+    expect(blocker).not.toMatch(/null|undefined|NaN/);
+    // NO MODELLED NUMBER AND NO RATE IN THE PROSE — the round-3 model change. The blocker states the
+    // validity fact in counts; every sample size and every rate lives in `power.perBand`.
+    expect(blocker).not.toMatch(/~\d+ PRs per group/);
+    expect(blocker).not.toMatch(/\d+(\.\d+)?%/);
+    expect(blocker).not.toMatch(/no sample size would/);
+  });
+
+  /**
+   * #1203 round 2, finding 1 — a NEW regression of the round-1 class, and the reason the sentence stopped
+   * fusing. The categorical branch inferred a REASON from a `null` it never checked: `requiredNPerGroup`
+   * returns null for four distinct reasons and only one of them says anything about a band. A negative
+   * `minDetectableDiff` made every band null at once and lit the branch with
+   * "every band's clean arm is already within -5 points of 100%" — printed beside a payload showing a band
+   * at 10.0%, and strictly worse than the visibly-absurd huge number `main` printed for the same input.
+   */
+  it('an unsizeable `mdd` is its OWN blocker, naming the input, not a claim about bands', () => {
+    const records = [
+      ...Array.from({ length: 20 }, (_, i) => pr(i, 10, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `a${i}`)),
+      ...Array.from({ length: 20 }, (_, i) => pr(100 + i, 2000, i % 2 === 0, 'independent-fix', 60, `b${i}`)),
+    ];
+    for (const bad of [-0.05, 0, 1, 1.5, NaN, Infinity]) {
+      const out = assessCriteria({ records, nowSec: NOW, mdd: bad });
+      const unsizeable = out.verdict.blockers.find((b) => b.startsWith('unsizeable effect'));
+      expect(`${bad}: ${typeof unsizeable}`).toBe(`${bad}: string`);
+      expect(unsizeable).toMatch(/`minDetectableDiff` is/);
+      // The observations blocker must say NOTHING about why the power figures are null — no inferred
+      // reason, no rate, no number it did not count.
+      const obs = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+      expect(obs).not.toMatch(/points? of 100%/);
+      expect(obs).not.toMatch(/\d+(\.\d+)?%/);
+      expect(obs).not.toMatch(/~\d+ PRs per group/);
+      // And the payload must not contradict itself: a band at 10% is still reported as being at 10%.
+      const xs = out.power.perBand.find((b) => b.band === 'xs');
+      expect(xs.baseRate).toBeCloseTo(0.1, 10);
+      expect(xs.requiredNPerGroup).toBeNull();
+    }
+    // A SIZEABLE mdd raises no such blocker — otherwise the assertion above passes for the wrong reason.
+    const ok = assessCriteria({ records, nowSec: NOW, mdd: 0.2 });
+    expect(ok.verdict.blockers.find((b) => b.startsWith('unsizeable effect'))).toBeUndefined();
+  });
+
+  // #1203 round 2, finding 4. The third branch — no band holds anything at all — was unreachable from any
+  // test, so making it dead code cost nothing. It is the state the tool is actually in on a fresh repo.
+  it('says so plainly when there is no band to be close to', () => {
+    const out = assessCriteria({ records: [], nowSec: NOW });
+    expect(out.power.perBand).toEqual([]);
+    const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+    expect(blocker).toMatch(/no band holds a single observation/);
+    expect(blocker).not.toMatch(/closest is band/);
     expect(blocker).not.toMatch(/null|undefined|NaN/);
   });
 
@@ -297,33 +365,68 @@ describe('the verdict names blockers rather than producing a number it cannot su
       ...Array.from({ length: 20 }, (_, i) => pr(200 + i, 10, i % 2 === 0, i < 2 ? 'independent-fix' : null, 60, `c${i}`)),
     ];
 
-    it('names the REACHABLE band instead of claiming no sample size would do', () => {
-      const out = assessCriteria({ records: skewed(), nowSec: NOW, mdd: 0.2 });
-      expect(out.multiplicity.bandsTested).toBe(0);          // the blocker really does fire — not vacuous
-      const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
-      // `xs` at 63, not `m` at 95 — the band that needs the FEWEST, so "how far off are we" is answerable.
-      expect(blocker).toMatch(/nearest band is `xs`/);
-      expect(blocker).toMatch(/~63 PRs per group there would detect a 20-point difference/);
-      // The categorical claim must NOT appear while any band admits an answer.
-      expect(blocker).not.toMatch(/no sample size would detect/);
-    });
-
     it('sizes each band from its own CLEAN arm, not from the corpus and not from both arms pooled', () => {
       const out = assessCriteria({ records: skewed(), nowSec: NOW, mdd: 0.2 });
       const byBand = Object.fromEntries(out.power.perBand.map((b) => [b.band, b]));
       // Clean-arm rates. Pooling `xs` across arms would give 2/20 = 10% as well — so `m` is the one that
-      // discriminates: clean 5/10 = 50% needs 95, but pooled across arms 15/20 = 75% needs only 50, which
-      // would also steal "nearest band" from `xs` in the test above.
+      // discriminates: clean 5/10 = 50% needs 95, but pooled across arms 15/20 = 75% needs only 50.
       expect(byBand.xs.baseRate).toBeCloseTo(0.1, 10);
       expect(byBand.xs.requiredNPerGroup).toBe(63);
       expect(byBand.m.baseRate).toBeCloseTo(0.5, 10);
       expect(byBand.m.requiredNPerGroup).toBe(95);
       expect(byBand.xl.requiredNPerGroup).toBeNull();
-      // Empty bands carry no entry at all, rather than a rate invented from zero observations.
+      // Bands with no observations at all carry no entry, rather than a rate invented from nothing.
       expect(out.power.perBand.map((b) => b.band).sort()).toEqual(['m', 'xl', 'xs']);
       // The corpus figure is a DIFFERENT number over a different population, and both are reported.
       expect(out.power.baseRate).toBeCloseTo(0.8, 10);
       expect(out.power.requiredNPerGroup).toBeNull();
+    });
+  });
+
+  /**
+   * #1203 round 2, finding 2 — "the nearest band" was ranked on the smallest REQUIREMENT, which is not
+   * nearness. It never looked at what a band already has, so a band ONE observation from clearing the bar
+   * lost to a band needing ~53 more PRs in each arm, and an operator following the sentence did about 106
+   * PRs of work instead of 1. Ranking is now on the deficit against the 5-and-5 rule, which is countable
+   * without any model and is what the word means.
+   */
+  describe('the blocker ranks bands by how close they are, not by how small their sample size is', () => {
+    // band `s`  — clean 200/60, escalated 100/4 → smallest cell is 4 (escalated defects): ONE short.
+    //             Its own requiredNPerGroup at 30% is 95, already exceeded in both arms, and it is STILL
+    //             not testable — which is the pair of criteria the old sentence spliced together.
+    // band `xs` — clean 10/1, escalated 10/1 → smallest cell is 1: FOUR short, but requires only 63.
+    const nearVsCheap = () => [
+      ...Array.from({ length: 200 }, (_, i) => pr(i, 60, false, i < 60 ? 'independent-fix' : null, 60, `s-c${i}`)),
+      ...Array.from({ length: 100 }, (_, i) => pr(1000 + i, 60, true, i < 4 ? 'independent-fix' : null, 60, `s-e${i}`)),
+      ...Array.from({ length: 10 }, (_, i) => pr(2000 + i, 10, false, i < 1 ? 'independent-fix' : null, 60, `x-c${i}`)),
+      ...Array.from({ length: 10 }, (_, i) => pr(3000 + i, 10, true, i < 1 ? 'independent-fix' : null, 60, `x-e${i}`)),
+    ];
+
+    it('names the band that is CLOSEST, not the one with the smallest requirement', () => {
+      const out = assessCriteria({ records: nearVsCheap(), nowSec: NOW, mdd: 0.2 });
+      expect(out.multiplicity.bandsTested).toBe(0);          // the blocker really does fire — not vacuous
+      const byBand = Object.fromEntries(out.power.perBand.map((b) => [b.band, b]));
+      // The two criteria disagree on purpose: `s` is nearer, `xs` is cheaper.
+      expect(`${byBand.s.shortBy} vs ${byBand.xs.shortBy}`).toBe('1 vs 4');
+      expect(byBand.s.requiredNPerGroup).toBeGreaterThan(byBand.xs.requiredNPerGroup);
+      const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+      expect(blocker).toMatch(/closest is band `s`, 1 short in its smallest cell \(escalated defects: 4 of the 5 needed\)/);
+      expect(blocker).not.toMatch(/`xs`/);
+    });
+
+    it('publishes `testable` alongside the sample size, so an already-met requirement cannot read as unmet', () => {
+      const out = assessCriteria({ records: nearVsCheap(), nowSec: NOW, mdd: 0.2 });
+      const s = out.power.perBand.find((b) => b.band === 's');
+      // 200 and 100 observations against a requirement of 95 — the POWER bar is met in both arms.
+      expect(s.requiredNPerGroup).toBe(95);
+      // …and the band is still not testable. Publishing the first without the second is what let a reader
+      // conclude "collect 95 and the blocker clears".
+      expect(s.testable).toBe(false);
+      expect(s.shortBy).toBe(1);
+      expect(s.smallestCell).toBe('escalated defects');
+      // The blocker says so in as many words, rather than leaving the two adjacent and unexplained.
+      const blocker = out.verdict.blockers.find((b) => b.startsWith('insufficient observations'));
+      expect(blocker).toMatch(/different question from having enough data to detect a difference/);
     });
   });
 
@@ -445,5 +548,40 @@ describe('the declaration', () => {
     const { run } = runGateHealth({}, history);
     expect(run.findings.assess.parameterSet).toBeNull();
     expect(run.findings.assess.parameterSetCaveat).toMatch(/nothing stamps the policy-contract version/);
+  });
+
+  /**
+   * #1203 round 2, finding 3 — the round-1 `mdd = 0` fix landed one layer BELOW where the substitution
+   * happens. `assessCriteria` grew a refusal for a step it cannot size, and this operation ran its own
+   * `Number(...) || 0.05` first, so the refusal was unreachable from the only shipped surface that can
+   * produce the input. The library looked fixed and the operator's symptom was byte-identical.
+   *
+   * Driven through `startRun`/`advanceWhileRunning`, because that is the layer the defect lived at — a
+   * direct `assessCriteria` call could never have seen it.
+   */
+  describe('the operation passes `minDetectableDiff` through instead of substituting for it', () => {
+    it('an explicit 0 reaches the assessment and is refused, not silently turned into 0.05', () => {
+      const { run } = runGateHealth({ minDetectableDiff: 0 }, history);
+      const assess = run.findings.assess;
+      expect(assess.power.minDetectableDiff).toBe(0);          // the caller's 0 survives into the payload
+      expect(assess.power.requiredNPerGroup).toBeNull();
+      expect(assess.verdict.blockers.join(' ')).toMatch(/unsizeable effect/);
+      // The old symptom, asserted as absent: a sample size for an effect nobody asked about.
+      expect(assess.verdict.blockers.join(' ')).not.toMatch(/5-point difference/);
+    });
+
+    it('a negative reaches it too, and produces no claim about the bands', () => {
+      const { run } = runGateHealth({ minDetectableDiff: -0.05 }, history);
+      const assess = run.findings.assess;
+      expect(assess.power.minDetectableDiff).toBe(-0.05);
+      expect(assess.verdict.blockers.join(' ')).toMatch(/unsizeable effect/);
+      expect(assess.verdict.blockers.join(' ')).not.toMatch(/within -5 points of 100%/);
+    });
+
+    it('an ABSENT field still gets the schema default, so the pass-through costs nothing', () => {
+      const { run } = runGateHealth({}, history);
+      expect(run.findings.assess.power.minDetectableDiff).toBe(0.05);
+      expect(run.findings.assess.verdict.blockers.join(' ')).not.toMatch(/unsizeable effect/);
+    });
   });
 });

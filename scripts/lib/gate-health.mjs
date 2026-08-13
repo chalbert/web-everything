@@ -201,11 +201,19 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  *      — the same averaging that produced the `1`. Such an arm also yields zero failures at every n, so
  *      `compareProportions` below would refuse it forever; the estimator must not name an n at which
  *      this module's own validity rule can never be met.
- *   2. either argument is not finite.
- *   3. `mdd <= 0`, or `baseRate` outside `[0, 1]`. A zero effect needs infinite n — that is a refusal,
- *      not a default. `Number(mdd) || 0.05` silently turned an explicit `mdd = 0` into a sample size for
- *      a 5-point effect the caller never asked about, and `minDetectableDiff` is a declared numeric input
- *      with no minimum, so that substitution was reachable from the shipped surface.
+ *   2. either argument is not a `number` — checked by `typeof`, NOT by coercion. `Number(null)` and
+ *      `Number([])` are both `0`, so a coercing guard silently substituted a base rate nobody supplied and
+ *      returned 153 for it; that is the same silent substitution this function claims to have removed,
+ *      surviving through `Number()` instead of through `|| 0`. The ONE exception, stated because "as
+ *      passed" would otherwise be wrong: an OMITTED `mdd` takes the documented 0.05 default, so
+ *      `requiredNPerGroup(0.5)` and `requiredNPerGroup(0.5, undefined)` both answer 1565. An omitted
+ *      `baseRate` has no default and refuses.
+ *   3. `mdd <= 0`, or `baseRate` outside `[0, 1]`. A zero effect needs infinite n — that is a refusal, not
+ *      a default. `Number(mdd) || 0.05` silently turned an explicit `mdd = 0` into a sample size for a
+ *      5-point effect the caller never asked about, and `minDetectableDiff` is a declared numeric input
+ *      with no minimum, so that substitution was reachable from the shipped surface. There is deliberately
+ *      no separate `mdd >= 1` guard: with `baseRate >= 0` it is already case 1, and a redundant line that
+ *      no input can reach is a line no test can defend.
  *
  * THE ARGUMENTS ARE GUARDED AS PASSED, before any clamp. Clamping first made the guard test a different
  * pair than the caller supplied, in both directions: `(0.9999999, 1e-6)` sums past 1 and was answered
@@ -222,13 +230,16 @@ export function compareGroups(band, { alpha = 0.05 } = {}) {
  *     only 2.12 failures at n=212, so `compareProportions` still refuses there. A caller that needs both
  *     must apply `n >= 5 / min(p, 1 - p, p + d, 1 - (p + d))` itself. Folding that floor in here would
  *     change shipped constants (`requiredNPerGroup(0.044, 0.2)` 49 → 114) and is a modelling call, not a
- *     bug fix — filed on the card rather than decided in a review round.
+ *     bug fix — filed on the card rather than decided in a review round. WHICH OF THE TWO BINDS DEPENDS ON
+ *     `mdd`, and `minDetectableDiff` is a caller input, so no unconditional claim is made about it: at
+ *     `p = 0.021` the power term is 276 at `mdd = 0.05` (the floor, 239, does not bind) but 104 at 0.10 and
+ *     42 at 0.20, where it does.
  *
  * @returns {number|null} observations per group, or null in the three cases above.
  */
 export function requiredNPerGroup(baseRate, mdd = 0.05) {
-  const p = Number(baseRate);
-  const d = Number(mdd);
+  const p = typeof baseRate === 'number' ? baseRate : NaN;
+  const d = typeof mdd === 'number' ? mdd : NaN;
   if (!Number.isFinite(p) || !Number.isFinite(d)) return null;
   if (d <= 0 || p < 0 || p > 1) return null;
   if (p + d >= 1) return null;
@@ -272,40 +283,80 @@ export function assessCriteria({ records, nowSec, windowDays = 14, parameterSet 
   // an operator quotes, but the BLOCKER no longer speaks from it — see `bandNeeds`.
   const required = requiredNPerGroup(baseRate, mdd);
 
-  // PER BAND, AND FROM THE CLEAN ARM (PR #1203 review, finding 1). The blocker asks a per-band question —
-  // "PRs per group per band" — and answering it from the pooled rate made a categorical claim out of a
-  // population the decision does not use. Demonstrated: 80 records at 98.75% plus 20 at 10% pools to 81%,
-  // which refuses outright, while the `xs` band's own 10% needs 63 per group. The old text said "~33 per
-  // group per band" — an under-estimate pointing the right way; the categorical version points the wrong
-  // way and reads as "collecting more data is futile", which is the worst thing this module can say.
+  // ── THE BLOCKER SENTENCE STOPPED FUSING (PR #1203 round 3) ──────────────────────────────────────────────
   //
-  // The CLEAN arm specifically, not the band pooled across arms: the formula sizes a comparison against a
-  // control at `baseRate` and a treatment at `baseRate + mdd`, so the control arm's rate is the base rate
-  // it means. Pooling the two arms feeds the comparison its own answer.
+  // Rounds 1 and 2 each fixed one fusion inside this sentence and created another. Round 1 answered a
+  // per-band question with a corpus rate. Round 2 fixed that and then inferred a REASON from a `null` it
+  // never checked — printing "every band's clean arm is already within -5 points of 100%" for a negative
+  // `mdd`, next to a payload showing a band at 10%. Same class, new place, twice.
+  //
+  // The model error is the sentence itself: one fluent string was carrying a validity fact, a power
+  // estimate, a corpus rate, a band rate and a categorical impossibility claim — five things, three
+  // populations, two different criteria. Patching it a third time would move the fusion again, so per
+  // `we:docs/agent/delivery-loop.md` the model changes instead of the implementation:
+  //
+  //   - the blocker states ONLY what `!testable.length` establishes — a validity fact, in pure counts;
+  //   - "how far off" is a DEFICIT against the 5-and-5 rule, which is what "nearest" means and is
+  //     countable without any model;
+  //   - every modelled number lives in `power.perBand`, structured and labelled, never in prose;
+  //   - an `mdd` that cannot be sized is its OWN blocker, naming the input, rather than a claim about
+  //     bands inferred from the nulls it caused.
+  //
+  // Nothing here asserts a relationship between the two criteria, because there isn't one: a band can
+  // exceed its `requiredNPerGroup` in both arms and still not be testable (round 2 review, finding 2).
+
+  // Is the requested effect size sizeable AT ALL? Checked ONCE, on the input, and reported as itself —
+  // never inferred later from a null. `requiredNPerGroup` returns null for four distinct reasons and only
+  // one of them says anything about a band.
+  const sizeableMdd = Number.isFinite(mdd) && mdd > 0 && mdd < 1;
+  if (!sizeableMdd) {
+    blockers.push(`unsizeable effect — \`minDetectableDiff\` is ${JSON.stringify(mdd)}, which no sample size can be computed for; it must be a number greater than 0 and less than 1. No power figure below is populated, and that is the reason.`);
+  }
+
+  // PER BAND. `baseRate` is the CLEAN arm's rate — the formula sizes a control at `baseRate` against a
+  // treatment at `baseRate + mdd`, so the control arm's rate is the base rate it means, and pooling the two
+  // arms feeds the comparison its own answer. `shortBy` is the SEPARATE, purely-counted validity question.
   const bandNeeds = SIZE_BANDS.map(([label]) => {
-    const { n, k } = bands[label].clean;
-    if (!n) return null;
-    const rate = k / n;
-    return { band: label, baseRate: rate, requiredNPerGroup: requiredNPerGroup(rate, mdd) };
+    const { escalated: esc, clean: cln } = bands[label];
+    if (!esc.n && !cln.n) return null;
+    const cells = [
+      { cell: 'escalated defects', have: esc.k },
+      { cell: 'escalated non-defects', have: esc.n - esc.k },
+      { cell: 'clean defects', have: cln.k },
+      { cell: 'clean non-defects', have: cln.n - cln.k },
+    ];
+    const worst = cells.reduce((a, b) => (b.have < a.have ? b : a));
+    const rate = cln.n ? cln.k / cln.n : null;
+    return {
+      band: label,
+      baseRate: rate,
+      // Null when there is no clean arm to take a rate from, or for any of the four reasons the estimator
+      // itself refuses. Which one holds is answered by `baseRate` and by the unsizeable-effect blocker —
+      // never guessed from this field. No `sizeableMdd` test here on purpose: the estimator already
+      // refuses every unsizeable `mdd`, and a redundant condition is one no mutation can redden.
+      requiredNPerGroup: rate === null ? null : requiredNPerGroup(rate, mdd),
+      // THE VALIDITY QUESTION, in counts. `testable` mirrors `compareProportions`'s own rule exactly.
+      testable: worst.have >= 5,
+      shortBy: Math.max(0, 5 - worst.have),
+      smallestCell: worst.cell,
+    };
   }).filter(Boolean);
 
   if (!testable.length) {
-    const answerable = bandNeeds.filter((b) => b.requiredNPerGroup !== null);
-    // The REACHABLE one — the band that needs the fewest. "No sample size would do" is a claim about every
-    // band at once, so it may only be made when every band refuses.
-    const easiest = answerable.length
-      ? answerable.reduce((a, b) => (b.requiredNPerGroup < a.requiredNPerGroup ? b : a))
+    // NEAREST BY DEFICIT, not by smallest requirement. Round 2 ranked on `requiredNPerGroup` and called the
+    // winner "the nearest band": a band one observation from clearing the bar lost to a band needing ~106
+    // more PRs, and an operator following it did about 106 PRs of work instead of 1.
+    const nearest = bandNeeds.length
+      ? bandNeeds.reduce((a, b) => (b.shortBy < a.shortBy ? b : a))
       : null;
-    const step = Math.round(mdd * 100);
-    let need;
-    if (easiest) {
-      need = `the nearest band is \`${easiest.band}\`, whose clean arm sits at ${(100 * easiest.baseRate).toFixed(1)}% — ~${easiest.requiredNPerGroup} PRs per group there would detect a ${step}-point difference`;
-    } else if (bandNeeds.length) {
-      need = `no sample size would detect a ${step}-point rise in ANY band — every band's clean arm is already within ${step} points of 100%`;
-    } else {
-      need = `no band holds a single clean-arm observation, so there is no rate to size against`;
-    }
-    blockers.push(`insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups at a ${(100 * baseRate).toFixed(1)}% corpus-wide base rate; ${need}`);
+    const how = nearest
+      ? `closest is band \`${nearest.band}\`, ${nearest.shortBy} short in its smallest cell (${nearest.smallestCell}: ${5 - nearest.shortBy} of the 5 needed)`
+      : `no band holds a single observation`;
+    blockers.push(
+      `insufficient observations — no size band reaches 5 defects and 5 non-defects in both groups; ${how}. `
+      + 'Clearing that bar is a different question from having enough data to detect a difference; the '
+      + 'per-band sample sizes for that are reported separately and neither implies the other.',
+    );
   }
 
   // `obs.observed` is the working set, not a result. Returning it put all 300 records inside the finding a

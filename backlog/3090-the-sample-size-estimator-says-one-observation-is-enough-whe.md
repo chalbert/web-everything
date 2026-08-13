@@ -96,8 +96,41 @@ direction; the categorical version points the wrong way and reads as *"collectin
 
 Each band is now sized from its **clean arm** — the formula compares a control at `baseRate` against a
 treatment at `baseRate + mdd`, so the control arm's rate is the base rate it means. `power.perBand` carries
-one entry per occupied band; `power.baseRate` and `power.requiredNPerGroup` stay corpus-wide and are now
-labelled as such.
+one entry per occupied band; `power.baseRate` and `power.requiredNPerGroup` stay corpus-wide.
+
+## Round 3 — the sentence stopped fusing, because patching it kept moving the defect
+
+Rounds 1 and 2 each fixed one fusion inside the blocker and created another. Round 2 inferred a **reason**
+from a `null` it never checked: `requiredNPerGroup` refuses for four distinct reasons, and a negative
+`minDetectableDiff` made every band null at once and lit the categorical branch with *"every band's clean
+arm is already within -5 points of 100%"* — printed beside a payload showing a band at 10.0%, and strictly
+worse than the visibly-absurd huge number `main` printed for the same input. Same class, new place, twice.
+
+**The model error was the sentence.** One string carried a validity fact, a power estimate, a corpus rate,
+a band rate and a categorical impossibility claim — five things, three populations, two criteria. Per
+`we:docs/agent/delivery-loop.md`, three rounds on one class means the model is wrong, so:
+
+- the blocker states **only** what `!testable.length` establishes — a validity fact, in pure counts, with
+  no rate and no modelled number anywhere in it;
+- *"how far off"* is a **deficit** against the 5-and-5 rule, which is what "nearest" means and is countable
+  without any model. Round 2 ranked on the smallest *requirement* and called the winner "the nearest band":
+  a band **one observation** from clearing the bar lost to one needing ~53 more PRs per arm, so an operator
+  following the sentence did about 106 PRs of work instead of 1;
+- an `mdd` that cannot be sized is **its own blocker**, naming the input, never a claim about bands;
+- `power.perBand` now carries `testable`, `shortBy` and `smallestCell` beside `requiredNPerGroup`, because
+  a band can exceed its sample-size requirement in both arms and still not be testable — publishing the
+  first without the second is what let a reader conclude *"collect 95 and the blocker clears"*.
+
+**And the round-1 `mdd = 0` fix landed one layer below where the substitution happened.**
+`we:scripts/operations/gate-health.mjs` ran its own `Number(...) || 0.05` before `assessCriteria` ever saw
+the zero, so the library's refusal was unreachable from the only shipped surface that produces the input —
+the fix looked done while the operator's symptom was byte-identical. The value is now passed through; the
+schema still supplies the default when the field is absent.
+
+The guard also stopped coercing. `Number(null)` and `Number([])` are both `0`, so a base rate nobody
+supplied was silently replaced and answered 153 — the same substitution this card says was removed,
+surviving through `Number()` instead of through `|| 0`. It is a `typeof` check now, with one stated
+exception: an omitted `mdd` takes the documented default.
 
 **What is NOT fixed, stated plainly.** The low end is untouched. `pbar = p + d / 2` places the comparison arm
 above the base rate, so the formula is one-directional by construction and `baseRate - mdd < 0` is outside
@@ -135,5 +168,16 @@ p+d, 1-(p+d))` — would close it, but it **changes shipped constants**: `requir
 49 → 114, and the existing test pins those values explicitly as the textbook reference.
 
 That is a modelling call, not a bug fix, so it is a box rather than a change made inside a review round.
-Note it does not affect the numbers on [#3071]: at a 2.1% base rate the power term (278) already exceeds the
-floor (239).
+
+**Which of the two binds depends on `mdd`, and `minDetectableDiff` is a caller input, so no unconditional
+claim is made about [#3071].** At that card's measured base rate the two are computed from the same rate
+(`5 / 234 = 0.02137`, not the rounded 2.1% — an earlier version of this paragraph compared a power term
+from one rate against a floor from the other and presented it as one comparison):
+
+| mdd | power term | floor `⌈5/p⌉` | binds |
+| --- | --- | --- | --- |
+| 0.05 | 278 | 234 | power |
+| 0.10 | 104 | 234 | **floor** |
+| 0.20 | 42 | 234 | **floor** |
+
+So at #3071's default the floor does not bind and its 278 stands. At a larger requested effect it would.
