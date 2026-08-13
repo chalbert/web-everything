@@ -103,7 +103,8 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     for (let turn = 0; turn < 64; turn += 1) {
       const status = runStatus(current, { registry });
       if (status === 'awaiting-effect') {
-        const outcome = await applyPendingEffects(current, { sinks, store });
+        // `auto`, because this is the timer. The distinction is the whole point of recording it.
+        const outcome = await applyPendingEffects(current, { sinks, store, attemptedBy: 'auto' });
         current = outcome.run;
         if (outcome.error) { report.errors.push({ key: outcome.halted?.key, error: String(outcome.error.message ?? outcome.error) }); break; }
         // Parked again on a NEW dispatch — a legitimate outcome, and the next pass picks it up.

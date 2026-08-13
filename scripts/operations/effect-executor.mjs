@@ -177,9 +177,18 @@ function withEntry(run, key, patch) {
  * @param {Record<string, Function>|Map<string, Function>} opts.sinks - effect type → `async (payload, ctx) => result`.
  * @param {{read: Function, write: Function}} opts.store - the run store handle (see `run-store.mjs`).
  * @param {number} [opts.stepIndex] - apply a specific step's effects instead of the pending one.
+ * @param {'human'|'auto'|'unknown'} [opts.attemptedBy] - who re-entered. Recorded, never acted on.
+ *
+ *   DEFAULTS TO `unknown`, NOT `human` (PR #1195 review, blocking). The earlier default was justified by
+ *   "every caller that existed before the waker was one", and that sentence was false the moment it was
+ *   written: `driveRun` is also reached by the HTTP adapter, where the caller is a network client the
+ *   adapter cannot identify. Every request-driven attempt was being filed as human.
+ *
+ *   There is no safe guess, so the third value is the honest one: `unknown` is excluded from BOTH
+ *   populations rather than padding either. A thin dataset is recoverable; a mislabelled one is not.
  * @returns {Promise<{run: object, applied: string[], skipped: string[], halted: (object|null), error: (Error|null)}>}
  */
-export async function applyPendingEffects(run, { sinks, store, stepIndex = null } = {}) {
+export async function applyPendingEffects(run, { sinks, store, stepIndex = null, attemptedBy = 'unknown' } = {}) {
   assertRunRecord(run, 'run record passed to applyPendingEffects');
   if (!store || typeof store.write !== 'function') {
     throw new TypeError('operations: applyPendingEffects needs a `store` handle — the record must be durable between effects');
@@ -253,9 +262,50 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null 
     //     handle-less entry is refused on replay exactly as `pending` is. What it buys is VISIBILITY: the
     //     crash lands in `inFlightEntries().unknown` and is closable through `resolveInFlight`, where a
     //     `pending` entry is invisible to both and can only be hand-edited. See the `inFlight` docblock.
+    // COUNT THE ATTEMPT, and record WHO made it. This is instrumentation, not policy: nothing reads these to
+    // decide anything, and #3083 — where retry gets a cap, a backoff and an owner — is unruled. They are here
+    // now because they cannot be recovered later. Today's corpus holds zero retry observations (nothing
+    // dispatches yet), so every one that ever exists starts accumulating from whenever this lands.
+    //
+    // `attemptedBy` separates two populations that a naive count conflates and that mean OPPOSITE things:
+    // an AUTOMATIC retry succeeding says the failure was flaky and a small budget would have caught it; a
+    // HUMAN retry succeeding usually says someone fixed the cause, and no budget would ever have helped.
+    // Averaging them yields a default that is too high. One field, unrecoverable if omitted.
+    // PER POPULATION, not one count plus a last-writer label (PR #1195 review, blocking 1). The first cut
+    // kept a cumulative `attempts` and OVERWROTE `attemptedBy` on each attempt, so an effect retried by both
+    // populations was filed wholly into whichever went last, carrying the other's attempts in its count.
+    // Both directions corrupt the corpus:
+    //   - human, human, then auto succeeds → filed as an automatic success at attempt 3. The truth is that
+    //     exactly ONE automatic attempt was made and it worked first time. That is the pooled inflation this
+    //     whole file exists to prevent.
+    //   - auto, auto, then a human fixes the cause → filed as human, and TWO genuine automatic failures —
+    //     evidence that a budget buys nothing — vanish from the automatic population entirely.
+    // Counting each population separately means a mixed entry contributes honestly to both.
+    const by = attemptedBy === 'auto' || attemptedBy === 'human' ? attemptedBy : 'unknown';
+    // THE INVARIANT, so #3083's reader does not have to guess its own denominator: for any entry created at
+    // or after this change, `attempts === autoAttempts + humanAttempts + unknownAttempts`. Every attempt
+    // increments exactly one population, and `by` is always one of the three.
+    //
+    // It can only be violated by an entry that already carries `attempts` and no per-population fields —
+    // reachable from an INTERMEDIATE build of this branch, which wrote a cumulative `attempts` plus a
+    // last-writer `attemptedBy`, and whose records survive locally because `.operations/` is gitignored.
+    // On a record written before any of this the four are all absent, all start at 0 together, and nothing
+    // is misfiled. The old `attemptedBy` key is dropped rather than left beside `lastAttemptBy`, so such a
+    // record cannot present two answers to the same question.
+    const attempted = {
+      attempts: (Number(live.attempts) || 0) + 1,
+      autoAttempts: (Number(live.autoAttempts) || 0) + (by === 'auto' ? 1 : 0),
+      humanAttempts: (Number(live.humanAttempts) || 0) + (by === 'human' ? 1 : 0),
+      unknownAttempts: (Number(live.unknownAttempts) || 0) + (by === 'unknown' ? 1 : 0),
+      lastAttemptAt: new Date().toISOString(),
+      // NAMED for what it is. `attemptedBy` read as "who attempted this", which is false for a mixed entry;
+      // it has only ever meant who attempted it LAST, and the last attempt is the one whose outcome settled.
+      lastAttemptBy: by,
+      attemptedBy: undefined,
+    };
     current = live.dispatch
-      ? withEntry(current, live.key, { status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
-      : withEntry(current, live.key, { status: 'pending', error: null });
+      ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
+      : withEntry(current, live.key, { ...attempted, status: 'pending', error: null });
     store.write(current);
 
     try {
@@ -377,7 +427,18 @@ export function createEffectExecutor({ sinks, store } = {}) {
     throw new TypeError('operations: createEffectExecutor needs a `store` handle');
   }
   return {
-    apply: (run, { stepIndex = null } = {}) => applyPendingEffects(run, { sinks, store, stepIndex }),
+    // `attemptedBy` is forwarded, not dropped. A destructure that omitted the field accepted a caller's
+    // stated population and silently recorded `unknown` instead.
+    //
+    // SCOPE, STATED HONESTLY (PR #1195 round 6, blocking 2): this closure has NO production caller. All
+    // three real entry points — the CLI, the HTTP adapter and the waker — call `applyPendingEffects`
+    // directly, so nothing in production ever had an argument eaten here. An earlier version of this
+    // comment called it "the one production path that reaches applyPendingEffects", which was false and
+    // was the same defect this item keeps bouncing on: a statement about one population (test callers)
+    // used to describe another (production callers). The fix is still right — the façade is offered to
+    // adapters and would mislabel the moment one used it, and mislabelled retry data cannot be recovered
+    // — but it guards a surface nothing production reaches today.
+    apply: (run, { stepIndex = null, attemptedBy = 'unknown' } = {}) => applyPendingEffects(run, { sinks, store, stepIndex, attemptedBy }),
     types: () => (sinks instanceof Map ? [...sinks.keys()] : Object.keys(sinks)).sort(),
   };
 }
