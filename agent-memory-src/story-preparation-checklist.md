@@ -28,11 +28,19 @@ anything that a story should have."*
 7. **Delivery shape** — can it land incrementally behind `main`, or must it land as one piece (needing a
    branch)? Say which, and why.
 
-**Why:** four items surveyed against what their PRs actually had to touch burned 2–6 review rounds each, and
-every gap was a card-level omission rather than a coding mistake — #3090 (size 1, 2 files, touched an
-unscoped caller), #3091 (four call sites, one discipline, found one at a time over six rounds), #3084 (3
-files declared, ~20 touched), #3071 (scope exactly right, work still pointless because nothing had measured
-whether it would unblock anything). Preparation is where that cost is paid or avoided.
+**Why:** items surveyed against what their PRs actually had to touch burned 2–6 review rounds each, and the
+gaps were card-level omissions rather than coding mistakes — #3090 (size 1, 2 files declared, touched a
+caller that was not in scope) and #3091 (four call sites had to honour one discipline; reviewers found them
+one at a time over six rounds). #3071 is the counter-example and belongs in the list: its scope was exactly
+right and the work was still pointless, because nothing had measured whether it would unblock anything.
+Preparation is where that cost is paid or avoided.
+
+**A correction, kept because it is the same defect this checklist exists to prevent.** The first version of
+this entry also cited *"#3084 — 3 files declared, ~20 touched"*. **That is false.** #3084 touched exactly its
+three declared files plus its own card (`git diff --name-only 227eef7c^1 227eef7c`). The "~20" was GitHub's
+`changedFiles` count against a stale `baseRefOid` after the drain rebased that lane — a number read off a UI,
+used as evidence, and propagated into two artifacts without being checked against the diff. **Never cite a
+file count from a PR page; derive it from the commit range.** An independent review caught it.
 
 **How to apply:** manual discipline until it becomes the `prepare-story` operation (epic `xl2q1zt`, first
 slice = the consumers check). Grounding rule: cite `path:line` actually opened, never invent an interface
