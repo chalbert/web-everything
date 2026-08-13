@@ -88,3 +88,35 @@ have an opinion. That trade is a ruling.
 
 - Whatever is chosen must not make a HUMAN re-run refuse. The operator hitting `--resume` after fixing the
   credentials is the recovery path, and a budget that has been exhausted by the timer must not block it.
+
+## 2026-08-13 — the reader that would have supplied the numbers is coming back here
+
+PR #1195 collected retry observations so this card's numbers could be measured rather than guessed. Its
+fifth review recommended **splitting it**, and that was accepted:
+
+- **The collector lands** — the `attemptedBy` threading and per-population counts in
+  `we:scripts/operations/effect-executor.mjs`. Unrecoverable: an attempt not recorded when it happens is
+  gone for good.
+- **The reader (`we:scripts/operations/retry-health.mjs`) is re-filed against this card.** It is a pure
+  function with no production caller, not currently runnable, and it exists only to answer *this* decision.
+
+**Why it comes back rather than being finished there.** Every blocking finding from round 2 onward lived in
+the reader, and all four were one class — a statistic or statement about one population applied to another
+population's decision. The last one: an all-`unknown` corpus renders byte-identical to an empty one (1,000
+settled entries and 5,000 real attempts printing "0 attempt observation(s)"), and the refusal explains it
+with "Human retries do not answer this" — a claim about the human population in a case containing zero
+human retries.
+
+**What must be settled before the reader is written again.** This is a modelling question, not an
+implementation one, and iterating on the implementation is what failed — the same conclusion [#3071]
+reached:
+
+- Name the population each threshold guards. `MIN_OBSERVATIONS` and `MIN_SUCCESSES` currently guard a
+  denominator built from two populations at once.
+- Decide what an all-`unknown` corpus is allowed to conclude. It is not "no data", and it is not the human
+  answer either; rendering it as the former is what made the defect invisible.
+
+**Newly unblocked:** [#3090] fixed `requiredNPerGroup`, which used to answer `1` above a 97% base rate —
+exactly the range retry success rates sit in. `MIN_SUCCESSES = 20` can now be *derived* rather than chosen:
+±5 points on a 95% coverage fraction wants roughly 153 observations, not 20. The estimator is ready before
+the reader that needs it.
