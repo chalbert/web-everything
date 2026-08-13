@@ -13,6 +13,7 @@
 - 43. Enforce Shared Gate At Write-Time — PreToolUse(Edit|Write) hook scans content + denies the write; #883
 - 104. Edit-Work Runs In A Lane Clone — edits land via lane-clone → ready-to-merge PR, NEVER direct to main (#2183/#2190); never branch a shared checkout; [[single-session-should-use-a-lane]]
 - 105. Claim Ignores Git State — backlog ownership=status:active NOT the working tree; uncommitted edits never a drop-reason
+- 148. Driving Delivery? Read The Loop Doc — docs/agent/delivery-loop.md; a subagent is NOT an independent reviewer
 
 <!-- categories: everything else, recall-gated — open the sub-index whose keywords match the task -->
 - **[Constellation & Placement](index-arch.md)** — placement · WE/FUI/Plateau · boundary · contract · impl · home · migration (21 rules)
@@ -23,5 +24,5 @@
 - **[Verification & Proof](index-verif.md)** — verify · prove · probe · grounding · closure · evidence (8 rules)
 - **[Batch · Commit · Git Hygiene](index-batch.md)** — batch · commit · git · stage · push · branch · claim (8 rules)
 - **[Testing · Gates · Build Infra](index-infra.md)** — gate · check:standards · vitest · build · vite · hook · dev-port · footgun (12 rules)
-- **[Agent Meta · Memory · Model Routing](index-meta.md)** — memory · agent · model routing · working style · context · orchestration (12 rules)
+- **[Agent Meta · Memory · Model Routing](index-meta.md)** — memory · agent · model routing · working style · context · orchestration (13 rules)
 - **[Exercise Apps · Configurator · Governance](index-app.md)** — exercise app · conformance loop · configurator · governance · personas (4 rules)
