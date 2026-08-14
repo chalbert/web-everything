@@ -217,6 +217,33 @@ export const GUARANTEE_NEEDS_A_TEST_RULE = [
   'single most common shape here.',
 ].join(' ');
 
+/**
+ * #3094 — THE MUTATION PROBE. What separates a finding that is real from one that merely reads well: break the
+ * line and watch whether a NAMED test goes red. Every review in the session that motivated this card found its
+ * defects that way ("I broke this line and nothing reddened"), and none of them were asked to — which is the
+ * argument for it being UNCONDITIONAL in {@link buildPanelMandate} rather than a flag a caller sets. An
+ * instruction that must be remembered per-call is one that gets forgotten, and this is the one that has paid.
+ *
+ * IT IS SCOPED BY ITS OWN WORDING, NOT BY A LENS BRANCH. The ruling's whole point: a `simplicity` or style
+ * finding changes no behaviour, so there is nothing to break and the sentence is inapplicable on its face. That
+ * is cheaper and safer than branching on the lens — a branch has to guess which lens produces which class of
+ * finding, and a `simplicity` juror can perfectly well report a behaviour defect it happened to see.
+ *
+ * DISTINCT FROM {@link GUARANTEE_NEEDS_A_TEST_RULE}, which mutates to check ONE narrow class: a guarantee the
+ * diff states in PROSE. This asks the same question of any behaviour finding, whatever prompted it.
+ *
+ * Exported so a caller building another transport can assert its presence rather than paraphrasing it, and so a
+ * test can pin that it is the only thing #3094 added to the mandate when no `aim` is passed.
+ */
+export const MUTATION_PROBE_RULE = [
+  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS. If you report a defect that affects correctness or changes',
+  'behaviour, BREAK the line you say is wrong or unguarded and state, in the finding, whether a NAMED test',
+  'reddens — name the test if one does, and say plainly that NO named test reddens if none does. "No test',
+  'catches this" is itself a finding worth reporting; an assertion of a defect with no mutation result behind it',
+  'is weaker than one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming,',
+  'wording, simplicity — where there is nothing to break: say nothing about mutation for those.',
+].join(' ');
+
 export const PROSE_IMPRECISION_RULE = [
   'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
   'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
@@ -1004,11 +1031,19 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * #2967 — `fenced` passes straight through to `buildMandate`: it fences the GOAL, which on the drain's review
  * path is the PR TITLE (author-controlled text off `gh pr view`). Every caller that supplies a `goal` it did not
  * itself author should pass it.
+ *
+ * #3094 — the OPTIONAL `aim` param, the caller's HYPOTHESIS about what to hunt. It sits BESIDE the goal, never
+ * instead of it: the goal is what the diff is trying to do (context), the aim is where the caller thinks the
+ * defect lives (instruction). It renders under a heading that says the hypothesis is UNVERIFIED and tells the
+ * juror to report the named defect ABSENT when it is absent — an aim that asserts the defect exists produces a
+ * reviewer who finds it either way, which is the failure the aim would otherwise buy. It is FENCED (#2438) for
+ * the same reason the goal is: it is caller-supplied prose, so it travels as labelled data and cannot become the
+ * juror's conclusion. Omitting it (or passing blank) leaves the mandate BYTE-FOR-BYTE what it is without it.
  * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string,
- *   round?: number, fenced?: boolean}} o
+ *   round?: number, fenced?: boolean, aim?: string}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false } = {}) {
+export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false, aim = '' } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
@@ -1034,6 +1069,29 @@ export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netCha
       'as scope creep, an undeclared payload, or an extra change. Judge only changes to the files in this net set.',
     );
   }
+  // #3094 — THE CALLER'S AIM, as a hypothesis. Placed last-but-one so it is the freshest instruction the juror
+  // reads before the mutation probe, and fenced so the prose inside it is subject matter, never orders. The
+  // FENCED_DATA_RULE sentence travels with it ONLY when the base has not already carried it in (a fenced goal
+  // brings it), so the mandate never states the same rule twice.
+  const aimText = typeof aim === 'string' ? aim.trim() : '';
+  if (aimText) {
+    if (!base.includes(FENCED_DATA_RULE)) parts.push(FENCED_DATA_RULE);
+    parts.push(
+      'WHERE THE CALLER THINKS THE DEFECT IS — A HYPOTHESIS, STATED BY THE CALLER, NOT ESTABLISHED. Search there',
+      'FIRST and report what you actually find. It is NOT a finding, NOT evidence, and NOT a conclusion you are',
+      'being asked to reach: if the named defect is NOT there, say so explicitly and in those words — "the aim',
+      'names X; X is not present here, and this is why" — and that is a COMPLETE answer to the aim, not a failed',
+      'one. Never manufacture an instance of it to satisfy the hypothesis, and never let it narrow you: anything',
+      'else your lens finds is still yours to report. The hypothesis, quoted verbatim:',
+      fenceUntrusted('aim', aimText),
+    );
+  }
+  // #3094 — THE MUTATION PROBE, UNCONDITIONAL (the fork ruled on the card, 2026-08-14). Every mandate that has
+  // found a real defect in this loop carried this instruction, so it is not left to a caller to remember: an
+  // opt-in flag is a way to omit the single highest-yield line by forgetting it. It is not gated on the lens
+  // either — the PHRASING makes it a natural no-op for a finding that changes no behaviour, which is what a
+  // `simplicity` juror is looking at, so no branch has to guess which lens is judging what.
+  parts.push(MUTATION_PROBE_RULE);
   return parts.join(' ');
 }
 

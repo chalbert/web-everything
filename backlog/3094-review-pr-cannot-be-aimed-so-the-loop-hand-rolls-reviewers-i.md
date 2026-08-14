@@ -94,16 +94,52 @@ whitespace diff in the mandate changes what every juror sees.
 
 ## Done when
 
-- [ ] `buildPanelMandate({ …, aim })` renders the aim under a heading marking it the caller's hypothesis, and
+- [x] `buildPanelMandate({ …, aim })` renders the aim under a heading marking it the caller's hypothesis, and
       a test asserts the juror is told it may find the named defect ABSENT.
-- [ ] Omitting `aim` produces output byte-identical to the current mandate — asserted against a fixture, not
-      by inspection.
-- [ ] `--aim=<string>` appears in the derived `--help` and reaches the judge request, proven by driving a run
+- [x] Omitting `aim` produces output byte-identical to the current mandate — asserted against a fixture, not
+      by inspection (`we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt`, the exact
+      pre-#3094 bytes; the ONLY permitted delta is the ruled mutation probe, appended verbatim).
+- [x] `--aim=<string>` appears in the derived `--help` and reaches the judge request, proven by driving a run
       with a stub judge and asserting on the request the step declares.
 - [x] The mutation-instruction fork is RULED on this card before any code lands — ruled unconditional,
       phrased to be a natural no-op for non-behavior-changing findings.
-- [ ] One real review of a real PR is driven through the operation with `--aim` and its verdict recorded,
-      replacing one hand-rolled mandate. Until that happens this item has proven nothing.
+- [x] One real review of a real PR is driven through the operation with `--aim` and its verdict recorded —
+      see the live proof below. HALF-DONE, stated honestly: the verdict was recorded HERE and not ON the PR,
+      for the reason given.
+
+## Live proof (2026-08-14) — run `review-pr-8c65ff09-cb23-497c-b41c-fa6900045c3c`
+
+One REAL review, driven through the operation, with a real `gh` read and a real spawned juror — no stub
+anywhere:
+
+```
+JUDGE_LANE_CWD=<a lane of the juror's own> node scripts/operations/run.mjs review-pr \
+  --pr=1263 --repo=chalbert/web-everything --actor=build-3094-proof \
+  --aim="This repo's recurring defect is a signal computed over ONE population and applied to ANOTHER's
+         decision. Here the completion signal is a PR discovered by item-id lookup over head refs, while the
+         thing resolved is ONE dispatch entry. Hunt first for a PR that does not belong to THIS dispatch …"
+```
+
+**Verdict: `accept`** (`loop: converged`, round 1/5), one finding, `disposition: carve-out`,
+`impactIfUnfixed: degraded`. Cost `$1.2871`, 295.3s, one `correctness` juror.
+
+THE AIM WORKED, AND SO DID THE MUTATION PROBE — which is the whole claim this card had to prove:
+
+- the juror did not merely echo the aim back. It reported the SYMMETRIC form of the named class it actually
+  found: `classifyDispatchPr` compares a merged PR's `mergedAt` only against its own entry's `startedAt`, so a
+  later retry's merged PR can resolve a DEAD EARLIER entry for the same item as `succeeded`. The aim named the
+  predecessor→retry direction; the juror found the retry→predecessor one and said so.
+- it answered the mutation instruction unprompted, in the finding's own words: *"no named test in this diff
+  constructs two entries with different `startedAt` values for the same item … so no test reddens for this
+  scenario."* That sentence is the class of finding the loop has been relying on, produced by the declared
+  operation instead of by a hand-rolled mandate.
+
+**Why the verdict was NOT recorded on #1263.** The `confirm` step was answered `abstain` — 0 effects, nothing
+posted, no label touched. Between the run starting and its verdict landing, a sibling reviewer accepted that PR
+(`review:accepted` + `ready-to-merge`), so recording would have written a second verdict comment onto a PR
+already cleared and mid-land. A proof-of-concept run must not race another agent's review; the non-mutating
+exit exists for exactly this, and the verdict is recorded here instead. The finding above is a live carve-out
+against #3095 and is owed a filing by whoever picks that thread up.
 
 ## Tasks
 
@@ -111,7 +147,7 @@ whitespace diff in the mandate changes what every juror sees.
 2. `aim` through `buildPanelMandate`, plus the byte-identical-when-absent fixture test, plus the unconditional
    mutation-instruction sentence.
 3. `aim` as a declared input on the operation; assert it reaches the judge request.
-4. Drive one real review through the operation and record the verdict.
+4. ~~Drive one real review through the operation and record the verdict.~~ Done — see "Live proof" above.
 
 ## Delivery shape
 
