@@ -23,8 +23,9 @@
  * the pass continues. The alternative is a waker that stops waking everything the first time one run is odd,
  * which is worse than a waker that reports and carries on.
  *
- * IT SHIPS NO OBSERVER. Nothing in the repo dispatches yet, so a concrete `claude agents`-backed observer
- * would have no work to watch. The table is injected, exactly like the executor's sinks.
+ * THE TABLE IS INJECTED, exactly like the executor's sinks — this module knows nothing about what any handle
+ * means. The CLI block at the bottom registers the ONE observer that exists today, the `claude agents`-backed
+ * one that `dispatch-lane` (#3037) dispatches against; before it there was nothing in the repo to watch.
  *
  * IO: reads and writes run records through an INJECTED store, and calls INJECTED observers and sinks. The CLI
  * block at the bottom is the only part that touches the real ones.
@@ -34,10 +35,11 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { advance, runStatus } from './engine.mjs';
-import { applyPendingEffects } from './effect-executor.mjs';
+import { applyPendingEffects, resolveInFlight } from './effect-executor.mjs';
 import { observeRun } from './effect-observer.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
+import { createDispatchObservers, defaultListAgents } from './dispatch-lane-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -217,8 +219,9 @@ export function renderPass(pass) {
       r.resolved.length ? `resolved ${r.resolved.map((x) => `${x.key}→${x.status}`).join(', ')}` : '',
       r.stillRunning.length ? `still running ${r.stillRunning.join(', ')}` : '',
       r.unresolved?.length ? `NEEDS A PERSON — terminal but not actionable: ${r.unresolved.map((x) => `${x.key}${x.error ? ` (${x.error})` : ''}`).join(', ')}`
-        + ' · close it out with `resolveInFlight(run, key, { status: \'failed\' })` (nothing landed → the next'
-        + ' run re-dispatches) or `{ status: \'applied\' }` (it did land) — no CLI surface yet, so a short script' : '',
+        + ` · close it out: \`node scripts/operations/wake.mjs --resolve=${r.runId} --key=<effectKey>`
+        + ' --status=failed` (nothing landed → the next run re-dispatches) or `--status=applied` (it did land).'
+        + ' The same call is `resolveInFlight(run, key, { status })` from a script' : '',
       r.skipped.length ? `SKIPPED ${r.skipped.map((x) => `${x.key} (${x.reason})`).join(', ')}` : '',
       r.errors.length ? `ERRORS ${r.errors.map((x) => x.error).join(' | ')}` : '',
       r.advanced ? 'advanced' : '',
@@ -235,32 +238,153 @@ export function renderPass(pass) {
   return lines;
 }
 
+/**
+ * CLOSE ONE IN-FLIGHT ENTRY OUT — the CLI surface `resolveInFlight` never had (PR #1211 review, F1).
+ *
+ * WHY IT LIVES HERE. The waker is the process that discovers a stuck entry and the only thing that prints its
+ * key, so it is where the operator already is when they need to act. Until now the answer printed by
+ * `renderPass` was "no CLI surface yet, so a short script" — and for `dispatch-lane` that mattered more than it
+ * looked: its observer can never answer `succeeded` (`claude agents` reports liveness, not outcome — #x9ylkp7),
+ * so EVERY completed dispatch needs a person to close it out, and "write some node" once per build is not a
+ * remedy. The declaration also ages a stale hold out on its own, so this is the deliberate, not the only, way.
+ *
+ * IT OWNS EXACTLY ONE RULE, AND `resolveInFlight` OWNS EVERY OTHER. The status rules — terminal only,
+ * `in-flight` only, no rewriting a settled entry — are `resolveInFlight`'s and are called first, so a malformed
+ * close-out is refused before anything else happens. The one rule that lives HERE is liveness, because it is
+ * the one `resolveInFlight` structurally cannot know: see {@link assertHandleNotLive}.
+ *
+ * @param {object} o
+ * @param {string} o.runId
+ * @param {string} o.key - the effect key, exactly as the pass printed it.
+ * @param {'applied'|'failed'} o.status
+ * @param {string} [o.note] - what the person found out. Recorded, never interpreted.
+ * @param {boolean} [o.force] - close out even though the handle is still listed (or cannot be checked).
+ * @param {() => object[]} [o.listAgents] - injectable `claude agents --json` reader.
+ * @param {{read: Function, write: Function}} o.store
+ * @returns {string} one operator-facing line.
+ */
+export function closeOutEntry({ runId, key, status, note = '', force = false, store, listAgents = defaultListAgents } = {}) {
+  if (!runId || !key) {
+    throw new Error('wake --resolve: needs both --resolve=<runId> and --key=<effectKey> (the pass prints the key).');
+  }
+  const run = store.read(runId);
+  if (!run) throw new Error(`wake --resolve: no run record for ${JSON.stringify(runId)}`);
+  const said = String(note || '').trim();
+  // FIRST, so a bad status or an unknown key is refused before a subprocess is spawned to check liveness.
+  const next = resolveInFlight(run, key, status === 'failed'
+    // WHY THE NOTE LANDS IN DIFFERENT FIELDS: `resolveInFlight` records `error` on a failure and `result` on a
+    // success, and putting a person's sentence anywhere else would make it invisible to the same readers.
+    ? { status, error: said || 'closed out by an operator: the work did not land' }
+    : { status, result: { closedOutBy: 'operator', note: said || null } });
+  if (!force) assertHandleNotLive((run.effects || []).find((e) => e.key === key), { listAgents });
+  store.write(next);
+  return `wake: ${runId}:${key} closed out as \`${status}\`${said ? ` — ${said}` : ''}${force ? ' (--force: liveness not checked)' : ''}.`;
+}
+
+/**
+ * REFUSE to close out an entry whose agent is still listed by `claude agents --json` (PR #1211 round 2, G2).
+ *
+ * WHAT WENT WRONG WITHOUT IT. `--resolve --status=failed` performed no liveness check at all, so running it on
+ * a five-minute-old, still-live dispatch un-parked the run; `failed` is retried by the executor with no cap;
+ * and the retry started a SECOND agent under the same deterministic session slug. Two live agents, one lane,
+ * and — before the executor kept `supersededHandles` — only one of them findable at all.
+ *
+ * WHY THIS RULE CANNOT LIVE IN `resolveInFlight`. That function is pure and knows nothing about what a handle
+ * MEANS; asking whether a session is alive is io, and `dispatch` is the only effect kind in the repo whose
+ * handle can be asked about. So the check lives at the operator's surface, where the io already is.
+ *
+ * FAIL CLOSED, WITH THE DOOR ONE FLAG AWAY. A listing that cannot be read is not evidence the agent is dead,
+ * so it refuses too — but `--force` always gets through, because `--resolve` is the ROUTINE per-build command
+ * (the observer can never answer `succeeded`) and an environment with no working `claude` must not wedge it.
+ * A handle-less INDETERMINATE entry is passed straight through: there is nothing to ask about.
+ *
+ * @param {object} entry - the in-flight effect entry being closed out.
+ * @param {{listAgents?: () => object[]}} [o]
+ */
+export function assertHandleNotLive(entry, { listAgents } = {}) {
+  const handle = String(entry?.handle ?? '');
+  if (!handle) return; // INDETERMINATE — no handle exists to check, and that is why a person is here.
+  const advice = `Stop that session first, or re-run with --force if you know it is not running. Closing out a LIVE `
+    + 'dispatch un-parks the run, and the executor then retries it — which for a dispatch means starting a SECOND agent '
+    + 'on the same lane, under the same session slug.';
+  let sessions;
+  try {
+    sessions = listAgents();
+  } catch (e) {
+    throw new Error(
+      `wake --resolve: could not read \`claude agents --json\` to check whether ${handle} is still running `
+      + `(${String(e?.message ?? e).split('\n')[0]}) — refusing to close out an entry whose agent MIGHT be alive. ${advice}`,
+    );
+  }
+  if (!Array.isArray(sessions)) {
+    throw new Error(
+      `wake --resolve: \`claude agents --json\` did not return an array, so whether ${handle} is still running `
+      + `cannot be told — refusing to close out an entry whose agent MIGHT be alive. ${advice}`,
+    );
+  }
+  if (sessions.some((s) => s && String(s.sessionId) === handle)) {
+    throw new Error(
+      `wake --resolve: session ${handle} is STILL LISTED by \`claude agents\` — the agent is ALIVE. ${advice}`,
+    );
+  }
+}
+
+/** One `--name` / `--name=value` flag out of an argv. `''` when present with no value, `undefined` when absent. */
+export function flagValue(argv, name) {
+  const hit = (argv || []).find((a) => a === `--${name}` || String(a).startsWith(`--${name}=`));
+  if (hit === undefined) return undefined;
+  const eq = String(hit).indexOf('=');
+  return eq === -1 ? '' : String(hit).slice(eq + 1);
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  // NO OBSERVERS ARE REGISTERED HERE, and that is the honest state: nothing in the repo dispatches yet, so
-  // every OBSERVABLE in-flight entry a pass finds today is reported as `no-observer` rather than silently
-  // ignored (a handle-less one is `no-handle`). The
-  // first real dispatch registers its observer alongside its sink.
-  const observers = {};
-  wakePass({
-    store: createFileRunStore(),
-    observers,
-    resolveFor: (op) => {
-      const { registry, sinks } = resolveOperation(op);
-      return { registry, sinks };
-    },
-  })
-    .then((pass) => {
-      writeAllSync(1, `${renderPass(pass).join('\n')}\n`);
-      // AN INTERVAL JOB'S EXIT CODE IS THE ONLY THING A SUPERVISOR SEES, so two things earn a non-zero one:
-      // a pass that could not read a run or resolve its operation, and a run stuck unresolved past
-      // `STUCK_ESCALATION_HOURS`. Before the second, a permanently unresolvable run reported at exit 0 on
-      // every tick forever and nothing watching exit codes ever learned. Per-run OBSERVER errors stay at 0:
-      // those are the fail-soft case, already reported, and the next pass asks again.
-      process.exitCode = (pass.errors.length || stuckPast(pass, STUCK_ESCALATION_HOURS).length) ? 1 : 0;
-    })
-    .catch((e) => {
+  // ONE OBSERVER IS REGISTERED, and it arrived with the first thing that dispatches (#3037). Until then this
+  // table was empty on purpose — an observer with no work to watch is an implementation with no caller — and
+  // the note here said the first real dispatch would register its observer alongside its sink. This is that.
+  // Any OTHER in-flight type is still reported as `no-observer` rather than silently ignored.
+  const observers = createDispatchObservers();
+  const argv = process.argv.slice(2);
+  const resolveId = flagValue(argv, 'resolve');
+  if (resolveId !== undefined) {
+    // THE CLOSE-OUT PATH. It observes nothing and advances nothing: a person has already found out what
+    // happened, and this records it. The next pass is what picks the run up again.
+    try {
+      writeAllSync(1, `${closeOutEntry({
+        runId: resolveId,
+        key: flagValue(argv, 'key'),
+        status: flagValue(argv, 'status'),
+        note: flagValue(argv, 'note') || '',
+        // PRESENT AT ALL IS ENOUGH — `--force` takes no value, and requiring `--force=true` would be a footgun
+        // on the one flag an operator reaches for when everything else has already refused them.
+        force: flagValue(argv, 'force') !== undefined,
+        store: createFileRunStore(),
+      })}\n`);
+    } catch (e) {
       writeAllSync(1, `error: ${String(e?.message ?? e)}\n`);
       process.exitCode = 1;
-    });
+    }
+  } else {
+    wakePass({
+      store: createFileRunStore(),
+      observers,
+      resolveFor: (op) => {
+        const { registry, sinks } = resolveOperation(op);
+        return { registry, sinks };
+      },
+    })
+      .then((pass) => {
+        writeAllSync(1, `${renderPass(pass).join('\n')}\n`);
+        // AN INTERVAL JOB'S EXIT CODE IS THE ONLY THING A SUPERVISOR SEES, so two things earn a non-zero one:
+        // a pass that could not read a run or resolve its operation, and a run stuck unresolved past
+        // `STUCK_ESCALATION_HOURS`. Before the second, a permanently unresolvable run reported at exit 0 on
+        // every tick forever and nothing watching exit codes ever learned. Per-run OBSERVER errors stay at 0:
+        // those are the fail-soft case, already reported, and the next pass asks again.
+        process.exitCode = (pass.errors.length || stuckPast(pass, STUCK_ESCALATION_HOURS).length) ? 1 : 0;
+      })
+      .catch((e) => {
+        writeAllSync(1, `error: ${String(e?.message ?? e)}\n`);
+        process.exitCode = 1;
+      });
+  }
 }

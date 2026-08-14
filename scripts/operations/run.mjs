@@ -30,6 +30,8 @@ import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
+import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
+import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -62,6 +64,17 @@ export const OPERATIONS = Object.freeze({
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
     sinks: {},
+  }),
+  // #3037 — the first operation whose effect STARTS work instead of finishing it. Its one sink launches a
+  // delivery agent and returns an in-flight marker; the matching OBSERVER is registered by the waker
+  // (`we:scripts/operations/wake.mjs`), which is the process that polls it. Both live in `dispatch-lane-io.mjs`.
+  [DISPATCH_LANE_OP]: () => ({
+    declaration: dispatchLaneOperation({ readTick: createTickReader() }),
+    // `WE_DISPATCH_AGENT_ARGS` is read HERE rather than defaulted inside the sink: the permission mode, the
+    // model and the effort a dispatched agent runs under are the operator's call, and a knob only a test can
+    // reach is not a knob. Unset → no extra flags, which is the deliberate non-default (a baked-in
+    // `--dangerously-skip-permissions` would widen every agent this ever launches).
+    sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv() }),
   }),
 });
 

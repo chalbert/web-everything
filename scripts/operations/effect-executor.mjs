@@ -164,6 +164,34 @@ function withEntry(run, key, patch) {
 }
 
 /**
+ * THE HANDLES A RETRIED DISPATCH LEAVES BEHIND — the entry's existing list, plus the handle it is about to
+ * stop carrying. PURE.
+ *
+ * WHY THIS IS NOT BOOKKEEPING FOR ITS OWN SAKE (PR #1211 round 2, G2). Retrying a `dispatch: true` effect does
+ * not re-run something harmless: it starts a SECOND agent. The pre-sink write blanks `handle` so the new
+ * session's id can land there, and before this the old id was simply gone — the record then said one agent
+ * existed where two did, and the first was unobservable (the observer only ever reads `handle`) and
+ * uncloseable (`wake --resolve` resolves one entry, whose handle is now the other session's). An escape hatch
+ * that destroys the evidence of what it escaped from is worse than no escape hatch.
+ *
+ * The list is EVIDENCE, not state: nothing decides on it. It is what an operator greps for when two agents are
+ * in one lane clone and only one of them is on the books.
+ *
+ * @param {object} entry - the effect entry as it stands before the re-attempt.
+ * @returns {Array<{handle: string, startedAt: (string|null), expectedBy: (string|null), supersededAt: string}>}
+ */
+export function supersededHandles(entry) {
+  const kept = Array.isArray(entry?.supersededHandles) ? entry.supersededHandles : [];
+  if (!isPollableHandle(entry?.handle)) return kept;
+  return [...kept, {
+    handle: String(entry.handle),
+    startedAt: entry.startedAt ?? null,
+    expectedBy: entry.expectedBy ?? null,
+    supersededAt: new Date().toISOString(),
+  }];
+}
+
+/**
  * APPLY THE EFFECTS a run has declared for its current (or a named) effect step.
  *
  * Persists the run record through `store` after EVERY status transition, so a crash at any point leaves a
@@ -215,8 +243,8 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
         `operations: effect ${entry.key} (${entry.type}) was dispatched but has NO handle, so whether it is still running ` +
         'cannot be observed — it is indistinguishable from an unknown outcome. It is not declared idempotent, so ' +
         'restarting it could double-apply. Refusing. Find out what happened to it, then close it out with ' +
-        '`resolveInFlight(run, key, { status: \'applied\' | \'failed\' })` and re-run. No command-line surface ' +
-        'exposes it yet, so that means a short script over the run store.',
+        `\`node scripts/operations/wake.mjs --resolve=${run.id} --key=${entry.key} --status=applied|failed\` ` +
+        '(or `resolveInFlight(run, key, { status })` from a script) and re-run.',
       );
     }
     if (typeof lookup(entry.type) !== 'function') {
@@ -264,8 +292,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
     //     `pending` entry is invisible to both and can only be hand-edited. See the `inFlight` docblock.
     // COUNT THE ATTEMPT, and record WHO made it. This is instrumentation, not policy: nothing reads these to
     // decide anything, and #3083 — where retry gets a cap, a backoff and an owner — is unruled. They are here
-    // now because they cannot be recovered later. Today's corpus holds zero retry observations (nothing
-    // dispatches yet), so every one that ever exists starts accumulating from whenever this lands.
+    // now because they cannot be recovered later. The corpus held zero retry observations when this landed
+    // (nothing dispatched yet — `dispatch-lane`, #3037, is the first), so every one that ever exists has been
+    // accumulating from that point.
     //
     // `attemptedBy` separates two populations that a naive count conflates and that mean OPPOSITE things:
     // an AUTOMATIC retry succeeding says the failure was flaky and a small budget would have caught it; a
@@ -304,7 +333,20 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
       attemptedBy: undefined,
     };
     current = live.dispatch
-      ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
+      ? withEntry(current, live.key, {
+        ...attempted,
+        status: 'in-flight',
+        // THE HANDLE THE PREVIOUS ATTEMPT MINTED IS KEPT, not overwritten into oblivion (PR #1211 round 2,
+        // G2). A dispatch retry starts a NEW session with a NEW id, and this line used to blank `handle`
+        // before the sink ran — so after one retry the FIRST agent's handle existed nowhere on the record.
+        // Neither the observer nor `wake --resolve` could reach it again: a live agent orphaned by the very
+        // act of retrying, with only one of the two on the books. See {@link supersededHandles}.
+        supersededHandles: supersededHandles(live),
+        handle: null,
+        startedAt: new Date().toISOString(),
+        expectedBy: null,
+        error: null,
+      })
       : withEntry(current, live.key, { ...attempted, status: 'pending', error: null });
     store.write(current);
 
@@ -354,8 +396,9 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
 
 /**
  * Resolve an `in-flight` entry once the work it started reports back (#3073) — the only supported way out of
- * that status. No CLI flag or HTTP route reaches it yet, so an operator calls it from a short script; #3070,
- * which polls these entries, is the first caller that will.
+ * that status. #3070's waker is the first caller, and it also exposes the operator's surface:
+ * `node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=applied|failed`
+ * (`we:scripts/operations/wake.mjs#closeOutEntry`). No HTTP route reaches it.
  *
  * REFUSES on any other status. Resolving an entry that is `pending` would be a guess about an unknown outcome,
  * which is exactly what the replay guard refuses; resolving one that is `applied` would rewrite a settled fact.
