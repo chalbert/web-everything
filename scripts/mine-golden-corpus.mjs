@@ -212,6 +212,16 @@ function buildGuardBashFixtures() {
     { id: 'git-push-main', cmd: 'git push origin main', ctx: {}, basis: '#2203 strict lane-only' },
     { id: 'git-push-lane-ref', cmd: 'git push origin HEAD:refs/heads/lane/batch-example-1', ctx: {}, basis: 'allowed: lane ref' },
     { id: 'benign-test-run', cmd: 'npm test -- run', ctx: {}, basis: 'allowed baseline' },
+    // #2367/#2413/#2997 — the lane-clobber repro table, pinned row by row. Rows 1-3 are the SHIPPED
+    // behaviour; row 4 is the residual #2413 left open by gating its minted-slug regime on the
+    // `workflowLane` marker, which only `--purpose=workflow-lane` sets. A guard change that silently
+    // flips any of these reddens here as well as in the unit tests.
+    { id: 'lane-clobber-foreign-session', cmd: 'git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: true }, basis: '#2367 row 1 — unmarked lease, ownerSession OTHER' },
+    { id: 'lane-clobber-marked-unasserted', cmd: 'git reset --hard HEAD~3', ctx: { primaryCwd: false, markedLeaseSlug: 'batch-x-2427' }, basis: '#2413 row 2 — marked workflowLane, no slug asserted' },
+    { id: 'lane-clobber-own-uncontested', cmd: 'git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: null }, basis: '#2997 row 3 — allowed: genuinely my own lane, no sibling holds one' },
+    { id: 'lane-clobber-contested-sibling', cmd: 'git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 row 4 (THE GAP) — unmarked lease held by a SIBLING of my own session' },
+    { id: 'lane-clobber-contested-asserted', cmd: 'LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07 git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 — allowed: the true holder re-asserts its minted slug' },
+    { id: 'lane-clobber-contested-override', cmd: 'LANE_CLOBBER_OK=1 git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 — allowed: the sanctioned LANE_CLOBBER_OK escape' },
   ];
   return scenarios.map((s) => ({
     id: s.id, cmd: s.cmd, ctx: s.ctx, basis: s.basis,
@@ -236,6 +246,45 @@ function buildGuardLaneFixtures() {
     // any other tracked file. #2273's replay harness caught this fixture drifting from that change.
     { id: 'agent-memory-edit-in-primary', filePathTemplate: '{{PRIMARY_ROOT}}/webeverything/.claude/agent-memory/example.md', expect: { decision: 'deny' }, basis: 'agent-memory NOT exempt (2026-07-09, supersedes #2266)' },
     { id: 'scratchpad-edit', filePathTemplate: '{{SCRATCHPAD_ROOT}}/example.md', expect: { decision: 'allow' }, basis: 'untracked scratch is exempt' },
+    // #2997 Gap 1 — guard-lane had NO lease read at all before this item: `laneGuardDecision(real, weRoot)`
+    // took no lease, no session and no owner, so an Edit into a lane another session was actively working in
+    // succeeded silently (worse than the Bash case #2367 covers — a file write leaves no reflog to recover
+    // from). The lease + caller session id are injected as `ctx`, matching how the CLI collects them.
+    // r2 (review F1): the guard keys on the DECLARED OCCUPANT (`workerSession`, written by `adopt`), never on
+    // `ownerSession` — that one records whoever RAN `acquire`, which for a dispatched lane is the dispatcher.
+    {
+      id: 'foreign-leased-lane-edit',
+      filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
+      ctx: { lease: { session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-DISPATCHER', workerSession: 'sess-OTHER' }, mySessionId: 'sess-MINE' },
+      expect: { decision: 'deny' },
+      basis: '#2997 Gap 1 — a lane ANOTHER session has declared it is working in',
+    },
+    {
+      id: 'own-leased-lane-edit',
+      filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
+      ctx: { lease: { session: 'Mac:39367', purpose: 'build-2997', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-MINE', workerSession: 'sess-MINE' }, mySessionId: 'sess-MINE' },
+      expect: { decision: 'allow' },
+      basis: '#2997 Gap 1 — allowed: the lane I adopted, no new friction on the normal flow',
+    },
+    // THE r2 REGRESSION FIXTURE. `ownerSession` is a THIRD PARTY to the working session (an operator leased the
+    // lane and handed it to a spawned agent) and the working session is the lane's rightful occupant. The first
+    // cut of Gap 1 compared `ownerSession` and DENIED here, which would have made every dispatched lane in the
+    // pool read-only for the agent sent to work in it. No fixture had this shape — hence a green gate on a
+    // repo-wide breakage. It must ALLOW.
+    {
+      id: 'dispatched-lane-edit-by-worker',
+      filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
+      ctx: { lease: { session: 'Mac:45983', purpose: 'review-1234', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-DISPATCHER' }, mySessionId: 'sess-WORKER' },
+      expect: { decision: 'allow' },
+      basis: '#2997 r2 (review F1) — the dispatched worker is never locked out of the lane leased FOR it',
+    },
+    {
+      id: 'unleased-lane-edit',
+      filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
+      ctx: { lease: null, mySessionId: 'sess-MINE' },
+      expect: { decision: 'allow' },
+      basis: '#2997 RULED — a lane with NO live lease stays writable; the lease IS the ownership signal',
+    },
   ];
 }
 

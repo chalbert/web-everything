@@ -1,0 +1,13 @@
+{
+  "id": "lane-clobber-own-uncontested",
+  "cmd": "git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "foreignLiveLease": false,
+    "contestedHolderSlug": null
+  },
+  "basis": "#2997 row 3 — allowed: genuinely my own lane, no sibling holds one",
+  "expect": {
+    "reason": null
+  }
+}

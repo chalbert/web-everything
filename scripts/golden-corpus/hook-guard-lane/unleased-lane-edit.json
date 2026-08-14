@@ -1,0 +1,12 @@
+{
+  "id": "unleased-lane-edit",
+  "filePathTemplate": "{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs",
+  "ctx": {
+    "lease": null,
+    "mySessionId": "sess-MINE"
+  },
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "#2997 RULED — a lane with NO live lease stays writable; the lease IS the ownership signal"
+}

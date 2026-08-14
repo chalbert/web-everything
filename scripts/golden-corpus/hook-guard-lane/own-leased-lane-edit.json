@@ -1,0 +1,19 @@
+{
+  "id": "own-leased-lane-edit",
+  "filePathTemplate": "{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs",
+  "ctx": {
+    "lease": {
+      "session": "Mac:39367",
+      "purpose": "build-2997",
+      "acquiredAt": "2026-08-14T12:00:00.000Z",
+      "ttlMinutes": 240,
+      "ownerSession": "sess-MINE",
+      "workerSession": "sess-MINE"
+    },
+    "mySessionId": "sess-MINE"
+  },
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "#2997 Gap 1 — allowed: the lane I adopted, no new friction on the normal flow"
+}

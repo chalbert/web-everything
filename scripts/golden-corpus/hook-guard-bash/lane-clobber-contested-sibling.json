@@ -1,0 +1,13 @@
+{
+  "id": "lane-clobber-contested-sibling",
+  "cmd": "git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "foreignLiveLease": false,
+    "contestedHolderSlug": "conveyor-delivery-lane-5-9f3a1c07"
+  },
+  "basis": "#2997 row 4 (THE GAP) — unmarked lease held by a SIBLING of my own session",
+  "expect": {
+    "reason": "This lane clone holds a LIVE lease that is CONTESTED (#2997) — a SIBLING agent of your own session is holding another lane right now, so the durable session id says \"mine\" for BOTH of you and cannot tell your lane from theirs. A destructive git op here must ASSERT this lease's own minted holder slug inline: prefix `LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07` (e.g. `LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07 git reset --hard origin/main`) — `lane-pool.mjs acquire` printed that slug when this lane was leased. The slug was ABSENT, so this is denied fail-closed. If this really is your lane, re-assert its slug; if it is not, you are about to clobber a sibling's in-flight work — run this in the lane YOU acquired instead. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`."
+  }
+}
