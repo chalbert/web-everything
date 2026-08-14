@@ -152,6 +152,28 @@ behind `targeted` for exactly this reason, noting that `ownerSession` answers "s
 "this lane". The destructive-op guard has no equivalent, so the same unmarked-sibling hazard is still
 open there.
 
+### 2026-08-14 — it happened, in ordinary use, not in a probe
+
+Not a re-confirmation this time. During normal delivery work a subagent finished its task and ran
+`we:scripts/lane-pool.mjs release --lane=5`, intending to release its own lease
+(`Mac:39367 file-memory-rewrite-gap`). **It released a different concurrent holder's lease**
+(`Mac:39423 review-1222-r2`) and the pool accepted it, because both leases carried the same parent
+`CLAUDE_CODE_SESSION_ID` and the ownership check resolved to "same session, therefore mine".
+
+Nothing was lost — the review that held lane-5 had already finished, and the tree was clean at the
+releasing agent's own commit. That is luck, not a guard. Had the review still been mid-run, its lane
+would have been returned to the pool and reissued to the next `acquire` while it was still working in
+it.
+
+Two things this adds to the analysis above:
+
+- the hazard is not confined to `reset --hard` / destructive ops. **`release` is enough**, because a
+  released lane is immediately re-issuable, and the next holder's `acquire` resets it;
+- it reached a real agent doing real work with no probe, no unusual topology and no override flag —
+  just two ordinary subagents of one session, which is now the default shape of a delivery session.
+
+The releasing agent noticed and reported it. Nothing in the system did.
+
 ## What to consider
 
 - **Gap 1**: give `we:scripts/guard-lane.mjs` the lease read `we:scripts/guard-bash.mjs` already has.
