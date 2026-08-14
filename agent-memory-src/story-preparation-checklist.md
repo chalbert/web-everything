@@ -42,6 +42,16 @@ three declared files plus its own card (`git diff --name-only 227eef7c^1 227eef7
 used as evidence, and propagated into two artifacts without being checked against the diff. **Never cite a
 file count from a PR page; derive it from the commit range.** An independent review caught it.
 
+**8. De-risk the risky part DURING preparation, not during the build.** Where an approach could be wrong in
+a way that only shows up late, spend the cheap probe up front: measure the blast radius, mutate the guarded
+line, revert the code under a test and see if it still passes. Measured on 2026-08-14 — every preparation
+told to *verify its own card's claim first* changed the outcome. #3015's prep measured the proposed pattern
+set at **1,276 of 3,319 files** and retired three families that would have reddened a third of the board.
+#2967's prep proved both gaps live by mutation and found the second was already shipping at two call sites,
+not hypothetical. #2996's prep reverted the code under a "regression test" and watched it pass anyway. Each
+cost one probe and removed a whole review round. **A POC belongs in preparation when the risk is that the
+approach is wrong; it belongs nowhere at all once the approach is known.**
+
 **How to apply:** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
 first slice — a script flagging importers missing from a `scope:` — was built, reviewed twice and **stood
 down** (#3098): in a repo whose scripts shell each other rather than import, a static ESM import scan reads
