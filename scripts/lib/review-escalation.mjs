@@ -1716,7 +1716,12 @@ export function bodyHasEscalationReason(body) {
  *     heading / end of body. The caller must fail safe: leave the body untouched rather than guess a replace
  *     region and delete content that sits outside the block.
  *   - `{ markerStart, regionEnd, reasons }` — a clean block. `markerStart`/`regionEnd` bound the region a
- *     replace may overwrite; `reasons` is the recorded reason list read off the block's bullets.
+ *     replace may overwrite; `reasons` is the recorded reason list read off the block's bullets, from the
+ *     RAW body at those offsets (#3044-review round 2, finding 1 — NOT from `scanned`: `blankQuotedRegions`
+ *     blanks inline code spans and fences INSIDE a bullet too, e.g. `` - a `code` span``, so a reason
+ *     containing backticks would read back different from what was written and never compare equal to its
+ *     own round-tripped form — `changed:true` on a byte-identical body, forever. The offsets are valid
+ *     against the raw body by this function's own contract (see above), so re-slicing it here is exact.
  *
  * TWO SHAPES THIS DELIBERATELY FREEZES, both stated so nobody re-derives them from the regex:
  *   - #3044-review F3 — two real markers in one body. `markerLineRe` is a non-global `exec`, so a naive read
@@ -1729,7 +1734,7 @@ export function bodyHasEscalationReason(body) {
  *     the oldest bodies. Kept as-is on purpose: a stale block is visible and harmless, whereas guessing the
  *     extent of a block whose terminator is absent is how a body gets mangled.
  */
-function locateEscalationBlock(scanned) {
+function locateEscalationBlock(scanned, rawSrc) {
   const markerLineRe = /(^|\n)(## Escalation reason)[ \t]*(?:\n|$)/;
   const markerMatch = markerLineRe.exec(scanned);
   if (!markerMatch) return null;
@@ -1758,7 +1763,12 @@ function locateEscalationBlock(scanned) {
 
   if (scanned.slice(cleanEnd, regionEnd).trim() !== '') return { malformed: true };
 
-  const reasons = blockMatch[1].split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
+  // Re-slice the RAW body for the bullet text rather than reading `blockMatch[1]` (which came from
+  // `scanned`, quote-blanked) — see the docblock's finding-1 note. `blockRe` is anchored (`^`), so the
+  // match starts at offset 0 of the slice it ran against; the captured group starts one char later, past
+  // the block's leading blank line.
+  const rawBulletBlock = rawSrc.slice(afterMarkerLine + 1, afterMarkerLine + 1 + blockMatch[1].length);
+  const reasons = rawBulletBlock.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
   return { markerStart, regionEnd, reasons };
 }
 
@@ -1818,7 +1828,7 @@ export function reconcileEscalationReasonBlock(body, reasons) {
   const freshReasons = (Array.isArray(reasons) ? reasons : []).filter(Boolean).map(normalizeReasonText).filter(Boolean);
   if (freshReasons.length === 0) return { body: src, changed: false };
 
-  const located = locateEscalationBlock(blankQuotedRegions(src));
+  const located = locateEscalationBlock(blankQuotedRegions(src), src);
   if (!located) {
     // GUARD ON RAW (see the docblock): the trusted reader found nothing, but if the marker bytes are there at
     // all, appending would duplicate them — and duplicate on every later pass, unboundedly.

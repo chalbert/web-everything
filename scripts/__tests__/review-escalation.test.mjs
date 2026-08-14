@@ -473,6 +473,23 @@ describe('review-escalation — #3044 reconcileEscalationReasonBlock (re-derive-
       const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)']);
       expect(reconcileEscalationReasonBlock(body, ['  blast-radius (x)  ']).changed).toBe(false);
     });
+
+    // #3044-review round 2, finding 1 — `blankQuotedRegions` blanks inline code spans INSIDE a bullet too,
+    // so reading the recorded reason off the quote-blanked text (not the raw body) made a backtick-bearing
+    // reason compare unequal to its own round-tripped form, forever: `changed:true` on a byte-identical body
+    // on every pass. Reconciling the SAME fenced reason a second time must be a no-op.
+    it('a reason containing backticks compares equal to its own round-tripped form on a second reconcile', () => {
+      const first = reconcileEscalationReasonBlock('Desc.', ['a `code` span']);
+      expect(first.changed).toBe(true);
+      const second = reconcileEscalationReasonBlock(first.body, ['a `code` span']);
+      expect(second).toEqual({ body: first.body, changed: false });
+    });
+
+    it('the fenced reason this describe block already builds also round-trips as clean', () => {
+      const body = 'Desc.' + buildEscalationReasonBlock(['```\nfenced\n```']);
+      expect(reconcileEscalationReasonBlock(body, ['```\nfenced\n```']))
+        .toEqual({ body, changed: false });
+    });
   });
 
   // F8 — mutations that survived the whole focused suite. Each assertion below reddens exactly one.
