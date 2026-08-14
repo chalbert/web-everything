@@ -59,10 +59,18 @@ to the juror, so this is plumbing, not a redesign.
   asserts the defect exists produces a reviewer who finds it whether or not it is there — the exact failure
   this repo has spent the week on.
 
-**Fork, NOT decided here, named so it is not settled silently:** whether the mutation instruction rides in
-`aim` (caller's choice, flexible) or is unconditional in `buildPanelMandate` (every review gets it, nobody
-can forget). The second is the better default and the worse fit for a lens like `simplicity`. **This wants a
-ruling before code**, and it is why this is a 3 rather than a 2.
+**Fork RULED (2026-08-14).** Unconditional in `buildPanelMandate` — not gated behind a caller flag. Reasoning:
+every mandate this session that actually found a real defect included the mutation instruction, unprompted by
+the caller; making it opt-in relies on every future caller remembering to ask for the thing that has been the
+single highest-yield instruction all session. The `simplicity` concern is real but narrower than it first
+looks — `we:scripts/lib/jury-ledger.mjs:157` confirms `simplicity` IS a live `PANEL_LENSES` entry, so this
+isn't hypothetical. Resolved by PHRASING, not by gating: the instruction reads as *"if you find a
+correctness-affecting or behavior-changing defect, state whether breaking the guarded line makes a named test
+redden — this does not apply to pure style/simplicity findings that change no behavior."* A simplicity-lens
+juror reads that sentence and it is naturally inapplicable to what it's judging, rather than the operation
+gating the instruction on a lens-type branch. Cheaper than a conditional, and it means a caller cannot
+accidentally omit the one instruction that has produced every real finding this session by forgetting to set
+a flag.
 
 Wiring [#3050]'s panel is deliberately **out of scope** — its own change with its own budget question, and
 bundling it is how a 3 becomes a 13.
@@ -92,14 +100,16 @@ whitespace diff in the mandate changes what every juror sees.
       by inspection.
 - [ ] `--aim=<string>` appears in the derived `--help` and reaches the judge request, proven by driving a run
       with a stub judge and asserting on the request the step declares.
-- [ ] The mutation-instruction fork is RULED on this card before any code lands.
+- [x] The mutation-instruction fork is RULED on this card before any code lands — ruled unconditional,
+      phrased to be a natural no-op for non-behavior-changing findings.
 - [ ] One real review of a real PR is driven through the operation with `--aim` and its verdict recorded,
       replacing one hand-rolled mandate. Until that happens this item has proven nothing.
 
 ## Tasks
 
-1. Rule the mutation-instruction fork.
-2. `aim` through `buildPanelMandate`, plus the byte-identical-when-absent fixture test.
+1. ~~Rule the mutation-instruction fork.~~ Done above.
+2. `aim` through `buildPanelMandate`, plus the byte-identical-when-absent fixture test, plus the unconditional
+   mutation-instruction sentence.
 3. `aim` as a declared input on the operation; assert it reaches the judge request.
 4. Drive one real review through the operation and record the verdict.
 
