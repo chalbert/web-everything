@@ -460,6 +460,32 @@ describe('genericity — the adapter knows nothing about either operation', () =
     expect(again.body.error).toContain('a question that has not been asked');
   });
 
+  // #3063 — a declaration fn refusing deterministically (the gate-self `record` guard) used to escape
+  // `driveRun` as an uncaught throw, which this route's own `try` turned into a bare `fail(500, message)` —
+  // no run payload at all. `driveRun` now returns `stopped: 'step-refused'` instead of throwing, so this
+  // route's `settled` check (unedited) falls through to its own 500 branch with the FULL `outcomePayload`.
+  it('a refused declaration fn 500s with the full run payload, not a bare error string', async () => {
+    const store = createMemoryRunStore();
+    const deps = { ...wiring({ readerOptions: { labels: ['review:human'] } }), store, judge: stubJudge, newRunId: idMinter() };
+    const started = await handleOperationRequest(
+      { method: 'POST', url: '/operations/review-pr/runs', body: { pr: 1153, repo: 'chalbert/web-everything' } },
+      deps,
+    );
+    expect(started.body.pending.of).toBe('human');
+
+    const refused = await handleOperationRequest(
+      { method: 'POST', url: `/operations/review-pr/runs/${started.body.runId}/advance`, body: { value: 'accept' } },
+      deps,
+    );
+    expect(refused.status).toBe(500);
+    expect(refused.body.stopped).toBe('step-refused');
+    expect(refused.body.runId).toBe(started.body.runId);
+    expect(refused.body.findings.confirm).toBe('accept');
+    expect(refused.body.error).toContain('human-ceremony-only');
+    // NOT the bare-error shape a throw used to produce — the payload carries the whole envelope.
+    expect(Object.keys(refused.body)).not.toEqual(['error']);
+  });
+
   it('a run STARTED on the command line is finished over HTTP, against the same record', async () => {
     const store = createMemoryRunStore();
     const { resolve, names } = wiring();
