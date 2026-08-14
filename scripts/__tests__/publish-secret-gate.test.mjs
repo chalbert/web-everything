@@ -162,7 +162,8 @@ describe('gate 3 — `check-memory.mjs --pre` (the only write-time gate the memo
 // two OF THE WAYS this backstop can break (rule stops detecting; rule stops being wired) each have a test.
 // A third way — the walk's glob silently matching zero files (e.g. `.endsWith('.md')` becoming
 // `.endsWith('.mdx')`) — would still look "wired" from the call-site regex alone, so the wiring test below
-// also asserts the walk actually finds files, not just that the call site's text is present.
+// also pins the real call site's filter IN CONTEXT (not a bare global regex — this file has several other
+// `.md` walks a global pattern would blindly match) and asserts the walk actually finds files.
 describe('gate 4 — the `check:standards` corpus sweep (the bypass backstop)', () => {
   it('FLAGS a card that reached disk carrying the synthetic marker (a hook-bypassing write)', async () => {
     const { scanPublishSecrets } = await import('../check-standards-rules.mjs');
@@ -188,10 +189,16 @@ describe('gate 4 — the `check:standards` corpus sweep (the bypass backstop)', 
     const src = readFileSync(join(ROOT, 'scripts', 'check-standards.mjs'), 'utf8');
     expect(src).toMatch(/scanPublishSecrets\(docs\)/);
     expect(src).toMatch(/for \(const label of \['backlog', 'agent-memory-src'\]\)/);
-    // The call-site regex above proves the TEXT is there, not that the walk it names actually finds any
-    // file — a glob that silently matches zero files (e.g. `.endsWith('.md')` → `.endsWith('.mdx')`) would
-    // still pass both checks above while scanning nothing. Replicate the same walk this call site runs
-    // (same directories, same `.md` filter) against the real repo tree and assert it is non-empty.
+    // #3015 review round 2, F4 — the call-site regex above proves the TEXT is there, not that the walk it
+    // names actually finds any file. A REPLICA walk (below) only proves the repo tree has `.md` files
+    // somewhere; it does not couple to the real call site's filter, so a mutation there
+    // (`.endsWith('.md')` → `.endsWith('.mdx')`) survived it undetected — this file has several other
+    // `.md` walks (e.g. the id-hygiene and reports scans above), so a bare global regex on `.endsWith('.md')`
+    // would be just as blind. Pin the filter IN CONTEXT, scoped to this walk block specifically, so the
+    // mutation this test names is the one it actually catches.
+    expect(src).toMatch(
+      /for \(const label of \['backlog', 'agent-memory-src'\]\)[\s\S]{0,400}?\.endsWith\('\.md'\)/,
+    );
     const docs = [];
     for (const label of ['backlog', 'agent-memory-src']) {
       const dir = join(ROOT, label);
