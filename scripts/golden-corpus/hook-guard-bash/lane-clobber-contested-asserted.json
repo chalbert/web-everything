@@ -1,0 +1,13 @@
+{
+  "id": "lane-clobber-contested-asserted",
+  "cmd": "LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07 git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "foreignLiveLease": false,
+    "contestedHolderSlug": "conveyor-delivery-lane-5-9f3a1c07"
+  },
+  "basis": "#2997 — allowed: the true holder re-asserts its minted slug",
+  "expect": {
+    "reason": null
+  }
+}
