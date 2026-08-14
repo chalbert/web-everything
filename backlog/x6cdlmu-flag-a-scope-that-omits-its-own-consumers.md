@@ -14,7 +14,7 @@ tags: [delivery, backlog, readiness, preparation]
 > the finding, because the finding is worth more than the code was.
 
 The idea: given an item's `scope:`, find every module that imports a file in it and report any importer the
-scope does not cover. Three of four surveyed disasters looked like that shape, and it is mechanical.
+scope does not cover. Two of the three surveyed items looked like that shape, and it is mechanical.
 
 ## No `scope:`, deliberately
 
@@ -51,8 +51,11 @@ Everything the reviews found follows from that:
 
 ## What survives, and it is the valuable half
 
-The evidence in [#xl2q1zt] — four items measured against what their PRs actually had to touch — stands, and
-so does the ranking it produced. The omission is real; the *detector* was wrong.
+The evidence in [#xl2q1zt] — now **three** items measured against what their PRs actually had to touch, after
+one row was retracted as false. The omission gaps 1 and 2 name are real and each hold in 2 of 3. **The
+ranking does NOT survive intact**: gap 3 fell to 1 of 3, so the epic's slice order is no longer evidenced.
+The omission is real; the *detector* was wrong; and the ranking is weaker than the first version of this
+sentence claimed.
 
 ## What the next attempt must settle BEFORE any code
 

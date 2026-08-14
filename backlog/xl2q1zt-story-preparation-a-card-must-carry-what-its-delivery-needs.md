@@ -9,7 +9,8 @@ tags: [delivery, backlog, readiness, preparation, throughput]
 
 `prepare` in this repo has only ever meant *prepare a DECISION* — survey prior art, state each fork's
 options, pick a bold default, stamp `preparedDate`. Nothing prepares a **story**, and the cost of that shows
-up as review rounds: four recent items each burned 2–6 rounds on defects a better-written card would have
+up as review rounds: three recent items each burned 2–6 rounds, two of them on defects a better-written card
+would have
 predicted. This epic makes story preparation a thing the repo does, deterministically where it can and by
 judgment only where it must.
 
@@ -19,11 +20,12 @@ readiness engine in `we:scripts/readiness/`; it does not start a parallel one.
 
 ## The evidence, and it is the whole argument
 
-Four items surveyed against what their PRs actually had to touch:
+Items surveyed against what their PRs actually had to touch. **One row was retracted — see below — so the
+set is three, and the counts beneath it are out of three:**
 
 | item | declared | reality | rounds |
 | --- | --- | --- | --- |
-| [#3090] | `size: 1`, 2 files | touched a caller that was NOT in scope; one declared file never touched | 3 |
+| [#3090] | `size: 1`, 2 files | touched a caller that was NOT in scope; one declared file never touched | 4 |
 | [#3091] | `size: 2`, 4 files | 4 call sites each had to honour one discipline independently; reviewers found them one at a time | 6 |
 | [#3071] | `size: 3`, 1 file | scope was exactly right — and the work was still pointless, because nothing had measured whether the fix would unblock anything (it would not) | 2, then stood down |
 | ~~[#3084]~~ | ~~`size: 2`, 3 files~~ | **RETRACTED — see below. It touched exactly its 3 declared files.** | 4+ |
@@ -37,7 +39,7 @@ Ranked by how often the gap preceded a long review:
 3. **Declared `scope:` drifts from what was touched** — **1 of 3**, once the retraction below is applied.
    Trivially scriptable, but only *after* the
    fact, so it is a measurement rather than a gate.
-4. **No feasibility number before sizing** — 1 of 4, and decisive there: [#3071] was two rounds of correct
+4. **No feasibility number before sizing** — 1 of 3, and decisive there: [#3071] was two rounds of correct
    work on the least-binding of three constraints.
 
 ## RETRACTION — the #3084 row was false, and how it got here matters
@@ -58,6 +60,11 @@ quietly delete its own.
 for anything. The two gaps that survive are still supported by [#3090] and [#3091].
 
 **The rule it produces:** never cite a changed-file count from a PR page. Derive it from the commit range.
+
+**And the slice order below is now wrong.** Slice 2 — *scope drift, measured at land* — was ranked on the
+gap that just collapsed from 3 of 4 to 1 of 3. It should NOT be built next on this evidence. It is left in
+the list rather than silently re-ordered, marked so nobody picks it up on a number that no longer supports
+it; re-ranking is a decision for whoever takes this epic up next, with the two surviving gaps in hand.
 
 ## What already exists — do not rebuild it
 
@@ -92,8 +99,9 @@ over-specified now.
    one is an ES import — every one shells it. Its confident all-clear was baseless 74% of the time it fired.
    [#x6cdlmu] carries the full account and what the next attempt must settle before any code. **The gap it
    targeted is still real**; only the detector was wrong.
-2. **Scope drift, measured at land** — compare declared `scope:` against the files a PR actually touched, and
-   accumulate it. Turns gap 3 into data rather than an opinion.
+2. ~~**Scope drift, measured at land**~~ — **DO NOT BUILD NEXT.** It was ranked on gap 3, which the
+   retraction above dropped to 1 of 3. Compare declared `scope:` against the files a PR actually touched.
+   Still plausibly worth doing; no longer evidenced as second.
 3. **Size plausibility** — declared `size` against implied breadth (named files, consumers, subsystems
    crossed).
 4. **Declare `prepare-story` as an operation** under [#3029], with the checks above as its `compute` step.
