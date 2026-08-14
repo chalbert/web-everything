@@ -2,8 +2,9 @@
 bornAs: xazyfw7
 kind: story
 size: 8
-status: open
+status: active
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-14"
 tags: [check-standards, gate, security, lock-point]
 scope:
   - we:scripts/check-standards-rules.mjs

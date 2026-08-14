@@ -337,11 +337,15 @@ export const POLICY_THRESHOLDS = Object.freeze({
 export const POLICY_CARE_JURY = REVIEW_POLICY.careJury;
 
 /** The care band names in least→most order (`none` → `high`) — mirrors CARE_LEVEL_ORDER (review-escalation.mjs),
- *  pinned equal by the conformance suite. Frozen. */
+ *  pinned equal by the conformance suite. Frozen.
+ *  @test-only-export-ok: review-policy.conformance.test.mjs IS the intended consumer — this constant exists so the
+ *  suite can pin the contract's band vocabulary against CARE_LEVEL_ORDER; no runtime path reads it (#2967a). */
 export const POLICY_CARE_BAND_NAMES = Object.freeze([...CARE_BAND_NAMES]);
 
 /** The disposition-config block (#2651, FF3) — the global default knobs + the per-decision override allow-list a
- *  future disposition judge (#2652) reads. Already deep-frozen via REVIEW_POLICY. */
+ *  future disposition judge (#2652) reads. Already deep-frozen via REVIEW_POLICY.
+ *  @test-only-export-ok: the conformance suite IS the intended consumer — it pins the contract's disposition block;
+ *  the runtime reads the resolved config through resolveDispositionConfig, never this raw view (#2967a). */
 export const POLICY_DISPOSITION = REVIEW_POLICY.careJury.disposition;
 
 /** The allow-list of knob keys a per-decision override may set (`lensWeights`, `dissentThreshold`, `resolutionMode`).
@@ -351,7 +355,9 @@ export const POLICY_DISPOSITION_OVERRIDABLE_KEYS = Object.freeze([...REVIEW_POLI
 /** The GLOBAL auto-land operating mode (#2675) — `shadow` (observe-only, the ratified default) or `enforce` (a clean
  *  auto-dispose writes review:accepted so the drain merges it). GLOBAL-only: NOT in POLICY_DISPOSITION_OVERRIDABLE_KEYS,
  *  so no band or decision may override it; flipping it to `enforce` is a separate one-line ruling (a diff to the
- *  policy contract → human-gated). The auto-land seam (auto-land-seam.mjs) reads this via resolveDispositionConfig. */
+ *  policy contract → human-gated). The auto-land seam (auto-land-seam.mjs) reads this via resolveDispositionConfig.
+ *  @test-only-export-ok: the conformance suite IS the intended consumer — the seam reads the mode through
+ *  resolveDispositionConfig, so this direct view exists to pin the contract's global default (#2967a). */
 export const POLICY_LAND_MODE = REVIEW_POLICY.careJury.disposition.landMode.value;
 
 /**
@@ -483,7 +489,9 @@ const { live: LIVE_REASONS, todoOwedTo: TODO_OWED_BY_TOKEN } = partitionReasons(
 /** token → { family, clearance }, for O(1) classification lookups. LIVE reasons only (a todo entry is inert). */
 const REASON_META = new Map(LIVE_REASONS.map((r) => [r.token, { family: r.family, clearance: r.clearance }]));
 
-/** The not-yet-implemented marker block (prose + the sections it is legal on). Already deep-frozen via REVIEW_POLICY. */
+/** The not-yet-implemented marker block (prose + the sections it is legal on). Already deep-frozen via REVIEW_POLICY.
+ *  @test-only-export-ok: the conformance suite IS the intended consumer — it enforces the #xonzpym third state
+ *  (declared-but-unimplemented must carry this marker) in both directions (#2967a). */
 export const POLICY_TODO_MARKER = REVIEW_POLICY.todoMarker;
 
 /**
@@ -506,13 +514,20 @@ export const POLICY_IMPLEMENTED_REASON_TOKENS = Object.freeze(LIVE_REASONS.map((
  * through BOTH precedence branches of `deriveReviewDisposition` to the permissive default — turning an unbuilt,
  * human-review-shaped reason into an agent AUTO-LAND. Use it only to reason ABOUT the contract (docs, the
  * conformance suite's partition checks).
+ *
+ * @test-only-export-ok: the conformance suite IS the intended consumer — the docblock above forbids the runtime
+ * from resolving against this set, so "nothing else imports it" is the property, not a defect (#2967a).
  */
 export const POLICY_DECLARED_REASON_TOKENS = Object.freeze(REVIEW_POLICY.reasons.map((r) => r.token));
 
-/** The tokens declared NOT YET IMPLEMENTED (`todo: true`), in contract order. Empty today. Frozen. */
+/** The tokens declared NOT YET IMPLEMENTED (`todo: true`), in contract order. Empty today. Frozen.
+ *  @test-only-export-ok: the conformance suite IS the intended consumer — it is what proves the declared set minus
+ *  the implemented set equals this one, marker and all (#2967a). */
 export const POLICY_TODO_REASON_TOKENS = Object.freeze([...TODO_OWED_BY_TOKEN.keys()]);
 
-/** token → the backlog item id that owes its implementation (`#` stripped), for every `todo` reason. Frozen. */
+/** token → the backlog item id that owes its implementation (`#` stripped), for every `todo` reason. Frozen.
+ *  @test-only-export-ok: the conformance suite IS the intended consumer — it resolves each owed id against the live
+ *  board, which is the whole point of recording the debt (#2967a). */
 export const POLICY_TODO_OWED_TO = Object.freeze(Object.fromEntries(TODO_OWED_BY_TOKEN));
 
 /** Reason tokens grouped by family — `{ sensitivity: [...], deadlock: [...] }`. LIVE reasons only.

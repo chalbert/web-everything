@@ -2396,3 +2396,425 @@ export function findLockPointFiles({ files, backlogScopes }, opts = {}) {
   }
   return out;
 }
+
+// ── 18/19. The two rules the PR #1064 review named but that needed whole-repo design first (#2967) ───────────
+// The review named three script-decidable rules. The third — declared-contract-vs-imports — was cheap and
+// shipped with the #1064 fix (`validateDeclaredModuleContract`, above). These are the other two. Both are
+// SOURCE-TEXT scans (regex + a small hand scanner), never a JS parser: they are hygiene gates over a repo whose
+// own style they only have to be truer than, and each documents the shapes it cannot see.
+
+/** Split `text` on the commas that sit at bracket depth 0 and outside any quote/template. A small hand
+ * scanner, NOT a JS parser — enough for a destructuring parameter list (`a = [], b = {}, c = FOO`). */
+function splitTopLevelCommas(text) {
+  const parts = [];
+  let depth = 0; let quote = null; let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') depth -= 1;
+    else if (c === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** The index just past the bracket matching the opener at `open` (`(`/`{`/`[`), or -1. Quote-aware. */
+function matchBracket(text, open) {
+  const closers = { '(': ')', '{': '}', '[': ']' };
+  const closer = closers[text[open]];
+  if (!closer) return -1;
+  let depth = 0; let quote = null;
+  for (let i = open; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === text[open]) depth += 1;
+    else if (c === closer) { depth -= 1; if (depth === 0) return i + 1; }
+  }
+  return -1;
+}
+
+// ── (a) TEST-ONLY EXPORTS — "extracted, tested, never wired" (#2967) ─────────────────────────────────────────
+// `reduceLensJury` was exported from scripts/lib/converge-core.mjs, unit-tested with three cases, and called by
+// NOTHING — so multi-juror lenses collapsed last-writer-wins inside `reducePanelRound` and the SAME two jurors
+// produced `land` or `edit` depending on array order. "No non-test module in this repo imports this export" is
+// fully script-decidable, and it catches that whole class in one rule.
+//
+// WARN-FIRST (`TEST_ONLY_EXPORT_ENFORCED = false`), on the `COMPOSE_TRAITS_ENFORCED` precedent: a broad
+// structural scan with a real but boundable false-positive surface ships advisory until its carve-outs are
+// curated false-positive-free, then flips. Four carve-out classes are known and handled:
+//   • USED INSIDE ITS OWN MODULE — a pure helper a file's own CLI shell calls, exported only as a test seam, is
+//     WIRED: its behaviour is live and a change to it breaks something real. The class this rule is for is the
+//     one `reduceLensJury` was in — called by NOTHING, so the tests were the only thing holding it up. A raw
+//     "no importer" scan conflates the two and buries the real finding under ~800 non-findings (measured).
+//   • STAR-IMPORT re-export — a module namespace-imported (`import * as rules from …`) has every export "used"
+//     only through the namespace object. Structural: precomputed by the caller's fs walk.
+//   • CLI-SHELLED harness body — `scripts/review-core-cli.mjs`'s exports are imported only by its own test file,
+//     but its real consumer is `node scripts/review-core-cli.mjs …` inside a workflow harness PROMPT STRING (and
+//     package.json scripts). The consumer is the OS, invisible to any import graph. Structural, same walk.
+//   • JUDGMENT carve-outs (a conformance suite that IS the intended consumer; a sibling-repo public API this
+//     checkout cannot see) — a per-export `@test-only-export-ok: <reason>` marker in the export's OWN leading
+//     comment. Deliberately NOT a curated list in this file: this file is already a #2678 lock point named by
+//     9 queued items' scopes, and a third giant list here compounds exactly the serialization cost that gate
+//     exists to flag. The marker is POSITIONALLY anchored for the reason `hasCohesiveEscapeHatch` is (its own
+//     r0/r1 history): an un-anchored marker is forgeable by anything that merely documents the hatch.
+export const TEST_ONLY_EXPORT_ENFORCED = false; // #2967, warn-first — mirrors COMPOSE_TRAITS_ENFORCED (#937)
+
+/** Every name a module exports by DECLARATION (`export function|const|let|class …`), with the index the
+ * declaration starts at. `export { … }` lists and `export default` are deliberately not collected: a
+ * re-export list has no leading comment to anchor a marker to, and a default export has no name to wire.
+ * @returns {Array<{name: string, index: number}>} */
+export function extractExportedNames(content) {
+  const out = [];
+  const re = /^export\s+(?:async\s+)?(?:function\s*\*?|const|let|class)\s+([A-Za-z_$][\w$]*)/gm;
+  for (const m of String(content ?? '').matchAll(re)) out.push({ name: m[1], index: m.index });
+  return out;
+}
+
+/** Does the export declared at `index` carry the `@test-only-export-ok: <reason>` marker in its OWN leading
+ * comment? POSITIONAL, not lexical — the same constraint `hasCohesiveEscapeHatch` learned the hard way (r0
+ * matched the marker anywhere in the file, so every file that merely DOCUMENTED the hatch exempted itself).
+ * Only the unbroken run of comment lines directly above the declaration counts: a blank line, a line of real
+ * code, or any backtick (a template literal's interior can look exactly like a comment line to a text scan)
+ * ends the walk. A bare marker with no reason text does NOT count — the author must state why. */
+export function hasTestOnlyExportOkMarker(content, index) {
+  const lines = String(content ?? '').slice(0, index).split('\n');
+  lines.pop();                                    // the (empty) head of the line the export starts on
+  const collected = [];
+  let inBlock = false;                            // walking UPWARD, we meet a block comment's `*/` first
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const t = lines[i].trim();
+    if (t.includes('`')) break;                   // unlexable: a template literal's body reads like a comment
+    if (inBlock) {
+      collected.push(t);
+      if (t.startsWith('/*')) inBlock = false;    // reached the block's opener — keep walking upward
+      continue;
+    }
+    if (t.endsWith('*/') && !t.startsWith('//')) { collected.push(t); inBlock = !t.includes('/*'); continue; }
+    if (t.startsWith('//')) { collected.push(t); continue; }
+    break;                                        // blank line or real code — the leading comment ends here
+  }
+  return /@test-only-export-ok:[ \t]*\S/.test(collected.join('\n'));
+}
+
+/**
+ * Flag every export that no non-test module imports AND that its own module never references again — the
+ * "extracted, tested, never wired" class (#2967a). Pure.
+ *
+ * Import matching is by SPECIFIER BASENAME, the same conservative match `validateDeclaredModuleContract` uses:
+ * two modules sharing a basename merge, which can only ever HIDE a finding, never invent one — the right
+ * direction for a scan whose whole design problem is false positives. The internal-reference test is the same
+ * shape of conservative: any second mention of the name in the file (including one in a JSDoc) counts as use.
+ *
+ * @param {Array<{file: string, content: string}>} modules - every candidate .mjs (scripts/**, skills-src/**,
+ *   excluding __tests__/dist/node_modules). Test files are excluded by the caller, which is why a finding says
+ *   "no NON-TEST module imports it" rather than naming the test that does.
+ * @param {{starImportedSpecifiers?: Set<string>, subprocessReferencedFiles?: Set<string>}} structural -
+ *   precomputed by the caller's fs walk; both are sets of FILE BASENAMES (e.g. `review-core-cli.mjs`).
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findTestOnlyExports(modules = [], structural = {}) {
+  const starImported = structural?.starImportedSpecifiers instanceof Set ? structural.starImportedSpecifiers : new Set();
+  const shelled = structural?.subprocessReferencedFiles instanceof Set ? structural.subprocessReferencedFiles : new Set();
+  // basename → every name some module imports (or re-exports) from a specifier with that basename.
+  const importedByBasename = new Map();
+  const add = (spec, names) => {
+    const base = String(spec).split('/').pop();
+    let set = importedByBasename.get(base);
+    if (!set) { set = new Set(); importedByBasename.set(base, set); }
+    for (const raw of names.split(',')) {
+      const name = raw.trim().split(/\s+as\s+/)[0].trim();
+      if (name) set.add(name);
+    }
+  };
+  for (const { content } of modules || []) {
+    const src = String(content ?? '');
+    // `[^'"{}]*` absorbs a default import (`import x, { y } from …`) without ever crossing a string boundary.
+    for (const m of src.matchAll(/import[^'"{}]*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) add(m[2], m[1]);
+    for (const m of src.matchAll(/export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) add(m[2], m[1]);
+  }
+  const errors = []; const warnings = [];
+  for (const { file, content } of modules || []) {
+    const base = String(file).split('/').pop();
+    if (starImported.has(base) || shelled.has(base)) continue;
+    const imported = importedByBasename.get(base) || new Set();
+    const src = String(content ?? '');
+    for (const { name, index } of extractExportedNames(content)) {
+      if (imported.has(name)) continue;
+      // Referenced again anywhere in its OWN module (a file's CLI shell calling its own pure core) ⇒ wired.
+      if ((src.match(new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`, 'g')) || []).length > 1) continue;
+      if (hasTestOnlyExportOkMarker(content, index)) continue;
+      const finding = {
+        // Deliberately SHORT: this fires ~50 times on today's tree, and a paragraph repeated 50 times is a
+        // wall, not a signal. The rationale (and `reduceLensJury`'s story) lives in the block comment above.
+        message:
+          `test-only export (#2967): \`${name}\` in ${file} — no non-test module imports it and nothing in ` +
+          `${file} references it either, so only its own test exercises it. Wire it, drop the export, or put ` +
+          `\`@test-only-export-ok: <reason>\` in its own leading comment if the consumer is one this scan ` +
+          `structurally cannot see (a sibling repo, a conformance suite that IS the intended consumer).`,
+        descriptor: { kind: 'test-only-export', file, export: name },
+      };
+      (TEST_ONLY_EXPORT_ENFORCED ? errors : warnings).push(finding);
+    }
+  }
+  return { errors, warnings };
+}
+
+// ── (b) UNFENCED MANDATE PARAMS — a mandate builder with no fence on its untrusted input (#2967b) ────────────
+// This repo ships `fenceUntrusted` + `FENCED_DATA_RULE` (#2438) so untrusted prose travels as LABELLED DATA
+// rather than sitting in instruction position. That fix was left local to the plan handshake, so the next
+// author composing a mandate followed the older, unfenced example — `scripts/converge-cli.mjs:210`'s own header
+// comment says so nearly verbatim.
+//
+// WHAT THIS RULE ESTABLISHES, EXACTLY — and no more. It proves a builder has NO fenced path for a parameter it
+// splices into instruction text. That is a hygiene fact about the source, not evidence of an exploit: nobody
+// has tested whether crafted caller text actually changes an agent's verdict, and the degree of influence is
+// UNMEASURED. Do not read (or write) a wider claim than "caller-supplied text reaches the mandate unfenced".
+//
+// CODE ONLY, NEVER PROSE (PR #1235 review, blocker 1). Everything below reads the builder body through
+// `maskNonCode` — comments, string/template TEXT and regex bodies are blanked before anything is matched. The
+// unmasked r0 scanned raw source, so `// TODO: fenceUntrusted('goal', goal) later` next to a raw `${goal}`
+// SILENCED the error (the fence "call" was a comment), and, in the other direction, a docblock that merely
+// SHOWS `${goal}` in an example flagged a builder that never splices it. A gate a comment can switch off is
+// not a gate; a gate this repo's commenting style reddens is not one either.
+//
+// TWO LIMITS, both deliberate and both worth knowing before trusting a green run:
+//   1. It is a DEFINITION-level scan. `fenced` is opt-in on some builders (`buildEditorMandate`), so a builder
+//      that merely OFFERS a fenced path passes — the rule does not verify that each CALL SITE opts in. Call-site
+//      verification is a different scan over a different file set; this one does not do it.
+//   2. It sees only a parameter interpolated DIRECTLY (`${goal}`, `${String(goal).trim()}`), and counts it
+//      fenced only when the param name appears in `fenceUntrusted`'s SECOND argument — the data expression. The
+//      TAG (first argument) is masked with the rest of the string literals on purpose: `fenceUntrusted('goal',
+//      somethingElse)` must not exempt a raw `${goal}` elsewhere in the body. So a param first copied into a
+//      local (`const g = goal;`) is invisible when spliced (no taint tracking, by design) and reads as UNfenced
+//      when only the local is passed to the fence. In the other direction it is deliberately blunt: a param
+//      merely MENTIONED inside an interpolated expression (`${goal ? a : b}`, where only its truthiness is
+//      read) counts as interpolated. Over-flagging costs one allow-list line; under-flagging costs the finding,
+//      so both bluntnesses point the safe way.
+export const UNFENCED_MANDATE_ENFORCED = true; // #2967 RULED: error from day one; both live sites fixed with it
+
+/** Parameters exempt from the fence: CLOSED vocabularies, never caller free text. `lens` is validated against
+ * `PANEL_LENSES` (an unknown lens throws); `round`/`roundCap` are numbers; `contextIsolation` is an isolation
+ * mode; `subjectNoun`/`findingAnchor` are the structural nouns a subject ADAPTER supplies ("diff", "region"),
+ * not anything a caller passes through. Fencing these would be noise inside the mandate's own grammar.
+ *
+ * ONE OF THOSE RATIONALES IS WEAKER THAN THE OTHERS, stated rather than glossed (PR #1235 review, finding 7):
+ * `contextIsolation` is called a closed vocabulary here, but no code closes it — `buildMandate` interpolates
+ * whatever string it is handed straight into instruction position. Every live caller passes the default or
+ * nothing, so the allow-list entry is not covering a live splice today; it is an unenforced claim, and closing
+ * it means validating the value at the builder, not editing this list. */
+export const MANDATE_FENCE_ALLOWED_PARAMS = new Set([
+  'lens', 'round', 'roundCap', 'contextIsolation', 'subjectNoun', 'findingAnchor', 'fenced',
+]);
+
+/**
+ * Blank every non-code region of a JS source — line and block comments, string literals (delimiters included),
+ * the TEXT of template literals, and regex bodies — while preserving length, newlines, and every `${…}`
+ * substitution's *expression* (PR #1235 review, blockers 1 and 2). Length preservation is what lets the
+ * bracket walkers below keep working on offsets taken from the masked copy.
+ *
+ * WHY THE WHOLE FILE AND NOT JUST THE BODY: the same masking is what keeps a commented-out
+ * `// export function buildOldMandate({ goal })` from being scanned as a live builder.
+ *
+ * The one heuristic here is regex-vs-division: a `/` is read as a regex literal only when the previous
+ * significant character cannot end an expression (or the previous word is `return`/`typeof`/`case`/…), and only
+ * when a closing `/` follows on the SAME line — a regex literal cannot span one, so anything else stays code.
+ */
+function maskNonCode(source) {
+  const src = String(source ?? '');
+  const out = src.split('');
+  const blank = (i) => { if (src[i] !== '\n') out[i] = ' '; };
+  // Openers and operators only: `)`, `]` and `}` are deliberately ABSENT — they can end an expression, so
+  // `arr[i] / 2` is division, and reading it as a regex would blank real code up to the next slash.
+  const REGEX_PREV = /[(,;:=!&|?+\-*%~^<>[{]/;
+  const REGEX_PREV_WORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'do', 'else', 'yield', 'await', 'new', 'delete', 'void']);
+  // Frames: the innermost is what we are lexing. A `template` frame blanks text and hands `${` back to code.
+  const frames = [{ kind: 'code', braces: 0 }];
+  let i = 0;
+  const prevSignificant = () => {
+    let k = i - 1;
+    while (k >= 0 && /\s/.test(out[k])) k -= 1;
+    if (k < 0) return { char: '', word: '' };
+    if (!/[\w$]/.test(out[k])) return { char: out[k], word: '' };
+    let end = k;
+    while (k >= 0 && /[\w$]/.test(out[k])) k -= 1;
+    return { char: out[end], word: out.slice(k + 1, end + 1).join('') };
+  };
+  while (i < src.length) {
+    const top = frames[frames.length - 1];
+    const c = src[i]; const d = src[i + 1];
+    if (top.kind === 'template') {
+      if (c === '\\') { blank(i); blank(i + 1); i += 2; continue; }
+      if (c === '$' && d === '{') { frames.push({ kind: 'code', braces: 0 }); i += 2; continue; } // keep `${`
+      if (c === '`') { blank(i); frames.pop(); i += 1; continue; }
+      blank(i); i += 1; continue;
+    }
+    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') { blank(i); i += 1; } continue; }
+    if (c === '/' && d === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end < 0 ? src.length : end + 2;
+      for (let k = i; k < stop; k += 1) blank(k);
+      i = stop; continue;
+    }
+    if (c === "'" || c === '"') {
+      blank(i); i += 1;
+      while (i < src.length && src[i] !== c && src[i] !== '\n') {
+        if (src[i] === '\\') { blank(i); i += 1; }
+        blank(i); i += 1;
+      }
+      if (i < src.length && src[i] === c) { blank(i); i += 1; }
+      continue;
+    }
+    if (c === '`') { blank(i); frames.push({ kind: 'template', braces: 0 }); i += 1; continue; }
+    if (c === '/') {
+      const prev = prevSignificant();
+      if (prev.char === '' || (prev.word ? REGEX_PREV_WORDS.has(prev.word) : REGEX_PREV.test(prev.char))) {
+        let k = i + 1; let inClass = false; let closed = -1;
+        while (k < src.length && src[k] !== '\n') {
+          if (src[k] === '\\') { k += 2; continue; }
+          if (src[k] === '[') inClass = true;
+          else if (src[k] === ']') inClass = false;
+          else if (src[k] === '/' && !inClass) { closed = k; break; }
+          k += 1;
+        }
+        if (closed > 0) {
+          let end = closed + 1;
+          while (end < src.length && /[a-z]/.test(src[end])) end += 1; // flags
+          for (let b = i; b < end; b += 1) blank(b);
+          i = end; continue;
+        }
+      }
+      i += 1; continue;
+    }
+    if (c === '{') { top.braces += 1; i += 1; continue; }
+    if (c === '}') {
+      if (top.braces === 0 && frames.length > 1) { frames.pop(); i += 1; continue; } // closes a `${…}` — keep it
+      top.braces -= 1; i += 1; continue;
+    }
+    i += 1;
+  }
+  return out.join('');
+}
+
+/** Every `export function build…Mandate(…)` in a module, with its destructured parameter names and body text.
+ * The body runs to the first `}` in column 0 — this repo's top-level functions all close that way. Reads the
+ * MASKED source (see `maskNonCode`): every consumer below matches identifiers, never prose. */
+function extractMandateBuilders(content) {
+  const src = maskNonCode(content);
+  const out = [];
+  for (const m of src.matchAll(/export\s+function\s+(build[A-Za-z0-9_$]*Mandate)\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const sigEnd = matchBracket(src, open);
+    if (sigEnd < 0) continue;
+    const sig = src.slice(open + 1, sigEnd - 1);
+    const bodyOpen = src.indexOf('{', sigEnd - 1);
+    if (bodyOpen < 0) continue;
+    const close = src.slice(bodyOpen).search(/\n\}/);
+    const body = src.slice(bodyOpen, close < 0 ? src.length : bodyOpen + close);
+    const params = [];
+    const brace = sig.indexOf('{');
+    const inner = brace >= 0 ? sig.slice(brace + 1, matchBracket(sig, brace) - 1) : sig;
+    for (const part of splitTopLevelCommas(inner)) {
+      const pm = /^\s*([A-Za-z_$][\w$]*)\s*(?::\s*([A-Za-z_$][\w$]*))?/.exec(part);
+      if (pm) params.push(pm[2] || pm[1]);
+    }
+    out.push({ name: m[1], params, body });
+  }
+  return out;
+}
+
+/** Every `${…}` expression in `text`, and every `fenceUntrusted(…)` call's DATA argument — everything after the
+ * first top-level comma, i.e. the expression actually being fenced. The tag argument is deliberately excluded
+ * (it is a masked string literal by the time this runs anyway): a fence whose TAG happens to spell a param name
+ * must not exempt that param from a raw splice elsewhere. `text` must already be masked. */
+function interpolationsAndFences(text) {
+  const interpolations = []; const fenced = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '$' && text[i + 1] === '{') {
+      const end = matchBracket(text, i + 1);
+      if (end > 0) { interpolations.push(text.slice(i + 2, end - 1)); i = end - 1; }
+    }
+  }
+  for (const m of text.matchAll(/\bfenceUntrusted\s*\(/g)) {
+    const end = matchBracket(text, m.index + m[0].length - 1);
+    if (end < 0) continue;
+    const args = splitTopLevelCommas(text.slice(m.index + m[0].length, end - 1));
+    if (args.length > 1) fenced.push(args.slice(1).join(','));
+  }
+  return { interpolations, fenced };
+}
+
+/** True when the builder hands its own `fenced` flag on to ANOTHER `build…Mandate(…)` — the delegate shape
+ * (`buildMandate` / `buildPanelMandate` forward `fenced` to `buildSubjectMandate`, which owns the wording and
+ * emits `FENCED_DATA_RULE`). A delegating builder therefore satisfies the data-rule requirement without naming
+ * the constant itself (PR #1235 review, blocker-adjacent 2). `body` must already be masked.
+ *
+ * THE LIMIT, stated rather than glossed: this traces ONE hop, syntactically. It proves the flag is forwarded to
+ * something named `build…Mandate`, not that the callee really emits the rule — a delegate chain two hops long,
+ * or a callee that ignores the flag, is out of reach of a definition-level scan. */
+function delegatesFenceRule(body) {
+  for (const m of body.matchAll(/\bbuild[A-Za-z0-9_$]*Mandate\s*\(/g)) {
+    const end = matchBracket(body, m.index + m[0].length - 1);
+    if (end > 0 && /\bfenced\b/.test(body.slice(m.index + m[0].length, end - 1))) return true;
+  }
+  return false;
+}
+
+/**
+ * Flag every `build…Mandate` parameter spliced into the mandate's instruction text with no `fenceUntrusted`
+ * path (#2967b). Pure. Read the two limits and the scope of the claim in the block comment above — the rule
+ * establishes that caller-supplied text reaches the mandate unfenced, and nothing about how much influence
+ * that buys, which is UNMEASURED.
+ *
+ * @param {Array<{file: string, content: string}>} modules - scripts/lib/*.mjs content.
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findUnfencedMandateParams(modules = []) {
+  const errors = []; const warnings = [];
+  const emit = (finding) => (UNFENCED_MANDATE_ENFORCED ? errors : warnings).push(finding);
+  for (const { file, content } of modules || []) {
+    for (const { name, params, body } of extractMandateBuilders(content)) {
+      const { interpolations, fenced } = interpolationsAndFences(body);
+      let anyFenced = false;
+      for (const param of params) {
+        const ref = new RegExp(`\\b${param}\\b`);
+        const isFenced = fenced.some((a) => ref.test(a));
+        if (isFenced) anyFenced = true;
+        if (!interpolations.some((e) => ref.test(e))) continue;
+        if (isFenced || MANDATE_FENCE_ALLOWED_PARAMS.has(param)) continue;
+        emit({
+          message:
+            `unfenced mandate param: \`${param}\` is interpolated into the mandate text ${name}() returns ` +
+            `(${file}) without ever passing through \`fenceUntrusted\`. Caller-supplied text then reaches the ` +
+            `mandate in instruction position rather than as labelled data — that is all this rule establishes; ` +
+            `whether such text can actually steer an agent's verdict is UNMEASURED here. Route it through ` +
+            `\`fenceUntrusted('<tag>', …)\` and include \`FENCED_DATA_RULE\` in the returned text (#2438), or ` +
+            `add it to \`MANDATE_FENCE_ALLOWED_PARAMS\` if it is a closed vocabulary rather than free text.`,
+          descriptor: { kind: 'unfenced-mandate-param', file, builder: name, param },
+        });
+      }
+      if (anyFenced && !body.includes('FENCED_DATA_RULE') && !delegatesFenceRule(body)) {
+        emit({
+          message:
+            `fenced mandate without its data rule: ${name}() (${file}) wraps a parameter in \`fenceUntrusted\` ` +
+            `but the text it returns never states \`FENCED_DATA_RULE\` — and it does not forward its \`fenced\` ` +
+            `flag to another \`build…Mandate\` that would. A fence with no rule sentence is decorative — the ` +
+            `tags are just characters unless the mandate tells the agent that fenced blocks are data to judge ` +
+            `and never instructions to follow (#2438).`,
+          descriptor: { kind: 'unfenced-mandate-param', file, builder: name, param: null },
+        });
+      }
+    }
+  }
+  return { errors, warnings };
+}
