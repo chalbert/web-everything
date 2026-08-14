@@ -31,10 +31,12 @@ import { createRegistry } from '../registry.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import {
   BRIEF_PLACEHOLDERS,
+  BRIEF_TOKEN_RE,
   DEFAULT_EXPECTED_WITHIN_MINUTES,
   DISPATCH_EFFECT,
   DISPATCH_HOLD_GRACE_MINUTES,
   DISPATCH_LANE_OP,
+  DISPATCH_LISTING_GRACE_MINUTES,
   canonicalPlaceholder,
   dispatchLaneOperation,
   dispatchStillHolds,
@@ -55,6 +57,7 @@ import {
   inFlightDispatchesFor,
   isPreSpawnRefusal,
   readTick,
+  stampLiveness,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -87,7 +90,7 @@ function tickRead(overrides = {}) {
     statusLine: 'conveyor · 1 building · 0 preparing',
     notes: [],
     droppedBookkeepingKeys: [],
-    inFlightDispatches: { runs: [], unreadable: 0 },
+    inFlightDispatches: { runs: [], unreadable: 0, livenessSource: 'not-needed' },
     bookkeepingSource: 'file',
     // WHEN the read was taken. The double-dispatch guard ages out against this, and the declaration is pure —
     // so the instant arrives as data. `NOW` is 10:00 and every in-flight fixture below is dated relative to it.
@@ -98,9 +101,24 @@ function tickRead(overrides = {}) {
 
 /** The instant every aging assertion is read against. */
 const NOW = '2026-08-13T10:00:00.000Z';
-/** An in-flight dispatch record summary, as `inFlightDispatchesFor` returns one. */
+/**
+ * An in-flight dispatch record summary, as `readTick` hands one to the declaration — `live` is the answer
+ * `claude agents --json` gave about its handle, stamped on by `stampLiveness`. It defaults to TRUE because
+ * that is what an in-flight dispatch normally is: an agent that is still running.
+ */
 function inFlightRun(over = {}) {
-  return { runId: 'dispatch-lane-abc', key: 'run-x#2#0', handle: 'sess-1', startedAt: '2026-08-13T09:30:00.000Z', expectedBy: '2026-08-13T11:00:00.000Z', ...over };
+  return {
+    runId: 'dispatch-lane-abc', key: 'run-x#2#0', handle: 'sess-1',
+    startedAt: '2026-08-13T09:30:00.000Z', expectedBy: '2026-08-13T11:00:00.000Z', live: true, ...over,
+  };
+}
+/** The same row with its session GONE from the listing — what an aged-out record actually looks like. */
+function goneRun(over = {}) {
+  return inFlightRun({ live: false, ...over });
+}
+/** An `inFlightDispatches` block as the io shell returns it, liveness read from a real listing. */
+function inFlightBlock(runs, over = {}) {
+  return { runs, unreadable: 0, livenessSource: 'claude-agents', ...over };
 }
 /** `at` shifted by minutes, as an ISO string. */
 function isoPlus(at, minutes) {
@@ -204,7 +222,7 @@ describe('the lane comes from the tick core or nowhere', () => {
     // the LANE is leased by the agent seconds after it starts — so two back-to-back invocations would get the
     // same cleared row and put two agents in one clone. The run store is what remembers the first one.
     const { run, registry } = runTo(tickRead({
-      inFlightDispatches: { runs: [inFlightRun()], unreadable: 0 },
+      inFlightDispatches: inFlightBlock([inFlightRun()]),
     }));
     expect(run.verdict.dispatching).toBe(false);
     expect(run.verdict.reason).toMatch(/already has a dispatch in flight/);
@@ -218,47 +236,122 @@ describe('the lane comes from the tick core or nowhere', () => {
     expect(run.verdict.reason).toMatch(/wake\.mjs --resolve=/);
   });
 
-  // ── PR #1211 review, F1 (BLOCKER) — the guard must not be a permanent per-item lockout ─────────────────────
+  // ── PR #1211: F1 (round 1) and G1 (round 2) — TWO OPPOSITE FAILURES, and both must stay fixed ──────────────
   //
-  // The observer can never answer `succeeded`, `unresolved` writes nothing, and run records are never pruned.
-  // Composed with a guard that held on ANY in-flight record, that made this operation single-use per item: the
-  // conveyor's own loop (dispatch → PR → review bounces → re-dispatch) could never run through it.
+  // ROUND 1, F1: the observer can never answer `succeeded`, `unresolved` writes nothing, and run records are
+  // never pruned. Composed with a guard that held on ANY in-flight record, that made this operation single-use
+  // per item — the conveyor's own loop (dispatch → PR → review bounces → re-dispatch) could never run.
+  //
+  // ROUND 2, G1: the fix released the hold on WALL CLOCK ALONE. The same record, at the same instant, was
+  // reported `still running` by the waker and dispatched past by the guard — and the scenario that produces a
+  // long-lived agent holding no lease is the likeliest first-run failure (a background session stalled on a
+  // permission prompt): alive, no lane leased, nothing claimed, so a second agent starts on the same lane under
+  // the same session slug. The tests below are the two halves. Neither may be traded away for the other.
 
-  it('DISPATCHES AGAIN once an in-flight record is past its deadline — the guard ages out, it does not wedge', () => {
-    // Same record as the refusal above, read 31 minutes past `expectedBy` + the grace margin. If the guard
-    // still held here, one completed dispatch would lock #3037 out of ever dispatching again.
-    const stale = inFlightRun({ expectedBy: isoPlus(NOW, -(DISPATCH_HOLD_GRACE_MINUTES + 1)) });
-    const { run } = runTo(tickRead({ inFlightDispatches: { runs: [stale], unreadable: 0 } }));
+  it('G1: a record whose session `claude agents` STILL LISTS holds at ANY age — the clock cannot release a live agent', () => {
+    // THE REVIEW'S OWN REPRODUCTION, to the minute: started 121 minutes ago with a 90-minute deadline, so it
+    // is 31 minutes past `expectedBy + DISPATCH_HOLD_GRACE_MINUTES` — the exact point the clock-only guard
+    // dispatched while the waker printed `still running` for the same handle in the same instant.
+    const startedAt = isoPlus(NOW, -121);
+    const stalled = inFlightRun({ runId: 'run-live-demo', startedAt, expectedBy: isoPlus(startedAt, 90), live: true });
+    const { run, registry } = runTo(tickRead({ inFlightDispatches: inFlightBlock([stalled]) }));
+
+    expect(run.verdict.dispatching).toBe(false);
+    expect(run.effects).toEqual([]);
+    expect(runStatus(run, { registry })).toBe('complete');
+    expect(run.verdict.agedOutDispatches).toEqual([]);
+    // …and the operator's line says WHICH fact holds it, because "inside its window" and "its session is
+    // listed" call for different actions.
+    expect(run.verdict.reason).toMatch(/STILL LISTED by `claude agents`/);
+    expect(run.verdict.reason).toMatch(/sess-1/);
+    // The function itself, at eighty times the age: there is no instant at which a listed session releases.
+    expect(dispatchStillHolds(stalled, isoPlus(NOW, 10_000))).toBe(true);
+  });
+
+  it('G1/F1 together: a record whose session is GONE still ages out — in MINUTES, and the lockout stays fixed', () => {
+    // The trap the round-2 fix fell into, closed in the opposite direction: making the guard ask about liveness
+    // must not restore the permanent per-item lockout. A handle the listing does not carry describes an agent
+    // that finished or died, and neither can collide with a fresh one in a lane.
+    const gone = goneRun({ startedAt: isoPlus(NOW, -10) });
+    const { run } = runTo(tickRead({ inFlightDispatches: inFlightBlock([gone]) }));
     expect(run.verdict.dispatching).toBe(true);
     expect(run.effects).toHaveLength(1);
     // …and it is not silent about what it went past: the record is still `in-flight` on disk.
     expect(run.verdict.agedOutDispatches).toEqual(['dispatch-lane-abc']);
     expect(run.verdict.reason).toMatch(/aged-out in-flight dispatch record/);
+    // It does NOT wait out the 90-minute estimate first — that agent is gone, and the clock was only ever the
+    // backstop for a record nothing could be observed about.
+    expect(dispatchStillHolds(gone, NOW)).toBe(false);
   });
 
-  it('a record still INSIDE its deadline plus the grace margin holds, and one past it does not', () => {
-    // The window the guard exists for is the spawn→claim race, which is minutes wide. This is the boundary,
-    // asserted on both sides so neither the deadline nor the margin can be dropped for free.
-    const entry = { expectedBy: NOW, startedAt: isoPlus(NOW, -90) };
-    expect(dispatchStillHolds(entry, isoPlus(NOW, DISPATCH_HOLD_GRACE_MINUTES - 1))).toBe(true);
-    expect(dispatchStillHolds(entry, isoPlus(NOW, DISPATCH_HOLD_GRACE_MINUTES + 1))).toBe(false);
+  it('G1: ABSENT but too YOUNG to be listed still holds — `--bg` returns before the session is visible', () => {
+    // The listing grace IS the spawn→claim window the whole guard exists for, so "not in the listing" must not
+    // mean "gone" inside it. Written with the LITERAL two minutes as well as the constant.
+    const started = isoPlus(NOW, -1); // one minute old, and not in the listing
+    const young = goneRun({ startedAt: started, expectedBy: isoPlus(started, 90) });
+    expect(DISPATCH_LISTING_GRACE_MINUTES).toBe(2);
+    expect(dispatchStillHolds(young, NOW)).toBe(true);
+    expect(dispatchStillHolds(young, isoPlus(started, 1.5))).toBe(true);
+    expect(dispatchStillHolds(young, isoPlus(started, 2.5))).toBe(false);
+    // …and an absent handle whose `startedAt` cannot be read cannot be told from a just-started one → holds.
+    expect(dispatchStillHolds(goneRun({ startedAt: null }), NOW)).toBe(true);
+  });
+
+  it('G1: with the listing UNREADABLE the clock backstop still applies — and the verdict says the guard was weak', () => {
+    // A `claude` that is missing or wedged means the system has NO liveness signal, so the `running` answer the
+    // clock used to contradict cannot be the one being contradicted. The clock is sound exactly here — but a
+    // caller must be able to see that this release was decided without liveness.
+    const unknown = {
+      runId: 'no-liveness', key: 'k', handle: 'sess-1',
+      startedAt: isoPlus(NOW, -200), expectedBy: isoPlus(NOW, -60), live: null,
+    };
+    const { run } = runTo(tickRead({ inFlightDispatches: { runs: [unknown], unreadable: 0, livenessSource: 'unreadable' } }));
+    expect(run.verdict.dispatching).toBe(true);
+    expect(run.verdict.agedOutDispatches).toEqual(['no-liveness']);
+    expect(run.verdict.dispatchLiveness).toBe('unreadable');
+    // …and a hold decided the same way says so rather than claiming a listing it never read.
+    const held = runTo(tickRead({
+      inFlightDispatches: { runs: [{ ...unknown, expectedBy: isoPlus(NOW, 60) }], unreadable: 0, livenessSource: 'unreadable' },
+    })).run;
+    expect(held.verdict.dispatching).toBe(false);
+    expect(held.verdict.reason).toMatch(/nothing could establish whether its agent is alive/);
+    expect(held.verdict.dispatchLiveness).toBe('unreadable');
+    // A guard that DID read the listing reports the strong source, and one with nothing to ask about says so.
+    expect(runTo(tickRead({ inFlightDispatches: inFlightBlock([goneRun({ startedAt: isoPlus(NOW, -10) })]) })).run.verdict.dispatchLiveness)
+      .toBe('claude-agents');
+    expect(runTo().run.verdict.dispatchLiveness).toBe('not-needed');
+  });
+
+  it('the CLOCK BACKSTOP boundary, pinned with LITERALS and not only with the constants (round 2, G5)', () => {
+    // The backstop governs an entry whose liveness is UNKNOWN, and only that. THE VALUES ARE ASSERTED, not
+    // just the shape: the round-2 boundary tests were written as `isoPlus(NOW, DISPATCH_HOLD_GRACE_MINUTES ± 1)`,
+    // so every assertion stayed true for ANY margin and `30 → 0` survived with the whole suite green. A margin
+    // asserted only against itself is a margin the next refactor deletes for free.
+    expect(DISPATCH_HOLD_GRACE_MINUTES).toBe(30);
+    expect(DEFAULT_EXPECTED_WITHIN_MINUTES).toBe(90);
+    const entry = { expectedBy: NOW, startedAt: isoPlus(NOW, -90) }; // no `live` → the backstop
+    expect(dispatchStillHolds(entry, isoPlus(NOW, 29))).toBe(true);
+    expect(dispatchStillHolds(entry, isoPlus(NOW, 31))).toBe(false);
+    // …and at a ZEROED margin the 29-minute case flips, which is what makes this an assertion about the VALUE
+    // rather than a restatement of the code.
+    expect(dispatchStillHolds(entry, isoPlus(NOW, 29), { graceMinutes: 0 })).toBe(false);
     // A handle-less INDETERMINATE entry never got an `expectedBy`; its deadline is reconstructed from
     // `startedAt` and the same estimate, so it ages out too rather than holding the item forever.
     const noDeadline = { expectedBy: null, startedAt: NOW };
-    expect(dispatchStillHolds(noDeadline, isoPlus(NOW, DEFAULT_EXPECTED_WITHIN_MINUTES + DISPATCH_HOLD_GRACE_MINUTES - 1))).toBe(true);
-    expect(dispatchStillHolds(noDeadline, isoPlus(NOW, DEFAULT_EXPECTED_WITHIN_MINUTES + DISPATCH_HOLD_GRACE_MINUTES + 1))).toBe(false);
+    expect(dispatchStillHolds(noDeadline, isoPlus(NOW, 90 + 30 - 1))).toBe(true);
+    expect(dispatchStillHolds(noDeadline, isoPlus(NOW, 90 + 30 + 1))).toBe(false);
     // FAIL-CLOSED on a date it cannot read: a wrong "aged out" is two agents in one clone, a wrong "still
     // holding" is a refusal an operator can see.
     expect(dispatchStillHolds({ expectedBy: null, startedAt: null }, NOW)).toBe(true);
     expect(dispatchStillHolds(entry, 'not a date')).toBe(true);
   });
 
-  it('holds on the LIVE record even when a stale sibling exists — aging is per record, not per item', () => {
+  it('holds on the LIVE record even when a gone sibling exists — the question is asked per record, not per item', () => {
     const { run, registry } = runTo(tickRead({
-      inFlightDispatches: {
-        runs: [inFlightRun({ runId: 'stale-1', expectedBy: isoPlus(NOW, -120) }), inFlightRun({ runId: 'live-1' })],
-        unreadable: 0,
-      },
+      inFlightDispatches: inFlightBlock([
+        goneRun({ runId: 'stale-1', startedAt: isoPlus(NOW, -120) }),
+        inFlightRun({ runId: 'live-1' }),
+      ]),
     }));
     expect(run.verdict.dispatching).toBe(false);
     expect(run.verdict.reason).toMatch(/live-1/);
@@ -273,11 +366,11 @@ describe('the lane comes from the tick core or nowhere', () => {
     // `inFlightDispatchesFor` skips a corrupt record rather than wedging every dispatch. That trade is only
     // acceptable if the caller can SEE it, and the guard's failure mode (two agents in one lane clone) is the
     // last thing that should degrade silently.
-    const { run } = runTo(tickRead({ inFlightDispatches: { runs: [], unreadable: 2 } }));
+    const { run } = runTo(tickRead({ inFlightDispatches: { runs: [], unreadable: 2, livenessSource: 'not-needed' } }));
     expect(run.verdict.dispatching).toBe(true);
     expect(run.verdict.unreadableRunRecords).toBe(2);
     // …and on a HOLD too, which is the exit that used to drop it as well.
-    const held = runTo(tickRead({ inFlightDispatches: { runs: [inFlightRun()], unreadable: 3 } })).run;
+    const held = runTo(tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()], { unreadable: 3 }) })).run;
     expect(held.verdict.dispatching).toBe(false);
     expect(held.verdict.unreadableRunRecords).toBe(3);
     // A complete guard says so with a number, not with an absent field.
@@ -381,8 +474,21 @@ describe('filling the delivery brief', () => {
     // Table-driven over all five names × the spellings a human typo actually produces. Any one of these
     // reaching an agent is the failure: `export LANE_SESSION={{ SESSION_SLUG }}` leases under a bogus session
     // name that `pr-watch --release-session conveyor-<num>` never releases — a stranded lease.
-    const variant = (name) => [`{{ ${name} }}`, `{{${name.toLowerCase()}}}`, `{{${name.replace(/_/g, '-')}}}`, `{{  ${name}}}`]
-      // A name with no underscore (`LANE`, `SCOPE`) dashes to ITSELF — that is the correct spelling, not a typo.
+    //
+    // THE SPACE AND THE DOT ARE HERE BECAUSE ROUND 2 FOUND THEM (G4). The claim said "in any spelling" while
+    // the scan's character class was `[A-Za-z0-9_-]`, so `{{ITEM NUM}}` and `{{ITEM.NUM}}` — an underscore
+    // typed as a space, or as a dot — matched NOTHING: not substituted, not refused, and not even reported as
+    // an unknown token. They reached the agent verbatim and invisibly, which is exactly the failure the round-1
+    // fix was written to prevent.
+    const variant = (name) => [
+      `{{ ${name} }}`,
+      `{{${name.toLowerCase()}}}`,
+      `{{${name.replace(/_/g, '-')}}}`,
+      `{{${name.replace(/_/g, ' ')}}}`,
+      `{{${name.replace(/_/g, '.')}}}`,
+      `{{  ${name}}}`,
+    ]
+      // A name with no underscore (`LANE`, `SCOPE`) separator-swaps to ITSELF — the correct spelling, not a typo.
       .filter((t) => t !== `{{${name}}}`);
     for (const name of BRIEF_PLACEHOLDERS) {
       for (const token of variant(name)) {
@@ -395,7 +501,26 @@ describe('filling the delivery brief', () => {
     }
     // The canonicalizer that decides "is this a misspelling OF one of ours" is the whole discrimination.
     expect(canonicalPlaceholder(' item-num ')).toBe('ITEM_NUM');
+    expect(canonicalPlaceholder('Item.Num')).toBe('ITEM_NUM');
+    expect(canonicalPlaceholder('SESSION SLUG')).toBe('SESSION_SLUG');
     expect(canonicalPlaceholder('LIKE_THIS')).toBeNull();
+  });
+
+  it('G4: the three spellings the round-2 review proved INVISIBLE are refused, one character at a time', () => {
+    // Named separately from the table above because these are the exact strings the review ran, and each of
+    // them previously came back `FILLED … unknownTokens: []` — the worst of the three possible outcomes.
+    for (const token of ['{{ITEM NUM}}', '{{ITEM.NUM}}', '{{SESSION SLUG}}']) {
+      expect(() => fillBrief(`${BRIEF}\nexport LANE_SESSION=${token}`, VALUES), `${token} must be refused`)
+        .toThrow(/MISSPELLED placeholder/);
+    }
+    // And the DETECTION half of the property, directly: the scan sees any token that carries no brace.
+    expect([...'a {{ITEM NUM}} b {{ITEM.NUM}} c'.matchAll(BRIEF_TOKEN_RE)].map((m) => m[1]))
+      .toEqual(['ITEM NUM', 'ITEM.NUM']);
+    // A NEWLINE INSIDE THE NAME is the one thing the class excludes, deliberately: a token's name never spans
+    // lines, and admitting it would let one unclosed `{{` swallow a paragraph of the brief's prose as a single
+    // bogus token. (Surrounding whitespace may still be a newline — that is a typo'd placeholder, not prose.)
+    expect([...'{{ITEM\nNUM}}'.matchAll(BRIEF_TOKEN_RE)]).toEqual([]);
+    expect([...'{{ a }} text {{ b }}'.matchAll(BRIEF_TOKEN_RE)].map((m) => m[1])).toEqual(['a', 'b']);
   });
 
   it('a token naming NOTHING we fill is still only reported — the round-1 fix is not undone', () => {
@@ -416,9 +541,19 @@ describe('filling the delivery brief', () => {
       const typod = real.replace(`{{${name}}}`, `{{ ${name} }}`);
       expect(() => fillBrief(typod, VALUES), `a typo'd {{${name}}} must not reach an agent`).toThrow(/MISSPELLED placeholder/);
     }
-    // And the clean fill leaves NO token of ours behind, in any spelling.
+    // …including the spellings round 1's narrower scan could not see at all (round 2, G4).
+    for (const name of BRIEF_PLACEHOLDERS) {
+      for (const sep of [' ', '.']) {
+        const mangled = real.replace(`{{${name}}}`, `{{${name.replace(/_/g, sep)}}}`);
+        if (mangled === real) continue; // `LANE` / `SCOPE` have no underscore to mangle
+        expect(() => fillBrief(mangled, VALUES), `{{${name.replace(/_/g, sep)}}} must not reach an agent`)
+          .toThrow(/MISSPELLED placeholder/);
+      }
+    }
+    // And the clean fill leaves NO token of ours behind, in any spelling THE SCAN ITSELF admits — read through
+    // the exported regex, so widening the scan automatically widens this check rather than leaving it behind.
     const { prompt } = fillBrief(real, VALUES);
-    for (const [, name] of prompt.matchAll(/\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g)) {
+    for (const [, name] of prompt.matchAll(BRIEF_TOKEN_RE)) {
       expect(canonicalPlaceholder(name), `${name} survived the fill`).toBeNull();
     }
   });
@@ -664,6 +799,10 @@ describe('the tick reader', () => {
     runNode: () => JSON.stringify(TICK),
     readText: () => BRIEF,
     loadItems: () => [{ num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] }],
+    // EVERY process boundary is injected here, including the liveness listing the guard now consults — a test
+    // that left this one real would shell `claude` whenever the ambient run store happened to hold an
+    // in-flight dispatch.
+    listAgents: () => [],
   };
 
   it('selects this item\'s launch with the tick\'s OWN normalizer, so `#042` and `42` are one item', () => {
@@ -758,6 +897,52 @@ describe('the tick reader', () => {
     // Fail-soft per record: one corrupt file must not wedge every dispatch, but the caller is told the guard
     // was partial rather than being handed a confident empty answer.
     expect(out.unreadable).toBe(1);
+  });
+
+  // ── PR #1211 round 2, G1 — the guard's PRIMARY axis is liveness, and this is where the answer is read ──────
+
+  it('G1: STAMPS each in-flight record with whether `claude agents` still lists its handle', () => {
+    const rows = [
+      { runId: 'a', handle: 'sess-live' },
+      { runId: 'b', handle: 'sess-gone' },
+      { runId: 'c', handle: null }, // INDETERMINATE — no handle exists to ask about
+    ];
+    const out = stampLiveness({ runs: rows, unreadable: 1 }, { listAgents: () => [{ sessionId: 'sess-live' }] });
+    expect(out.runs.map((r) => r.live)).toEqual([true, false, null]);
+    expect(out.livenessSource).toBe('claude-agents');
+    // The partial-guard count is carried through rather than reset by the pass that adds liveness.
+    expect(out.unreadable).toBe(1);
+  });
+
+  it('G1: a listing that CANNOT be read degrades to the clock backstop and SAYS SO — it never claims "gone"', () => {
+    // Reporting `live: false` here would be the G1 hole again wearing a different hat: an unreadable listing is
+    // not evidence a session ended. It has to read as UNKNOWN, and the weaker guard has to be visible.
+    const rows = [{ runId: 'a', handle: 'sess-live' }];
+    for (const listAgents of [() => { throw new Error('spawnSync claude ETIMEDOUT'); }, () => ({}), undefined]) {
+      const out = stampLiveness({ runs: rows, unreadable: 0 }, { listAgents });
+      expect(out.runs[0].live).toBeNull();
+      expect(out.livenessSource).toBe('unreadable');
+    }
+  });
+
+  it('G1: asks NOTHING when nothing is in flight — the common path spawns no subprocess', () => {
+    let calls = 0;
+    const out = stampLiveness({ runs: [], unreadable: 0 }, { listAgents: () => { calls += 1; return []; } });
+    expect(calls).toBe(0);
+    expect(out.livenessSource).toBe('not-needed');
+  });
+
+  it('G1: the READ wires the liveness answer onto the rows the declaration ages against', () => {
+    // The seam that matters: `dispatchStillHolds` is pure, so a `live` field that never got stamped would
+    // silently put every hold back on the clock — the exact defect round 2 found, one level up.
+    const out = readTick({
+      num: '3037',
+      ...bindings,
+      listInFlightDispatches: () => ({ runs: [{ runId: 'a', handle: 'sess-live' }, { runId: 'b', handle: 'sess-x' }], unreadable: 0 }),
+      listAgents: () => [{ sessionId: 'sess-live' }],
+    });
+    expect(out.inFlightDispatches.runs.map((r) => r.live)).toEqual([true, false]);
+    expect(out.inFlightDispatches.livenessSource).toBe('claude-agents');
   });
 
   it('resolves the item\'s spec path and repo-qualified scope from the canonical loader', () => {

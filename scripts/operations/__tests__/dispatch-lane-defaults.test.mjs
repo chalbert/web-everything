@@ -19,6 +19,7 @@ import {
   DISPATCH_EFFECT,
 } from '../dispatch-lane.mjs';
 import {
+  LIST_TIMEOUT_ENV,
   LIST_TIMEOUT_MS,
   SPAWN_TIMEOUT_MS,
   TICK_TIMEOUT_MS,
@@ -27,6 +28,7 @@ import {
   defaultListAgents,
   defaultRunNode,
   defaultSpawnAgent,
+  listTimeoutMs,
   readTick,
 } from '../dispatch-lane-io.mjs';
 
@@ -60,8 +62,33 @@ describe('the default subprocess calls are BOUNDED — every one of them', () =>
 
   it('the agent listing is bounded — it sits inside a waker pass that promises to be fail-soft per run', () => {
     const { exec, calls } = spyExec('[]');
-    defaultListAgents({ exec });
+    defaultListAgents({ exec, env: {} });
+    // THE LITERAL, not only the constant: fifteen seconds is the claim, and a test written as
+    // `timeout: LIST_TIMEOUT_MS` alone stays true for any value the constant is changed to.
+    expect(LIST_TIMEOUT_MS).toBe(15 * 1000);
     expect(calls[0].opts).toMatchObject({ timeout: LIST_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  });
+
+  // ── PR #1211 round 2, G3 — the bound is REACHABLE, which is what de-flakes the waker CLI test ──────────────
+
+  it('the listing bound is overridable from the environment, and `0` means UNBOUNDED', () => {
+    // `wake-cli.test.mjs` drives the real CLI in a child process; under the gate's fork storm its stub
+    // `claude` could not always complete inside 15 seconds, `execFileSync` SIGKILLed it, and one assertion
+    // failed roughly one run in five. The child now sets this to `0` — Node reads that as no timeout at all —
+    // so the assertion races no wall clock, rather than racing a longer one.
+    expect(listTimeoutMs({})).toBe(LIST_TIMEOUT_MS);
+    expect(listTimeoutMs({ [LIST_TIMEOUT_ENV]: '0' })).toBe(0);
+    expect(listTimeoutMs({ [LIST_TIMEOUT_ENV]: '90000' })).toBe(90000);
+    const { exec, calls } = spyExec('[]');
+    defaultListAgents({ exec, env: { [LIST_TIMEOUT_ENV]: '0' } });
+    expect(calls[0].opts.timeout).toBe(0);
+  });
+
+  it('refuses a malformed listing bound rather than silently using the default', () => {
+    // Same rule as `WE_DISPATCH_AGENT_ARGS`: an operator who set a bound that never applied is worse off than
+    // one who was told their value was junk.
+    expect(() => listTimeoutMs({ [LIST_TIMEOUT_ENV]: 'soon' })).toThrow(new RegExp(LIST_TIMEOUT_ENV));
+    expect(() => listTimeoutMs({ [LIST_TIMEOUT_ENV]: '-1' })).toThrow(/non-negative/);
   });
 });
 
@@ -98,6 +125,25 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
     });
     expect(calls).toHaveLength(1);
     expect(calls[0].opts).toMatchObject({ timeout: TICK_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  });
+
+  it('the guard\'s LIVENESS read goes through `defaultListAgents` too — same argv, same bound, still no `--all`', () => {
+    // The third wiring seam, and the one G1's fix adds: a `stampLiveness` that reached a different reader — or
+    // no reader — would put every hold silently back on the clock, which is the defect round 2 found. Nothing
+    // is overridden here but the process boundary itself.
+    const { exec, calls } = spyExec('[]');
+    readTick({
+      num: '3037',
+      exec,
+      runNode: () => '{"decisions":{},"nextState":{}}',
+      readText: () => 'brief {{ITEM_NUM}}',
+      loadItems: () => [],
+      listInFlightDispatches: () => ({ runs: [{ runId: 'a', handle: 'sess-1' }], unreadable: 0 }),
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('claude');
+    expect(calls[0].argv).toEqual(['agents', '--json']);
+    expect(calls[0].opts).toMatchObject({ killSignal: 'SIGKILL' });
   });
 
   it('the sink goes through `defaultSpawnAgent`, timeout and all', async () => {

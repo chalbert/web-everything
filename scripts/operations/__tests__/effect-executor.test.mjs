@@ -464,6 +464,17 @@ describe('a dispatch that loses its handle degrades to unknown', () => {
     await expect(applyPendingEffects(run, { sinks, store })).rejects.toThrow(/dispatched but has NO handle/);
   });
 
+  it('and the refusal NAMES the runnable close-out command, run id and key filled in (PR #1211 round 2, G6)', async () => {
+    // THE ONE MESSAGE AN OPERATOR HITS ON THIS PATH — the path where they are most stuck and least able to
+    // guess. Round 1's wording was "no command-line surface exposes it yet, so that means a short script over
+    // the run store"; round 2 replaced it with the real command and NO test noticed the difference, so the old
+    // sentence could be restored for free. `renderPass`'s equivalent line was already pinned; this closes the
+    // asymmetry.
+    const { run, store, sinks } = await handleless();
+    await expect(applyPendingEffects(run, { sinks, store }))
+      .rejects.toThrow('node scripts/operations/wake.mjs --resolve=run-l --key=run-l#0#0 --status=applied|failed');
+  });
+
   it('is re-dispatched instead when the effect declared itself idempotent', async () => {
     const { run, store, sinks, calls } = await handleless(true);
     await applyPendingEffects(run, { sinks, store });

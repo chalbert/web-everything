@@ -130,7 +130,17 @@ export default defineConfig({
     // spawns off the shared `threads` worker pool the rest of the suite runs on, instead of contending with
     // every other file for the same pool of worker threads. Scoped to this file only — no other test's pool
     // assignment changes.
-    poolMatchGlobs: [['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks']],
+    // #3037 (PR #1211 round 2, G3): `wake-cli.test.mjs` joins it for the same reason and with the same
+    // measurement behind it. It drives the REAL waker CLI in a `node` child whose `claude` is an `sh` stub,
+    // and on the shared `threads` pool that child competed with every other worker for CPU — the stub's own
+    // spawn missed the observer's 15-second bound roughly one `--shard=1/2` run in five, and the test failed
+    // on an assertion whose subject had never been reached. The bound is now removable per-process
+    // (`WE_DISPATCH_LIST_TIMEOUT_MS=0`, which the test sets) and this keeps its subprocess spawns off the
+    // shared pool as well: the race is removed, and then the contention that produced it is too.
+    poolMatchGlobs: [
+      ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
+      ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
+    ],
     poolOptions: {
       forks: {
         singleFork: true,

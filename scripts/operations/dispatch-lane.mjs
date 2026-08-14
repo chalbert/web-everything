@@ -83,32 +83,61 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
 export const BRIEF_PLACEHOLDERS = Object.freeze(['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE']);
 
 /**
- * How long an in-flight dispatch record keeps HOLDING its item past the deadline it was given, before this
- * operation will dispatch that item again. See {@link dispatchStillHolds} for why any such window exists.
+ * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item
+ * past the deadline it was given. See {@link dispatchStillHolds} — this is the backstop for an entry nothing
+ * can be observed about, and it never overrules a listing that says the agent is alive.
+ *
+ * THE VALUE IS PINNED BY A TEST WRITTEN WITH THE LITERAL (PR #1211 round 2, G5). The boundary tests were
+ * written relative to this constant, so `30 → 0` left the whole suite green — a margin asserted only against
+ * itself is a margin the next refactor deletes for free. It absorbs clock difference between the process that
+ * wrote `expectedBy` and the process that reads `observedAt`; at 0 it is a knife edge.
  */
 export const DISPATCH_HOLD_GRACE_MINUTES = 30;
 
 /**
- * DETECTION is wider than SUBSTITUTION, and the gap is the whole point (PR #1211 review, F3).
+ * How long after a dispatch STARTED its session may still be missing from `claude agents --json` without that
+ * absence meaning the agent is gone.
+ *
+ * `claude --bg` returns before its session is necessarily visible, so a listing taken inside this window
+ * cannot tell *not yet listed* from *already finished*. The guard treats "absent and young" as HOLDING — the
+ * fail-closed direction, and the exact seconds the double-dispatch guard exists to cover.
+ *
+ * ONE SOURCE OF TRUTH with the observer's own grace: `we:scripts/operations/dispatch-lane-io.mjs` derives its
+ * `LISTING_GRACE_MS` from this constant rather than carrying a second number that could drift from it.
+ */
+export const DISPATCH_LISTING_GRACE_MINUTES = 2;
+
+/**
+ * DETECTION is wider than SUBSTITUTION, and the gap is the whole point (PR #1211 review, F3 → round 2, G4).
  *
  * Substitution is keyed to the five names spelled EXACTLY `{{NAME}}`. If detection used the same shape, every
  * near-miss spelling — `{{ ITEM_NUM }}`, `{{item_num}}`, `{{ITEM-NUM}}` — would match nothing at all: not
  * substituted, and not reported either, since `unknownTokens` is fed by the same scan. A one-character typo in
  * the brief would then reach a dispatched agent verbatim and silently, which is the failure this fill exists to
- * prevent. So the scan admits whitespace, lower case and dashes, and {@link fillBrief} decides per match what
- * the wider shape means.
+ * prevent.
+ *
+ * ROUND 1'S FIX WAS STILL TOO NARROW, and the claim above {@link fillBrief} was stated more strongly than the
+ * code delivered: the character class was `[A-Za-z0-9_-]`, so `{{ITEM NUM}}` and `{{ITEM.NUM}}` — an underscore
+ * typed as a space, or as a dot — matched NOTHING and reached the agent verbatim AND unreported. The class is
+ * now "anything that is not a brace and not a newline", which covers every spelling a placeholder can actually
+ * be typed as. Newlines are excluded deliberately: a placeholder never spans lines, and admitting them would
+ * let one unclosed `{{` swallow a paragraph of the brief's prose into a single bogus token.
  */
-export const BRIEF_TOKEN_RE = /\{\{\s*([A-Za-z0-9_-]+)\s*\}\}/g;
+export const BRIEF_TOKEN_RE = /\{\{\s*([^{}\n]*?)\s*\}\}/g;
 
 /**
  * The canonical placeholder a detected token name is a MISSPELLING OF, or null when it names nothing this
- * operation fills. Case- and dash-insensitive, because those are where typos actually live.
+ * operation fills.
+ *
+ * NORMALIZES EVERY NON-ALPHANUMERIC RUN TO ONE `_`, then upper-cases — so `item-num`, `ITEM NUM`, `Item.Num`
+ * and `item_num` all canonicalize to `ITEM_NUM`. Dashes alone were not enough (PR #1211 round 2, G4): the
+ * separators typos actually produce are the space and the dot as much as the dash.
  *
  * @param {string} name - the token name, without braces.
  * @returns {string|null}
  */
 export function canonicalPlaceholder(name) {
-  const norm = String(name ?? '').trim().replace(/-/g, '_').toUpperCase();
+  const norm = String(name ?? '').trim().replace(/[^A-Za-z0-9]+/g, '_').toUpperCase();
   return BRIEF_PLACEHOLDERS.includes(norm) ? norm : null;
 }
 
@@ -163,11 +192,18 @@ export function sessionSlugFor(num) {
  *
  * WHAT IT REFUSES AGAIN, and this is the correction of THAT correction (PR #1211 review, F3): a MISSPELLED
  * placeholder — a token that names one of the five in any other spelling (`{{ ITEM_NUM }}`, `{{item_num}}`,
- * `{{ITEM-NUM}}`). The over-broad first fix made those neither substituted NOR reported, because the scan regex
- * matched only the exact shape; a one-character typo in the brief would reach the agent verbatim and invisible.
- * The property is the bar the reviewer set and it is enforced here: **no placeholder of this operation's own,
- * in any spelling, may reach a dispatched agent unsubstituted — and the refusal names which one.** A token that
- * names nothing we fill is still merely reported, so the real brief's prose still dispatches.
+ * `{{ITEM-NUM}}`, `{{ITEM NUM}}`, `{{ITEM.NUM}}`). The over-broad first fix made those neither substituted NOR
+ * reported, because the scan regex matched only the exact shape; a one-character typo in the brief would reach
+ * the agent verbatim and invisible.
+ *
+ * THE PROPERTY, and it is now exactly as wide as {@link BRIEF_TOKEN_RE}: **no placeholder of this operation's
+ * own may reach a dispatched agent unsubstituted, spelled with any run of separators (spaces, dots, dashes,
+ * underscores) and in any case — and the refusal names which one.** Round 1 claimed "in any spelling" while
+ * the scan covered only `[A-Za-z0-9_-]`, which left `{{ITEM NUM}}` and `{{ITEM.NUM}}` invisible (round 2, G4);
+ * the claim and the class are stated together here so the next reader can check one against the other. The one
+ * spelling still outside it is a token carrying a BRACE or a NEWLINE, which no placeholder ever is.
+ *
+ * A token that names nothing we fill is still merely reported, so the real brief's prose still dispatches.
  *
  * @param {string} template - the brief's markdown.
  * @param {Record<string, string|number>} values - keyed by placeholder NAME (`ITEM_NUM`, not `{{ITEM_NUM}}`).
@@ -214,35 +250,81 @@ export function fillBrief(template, values = {}) {
 }
 
 /**
- * Does an in-flight dispatch record still HOLD its item against a fresh dispatch? (PR #1211 review, F1.)
+ * Does an in-flight dispatch record still HOLD its item against a fresh dispatch?
  *
- * THE WEDGE THIS BREAKS. Three shipped decisions composed into a permanent, per-item lockout: the observer
- * never answers `succeeded` (`claude agents` reports liveness, not outcome — #x9ylkp7), `unresolved` writes
- * nothing, so the entry stays `in-flight` forever; and the double-dispatch guard refused any item with ANY
- * in-flight record. Run records are never pruned, so ONE successful dispatch per item was the ceiling — and the
- * conveyor's normal loop (dispatch → PR → review bounces → re-dispatch) could never run.
+ * ── TWO OPPOSITE FAILURES, AND THIS FUNCTION HAS TO AVOID BOTH ───────────────────────────────────────────────
  *
- * WHY AGE IS THE RIGHT AXIS. The guard exists to cover exactly one window: the seconds between this operation
- * starting an agent and that agent leasing its lane, during which the tick core can see nothing wrong and a
- * second invocation would get the same cleared row. That window is minutes wide. An entry past its own
- * `expectedBy` plus a grace margin is by construction not in it — the agent it describes either finished (and
- * the observer cannot say so) or died, and either way a second one cannot collide with it in a lane. So the
- * guard keeps its whole purpose and loses only the part that was never protecting anything.
+ * **The wedge (PR #1211 round 1, F1).** Three shipped decisions composed into a permanent, per-item lockout:
+ * the observer never answers `succeeded` (`claude agents` reports liveness, not outcome — #x9ylkp7),
+ * `unresolved` writes nothing, so the entry stays `in-flight` forever; and the guard refused any item with ANY
+ * in-flight record. Run records are never pruned, so ONE dispatch per item was the ceiling and the conveyor's
+ * own loop (dispatch → PR → review bounces → re-dispatch) could never run.
+ *
+ * **The hole (PR #1211 round 2, G1).** The first fix aged the hold out on WALL CLOCK alone, and its docblock
+ * claimed an entry past `expectedBy + grace` was "by construction" finished or dead. That is false, and the
+ * same module proves it: the observer's other answer is `running`, and nothing bounds it. A background session
+ * stalled on a permission prompt is ALIVE, holds no lane lease and has claimed no item — so at t+2h the tick
+ * core hands out the same cleared row and the same lane, and a SECOND agent starts under the same session slug.
+ * The clock removed the cover in precisely the case where the cover was doing work.
+ *
+ * ── THE AXIS IS LIVENESS; THE CLOCK IS ONLY THE BACKSTOP ────────────────────────────────────────────────────
+ *
+ * `entry.live` is the answer `claude agents --json` gave about THIS record's handle, stamped onto the row by
+ * the io shell (`we:scripts/operations/dispatch-lane-io.mjs#stampLiveness`) so this stays pure. Three values,
+ * three rules:
+ *
+ *   | `live`  | meaning                                   | verdict                                            |
+ *   |---------|-------------------------------------------|----------------------------------------------------|
+ *   | `true`  | the session is LISTED — the agent is alive | HOLDS, and no clock may overrule it                |
+ *   | `false` | listed-and-absent — the agent is gone      | ages out as soon as it is older than the listing grace |
+ *   | nullish | no handle, or the listing could not be read | the CLOCK backstop below                          |
+ *
+ * That satisfies both constraints at once, which is the whole point: a record whose session is gone forever
+ * still ages out (in MINUTES now, not hours), and a record whose session is alive is never released on a clock.
+ *
+ * WHY `false` STILL WAITS OUT A GRACE. `claude --bg` returns before its session is necessarily listed, so
+ * "absent" inside {@link DISPATCH_LISTING_GRACE_MINUTES} of `startedAt` is *not yet visible*, not *gone* — and
+ * those seconds are exactly the spawn→claim window this guard exists for. Absent with an unreadable
+ * `startedAt` cannot be told apart from either, so it holds.
+ *
+ * WHY THE CLOCK IS SOUND FOR THE NULLISH CASE AND ONLY THERE. A handle-less INDETERMINATE entry can never be
+ * observed at all, and an unreadable listing means the system has NO liveness signal — so the `running` answer
+ * that made the clock wrong cannot be the one being contradicted. G1's property holds: this never releases an
+ * item while the system's own liveness signal says the agent is running.
  *
  * FAIL-CLOSED ON A DATE IT CANNOT READ. No usable instant, or a record carrying neither `expectedBy` nor
  * `startedAt`, means the age is unknown — and an unknown age holds, because the cost of a wrong "aged out" is
- * two agents in one clone and the cost of a wrong "still holding" is a refusal an operator can see and act on.
+ * two agents in one clone and the cost of a wrong "still holding" is a refusal an operator can see and act on
+ * (`wake.mjs --resolve`, which now refuses to close out a LIVE handle without `--force`).
  *
- * @param {{expectedBy?: string|null, startedAt?: string|null}} entry - an in-flight dispatch record summary.
+ * @param {{expectedBy?: string|null, startedAt?: string|null, live?: boolean|null}} entry - an in-flight
+ *   dispatch record summary, with the liveness answer the io shell stamped onto it.
  * @param {string} at - the instant the read was taken, ISO. The io shell supplies it; this stays pure.
- * @param {{expectedWithinMinutes?: number, graceMinutes?: number}} [o]
+ * @param {{expectedWithinMinutes?: number, graceMinutes?: number, listingGraceMinutes?: number}} [o]
  * @returns {boolean}
  */
-export function dispatchStillHolds(entry, at, { expectedWithinMinutes = DEFAULT_EXPECTED_WITHIN_MINUTES, graceMinutes = DISPATCH_HOLD_GRACE_MINUTES } = {}) {
+export function dispatchStillHolds(entry, at, {
+  expectedWithinMinutes = DEFAULT_EXPECTED_WITHIN_MINUTES,
+  graceMinutes = DISPATCH_HOLD_GRACE_MINUTES,
+  listingGraceMinutes = DISPATCH_LISTING_GRACE_MINUTES,
+} = {}) {
   const now = Date.parse(String(at ?? ''));
   if (Number.isNaN(now)) return true;
-  const expectedBy = Date.parse(String(entry?.expectedBy ?? ''));
   const startedAt = Date.parse(String(entry?.startedAt ?? ''));
+
+  // THE AGENT IS ALIVE. No clock, at any age. This is the branch the round-2 fix did not have.
+  if (entry?.live === true) return true;
+
+  // THE AGENT IS GONE from a listing that WAS read. Nothing can collide with a session that does not exist, so
+  // the hold ends as soon as the record is too old for "absent" to mean "not listed yet".
+  if (entry?.live === false) {
+    if (Number.isNaN(startedAt)) return true;
+    const listingGrace = Number(listingGraceMinutes) >= 0 ? Number(listingGraceMinutes) : DISPATCH_LISTING_GRACE_MINUTES;
+    return now < startedAt + listingGrace * 60_000;
+  }
+
+  // LIVENESS IS UNKNOWN — the clock backstop, and the only case it is sound for.
+  const expectedBy = Date.parse(String(entry?.expectedBy ?? ''));
   // `expectedBy` is the deadline the sink recorded. A handle-less INDETERMINATE entry never got one, so its
   // deadline is reconstructed from `startedAt` and the same estimate the dispatch would have used.
   const deadline = Number.isNaN(expectedBy)
@@ -251,6 +333,12 @@ export function dispatchStillHolds(entry, at, { expectedWithinMinutes = DEFAULT_
   if (Number.isNaN(deadline)) return true;
   return now < deadline + (Number(graceMinutes) >= 0 ? Number(graceMinutes) : DISPATCH_HOLD_GRACE_MINUTES) * 60_000;
 }
+
+/**
+ * The answers `stampLiveness` may give about where an in-flight record's liveness came from. Anything else
+ * (including an absent field) reads as `unknown`, which is the honest word for a reader that did not say.
+ */
+export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'unreadable', 'not-needed']);
 
 /** A launch/suppression row from the tick core, or null. Shape-checked, never trusted blind. */
 function shapeRow(row, what) {
@@ -334,6 +422,11 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // not. The guard's failure mode is two agents in one lane clone; a silently-partial one is the last thing
     // that should be invisible.
     unreadableRunRecords: Number(inFlight.unreadable) > 0 ? Number(inFlight.unreadable) : 0,
+    // WHERE THE HOLD'S LIVENESS ANSWER CAME FROM (PR #1211 round 2, G1). `claude-agents` means each in-flight
+    // record was checked against the real session listing; `unreadable` means the listing could not be read at
+    // all and every hold fell back to the CLOCK backstop, which is a materially weaker guard and must not look
+    // like the strong one; `not-needed` means there was nothing in flight to ask about.
+    dispatchLiveness: LIVENESS_SOURCES.includes(inFlight.livenessSource) ? inFlight.livenessSource : 'unknown',
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is
@@ -344,10 +437,14 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   //
   // BUT ONLY WHILE IT COULD STILL BE THAT WINDOW — see `dispatchStillHolds`. Holding on EVERY in-flight record
   // made one completed dispatch lock its item out forever, because nothing ever resolves the entry
-  // (`unresolved` writes nothing) and run records are never pruned.
+  // (`unresolved` writes nothing) and run records are never pruned; releasing on the CLOCK ALONE handed the
+  // same lane to a second agent while the first was still listed as running.
   const holdingRuns = allRuns.filter((r) => dispatchStillHolds(r, raw.observedAt, { expectedWithinMinutes: base.expectedWithinMinutes }));
   const agedOutRuns = allRuns.filter((r) => !holdingRuns.includes(r));
   if (holdingRuns.length) {
+    // WHICH KIND OF HOLD IT IS, in the operator's own line: a session `claude agents` still lists is a
+    // materially different fact from one whose liveness nothing could establish, and the remedies differ.
+    const liveHolds = holdingRuns.filter((r) => r.live === true);
     return {
       ...base,
       dispatching: false,
@@ -362,7 +459,10 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       agedOutRuns,
       holdReason:
         `this operation already has a dispatch in flight for #${resolvedNum} (run ${holdingRuns.map((r) => r.runId).join(', ')}) — `
-        + 'it has not been observed finishing and is still inside its expected window. Resolve or close out that run '
+        + (liveHolds.length
+          ? `its session is STILL LISTED by \`claude agents\` (${liveHolds.map((r) => r.handle).join(', ')}), so the agent is alive. `
+          : 'nothing could establish whether its agent is alive, and it is still inside the clock backstop. ')
+        + 'Resolve or close out that run '
         + '(`node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=failed`) before dispatching '
         + 'again; starting a second agent would put two of them in one lane clone.',
     };
@@ -495,12 +595,15 @@ export function dispatchLaneOperation({ readTick } = {}) {
                   + 'each is still open on disk and still needs closing out)'
                 : '')
             : read.holdReason,
-          // THE GUARD'S OWN HONESTY, both halves on the verdict where the decision is read:
+          // THE GUARD'S OWN HONESTY, all three parts on the verdict where the decision is read:
           //   - `unreadableRunRecords` — how many run records the double-dispatch guard could not read at all;
-          //   - `agedOutDispatches` — which in-flight records it deliberately dispatched past on age.
-          // Either one silently zero would make a partial guard look like a complete one.
+          //   - `agedOutDispatches` — which in-flight records it deliberately dispatched past;
+          //   - `dispatchLiveness` — whether those releases were decided on a real session listing or on the
+          //     clock backstop, which is the difference between the strong guard and the weak one (G1).
+          // Any one of them silently zeroed would make a partial guard look like a complete one.
           unreadableRunRecords: Number(read.unreadableRunRecords) || 0,
           agedOutDispatches: agedOut.map((r) => String(r.runId)),
+          dispatchLiveness: read.dispatchLiveness,
           // SURFACED ON THE VERDICT, not buried in the read finding: a dispatch decided without the caller's
           // in-flight guards is weaker than one decided with them, and whoever reads the verdict is exactly who
           // needs to know that. `droppedBookkeeping` is here for the same reason — a setting the caller passed

@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { normNum } from '../conveyor/queue-store.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
-import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT } from './dispatch-lane.mjs';
+import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES } from './dispatch-lane.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -57,8 +57,12 @@ export function briefPath(root = REPO_ROOT) {
  * `claude --bg` returns before its session is necessarily visible to `claude agents`, and the observer's
  * "absent" branch is TERMINAL — so without a grace window the first poll after a dispatch could close out a
  * build that had not finished starting. Two minutes is far below any real build and far above process startup.
+ *
+ * DERIVED, not a second literal: the double-dispatch guard needs the same window in the pure half (an absent
+ * session inside it must HOLD the item rather than release it — `dispatch-lane.mjs#dispatchStillHolds`), and
+ * two numbers that must agree are two numbers that eventually will not.
  */
-export const LISTING_GRACE_MS = 2 * 60 * 1000;
+export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
 
 /**
  * READ ONE TICK and select this item's row. The `readTick` the declaration is injected with.
@@ -80,6 +84,9 @@ export const LISTING_GRACE_MS = 2 * 60 * 1000;
  * @param {Function} [o.loadItems] - injectable backlog loader.
  * @param {() => Date} [o.now] - injectable clock; stamps `observedAt`, which is how the pure declaration ages
  *   its double-dispatch guard out without reading a clock of its own.
+ * @param {() => object[]} [o.listAgents] - injectable `claude agents --json` reader. The double-dispatch
+ *   guard's PRIMARY axis is liveness, not age (PR #1211 round 2, G1), so the read asks the same question the
+ *   observer asks and stamps the answer onto each in-flight row.
  * @returns {{launch: object|null, suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string}}
  */
 export function readTick({
@@ -91,6 +98,7 @@ export function readTick({
   readText = (path) => readFileSync(path, 'utf8'),
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
+  listAgents = () => defaultListAgents({ exec }),
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -138,8 +146,9 @@ export function readTick({
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
-    // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor}.
-    inFlightDispatches: listInFlightDispatches(key),
+    // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
+    // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
+    inFlightDispatches: stampLiveness(listInFlightDispatches(key), { listAgents }),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
     // ages out and every in-flight record holds, which is the fail-closed direction.
@@ -210,6 +219,55 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
     }
   }
   return { runs, unreadable };
+}
+
+/**
+ * ASK `claude agents --json` WHETHER EACH IN-FLIGHT DISPATCH IS STILL ALIVE, and stamp the answer onto its row.
+ *
+ * WHY THE GUARD NEEDS THIS AT ALL (PR #1211 round 2, G1). The double-dispatch guard used to release a record
+ * purely on wall-clock age, on the reasoning that an entry past its deadline "either finished or died". The
+ * observer's other answer is `running`, and nothing bounds it — a background session stalled on a permission
+ * prompt is alive, holds no lane lease and has claimed no item, so the tick core sees a clear row and the
+ * clock-only guard hands out the same lane to a SECOND agent. Liveness is the axis that answers the question
+ * the guard is actually asking; age is only the backstop for a record nothing can be observed about.
+ *
+ * THE THREE ANSWERS, and why an absent one is not silence:
+ *   - `live: true` — the handle is in the listing. `dispatchStillHolds` holds it at any age.
+ *   - `live: false` — the listing was read and this handle is not in it. Ages out once past the listing grace.
+ *   - `live: null` — the row has no handle (an INDETERMINATE dispatch), or the listing could not be read at
+ *     all. Falls to the clock backstop, and `livenessSource: 'unreadable'` rides the read onto the VERDICT so
+ *     a weaker guard never looks like the strong one.
+ *
+ * ONE LISTING PER READ, and NONE when there is nothing in flight — the common case is an item with no open
+ * dispatch, and shelling `claude` to ask about zero handles would put a subprocess on every dispatch path.
+ *
+ * IT NEVER THROWS. A `claude` that is missing, wedged or answering nonsense degrades the guard to its clock
+ * backstop and says so; it must not take down a dispatch read, which is also the tick read.
+ *
+ * @param {{runs?: object[], unreadable?: number}} inFlight - what {@link inFlightDispatchesFor} returned.
+ * @param {{listAgents?: () => object[]}} [o]
+ * @returns {{runs: object[], unreadable: number, livenessSource: 'claude-agents'|'unreadable'|'not-needed'}}
+ */
+export function stampLiveness(inFlight, { listAgents } = {}) {
+  const rows = Array.isArray(inFlight?.runs) ? inFlight.runs : [];
+  const unreadable = Number(inFlight?.unreadable) > 0 ? Number(inFlight.unreadable) : 0;
+  if (!rows.length) return { runs: [], unreadable, livenessSource: 'not-needed' };
+
+  let sessions = null;
+  try {
+    sessions = typeof listAgents === 'function' ? listAgents() : null;
+  } catch {
+    sessions = null;
+  }
+  if (!Array.isArray(sessions)) {
+    return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
+  }
+  const listed = new Set(sessions.map((s) => String(s?.sessionId ?? '')).filter(Boolean));
+  return {
+    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(String(r.handle)) : null })),
+    unreadable,
+    livenessSource: 'claude-agents',
+  };
 }
 
 /**
@@ -297,6 +355,41 @@ export const SPAWN_TIMEOUT_MS = 60 * 1000;
 
 /** How long `claude agents --json` gets. A read this cheap that blocks is a broken environment, not slow work. */
 export const LIST_TIMEOUT_MS = 15 * 1000;
+
+/** The env var that overrides {@link LIST_TIMEOUT_MS}. `0` means UNBOUNDED. See {@link listTimeoutMs}. */
+export const LIST_TIMEOUT_ENV = 'WE_DISPATCH_LIST_TIMEOUT_MS';
+
+/**
+ * The listing timeout for THIS process — {@link LIST_TIMEOUT_MS} unless the environment overrides it.
+ *
+ * WHY THE KNOB EXISTS, and it is a test-determinism fix before it is an operator one (PR #1211 round 2, G3).
+ * `wake-cli.test.mjs` drives the real waker CLI in a child process whose `claude` is a two-line `sh` stub. On
+ * the required gate that child competes with the whole shard's worker pool for CPU, and roughly one run in
+ * five the stub's own spawn did not complete inside the 15-second bound: `execFileSync` SIGKILLed it, the
+ * observer reported an error instead of `running`, and one assertion failed. A flaky test on the required
+ * check teaches everyone to re-run instead of read, and this one's job is to prove a blocker fix.
+ *
+ * The test sets this to `0`, which Node's `child_process` reads as NO TIMEOUT — so the assertion no longer
+ * races a wall clock at all, rather than racing a bigger one. The production default is untouched and is
+ * asserted with its literal in `dispatch-lane-defaults.test.mjs`.
+ *
+ * REFUSES a malformed value rather than silently falling back: an operator who set a bound that never applied
+ * is in exactly the position this module's `WE_DISPATCH_AGENT_ARGS` refusal exists to prevent.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {number} milliseconds; `0` = unbounded.
+ */
+export function listTimeoutMs(env = process.env) {
+  const raw = String(env[LIST_TIMEOUT_ENV] ?? '').trim();
+  if (!raw) return LIST_TIMEOUT_MS;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new TypeError(
+      `operations: ${LIST_TIMEOUT_ENV} must be a non-negative number of milliseconds (0 = unbounded), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return ms;
+}
 
 /**
  * How long the whole tick read gets. It is the only NETWORK-bound path in this file — `tick-core` shells
@@ -569,14 +662,14 @@ export function createDispatchObservers({ exec = execFileSync, listAgents = () =
  * `dispatch-lane-defaults.test.mjs` now pins the argv and the opts, and the wake CLI test proves the same argv
  * across a real process boundary.
  *
- * @param {{exec?: Function}} [io] - injected ONLY so the argv and opts can be asserted.
+ * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
  */
-export function defaultListAgents({ exec = execFileSync } = {}) {
+export function defaultListAgents({ exec = execFileSync, env = process.env } = {}) {
   const out = exec('claude', ['agents', '--json'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 8 * 1024 * 1024,
-    timeout: LIST_TIMEOUT_MS,
+    timeout: listTimeoutMs(env),
     killSignal: 'SIGKILL',
   });
   return JSON.parse(String(out || '[]'));

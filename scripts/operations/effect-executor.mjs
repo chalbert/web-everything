@@ -164,6 +164,34 @@ function withEntry(run, key, patch) {
 }
 
 /**
+ * THE HANDLES A RETRIED DISPATCH LEAVES BEHIND — the entry's existing list, plus the handle it is about to
+ * stop carrying. PURE.
+ *
+ * WHY THIS IS NOT BOOKKEEPING FOR ITS OWN SAKE (PR #1211 round 2, G2). Retrying a `dispatch: true` effect does
+ * not re-run something harmless: it starts a SECOND agent. The pre-sink write blanks `handle` so the new
+ * session's id can land there, and before this the old id was simply gone — the record then said one agent
+ * existed where two did, and the first was unobservable (the observer only ever reads `handle`) and
+ * uncloseable (`wake --resolve` resolves one entry, whose handle is now the other session's). An escape hatch
+ * that destroys the evidence of what it escaped from is worse than no escape hatch.
+ *
+ * The list is EVIDENCE, not state: nothing decides on it. It is what an operator greps for when two agents are
+ * in one lane clone and only one of them is on the books.
+ *
+ * @param {object} entry - the effect entry as it stands before the re-attempt.
+ * @returns {Array<{handle: string, startedAt: (string|null), expectedBy: (string|null), supersededAt: string}>}
+ */
+export function supersededHandles(entry) {
+  const kept = Array.isArray(entry?.supersededHandles) ? entry.supersededHandles : [];
+  if (!isPollableHandle(entry?.handle)) return kept;
+  return [...kept, {
+    handle: String(entry.handle),
+    startedAt: entry.startedAt ?? null,
+    expectedBy: entry.expectedBy ?? null,
+    supersededAt: new Date().toISOString(),
+  }];
+}
+
+/**
  * APPLY THE EFFECTS a run has declared for its current (or a named) effect step.
  *
  * Persists the run record through `store` after EVERY status transition, so a crash at any point leaves a
@@ -305,7 +333,20 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
       attemptedBy: undefined,
     };
     current = live.dispatch
-      ? withEntry(current, live.key, { ...attempted, status: 'in-flight', handle: null, startedAt: new Date().toISOString(), expectedBy: null, error: null })
+      ? withEntry(current, live.key, {
+        ...attempted,
+        status: 'in-flight',
+        // THE HANDLE THE PREVIOUS ATTEMPT MINTED IS KEPT, not overwritten into oblivion (PR #1211 round 2,
+        // G2). A dispatch retry starts a NEW session with a NEW id, and this line used to blank `handle`
+        // before the sink ran — so after one retry the FIRST agent's handle existed nowhere on the record.
+        // Neither the observer nor `wake --resolve` could reach it again: a live agent orphaned by the very
+        // act of retrying, with only one of the two on the books. See {@link supersededHandles}.
+        supersededHandles: supersededHandles(live),
+        handle: null,
+        startedAt: new Date().toISOString(),
+        expectedBy: null,
+        error: null,
+      })
       : withEntry(current, live.key, { ...attempted, status: 'pending', error: null });
     store.write(current);
 

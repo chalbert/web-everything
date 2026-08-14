@@ -198,3 +198,26 @@ the handle; it is not a claim that a lane has been dispatched.
   observer's deliberate absence of `--all`, lived inside default parameters that every test overrode. Mutating
   the FIX found the same defect one level up — a tested `defaultRunNode` that the reader had stopped calling
   would also have gone unnoticed — so the production wiring is asserted too, not just the default's body.
+- **Fixing a failure by inverting it is not fixing it** (round 2, G1 — the costliest lesson here). Round 1
+  found a permanent per-item lockout; round 2 fixed it by releasing the hold on wall-clock age, which handed
+  the same lane to a second agent while the first was still listed as running. Both rounds shipped a docblock
+  asserting the new behaviour was safe "by construction", and both times the counter-example was in the same
+  module: the observer's own `running` answer. The rule the third round used instead — write down BOTH
+  failures, then find the axis on which each is impossible — is why the guard now asks about liveness (the
+  question it was always really asking) and keeps the clock only for records nothing can be observed about.
+  A fix stated as "X is by construction impossible" is a claim to go and try to falsify, not a conclusion.
+- **A test written relative to the constant it guards asserts nothing about its value** (round 2, G5). The
+  30-minute grace margin's boundary tests were `isoPlus(NOW, DISPATCH_HOLD_GRACE_MINUTES ± 1)`, so `30 → 0`
+  survived with the whole suite green — every assertion stayed true for any value. Boundary tests over a tuned
+  constant need the LITERAL on at least one side, plus one assertion that flips when the value changes.
+- **A flaky test on the required gate is a defect in the test, not a fact about the machine** (round 2, G3).
+  `we:scripts/operations/__tests__/wake-cli.test.mjs` failed one `--shard=1/2` run in five because its stub
+  `claude` could not always finish inside the observer's 15-second bound under the shard's fork storm. Raising
+  the bound would have made the race rarer; removing it in the child (an env knob the test sets to `0`) and
+  routing the file to the same dedicated `forks` pool the other subprocess-spawning test already uses removes
+  the race and then the contention that produced it.
+- **An escape hatch that destroys the evidence of what it escaped from is worse than no hatch** (round 2, G2).
+  `--resolve` existed to un-wedge a stuck dispatch, and on a LIVE entry it started a second agent AND
+  overwrote the first one's handle in place — leaving a running session that nothing in the repo could name.
+  An operator surface over a non-idempotent effect needs both halves: refuse what it cannot prove is safe, and
+  never discard a handle it is replacing.
