@@ -22,10 +22,12 @@ import { describe, it, expect } from 'vitest';
 
 import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
-import { createRegistry } from '../registry.mjs';
+import { createRegistry, op } from '../registry.mjs';
+import { compute } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import {
   driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli, judgeOutcome,
+  restartCommand,
 } from '../cli-adapter.mjs';
 import {
   CONFIRM_ACTORS,
@@ -198,6 +200,125 @@ describe('the gate-self invariant', () => {
     // A bounce never removes the human gate.
     expect(label.payload.removeLabels).not.toContain('review:human');
   });
+});
+
+// ── #3063 THE GATE-SELF REFUSAL, AS AN OPERATOR-VISIBLE STOP ─────────────────────────────────────────────
+// The pure-core refusal above is pinned; nothing before this drove it out through `runOperationCli`, so the
+// exit code and the printed lines were unasserted. This is that seam — a `record` refusal renders as
+// `step-refused`, not a throw, and states what the wedged run already cost.
+describe('#3063 a step refusal renders a stop instead of throwing out of `driveRun`', () => {
+  /** A judge shaped like a real `judgeSpawn` return, so the spend lines have something to assert on. */
+  const meteredJudge = async () => judgeOutcome(CLEAN_ANSWER, {
+    costUsd: 0.4599, durationMs: 12600, wallMs: 12600, numTurns: 1, stopReason: 'end_turn',
+    sessionId: '99999999-8888-7777-6666-555555555555', loadedContextTokens: 70688,
+  });
+
+  it('answers a gate-self `accept` with exit 1 and `step-refused`, not a throw — and states the spend', async () => {
+    const { declaration, registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => ({ ok: true })]));
+
+    const started = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--pr=1153', '--repo=chalbert/web-everything'], newRunId: () => 'run-refuse',
+    });
+    expect(started.stopped).toBe('confirm');
+    expect(started.lines.join('\n')).toContain('awaiting a decision from: human');
+
+    const refused = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--resume=run-refuse', '--answer=accept'], newRunId: () => 'unused',
+    });
+
+    expect(refused.code).toBe(1);
+    expect(refused.stopped).toBe('step-refused');
+    const text = refused.lines.join('\n');
+    // The declaration's own message, verbatim — not paraphrased.
+    expect(text).toContain('gate-self: review:human is human-ceremony-only');
+    expect(text).toContain('decideSetLabel');
+    // The committed answer, and that a fresh run is the way out.
+    expect(text).toContain('the answer recorded at `confirm` is `accept`');
+    expect(text).toContain(restartCommand(refused.run));
+    // The point of the whole card: the thrown-away juror's cost is stated.
+    expect(text).toContain('judge spend: $0.4599 over 1 juror(s)');
+
+    // NOTHING WAS RECORDED: cursor unchanged, the confirm answer still `accept`, effects still empty.
+    const record = store.read('run-refuse');
+    expect(record.cursor).toBe(4);
+    expect(record.findings.confirm).toBe('accept');
+    expect(record.effects).toEqual([]);
+  });
+
+  it('is idempotent — a repeat --resume produces byte-identical output and the same exit code', async () => {
+    // THE ANSWER IS ALREADY COMMITTED after the first refusal: `findings.confirm` is `accept` and `pending`
+    // is `null`, so the run's status is `running`, not `awaiting-confirm` — a second `--answer` would hit the
+    // CALLER-error path (the neighbouring pinned test), exactly as the card's own reproduction shows. The
+    // idempotent replay is a bare `--resume`, which is what the refusal's own restart guidance calls for.
+    const { declaration, registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => ({ ok: true })]));
+    await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--pr=1153', '--repo=chalbert/web-everything'], newRunId: () => 'run-repeat',
+    });
+    const first = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--resume=run-repeat', '--answer=accept'], newRunId: () => 'unused',
+    });
+    const second = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--resume=run-repeat'], newRunId: () => 'unused',
+    });
+    expect(second.code).toBe(first.code);
+    expect(second.lines).toEqual(first.lines);
+  });
+
+  it('--json exits 1 with an outcomePayload carrying `stopped: "step-refused"` and `error`', async () => {
+    const { declaration, registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [t, async () => ({ ok: true })]));
+    await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--pr=1153', '--repo=chalbert/web-everything'], newRunId: () => 'run-json',
+    });
+    const refused = await runOperationCli({
+      declaration, registry, store, sinks, judge: meteredJudge,
+      argv: ['--resume=run-json', '--answer=accept', '--json'], newRunId: () => 'unused',
+    });
+    expect(refused.code).toBe(1);
+    const payload = JSON.parse(refused.lines.join('\n'));
+    expect(payload.stopped).toBe('step-refused');
+    expect(payload.error).toMatch(/human-ceremony-only/);
+    expect(payload.findings.confirm).toBe('accept');
+  });
+
+  it('omits the "answer recorded at confirm" lines when the FIRST step throws — no decision was made yet', async () => {
+    // A minimal one-step declaration whose only step refuses outright — there is no prior `confirm` finding
+    // to report, so the stop must not claim one.
+    const throwsFirst = op('throws-first', {
+      input: {},
+      first: compute({ fn: () => { throw new Error('the first step refuses, deterministically'); } }),
+    });
+    const registry = createRegistry();
+    registry.register(throwsFirst);
+    const store = createMemoryRunStore();
+
+    const out = await runOperationCli({
+      declaration: throwsFirst, registry, store, sinks: {}, judge: async () => CLEAN_ANSWER,
+      argv: [], newRunId: () => 'run-first',
+    });
+    expect(out.stopped).toBe('step-refused');
+    const text = out.lines.join('\n');
+    expect(text).toContain('run run-first — REFUSED at `first`: the first step refuses, deterministically');
+    expect(text).not.toContain('the answer recorded at');
+    expect(text).toContain(restartCommand(out.run));
+  });
+
+  // THE NEIGHBOURING TEST THIS STORY MUST NOT REDDEN — a mistyped `--answer` is a CALLER error, not a
+  // declaration refusal, and must keep rejecting rather than being handed a `step-refused` stop that tells
+  // the operator to start a fresh run (re-spawning the juror this card exists to stop paying for twice). See
+  // `refuses an --answer outside the declared option set`, further below in this file (unedited), for the
+  // pinned assertion — this `try` is drawn to leave that `advance` call uncaught.
 });
 
 // ── THE DECLARED EFFECTS: ORDER, IDEMPOTENCY, AND REPLAY ──────────────────────────────────────────────────
