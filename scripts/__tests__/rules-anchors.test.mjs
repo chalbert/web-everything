@@ -15,6 +15,7 @@ const {
   validateRulesAnchors, collectExplicitAnchorDefs, findDuplicateAnchors, findOrphanAnchors,
   collectAnchorReferences, anchorSubstance, validateAnchorSubstance, runStatuteCheck,
   collectEnforcerPaths, enforcerPathCandidates, validateInvariantEnforcers, collectOpenItemIds,
+  collectItemStatuses, validateCitedItemStatusClaims,
 } = require('../lib/validate-rules-anchors.cjs');
 
 describe('extractAnchors — the three anchor forms the governance docs use', () => {
@@ -255,5 +256,133 @@ describe('#2844 — validateInvariantEnforcers: an invariant must link a LIVE en
     expect(catalogue.invariants.length).toBeGreaterThan(20);
     const { errors } = runStatuteCheck();
     expect(errors.map((e) => e.message)).toEqual([]);
+  });
+});
+
+// ── #2842 · a status claim about a cited #NNN must match that item's real status ─────────────────────────────
+// The statute annotates its cites with the cited item's settledness — `(#2398, resolved)`, "#2785 is
+// `status: open`", "owed on the **OPEN** line (#2840/#2785)". Nothing held those true, and six sentences in
+// platform-decisions.md asserted #2785/#2840 were OPEN months after both resolved. This block pins the gate that
+// holds them, entirely on fixtures: an assertion about a REAL item's status would itself go red the day that item
+// resolved, which is the very drift under test. The negative controls are the load-bearing half — the grammar was
+// chosen because a LOOSER one measured ~75–95% false positives, so "does it decline the near-miss?" is the case
+// that decides whether this gate is shippable at all.
+describe('#2842 — validateCitedItemStatusClaims: a cited item\'s claimed status must be its real status', () => {
+  const DOC = 'docs/agent/platform-decisions.md';
+  const doc = (...lines) => ({ [DOC]: lines.join('\n') });
+  const statuses = (map) => ({ statusOf: (n) => (n in map ? map[n] : null) });
+
+  it('REJECTS `(#111, resolved)` when 111 is really open — naming doc, LINE, claimed and real status', () => {
+    const errs = validateCitedItemStatusClaims(
+      doc('intro line', 'ruled by the precedent (#111, resolved) this composes on'), statuses({ 111: 'open' }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/^docs\/agent\/platform-decisions\.md:2: /); // the doc line to EDIT
+    expect(errs[0].message).toMatch(/#111/);
+    expect(errs[0].message).toMatch(/claims #111 is `resolved`/);       // the claimed status
+    expect(errs[0].message).toMatch(/really `status: open`/);           // the real status
+    // Blast radius: this rule reds the gate for authors who never touched the doc, so the message must point at
+    // the exact line to edit WITHOUT them reading the card. Prefix + fix clause, twice.
+    expect(errs[0].message).toMatch(/Edit docs\/agent\/platform-decisions\.md:2 —/);
+  });
+
+  it('ACCEPTS the same annotation when it is true', () => {
+    expect(validateCitedItemStatusClaims(
+      doc('ruled by the precedent (#111, resolved) this composes on'), statuses({ 111: 'resolved' }))).toEqual([]);
+  });
+
+  it('REJECTS an explicit `status:` token claim — pattern B', () => {
+    const errs = validateCitedItemStatusClaims(
+      doc('the split is ruled but #222 is `status: open` today'), statuses({ 222: 'resolved' }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/claims #222 is `status: open`/);
+    expect(errs[0].message).toMatch(/really `status: resolved`/);
+  });
+
+  it('REJECTS per-cite inside an uppercase OPEN run — pattern C flags only the resolved member', () => {
+    const errs = validateCitedItemStatusClaims(
+      doc('owed on the **OPEN** line (#333/#444)'), statuses({ 333: 'resolved', 444: 'active' }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/#333/);
+    expect(errs[0].message).not.toMatch(/#444/);
+    expect(errs[0].message).toMatch(/uppercase "OPEN"/);
+  });
+
+  it('GUARD 1 — `#086 (open-core constellation)` is not a status claim (the `(?![-\\w])` stop)', () => {
+    // Real corpus line. Without the guard, "open" matches inside "open-core" and the gate cries wolf on a
+    // lineage list — the single fastest way to get a statute gate suppressed.
+    expect(validateCitedItemStatusClaims(
+      doc('**Lineage:** #098 #185 (licensing / GTM) · #089–#093 #086 (open-core constellation) · #182 #183'),
+      statuses({ '086': 'resolved' }))).toEqual([]);
+  });
+
+  it('GUARD 2a — pattern C\'s run stops at the clause boundary, not a character budget', () => {
+    // A flat 120-char window swept #555 in as if the OPEN claim governed it; it governs the slash-run only.
+    const errs = validateCitedItemStatusClaims(
+      doc('owed on the OPEN items #333/#444, tracked as preventions on #555'),
+      statuses({ 333: 'open', 444: 'active', 555: 'resolved' }));
+    expect(errs).toEqual([]);
+  });
+
+  it('GUARD 2b — an inner `;` does not truncate the run: the boundary is the PARENTHETICAL', () => {
+    // The shape of the real platform-decisions.md:3422. A naive `[^,;.)]` stop drops the second cite and
+    // silently UNDER-reports, which is the worse failure: a gate that reads green on live drift.
+    const errs = validateCitedItemStatusClaims(
+      doc('owed on the **OPEN** line (#333 — a reason; #444 — another)'),
+      statuses({ 333: 'resolved', 444: 'resolved' }));
+    expect(errs).toHaveLength(2);
+    expect(errs.map((e) => e.message).join(' ')).toMatch(/#333/);
+    expect(errs.map((e) => e.message).join(' ')).toMatch(/#444/);
+  });
+
+  it('GUARD 3 — pattern B binds the NEAREST preceding cite, not the leftmost', () => {
+    // The real :3420 shape. A left-to-right scan starts at #333 and blames it; the claim is about #444. Getting
+    // this wrong names the wrong item in the error AND goes silent on real drift once the two statuses differ.
+    const errs = validateCitedItemStatusClaims(
+      doc('#333\'s implementation #444 is `status: open`, so the split is ruled but not live'),
+      statuses({ 333: 'open', 444: 'resolved' }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/#444/);
+    expect(errs[0].message).not.toMatch(/#333/);
+  });
+
+  it('REJECTS a claim about an item with no backlog file — the DANGLING cite', () => {
+    const errs = validateCitedItemStatusClaims(doc('see (#999, resolved)'), statuses({}));
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toMatch(/DANGLING/);
+    expect(errs[0].message).toMatch(/#999/);
+  });
+
+  it('DECLINES the loose-grammar near-misses that made proximity matching unshippable', () => {
+    // All three are real corpus lines a proximity grammar fires on. Each has a status word near a cite, and in
+    // none of them is the cite the subject of the claim — the word describes a MECHANISM or a STATE MACHINE.
+    expect(validateCitedItemStatusClaims(doc(
+      'scaffold `--session` so the item is born owned (#670).** Without `--session` a scaffolded item is born `status: open` — instantly claimable.',
+      'Concurrency is owned by the `status: open → active` transition (and the `reserve` soft-holds, #083) — not by git. A racing agent is detected by the item reading `status: active`.',
+      'lowercase is ordinary prose: owed on the open #333/#444 line, per Rule #105) … the `open→active→resolved` backlog flow',
+      'soft precedent framing carries no status word: precedent #840/#844/#477, and #1163 (golden precedent)',
+    ), statuses({ 670: 'resolved', '083': 'resolved', 333: 'resolved', 444: 'resolved', 105: 'resolved', 840: 'resolved', 844: 'resolved', 477: 'resolved', 1163: 'resolved' }))).toEqual([]);
+  });
+
+  it('is PURE — no filesystem, no live backlog: an empty corpus and an absent statusOf are both inert', () => {
+    expect(validateCitedItemStatusClaims({}, statuses({}))).toEqual([]);
+    expect(validateCitedItemStatusClaims(doc('nothing to see here'), {})).toEqual([]);
+  });
+
+  it('collectItemStatuses reports the real status value, and collectOpenItemIds derives over it unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'item-statuses-'));
+    writeFileSync(join(dir, '111-live.md'), '---\nbornAs: xaaa111\nstatus: active\n---\n');
+    writeFileSync(join(dir, '222-open.md'), '---\nbornAs: xbbb222\nstatus: open\n---\n');
+    writeFileSync(join(dir, '333-done.md'), '---\nbornAs: xccc333\nstatus: resolved\n---\n');
+    writeFileSync(join(dir, '444-parked.md'), '---\nstatus: parked\n---\n');
+    writeFileSync(join(dir, '555-nostatus.md'), '---\nbornAs: xeee555\n---\n');
+    try {
+      const m = collectItemStatuses(dir);
+      expect(m.get('111')).toBe('active');
+      expect(m.get('xaaa111')).toBe('active');
+      expect(m.get('333')).toBe('resolved');
+      expect(m.get('444')).toBe('parked');
+      expect(m.has('555')).toBe(false);            // no status → not an item this rule can judge
+      expect([...collectOpenItemIds(dir)].sort()).toEqual(['111', '222', '444', 'xaaa111', 'xbbb222']);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

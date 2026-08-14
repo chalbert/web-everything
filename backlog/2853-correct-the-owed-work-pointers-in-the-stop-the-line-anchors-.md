@@ -50,6 +50,24 @@ anchor ids unchanged.
 **Note on routing:** this edits the cite-able statute layer, so the PR parks `review:human` and needs its own
 deliberate human pass. That is why it is filed rather than patched inline at accept time.
 
+## Flagged back from #2842 — the prescribed repoint does NOT satisfy the new statute lint
+
+**#2842 landed first** (the ordering in its card was inverted: this item was still open and unbuilt when #2842
+built). #2842 ships a gate that fails `check:standards` when statute prose asserts a cited item's status and the
+assertion is false — including an uppercase **`OPEN`** governing a cite run whose members are `resolved`. Two
+consequences for this item:
+
+1. **#2844 is `status: resolved`.** Re-pointing "owed on the **OPEN** conveyor-mechanization line …" at #2844
+   would fire #2842's pattern C on the *corrected* sentence and red the gate repo-wide. Of the three targets this
+   card names, only **#2843** and **#2848** are open. Either name only the open owners, or drop the "OPEN"
+   framing from the sentence that names #2844 — do not carry both.
+2. **The status half of these sentences is already corrected; the pointer half is not.** #2842 removed the false
+   `OPEN` / `` `status: open` `` claims at `we:docs/agent/platform-decisions.md:3420`, `:3422`, `:3426`, `:3440`,
+   `:3446` and `:3462` but left **every #2840/#2785 cite exactly where it was**, so this card's whole job is
+   intact. Each of those sentences now reads "pending #2853's re-point", which is the text to replace. The
+   "filed under those open items **at accept**" round-token this card also flags was dropped from `:3422` as a
+   side effect of that edit; the remaining instances are still this item's.
+
 ## Prevention
 
 Widen **#2849** (the temporal/owed-work statute lint) from a status test to a **bidirectional** one: an owed-work

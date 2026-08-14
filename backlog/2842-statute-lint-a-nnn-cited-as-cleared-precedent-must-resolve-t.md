@@ -5,12 +5,13 @@ size: 3
 parent: "2822"
 status: open
 dateOpened: "2026-08-02"
-blockedBy: ["2853"]
 scope:
   - we:scripts/lib/validate-rules-anchors.cjs
   - we:scripts/__tests__/rules-anchors.test.mjs
   - we:docs/agent/platform-decisions.md
-scopeRationale: "Adds one pure rule + its wiring to the statute gate in we:scripts/lib/validate-rules-anchors.cjs, fixture-tests it in we:scripts/__tests__/rules-anchors.test.mjs, and clears the residual stale status claims in we:docs/agent/platform-decisions.md that the new rule fires on after #2853's repoint lands."
+  - we:backlog/2842-statute-lint-a-nnn-cited-as-cleared-precedent-must-resolve-t.md
+  - we:backlog/2853-correct-the-owed-work-pointers-in-the-stop-the-line-anchors-.md
+scopeRationale: "Adds one pure rule + its wiring to the statute gate in we:scripts/lib/validate-rules-anchors.cjs, fixture-tests it in we:scripts/__tests__/rules-anchors.test.mjs, and clears the stale status claims in we:docs/agent/platform-decisions.md that the new rule fires on. The two backlog files carry the #2853 coordination the card requires be flagged back rather than silently diverged from (see Build note)."
 tags: [conveyor, statute-lint, prevention, precedent]
 ---
 
@@ -248,6 +249,40 @@ fixture tests mirroring an existing describe block, and a 2-sentence residual do
 other four). No new file, no new consumer, no schema change — and the detection grammar is already prototyped and
 measured against the live corpus, which is the part that would otherwise carry the estimate risk. Held at 3: guard 3
 and the two extra fixtures are a fraction of a point, and the doc work shrank by the same amount when #2853 took it.
+
+## Build note — the #2853 ordering was INVERTED, deliberately
+
+The card was written `blockedBy: ["2853"]` on the assumption #2853 would land first and this item would clear
+only the residual. At build time **#2853 was `status: open`, unbuilt, with no lane and no PR** — so the ordering
+was inverted rather than the build stalled. The `blockedBy` edge is removed because it is no longer true: nothing
+in this item's Done-when needs #2853.
+
+**The split that made the inversion safe:** the two items touch the same sentences but assert different things.
+#2853 owns **WHICH ITEM** the owed work is pointed at (a judgment call about ownership). This item owns **WHETHER
+THE STATED STATUS IS TRUE** (a mechanical fact). So this build corrected only the status half — it dropped the
+false `OPEN` framing and the false `` `status: open` `` claims at `:3420`, `:3422`, `:3426`, `:3440`, `:3446`,
+`:3462` — and **left every #2840/#2785 cite exactly where it was**. #2853's repoint is untouched, still fully
+owed, and each of those sentences now says so in the statute prose itself ("pending #2853's re-point"), so a
+reader in the interim is told the pointer is wrong rather than being quietly misled.
+
+**Flagged back onto #2853 (per Task 5), not silently diverged from:** its prescribed target **#2844 is
+`status: resolved`**, so re-pointing an "owed on the **OPEN** …" sentence at it would fire pattern C of the rule
+this item just shipped. Only **#2843** and **#2848** of the three targets it names are open. That note is now
+written into #2853 itself.
+
+**`/resolve` does not sweep the statute doc** — checked at build time: `we:.claude/commands/resolve.md` has zero
+mentions of `platform-decisions` or the statute gate. Per the card's own instruction that is a **follow-up item,
+not a blocker**; the blast-radius mitigation that *is* required — the error message naming the doc line to edit —
+is built and pinned by a test.
+
+**Blast radius, re-measured on the tree at build time (not the stale number):** 8 findings before the doc
+correction, **0 false positives** — every finding was a genuinely stale claim on one of the four lines the card
+named. 0 findings after. Simulating a `/resolve` of the three in-flight items confirms the coupling is real and
+lands exactly where the card predicted: #2811 (`:3444`) and #2823 (`:3426`) each fire via pattern B, #2834 does
+not (no copula — the documented false negative). Two loose-grammar false positives surfaced during the build
+(`we:docs/agent/backlog-workflow.md:43` and `:276`, both the "born `status: open`" / "reading `status: active`"
+mechanism sense) and were eliminated by tightening pattern B: the copula must sit **directly on** the status
+token, and must not cross a sentence boundary from the cite. Both near-misses are pinned as negative controls.
 
 ## Provenance
 
