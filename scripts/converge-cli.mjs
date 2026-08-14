@@ -225,9 +225,14 @@ function panelInstruction(state, envelope, material) {
     // #2950 — `goal` and `round` reach the mandate from the envelope/state, never from a local: the goal is what
     // stops a juror judging against an ideal, and `round` ≥ 2 fires the anti-spiral clause (judge only the last
     // round's fix), which is what lets the loop end on agreement instead of on the round cap.
+    // #2967 — `fenced: true`: the goal is CALLER-SUPPLIED text, so it travels as labelled data, not as
+    // instructions. `--goal` is filled per skills-src/converge/SKILL.md ("one sentence from the backlog item's
+    // lead paragraph") — prose the caller did not author, which is exactly the condition `buildPanelMandate`'s
+    // docblock states. The material was already fenced by `seedWithMaterial`; the goal sat outside every fence
+    // until PR #1235's review found this third live site.
     const mandate = PANEL_LENSES.includes(lens)
       ? seedWithMaterial(buildPanelMandate({
-        lens, netChangedFiles, goal: envelope.ctx.goal, round: state.round,
+        lens, netChangedFiles, goal: envelope.ctx.goal, round: state.round, fenced: true,
       }), material)
       : null;
     return {

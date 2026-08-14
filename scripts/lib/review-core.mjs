@@ -235,7 +235,10 @@ export const PROSE_IMPRECISION_RULE = [
  *   fenced?: boolean}} [o] - #2950: `goal` is what the diff is trying to do (judged against that and the base,
  *   never an ideal); `round` ≥ 2 fires the anti-spiral clause. Both additive — omitted, the text is what it was
  *   before #2950. #2967: `fenced` puts the goal inside the #2438 labelled data fence; pass it whenever the goal
- *   is caller-supplied text (a PR title), which is the only way an untrusted string reaches this mandate.
+ *   is caller-supplied text (a PR title). It is NOT the only untrusted path in: `contextIsolation` is
+ *   interpolated straight into instruction position below and is fence-exempt on the grounds that it names an
+ *   isolation MODE — a closedness no code enforces (PR #1235 review, finding 7). No caller passes a non-default
+ *   today, so that is a stated gap in the allow-list's rationale, not a live hole.
  * @returns {string}
  */
 export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1, fenced = false } = {}) {

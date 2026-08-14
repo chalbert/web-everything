@@ -1373,7 +1373,11 @@ export function rosterPickedEvent(plan, { round = 0, at, charterForLens, reviewe
  */
 
 /** The subject-adapter contract descriptor (#2656) — the REQUIRED and OPTIONAL interface keys, single-sourced so
- *  `validateSubjectAdapter` and adapter authors name them once. Frozen. */
+ *  `validateSubjectAdapter` and adapter authors name them once. Frozen.
+ *  @test-only-export-ok: this is a PUBLISHED interface descriptor — its consumers are adapter authors (in this
+ *  repo the docblocks of design-pixels-adapter.mjs / decision-prose-adapter.mjs cite it, and out of it a sibling
+ *  repo's adapter would) plus the jury-core conformance assertions that pin the key sets. validateSubjectAdapter
+ *  deliberately keeps its own literals, so "no live importer" is the shape of a contract, not dead code (#2967a). */
 export const SUBJECT_ADAPTER_CONTRACT = Object.freeze({
   required: Object.freeze(['subject', 'extractTouchSet', 'resolveMethods']),
   optional: Object.freeze(['subjectNoun', 'mandatoryLenses', 'charterForLens', 'buildMandate']),

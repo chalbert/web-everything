@@ -11,7 +11,8 @@
  * stays clean" guard that runs the exact pure rule the script composes over the live registries.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -52,6 +53,8 @@ import {
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
 } from '../check-standards-rules.mjs';
+// The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
+import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
 import { execFileSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
@@ -2153,10 +2156,15 @@ describe('findTestOnlyExports — the reduceLensJury class (#2967a)', () => {
     const res = findTestOnlyExports(everyModule.filter((m) => !isTestPath(m.file)), { starImportedSpecifiers, subprocessReferencedFiles });
     const all = [...res.errors, ...res.warnings];
     expect(everyModule.length).toBeGreaterThan(50);          // the walk itself must not come back empty
-    // The three false-positive categories #2967 named, asserted on the LIVE tree:
-    expect(all.filter((f) => f.descriptor.file === 'scripts/review-core-cli.mjs')).toEqual([]);        // CLI-shelled
-    expect(all.filter((f) => f.descriptor.export === 'REVIEW_POLICY')).toEqual([]);                    // conformance-suite constant
-    expect(all.filter((f) => f.descriptor.file === 'scripts/check-standards-rules.mjs')).toEqual([]);  // star-imported
+    // The three false-positive categories #2967 named, asserted on the LIVE tree — each PINNED TO AN EXPORT THAT
+    // ITS OWN CARVE-OUT IS THE ONLY THING SUPPRESSING (PR #1235 review, finding 5). The r0 anchors were vacuous:
+    // `scripts/review-core-cli.mjs` and `scripts/check-standards-rules.mjs` stayed green with their carve-outs
+    // deleted (their exports are wired anyway), and `REVIEW_POLICY` is held up by the internal-use carve-out, not
+    // by the marker it was written to demonstrate. Measured 2026-08-13 by re-running the rule with each carve-out
+    // set emptied: 9 findings ride on the star-import set, 4 on the CLI-shell set, 8 on the marker.
+    expect(all.filter((f) => f.descriptor.export === 'buildMergeArgs')).toEqual([]);        // CLI-shelled (scripts/pr-land.mjs)
+    expect(all.filter((f) => f.descriptor.export === 'POLICY_TODO_OWED_TO')).toEqual([]);   // `@test-only-export-ok:` marker (review-policy.mjs)
+    expect(all.filter((f) => f.descriptor.export === 'renderJuryCharter')).toEqual([]);     // star-imported (scripts/lib/review-core.mjs)
     // …and the scan is not inert: it still finds the class it exists for.
     expect(all.length).toBeGreaterThan(0);
   });
@@ -2237,16 +2245,116 @@ describe('findUnfencedMandateParams — the #2438 fence, generalized (#2967b)', 
     expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
   });
 
+  // ── PR #1235 review, blocker 1: a COMMENT must never switch the rule off ────────────────────────────────
+  // r0 regex-scanned the raw body, so any text that merely SPELLED a fence exempted the param. Reproduced on
+  // the real `buildSubjectMandate`: the goal fence removed + one deferral comment left in its place = 0 errors.
+  it('a comment that merely MENTIONS the fence does not exempt a raw splice', () => {
+    const src = [
+      'export function buildSubjectMandate({ goal = "" } = {}) {',
+      "  // TODO(#9999): fenceUntrusted('goal', String(goal).trim()) once the tag budget lands.",
+      '  return `WHAT THIS IS TRYING TO DO: ${String(goal).trim()}`;',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
+  });
+
+  it('a string literal that mentions the fence does not exempt a raw splice', () => {
+    const src = [
+      'export function buildXMandate({ goal = "" } = {}) {',
+      '  const hint = "use fenceUntrusted(goal) here";',
+      '  return `${goal} — ${hint}`;',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
+  });
+
+  it('a fence whose TAG happens to spell the param name does not exempt it — only the DATA argument counts', () => {
+    const src = [
+      'export function buildXMandate({ goal = "" } = {}) {',
+      '  return [FENCED_DATA_RULE, fenceUntrusted("goal", somethingElse), `${goal}`].join(" ");',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
+  });
+
+  // ── PR #1235 review, blocker-adjacent 2: the same masking must not invent findings either ───────────────
+  it('a comment or docblock containing `${param}` is NOT a splice (this repo writes those constantly)', () => {
+    const src = [
+      '/** Historically this spliced ${goal} straight into instruction position. */',
+      'export function buildXMandate({ goal = "" } = {}) {',
+      '  // The caller supplies ${goal}; we only hand it on.',
+      '  return buildSubjectMandate({ goal, fenced: true });',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('a DELEGATE that forwards `fenced` supplies the data rule (the buildMandate/buildPanelMandate shape)', () => {
+    // `buildMandate` and `buildPanelMandate` never state FENCED_DATA_RULE themselves — they pass `fenced`
+    // through to `buildSubjectMandate`, which owns the wording. Adding their own second fence must not redden.
+    const src = [
+      'export function buildXMandate({ goal = "", extra = "", fenced = false } = {}) {',
+      '  return buildSubjectMandate({ goal, fenced, bodyLines: [fenceUntrusted("extra", extra)] });',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('a commented-out builder is not scanned as a live one', () => {
+    const src = ['// export function buildOldMandate({ goal = "" } = {}) {', '//   return `${goal}`;', '// }'].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('a regex literal containing quotes does not derail the scan', () => {
+    const src = [
+      'export function buildXMandate({ goal = "" } = {}) {',
+      "  const clean = String(goal).replace(/['\"]/g, '');",
+      '  return `${goal} ${clean}`;',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
+  });
+
   it('ignores a non-mandate export (only `build…Mandate` is in scope)', () => {
     const src = 'export function renderComment({ body = "" } = {}) {\n  return `body: ${body}`;\n}';
     expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
   });
 
-  it('the real scripts/lib mandate builders stay clean (standing guard, mirrors the check-standards.mjs wiring)', () => {
-    const dir = join(ROOT, 'scripts', 'lib');
-    const mods = readdirSync(dir).filter((f) => f.endsWith('.mjs'))
-      .map((f) => ({ file: `scripts/lib/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
-    expect(findings(findUnfencedMandateParams(mods))).toEqual([]);
+  it('rule 19 is WIRED: the gate imports the real walk, and the real walk still reaches the rule', () => {
+    // Finding 4 of the PR #1235 review: mutating the call to `findUnfencedMandateParams([])` left all 314 tests
+    // green, because both standing guards RE-IMPLEMENT the walk in this file — they pin the rule and never the
+    // registration. So this test never re-implements anything. It (a) runs the SHIPPED walk
+    // (`scanUnfencedMandateParams`, the exact function check-standards.mjs calls) over a throwaway root whose
+    // one mandate builder is genuinely unfenced, which reddens the moment the walk stops reaching the rule or
+    // stops reading scripts/lib; and (b) pins that check-standards.mjs still calls it, outside any try/catch —
+    // a rule that ERRORS may not be demoted to a warning by a catch-all.
+    const root = mkdtempSync(join(tmpdir(), 'rule19-wiring-'));
+    try {
+      mkdirSync(join(root, 'scripts', 'lib'), { recursive: true });
+      writeFileSync(
+        join(root, 'scripts', 'lib', 'fixture-core.mjs'),
+        'export function buildFixtureMandate({ goal = "" } = {}) {\n  return `Goal: ${String(goal).trim()}`;\n}\n',
+      );
+      const res = scanUnfencedMandateParams(root);
+      expect([...res.errors, ...res.warnings].map((f) => f.descriptor)).toEqual([
+        { kind: 'unfenced-mandate-param', file: 'scripts/lib/fixture-core.mjs', builder: 'buildFixtureMandate', param: 'goal' },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+    const gate = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
+    expect(gate).toMatch(/import \{ scanUnfencedMandateParams \} from '\.\/lib\/mandate-fence-scan\.mjs';/);
+    expect(gate).toMatch(/const unfenced = scanUnfencedMandateParams\(ROOT\);/);
+    const from = gate.indexOf('// ── 19. Unfenced mandate params');
+    const nextSection = gate.indexOf('\n// ── ', from + 1);
+    expect(gate.slice(from, nextSection < 0 ? undefined : nextSection)).not.toMatch(/^\s*try\s*\{/m);
+  });
+
+  it('the real scripts/lib mandate builders stay clean (standing guard, through the check-standards.mjs wiring)', () => {
+    // Reads through the SHIPPED walk rather than a copy of it, so "clean" means clean over the module set the
+    // gate actually judges (PR #1235 review, finding 4).
+    const mods = readMandateBuilderModules(ROOT);
+    expect(findings(scanUnfencedMandateParams(ROOT))).toEqual([]);
     // Not inert: the scan really did find the builders it is meant to be judging.
     const builders = mods.filter((m) => /export function build[A-Za-z0-9_$]*Mandate/.test(m.content));
     expect(builders.length).toBeGreaterThan(2);

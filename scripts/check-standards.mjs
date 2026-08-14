@@ -64,8 +64,9 @@ import {
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
   findLockPointFiles, lockPointCandidatePaths,
-  findTestOnlyExports, findUnfencedMandateParams,
+  findTestOnlyExports,
 } from './check-standards-rules.mjs';
+import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   countSourceLines, CITATION_GATES_ENFORCED,
@@ -2013,21 +2014,13 @@ try {
 }
 
 // ── 19. Unfenced mandate params (#2967b) ───────────────────────────────────────
-// Reads its own module set the way rule 16 does, and runs OUTSIDE any try/catch on purpose: this rule ERRORS,
-// and a catch-all that demoted its failure to a warning would be a gate that fails OPEN — the exact shape
-// #2967 exists to stop shipping.
+// The WALK lives in `lib/mandate-fence-scan.mjs`, not here (PR #1235 review, finding 4): a walk copied into a
+// test pins the rule but never the registration, so `findUnfencedMandateParams([])` here used to leave the
+// whole suite green. `scanUnfencedMandateParams` is what the test imports, so neutering it reddens.
+// Runs OUTSIDE any try/catch on purpose: this rule ERRORS, and a catch-all that demoted its failure to a
+// warning would be a gate that fails OPEN — the exact shape #2967 exists to stop shipping.
 {
-  const libDir = join(ROOT, 'scripts', 'lib');
-  const mods = [];
-  if (existsSync(libDir)) {
-    for (const name of readdirSync(libDir)) {
-      if (!name.endsWith('.mjs')) continue;
-      const abs = join(libDir, name);
-      try { if (!statSync(abs).isFile()) continue; } catch { continue; }
-      mods.push({ file: `scripts/lib/${name}`, content: readFileSync(abs, 'utf8') });
-    }
-  }
-  const unfenced = findUnfencedMandateParams(mods);
+  const unfenced = scanUnfencedMandateParams(ROOT);
   for (const e of unfenced.errors) err(e.message, e.descriptor);
   for (const w of unfenced.warnings) warn(w.message, w.descriptor);
 }
