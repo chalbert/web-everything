@@ -9,17 +9,24 @@
  * record from disk, finds the handle nobody told it, asks an observer about it, and writes back whatever
  * resolved. It is the dispatch-shaped sibling of `./resume-run.mjs`.
  *
- * IT STARTS NO AGENT AND RUNS NO `claude`. Only the `claude agents --json` READ is stubbed — from
- * `FIXTURE_AGENTS` — so the observer under test is the REAL one from
- * `we:scripts/operations/dispatch-lane-io.mjs`, not a test double of it.
+ * IT STARTS NO AGENT, RUNS NO `claude`, AND TOUCHES NO NETWORK. Both of the observer's READS are stubbed from
+ * the environment — the `claude agents --json` liveness listing from `FIXTURE_AGENTS`, and (since #x9ylkp7) the
+ * `gh pr list` PR listing from `FIXTURE_PRS` — so the observer under test is the REAL one from
+ * `we:scripts/operations/dispatch-lane-io.mjs`, not a test double of it, while nothing here reaches out.
+ *
+ * STUBBING THE PR READ IS NOT OPTIONAL, and leaving it out is a defect this file actually shipped for one gate
+ * run. With `listPrs` left at its default, this fixture shelled a REAL `gh pr list` against whatever repo the
+ * suite happened to be checked out in, matched the test's item number against a REAL merged PR, and resolved a
+ * run the test expected to still be parked. A test whose verdict depends on the state of a live repository is
+ * not a test.
  *
  * Usage: `node observe-dispatch.mjs <runId>`
  *   env `OPERATION_RUNS_DIR`     — where the run record lives (required in tests).
  *   env `FIXTURE_AGENTS`         — JSON array standing in for `claude agents --json`.
- *   env `FIXTURE_OBSERVATION`    — when set, a STUB observer answers with this status instead. The real
- *                                  observer can only answer `running` / `unresolved` (liveness is not an
- *                                  outcome), so this is the only way to exercise the `succeeded` resume path
- *                                  a future outcome source would take.
+ *   env `FIXTURE_PRS`            — JSON array standing in for `gh pr list --state all --json …`. Defaults to
+ *                                  `[]`, i.e. "this item has no PR", which is the fall-through case.
+ *   env `FIXTURE_OBSERVATION`    — when set, a STUB observer answers with this status instead, bypassing both
+ *                                  axes. Kept for the cases that want a terminal answer without modelling one.
  * Prints one JSON line: `{ handle, expectedBy, status, resolved, unresolved, stillRunning, effects }`.
  */
 
@@ -52,7 +59,10 @@ const entry = run.effects.find((e) => e.status === 'in-flight');
 const stubbed = process.env.FIXTURE_OBSERVATION || '';
 const observers = stubbed
   ? { [DISPATCH_EFFECT]: async () => ({ status: stubbed, result: { via: 'fixture' } }) }
-  : createDispatchObservers({ listAgents: () => JSON.parse(process.env.FIXTURE_AGENTS || '[]') });
+  : createDispatchObservers({
+    listAgents: () => JSON.parse(process.env.FIXTURE_AGENTS || '[]'),
+    listPrs: () => JSON.parse(process.env.FIXTURE_PRS || '[]'),
+  });
 
 // The REGISTRY is the real one, resolved from the record's own operation name — so the child steps the run
 // against the declaration the repo ships, not against whatever the parent happened to build.

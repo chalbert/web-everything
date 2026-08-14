@@ -51,6 +51,39 @@ describe('laneRefItemNum — the couple key encoded in a lane/<num>-<slug> head 
     expect(laneRefItemNum('feature/x')).toBe(null);
     expect(laneRefItemNum(null)).toBe(null);
   });
+
+  // ── #x9ylkp7 — the grammar is `pr-land`'s, so the reaper and the dispatch observer cannot disagree ─────────
+
+  it('a `bornAs` HASH ref resolves too — `pr-land` accepts `lane/xNNNNNN-*` and this used to read it as no item', () => {
+    // `we:scripts/pr-land.mjs` parses `^lane\/(x[a-z0-9]{5,7}|\d+)`, and the delivery-agent brief documents
+    // `{{ITEM_NUM}}` as "the backlog item number (or `xNNNNNN` hash)". Only the digit half matched here, so a
+    // hash-identified item's PR was invisible to everything keying through this function.
+    expect(laneRefItemNum('lane/x9ylkp7-give-the-observer-a-completion-signal')).toBe('x9ylkp7');
+    expect(laneRefItemNum('lane/xaibmeu-route-the-conveyor')).toBe('xaibmeu');
+    // Case-folded on the way out, matching `normNum`'s convention for a non-numeric id.
+    expect(laneRefItemNum('lane/X9YLKP7-shouty')).toBe('x9ylkp7');
+  });
+
+  it('still refuses a ref that is neither — the widening is a second alternative, not a wildcard', () => {
+    expect(laneRefItemNum('lane/build-3095')).toBe(null); // no leading `x`, not digits
+    expect(laneRefItemNum('lane/x9yl-too-short')).toBe(null); // `x` + 3 < the 5-char floor
+    expect(laneRefItemNum('lane/2667')).toBe(null); // no `-<slug>` at all
+  });
+
+  it('the REAPER is unaffected by the widening: a hash key is unreachable from a lease session', () => {
+    // The claim in `laneRefItemNum`'s docblock, asserted rather than asserted-about. `prStatesFromList` now
+    // mints hash keys, but `itemNumFromSession` — the only lookup on the reap path — can only ever produce
+    // digits, so no hash key is reachable and none collides with an existing one.
+    const states = prStatesFromList([
+      { headRefName: 'lane/x9ylkp7-hash-item', state: 'MERGED', mergedAt: '2026-08-13T00:00:00Z' },
+      { headRefName: 'lane/2667-digit-item', state: 'OPEN' },
+    ]);
+    expect(states.get('x9ylkp7')).toBe('merged');
+    expect(states.get('2667')).toBe('open');
+    // A lease for the hash item is named `conveyor-x9ylkp7`; its session key is the trailing digit run.
+    expect(itemNumFromSession('conveyor-x9ylkp7')).toBe('7');
+    expect(states.get(itemNumFromSession('conveyor-x9ylkp7'))).toBeUndefined();
+  });
 });
 
 describe('classifyReap — PR-terminal axis (work done/abandoned → reclaim even pre-TTL)', () => {
