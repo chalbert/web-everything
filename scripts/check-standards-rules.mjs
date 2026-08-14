@@ -2396,3 +2396,296 @@ export function findLockPointFiles({ files, backlogScopes }, opts = {}) {
   }
   return out;
 }
+
+// ── 18/19. The two rules the PR #1064 review named but that needed whole-repo design first (#2967) ───────────
+// The review named three script-decidable rules. The third — declared-contract-vs-imports — was cheap and
+// shipped with the #1064 fix (`validateDeclaredModuleContract`, above). These are the other two. Both are
+// SOURCE-TEXT scans (regex + a small hand scanner), never a JS parser: they are hygiene gates over a repo whose
+// own style they only have to be truer than, and each documents the shapes it cannot see.
+
+/** Split `text` on the commas that sit at bracket depth 0 and outside any quote/template. A small hand
+ * scanner, NOT a JS parser — enough for a destructuring parameter list (`a = [], b = {}, c = FOO`). */
+function splitTopLevelCommas(text) {
+  const parts = [];
+  let depth = 0; let quote = null; let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') depth -= 1;
+    else if (c === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** The index just past the bracket matching the opener at `open` (`(`/`{`/`[`), or -1. Quote-aware. */
+function matchBracket(text, open) {
+  const closers = { '(': ')', '{': '}', '[': ']' };
+  const closer = closers[text[open]];
+  if (!closer) return -1;
+  let depth = 0; let quote = null;
+  for (let i = open; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === text[open]) depth += 1;
+    else if (c === closer) { depth -= 1; if (depth === 0) return i + 1; }
+  }
+  return -1;
+}
+
+// ── (a) TEST-ONLY EXPORTS — "extracted, tested, never wired" (#2967) ─────────────────────────────────────────
+// `reduceLensJury` was exported from scripts/lib/converge-core.mjs, unit-tested with three cases, and called by
+// NOTHING — so multi-juror lenses collapsed last-writer-wins inside `reducePanelRound` and the SAME two jurors
+// produced `land` or `edit` depending on array order. "No non-test module in this repo imports this export" is
+// fully script-decidable, and it catches that whole class in one rule.
+//
+// WARN-FIRST (`TEST_ONLY_EXPORT_ENFORCED = false`), on the `COMPOSE_TRAITS_ENFORCED` precedent: a broad
+// structural scan with a real but boundable false-positive surface ships advisory until its carve-outs are
+// curated false-positive-free, then flips. Four carve-out classes are known and handled:
+//   • USED INSIDE ITS OWN MODULE — a pure helper a file's own CLI shell calls, exported only as a test seam, is
+//     WIRED: its behaviour is live and a change to it breaks something real. The class this rule is for is the
+//     one `reduceLensJury` was in — called by NOTHING, so the tests were the only thing holding it up. A raw
+//     "no importer" scan conflates the two and buries the real finding under ~800 non-findings (measured).
+//   • STAR-IMPORT re-export — a module namespace-imported (`import * as rules from …`) has every export "used"
+//     only through the namespace object. Structural: precomputed by the caller's fs walk.
+//   • CLI-SHELLED harness body — `scripts/review-core-cli.mjs`'s exports are imported only by its own test file,
+//     but its real consumer is `node scripts/review-core-cli.mjs …` inside a workflow harness PROMPT STRING (and
+//     package.json scripts). The consumer is the OS, invisible to any import graph. Structural, same walk.
+//   • JUDGMENT carve-outs (a conformance suite that IS the intended consumer; a sibling-repo public API this
+//     checkout cannot see) — a per-export `@test-only-export-ok: <reason>` marker in the export's OWN leading
+//     comment. Deliberately NOT a curated list in this file: this file is already a #2678 lock point named by
+//     9 queued items' scopes, and a third giant list here compounds exactly the serialization cost that gate
+//     exists to flag. The marker is POSITIONALLY anchored for the reason `hasCohesiveEscapeHatch` is (its own
+//     r0/r1 history): an un-anchored marker is forgeable by anything that merely documents the hatch.
+export const TEST_ONLY_EXPORT_ENFORCED = false; // #2967, warn-first — mirrors COMPOSE_TRAITS_ENFORCED (#937)
+
+/** Every name a module exports by DECLARATION (`export function|const|let|class …`), with the index the
+ * declaration starts at. `export { … }` lists and `export default` are deliberately not collected: a
+ * re-export list has no leading comment to anchor a marker to, and a default export has no name to wire.
+ * @returns {Array<{name: string, index: number}>} */
+export function extractExportedNames(content) {
+  const out = [];
+  const re = /^export\s+(?:async\s+)?(?:function\s*\*?|const|let|class)\s+([A-Za-z_$][\w$]*)/gm;
+  for (const m of String(content ?? '').matchAll(re)) out.push({ name: m[1], index: m.index });
+  return out;
+}
+
+/** Does the export declared at `index` carry the `@test-only-export-ok: <reason>` marker in its OWN leading
+ * comment? POSITIONAL, not lexical — the same constraint `hasCohesiveEscapeHatch` learned the hard way (r0
+ * matched the marker anywhere in the file, so every file that merely DOCUMENTED the hatch exempted itself).
+ * Only the unbroken run of comment lines directly above the declaration counts: a blank line, a line of real
+ * code, or any backtick (a template literal's interior can look exactly like a comment line to a text scan)
+ * ends the walk. A bare marker with no reason text does NOT count — the author must state why. */
+export function hasTestOnlyExportOkMarker(content, index) {
+  const lines = String(content ?? '').slice(0, index).split('\n');
+  lines.pop();                                    // the (empty) head of the line the export starts on
+  const collected = [];
+  let inBlock = false;                            // walking UPWARD, we meet a block comment's `*/` first
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const t = lines[i].trim();
+    if (t.includes('`')) break;                   // unlexable: a template literal's body reads like a comment
+    if (inBlock) {
+      collected.push(t);
+      if (t.startsWith('/*')) inBlock = false;    // reached the block's opener — keep walking upward
+      continue;
+    }
+    if (t.endsWith('*/') && !t.startsWith('//')) { collected.push(t); inBlock = !t.includes('/*'); continue; }
+    if (t.startsWith('//')) { collected.push(t); continue; }
+    break;                                        // blank line or real code — the leading comment ends here
+  }
+  return /@test-only-export-ok:[ \t]*\S/.test(collected.join('\n'));
+}
+
+/**
+ * Flag every export that no non-test module imports AND that its own module never references again — the
+ * "extracted, tested, never wired" class (#2967a). Pure.
+ *
+ * Import matching is by SPECIFIER BASENAME, the same conservative match `validateDeclaredModuleContract` uses:
+ * two modules sharing a basename merge, which can only ever HIDE a finding, never invent one — the right
+ * direction for a scan whose whole design problem is false positives. The internal-reference test is the same
+ * shape of conservative: any second mention of the name in the file (including one in a JSDoc) counts as use.
+ *
+ * @param {Array<{file: string, content: string}>} modules - every candidate .mjs (scripts/**, skills-src/**,
+ *   excluding __tests__/dist/node_modules). Test files are excluded by the caller, which is why a finding says
+ *   "no NON-TEST module imports it" rather than naming the test that does.
+ * @param {{starImportedSpecifiers?: Set<string>, subprocessReferencedFiles?: Set<string>}} structural -
+ *   precomputed by the caller's fs walk; both are sets of FILE BASENAMES (e.g. `review-core-cli.mjs`).
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findTestOnlyExports(modules = [], structural = {}) {
+  const starImported = structural?.starImportedSpecifiers instanceof Set ? structural.starImportedSpecifiers : new Set();
+  const shelled = structural?.subprocessReferencedFiles instanceof Set ? structural.subprocessReferencedFiles : new Set();
+  // basename → every name some module imports (or re-exports) from a specifier with that basename.
+  const importedByBasename = new Map();
+  const add = (spec, names) => {
+    const base = String(spec).split('/').pop();
+    let set = importedByBasename.get(base);
+    if (!set) { set = new Set(); importedByBasename.set(base, set); }
+    for (const raw of names.split(',')) {
+      const name = raw.trim().split(/\s+as\s+/)[0].trim();
+      if (name) set.add(name);
+    }
+  };
+  for (const { content } of modules || []) {
+    const src = String(content ?? '');
+    // `[^'"{}]*` absorbs a default import (`import x, { y } from …`) without ever crossing a string boundary.
+    for (const m of src.matchAll(/import[^'"{}]*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) add(m[2], m[1]);
+    for (const m of src.matchAll(/export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) add(m[2], m[1]);
+  }
+  const errors = []; const warnings = [];
+  for (const { file, content } of modules || []) {
+    const base = String(file).split('/').pop();
+    if (starImported.has(base) || shelled.has(base)) continue;
+    const imported = importedByBasename.get(base) || new Set();
+    const src = String(content ?? '');
+    for (const { name, index } of extractExportedNames(content)) {
+      if (imported.has(name)) continue;
+      // Referenced again anywhere in its OWN module (a file's CLI shell calling its own pure core) ⇒ wired.
+      if ((src.match(new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`, 'g')) || []).length > 1) continue;
+      if (hasTestOnlyExportOkMarker(content, index)) continue;
+      const finding = {
+        // Deliberately SHORT: this fires ~50 times on today's tree, and a paragraph repeated 50 times is a
+        // wall, not a signal. The rationale (and `reduceLensJury`'s story) lives in the block comment above.
+        message:
+          `test-only export (#2967): \`${name}\` in ${file} — no non-test module imports it and nothing in ` +
+          `${file} references it either, so only its own test exercises it. Wire it, drop the export, or put ` +
+          `\`@test-only-export-ok: <reason>\` in its own leading comment if the consumer is one this scan ` +
+          `structurally cannot see (a sibling repo, a conformance suite that IS the intended consumer).`,
+        descriptor: { kind: 'test-only-export', file, export: name },
+      };
+      (TEST_ONLY_EXPORT_ENFORCED ? errors : warnings).push(finding);
+    }
+  }
+  return { errors, warnings };
+}
+
+// ── (b) UNFENCED MANDATE PARAMS — a mandate builder with no fence on its untrusted input (#2967b) ────────────
+// This repo ships `fenceUntrusted` + `FENCED_DATA_RULE` (#2438) so untrusted prose travels as LABELLED DATA
+// rather than sitting in instruction position. That fix was left local to the plan handshake, so the next
+// author composing a mandate followed the older, unfenced example — `scripts/converge-cli.mjs:210`'s own header
+// comment says so nearly verbatim.
+//
+// WHAT THIS RULE ESTABLISHES, EXACTLY — and no more. It proves a builder has NO fenced path for a parameter it
+// splices into instruction text. That is a hygiene fact about the source, not evidence of an exploit: nobody
+// has tested whether crafted caller text actually changes an agent's verdict, and the degree of influence is
+// UNMEASURED. Do not read (or write) a wider claim than "caller-supplied text reaches the mandate unfenced".
+//
+// TWO LIMITS, both deliberate and both worth knowing before trusting a green run:
+//   1. It is a DEFINITION-level scan. `fenced` is opt-in on some builders (`buildEditorMandate`), so a builder
+//      that merely OFFERS a fenced path passes — the rule does not verify that each CALL SITE opts in. Call-site
+//      verification is a different scan over a different file set; this one does not do it.
+//   2. It sees only a parameter interpolated DIRECTLY (`${goal}`, `${String(goal).trim()}`). A parameter first
+//      copied into a local (`const g = goal;`) is invisible to it — no taint tracking, by design. In the other
+//      direction it is deliberately blunt: a param merely MENTIONED inside an interpolated expression
+//      (`${goal ? a : b}`, where only its truthiness is read) counts as interpolated. Over-flagging costs one
+//      allow-list line; under-flagging costs the finding, so the bluntness points the safe way.
+export const UNFENCED_MANDATE_ENFORCED = true; // #2967 RULED: error from day one; both live sites fixed with it
+
+/** Parameters exempt from the fence: CLOSED vocabularies, never caller free text. `lens` is validated against
+ * `PANEL_LENSES` (an unknown lens throws); `round`/`roundCap` are numbers; `contextIsolation` is an isolation
+ * mode; `subjectNoun`/`findingAnchor` are the structural nouns a subject ADAPTER supplies ("diff", "region"),
+ * not anything a caller passes through. Fencing these would be noise inside the mandate's own grammar. */
+export const MANDATE_FENCE_ALLOWED_PARAMS = new Set([
+  'lens', 'round', 'roundCap', 'contextIsolation', 'subjectNoun', 'findingAnchor', 'fenced',
+]);
+
+/** Every `export function build…Mandate(…)` in a module, with its destructured parameter names and body text.
+ * The body runs to the first `}` in column 0 — this repo's top-level functions all close that way. */
+function extractMandateBuilders(content) {
+  const src = String(content ?? '');
+  const out = [];
+  for (const m of src.matchAll(/export\s+function\s+(build[A-Za-z0-9_$]*Mandate)\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const sigEnd = matchBracket(src, open);
+    if (sigEnd < 0) continue;
+    const sig = src.slice(open + 1, sigEnd - 1);
+    const bodyOpen = src.indexOf('{', sigEnd - 1);
+    if (bodyOpen < 0) continue;
+    const close = src.slice(bodyOpen).search(/\n\}/);
+    const body = src.slice(bodyOpen, close < 0 ? src.length : bodyOpen + close);
+    const params = [];
+    const brace = sig.indexOf('{');
+    const inner = brace >= 0 ? sig.slice(brace + 1, matchBracket(sig, brace) - 1) : sig;
+    for (const part of splitTopLevelCommas(inner)) {
+      const pm = /^\s*([A-Za-z_$][\w$]*)\s*(?::\s*([A-Za-z_$][\w$]*))?/.exec(part);
+      if (pm) params.push(pm[2] || pm[1]);
+    }
+    out.push({ name: m[1], params, body });
+  }
+  return out;
+}
+
+/** Every `${…}` expression in `text`, and every argument list handed to `fenceUntrusted(…)`. */
+function interpolationsAndFences(text) {
+  const interpolations = []; const fenced = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '$' && text[i + 1] === '{') {
+      const end = matchBracket(text, i + 1);
+      if (end > 0) { interpolations.push(text.slice(i + 2, end - 1)); i = end - 1; }
+    }
+  }
+  for (const m of text.matchAll(/fenceUntrusted\s*\(/g)) {
+    const end = matchBracket(text, m.index + m[0].length - 1);
+    if (end > 0) fenced.push(text.slice(m.index + m[0].length, end - 1));
+  }
+  return { interpolations, fenced };
+}
+
+/**
+ * Flag every `build…Mandate` parameter spliced into the mandate's instruction text with no `fenceUntrusted`
+ * path (#2967b). Pure. Read the two limits and the scope of the claim in the block comment above — the rule
+ * establishes that caller-supplied text reaches the mandate unfenced, and nothing about how much influence
+ * that buys, which is UNMEASURED.
+ *
+ * @param {Array<{file: string, content: string}>} modules - scripts/lib/*.mjs content.
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findUnfencedMandateParams(modules = []) {
+  const errors = []; const warnings = [];
+  const emit = (finding) => (UNFENCED_MANDATE_ENFORCED ? errors : warnings).push(finding);
+  for (const { file, content } of modules || []) {
+    for (const { name, params, body } of extractMandateBuilders(content)) {
+      const { interpolations, fenced } = interpolationsAndFences(body);
+      let anyFenced = false;
+      for (const param of params) {
+        const ref = new RegExp(`\\b${param}\\b`);
+        const isFenced = fenced.some((a) => ref.test(a));
+        if (isFenced) anyFenced = true;
+        if (!interpolations.some((e) => ref.test(e))) continue;
+        if (isFenced || MANDATE_FENCE_ALLOWED_PARAMS.has(param)) continue;
+        emit({
+          message:
+            `unfenced mandate param: \`${param}\` is interpolated into the mandate text ${name}() returns ` +
+            `(${file}) without ever passing through \`fenceUntrusted\`. Caller-supplied text then reaches the ` +
+            `mandate in instruction position rather than as labelled data — that is all this rule establishes; ` +
+            `whether such text can actually steer an agent's verdict is UNMEASURED here. Route it through ` +
+            `\`fenceUntrusted('<tag>', …)\` and include \`FENCED_DATA_RULE\` in the returned text (#2438), or ` +
+            `add it to \`MANDATE_FENCE_ALLOWED_PARAMS\` if it is a closed vocabulary rather than free text.`,
+          descriptor: { kind: 'unfenced-mandate-param', file, builder: name, param },
+        });
+      }
+      if (anyFenced && !body.includes('FENCED_DATA_RULE')) {
+        emit({
+          message:
+            `fenced mandate without its data rule: ${name}() (${file}) wraps a parameter in \`fenceUntrusted\` ` +
+            `but the text it returns never states \`FENCED_DATA_RULE\`. A fence with no rule sentence is ` +
+            `decorative — the tags are just characters unless the mandate tells the agent that fenced blocks ` +
+            `are data to judge and never instructions to follow (#2438).`,
+          descriptor: { kind: 'unfenced-mandate-param', file, builder: name, param: null },
+        });
+      }
+    }
+  }
+  return { errors, warnings };
+}

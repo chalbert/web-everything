@@ -386,7 +386,11 @@ export function reviewPrOperation({ readPr } = {}) {
         const lens = view.input.lens;
         return {
           // GROUND TRUTH goes in as the NET list, never `ghDiffStat` (#2450).
-          mandate: buildPanelMandate({ lens, netChangedFiles: read.netChangedFiles, goal: read.title }),
+          // `fenced: true` (#2967) — `read.title` is the PR title straight off `gh pr view`, written by whoever
+          // opened the PR, so it goes to the juror inside the #2438 labelled data fence rather than in
+          // instruction position. What that fixes is caller-supplied text reaching the mandate unfenced; whether
+          // a crafted title could actually move a verdict is UNMEASURED, so this is hygiene, not a patched hole.
+          mandate: buildPanelMandate({ lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true }),
           input: renderJudgeInput(read),
           shape: REVIEW_JUDGE_SHAPE,
           lens,

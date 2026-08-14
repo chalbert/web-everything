@@ -64,6 +64,7 @@ import {
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
   findLockPointFiles, lockPointCandidatePaths,
+  findTestOnlyExports, findUnfencedMandateParams,
 } from './check-standards-rules.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
@@ -1961,6 +1962,74 @@ try {
     );
 } catch (e) {
   warn(`Small-file preference lock-point scan failed: ${e.message}`);
+}
+
+// ── 18. Test-only exports: exported, tested, wired to nothing (#2967a) ─────────
+// `reduceLensJury` was exported from scripts/lib/converge-core.mjs, unit-tested and called by nothing, so
+// multi-juror lenses collapsed last-writer-wins. WARN-first (`TEST_ONLY_EXPORT_ENFORCED`). Pure rule in
+// check-standards-rules.mjs; the fs read and the two STRUCTURAL carve-out sets it needs stay here (rule 16's
+// split). Rule 19 — the other rule that review named — follows.
+try {
+  const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '__snapshots__']);
+  const isTestPath = (p) => p.includes('/__tests__/') || p.includes('/__fixtures__/') || p.endsWith('.test.mjs');
+  const everyModule = [];
+  const walkMjs = (dir, rel) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(ent.name)) continue;
+      const abs = join(dir, ent.name);
+      const relPath = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) walkMjs(abs, relPath);
+      else if (ent.name.endsWith('.mjs')) everyModule.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+    }
+  };
+  for (const top of ['scripts', 'skills-src']) if (existsSync(join(ROOT, top))) walkMjs(join(ROOT, top), top);
+
+  // STRUCTURAL carve-outs, both keyed by file basename (rule 18's import matching is basename-based too):
+  //  • star-imported modules — scanned over EVERY .mjs INCLUDING tests, because the real case is a test doing
+  //    `import * as rules from '../check-standards-rules.mjs'` (its exports are used only via the namespace).
+  //  • subprocess-referenced files — a `node scripts/<f>.mjs` string in ANOTHER non-test file (a workflow
+  //    harness body a subagent reads, package.json's scripts): the consumer is the OS, invisible to imports.
+  //    Deliberately NOT scanned from test files: a CLI only a test shells out to IS a test-only consumer.
+  const starImportedSpecifiers = new Set();
+  const subprocessReferencedFiles = new Set();
+  const pkgPath = join(ROOT, 'package.json');
+  const shellSources = everyModule.filter((m) => !isTestPath(m.file));
+  if (existsSync(pkgPath)) shellSources.push({ file: 'package.json', content: readFileSync(pkgPath, 'utf8') });
+  for (const { content } of everyModule)
+    for (const m of content.matchAll(/import\s+\*\s+as\s+[\w$]+\s+from\s*['"]([^'"]+)['"]/g))
+      starImportedSpecifiers.add(m[1].split('/').pop());
+  for (const { file, content } of shellSources)
+    for (const m of content.matchAll(/node\s+(?:--[\w-]+(?:=\S+)?\s+)*(?:we:)?["']?((?:\.\/)?(?:scripts|skills-src)\/[\w./-]+\.mjs)/g)) {
+      const base = m[1].split('/').pop();
+      if (base !== file.split('/').pop()) subprocessReferencedFiles.add(base); // a self-reference exempts nothing
+    }
+
+  const candidates = everyModule.filter((m) => !isTestPath(m.file));
+  const testOnly = findTestOnlyExports(candidates, { starImportedSpecifiers, subprocessReferencedFiles });
+  for (const e of testOnly.errors) err(e.message, e.descriptor);
+  for (const w of testOnly.warnings) warn(w.message, w.descriptor);
+} catch (e) {
+  warn(`Test-only-export scan failed: ${e.message}`);
+}
+
+// ── 19. Unfenced mandate params (#2967b) ───────────────────────────────────────
+// Reads its own module set the way rule 16 does, and runs OUTSIDE any try/catch on purpose: this rule ERRORS,
+// and a catch-all that demoted its failure to a warning would be a gate that fails OPEN — the exact shape
+// #2967 exists to stop shipping.
+{
+  const libDir = join(ROOT, 'scripts', 'lib');
+  const mods = [];
+  if (existsSync(libDir)) {
+    for (const name of readdirSync(libDir)) {
+      if (!name.endsWith('.mjs')) continue;
+      const abs = join(libDir, name);
+      try { if (!statSync(abs).isFile()) continue; } catch { continue; }
+      mods.push({ file: `scripts/lib/${name}`, content: readFileSync(abs, 'utf8') });
+    }
+  }
+  const unfenced = findUnfencedMandateParams(mods);
+  for (const e of unfenced.errors) err(e.message, e.descriptor);
+  for (const w of unfenced.warnings) warn(w.message, w.descriptor);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────

@@ -49,6 +49,8 @@ import {
   validateDeclaredModuleContract,
   countCodeLines, hasCohesiveEscapeHatch, countScopeCollisions, findLockPointFiles,
   lockPointCandidatePaths,
+  findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
+  findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -2034,5 +2036,219 @@ describe('findLockPointFiles — calibration against the REAL repo backlog (#278
         ? NAMED_TARGETS_2678
         : [`none of ${NAMED_TARGETS_2678.join(', ')} flagged; flagged instead: ${flagged.join(', ') || '(nothing)'}`],
     ).toEqual(NAMED_TARGETS_2678);
+  });
+});
+
+// ── #2967a — test-only exports ("extracted, tested, never wired") ──────────────────────────────────────────
+// Each fixture is named for the REAL shape it is built from, and each carve-out gets its own case so deleting
+// that carve-out reddens exactly one test.
+describe('findTestOnlyExports — the reduceLensJury class (#2967a)', () => {
+  const mod = (file, content) => ({ file, content });
+  const findings = (res) => [...res.errors, ...res.warnings];
+
+  it('flags an export nothing imports and its own module never uses again (the reduceLensJury shape)', () => {
+    const res = findTestOnlyExports([
+      mod('scripts/lib/converge-core.mjs', 'export function reduceLensJury(a) { return a; }\n'),
+      mod('scripts/lib/other.mjs', "import { somethingElse } from './converge-core.mjs';\n"),
+    ], {});
+    const all = findings(res);
+    expect(all).toHaveLength(1);
+    expect(all[0].descriptor).toEqual({ kind: 'test-only-export', file: 'scripts/lib/converge-core.mjs', export: 'reduceLensJury' });
+    // Warn-first today (#2967 ships (a) on the COMPOSE_TRAITS_ENFORCED precedent) — pinned to the flag, so
+    // flipping the flag moves the finding to `errors` without this test lying about where it lands.
+    expect(TEST_ONLY_EXPORT_ENFORCED ? res.errors : res.warnings).toHaveLength(1);
+  });
+
+  it('does not flag an export another non-test module imports', () => {
+    expect(findings(findTestOnlyExports([
+      mod('scripts/lib/converge-core.mjs', 'export function reduceLensJury(a) { return a; }\n'),
+      mod('scripts/lib/wired.mjs', "import { reduceLensJury } from './converge-core.mjs';\n"),
+    ], {}))).toEqual([]);
+  });
+
+  it('does not flag an export the module itself still calls (a test seam over LIVE behaviour)', () => {
+    expect(findings(findTestOnlyExports([
+      mod('scripts/conveyor/tick-core.mjs', 'export function routeExit(c) { return c; }\nconst main = () => routeExit(0);\nmain();\n'),
+    ], {}))).toEqual([]);
+  });
+
+  it('does not flag a STAR-IMPORTED module (the check-standards.conformance.test.mjs `import * as rules` shape)', () => {
+    expect(findings(findTestOnlyExports(
+      [mod('scripts/check-standards-rules.mjs', 'export const HTML_ELEMENTS = new Set();\n')],
+      { starImportedSpecifiers: new Set(['check-standards-rules.mjs']) },
+    ))).toEqual([]);
+  });
+
+  it('does not flag a CLI-SHELLED file (the review-core-cli.mjs / review-parked-prs.mjs harness-body shape)', () => {
+    expect(findings(findTestOnlyExports(
+      [mod('scripts/review-core-cli.mjs', 'export function parseFlags(a) { return a; }\n')],
+      { subprocessReferencedFiles: new Set(['review-core-cli.mjs']) },
+    ))).toEqual([]);
+  });
+
+  it('honours `@test-only-export-ok:` in the export\'s own leading comment', () => {
+    expect(findings(findTestOnlyExports([
+      mod('scripts/lib/review-policy.mjs', '// @test-only-export-ok: the conformance suite IS the intended consumer\nexport const REVIEW_POLICY = {};\n'),
+    ], {}))).toEqual([]);
+  });
+
+  it('ignores a marker that is not the export\'s own leading comment (the hasCohesiveEscapeHatch r0/r1 regression)', () => {
+    // r0's bug, transplanted: a file that merely DOCUMENTS the hatch (in a docstring example, in prose, or under
+    // a blank line) must not exempt itself. Only the unbroken comment run directly above the export counts.
+    const documented = [
+      '/** Docs: put `@test-only-export-ok: <reason>` above an export to exempt it. */',
+      'const HELP = `usage:',
+      '// @test-only-export-ok: forged from inside a template literal',
+      '`;',
+      '',
+      'export const REVIEW_POLICY = {};',
+    ].join('\n');
+    const all = findings(findTestOnlyExports([mod('scripts/lib/review-policy.mjs', documented)], {}));
+    expect(all.map((f) => f.descriptor.export)).toEqual(['REVIEW_POLICY']);
+  });
+
+  it('a bare marker with no reason does not exempt', () => {
+    expect(findings(findTestOnlyExports([
+      mod('scripts/lib/x.mjs', '// @test-only-export-ok:\nexport const A = 1;\n'),
+    ], {})).map((f) => f.descriptor.export)).toEqual(['A']);
+  });
+
+  it('extractExportedNames reads the declaration forms, not `export {}` lists', () => {
+    const src = 'export const A = 1;\nexport function b() {}\nexport async function c() {}\nexport class D {}\nexport { A as E };\n';
+    expect(extractExportedNames(src).map((e) => e.name)).toEqual(['A', 'b', 'c', 'D']);
+  });
+
+  it('hasTestOnlyExportOkMarker accepts a JSDoc block directly above the export', () => {
+    const src = '/**\n * Why: sibling repo consumes this.\n * @test-only-export-ok: consumed by frontierui, not visible here\n */\nexport const A = 1;\n';
+    expect(hasTestOnlyExportOkMarker(src, src.indexOf('export const A'))).toBe(true);
+  });
+
+  it('the real repo stays clean for the three known false-positive shapes (standing guard)', () => {
+    // Mirrors the check-standards.mjs wiring: same walk, same structural sets.
+    const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '__snapshots__']);
+    const isTestPath = (p) => p.includes('/__tests__/') || p.includes('/__fixtures__/') || p.endsWith('.test.mjs');
+    const everyModule = [];
+    const walkMjs = (dir, rel) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        if (SKIP_DIRS.has(ent.name)) continue;
+        const abs = join(dir, ent.name);
+        const relPath = rel ? `${rel}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) walkMjs(abs, relPath);
+        else if (ent.name.endsWith('.mjs')) everyModule.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+      }
+    };
+    for (const top of ['scripts', 'skills-src']) if (existsSync(join(ROOT, top))) walkMjs(join(ROOT, top), top);
+    const starImportedSpecifiers = new Set();
+    const subprocessReferencedFiles = new Set();
+    const shellSources = everyModule.filter((m) => !isTestPath(m.file));
+    shellSources.push({ file: 'package.json', content: readFileSync(join(ROOT, 'package.json'), 'utf8') });
+    for (const { content } of everyModule)
+      for (const m of content.matchAll(/import\s+\*\s+as\s+[\w$]+\s+from\s*['"]([^'"]+)['"]/g))
+        starImportedSpecifiers.add(m[1].split('/').pop());
+    for (const { file, content } of shellSources)
+      for (const m of content.matchAll(/node\s+(?:--[\w-]+(?:=\S+)?\s+)*(?:we:)?["']?((?:\.\/)?(?:scripts|skills-src)\/[\w./-]+\.mjs)/g)) {
+        const base = m[1].split('/').pop();
+        if (base !== file.split('/').pop()) subprocessReferencedFiles.add(base);
+      }
+    const res = findTestOnlyExports(everyModule.filter((m) => !isTestPath(m.file)), { starImportedSpecifiers, subprocessReferencedFiles });
+    const all = [...res.errors, ...res.warnings];
+    expect(everyModule.length).toBeGreaterThan(50);          // the walk itself must not come back empty
+    // The three false-positive categories #2967 named, asserted on the LIVE tree:
+    expect(all.filter((f) => f.descriptor.file === 'scripts/review-core-cli.mjs')).toEqual([]);        // CLI-shelled
+    expect(all.filter((f) => f.descriptor.export === 'REVIEW_POLICY')).toEqual([]);                    // conformance-suite constant
+    expect(all.filter((f) => f.descriptor.file === 'scripts/check-standards-rules.mjs')).toEqual([]);  // star-imported
+    // …and the scan is not inert: it still finds the class it exists for.
+    expect(all.length).toBeGreaterThan(0);
+  });
+});
+
+// ── #2967b — mandate params spliced into instruction text with no fence ────────────────────────────────────
+describe('findUnfencedMandateParams — the #2438 fence, generalized (#2967b)', () => {
+  const lib = (content, file = 'scripts/lib/review-core.mjs') => [{ file, content }];
+  const findings = (res) => [...res.errors, ...res.warnings];
+
+  it('flags an unfenced caller-supplied param (the review-pr.mjs `goal: read.title` shape)', () => {
+    const src = [
+      'export function buildSubjectMandate({ subjectNoun = "diff", goal = "" } = {}) {',
+      '  return [`You are reviewing a ${subjectNoun}.`, `WHAT THIS IS TRYING TO DO: ${String(goal).trim()}`].join("\\n");',
+      '}',
+    ].join('\n');
+    const all = findings(findUnfencedMandateParams(lib(src, 'scripts/lib/jury-core.mjs')));
+    expect(all).toHaveLength(1);
+    expect(all[0].descriptor).toEqual({ kind: 'unfenced-mandate-param', file: 'scripts/lib/jury-core.mjs', builder: 'buildSubjectMandate', param: 'goal' });
+    expect(UNFENCED_MANDATE_ENFORCED ? all[0] : null).toBeTruthy(); // #2967 RULED: this one errors from day one
+  });
+
+  it('is an ERROR, not a warning, at the shipped default', () => {
+    const src = 'export function buildXMandate({ goal = "" } = {}) {\n  return `goal: ${goal}`;\n}';
+    const res = findUnfencedMandateParams(lib(src));
+    expect(res.errors).toHaveLength(UNFENCED_MANDATE_ENFORCED ? 1 : 0);
+    expect(res.warnings).toHaveLength(UNFENCED_MANDATE_ENFORCED ? 0 : 1);
+  });
+
+  it('accepts a param routed through fenceUntrusted alongside FENCED_DATA_RULE', () => {
+    const src = [
+      'export function buildPlanMandate({ task = "" } = {}) {',
+      '  return [FENCED_DATA_RULE, fenceUntrusted("task", task)].join("\\n");',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('accepts an OPT-IN fence (the buildEditorMandate `fenced` shape) — and says so: call sites are not checked', () => {
+    const src = [
+      'export function buildEditorMandate({ findings = [], fenced = false } = {}) {',
+      '  const lines = findings.join("\\n");',
+      '  return [fenced ? FENCED_DATA_RULE : "", `Findings: ${fenced ? fenceUntrusted("findings", lines) : lines}`].join(" ");',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('flags a fenced builder whose returned text never states FENCED_DATA_RULE', () => {
+    const src = 'export function buildPlanMandate({ task = "" } = {}) {\n  return `Judge: ${fenceUntrusted("task", task)}`;\n}';
+    const all = findings(findUnfencedMandateParams(lib(src)));
+    expect(all).toHaveLength(1);
+    expect(all[0].descriptor.param).toBe(null);
+    expect(all[0].message).toMatch(/never states `FENCED_DATA_RULE`/);
+  });
+
+  it('does not flag the closed vocabularies in MANDATE_FENCE_ALLOWED_PARAMS', () => {
+    const src = [
+      'export function buildPanelMandate({ lens, round = 1, roundCap = 3, contextIsolation = "diff-only", subjectNoun = "diff", findingAnchor = "file" } = {}) {',
+      '  return `${lens} ${round}/${roundCap} ${contextIsolation} ${subjectNoun} ${findingAnchor}`;',
+      '}',
+    ].join('\n');
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+    expect([...MANDATE_FENCE_ALLOWED_PARAMS]).toContain('lens');
+  });
+
+  it('does not flag a param that never reaches the mandate text', () => {
+    // `writeTarget` is pushed as a whole line — a caller-supplied CLAUSE, never a value spliced into one.
+    const src = 'export function buildXMandate({ writeTarget = "" } = {}) {\n  return ["Revise the diff.", writeTarget].join(" ");\n}';
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('over-flags rather than under-flags: a param read only for its truthiness inside `${…}` still counts', () => {
+    // Documented bluntness (limit 2 in the rule's block comment) — no expression parser, so a mention inside an
+    // interpolated expression is treated as a splice. The cost of being wrong here is one allow-list line; the
+    // cost of the opposite mistake is a missed finding, so the scan points that way on purpose.
+    const src = 'export function buildXMandate({ goal = "" } = {}) {\n  return `${goal ? "has goal" : "no goal"}`;\n}';
+    expect(findings(findUnfencedMandateParams(lib(src))).map((f) => f.descriptor.param)).toEqual(['goal']);
+  });
+
+  it('ignores a non-mandate export (only `build…Mandate` is in scope)', () => {
+    const src = 'export function renderComment({ body = "" } = {}) {\n  return `body: ${body}`;\n}';
+    expect(findings(findUnfencedMandateParams(lib(src)))).toEqual([]);
+  });
+
+  it('the real scripts/lib mandate builders stay clean (standing guard, mirrors the check-standards.mjs wiring)', () => {
+    const dir = join(ROOT, 'scripts', 'lib');
+    const mods = readdirSync(dir).filter((f) => f.endsWith('.mjs'))
+      .map((f) => ({ file: `scripts/lib/${f}`, content: readFileSync(join(dir, f), 'utf8') }));
+    expect(findings(findUnfencedMandateParams(mods))).toEqual([]);
+    // Not inert: the scan really did find the builders it is meant to be judging.
+    const builders = mods.filter((m) => /export function build[A-Za-z0-9_$]*Mandate/.test(m.content));
+    expect(builders.length).toBeGreaterThan(2);
   });
 });
