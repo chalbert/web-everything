@@ -79,6 +79,14 @@ this honestly:
 - interface risk: does another OPEN item's scope overlap this one's?
 - unmeasured-impact risk: does the card cite a measurement at all?
 
+**These four are not equally mechanical, and the build must own that** (independent review, 2026-08-14):
+interface is a pure repo fact (frontmatter set intersection); consumer decides *candidate* presence (the ES
+import graph plus a subprocess/hook grep whose hits include doc-only mentions — it over-fires, and that is
+acceptable); blast-radius and unmeasured-impact read the card's own text and are heuristics that can miss a
+novel phrasing. So build every check conservative — err toward firing, because a spurious fire costs one
+prompt while a silent miss is an unassessed risk wearing an assessed card's clothes — and the output must
+present a non-firing check as "not flagged", never as "clear".
+
 **Script cannot decide SEVERITY, and must not pretend to.** Whether a consumer actually needs changing is
 judgment. So the script's output is *"these risks apply; here is the strategy for each; state your answer"*
 — it prompts, it does not score. A number invented by a script and then quoted as evidence is the exact
@@ -107,6 +115,18 @@ data to weight one. Rank on `shortBy`-style facts, never on a synthesised score.
 - [ ] Severity and the go rating are explicitly NOT computed until the rating fork is ruled.
 - [ ] Re-run over three real items from this session ([#3090], [#3091], [#3015]) and confirm it flags the
       risks that actually bit them — and stays quiet on [#3071]'s scope, which was correct.
+
+## Independent review — 2026-08-14 (checklist item 9, applied to this card itself)
+
+Confidence: **High**. Eight evidence citations spot-checked against the cited cards and their review PRs
+([#2996], [#3015], [#2787], [#2803], [#3004], [#3095], [#2842], [#3071]) — all support their rows, several
+verbatim (the 1,276-of-3,319 measurement, the two adjacent lines on `main`, the "provably a no-op" and
+"never recorded anywhere" wording). The second-wave section matches PR #1254's own body. Leaving the go
+rating unruled is the right call: the bold default (count + per-risk flag) is stated, so the fork is
+ready to ratify, and ruling it inside a review would bypass the decision turn the card itself asks for.
+**One change made:** the presence checks were presented as uniformly script-decidable when two of the four
+are text heuristics — the paragraph above ("not equally mechanical") was added so a builder does not treat
+a heuristic's silent miss as a clearance.
 
 ## Watch for
 
