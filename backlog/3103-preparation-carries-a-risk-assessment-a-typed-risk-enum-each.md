@@ -41,9 +41,9 @@ Seven cards were prepared (design decided, interfaces cited) and merged with no 
 independently reviewed after the fact as a separate pass. **All seven had real defects**, each landing on an
 enum entry already above — the taxonomy held without needing a ninth category:
 
-- **premise** — [#2803]'s design was reasoned from a resolve-time model the repo moved past six weeks earlier
-  (the drain owns the flip now, not the producing lane); [#3004]'s residual claim ("unrecoverable") rested on
-  a manifest-location fact that changed under #2411.
+- **premise** — [#2803]'s design was reasoned from a resolve-time model the repo moved past ~2.5 weeks earlier
+  (since #2748 landed 2026-07-28: the drain owns the flip now, not the producing lane); [#3004]'s residual
+  claim ("unrecoverable") rested on a manifest-location fact that changed under #2411.
 - **blast-radius** — [#2842]'s proposed statute-lint rule would fail `check:standards` repo-wide the moment
   anyone resolved one of three specific in-flight items — unmeasured and unnamed until review.
 - **consumer** — [#2787] named one print site for a bug that had two; the second was live on `main`, printing

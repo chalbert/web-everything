@@ -68,7 +68,9 @@ plan:
   design looked up a dispatched build's PR by a branch name that dispatch entries never record — the lookup
   could only ever return empty.
 - **#2803 — the premise was built on a fact the repo had moved past.** Two of its four design decisions
-  assumed resolve happens in the producing lane pre-merge; the drain has owned that flip for six weeks. A
+  assumed resolve happens in the producing lane pre-merge; the drain has owned that flip since #2748 landed
+  (2026-07-28, ~2.5 weeks before this review — not the drain's own six-week age, which the first draft
+  conflated with the resolve-ownership date). A
   guard reasoned from the wrong moment is not almost-right, it fires at the wrong time or not at all.
 - **#2351 — a wrong mechanism would have silently disabled the feature.** It picked a lock key that turned out
   to be the resident drain daemon's own whole-process lock, and assumed a hook fires once at session end when
