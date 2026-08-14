@@ -121,6 +121,32 @@ honest cost of (1) versus the strong form of (2) is the stale-PR ambiguity below
 dispatch's PR from a previous attempt's, and a stored PR number could. This needs a ruling before the build
 starts, not a silent pick — name it explicitly in the PR that builds this.
 
+### RULED (2026-08-14, before any code was written): **approach 1 — item-id lookup over the head refs**
+
+The build took the recommendation, and the reasons are the card's own: it needs no change to the
+dispatch/brief/`pr-land` write path, so this item's "no control-flow change" boundary stays honest; it reuses
+`we:scripts/conveyor/lease-reaper.mjs`'s `laneRefItemNum`, which is already pure and unit-tested, so the reaper
+and the observer cannot come to disagree about which ref belongs to which item; and it degrades safely, because
+an empty listing is indistinguishable from "no PR yet", which is exactly the right reading.
+
+Approach 2 was weighed on its STRONG form (`we:scripts/pr-land.mjs` writing the PR number back), not the brief
+form — the brief-compliance argument alone would have been an argument against the wrong version. It was
+declined on COST and SIZE rather than on merit: it adds a persisted field to the run store, a new coupling from
+`pr-land` to the operations store it knows nothing about today, and a migration question for entries written
+before it. The card's own Delivery shape says that is not a 3 and needs re-sizing first.
+
+**What choosing (1) costs, stated rather than buried:** id-matching cannot tell THIS dispatch's PR from a
+previous attempt's, and a stored PR number could. The stale guard closes the case the card names (a predecessor
+merged BEFORE `startedAt` resolves nothing, and a missing/unparseable `startedAt` fails closed the same way).
+The residual it does NOT close: a predecessor's PR that merges AFTER a retry started falls inside the window
+and would resolve that retry. Only approach 2 can tell those apart. Both the code and its tests say so.
+
+The grammar widening the build needed (task 4) went where the card said: `laneRefItemNum` now accepts
+`pr-land`'s own `^lane\/(x[a-z0-9]{5,7}|\d+)[a-z]?-`, so a `bornAs`-hash item's PR is no longer read as
+belonging to no item. The reaper's behaviour is unchanged and that is asserted, not assumed — `prStatesFromList`
+mints hash keys, but `itemNumFromSession` can only ever produce digits, so no hash key is reachable on the reap
+path and none collides with an existing one.
+
 ## Interfaces and protocol
 
 ```js

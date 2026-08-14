@@ -16,9 +16,10 @@
  * WHAT THIS DOES NOT DO, deliberately:
  *   - it ships NO concrete observer of its own. The seam is here; #3070's ruling names the host. The FIRST one
  *     arrived with the first thing that dispatches — `we:scripts/operations/dispatch-lane-io.mjs` (#3037)
- *     registers a `claude agents`-backed observer, and the waker's CLI binds it. It answers `running` or
- *     `unresolved` and never `succeeded`, for the reason {@link OBSERVATIONS} gives: the tool reports liveness,
- *     which is not an outcome.
+ *     registers a `claude agents`-backed observer, and the waker's CLI binds it. Its LIVENESS axis can only
+ *     ever answer `running` or `unresolved`, for the reason {@link OBSERVATIONS} gives: the tool reports
+ *     liveness, which is not an outcome. `succeeded` is reached on a second axis — the agent's own PR, merged
+ *     (#x9ylkp7) — which is an outcome, and is the only classification that resolves.
  *   - it does not decide that overdue work is DEAD. `expectedBy` passing means "go look", not "give up" —
  *     the observer is what knows, and an `expectedBy` is an estimate rather than a deadline. A waker that
  *     fails an entry on a clock alone would kill slow-but-healthy work, which is the failure the three-bucket

@@ -244,9 +244,14 @@ export function renderPass(pass) {
  * WHY IT LIVES HERE. The waker is the process that discovers a stuck entry and the only thing that prints its
  * key, so it is where the operator already is when they need to act. Until now the answer printed by
  * `renderPass` was "no CLI surface yet, so a short script" — and for `dispatch-lane` that mattered more than it
- * looked: its observer can never answer `succeeded` (`claude agents` reports liveness, not outcome — #x9ylkp7),
- * so EVERY completed dispatch needs a person to close it out, and "write some node" once per build is not a
- * remedy. The declaration also ages a stale hold out on its own, so this is the deliberate, not the only, way.
+ * looked: its observer could not answer `succeeded` at all (`claude agents` reports liveness, not outcome), so
+ * EVERY completed dispatch needed a person, and "write some node" once per build is not a remedy.
+ *
+ * IT IS NO LONGER THE ONLY WAY OUT, AND IS UNCHANGED BY THAT (#x9ylkp7). The observer now also reads the
+ * entry's PR and resolves a MERGED one on its own, so the clean case closes itself. This surface stays exactly
+ * as it was, because the cases it exists for are the ones the machine still cannot rule on: a PR that was
+ * closed unmerged, one parked mid-review, a build that never opened one at all, and a match that can only be
+ * attributed to an earlier attempt. The two paths coexist and neither needs the other.
  *
  * IT OWNS EXACTLY ONE RULE, AND `resolveInFlight` OWNS EVERY OTHER. The status rules — terminal only,
  * `in-flight` only, no rewriting a settled entry — are `resolveInFlight`'s and are called first, so a malformed
@@ -294,9 +299,10 @@ export function closeOutEntry({ runId, key, status, note = '', force = false, st
  * handle can be asked about. So the check lives at the operator's surface, where the io already is.
  *
  * FAIL CLOSED, WITH THE DOOR ONE FLAG AWAY. A listing that cannot be read is not evidence the agent is dead,
- * so it refuses too — but `--force` always gets through, because `--resolve` is the ROUTINE per-build command
- * (the observer can never answer `succeeded`) and an environment with no working `claude` must not wedge it.
- * A handle-less INDETERMINATE entry is passed straight through: there is nothing to ask about.
+ * so it refuses too — but `--force` always gets through, because `--resolve` remains the operator's answer for
+ * every dispatch the observer cannot rule on (#x9ylkp7 resolves the merged-PR case and no other), and an
+ * environment with no working `claude` must not wedge it. A handle-less INDETERMINATE entry is passed straight
+ * through: there is nothing to ask about.
  *
  * @param {object} entry - the in-flight effect entry being closed out.
  * @param {{listAgents?: () => object[]}} [o]
