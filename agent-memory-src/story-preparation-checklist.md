@@ -42,11 +42,12 @@ three declared files plus its own card (`git diff --name-only 227eef7c^1 227eef7
 used as evidence, and propagated into two artifacts without being checked against the diff. **Never cite a
 file count from a PR page; derive it from the commit range.** An independent review caught it.
 
-**How to apply:** manual discipline until it becomes the `prepare-story` operation (epic `xl2q1zt`). Its
+**How to apply:** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
 first slice — a script flagging importers missing from a `scope:` — was built, reviewed twice and **stood
-down**: in a repo whose scripts shell each other rather than import, a static ESM import scan reads the
-wrong graph, and its confident all-clear was baseless 74% of the time it fired. So item 1 above is done by
-hand, and the epic is a record of what was tried rather than a ranked plan. Grounding rule: cite `path:line` actually opened, never invent an interface
+down** (#3098): in a repo whose scripts shell each other rather than import, a static ESM import scan reads
+the wrong graph, and its confident all-clear was baseless 74% of the time it fired. So item 1 above is done
+by hand, and the epic is a record of what was tried rather than a ranked plan.
+Grounding rule: cite `path:line` actually opened, never invent an interface
 you have not read — **an honest open question beats a confident wrong contract.** Governed by #2607
 (deterministic core, thin judgment): whatever part a script can decide belongs in `we:scripts/readiness/`,
 not in an agent's recall. Note #3071's lesson too — a perfect scope does not make work worth doing; if
