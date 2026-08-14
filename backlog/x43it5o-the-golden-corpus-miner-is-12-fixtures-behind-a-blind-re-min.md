@@ -27,14 +27,21 @@ the assertion that would have failed no longer exists. That is the same shape as
 repo keeps finding, except it arrives by tooling rather than by authoring — nobody has to write a bad test,
 they only have to run a script.
 
+## Confirmed, one category
+
+An independent reviewer of [#2997] (PR #1234, 2026-08-14) re-mined at `origin/main` as part of verifying the
+corpus wasn't dropped by that PR: `hook-guard-bash` miner output is **16** against a committed index of
+**28** — the same 12-file gap, pre-existing, not introduced by #2997. One category only; the other
+categories in the corpus were not re-mined by that check.
+
 ## What is not yet established
 
 - **Why** the miner is behind — whether those 12 were added by hand, whether a generator changed, or
   whether the miner's category list no longer covers them. **Diagnose before fixing**; a fix that
   regenerates them without knowing why they went missing can lose them again the same way.
-- Whether categories other than the two [#2997] touched are also behind. The 12 is what one build happened
-  to notice, not a measured total. **Count the real drift across every category first** — that number
-  decides whether this is a task or a story.
+- Whether categories other than `hook-guard-bash`/`hook-guard-lane` are also behind. 12 is what two builds
+  happened to notice on two categories, not a measured total across the corpus. **Count the real drift
+  across every category first** — that number decides whether this is a task or a story.
 
 ## Done when
 
