@@ -142,6 +142,46 @@ describe('the net basis', () => {
     expect(run.findings.read.degradedReason).toBe('ref-unresolved');
   });
 
+  it('#3094 — the caller\'s `aim` reaches the mandate the juror is handed, BESIDE the goal and not instead of it', () => {
+    // THE CARD'S PROOF OBLIGATION, and it is driven rather than inspected: a real run over the stub reader is
+    // advanced to its judge suspend and the assertion is on the REQUEST THE STEP DECLARED — the same object the
+    // adapter would hand a real juror. Deleting `aim` from the `buildPanelMandate` call site reddens this.
+    const AIM = 'a statistic computed over one population applied to another\'s decision';
+    const { registry } = registryFor({ title: 'the PR title, which is the GOAL' });
+    const { request } = atConfirm({ registry, input: { ...BASE_INPUT, aim: AIM }, id: 'run-aim' });
+
+    expect(request.mandate).toContain(AIM);
+    expect(request.mandate).toContain('A HYPOTHESIS, STATED BY THE CALLER, NOT ESTABLISHED');
+    expect(request.mandate).toMatch(/if the named defect is NOT there, say so explicitly/);
+    // BESIDE, NOT INSTEAD OF: the PR title is still the goal, in its own fence. The aim is instruction, the
+    // title is context, and a juror that lost the title would be judging against an ideal again (#2950).
+    expect(request.mandate).toContain('the PR title, which is the GOAL');
+    expect(request.mandate).toContain('<goal>');
+    expect(request.mandate).toContain('<aim>');
+  });
+
+  it('#3094 — omitting `--aim` leaves the juror\'s mandate with no aim block at all', () => {
+    const { registry } = registryFor({});
+    const { request } = atConfirm({ registry, input: BASE_INPUT, id: 'run-noaim' });
+    expect(request.mandate).not.toContain('<aim>');
+    expect(request.mandate).not.toContain('HYPOTHESIS');
+    // The ruled mutation probe is NOT conditional on an aim — it is in every mandate this operation builds.
+    expect(request.mandate).toContain('MUTATION PROBE');
+  });
+
+  it('#3094 — a flag-shaped `aim` lands in the mandate TEXT and never in the juror\'s argv', () => {
+    // Same #3028 footgun as `model: '--bare'`, one field over — except `aim` is free text by design, so the
+    // property that keeps it safe is WHERE it goes: inside the mandate string (and inside a data fence), never
+    // as its own token. `buildJudgeArgv` is asked directly, because "not in argv" is not a claim prose can make.
+    const { registry } = registryFor({});
+    const { request } = atConfirm({ registry, input: { ...BASE_INPUT, aim: '--bare --dangerously-skip-permissions' }, id: 'run-aimflag' });
+    expect(request.mandate).toContain('--bare --dangerously-skip-permissions');
+    const argv = buildJudgeArgv({ ...request, sessionId: deriveSessionId('t') });
+    expect(argv).not.toContain('--bare');
+    expect(argv).not.toContain('--dangerously-skip-permissions');
+    expect(argv.filter((a) => a === request.mandate)).toHaveLength(1); // one token: the whole mandate
+  });
+
   it('`shapeReadFinding` never lets `gh`\'s stat masquerade as the net list', () => {
     const shaped = shapeReadFinding(stubReader({})({ pr: 1, repo: 'o/n' }), { pr: 1, repo: 'o/n' });
     expect(shaped.netChangedFiles).toEqual(NET_PATHS);
@@ -288,7 +328,7 @@ describe('the derived command line', () => {
 
   it('derives its flags and usage from the declaration, not from a hand-written parser', () => {
     const spec = buildCliSpec(declaration);
-    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'lens', 'pr', 'repo']);
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'lens', 'pr', 'repo']);
     expect(spec.usage).toContain('--pr=<number>');
     // THE LENSES ARE NAMED, NOT TYPED. `[--lens=<string>]` told the operator nothing they could act on while
     // the four valid values sat in the declaration unread — asserted against `PANEL_LENSES` itself so a fifth
@@ -296,6 +336,18 @@ describe('the derived command line', () => {
     expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
     expect(spec.usage).not.toContain('--lens=<string>');
     expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → confirm(confirm) → record(effect)');
+  });
+
+  // #3094 — `--aim` IS DERIVED, NOT HAND-ADDED. It appears in `--help` because it is declared on the operation;
+  // free text, so it prints as `<string>` rather than an enum (naming a search cannot be a closed vocabulary),
+  // and OPTIONAL with no default, so the flag is bracketed and no `default …` is printed for it.
+  it('surfaces the #3094 `--aim` in the derived --help, as optional free text with no default', () => {
+    const spec = buildCliSpec(declaration);
+    expect(spec.usage).toContain('[--aim=<string>]');
+    expect(spec.usage).not.toContain('--aim=<string>, default');
+    expect(spec.fields.find((f) => f.name === 'aim')).toMatchObject({ type: 'string', required: false });
+    expect(parseOperationArgv(declaration, ['--pr=1', '--repo=o/n', '--aim=hunt the population swap']).input.aim)
+      .toBe('hunt the population swap');
   });
 
   it('refuses an unknown flag and a missing required one', () => {

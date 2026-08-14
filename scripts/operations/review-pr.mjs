@@ -358,6 +358,19 @@ export function reviewPrOperation({ readPr } = {}) {
       // Wiring it substitutes behind this same step — the request already carries `lens` — and no other step
       // changes.
       lens: { type: 'string', required: false, default: DEFAULT_LENS, enum: [...PANEL_LENSES] },
+      // WHAT TO HUNT (#3094) — the caller's hypothesis about where the defect is, surfaced as `--aim=<string>`.
+      // THE REASON THIS INPUT EXISTS: over one session driving four PRs to merge, every review that found a real
+      // defect was a HAND-ROLLED mandate naming the shape to look for, and none went through this operation —
+      // because there was no way to tell it what to hunt. `goal` could not carry it: `goal` is the PR TITLE, i.e.
+      // what the diff is TRYING to do, and a juror needs both (context AND instruction), so `aim` is passed
+      // ALONGSIDE it, never in its place.
+      // IT IS A HYPOTHESIS, NOT A VERDICT. `buildPanelMandate` renders it under a heading saying the caller
+      // stated it and nothing has established it, and instructs the juror to report the named defect ABSENT when
+      // it is absent — an aim that tells a juror its conclusion buys a reviewer who confirms it either way.
+      // Free text with no `enum`, unlike `lens`: naming a search cannot be a closed vocabulary. It reaches the
+      // juror only inside the mandate TEXT and inside a #2438 data fence — never a flag position in argv (the
+      // `JUDGE_MODEL` note above is the general form of that property).
+      aim: { type: 'string', required: false },
       // Who the durable comment is attributed to. Free text, exactly like `review-set-label.mjs --actor`.
       actor: { type: 'string', required: false, default: 'operator' },
     },
@@ -380,17 +393,23 @@ export function reviewPrOperation({ readPr } = {}) {
     // suspends and the caller does the spawn between two `advance` calls. `--tools ""` is what makes the
     // mandate's "never check the branch out in a shared tree" (#2336) a thing the juror cannot do.
     judge: judgeStep({
-      reads: ['input.lens', 'findings.read'],
+      reads: ['input.lens', 'input.aim', 'findings.read'],
       request: (view) => {
         const read = view.findings.read;
         const lens = view.input.lens;
+        // #3094 — the caller's aim rides in the MANDATE, beside the goal. `input.aim` is DECLARED in `reads`
+        // above: a step that consumes an input without declaring it is reading state the run record does not
+        // record it as depending on.
+        const aim = typeof view.input.aim === 'string' ? view.input.aim : '';
         return {
           // GROUND TRUTH goes in as the NET list, never `ghDiffStat` (#2450).
           // `fenced: true` (#2967) — `read.title` is the PR title straight off `gh pr view`, written by whoever
           // opened the PR, so it goes to the juror inside the #2438 labelled data fence rather than in
           // instruction position. What that fixes is caller-supplied text reaching the mandate unfenced; whether
           // a crafted title could actually move a verdict is UNMEASURED, so this is hygiene, not a patched hole.
-          mandate: buildPanelMandate({ lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true }),
+          mandate: buildPanelMandate({
+            lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
+          }),
           input: renderJudgeInput(read),
           shape: REVIEW_JUDGE_SHAPE,
           lens,
