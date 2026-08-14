@@ -158,7 +158,26 @@ already-shipped self-guard: `we:scripts/lib/__tests__/check-standards.conformanc
 `*_ENFORCED` constant exported by the engine is declared in the contract") reddens automatically the moment
 either constant is exported without its contract entry.
 
-## Open decision: `UNFENCED_MANDATE_ENFORCED` default
+## RULED 2026-08-14 (operator): error-enforced from day one, both live sites fixed in the same PR
+
+`UNFENCED_MANDATE_ENFORCED = true`, and `we:scripts/operations/review-pr.mjs` and
+`we:scripts/review-core-cli.mjs` are fixed in the SAME change. The second option below, as recommended.
+
+**The reasoning, so it is not re-litigated.** There are exactly two offending sites, both located and both a
+three-line mechanical fix. A gate that ships permitting the two cases it was written to catch is not a gate —
+and this session produced several guards that existed and enforced nothing, which is the pattern that made
+the call easy. Warn-first would have parked a demonstrated injection surface behind a message competing with
+1,318 other warnings.
+
+**What is NOT claimed, and the builder must not overstate it.** Nobody has tested whether a crafted PR title
+actually changes a juror's verdict. What is established is that caller-supplied text reaches the mandate
+unfenced; the degree of influence is UNMEASURED. Write the rule and its docblock to say exactly that. A
+security claim wider than its evidence is the defect class this repo has spent the week on, and it would be a
+poor thing to introduce in the fix for an injection surface.
+
+Rule (a) is unchanged: warn-first, per the `COMPOSE_TRAITS_ENFORCED` precedent.
+
+## Open decision (RULED above — kept for the reasoning): `UNFENCED_MANDATE_ENFORCED` default
 
 Rule (a) is uncontroversially warn-first (COMPOSE_TRAITS_ENFORCED precedent, ~156 raw candidates). Rule (b) is
 different: I found it is **already live-exploitable on main today** at two call sites (see Verification). Two
