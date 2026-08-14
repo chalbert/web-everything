@@ -272,6 +272,27 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
 }
 
 /**
+ * The nearest `confirm`-kind step BELOW `stepIndex` that already holds a finding — i.e. an answer a caller
+ * already gave, and that `driveRun` is about to re-encounter on a `--resume`. `null` when the refusing step
+ * is the first, or nothing below it is a `confirm` with a recorded finding. PURE — reads only the
+ * declaration's step list and the run's own findings.
+ *
+ * @param {object} declaration
+ * @param {object} run
+ * @param {number} stepIndex - the refusing step's index (`declaration.steps[stepIndex]`).
+ * @returns {{step: string, value: *}|null}
+ */
+function findPriorConfirm(declaration, run, stepIndex) {
+  for (let i = stepIndex - 1; i >= 0; i -= 1) {
+    const entry = declaration.steps[i];
+    if (entry.step.kind === 'confirm' && Object.prototype.hasOwnProperty.call(run.findings ?? {}, entry.name)) {
+      return { step: entry.name, value: run.findings[entry.name] };
+    }
+  }
+  return null;
+}
+
+/**
  * DRIVE A RUN to its next stop. The whole adapter, in one loop.
  *
  * @param {object} o
@@ -282,7 +303,13 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
  * @param {(request: object) => Promise<object>} o.judge
  * @param {{value: *}|null} [o.resume] - the confirm answer, when one arrived.
  * @param {number} [o.maxTurns]
- * @returns {Promise<{run: object, stopped: string, error: (Error|null), applied: string[]}>}
+ * @returns {Promise<{run: object, stopped: string, error: (Error|null), applied: string[], step?: string,
+ *   priorConfirm?: ({step: string, value: *}|null), inFlight?: string[]}>}
+ *   `stopped` is one of `'complete'`, `'confirm'`, `'stuck'`, `'effect-halted'`, `'effect-in-flight'` or
+ *   `'step-refused'` — the last one is a declaration fn (a `compute`, `judge`, `confirm` or `effect` step)
+ *   throwing deterministically once its answer is already committed to the record (#3063). `step` and
+ *   `priorConfirm` ride only on `step-refused`, because that is the one stop `renderOutcome` cannot describe
+ *   from `{run, stopped, error, applied}` alone — see the file header and #3063 for why.
  */
 export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null, attemptedBy = 'unknown' } = {}) {
   let current = run;
@@ -346,8 +373,29 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
       continue;
     }
 
-    // running
-    const next = advance(current, { registry });
+    // running — THE ONE `advance` CALL THAT EXECUTES A DECLARATION FN (#3063). A `compute` fn, a `judge`
+    // `request`, a `confirm` `asks`/`of` or an `effect` `effects` can all throw here, deterministically, once
+    // an earlier answer is already committed to the record — see the file header. The `try` is drawn around
+    // THIS call only: the other three `advance` calls in this loop (`awaiting-confirm` resume, `awaiting-judge`
+    // resume, the post-apply `awaiting-effect` resolve) run `resolvePending`, which executes no declaration fn
+    // at all — what THEY throw is a caller error (a malformed resume, an answer outside the closed option set),
+    // and folding those into `step-refused` would tell an operator who mistyped `--answer` to start a fresh
+    // run, re-spawning the juror this story exists to stop paying for twice. Do not widen this catch.
+    const declaration = registry.get(current.op);
+    const stepIndex = current.cursor;
+    let next;
+    try {
+      next = advance(current, { registry });
+    } catch (e) {
+      return {
+        run: current,
+        stopped: 'step-refused',
+        error: e,
+        applied,
+        step: declaration.steps[stepIndex]?.name,
+        priorConfirm: findPriorConfirm(declaration, current, stepIndex),
+      };
+    }
     if (next === current) return { run: current, stopped: 'stuck', error: null, applied };
     current = next;
     store.write(current);
@@ -471,6 +519,21 @@ export function outcomePayload({ run, stopped, error = null, applied = [] }) {
   };
 }
 
+/**
+ * The command line that starts THIS run again from its own recorded input. PURE.
+ *
+ * `buildCliSpec` derives every flag straight from `declaration.input`'s keys and refuses one that collides
+ * with a control flag (`:59-65`), so `run.input`'s own keys can never render an ambiguous line — field names
+ * map 1:1 to flags. Exported so `step-refused`'s restart line is asserted directly, not scraped from prose.
+ *
+ * @param {object} run
+ * @returns {string}
+ */
+export function restartCommand(run) {
+  const flags = Object.entries(run.input ?? {}).map(([key, value]) => `--${key}=${value}`);
+  return [`node scripts/operations/run.mjs`, run.op, ...flags].join(' ');
+}
+
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
 export function renderOutcome({ outcome, json = false }) {
   const { run, stopped, error, applied } = outcome;
@@ -537,6 +600,27 @@ export function renderOutcome({ outcome, json = false }) {
         `run ${run.id} — HALTED applying \`${run.pending?.step}\`: ${String(error?.message ?? error)}`,
         `${applied.length} effect(s) landed and are recorded as applied; a --resume=${run.id} continues from there `
         + 'and never re-applies them.',
+        ...spend,
+      ],
+    };
+  }
+  // A DECLARATION FN REFUSED, DETERMINISTICALLY, ONCE ITS INPUT WAS ALREADY COMMITTED (#3063). `outcome.step`
+  // names the refusing step — NOT `run.pending?.step`, which is `null` here (the confirm that led here already
+  // cleared it). The prior-`confirm` lines are gated on `outcome.priorConfirm`: this stop never claims a
+  // decision was made when the refusal is the FIRST step's own doing. The restart line is unconditional —
+  // it is the one thing true on every path, deterministic or not.
+  if (stopped === 'step-refused') {
+    const priorConfirm = outcome.priorConfirm ?? null;
+    return {
+      code: 1,
+      lines: [
+        `run ${run.id} — REFUSED at \`${outcome.step}\`: ${String(error?.message ?? error)}`,
+        ...(priorConfirm ? [
+          `the answer recorded at \`${priorConfirm.step}\` is \`${priorConfirm.value}\`; it is committed, and a `
+          + '--resume replays this same step with it.',
+          'if this refusal is deterministic the run cannot reach another answer — start a fresh one:',
+        ] : []),
+        `  ${restartCommand(run)}`,
         ...spend,
       ],
     };
