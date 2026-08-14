@@ -21,14 +21,20 @@ import {
 import {
   LIST_TIMEOUT_ENV,
   LIST_TIMEOUT_MS,
+  PR_LIST_JSON_FIELDS,
+  PR_LIST_LIMIT,
+  PR_LIST_TIMEOUT_ENV,
+  PR_LIST_TIMEOUT_MS,
   SPAWN_TIMEOUT_MS,
   TICK_TIMEOUT_MS,
   createDispatchObservers,
   createDispatchSinks,
   defaultListAgents,
+  defaultListPrs,
   defaultRunNode,
   defaultSpawnAgent,
   listTimeoutMs,
+  prListTimeoutMs,
   readTick,
 } from '../dispatch-lane-io.mjs';
 
@@ -109,6 +115,69 @@ describe('the observer reads LIVE sessions only', () => {
   });
 });
 
+// ── #x9ylkp7 — THE DISCOVERY QUERY, pinned. Every other test of this feature passes on injected fixtures ─────
+//
+// The failure mode of a wrong discovery query is SILENCE, not an error: an empty listing is BY DESIGN
+// indistinguishable from "no PR yet", so a query that matches nothing looks exactly like a fleet with no PRs
+// open. Nothing reddens, the waker keeps escalating at 6h, and the item reads as delivered. That is why the
+// argv is asserted here and not merely exercised through a fixture — the same defect class as F5/F6 in the PR
+// #1211 review, where a tested default reached by nothing was the whole problem.
+
+describe('the PR discovery query — the one thing fixtures cannot prove', () => {
+  it('asks for `--state all`; without it every MERGED PR is hidden and the axis resolves NOTHING', () => {
+    const { exec, calls } = spyExec('[]');
+    defaultListPrs({ exec, env: {} });
+    expect(calls[0].file).toBe('gh');
+    // THE FLAG, and the PAIR — `gh pr list --state all`. Bare `gh pr list` defaults to OPEN only, and `merged`
+    // is the single classification this observer ever resolves on.
+    const stateAt = calls[0].argv.indexOf('--state');
+    expect(stateAt).toBeGreaterThan(-1);
+    expect(calls[0].argv[stateAt + 1]).toBe('all');
+  });
+
+  it('asks for `headRefName` in `--json`; without it no PR can be matched to any item', () => {
+    const { exec, calls } = spyExec('[]');
+    defaultListPrs({ exec, env: {} });
+    const jsonAt = calls[0].argv.indexOf('--json');
+    expect(jsonAt).toBeGreaterThan(-1);
+    const fields = String(calls[0].argv[jsonAt + 1]).split(',');
+    // `headRefName` is the match key; `state`/`mergedAt`/`labels` are what `classifyPr` itself reads; `number`
+    // is the evidence recorded on the resolved entry.
+    expect(fields).toEqual(expect.arrayContaining(['headRefName', 'state', 'mergedAt', 'labels', 'number']));
+    expect(PR_LIST_JSON_FIELDS.split(',')).toEqual(fields);
+  });
+
+  it('the whole argv, in one assertion — a rename or a dropped flag reddens exactly here', () => {
+    const { exec, calls } = spyExec('[]');
+    defaultListPrs({ exec, env: {} });
+    expect(calls[0].argv).toEqual(['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS]);
+    expect(PR_LIST_LIMIT).toBe(400); // the LITERAL, not only the constant — same page the lease reaper reads
+  });
+
+  it('is BOUNDED — it is a network read sitting inside a fail-soft waker pass', () => {
+    const { exec, calls } = spyExec('[]');
+    defaultListPrs({ exec, env: {} });
+    expect(PR_LIST_TIMEOUT_MS).toBe(30 * 1000);
+    expect(calls[0].opts).toMatchObject({ timeout: PR_LIST_TIMEOUT_MS, killSignal: 'SIGKILL', encoding: 'utf8' });
+  });
+
+  it('the bound is its OWN knob, and a malformed one is refused rather than ignored', () => {
+    // A separate var from the agent listing's: the two reads have different costs (a local daemon versus a
+    // network round-trip), and lengthening one must not silently lengthen the other.
+    expect(prListTimeoutMs({})).toBe(PR_LIST_TIMEOUT_MS);
+    expect(prListTimeoutMs({ [PR_LIST_TIMEOUT_ENV]: '0' })).toBe(0);
+    expect(prListTimeoutMs({ [LIST_TIMEOUT_ENV]: '1' })).toBe(PR_LIST_TIMEOUT_MS); // the OTHER knob is not this one
+    expect(listTimeoutMs({ [PR_LIST_TIMEOUT_ENV]: '1' })).toBe(LIST_TIMEOUT_MS);
+    expect(() => prListTimeoutMs({ [PR_LIST_TIMEOUT_ENV]: 'soon' })).toThrow(new RegExp(PR_LIST_TIMEOUT_ENV));
+    expect(() => prListTimeoutMs({ [PR_LIST_TIMEOUT_ENV]: '-1' })).toThrow(/non-negative/);
+  });
+
+  it('parses the page, and an empty answer is an empty array rather than a throw', () => {
+    expect(defaultListPrs({ exec: () => '[{"number":7}]', env: {} })).toEqual([{ number: 7 }]);
+    expect(defaultListPrs({ exec: () => '', env: {} })).toEqual([]);
+  });
+});
+
 describe('the PRODUCTION callers reach those defaults — a tested default nothing uses is the same defect', () => {
   // THE SECOND HALF OF F5, found by mutating this fix rather than the original code: asserting
   // `defaultRunNode` builds a timeout proves nothing if `readTick`'s own default quietly stopped being it.
@@ -158,8 +227,30 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
   it('the observer goes through `defaultListAgents` — same argv, still no `--all`', async () => {
     const { exec, calls } = spyExec('[]');
     const observers = createDispatchObservers({ exec, now: () => new Date('2026-08-13T12:00:00.000Z') });
+    // NO `payload.num`, so the PR axis is skipped entirely and `claude` is the only thing shelled — which is
+    // itself the assertion that an entry the PR axis cannot use costs no subprocess.
     await observers[DISPATCH_EFFECT]({ handle: 'sess-gone', startedAt: '2026-08-13T10:00:00.000Z' }, { handle: 'sess-gone' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('claude');
     expect(calls[0].argv).toEqual(['agents', '--json']);
     expect(calls[0].opts).toMatchObject({ timeout: LIST_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  });
+
+  it('the observer\'s PR axis goes through `defaultListPrs` too — the seam #x9ylkp7 adds, reached by production', async () => {
+    // Same shape of proof as the three above, and the same reason: a pinned default that the real factory does
+    // not reach is a pinned default that resolves nothing in production.
+    const { exec, calls } = spyExec('[]');
+    const observers = createDispatchObservers({ exec, now: () => new Date('2026-08-13T12:00:00.000Z') });
+    await observers[DISPATCH_EFFECT](
+      { handle: 'sess-gone', startedAt: '2026-08-13T10:00:00.000Z', payload: { num: '3095' } },
+      { handle: 'sess-gone' },
+    );
+    const gh = calls.find((c) => c.file === 'gh');
+    expect(gh, 'the observer must reach the real `gh pr list` reader').toBeTruthy();
+    expect(gh.argv).toEqual(['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS]);
+    expect(gh.opts).toMatchObject({ timeout: PR_LIST_TIMEOUT_MS, killSignal: 'SIGKILL' });
+    // …and the PR axis running first does not cost the liveness axis: an empty page is no verdict, so the
+    // agent listing is still read.
+    expect(calls.some((c) => c.file === 'claude')).toBe(true);
   });
 });
