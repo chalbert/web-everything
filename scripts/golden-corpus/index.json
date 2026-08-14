@@ -10,9 +10,9 @@
     "memory": 12,
     "hook-locus-prefix": 12,
     "hook-guard-bash": 34,
-    "hook-guard-lane": 7
+    "hook-guard-lane": 8
   },
-  "total": 113,
+  "total": 114,
   "categories": {
     "backlog-claim": {
       "source": "git-mined",

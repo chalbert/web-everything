@@ -18,6 +18,8 @@ import {
   laneMarkedSlug,
   assertedLaneSlug,
   laneHolderSlug,
+  laneWorkerSession,
+  isForeignOccupancy,
   isContestedLease,
   requiredAssertionSlug,
 } from '../lane-lease.mjs';
@@ -292,6 +294,54 @@ describe('#2997 — laneHolderSlug (the minted per-holder slug on EVERY lease)',
   });
 });
 
+// ── #2997 r2 — the DECLARED-OCCUPANT channel (independent review of PR #1234, finding F1) ────────────────
+//
+// The first cut of Gap 1 denied an Edit/Write when `lease.ownerSession !== mySessionId`. But `acquire` stamps
+// `ownerSession` from the env of the process that RUNS it, which is the DISPATCHER whenever a lane is leased
+// on an agent's behalf — so that compare read FOREIGN for the lane's own legitimate occupant, and every
+// dispatched lane in the pool would have gone read-only for the agent sent to work in it. Occupancy is now its
+// own field, written only by a session claiming the lane for itself (`acquire --adopt` / `adopt --lane=N`).
+describe('#2997 r2 — laneWorkerSession / isForeignOccupancy (who is WORKING here, not who leased it)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  const dispatched = leaseBody({ session: 'Mac:45983', purpose: 'review-1234', acquiredAt: at, ownerSession: 'sess-DISPATCHER', holder: 'review-1234-lane-4-abcd1234' });
+  const adopted = leaseBody({ ...dispatched, acquiredAt: at, workerSession: 'sess-WORKER' });
+
+  it('leaseBody OMITS workerSession unless occupancy is claimed — an ordinary acquire\'s marker is unchanged', () => {
+    expect('workerSession' in dispatched).toBe(false);
+    expect(adopted.workerSession).toBe('sess-WORKER');
+    expect('workerSession' in leaseBody({ session: 's', acquiredAt: at, workerSession: '' })).toBe(false);
+  });
+
+  it('laneWorkerSession reads the dedicated field only — never ownerSession', () => {
+    expect(laneWorkerSession(dispatched)).toBeNull();
+    expect(laneWorkerSession(adopted)).toBe('sess-WORKER');
+    expect(laneWorkerSession({ workerSession: 42 })).toBeNull();
+    expect(laneWorkerSession(null)).toBeNull();
+  });
+
+  // THE REGRESSION THE REVIEW CAUGHT. `ownerSession` is a THIRD PARTY to the working session and the working
+  // session is the lane's rightful occupant. This shape had NO fixture, which is why a repo-wide false DENY
+  // shipped with a green gate. It must be ALLOWED — before adoption and after.
+  it('MUST-ALLOW: a dispatched lane is NOT foreign to the worker it was leased FOR (review F1)', () => {
+    expect(isForeignOccupancy({ lease: dispatched, mySessionId: 'sess-WORKER' })).toBe(false);
+    expect(isForeignOccupancy({ lease: adopted, mySessionId: 'sess-WORKER' })).toBe(false);
+  });
+
+  it('FOREIGN once a DIFFERENT session has declared occupancy — the deny is armed by the declaration', () => {
+    expect(isForeignOccupancy({ lease: adopted, mySessionId: 'sess-INTRUDER' })).toBe(true);
+    // …including the dispatcher that leased it: leasing a lane is not working in it.
+    expect(isForeignOccupancy({ lease: adopted, mySessionId: 'sess-DISPATCHER' })).toBe(true);
+  });
+
+  it('fail-OPEN with no declared occupant, no session id, or no lease at all', () => {
+    expect(isForeignOccupancy({ lease: dispatched, mySessionId: 'sess-ANYONE' })).toBe(false);
+    expect(isForeignOccupancy({ lease: adopted, mySessionId: null })).toBe(false);
+    expect(isForeignOccupancy({ lease: null, mySessionId: 'sess-MINE' })).toBe(false);
+    expect(isForeignOccupancy({})).toBe(false);
+    expect(isForeignOccupancy()).toBe(false);
+  });
+});
+
 describe('#2997 — isContestedLease (when ambient session identity provably cannot answer)', () => {
   const at = '2026-07-05T12:00:00.000Z';
   const mine = leaseBody({ session: 'Mac:39367', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-mine' });
@@ -310,6 +360,15 @@ describe('#2997 — isContestedLease (when ambient session identity provably can
   it('a lease with no ownerSession is never contested (nothing to collide on; fail-open, as documented)', () => {
     const idless = leaseBody({ session: 'Mac:1', acquiredAt: at, holder: 'h-x' });
     expect(isContestedLease({ lease: idless, siblingLeases: [leaseBody({ session: 'Mac:2', acquiredAt: at, holder: 'h-y' })] })).toBe(false);
+  });
+  // r2 (review F4/M10) — the `s !== lease` self-exclusion had no test, so removing it reddened nothing. A
+  // caller that (spuriously) includes the subject lease in its own sibling list must NOT read as contested:
+  // that is a lease colliding with itself, and treating it as a sibling collision is a pure false-deny.
+  it('is NOT contested by ITSELF when the subject lease appears in its own sibling list', () => {
+    expect(isContestedLease({ lease: mine, siblingLeases: [mine] })).toBe(false);
+    // …and a real sibling alongside it still contests, so the self-exclusion narrows nothing it shouldn't.
+    const sibling = leaseBody({ session: 'Mac:39423', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-sib' });
+    expect(isContestedLease({ lease: mine, siblingLeases: [mine, sibling] })).toBe(true);
   });
   it('never throws on empty/absent args', () => {
     expect(isContestedLease({})).toBe(false);

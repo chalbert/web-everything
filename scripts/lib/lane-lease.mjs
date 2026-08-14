@@ -101,8 +101,12 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
  *  distinct between two SIBLING agents of the SAME session (`ownerSession` is identical for them by
  *  construction, which is the whole #2997 gap). OMITTED when absent, so a `leaseBody` call that passes no
  *  holder produces a byte-identical marker to today (an on-disk lease minted before #2997 simply has no
- *  `holder`, ⇒ `laneHolderSlug` null ⇒ the pre-#2997 fail-open behaviour, unchanged). */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved, holder }) {
+ *  `holder`, ⇒ `laneHolderSlug` null ⇒ the pre-#2997 fail-open behaviour, unchanged).
+ *  `workerSession` (#2997 r2) is the session id of the agent that will actually WORK this lane — deliberately
+ *  a DIFFERENT field from `ownerSession`, which records only whoever RAN `acquire`. OMITTED unless a caller
+ *  positively claims occupancy (`acquire --adopt` / `adopt`), so an ordinary acquire's marker stays
+ *  byte-identical to today. See `isForeignOccupancy` for why the two cannot be the same field. */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved, holder, workerSession }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
@@ -115,6 +119,10 @@ export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_L
     // #2997 — the minted PER-HOLDER slug. Included ONLY when a non-empty string (omit-when-absent keeps a
     // holder-less caller's marker byte-identical to today); a reader keys on `laneHolderSlug`.
     ...(typeof holder === 'string' && holder ? { holder } : {}),
+    // #2997 r2 — the DECLARED OCCUPANT: the session that will actually work in this lane. Included ONLY when a
+    // caller positively claims occupancy, so an ordinary acquire's marker is unchanged; a reader keys on
+    // `laneWorkerSession` / `isForeignOccupancy`.
+    ...(typeof workerSession === 'string' && workerSession ? { workerSession } : {}),
     // #2560 — advisory predicted file-scope, included ONLY when a non-empty array (omit-when-empty keeps a
     // scope-less acquire's marker byte-identical to today). A defensive copy so the caller can't alias in.
     ...(Array.isArray(predictedScope) && predictedScope.length ? { predictedScope: [...predictedScope] } : {}),
@@ -143,6 +151,51 @@ export function isForeignLease({ lease, mySessionId } = {}) {
   if (!lease) return false;
   if (lease.ownerSession && mySessionId) return lease.ownerSession !== mySessionId;
   return false; // degraded: no identity signal on both sides ⇒ fail-open (allow) — see doc above
+}
+
+// #2997 r2 — the DECLARED-OCCUPANT channel, and why `ownerSession` could not be it ────────────────────────
+//
+// `lane-pool.mjs acquire` stamps `ownerSession` from the env of the process that RUNS the acquire. That is the
+// working agent in ONE topology (the conveyor/dispatch brief has the agent acquire its own lane — see
+// `we:scripts/operations/dispatch-lane-io.mjs`, "the agent's very first instruction is to acquire a lane of its
+// own") and the DISPATCHER in another (an operator leases lane-N and hands the path to a spawned agent, which
+// runs under a session id of its own). A reader of the marker cannot tell those two apart, so
+// `lease.ownerSession !== mySessionId` does NOT mean "someone else is working here" — for a dispatched lane it
+// is true BY CONSTRUCTION for the lane's own legitimate occupant.
+//
+// The first cut of Gap 1 denied on exactly that compare, which would have made every dispatched lane READ-ONLY
+// for the agent sent to work in it (independent review of PR #1234, F1 — reproduced live: a lease whose
+// `purpose` was minted FOR the denied agent). The fix is not a special case; it is to stop overloading one
+// field with two meanings. `ownerSession` keeps its meaning ("who ran acquire" — the #2367/#2452 release
+// signal, untouched), and OCCUPANCY gets its own field that ONLY a session claiming to work the lane ever
+// writes: `workerSession`, stamped by `acquire --adopt` or by the `adopt` hand-off command.
+//
+// Consequence, stated plainly: a lane whose occupant was never declared is NOT protected by the Edit/Write arm
+// — it stays writable, exactly as on `main` before this item. That is the deliberate trade: an undeclared lane
+// cannot be told from a dispatched one, and a false DENY here wedges an agent out of its own lane, which is
+// strictly worse than the silent-write hole it would be closing.
+
+/** The session that DECLARED it is working in this lane (`workerSession`), or null when none ever did. Pure. */
+export function laneWorkerSession(lease) {
+  return lease && typeof lease.workerSession === 'string' && lease.workerSession ? lease.workerSession : null;
+}
+
+/**
+ * #2997 r2 — is this lane provably OCCUPIED BY SOMEONE ELSE? The ownership decision for the `Edit`/`Write`
+ * guard (`guard-lane.mjs`), which has no per-operation assertion channel and so must be certain before it
+ * denies. Pure.
+ *
+ *   FOREIGN (deny) ⇒ the lease carries a DECLARED occupant (`workerSession`) AND this caller has a session id
+ *     AND they differ. Only a session claiming the lane for itself ever writes that field, so a mismatch is a
+ *     positive statement that a different agent is working here — not an inference from who ran `acquire`.
+ *   NOT FOREIGN (allow) ⇒ everything else: no lease, no declared occupant (an ordinary acquire, a dispatched
+ *     lane nobody adopted, a pre-#2997 marker), or no session id on this side. Fail-OPEN, the guard's standing
+ *     posture — see the block comment above for why the `ownerSession` compare is NOT a safe substitute.
+ */
+export function isForeignOccupancy({ lease, mySessionId } = {}) {
+  const worker = laneWorkerSession(lease);
+  if (!worker || !mySessionId) return false; // no declared occupant / no id here ⇒ nothing is proven ⇒ allow
+  return worker !== mySessionId;
 }
 
 /** One-line human description of a lease for `status` output. */
@@ -247,6 +300,15 @@ export function laneHolderSlug(lease) {
 /**
  * #2997 — is `lease` CONTESTED: does at least one OTHER live lease share its `ownerSession`? Pure — the caller
  * supplies `siblingLeases` (the other lanes' leases, already filtered to LIVE ones and excluding this lane).
+ * Both callers (`guard-bash.mjs#siblingLaneLeases`, `lane-pool.mjs#liveLeasesInPoolExcept`) scan EVERY pool
+ * under the `.lanes/` root, not just this lane's own pool — a session's siblings routinely hold lanes in a
+ * different pool and the ambient id is exactly as ambiguous there (r2, review F3/R2).
+ *
+ * SCOPE OF THE CLOSURE, stated plainly (r2, review F3/R1). This predicate needs a SECOND live lease to exist.
+ * A sibling agent that holds NO lane of its own — a review subagent, say — leaves nothing to find, so a lane
+ * whose holder is its session's only holder reads UNCONTESTED and the op is allowed. That is not closed here.
+ * The 2026-08-08 incident (a lane-less review subagent clobbering lane-1) is therefore covered ONLY when some
+ * other lane was live under the same `ownerSession` at that moment; in the sole-holder shape it is not.
  *
  * This is the precise, script-decidable statement of "ambient session identity cannot answer here". When no
  * sibling of this session holds another lane, `ownerSession` DOES distinguish owner from foreigner and the

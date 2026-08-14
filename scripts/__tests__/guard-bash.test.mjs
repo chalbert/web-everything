@@ -445,6 +445,23 @@ describe('guard-bash — siblingLaneLeases reads the real pool layout (#2997)', 
     expect(got).toEqual(['h-5', 'h-6']);
   });
 
+  // r2 (independent review of PR #1234, F3/R2). The first cut scanned only `dirname(laneRoot)` — this lane's
+  // OWN pool — so a sibling agent holding a lane in a DIFFERENT pool left nothing to find and the destructive
+  // op was allowed. That shape is ordinary, not exotic: a cross-locus couple leases one lane in the
+  // web-everything pool and one in the plateau-app pool (the exact case `release --all-pools` exists for), and
+  // the ambient session id is precisely as ambiguous across pools as within one.
+  it('scans EVERY pool under .lanes/, not just this lane\'s own pool (review F3/R2)', () => {
+    const other = join(root, '.lanes', 'plateau-app');
+    mkdirSync(join(other, 'lane-2', '.git'), { recursive: true });
+    writeFileSync(join(other, 'lane-2', '.git', '.lane-lease'), JSON.stringify(live({ ownerSession: 'sess-shared', holder: 'h-cross' })));
+    // A file sitting where a pool would be, and a pool holding a stale lease: neither may throw or leak.
+    writeFileSync(join(root, '.lanes', 'not-a-pool'), 'x\n');
+
+    const got = siblingLaneLeases(join(pool, 'lane-3'), NOW).map((l) => l.holder).sort();
+    expect(got).toContain('h-cross');
+    expect(got).toEqual(['h-5', 'h-6', 'h-cross']);
+  });
+
   it('fails OPEN (empty) on a missing pool — a guard fault must never wedge the agent', () => {
     expect(siblingLaneLeases(join(root, 'nope', 'lane-1'), NOW)).toEqual([]);
   });

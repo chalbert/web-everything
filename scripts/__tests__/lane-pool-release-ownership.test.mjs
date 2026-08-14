@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -217,5 +217,112 @@ describe('lane-pool #2997 — a TARGETED release of a CONTESTED lease needs the 
     const theirs = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=theirs', '--json'], 'sess-uuid-A').out);
     const release = runPool(['release', `--lane=${theirs.lane}`, ...poolArgs(), '--session=mine-host-B'], 'sess-uuid-B');
     expect(release.out + release.err).toMatch(/not yours/);
+  });
+
+  // r2 (independent review of PR #1234, F2). The SIBLINGS were filtered to live, but the SUBJECT lease was
+  // never staleness-checked — so an EXPIRED lease with a live same-`ownerSession` sibling read as CONTESTED and
+  // could not be released without `--force`. That is a regression against main AND a direct contradiction of
+  // this item's own ruling, stated in three places: "a stale lease reads as no lease, EVERYWHERE". A dead
+  // holder has no one to be confused with, so there is nothing to prove.
+  it('a STALE lease releases with NO --force even when a live sibling shares its ownerSession (review F2)', () => {
+    const { a, b } = acquireTwoSiblings();
+    // Age B's lease out by 10 days, leaving everything else (including its minted holder slug) intact.
+    const marker = join(poolRoot, 'releaseowner', `lane-${b.lane}`, '.git', '.lane-lease');
+    const aged = { ...JSON.parse(readFileSync(marker, 'utf8')), acquiredAt: new Date(Date.now() - 10 * 864e5).toISOString() };
+    writeFileSync(marker, JSON.stringify(aged, null, 2) + '\n');
+    expect(a.holder).toBeTruthy(); // lane A is still LIVE and shares B's ownerSession — the contested shape
+
+    const release = runPool(['release', `--lane=${b.lane}`, ...poolArgs(), '--json'], 'sess-uuid-shared');
+    expect(release.code).toBe(0);
+    expect(JSON.parse(release.out).released).toBe(1);
+    expect(release.out + release.err).not.toMatch(/CONTESTED/);
+    expect(release.out + release.err).not.toMatch(/not yours/);
+  });
+
+  // r2 (review F4/M7) — the idempotent re-acquire path is documented to KEEP the existing holder slug ("never
+  // invalidates the slug the current holder is already asserting"), but nothing pinned it: re-minting on every
+  // re-acquire passed the whole suite. A re-mint turns the holder's next legitimate destructive op into a
+  // mismatch deny, i.e. a self-inflicted false refusal.
+  it('an IDEMPOTENT re-acquire by the current holder PRESERVES its minted slug (review F4)', () => {
+    expect(runPool(['provision', '--count=2', ...poolArgs()], 'sess-uuid-idem').code).toBe(0);
+    const first = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--session=holder-A', '--purpose=idem', '--json'], 'sess-uuid-idem').out);
+    const again = JSON.parse(runPool(['acquire', `--lane=${first.lane}`, ...poolArgs(), '--no-reset', '--session=holder-A', '--purpose=idem', '--json'], 'sess-uuid-idem').out);
+    expect(again.lane).toBe(first.lane);
+    expect(again.holder).toBe(first.holder);
+    // …and the slug still on disk is the one the holder is asserting, not a freshly minted one.
+    const marker = join(poolRoot, 'releaseowner', `lane-${first.lane}`, '.git', '.lane-lease');
+    expect(JSON.parse(readFileSync(marker, 'utf8')).holder).toBe(first.holder);
+  });
+});
+
+// ── #2997 r2 — `adopt`, the dispatcher → worker OCCUPANCY hand-off (independent review of PR #1234, F1) ────
+//
+// `acquire` stamps `ownerSession` from the env of the process that RUNS it. When an operator leases a lane and
+// hands it to a spawned agent, that field records the OPERATOR — the working agent runs under its own session
+// id and matches nothing on the marker. The first cut of Gap 1 denied Edit/Write on that mismatch, which would
+// have locked every dispatched agent out of the lane leased FOR it. Occupancy is now declared, not inferred.
+describe('lane-pool #2997 r2 — adopt declares the OCCUPANT (the signal guard-lane actually reads)', () => {
+  const leaseOf = (lane) => JSON.parse(readFileSync(join(poolRoot, 'releaseowner', `lane-${lane}`, '.git', '.lane-lease'), 'utf8'));
+
+  it('an ordinary acquire declares NO occupant — `ownerSession` is only "who ran acquire"', () => {
+    expect(runPool(['provision', '--count=1', ...poolArgs()], 'sess-DISPATCHER').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=fix-1234', '--json'], 'sess-DISPATCHER').out);
+    expect(leaseOf(a.lane).ownerSession).toBe('sess-DISPATCHER');
+    expect('workerSession' in leaseOf(a.lane)).toBe(false); // marker byte-shape unchanged from pre-r2
+    expect(a.workerSession).toBeNull();
+  });
+
+  it('the WORKER adopts the lane it was handed, and the marker records ITS session, not the dispatcher\'s', () => {
+    expect(runPool(['provision', '--count=1', ...poolArgs()], 'sess-DISPATCHER').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=fix-1234', '--json'], 'sess-DISPATCHER').out);
+    const adopt = runPool(['adopt', `--lane=${a.lane}`, ...poolArgs(), '--json'], 'sess-WORKER');
+    expect(adopt.code).toBe(0);
+    expect(JSON.parse(adopt.out).workerSession).toBe('sess-WORKER');
+    const lease = leaseOf(a.lane);
+    expect(lease.workerSession).toBe('sess-WORKER');
+    expect(lease.ownerSession).toBe('sess-DISPATCHER'); // untouched — release ownership (#2452) is unaffected
+    expect(lease.holder).toBe(a.holder);                // and the minted slug survives the hand-off
+  });
+
+  it('`acquire --adopt` stamps the occupant in one step, for the agent that leases its OWN lane', () => {
+    expect(runPool(['provision', '--count=1', ...poolArgs()], 'sess-SELF').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--adopt', '--purpose=self', '--json'], 'sess-SELF').out);
+    expect(a.workerSession).toBe('sess-SELF');
+    expect(leaseOf(a.lane).workerSession).toBe('sess-SELF');
+  });
+
+  it('adopting a lane a DIFFERENT live session already occupies is REFUSED without --force, and names who holds it', () => {
+    expect(runPool(['provision', '--count=1', ...poolArgs()], 'sess-DISPATCHER').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=fix-1234', '--json'], 'sess-DISPATCHER').out);
+    expect(runPool(['adopt', `--lane=${a.lane}`, ...poolArgs()], 'sess-WORKER').code).toBe(0);
+
+    const steal = runPool(['adopt', `--lane=${a.lane}`, ...poolArgs()], 'sess-INTRUDER');
+    expect(steal.code).not.toBe(0);
+    expect(steal.err).toMatch(/already declared as occupied by session sess-WORKER/);
+    expect(leaseOf(a.lane).workerSession).toBe('sess-WORKER'); // unchanged
+
+    // …and the deliberate takeover works, naming who is displaced.
+    const forced = runPool(['adopt', `--lane=${a.lane}`, '--force', ...poolArgs()], 'sess-INTRUDER');
+    expect(forced.code).toBe(0);
+    expect(forced.err).toMatch(/took over from sess-WORKER/);
+    expect(leaseOf(a.lane).workerSession).toBe('sess-INTRUDER');
+  });
+
+  it('re-adopting my own lane is idempotent, and adopting an unleased lane is refused', () => {
+    expect(runPool(['provision', '--count=2', ...poolArgs()], 'sess-SELF').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--adopt', '--purpose=self', '--json'], 'sess-SELF').out);
+    expect(runPool(['adopt', `--lane=${a.lane}`, ...poolArgs()], 'sess-SELF').code).toBe(0);
+    expect(leaseOf(a.lane).workerSession).toBe('sess-SELF');
+    const free = a.lane === 1 ? 2 : 1;
+    const none = runPool(['adopt', `--lane=${free}`, ...poolArgs()], 'sess-SELF');
+    expect(none.code).not.toBe(0);
+    expect(none.err).toMatch(/holds no lease to adopt/);
+  });
+
+  it('an idempotent re-acquire KEEPS the declared occupant — a re-acquire never silently un-protects a lane', () => {
+    expect(runPool(['provision', '--count=1', ...poolArgs()], 'sess-SELF').code).toBe(0);
+    const a = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--session=holder-A', '--adopt', '--purpose=self', '--json'], 'sess-SELF').out);
+    expect(runPool(['acquire', `--lane=${a.lane}`, ...poolArgs(), '--no-reset', '--session=holder-A', '--purpose=self', '--json'], 'sess-SELF').code).toBe(0);
+    expect(leaseOf(a.lane).workerSession).toBe('sess-SELF');
   });
 });

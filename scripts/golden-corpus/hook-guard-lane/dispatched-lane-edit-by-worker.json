@@ -1,0 +1,18 @@
+{
+  "id": "dispatched-lane-edit-by-worker",
+  "filePathTemplate": "{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs",
+  "ctx": {
+    "lease": {
+      "session": "Mac:45983",
+      "purpose": "review-1234",
+      "acquiredAt": "2026-08-14T12:00:00.000Z",
+      "ttlMinutes": 240,
+      "ownerSession": "sess-DISPATCHER"
+    },
+    "mySessionId": "sess-WORKER"
+  },
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "#2997 r2 (review F1) — the dispatched worker is never locked out of the lane leased FOR it"
+}

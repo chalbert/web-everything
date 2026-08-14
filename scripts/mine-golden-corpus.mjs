@@ -250,19 +250,33 @@ function buildGuardLaneFixtures() {
     // took no lease, no session and no owner, so an Edit into a lane another session was actively working in
     // succeeded silently (worse than the Bash case #2367 covers — a file write leaves no reflog to recover
     // from). The lease + caller session id are injected as `ctx`, matching how the CLI collects them.
+    // r2 (review F1): the guard keys on the DECLARED OCCUPANT (`workerSession`, written by `adopt`), never on
+    // `ownerSession` — that one records whoever RAN `acquire`, which for a dispatched lane is the dispatcher.
     {
       id: 'foreign-leased-lane-edit',
       filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
-      ctx: { lease: { session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-OTHER' }, mySessionId: 'sess-MINE' },
+      ctx: { lease: { session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-DISPATCHER', workerSession: 'sess-OTHER' }, mySessionId: 'sess-MINE' },
       expect: { decision: 'deny' },
-      basis: '#2997 Gap 1 — a lane holding ANOTHER session\'s live lease',
+      basis: '#2997 Gap 1 — a lane ANOTHER session has declared it is working in',
     },
     {
       id: 'own-leased-lane-edit',
       filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
-      ctx: { lease: { session: 'Mac:39367', purpose: 'build-2997', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-MINE' }, mySessionId: 'sess-MINE' },
+      ctx: { lease: { session: 'Mac:39367', purpose: 'build-2997', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-MINE', workerSession: 'sess-MINE' }, mySessionId: 'sess-MINE' },
       expect: { decision: 'allow' },
-      basis: '#2997 Gap 1 — allowed: my OWN lane, no new friction on the normal flow',
+      basis: '#2997 Gap 1 — allowed: the lane I adopted, no new friction on the normal flow',
+    },
+    // THE r2 REGRESSION FIXTURE. `ownerSession` is a THIRD PARTY to the working session (an operator leased the
+    // lane and handed it to a spawned agent) and the working session is the lane's rightful occupant. The first
+    // cut of Gap 1 compared `ownerSession` and DENIED here, which would have made every dispatched lane in the
+    // pool read-only for the agent sent to work in it. No fixture had this shape — hence a green gate on a
+    // repo-wide breakage. It must ALLOW.
+    {
+      id: 'dispatched-lane-edit-by-worker',
+      filePathTemplate: '{{LANE_ROOT}}/.lanes/web-everything/lane-3/scripts/example.mjs',
+      ctx: { lease: { session: 'Mac:45983', purpose: 'review-1234', acquiredAt: '2026-08-14T12:00:00.000Z', ttlMinutes: 240, ownerSession: 'sess-DISPATCHER' }, mySessionId: 'sess-WORKER' },
+      expect: { decision: 'allow' },
+      basis: '#2997 r2 (review F1) — the dispatched worker is never locked out of the lane leased FOR it',
     },
     {
       id: 'unleased-lane-edit',

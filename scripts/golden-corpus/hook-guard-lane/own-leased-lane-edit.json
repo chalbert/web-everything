@@ -7,12 +7,13 @@
       "purpose": "build-2997",
       "acquiredAt": "2026-08-14T12:00:00.000Z",
       "ttlMinutes": 240,
-      "ownerSession": "sess-MINE"
+      "ownerSession": "sess-MINE",
+      "workerSession": "sess-MINE"
     },
     "mySessionId": "sess-MINE"
   },
   "expect": {
     "decision": "allow"
   },
-  "basis": "#2997 Gap 1 — allowed: my OWN lane, no new friction on the normal flow"
+  "basis": "#2997 Gap 1 — allowed: the lane I adopted, no new friction on the normal flow"
 }

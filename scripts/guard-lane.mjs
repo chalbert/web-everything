@@ -13,24 +13,36 @@
  * genuinely-personal `~/.claude/*` config that does NOT resolve into a repo, untracked scratch.
  *
  * SECOND DECISION (#2997 Gap 1): deny the Edit/Write when the target sits inside a LANE CLONE whose LIVE lease
- * belongs to ANOTHER SESSION. Until #2997 this guard read no lease, no session and no owner at all — its whole
- * decision was the primary-vs-lane path test above — so an `Edit` to a tracked file inside a lane another
- * session was actively working in succeeded silently. That is strictly WORSE than the Bash case #2367 already
- * covers: `git reset --hard` at least leaves a reflog entry, whereas `Edit` overwrites with nothing to recover
- * from. The ownership decision is `isForeignLease` (`lib/lane-lease.mjs`) and the lease location + read are
- * `laneRootFromCwd` + `readLaneLease` imported from `guard-bash.mjs` — deliberately the SAME implementations
- * the Bash guard uses, so the two guards can never drift on what "your lane" means.
+ * names a DECLARED OCCUPANT that is not this caller. Until #2997 this guard read no lease, no session and no
+ * owner at all — its whole decision was the primary-vs-lane path test above — so an `Edit` to a tracked file
+ * inside a lane another session was actively working in succeeded silently. That is strictly WORSE than the
+ * Bash case #2367 already covers: `git reset --hard` at least leaves a reflog entry, whereas `Edit` overwrites
+ * with nothing to recover from. The ownership decision is `isForeignOccupancy` (`lib/lane-lease.mjs`) and the
+ * lease location + read are `laneRootFromCwd` + `readLaneLease` imported from `guard-bash.mjs` — deliberately
+ * the SAME implementations the Bash guard uses, so the two guards can never drift on what "your lane" means.
+ *
+ * WHY THE OCCUPANT FIELD AND NOT `ownerSession` (#2997 r2, the F1 correction). `acquire` stamps `ownerSession`
+ * from the env of whoever RUNS it. In the dispatched topology that is the DISPATCHER, not the agent then sent
+ * to work in the lane — so an `ownerSession !== mySessionId` test reads FOREIGN for the lane's own legitimate
+ * occupant, by construction. The first cut of this arm did exactly that, and would have made every dispatched
+ * lane read-only for the agent working in it (the lease's own `purpose` naming that very agent). Occupancy is
+ * therefore its own lease field, `workerSession`, written ONLY by a session claiming the lane for itself
+ * (`lane-pool.mjs acquire --adopt`, or `lane-pool.mjs adopt --lane=N` at hand-off). See `isForeignOccupancy`.
  *
  * RULED (#2997): a lane holding NO live lease stays fully writable. The lease IS the ownership signal; with no
  * lease there is no holder to protect, and the pool's own maintenance flows (provision, refresh, an operator
  * inspecting a free lane) all operate on unleased clones. A stale lease reads as no lease, same as everywhere
  * else. So this arm fires ONLY against a live foreign hold, never against an empty or expired one.
  *
- * KNOWN RESIDUAL (#2997): this arm separates SESSIONS, not sibling agents of one session. #2413's ratified
- * statute is that no ambient env or process property tells siblings apart, so the sibling case is closed by an
- * asserted minted slug — a per-operation channel the Bash guard has (the command string) and a file tool
- * structurally does not. An `Edit` into a sibling's lane therefore still passes; the Bash-side #2997 arm and
- * `lane-pool release` cover the sibling topology where a channel exists.
+ * KNOWN RESIDUALS (#2997, both deliberate and both fail-OPEN):
+ *   1. A lane whose occupant was never DECLARED is not protected — an undeclared lease cannot be told from a
+ *      dispatcher-acquired one, and denying on the ambiguity locks agents out of their own lanes (above).
+ *      Protection is opt-in per lane, via `--adopt`/`adopt`; without it this guard behaves exactly as before.
+ *   2. Even with a declared occupant, this arm separates SESSIONS, not sibling agents of one session. #2413's
+ *      ratified statute is that no ambient env or process property tells siblings apart, so the sibling case is
+ *      closed by an asserted minted slug — a per-operation channel the Bash guard has (the command string) and
+ *      a file tool structurally does not. An `Edit` into a sibling's lane therefore still passes; the Bash-side
+ *      #2997 arm and `lane-pool release` cover the sibling topology where a channel exists.
  *
  * AGENT MEMORY IS NOT EXEMPT (2026-07-09, superseding a conflicting 2026-07-03 "memory is low-collision,
  * edit-in-place" note). The repo memory store is git-TRACKED project content: its SoT is `<repo>/
@@ -52,7 +64,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isForeignLease, isLeaseStale, describeLease } from './lib/lane-lease.mjs';
+import { isForeignOccupancy, laneWorkerSession, isLeaseStale, describeLease } from './lib/lane-lease.mjs';
 // #2997 — the SAME lease-location + lease-read pair `guard-bash.mjs` uses for its #2367 arm. Imported rather
 // than re-implemented so the Edit/Write gate and the Bash gate can never disagree about which lane a path
 // belongs to or what its lease says. Importing guard-bash does NOT run its CLI (that block is gated on
@@ -110,20 +122,23 @@ export function laneGuardDecision(real, weRoot, { lease = null, mySessionId = nu
   const inLane = real.includes(`${SEP}.lanes${SEP}`);
   const inPrimary = primaries.some((p) => (real + SEP).startsWith(p));
 
-  // #2997 Gap 1 — a lane clone is no longer unconditionally allowed. If it carries a LIVE lease held by
-  // ANOTHER session, this Edit/Write would overwrite their in-flight work with nothing to recover from (no
-  // reflog for a file write). Deny with the holder named, and a remedy — a bare refusal here would just become
-  // the next false-deny footgun (#2986/#2994), so the message says which lane to use instead and how to check.
-  if (inLane && isForeignLease({ lease, mySessionId })) {
+  // #2997 Gap 1 — a lane clone is no longer unconditionally allowed. If its LIVE lease names a DECLARED
+  // OCCUPANT that is not me, this Edit/Write would overwrite their in-flight work with nothing to recover from
+  // (no reflog for a file write). Deny with the holder named, and a remedy — a bare refusal here would just
+  // become the next false-deny footgun (#2986/#2994), so the message says which lane to use instead and how to
+  // check. NOTE the test is `isForeignOccupancy`, NOT `isForeignLease`: the latter compares `ownerSession`,
+  // which records whoever ran `acquire` (the DISPATCHER for a dispatched lane) and so reads foreign for the
+  // lane's own legitimate worker — see this file's header and `isForeignOccupancy`'s doc.
+  if (inLane && isForeignOccupancy({ lease, mySessionId })) {
     return (
-      `edit BLOCKED — "${path.relative(workspace, real)}" is inside a lane clone that holds a LIVE lease owned ` +
-      `by ANOTHER session (${describeLease(lease)}). Writing here overwrites their in-flight work, and unlike a ` +
-      `Bash \`git reset\` an Edit/Write leaves no reflog entry to recover from (#2997/#2367). Work in the lane ` +
-      `YOU acquired instead:\n` +
+      `edit BLOCKED — "${path.relative(workspace, real)}" is inside a lane clone that a DIFFERENT session has ` +
+      `declared it is working in (${describeLease(lease)}; occupant session ${laneWorkerSession(lease)}). ` +
+      `Writing here overwrites their in-flight work, and unlike a Bash \`git reset\` an Edit/Write leaves no ` +
+      `reflog entry to recover from (#2997/#2367). Work in the lane YOU acquired instead:\n` +
       `  node scripts/lane-pool.mjs status --json     # who holds what right now\n` +
-      `  node scripts/lane-pool.mjs acquire --purpose=<why>   # lease your own lane and edit THERE\n` +
-      `If that lease is stale/abandoned, release it deliberately (\`release --lane=N --force\`) rather than ` +
-      `writing over it.`
+      `  node scripts/lane-pool.mjs acquire --purpose=<why> --adopt   # lease your own lane and edit THERE\n` +
+      `If this lane really was handed to you, claim it explicitly (\`adopt --lane=N\`); if its lease is ` +
+      `stale/abandoned, release it deliberately (\`release --lane=N --force\`) rather than writing over it.`
     );
   }
 
@@ -165,7 +180,7 @@ if (process.argv[1] && realpathSyncSafe(process.argv[1]) === realpathSyncSafe(fi
         const real = resolveReal(file);
         // #2997 — collect the target lane's LIVE lease + this caller's durable session id (the impure half),
         // then hand both to the pure decision. Keyed on `CLAUDE_CODE_SESSION_ID` FIRST, the SAME source
-        // `lane-pool.mjs acquire` stamps into `ownerSession` and `guard-bash.mjs` reads, so my own lease can
+        // `lane-pool.mjs adopt` stamps into `workerSession` and `guard-bash.mjs` reads, so a lane I adopted can
         // never read as foreign through a string-source mismatch. The lease is located from the TARGET PATH,
         // not the cwd — an Edit names its own file, and the reported cwd is unreliable (#2335).
         const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || ev.session_id || null;

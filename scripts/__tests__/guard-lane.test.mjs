@@ -103,28 +103,62 @@ describe('laneGuardDecision (pure)', () => {
 // weRoot)` took no lease, no session and no owner, so an Edit to a tracked file inside a lane ANOTHER session
 // was actively working in succeeded silently. That is strictly worse than the Bash case #2367 already covers —
 // `git reset --hard` leaves a reflog entry, an Edit leaves nothing to recover from.
-describe('#2997 Gap 1 — laneGuardDecision refuses a write into a FOREIGN-leased lane', () => {
+describe('#2997 Gap 1 — laneGuardDecision refuses a write into a lane a DIFFERENT session occupies', () => {
   const LANE_FILE = p('.lanes', 'web-everything', 'lane-3', 'scripts', 'x.mjs');
+  // `ownerSession` = who ran `acquire`; `workerSession` = who DECLARED they are working in the lane (`adopt`).
+  // The guard keys on the second, and the two are routinely different — see the r2 block below.
   const leaseOf = (ownerSession, extra = {}) => ({
     session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: '2026-08-14T12:00:00.000Z',
     ttlMinutes: 240, ownerSession, ...extra,
   });
+  const occupiedBy = (workerSession, ownerSession = 'sess-DISPATCHER') => leaseOf(ownerSession, { workerSession });
 
-  it('DENIES an Edit into a lane whose LIVE lease belongs to another session', () => {
-    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+  it('DENIES an Edit into a lane another session has DECLARED it is working in', () => {
+    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: occupiedBy('sess-OTHER'), mySessionId: 'sess-MINE' });
     expect(msg).toMatch(/BLOCKED/);
-    expect(msg).toMatch(/LIVE lease owned by ANOTHER session/);
+    expect(msg).toMatch(/DIFFERENT session has declared it is working in/);
+    expect(msg).toMatch(/occupant session sess-OTHER/);
   });
 
   it('the deny NAMES the holder and the remedy — a bare refusal is the next false-deny footgun (#2986/#2994)', () => {
-    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: occupiedBy('sess-OTHER'), mySessionId: 'sess-MINE' });
     expect(msg).toMatch(/leased by Mac:39423 \(review-1222-r2\)/); // who holds it
     expect(msg).toMatch(/lane-pool\.mjs acquire/);                  // what to do instead
+    expect(msg).toMatch(/adopt --lane=N/);                          // …or claim it, if it was handed to you
     expect(msg).toMatch(/release --lane=N --force/);                // and how to reclaim a stale one
   });
 
-  it('MUST-ALLOW: my OWN lane is untouched — no new friction on the normal flow', () => {
-    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-MINE'), mySessionId: 'sess-MINE' })).toBe(null);
+  it('MUST-ALLOW: the lane I adopted is untouched — no new friction on the normal flow', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: occupiedBy('sess-MINE'), mySessionId: 'sess-MINE' })).toBe(null);
+  });
+
+  // ── THE r2 REGRESSION FIXTURE (independent review of PR #1234, F1) ──────────────────────────────────────
+  //
+  // `acquire` stamps `ownerSession` from the env of the process that RUNS it. When an operator leases lane-N
+  // and hands it to a spawned agent, that field holds the DISPATCHER's id and the working agent's id is a
+  // THIRD STRING — neither the lease's `ownerSession` nor anything else in the marker. The first cut of this
+  // arm compared `ownerSession` against the working session, so it read FOREIGN for the lane's own legitimate
+  // occupant and would have made EVERY dispatched lane read-only for the agent sent to work in it (the lease's
+  // own `purpose` naming that very agent). No fixture had this shape, which is why the gate stayed green.
+  describe('a lease whose ownerSession is a THIRD PARTY to the working session', () => {
+    it('MUST-ALLOW: the dispatched worker, in the lane leased FOR it, is not locked out', () => {
+      // The live shape: operator session D ran `acquire --purpose=review-1234`; worker session W was then sent
+      // to work there. W is neither D nor anyone else on the marker, and W is the lane's rightful occupant.
+      const dispatched = leaseOf('sess-DISPATCHER', { purpose: 'review-1234' });
+      expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: dispatched, mySessionId: 'sess-WORKER' })).toBe(null);
+    });
+
+    it('MUST-ALLOW even once the worker has adopted it — the occupant stamp is what the guard reads', () => {
+      const adopted = leaseOf('sess-DISPATCHER', { purpose: 'review-1234', workerSession: 'sess-WORKER' });
+      expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: adopted, mySessionId: 'sess-WORKER' })).toBe(null);
+    });
+
+    it('…and only THEN does a third session get refused — the declaration is what arms the deny', () => {
+      const adopted = leaseOf('sess-DISPATCHER', { purpose: 'review-1234', workerSession: 'sess-WORKER' });
+      expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: adopted, mySessionId: 'sess-INTRUDER' })).toMatch(/BLOCKED/);
+      // …including the dispatcher itself, which leased the lane but is not the one working in it.
+      expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: adopted, mySessionId: 'sess-DISPATCHER' })).toMatch(/BLOCKED/);
+    });
   });
 
   it('RULED (#2997): a lane with NO live lease stays writable — the lease IS the ownership signal', () => {
@@ -133,21 +167,25 @@ describe('#2997 Gap 1 — laneGuardDecision refuses a write into a FOREIGN-lease
     expect(laneGuardDecision(LANE_FILE, WE_ROOT)).toBe(null);
   });
 
-  it('DEGRADED (no ownerSession on the lease, or no session id here) stays fail-OPEN, as isForeignLease specifies', () => {
-    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf(null), mySessionId: 'sess-MINE' })).toBe(null);
-    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: null })).toBe(null);
+  it('RESIDUAL 1 (deliberate): a lease with NO declared occupant is fail-OPEN, however foreign its ownerSession', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' })).toBe(null);
+  });
+
+  it('DEGRADED (no session id on this side) stays fail-OPEN, as isForeignOccupancy specifies', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: occupiedBy('sess-OTHER'), mySessionId: null })).toBe(null);
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: occupiedBy(''), mySessionId: 'sess-MINE' })).toBe(null);
   });
 
   it('the PRIMARY refusal still wins and is unchanged — no existing deny is weakened by the new arm', () => {
     // A primary path is not in a lane, so the lease arm cannot fire; the #2123 message must survive intact.
-    const msg = laneGuardDecision(p('webeverything', 'scripts', 'x.mjs'), WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+    const msg = laneGuardDecision(p('webeverything', 'scripts', 'x.mjs'), WE_ROOT, { lease: occupiedBy('sess-OTHER'), mySessionId: 'sess-MINE' });
     expect(msg).toMatch(/shared PRIMARY checkout/);
-    expect(msg).not.toMatch(/LIVE lease/);
+    expect(msg).not.toMatch(/declared it is working in/);
   });
 
   it('applies to a lane in ANY pool, not just web-everything', () => {
     const plateauFile = p('.lanes', 'plateau-app', 'lane-2', 'src', 'a.ts');
-    expect(laneGuardDecision(plateauFile, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' })).toMatch(/BLOCKED/);
+    expect(laneGuardDecision(plateauFile, WE_ROOT, { lease: occupiedBy('sess-OTHER'), mySessionId: 'sess-MINE' })).toMatch(/BLOCKED/);
   });
 });
 
@@ -172,22 +210,28 @@ describe('#2997 Gap 1 — the guard-lane CLI reads the target lane\'s lease off 
     });
     return { code: res.status, err: res.stderr || '' };
   };
-  const liveLease = (ownerSession) => ({
+  const liveLease = (workerSession, ownerSession = 'sess-DISPATCHER') => ({
     session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: new Date(Date.now() - 60_000).toISOString(),
-    ttlMinutes: 240, ownerSession,
+    ttlMinutes: 240, ownerSession, ...(workerSession ? { workerSession } : {}),
   });
 
-  it('EXITS 2 (deny) for a write into a lane holding another session\'s live lease', () => {
+  it('EXITS 2 (deny) for a write into a lane another session has declared it occupies', () => {
     const r = runHook(liveLease('sess-OTHER'), 'sess-MINE');
     expect(r.code).toBe(2);
-    expect(r.err).toMatch(/LIVE lease owned by ANOTHER session/);
+    expect(r.err).toMatch(/DIFFERENT session has declared it is working in/);
   });
 
-  it('exits 0 (allow) for the SAME write when the lease is my own', () => {
+  it('exits 0 (allow) for the SAME write when I am the declared occupant', () => {
     expect(runHook(liveLease('sess-MINE'), 'sess-MINE').code).toBe(0);
   });
 
-  it('exits 0 (allow) when the foreign lease is STALE — a stale lease is no live hold', () => {
+  // The r2 regression, end-to-end through the real hook: the lease was minted by a dispatcher and nobody has
+  // declared occupancy, so the working agent — whose id matches nothing on the marker — must still be allowed.
+  it('exits 0 (allow) for the dispatched worker in a lane leased by a THIRD session (review F1)', () => {
+    expect(runHook(liveLease(null, 'sess-DISPATCHER'), 'sess-WORKER').code).toBe(0);
+  });
+
+  it('exits 0 (allow) when the foreign occupancy is on a STALE lease — a stale lease is no live hold', () => {
     const stale = { ...liveLease('sess-OTHER'), acquiredAt: '2020-01-01T00:00:00.000Z' };
     expect(runHook(stale, 'sess-MINE').code).toBe(0);
   });

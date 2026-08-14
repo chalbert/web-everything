@@ -26,8 +26,9 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane.
- *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease in the pool shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
+ *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
+ *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease — in ANY pool under POOL_ROOT, per r2 — shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`. A STALE lease is never contested (r2): a dead holder has nothing to prove, so an expired lease releases without --force exactly as on main.
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
@@ -86,6 +87,7 @@ import {
   leaseOwnedBy,
   leaseOwnedByCaller,
   laneHolderSlug,
+  laneWorkerSession,
   isContestedLease,
 } from './lib/lane-lease.mjs';
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
@@ -471,14 +473,27 @@ function liveLease(dir, nowMs, ttlMs) {
   const lease = readLease(dir);
   return lease && !isLeaseStale(lease, nowMs, ttlMs) ? lease : null;
 }
-// #2997 — every OTHER lane's LIVE lease in `repo`'s pool. The input to `isContestedLease`, i.e. "is a sibling
-// agent of this lease's session holding a lane right now?". Best-effort: any read failure just yields a shorter
-// list, which can only make a lease read as UNcontested (today's behaviour) — never a spurious refusal.
+// #2997 — every OTHER lane's LIVE lease the caller could be confused with. The input to `isContestedLease`,
+// i.e. "is a sibling agent of this lease's session holding a lane right now?". Best-effort: any read failure
+// just yields a shorter list, which can only make a lease read as UNcontested (today's behaviour) — never a
+// spurious refusal.
+// #2997 r2 (review F3) — the scan is CROSS-POOL, not this pool only. A session's sibling agents routinely hold
+// lanes in different pools (a cross-locus couple leases one lane in the web-everything pool and one in the
+// plateau-app pool), and a same-pool-only scan read those as uncontested — the ambient id is exactly as
+// ambiguous there, so the refusal must arm there too. The cost is a readdir per pool, paid only on release.
 function liveLeasesInPoolExcept(repo, lane, nowMs, ttlMs) {
-  return existingLanes(repo)
-    .filter((n) => n !== lane)
-    .map((n) => liveLease(laneDir(repo, n), nowMs, ttlMs))
-    .filter(Boolean);
+  const here = laneDir(repo, lane);
+  const out = [];
+  for (const name of existingPools()) {
+    const poolDir = join(POOL_ROOT, name);
+    for (const n of laneIndicesIn(poolDir)) {
+      const dir = join(poolDir, `lane-${n}`);
+      if (dir === here) continue; // never the subject lane itself
+      const lease = liveLease(dir, nowMs, ttlMs);
+      if (lease) out.push(lease);
+    }
+  }
+  return out;
 }
 // Session identity must be STABLE across a consumer's separate `acquire` then `release` invocations, yet
 // DISTINCT between concurrent sessions on one host (the whole point — session B must not release session A's
@@ -752,7 +767,7 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
   // shared-ancestor topology and so failed open while looking protective — see `isForeignLease`, lane-lease.mjs).
   // `pid` stays as an informational-only field (human-readable `status`/debug), never used for ownership.
   const mintedHolder = mintHolderSlug(dir, flags.purpose);
-  const bodyFor = (holder) => JSON.stringify(
+  const bodyFor = (holder, workerSession) => JSON.stringify(
     leaseBody({
       session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(),
       host: hostname(), pid: process.pid,
@@ -763,6 +778,11 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
       // cannot separate siblings. Minting it universally is what lets the guards and `release` demand proof of
       // HOLDING (not merely of belonging to the same session) wherever that compare is provably ambiguous.
       holder,
+      // #2997 r2 — the DECLARED OCCUPANT. `ownerSession` above records whoever RAN this acquire, which is the
+      // DISPATCHER whenever a lane is leased on an agent's behalf — so it can never answer "who is working
+      // here". `--adopt` is how the acquirer says "and I am the one who will work in it"; a dispatcher simply
+      // omits it and the worker claims the lane later with `adopt --lane=N`. Omitted unless claimed.
+      workerSession,
       // #2413 — `--purpose=workflow-lane` MARKS the lease: it stamps the dedicated `workflowLane: true` field
       // (not free-text purpose) that switches the destructive-op guard fail-closed for this lane, requiring a
       // sibling parallel lane to assert this lease's own minted `session` slug before it can clobber the clone.
@@ -777,9 +797,12 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     }),
     null, 2,
   ) + '\n';
+  // #2997 r2 — `--adopt` means "I am also the agent that will WORK this lane", so stamp the occupant now. A
+  // dispatcher acquiring on someone else's behalf omits it and the worker runs `adopt --lane=N` at hand-off.
+  const adopted = flags.adopt ? (process.env.CLAUDE_CODE_SESSION_ID || null) : null;
   const file = LEASE_MARKER(dir);
   try {
-    writeFileSync(file, bodyFor(mintedHolder), { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
+    writeFileSync(file, bodyFor(mintedHolder, adopted), { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
     return mintedHolder;
   } catch (e) {
     if (e.code !== 'EEXIST') throw e;
@@ -790,14 +813,17 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     // silently invalidate the slug the current holder is already asserting in its commands, turning its next
     // legitimate destructive op into a mismatch deny — a self-inflicted false refusal.
     const holder = laneHolderSlug(existing) || mintedHolder;
-    writeFileSync(file, bodyFor(holder));
+    // …and it KEEPS the declared occupant for the same reason: dropping it would silently un-protect a lane an
+    // agent is working in. `--adopt` on the re-acquire is the deliberate way to (re-)claim it.
+    writeFileSync(file, bodyFor(holder, adopted || laneWorkerSession(existing)));
     return holder;
   }
   if (isLeaseStale(existing, nowMs, ttlMs)) {
     rmSync(file, { force: true });                 // reclaim a stale lease (unlink→create race: acceptable)
     // A reclaim is a NEW hold by a NEW holder, so it mints a fresh slug — the dead owner's slug must not carry
-    // over, or a returning zombie would still assert its way past the guard.
-    try { writeFileSync(file, bodyFor(mintedHolder), { flag: 'wx' }); return mintedHolder; } catch { return null; }
+    // over, or a returning zombie would still assert its way past the guard. The dead owner's declared
+    // OCCUPANCY is dropped for the same reason (only `--adopt` re-declares it for the new holder).
+    try { writeFileSync(file, bodyFor(mintedHolder, adopted), { flag: 'wx' }); return mintedHolder; } catch { return null; }
   }
   return null; // a LIVE lease held by another session — this lane is taken, even with --force
 }
@@ -1068,7 +1094,12 @@ function cmdAcquire(repo) {
   log(`  holder slug: ${holderSlug} — if a SIBLING agent of your session also holds a lane, prove this one is yours:`);
   log(`    release:        node scripts/lane-pool.mjs release --lane=${chosen} --session=${holderSlug}`);
   log(`    destructive op: LANE_SESSION=${holderSlug} git reset --hard origin/${repo.branch}`);
-  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
+  // #2997 r2 — OCCUPANCY is a separate declaration from the lease, because `ownerSession` records whoever ran
+  // THIS process, which for a dispatched lane is not the agent that will work in it. Say so at the seam.
+  const occupant = laneWorkerSession(readLease(dir));
+  if (occupant) log(`  occupant: ${occupant} (--adopt) — Edit/Write from any OTHER session is now refused (#2997)`);
+  else log(`  occupant: NOT declared — hand this lane off with \`node scripts/lane-pool.mjs adopt --lane=${chosen}\` run BY the agent that will work in it (or re-run acquire with --adopt if that is you); until then the Edit/Write guard stays fail-open for this lane`);
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, workerSession: occupant, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
   else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
 }
 
@@ -1215,7 +1246,13 @@ function cmdRelease(repo) {
     // in that incident only because the other holder had already finished; a released lane is immediately
     // re-issuable and the next `acquire` resets it, so `release` alone is a data-loss path, not a bookkeeping one.
     const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
-    const contested = isContestedLease({ lease, siblingLeases: liveLeasesInPoolExcept(repo, n, nowMs, ttlMs) });
+    // #2997 r2 (review F2) — staleness-check the SUBJECT lease too, not only the siblings. Without this an
+    // EXPIRED lease sharing its `ownerSession` with a live sibling read as CONTESTED and became unreleasable
+    // without `--force` — a regression against main, and a direct contradiction of this item's own ruling that
+    // "a stale lease reads as no lease, EVERYWHERE" (true in guard-bash.mjs and guard-lane.mjs, false here).
+    // A dead holder has nothing to protect: there is no one to be confused with, so nothing to prove.
+    const contested = !isLeaseStale(lease, nowMs, ttlMs)
+      && isContestedLease({ lease, siblingLeases: liveLeasesInPoolExcept(repo, n, nowMs, ttlMs) });
     if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId, targeted, contested })) {
       const holder = laneHolderSlug(lease);
       log(
@@ -1316,6 +1353,40 @@ function cmdRemove(repo) {
   }
 }
 
+// ── adopt (#2997 r2) — the dispatcher → worker OCCUPANCY hand-off ──────────────────────────────────
+//
+// WHY THIS EXISTS. `acquire` stamps `ownerSession` from the env of the process that RUNS it. When an operator
+// (or any dispatcher) leases a lane on an agent's behalf, that field records the DISPATCHER — the agent then
+// sent to work in the lane runs under a session id of its own. So `ownerSession` answers "who leased it",
+// never "who is working in it", and the Edit/Write guard cannot safely deny on it (it would refuse the lane's
+// own occupant — the F1 finding on PR #1234). `adopt` is the missing half: the WORKER declares itself, the
+// marker records it in the dedicated `workerSession` field, and from that moment `guard-lane.mjs` refuses
+// Edit/Write from any OTHER session. Idempotent; a lane already occupied by a different LIVE session needs
+// `--force` (deliberate takeover), which prints who is being displaced.
+function cmdAdopt(repo) {
+  const n = Number(flags.lane);
+  if (!Number.isInteger(n) || n < 1) fail('adopt needs --lane=<positive integer> — it declares YOU the occupant of that lane');
+  const me = process.env.CLAUDE_CODE_SESSION_ID || null;
+  if (!me) fail('adopt needs a durable session id (CLAUDE_CODE_SESSION_ID) to stamp — without one there is nothing to declare, and the Edit/Write guard stays fail-open for this lane');
+  const dir = laneDir(repo, n);
+  const lease = readLease(dir);
+  if (!lease) fail(`lane-${n} holds no lease to adopt — acquire it first (\`acquire --lane=${n} --purpose=<why> --adopt\`)`);
+  if (isLeaseStale(lease, Date.now(), ttlMsFromFlags())) {
+    fail(`lane-${n}'s lease is STALE (${describeLease(lease)}) — a stale lease reads as no lease; re-acquire the lane rather than adopting a dead hold`);
+  }
+  const current = laneWorkerSession(lease);
+  if (current && current !== me && !flags.force) {
+    fail(
+      `lane-${n} is already declared as occupied by session ${current} (${describeLease(lease)}) — adopting it would take it out from under a working agent.\n` +
+      `    If that agent is gone, pass --force to take it over deliberately; otherwise acquire your own lane (\`acquire --purpose=<why> --adopt\`).`,
+    );
+  }
+  writeFileSync(LEASE_MARKER(dir), JSON.stringify({ ...lease, workerSession: me }, null, 2) + '\n');
+  log(`  adopted lane-${n} — occupant session is now ${me}${current && current !== me ? ` (took over from ${current})` : ''}`);
+  log('    Edit/Write into this lane from ANY other session is now refused by guard-lane.mjs (#2997).');
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: n, path: dir, workerSession: me, previousWorkerSession: current }, null, 2) + '\n');
+}
+
 // ── map / unmap (#2139) — maintain the item → lane page-port registry ───────────────────────────────
 function cmdMap(repo) {
   const n = Number(flags.lane);
@@ -1358,6 +1429,7 @@ const COMMANDS = {
   list: cmdList,
   path: cmdPath,
   acquire: cmdAcquire,
+  adopt: cmdAdopt,
   release: cmdRelease,
   remove: cmdRemove,
   map: cmdMap,
@@ -1367,8 +1439,8 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);

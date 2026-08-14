@@ -1587,19 +1587,38 @@ export function readLaneLease(laneRoot) {
   }
 }
 
-// #2997 — every OTHER lane's LIVE lease in the same pool as `laneRoot`. Impure (a readdir + a few small file
-// reads); the input to `isContestedLease`, i.e. "is a sibling agent of this lease's session holding a lane
-// right now?". A pool is `<…>/.lanes/<repo>/` with `lane-N` children, so the sibling set is the pool dir minus
-// this lane. Fails OPEN (empty list ⇒ never contested ⇒ today's behaviour) on any fs error — a guard fault must
-// never wedge the agent. Only ever called from the already-narrow destructive-op slice, so the cost is paid on
-// a tiny fraction of Bash calls.
+// #2997 — every OTHER lane's LIVE lease under the same `.lanes/` root as `laneRoot`. Impure (a readdir + a few
+// small file reads); the input to `isContestedLease`, i.e. "is a sibling agent of this lease's session holding
+// a lane right now?". Fails OPEN (empty list ⇒ never contested ⇒ today's behaviour) on any fs error — a guard
+// fault must never wedge the agent. Only ever called from the already-narrow destructive-op slice, so the cost
+// is paid on a tiny fraction of Bash calls.
+//
+// #2997 r2 (review F3, R2) — the scan is CROSS-POOL. A lane lives at `<…>/.lanes/<pool>/lane-N`, and the first
+// cut scanned only `<pool>`. But a session's sibling agents routinely hold lanes in DIFFERENT pools (a
+// cross-locus couple leases one lane in the web-everything pool and one in the plateau-app pool — the exact
+// shape `release --all-pools` exists for), and the ambient session id is precisely as ambiguous there. Those
+// read as UNcontested and the destructive op was allowed. Scanning every pool under `.lanes/` closes it.
+//
+// STILL OPEN, deliberately (review F3, R1): the sibling that holds NO lane of its own. A lane-less agent of
+// session S running a destructive op in S's only leased lane produces no second live lease anywhere, so
+// nothing is contested and the op is allowed. Closing that would mean demanding the minted slug for EVERY
+// destructive op in EVERY leased lane — a fail-closed default whose false-deny cost lands on every ordinary
+// solo flow. Not taken here; recorded on the card and in the PR body instead.
 export function siblingLaneLeases(laneRoot, nowMs = Date.now()) {
   try {
-    const poolDir = dirname(laneRoot);
-    return readdirSync(poolDir)
-      .filter((name) => /^lane-\d+$/.test(name) && join(poolDir, name) !== laneRoot)
-      .map((name) => readLaneLease(join(poolDir, name)))
-      .filter((lease) => lease && !isLeaseStale(lease, nowMs));
+    const poolsRoot = dirname(dirname(laneRoot)); // `<…>/.lanes` — the parent of every pool
+    const out = [];
+    for (const pool of readdirSync(poolsRoot)) {
+      const poolDir = join(poolsRoot, pool);
+      let entries;
+      try { entries = readdirSync(poolDir); } catch { continue; } // a non-directory / unreadable entry: skip it
+      for (const name of entries) {
+        if (!/^lane-\d+$/.test(name) || join(poolDir, name) === laneRoot) continue;
+        const lease = readLaneLease(join(poolDir, name));
+        if (lease && !isLeaseStale(lease, nowMs)) out.push(lease);
+      }
+    }
+    return out;
   } catch {
     return [];
   }
