@@ -51,6 +51,7 @@ import {
   assertNotALaneCheckout,
   briefPath,
   buildAgentArgv,
+  classifyDispatchPr,
   createDispatchObservers,
   createDispatchSinks,
   forwardableBookkeeping,
@@ -780,6 +781,223 @@ describe('observing a dispatched agent', () => {
   it('refuses a listing that is not an array rather than reading it as "gone"', async () => {
     const observers = createDispatchObservers({ listAgents: () => ({}), now: later });
     await expect(observers[DISPATCH_EFFECT](entry, { handle: 'sess-live' })).rejects.toThrow(/did not return an array/);
+  });
+
+  it('an entry with NO item id never reaches the PR axis — no `gh` is shelled for something it cannot look up', async () => {
+    // Every case above rides this: their fixture carries no payload, so the whole PR axis is skipped and the
+    // liveness behaviour they assert is the whole behaviour. If that stopped being true they would be
+    // exercising a different code path than the one they name.
+    const observers = createDispatchObservers({
+      listAgents: () => [{ sessionId: 'sess-live' }],
+      listPrs: () => { throw new Error('must not be read'); },
+      now: later,
+    });
+    expect(await observers[DISPATCH_EFFECT](entry, { handle: 'sess-live' })).toMatchObject({ status: 'running' });
+  });
+});
+
+// ── 6b. #x9ylkp7 — the PR axis, the ONLY one that can reach `succeeded` ──────────────────────────────────────
+//
+// `claude agents --json` reports LIVENESS, so section 6's observer could answer `running` or `unresolved` and
+// nothing else: a finished build was re-reported on every waker pass and, past `STUCK_ESCALATION_HOURS`, made
+// the waker exit non-zero forever until a person closed it out. The completion signal exists elsewhere — the
+// agent's PR — and this is the axis that reads it. ONE classification resolves: `merged`.
+
+describe('observing a dispatched agent — the PR axis', () => {
+  const STARTED = '2026-08-13T10:00:00.000Z';
+  const later = () => new Date('2026-08-13T11:00:00.000Z');
+  /** An in-flight entry that CARRIES an item id, which is what makes the PR axis reachable at all. */
+  const entryFor = (num = '3095', startedAt = STARTED) => ({
+    key: 'k', type: DISPATCH_EFFECT, handle: 'sess-live', startedAt, payload: { num, lane: 3 },
+  });
+  const pr = (over = {}) => ({ number: 1247, headRefName: 'lane/3095-give-the-observer-a-signal', state: 'OPEN', mergedAt: null, labels: [], ...over });
+  const merged = (mergedAt = '2026-08-13T10:45:00.000Z') => pr({ state: 'MERGED', mergedAt });
+  /** No live session — so anything but the PR axis lands on today's `unresolved`. */
+  const observe = (listPrs, { listAgents = () => [] } = {}) => createDispatchObservers({ listAgents, listPrs, now: later });
+
+  it('a MERGED PR resolves the entry `succeeded`, and names the evidence it resolved on', async () => {
+    const answer = await observe(() => [merged()])[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('succeeded');
+    // `observeRun` REFUSES a `succeeded` carrying an error, so the absence of one is part of the contract.
+    expect(answer.error ?? null).toBe(null);
+    expect(answer.result).toMatchObject({ resolvedBy: 'pr-merged', pr: 1247, mergedAt: '2026-08-13T10:45:00.000Z' });
+  });
+
+  it('and the run RECORDS `applied`, so the waker stops re-reporting it on the next pass', async () => {
+    // The whole point of the item: `unresolved` writes nothing, so a finished dispatch was re-reported every
+    // pass forever. This is the end-to-end proof that it now writes — through the real `observeRun`.
+    const run = {
+      v: 1, id: 'run-pr', op: DISPATCH_LANE_OP, input: {}, cursor: 2, findings: {}, verdict: null, pending: null,
+      effects: [{
+        key: 'run-pr#2#0', stepIndex: 2, step: 'dispatch', index: 0, type: DISPATCH_EFFECT,
+        payload: { num: '3095' }, idempotent: false, dispatch: true, status: 'in-flight', handle: 'sess-live',
+        startedAt: STARTED, expectedBy: null, result: null, error: null,
+      }],
+    };
+    const out = await observeRun(run, { observers: observe(() => [merged()]), now: later() });
+    expect(out.unresolved).toEqual([]);
+    expect(out.resolved).toEqual([{ key: 'run-pr#2#0', type: DISPATCH_EFFECT, status: 'succeeded', recordedAs: 'applied' }]);
+    expect(out.run.effects[0].status).toBe('applied');
+    // …and a SECOND pass over the written record finds nothing in flight at all — the re-report is gone.
+    const again = await observeRun(out.run, { observers: observe(() => [merged()]), now: later() });
+    expect(again.resolved).toEqual([]);
+    expect(again.unresolved).toEqual([]);
+    expect(again.stillRunning).toEqual([]);
+  });
+
+  it('the PR axis runs FIRST — a merged PR resolves even while the session is still listed', async () => {
+    // The agent's last act is `pr-land`; it exits some seconds later. Ordering liveness first would report a
+    // finished build `running` for as long as the session lingered, i.e. the axis would never fire in the
+    // common case.
+    const observers = observe(() => [merged()], { listAgents: () => [{ sessionId: 'sess-live', kind: 'background' }] });
+    expect(await observers[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' })).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('a CLOSED-unmerged PR is terminal but is NOT success — `unresolved`, and it writes nothing', async () => {
+    const answer = await observe(() => [pr({ state: 'CLOSED' })])[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('unresolved');
+    expect(answer.error).toMatch(/CLOSED UNMERGED/);
+  });
+
+  it('a PARKED PR is mid-review, not an outcome — `unresolved`', async () => {
+    const answer = await observe(() => [pr({ labels: [{ name: 'review:pending' }] })])[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('unresolved');
+    expect(answer.error).toMatch(/PARKED for review/);
+  });
+
+  it('neither ambiguous case WRITES — the entry stays in-flight and is reported for a person', async () => {
+    for (const p of [pr({ state: 'CLOSED' }), pr({ labels: [{ name: 'review:changes' }] })]) {
+      const run = {
+        v: 1, id: 'run-amb', op: DISPATCH_LANE_OP, input: {}, cursor: 2, findings: {}, verdict: null, pending: null,
+        effects: [{
+          key: 'run-amb#2#0', stepIndex: 2, step: 'dispatch', index: 0, type: DISPATCH_EFFECT,
+          payload: { num: '3095' }, idempotent: false, dispatch: true, status: 'in-flight', handle: 'sess-live',
+          startedAt: STARTED, expectedBy: null, result: null, error: null,
+        }],
+      };
+      const out = await observeRun(run, { observers: observe(() => [p]), now: later() });
+      expect(out.resolved).toEqual([]);
+      expect(out.unresolved).toHaveLength(1);
+      expect(out.run.effects[0].status).toBe('in-flight');
+    }
+  });
+
+  it('a PREVIOUS attempt\'s merged PR resolves NOTHING — the stale guard, which is the cost of id-matching', async () => {
+    // Re-dispatch of one item is a designed path. A predecessor's PR matches the new entry's item id just as
+    // well as its own would, and resolving on it would mark a build that has barely begun `applied`.
+    const answer = await observe(() => [merged('2026-08-13T09:00:00.000Z')])[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('unresolved');
+    expect(answer.error).toMatch(/PREVIOUS attempt/);
+  });
+
+  it('a merge at exactly `startedAt` counts as this attempt\'s — the boundary is inclusive', async () => {
+    const answer = await observe(() => [merged(STARTED)])[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('succeeded');
+  });
+
+  it('an entry with NO usable `startedAt` fails CLOSED — nothing can be attributed, so nothing resolves', async () => {
+    for (const startedAt of [null, 'not-a-date']) {
+      const answer = await observe(() => [merged()])[DISPATCH_EFFECT](entryFor('3095', startedAt), { handle: 'sess-live' });
+      expect(answer.status).toBe('unresolved');
+    }
+  });
+
+  it('NO PR YET behaves exactly as today — the liveness axis answers, both ways', async () => {
+    // The dominant case for most of a build's life, and an EMPTY listing is deliberately indistinguishable
+    // from "no PR yet": both mean fall through, neither means failure.
+    const live = observe(() => [], { listAgents: () => [{ sessionId: 'sess-live' }] });
+    expect(await live[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' })).toMatchObject({ status: 'running' });
+    const gone = observe(() => []);
+    const answer = await gone[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    expect(answer.status).toBe('unresolved');
+    expect(answer.error).toMatch(/liveness and not outcome/);
+  });
+
+  it('a PR belonging to ANOTHER item is not this entry\'s — matched by item id, never by proximity', async () => {
+    const others = () => [merged(), pr({ number: 9, headRefName: 'lane/9999-someone-else', state: 'MERGED', mergedAt: '2026-08-13T10:50:00.000Z' })];
+    const answer = await observe(others)[DISPATCH_EFFECT](entryFor('9999'), { handle: 'sess-live' });
+    expect(answer.status).toBe('succeeded');
+    expect(answer.result.pr).toBe(9);
+    // …and an item with no PR of its own is not resolved by anybody else's.
+    expect(await observe(others)[DISPATCH_EFFECT](entryFor('4242'), { handle: 'sess-live' })).toMatchObject({ status: 'unresolved' });
+  });
+
+  it('a `bornAs`-HASH item resolves too — `pr-land` accepts `lane/xNNNNNN-*` and dispatch ids can be hashes', async () => {
+    // The brief documents `{{ITEM_NUM}}` as "the backlog item number (or `xNNNNNN` hash)". Before the shared
+    // matcher was widened, every hash-identified build was unresolvable by construction.
+    const hashPr = pr({ number: 77, headRefName: 'lane/x9ylkp7-completion-signal', state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' });
+    const answer = await observe(() => [hashPr])[DISPATCH_EFFECT](entryFor('x9ylkp7'), { handle: 'sess-live' });
+    expect(answer).toMatchObject({ status: 'succeeded', result: { pr: 77 } });
+  });
+
+  it('a `gh` READ THAT FAILS degrades the axis to OFF and falls through to liveness — it never throws', async () => {
+    // Fail-SAFE, in the one direction that matters: the cost is a completed build still needing a person (the
+    // status quo), never a running build resolved on no evidence. The lease reaper makes the same trade.
+    const observers = observe(() => { throw new Error('gh: not authenticated'); }, { listAgents: () => [{ sessionId: 'sess-live' }] });
+    expect(await observers[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' })).toMatchObject({ status: 'running' });
+  });
+
+  it('a `gh` answer that is not an array is no verdict either — junk resolves nothing', async () => {
+    const observers = observe(() => ({ message: 'Not Found' }), { listAgents: () => [{ sessionId: 'sess-live' }] });
+    expect(await observers[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' })).toMatchObject({ status: 'running' });
+  });
+
+  it('reads the PR list ONCE per pass, however many entries it is asked about', async () => {
+    // Same rule as the agent listing: one bounded subprocess per PASS, not one per in-flight entry.
+    let calls = 0;
+    const observers = observe(() => { calls += 1; return []; }, { listAgents: () => [{ sessionId: 'sess-live' }] });
+    await observers[DISPATCH_EFFECT](entryFor(), { handle: 'sess-live' });
+    await observers[DISPATCH_EFFECT](entryFor('4242'), { handle: 'sess-live' });
+    expect(calls).toBe(1);
+  });
+});
+
+describe('classifyDispatchPr — the PR axis\'s pure core', () => {
+  const STARTED = '2026-08-13T10:00:00.000Z';
+  const ref = (headRefName, over = {}) => ({ number: 1, headRefName, state: 'OPEN', mergedAt: null, labels: [], ...over });
+
+  it('the whole classification table, and only `merged` is a resolution', () => {
+    const at = (prs) => classifyDispatchPr({ num: '3095', startedAt: STARTED, prs }).verdict;
+    expect(at([ref('lane/3095-x', { state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })])).toBe('merged');
+    expect(at([ref('lane/3095-x', { state: 'CLOSED' })])).toBe('closed');
+    expect(at([ref('lane/3095-x', { labels: [{ name: 'review:pending' }] })])).toBe('parked');
+    expect(at([ref('lane/3095-x')])).toBe('pending');
+    expect(at([ref('lane/3095-x', { state: 'MERGED', mergedAt: '2026-08-13T09:00:00.000Z' })])).toBe('stale');
+  });
+
+  it('OPEN WINS over an ambiguous terminal — an abandoned PR must not give up on a live one', () => {
+    // The same safety `prStatesFromList` applies from the other side (the #2267 data-loss case): among the
+    // PRs that survive the stale filter, `merged` resolves, then `pending` keeps waiting, and only then do the
+    // ambiguous terminals speak.
+    const prs = [ref('lane/3095-abandoned', { state: 'CLOSED' }), ref('lane/3095-current')];
+    expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs }).verdict).toBe('pending');
+    const withMerge = [...prs, ref('lane/3095-landed', { number: 5, state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })];
+    expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: withMerge })).toMatchObject({ verdict: 'merged', pr: { number: 5 } });
+  });
+
+  it('no id, no listing, or an unreadable listing → `pending`, which is the word for "this axis has nothing to say"', () => {
+    expect(classifyDispatchPr({ num: '', startedAt: STARTED, prs: [ref('lane/3095-x')] }).verdict).toBe('pending');
+    expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: null }).verdict).toBe('pending');
+    expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: { nope: 1 } }).verdict).toBe('pending');
+    expect(classifyDispatchPr({}).verdict).toBe('pending');
+  });
+
+  it('normalizes the id the way every other conveyor reader does — `#3095` and `3095` are one item', () => {
+    const prs = [ref('lane/3095-x', { state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })];
+    for (const num of ['3095', '#3095', 3095, ' 03095 ']) {
+      expect(classifyDispatchPr({ num, startedAt: STARTED, prs }).verdict).toBe('merged');
+    }
+  });
+
+  it('a `merged` PR with no PARSEABLE merge instant is not attributable — it fails closed, like a missing start', () => {
+    const prs = [ref('lane/3095-x', { state: 'MERGED', mergedAt: null })];
+    expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs }).verdict).toBe('stale');
+  });
+
+  it('a head ref that encodes no item is ignored rather than guessed at', () => {
+    for (const bad of ['main', 'feature/3095-thing', 'lane/build-3095', null]) {
+      expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: [ref(bad, { state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })] }).verdict).toBe('pending');
+    }
   });
 });
 

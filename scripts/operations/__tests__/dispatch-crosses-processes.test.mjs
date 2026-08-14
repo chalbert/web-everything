@@ -8,8 +8,9 @@
  * `./run-crosses-processes.test.mjs`.
  *
  * The child runs the REAL observer (`we:scripts/operations/dispatch-lane-io.mjs`) against the REAL registry
- * resolved from the record's own operation name. Only the `claude agents --json` READ is stubbed, through an
- * env var — no `claude` process is started by this suite, and no agent is ever launched.
+ * resolved from the record's own operation name. Both of the observer's READS are stubbed through env vars —
+ * the `claude agents --json` liveness listing and (since #x9ylkp7) the `gh pr list` PR listing. No `claude`
+ * process is started by this suite, no agent is ever launched, and no network call is made.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -80,7 +81,10 @@ function observeInChild(env = {}) {
   const stdout = execFileSync(process.execPath, [OBSERVE_SCRIPT, RUN_ID], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, OPERATION_RUNS_DIR: dir, FIXTURE_AGENTS: '[]', ...env },
+    // BOTH READS DEFAULT TO EMPTY. `FIXTURE_PRS: '[]'` is load-bearing rather than tidy: without it the child
+    // shells a REAL `gh pr list` and the verdict of this suite depends on the live state of whatever repo it
+    // is checked out in. `[]` is the honest default here — these cases are about a dispatch with no PR.
+    env: { ...process.env, OPERATION_RUNS_DIR: dir, FIXTURE_AGENTS: '[]', FIXTURE_PRS: '[]', ...env },
   });
   return JSON.parse(stdout);
 }
@@ -124,11 +128,44 @@ describe('a dispatch started here is found by a process that never saw it', () =
     expect(createFileRunStore(dir).read(RUN_ID).effects[0].observedError).toMatch(/liveness and not outcome/);
   });
 
+  it('#x9ylkp7: the REAL observer resolves it across the boundary when the item\'s PR has MERGED', async () => {
+    // The clause this item adds, proven where it matters: a process that never dispatched, holding nothing but
+    // a run id, reads the PR axis and closes the entry out with no person involved. Nothing is stubbed here
+    // except the two listings — the observer, the registry and the store are the real ones.
+    await dispatchAndPark();
+    const seen = observeInChild({
+      FIXTURE_AGENTS: '[]', // the session is already gone: liveness ALONE would still say `unresolved`
+      FIXTURE_PRS: JSON.stringify([{
+        number: 4242, headRefName: 'lane/3037-declare-dispatch', state: 'MERGED',
+        mergedAt: '2026-08-13T09:30:00.000Z', labels: [], // AFTER the entry's startedAt (09:00) — attributable
+      }]),
+    });
+    expect(seen.unresolved).toEqual([]);
+    expect(seen.resolved).toEqual([{ key: 'run-dispatch-xproc#2#0', type: 'conveyor.dispatch-delivery-agent', status: 'succeeded', recordedAs: 'applied' }]);
+    expect(seen.effects[0].status).toBe('applied');
+    expect(seen.status).toBe('complete');
+    expect(createFileRunStore(dir).read(RUN_ID).effects[0].result).toMatchObject({ resolvedBy: 'pr-merged', pr: 4242 });
+  });
+
+  it('#x9ylkp7: a PREVIOUS attempt\'s merged PR does NOT resolve it — the stale guard holds across processes too', async () => {
+    await dispatchAndPark();
+    const seen = observeInChild({
+      FIXTURE_AGENTS: '[]',
+      FIXTURE_PRS: JSON.stringify([{
+        number: 4241, headRefName: 'lane/3037-declare-dispatch', state: 'MERGED',
+        mergedAt: '2026-08-12T09:30:00.000Z', labels: [], // a DAY before this entry started
+      }]),
+    });
+    expect(seen.resolved).toEqual([]);
+    expect(seen.unresolved[0].error).toMatch(/PREVIOUS attempt/);
+    expect(seen.effects[0]).toMatchObject({ status: 'in-flight', handle: HANDLE });
+  });
+
   it('an outcome that DOES resolve it completes the run in that other process', async () => {
     await dispatchAndPark();
-    // The real observer cannot say this yet — `claude agents` reports liveness, not outcome — so the child
-    // stubs the answer. What is being proven is the RESUME path: a terminal answer arriving in a process that
-    // never dispatched marks the entry `applied` and advances the run to completion.
+    // A terminal answer with neither axis involved — the child stubs the observer outright. What is being
+    // proven is the RESUME path itself: a terminal answer arriving in a process that never dispatched marks
+    // the entry `applied` and advances the run to completion.
     const seen = observeInChild({ FIXTURE_OBSERVATION: 'succeeded' });
     expect(seen.resolved).toEqual([{ key: 'run-dispatch-xproc#2#0', type: 'conveyor.dispatch-delivery-agent', status: 'succeeded', recordedAs: 'applied' }]);
     expect(seen.status).toBe('complete');
