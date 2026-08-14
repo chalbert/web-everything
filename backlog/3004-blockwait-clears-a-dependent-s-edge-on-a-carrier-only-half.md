@@ -33,7 +33,7 @@ The reproduction below was re-run against `origin/main` at `95a8fc46` (independe
 found by reading the current code rather than the card's prose:
 
 1. **A carrier-side gate has since been built that closes most of the window.** `joinImplToCouples`
-   (`we:scripts/merge-ai-prs.mjs:730-749`, the #xc7p3q9 R7 pass) already refuses to let a WE carrier enter
+   (`we:scripts/merge-ai-prs.mjs:730-749`, the #2989 R7 pass) already refuses to let a WE carrier enter
    `ready` while any sibling ref named in its `manifestRefs` is still open and not landing this pass — it stamps
    `coupleDefer = true` with `coupleDeferReason = 'impl-open'`. So in a healthy, complete-context pass the
    "WE half landed while the impl half is still open" state can no longer be *created* by the drain itself.
@@ -284,7 +284,7 @@ independent review moved the wiring OUT of the pure `planDrainPass` seam and INT
 is a materially different job. The cascade is stateful (`remaining`, `merged`, per-iteration `replan`), it is
 the drain's single write path to `main`, and it is where the `\ mergedRefs` subtraction has to be exactly right
 or every healthy couple defers. It also now touches two predicates (`provenLanded` and `stackProven`), inside
-the densest invariant cluster in the repo (`planLabelDrain` carries #2188 / #2393 / #999 / #xc7p3q9 at once),
+the densest invariant cluster in the repo (`planLabelDrain` carries #2188 / #2393 / #999 / #2989 at once),
 and it carries three cascade-level tests rather than pure-function ones. Not a 3 — a 3 was the plan-time
 version, which is provably inert. Not an 8 — it is still one file, no signature break, and the `provenOnMain`
 arm stays out of scope.

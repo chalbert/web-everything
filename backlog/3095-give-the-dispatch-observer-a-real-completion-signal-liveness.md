@@ -38,7 +38,7 @@ The card's third acceptance bullet ("a CLI or documented one-liner exists for cl
 is **done**: `we:scripts/operations/wake.mjs`'s `closeOutEntry` (`--resolve=<runId> --key=<effectKey>
 --status=applied|failed`) shipped from PR #1211's review, and its own docblock names this card's `bornAs` hash
 directly — *"its observer can never answer `succeeded` (claude agents reports liveness, not outcome —
-#x9ylkp7)... this is the deliberate, not the only, way [to remedy it]"*. So the manual close-out path is not
+#3095)... this is the deliberate, not the only, way [to remedy it]"*. So the manual close-out path is not
 this item's job. **What remains is the automatic path** — the first two acceptance bullets, unchanged from the
 original card.
 
