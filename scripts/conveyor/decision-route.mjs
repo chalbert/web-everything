@@ -49,8 +49,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   planDecision,
-  computeAgreementMetric,
   recordShadowOutcome,
+  resolveLandMode,
   DECISION_PROCESSES,
   RULING_ACTIONS,
 } from '../lib/decision-routing.mjs';
@@ -168,11 +168,19 @@ function main(argv) {
   // #2754 SESSION-FREE METRIC: an --agreement-file with NO decision ledger reports just the flip state. This is the
   // "how many consecutive matches, zero divergences?" answer, readable without a session.
   if (Array.isArray(agreement) && !Array.isArray(ledger)) {
-    const metric = computeAgreementMetric(agreement, {});
+    // landMode is GLOBAL-only (review-policy.mjs :381-383) — no band/decision layer touches it, so resolve it
+    // with NO band. Keep the try/catch anyway if you ever pass a band: resolveDispositionConfig THROWS on an
+    // unknown band, and this file's contract is "a bad band fails loud at the impure boundary" (:155-157).
+    const resolution = resolveLandMode({ records: agreement, configMode: resolveDispositionConfig().landMode });
     if (f.json) {
-      writeLineSync(1, JSON.stringify({ metric }));
+      writeLineSync(1, JSON.stringify({ metric: resolution.metric, landMode: { mode: resolution.mode, reason: resolution.reason, trail: resolution.trail } }));
     } else {
-      console.log([`flip-metric: ${metric.answer}`, `  trigger: N=${metric.N} consecutive matches, 0 divergences over the last M=${metric.M}`].join('\n'));
+      console.log([
+        `flip-metric: ${resolution.metric.answer}`,
+        `  trigger: N=${resolution.metric.N} consecutive matches, 0 divergences over the last M=${resolution.metric.M}`,
+        `land-mode: ${resolution.mode} (${resolution.reason})`,
+        ...resolution.trail.slice(1).map((t) => `  ${t}`),
+      ].join('\n'));
     }
     process.exit(0);
   }

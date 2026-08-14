@@ -381,7 +381,7 @@ export function computeAgreementMetric(records = [], { N = ENFORCE_FLIP_TRIGGER.
   const window = M > 0 ? list.slice(-M) : [];
   const divergencesInWindow = window.reduce((n, r) => n + (recordIsMatch(r) ? 0 : 1), 0);
   const flipReady = consecutiveMatches >= N && divergencesInWindow === 0;
-  const answer = `${consecutiveMatches}/${N} consecutive matches, ${divergencesInWindow} divergence(s) in the last ${window.length}/${M} decided → ${flipReady ? 'FLIP-READY (enforce armed)' : 'below trigger (holds shadow)'}`;
+  const answer = `${consecutiveMatches}/${N} consecutive matches, ${divergencesInWindow} divergence(s) in the last ${window.length}/${M} decided → ${flipReady ? 'FLIP-READY' : 'below trigger'}`;
   return { consecutiveMatches, divergencesInWindow, windowSize: window.length, decided: list.length, N, M, flipReady, answer };
 }
 
