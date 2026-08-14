@@ -1681,6 +1681,101 @@ export function bodyHasEscalationReason(body) {
 }
 
 /**
+ * #3044 — internal. Locate the drain-written escalation block inside `scanned` (the QUOTED-REGION-BLANKED
+ * body, see {@link blankQuotedRegions}) and validate that what follows the marker is the EXACT shape
+ * `buildEscalationReasonBlock` produces. Offsets returned are valid against the ORIGINAL body too —
+ * `blankQuotedRegions` preserves length and line structure, it only blanks quoted bytes to same-length
+ * spaces.
+ *
+ * Three outcomes, each load-bearing for `reconcileEscalationReasonBlock`'s fail-safe:
+ *   - `null` — no REAL marker (absent, or only present inside a quoted/fenced region — forgery-safe by
+ *     construction, since a quoted marker is already blanked out of `scanned`). Caller appends.
+ *   - `{ malformed: true }` — a real marker IS present, but either the bytes after it don't match the
+ *     block's exact shape (no bullets, no policy stamp, …) or non-blank content follows the block before
+ *     the next `##` heading / end of body. Either way the block's extent cannot be identified unambiguously,
+ *     so the caller must fail safe: leave the body untouched rather than guess a replace region and risk
+ *     deleting content a human added.
+ *   - `{ markerStart, regionEnd, reasons }` — a clean block. `markerStart`/`regionEnd` bound the region a
+ *     replace may overwrite; `reasons` is the recorded reason list read off the block's bullets.
+ */
+function locateEscalationBlock(scanned) {
+  const markerLineRe = /(^|\n)(## Escalation reason)[ \t]*(?:\n|$)/;
+  const markerMatch = markerLineRe.exec(scanned);
+  if (!markerMatch) return null;
+
+  const markerStart = markerMatch.index + markerMatch[1].length;
+  const afterMarkerLine = markerStart + (markerMatch[0].length - markerMatch[1].length);
+
+  // The exact tail `buildEscalationReasonBlock` writes from the marker's line onward: a blank line, one or
+  // more `- reason` bullets, a blank line, then the policy-stamp comment (see :1562-1566 for the template
+  // this mirrors byte-for-byte).
+  const blockRe = /^\n((?:- .*\n)+)\n(<!--\s*policy-set:\s*v\S+\s+[0-9a-f]{6,64}\s*-->)\n?/;
+  const blockMatch = blockRe.exec(scanned.slice(afterMarkerLine));
+  if (!blockMatch) return { malformed: true };
+
+  const cleanEnd = afterMarkerLine + blockMatch[0].length;
+  const restScanned = scanned.slice(cleanEnd);
+  const headingMatch = restScanned.match(/(^|\n)##[ \t]/);
+  const regionEnd = headingMatch ? cleanEnd + headingMatch.index + headingMatch[1].length : scanned.length;
+
+  if (scanned.slice(cleanEnd, regionEnd).trim() !== '') return { malformed: true };
+
+  const reasons = blockMatch[1].split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
+  return { markerStart, regionEnd, reasons };
+}
+
+/**
+ * #3044 — the block is stamped ONCE (guard-then-append on `bodyAlreadyCarriesReasonBlock`) and never
+ * refreshed, so a re-park that scores MORE or FEWER reasons than the first park leaves the block a snapshot
+ * of that first park. Since #2908 the block is write-authorizing (`we:scripts/workflows/review-parked-prs.mjs:393`
+ * bands the converge-loop editor on it), so a stale-LOW block is a fail-open. This re-derives the block
+ * against the CURRENT reason set every time, replacing it in place when it drifted rather than only ever
+ * appending once.
+ *
+ * Pure. Reuses `blankQuotedRegions` for forgery-safety (a documented example in a fenced block is never
+ * mistaken for the real thing, same reasoning as `bodyHasEscalationReason`) and `buildEscalationReasonBlock`
+ * for the fresh block's exact bytes.
+ *
+ *   - No real marker, reasons non-empty → APPEND (today's behavior, unchanged): `body +
+ *     buildEscalationReasonBlock(reasons)`, `changed:true`.
+ *   - Reasons empty (marker absent OR present) → no-op, `changed:false`. Mirrors existing precedent
+ *     (`we:scripts/merge-ai-prs.mjs`: "a DE-ESCALATED human park has no fresh reasons... records NOTHING
+ *     here") — a stale-but-non-empty block is left as first-park history, never blanked. Whether a body
+ *     should ever LOSE a record it once carried is a legitimate future question, not decided here.
+ *   - Real marker present, recorded reason SET === fresh reason SET (order-insensitive) → no-op,
+ *     `changed:false`, byte-identical body. THE FIX'S CORE: a re-park that scored nothing new writes nothing.
+ *   - Real marker present, sets differ, reasons non-empty → REPLACE the block region (the marker line
+ *     through its end boundary — the policy-stamp line, or up to the next `##` heading / end of body) with a
+ *     freshly built block. Handles growth AND shrink identically.
+ *   - Real marker present but the block is malformed, or non-blank content follows its end boundary → FAILS
+ *     SAFE: no-op, `changed:false`, so an unexpected shape can never delete content a human added.
+ *
+ * @param {string} body
+ * @param {Array<string>} reasons
+ * @returns {{body: string, changed: boolean}}
+ */
+export function reconcileEscalationReasonBlock(body, reasons) {
+  const src = typeof body === 'string' ? body : '';
+  const freshReasons = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
+  if (freshReasons.length === 0) return { body: src, changed: false };
+
+  const located = locateEscalationBlock(blankQuotedRegions(src));
+  if (!located) return { body: src + buildEscalationReasonBlock(freshReasons), changed: true };
+  if (located.malformed) return { body: src, changed: false };
+
+  const recordedSet = new Set(located.reasons);
+  const freshSet = new Set(freshReasons);
+  const sameSet = recordedSet.size === freshSet.size && [...recordedSet].every((r) => freshSet.has(r));
+  if (sameSet) return { body: src, changed: false };
+
+  // Drop the fresh block's own leading `\n\n` — the content strictly before `markerStart` already carries
+  // the blank line(s) that led into the original block, so keeping both would double them on every replace.
+  const freshBlock = buildEscalationReasonBlock(freshReasons).slice(2);
+  const newBody = src.slice(0, located.markerStart) + freshBlock + src.slice(located.regionEnd);
+  return { body: newBody, changed: true };
+}
+
+/**
  * The NON-BLOCKING review gate (#2171). Given a PR's escalation verdict and its observed review labels, decide
  * what the drain does THIS pass. Pure — the drain never blocks: an escalated PR is SKIPPED (parked alive) and
  * re-evaluated next pass, so other PRs keep flowing.

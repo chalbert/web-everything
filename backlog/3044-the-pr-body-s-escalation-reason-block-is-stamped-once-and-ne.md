@@ -2,8 +2,9 @@
 bornAs: xx15niz
 kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-14"
 tags: [review, converge-loop, gate]
 relatedTo: ["2908", "2324", "2844"]
 scope:

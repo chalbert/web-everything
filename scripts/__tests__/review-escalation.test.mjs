@@ -9,8 +9,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock, reconcileEscalationReasonBlock } from '../lib/review-escalation.mjs';
 import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
+import { buildAuthorActorMarker } from '../lib/review-independence.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -230,6 +231,111 @@ describe('review-escalation — #2324 escalation-reason-in-body', () => {
     expect(bodyHasEscalationReason('')).toBe(false);
     expect(bodyHasEscalationReason(null)).toBe(false);
     expect(bodyHasEscalationReason(undefined)).toBe(false);
+  });
+});
+
+// #3044 — the block was stamped ONCE (guard-then-append on the RAW-text `bodyAlreadyCarriesReasonBlock`
+// guard) and never refreshed, so a re-park that scored MORE or FEWER reasons than the first park left the
+// block a stale snapshot — a fail-open, since #2908 made the block write-authorizing for the converge loop's
+// editor-enablement band. `reconcileEscalationReasonBlock` re-derives the block against the CURRENT reason
+// set every time. Independently re-parses each resulting block (never reusing the function's own internal
+// boundary reader) so these tests can't pass merely because both sides share a bug.
+describe('review-escalation — #3044 reconcileEscalationReasonBlock (re-derive-and-replace, not stamp-once)', () => {
+  // Deliberately NOT `bodyHasEscalationReason`/`ESCALATION_REASON_MARKER`-aware parsing — an independent,
+  // dumber re-read of the resulting body, so a bug shared between the implementation and the test can't hide.
+  function parsedReasonsOf(body) {
+    const afterMarker = body.split('## Escalation reason')[1] || '';
+    const bulletsPart = afterMarker.split('<!--')[0];
+    return bulletsPart.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2));
+  }
+
+  it('APPENDS when no real marker is present and reasons are non-empty (today\'s behavior, unchanged)', () => {
+    const result = reconcileEscalationReasonBlock('Plain PR body.', ['size (500 ≥ 400 changed lines)']);
+    expect(result).toEqual({
+      body: 'Plain PR body.' + buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']),
+      changed: true,
+    });
+  });
+
+  it('is a no-op, byte-identical body, when a re-park scores the SAME set in a different order', () => {
+    const body = 'PR description.'
+      + buildEscalationReasonBlock(['blast-radius (…)', 'size (602 ≥ 400 changed lines)']);
+    const result = reconcileEscalationReasonBlock(
+      body,
+      ['size (602 ≥ 400 changed lines)', 'blast-radius (…)'], // same set, reversed order
+    );
+    expect(result.changed).toBe(false);
+    expect(result.body).toBe(body); // byte-identical — a routine re-park with nothing new writes nothing
+  });
+
+  it('REPLACES on growth — the live PR #1018 shape from the #3044 card', () => {
+    const recorded = ['blast-radius (dep bump touches 12 files)'];
+    const fresh = ['blast-radius (dep bump touches 12 files)', 'size (602 ≥ 400 changed lines)'];
+    const body = 'PR description.' + buildEscalationReasonBlock(recorded);
+    const result = reconcileEscalationReasonBlock(body, fresh);
+    expect(result.changed).toBe(true);
+    expect(new Set(parsedReasonsOf(result.body))).toEqual(new Set(fresh));
+  });
+
+  it('REPLACES on shrink — a re-score that drops a reason updates the block too, not only growth', () => {
+    const recorded = ['blast-radius (dep bump touches 12 files)', 'size (602 ≥ 400 changed lines)'];
+    const fresh = ['blast-radius (dep bump touches 12 files)'];
+    const body = 'PR description.' + buildEscalationReasonBlock(recorded);
+    const result = reconcileEscalationReasonBlock(body, fresh);
+    expect(result.changed).toBe(true);
+    expect(new Set(parsedReasonsOf(result.body))).toEqual(new Set(fresh));
+  });
+
+  it('is a no-op when fresh reasons are empty and no marker is present (nothing to append)', () => {
+    const result = reconcileEscalationReasonBlock('Plain PR body.', []);
+    expect(result).toEqual({ body: 'Plain PR body.', changed: false });
+  });
+
+  it('is a no-op when fresh reasons are empty and a marker IS present — a de-escalation is left as first-park history, never blanked', () => {
+    const body = 'PR description.' + buildEscalationReasonBlock(['size (500 ≥ 400 changed lines)']);
+    const result = reconcileEscalationReasonBlock(body, []);
+    expect(result).toEqual({ body, changed: false });
+  });
+
+  it('a quoted/fenced example of the marker is never mistaken for a real block — appends fresh instead of "replacing" the documentation', () => {
+    const documented = 'Here is what the block looks like:\n\n```\n'
+      + buildEscalationReasonBlock(['old documented reason']) + '\n```\n\nEnd.';
+    const result = reconcileEscalationReasonBlock(documented, ['new real reason']);
+    expect(result.changed).toBe(true);
+    // The quoted example survives verbatim — the write only ever appends past it.
+    expect(result.body.startsWith(documented)).toBe(true);
+    expect(result.body).toContain('old documented reason'); // untouched inside the fence
+    expect(result.body).toContain('new real reason'); // the freshly appended real block
+  });
+
+  it('preserves content before the marker byte-for-byte on a replace, including an authored-by-actor stamp', () => {
+    // we:scripts/pr-body-edit.mjs exists precisely because a body rewrite that forgets to carry this stamp
+    // forward disarms the #2844 independence check. reconcileEscalationReasonBlock never rewrites the body
+    // WHOLESALE — a replace only ever touches the marker onward — so there is nothing to carry forward, but
+    // that guarantee is worth proving directly rather than assuming.
+    const stamp = buildAuthorActorMarker('sess-abc123');
+    expect(stamp).not.toBe(''); // sanity: the fixture id actually produced a stamp
+    const before = `## Summary\n\nDoes a thing.\n\n${stamp}\n`;
+    const body = before + buildEscalationReasonBlock(['blast-radius (dep bump touches 12 files)']);
+    const result = reconcileEscalationReasonBlock(
+      body,
+      ['blast-radius (dep bump touches 12 files)', 'size (602 ≥ 400 changed lines)'],
+    );
+    expect(result.changed).toBe(true);
+    expect(result.body.startsWith(before)).toBe(true);
+    expect(result.body).toContain(stamp);
+  });
+
+  it('fails safe — non-blank content after the block\'s end boundary leaves the body untouched rather than deleting it', () => {
+    const block = buildEscalationReasonBlock(['blast-radius (dep bump touches 12 files)']);
+    // Not a shape either writer produces today (the block is always last) — exactly the "in practice: never"
+    // case the card names, which is why it must fail safe rather than assume it can locate the block.
+    const body = 'PR description.' + block + 'A human added this paragraph after the block.\n';
+    const result = reconcileEscalationReasonBlock(
+      body,
+      ['blast-radius (dep bump touches 12 files)', 'size (602 ≥ 400 changed lines)'],
+    );
+    expect(result).toEqual({ body, changed: false });
   });
 });
 
