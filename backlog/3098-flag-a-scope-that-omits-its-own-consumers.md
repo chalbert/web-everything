@@ -1,7 +1,8 @@
 ---
+bornAs: x6cdlmu
 kind: story
 size: 3
-parent: xl2q1zt
+parent: 3099
 status: open
 dateOpened: "2026-08-13"
 tags: [delivery, backlog, readiness, preparation]
@@ -51,7 +52,7 @@ Everything the reviews found follows from that:
 
 ## What survives, and it is the valuable half
 
-The evidence in [#xl2q1zt] — now **three** items measured against what their PRs actually had to touch, after
+The evidence in [#3099] — now **three** items measured against what their PRs actually had to touch, after
 one row was retracted as false. The omission gaps 1 and 2 name are real and each hold in 2 of 3. **The
 ranking does NOT survive intact**: gap 3 fell to 1 of 3, so the epic's slice order is no longer evidenced.
 The omission is real; the *detector* was wrong; and the ranking is weaker than the first version of this

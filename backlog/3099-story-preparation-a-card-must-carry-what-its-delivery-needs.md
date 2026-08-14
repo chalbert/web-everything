@@ -1,4 +1,5 @@
 ---
+bornAs: xl2q1zt
 kind: epic
 status: open
 dateOpened: "2026-08-13"
@@ -97,7 +98,7 @@ over-specified now.
 1. ~~**The consumers check**~~ — **ATTEMPTED AND STOOD DOWN.** Built, reviewed twice, deleted. The import
    graph is not the consumer graph in this repo: `we:scripts/lane-pool.mjs` has ten-plus consumers and not
    one is an ES import — every one shells it. Its confident all-clear was baseless 74% of the time it fired.
-   [#x6cdlmu] carries the full account and what the next attempt must settle before any code. **The gap it
+   [#3098] carries the full account and what the next attempt must settle before any code. **The gap it
    targeted is still real**; only the detector was wrong.
 2. ~~**Scope drift, measured at land**~~ — **DO NOT BUILD NEXT.** It was ranked on gap 3, which the
    retraction above dropped to 1 of 3. Compare declared `scope:` against the files a PR actually touched.
