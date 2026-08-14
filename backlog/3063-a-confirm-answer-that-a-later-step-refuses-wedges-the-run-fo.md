@@ -90,9 +90,17 @@ Two claims on the card needed correcting, and one surface was missing:
 - **"the wedge is currently pinned by nothing" is now only half true.** The ENGINE-level throw IS pinned:
   `we:scripts/operations/__tests__/review-pr.test.mjs:172-187` drives `accept` on a `review:human` PR and
   asserts `advance` throws with the `human-ceremony-only` + `decideSetLabel` text and declares zero effects.
-  What is pinned nowhere is the **operator-visible outcome** — no test drives this through
+  What is pinned nowhere is the **operator-visible outcome** — no test drives THIS refusal through
   `runOperationCli`, so the exit code and the printed lines are unasserted. That is exactly the surface this
   story changes, so the acceptance criteria below are written at that level.
+- **But a DIFFERENT engine throw IS already pinned through `runOperationCli`, as a rejection.**
+  `we:scripts/operations/__tests__/review-pr.test.mjs:336-348` resumes with `--answer=merge-it` and asserts
+  `await expect(runOperationCli(…)).rejects.toThrow(/accepts only/)`. That throw is the closed-option check
+  at `we:scripts/operations/engine.mjs:269-274`, raised from the `awaiting-confirm` branch's `advance`
+  (`we:scripts/operations/cli-adapter.mjs:311`) — a DIFFERENT `advance` call from the one that wedges. A `try`
+  drawn around every `advance` in the loop swallows it too, turns that rejection into a resolved
+  `step-refused`, and reddens a passing test. The seam below is drawn to exclude it deliberately; see
+  *Interfaces*.
 - **`options` is still static-only**, confirming option 1 is unbuilt: `we:scripts/operations/step-kinds.mjs:149-173`
   accepts `asks`/`of` as `string|fn` and `options` as an array only, and `confirm()` seals
   `options: options ? Object.freeze([...options]) : null`.
@@ -156,36 +164,71 @@ because the ruling changes neither.
   status code is deliberately unchanged — a refused step IS a failure — but the client now gets `runId`,
   `findings`, `pending`, `telemetry` and `error`. **No edit to this file is required**; the improvement is a
   consequence, and it gets a test rather than a code change.
+- **Consumer 3 — the existing suite.** `we:scripts/operations/__tests__/review-pr.test.mjs:336-348` already
+  drives an engine throw out through `runOperationCli` and asserts it REJECTS. It is a consumer of exactly
+  the behaviour this card changes, and the seam in *Interfaces* is drawn to leave it passing unedited. If a
+  build reddens it, the `try` was drawn too wide.
 - **Not a consumer:** `we:scripts/operations/effect-executor.mjs`. A sink failure is RETURNED
-  (`outcome.error` → `effect-halted`, `we:scripts/operations/cli-adapter.mjs:337`), never thrown, so nothing
+  (`outcome.error` → `effect-halted`, `we:scripts/operations/cli-adapter.mjs:335`), never thrown, so nothing
   about the executor's paths changes.
 
 ## Size
 
-**3.** Basis: one production file, ~35 lines across three edits (a `try` in the `driveRun` loop, a
-`renderOutcome` branch, one pure restart-command helper), plus four tests in two existing files. Raised
-from the filed **2** for a stated reason: 2 assumed the card's "a `try`/`catch` and nothing else", which
-counted neither the render branch, nor the helper, nor the second adapter that did not exist when the card
-was written. Not 5 — nothing in `we:scripts/operations/engine.mjs` changes, the step vocabulary stays closed
-at four, and no run-record field is added, so there is no replay or migration surface.
+**3.** Basis: one production file, ~45 lines across three edits (a `try` around the `running` branch's
+`advance` plus the `step`/`priorConfirm` derivation, a `renderOutcome` branch, one pure restart-command
+helper), plus four tests in two existing files. Raised from the filed **2** for a stated reason: 2 assumed
+the card's "a `try`/`catch` and nothing else", which counted neither the render branch, nor the helper, nor
+the second adapter that did not exist when the card was written. Not 5 — nothing in
+`we:scripts/operations/engine.mjs` changes, the step vocabulary stays closed at four, and no run-record
+field is added, so there is no replay or migration surface.
 
 ## Interfaces and protocol
 
-**The new stop, alongside the existing three.** `driveRun`'s current signature and return
-(`we:scripts/operations/cli-adapter.mjs:287`) are unchanged:
+**The new stop, alongside the existing three.** `driveRun`'s signature
+(`we:scripts/operations/cli-adapter.mjs:287`) is unchanged; its RETURN gains two fields the render cannot
+derive on its own (below):
 
 ```js
 export async function driveRun({ run, registry, store, sinks, judge, resume = null,
                                  maxTurns = 64, autoConfirm = null, attemptedBy = 'unknown' } = {})
-// → Promise<{run, stopped, error, applied, inFlight?}>
+// → Promise<{run, stopped, error, applied, inFlight?, step?, priorConfirm?}>
 ```
 
 `stopped` gains **`'step-refused'`** — carrying the thrown error in `error`, joining `'complete'`,
-`'confirm'`, `'stuck'`, `'effect-halted'` and `'effect-in-flight'`. The `try` wraps the `advance` calls inside
-the loop, so a throw from ANY step kind's fn is covered (a `compute` `fn`, a `judge` `request`, a `confirm`
-`asks`/`of`, an `effect` `effects`), not only `record`'s. The `maxTurns` runaway throw at the end of
-`driveRun` stays a throw — it is a driver bug, not a declaration refusal, and it has no run state to render
-against.
+`'confirm'`, `'stuck'`, `'effect-halted'` and `'effect-in-flight'`.
+
+**THE SEAM IS ONE `advance` CALL, NOT FOUR.** The `try` wraps **only the `running` branch's `advance`**
+(`we:scripts/operations/cli-adapter.mjs:350`). That single call is where EVERY step fn is invoked — a
+`compute` `fn` (`we:scripts/operations/engine.mjs:345`), a `judge` `request` (`:352`), a `confirm`
+`asks`/`of` (`:375`/`:382`), an `effect` `effects` (`:394`) — so the coverage the card wants is complete at
+this one call. The other three `advance` calls in the loop (`:311` confirm resume, `:321` judge resume,
+`:344` post-apply effect resolve) run `resolvePending` only, which executes **no declaration fn at all**
+(`we:scripts/operations/engine.mjs:236-277`). Everything they throw is a CALLER error — a malformed resume,
+an answer outside the closed option set, a resume aimed at an `effect` step, telemetry on a non-`judge`
+resume. Folding those into `step-refused` would (a) redden the passing test at
+`we:scripts/operations/__tests__/review-pr.test.mjs:336-348`, and (b) tell an operator who simply mistyped
+`--answer` that the run is refused and they should start a fresh one — which re-spawns the juror and charges
+the 46 cents this card exists to save. Wrong on both counts. Keep them throwing.
+
+The `maxTurns` runaway throw at the end of `driveRun` stays a throw too — it is a driver bug, not a
+declaration refusal, and it has no run state to render against.
+
+**`step` and `priorConfirm` must come from `driveRun`, because `renderOutcome` cannot compute them.**
+`renderOutcome({ outcome, json })` (`:475`) receives only `{run, stopped, error, applied}` — **no registry
+and no declaration**. Two consequences the first cut of this card missed:
+
+- The refusing step's NAME is not on the record. `effect-halted` reads `run.pending?.step` (`:537`), which
+  works only because that stop happens while a pending exists. At a post-`confirm` refusal `pending` is
+  `null` (the confirm resolve cleared it — the wedged record on disk has `pending: null`, `cursor: 4`), so
+  `run.pending?.step` renders `undefined`. `driveRun` HAS the registry, so it returns
+  `step: registry.get(current.op).steps[current.cursor].name` — `declarationFor`
+  (`we:scripts/operations/engine.mjs:66`) is module-private and stays that way; `registry.get` is the same
+  lookup it performs (`:67`).
+- The "did an earlier `confirm` already record an answer" predicate needs step KINDS, which live on the
+  declaration, not the record — `run.findings` is `{stepName: value}` and says nothing about kind. So
+  `driveRun` also returns `priorConfirm: {step, value} | null` — the nearest `confirm`-kind step at a
+  `stepIndex` below the refusing one that holds a finding, or `null`. Still no new persisted state: both
+  fields are derived per drive and neither is written to the record.
 
 **The new pure helper**, exported from the same module so a test asserts on it directly:
 
@@ -210,28 +253,37 @@ if this refusal is deterministic the run cannot reach another answer — start a
 <judge spend lines>
 ```
 
-The middle two lines are emitted **only when the run holds a finding for an earlier `confirm`-kind step**;
-otherwise just the `REFUSED` line, the restart line, and the spend. That predicate is `run.findings` keyed by
-a step whose kind is `confirm` at a `stepIndex` below the refusing one — checkable from the record and the
-declaration, no new state. The spend lines are `renderSpendLines(run)` (`:418`), which is the point of the
+The step name on the `REFUSED` line is `outcome.step`, and the middle two lines are emitted **only when
+`outcome.priorConfirm` is non-null** — both computed in `driveRun`, which is the only place with the
+declaration (see *Interfaces*); `renderOutcome` cannot derive either. Otherwise just the `REFUSED` line, the
+restart line, and the spend. The spend lines are `renderSpendLines(run)` (`:424`), which is the point of the
 whole card: the operator is told what the thrown-away juror cost.
 
-**`--json`** returns `outcomePayload(outcome)` (`:456`) with `stopped: 'step-refused'` and `error` set, at
-exit code 1 — `renderOutcome`'s json branch at `:477-484` already handles this with no edit, because
-`step-refused` is simply not in its exit-0 list.
+**`--json`** returns `outcomePayload(outcome)` (`:455`) with `stopped: 'step-refused'` and `error` set, at
+exit code 1 — `renderOutcome`'s json branch at `:477-483` already handles this with no edit, because
+`step-refused` is simply not in its exit-0 list. Note `outcomePayload` destructures a fixed set, so `step`
+and `priorConfirm` do NOT reach the json payload or the HTTP body; that is fine for the criteria below, and
+adding them is out of scope.
 
 ## Tasks
 
-1. In `we:scripts/operations/cli-adapter.mjs`, wrap the `advance` calls inside `driveRun`'s loop in a `try`
-   and return `{ run: current, stopped: 'step-refused', error: e, applied }` on a throw. Leave the `maxTurns`
-   throw after the loop uncaught.
+1. In `we:scripts/operations/cli-adapter.mjs`, wrap **only** the `running` branch's `advance`
+   (`:350`) in a `try` and return
+   `{ run: current, stopped: 'step-refused', error: e, applied, step, priorConfirm }` on a throw, with `step`
+   and `priorConfirm` derived from `registry.get(current.op)` as *Interfaces* specifies. Leave the other three
+   `advance` calls (`:311`, `:321`, `:344`) and the `maxTurns` throw after the loop uncaught.
 2. Add and export `restartCommand(run)` — pure, rendered from `run.input`.
-3. Add the `stopped === 'step-refused'` branch to `renderOutcome`, before the `:544` fallthrough, with the
-   conditional prior-`confirm` lines and `renderSpendLines`.
+3. Add the `stopped === 'step-refused'` branch to `renderOutcome`, before the `:544` fallthrough, naming the
+   step from `outcome.step` (NOT `run.pending`, which is null here), with the prior-`confirm` lines gated on
+   `outcome.priorConfirm` and `renderSpendLines`.
 4. Update the module header's list of stops and the `driveRun` return-type JSDoc.
 5. Test in `we:scripts/operations/__tests__/review-pr.test.mjs`: drive a gate-self PR through
-   `runOperationCli` to `accept` and assert `code === 1`, `stopped === 'step-refused'`, the refusal text
-   verbatim in `lines`, the restart command line, and that the record still holds `effects: []`.
+   `runOperationCli` to `accept` — with a **telemetry-reporting** judge (the `meteredJudge` shape at
+   `:356-361`), or the spend assertion has nothing to assert on — and check `code === 1`,
+   `stopped === 'step-refused'`, the refusal text verbatim in `lines`, the restart command line, the spend
+   lines, and that the record still holds `effects: []`. Leave the neighbouring bad-`--answer` test
+   (`:336-348`, which asserts `runOperationCli` REJECTS) passing and unedited — if it reddens, the `try` was
+   drawn around the wrong `advance`.
 6. Test the same run with `--json`: exit 1 and an `outcomePayload` carrying `stopped`, `error`, `findings.confirm`.
 7. Test the no-prior-`confirm` case — a declaration whose FIRST step throws — and assert the two
    confirm-specific lines are absent while the restart line is present.
@@ -256,6 +308,9 @@ exit code 1 — `renderOutcome`'s json branch at `:477-484` already handles this
       **omits** the two "answer recorded at `confirm`" lines — the stop never claims a decision that was not made.
 - [ ] The HTTP drive route returns 500 with the full run payload (`runId`, `findings`, `error`), not
       `fail(500, <string>)`.
+- [ ] A `--resume` with an `--answer` outside the closed option set STILL rejects out of `runOperationCli` —
+      `we:scripts/operations/__tests__/review-pr.test.mjs:336-348` passes unedited. A caller's typo is not a
+      step refusal, and must not be handed a "start a fresh run" that re-spawns the juror.
 - [ ] `we:scripts/operations/engine.mjs` and `we:scripts/operations/step-kinds.mjs` are untouched by the diff.
 - [ ] `npm run check:standards` at 0 errors and `npm run test:unit` green.
 
@@ -264,16 +319,21 @@ exit code 1 — `renderOutcome`'s json branch at `:477-484` already handles this
 **One piece.** The three production edits are one mechanism — a state that is returned but never rendered is
 worse than the throw it replaces, and a render branch for a state nothing produces is dead code. The tests
 are the only thing that could be split off, and splitting tests from the behaviour they pin is the shape this
-repo keeps refusing. No slice is independently deliverable, and the whole thing is ~35 lines.
+repo keeps refusing. No slice is independently deliverable, and the whole thing is ~45 lines.
 
 ## Watch for
 
 - **Do not catch the `maxTurns` runaway.** It is thrown from OUTSIDE the loop deliberately; folding it into
   `step-refused` would report a driver bug as a declaration refusal and hand the operator a restart command
   for a run that would loop again.
+- **Do not catch the three RESUME `advance` calls** (`we:scripts/operations/cli-adapter.mjs:311`, `:321`,
+  `:344`). They execute no declaration fn, so they add nothing to the coverage; what they DO throw is caller
+  error, and reporting a mistyped `--answer` as `step-refused` tells the operator to start a fresh run —
+  paying the juror cost this card exists to save. The tell that this went wrong is
+  `we:scripts/operations/__tests__/review-pr.test.mjs:336-348` turning red.
 - **Do not touch the refusal itself.** `decideSetLabel` and INVARIANT 2 are the point; this story only gives
   the refusal a place to land. A diff that edits `we:scripts/review-set-label.mjs` has misread the card.
-- **`error` must survive `outcomePayload`.** It already stringifies `error` (`:460`), but only when truthy —
+- **`error` must survive `outcomePayload`.** It already stringifies `error` (`:470`), but only when truthy —
   a branch that returns `stopped: 'step-refused'` with `error: null` would render an empty refusal.
 - The two rejected options stay **unfiled**, per the card's original instruction. If something else later
   wants a per-run `options` set, it should be filed on its own merit, not resurrected from here.
