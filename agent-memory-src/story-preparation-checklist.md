@@ -1,6 +1,6 @@
 ---
 name: story-preparation-checklist
-description: What a story must carry before anyone builds it — scope+consumers, size, testable acceptance, decided design, interfaces/protocol, tasks, delivery shape
+description: What a story must carry before anyone builds it — scope+consumers, size, testable acceptance, decided design, interfaces/protocol, tasks, delivery shape, AND independent review of the preparation itself before it's build-ready
 metadata:
   type: feedback
 ---
@@ -55,7 +55,48 @@ correction is exactly the move this item asks prep to make earlier; #3015 shows 
 then. Each of the other two cost one probe and removed a whole review round. **A POC belongs in preparation
 when the risk is that the approach is wrong; it belongs nowhere at all once the approach is known.**
 
-**How to apply:** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
+**9. A prepared card is NOT trustworthy until the preparation itself has been independently reviewed — the
+same discipline code gets, not a lighter one.** Measured on 2026-08-14: seven cards were prepared (design
+decided, interfaces cited, acceptance written) and merged with NO independent review, on the reasoning that a
+backlog-only text change is "just docs" and low-risk. It is not. **All seven, independently reviewed after the
+fact, had real defects** — not style notes, defects that would have produced a passing build against a broken
+plan:
+
+- **#3004 and #3095 — the design was a PROVABLE NO-OP.** #3004's proposed guard was wired to derive from the
+  exact same inputs that already excluded the failing case from the set it checked — the two sets were
+  disjoint by construction, so no test could ever catch it: green forever, zero effect on production. #3095's
+  design looked up a dispatched build's PR by a branch name that dispatch entries never record — the lookup
+  could only ever return empty.
+- **#2803 — the premise was built on a fact the repo had moved past.** Two of its four design decisions
+  assumed resolve happens in the producing lane pre-merge; the drain has owned that flip for six weeks. A
+  guard reasoned from the wrong moment is not almost-right, it fires at the wrong time or not at all.
+- **#2351 — a wrong mechanism would have silently disabled the feature.** It picked a lock key that turned out
+  to be the resident drain daemon's own whole-process lock, and assumed a hook fires once at session end when
+  it actually fires after every turn. Built as written: the memory-save hook either never lands (lock
+  contention) or blocks the drain for 15 minutes.
+- **#2842 — an unnamed blast-radius risk.** The proposed statute-lint rule would fail `check:standards`
+  repo-wide the moment anyone resolved one of three specific in-flight items — including one expected to
+  resolve soon. Nobody had asked "what does this break for someone doing unrelated work."
+- **#2787 and #3063 — a missed consumer, and a catch drawn too wide.** #2787 named one print site for a bug
+  that had two; the second was live on `main`, printing the bug and its own correction on adjacent lines.
+  #3063's proposed fix would have caught three call sites that don't need catching, breaking an
+  already-passing test and doubling real spend (a metered judge re-run) on an operator typo.
+
+**Every one of these maps onto the existing risk taxonomy** (`backlog/3103-*.md`: premise, blast-radius,
+consumer, interface, population, decorative-guard, unmeasured-impact, legibility) — which is exactly the
+point: risk assessment during preparation and independent review of preparation are the same discipline
+aimed at the same failure modes, and neither substitutes for the other. Self-verification (the preparer
+re-checking their own claim) caught real things earlier tonight (item 8), but it did not catch any of these
+seven — the preparer is structurally the wrong person to catch a mistake in their own reasoning, same as a
+builder is the wrong person to accept their own PR.
+
+**Apply item 9 as its own gate:** treat "prepared" and "build-ready" as different states. A card is prepared
+when it carries items 1–8. It is build-ready only after an independent reviewer has produced a confidence
+level (High / Medium / Low) and a named risk list against it — the same headless, independently-sessioned
+review this repo already requires for code (`we:docs/agent/delivery-loop.md`), run against the card instead
+of a diff. Do not start a build against a card that only has the first half.
+
+**How to apply (items 1–8):** manual discipline until it becomes the `prepare-story` operation (epic #3099). Its
 first slice — a script flagging importers missing from a `scope:` — was built, reviewed twice and **stood
 down** (#3098): in a repo whose scripts shell each other rather than import, a static ESM import scan reads
 the wrong graph, and its confident all-clear was baseless 74% of the time it fired. So item 1 above is done
