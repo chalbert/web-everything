@@ -27,10 +27,19 @@ const HUMAN_MARKERS = ['✅ human review', '🔁 human review'];
 
 /**
  * Parse the body's `## Escalation reason` block (#2324) — the lines AFTER the `ESCALATION_REASON_MARKER` line
- * up to the next `##` heading or end-of-body. Each reason is a `- <reason>` bullet (from
- * `we:scripts/lib/review-escalation.mjs`'s `buildEscalationReasonBlock`); the leading bullet marker is stripped
- * so the returned strings are the bare decorated reasons `deriveReviewDisposition` canonicalizes. Pure. Returns
- * `[]` when the body is absent or carries no such block (an unparked PR). Tolerant of a missing body.
+ * up to the next `##` heading, the first non-bullet line, or end-of-body. Each reason is a `- <reason>` bullet
+ * (from `we:scripts/lib/review-escalation.mjs`'s `buildEscalationReasonBlock`, which guarantees the block's
+ * body is BULLETS ONLY between the marker and whatever follows); the leading bullet marker is stripped so the
+ * returned strings are the bare decorated reasons `deriveReviewDisposition` canonicalizes. Pure. Returns `[]`
+ * when the body is absent or carries no such block (an unparked PR). Tolerant of a missing body.
+ *
+ * #3101 — the stop condition matches the block's real GRAMMAR (bullets only), not only the next-heading case.
+ * `buildEscalationReasonBlock` unconditionally appends a trailing `<!-- policy-set: … -->` HTML-comment stamp
+ * right after the bullets whenever it writes any reasons (`we:scripts/lib/review-escalation.mjs:1565`) — that
+ * line is neither blank nor a `##` heading, so the old loop swallowed it as a bogus extra "reason". Stopping on
+ * the first non-blank, non-heading, non-bullet line generalizes past that ONE known trailing shape (a hardcoded
+ * stamp-marker check would only patch this one) and protects against any future trailing content appended
+ * after the stamp.
  * @param {string|null|undefined} body
  * @returns {string[]}
  */
@@ -45,6 +54,7 @@ export function parseEscalationReason(body) {
     if (line.trimStart().startsWith('##')) break; // next heading ends the block
     const trimmed = line.trim();
     if (!trimmed) continue; // skip blank lines (incl. the marker's trailing blank)
+    if (!/^[-*]\s+/.test(trimmed)) break; // non-bullet content (e.g. the trailing policy-stamp comment) ends the block
     out.push(trimmed.replace(/^[-*]\s+/, '')); // strip the `- `/`* ` bullet → bare reason
   }
   return out;

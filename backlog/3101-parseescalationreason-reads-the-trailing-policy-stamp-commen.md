@@ -2,8 +2,9 @@
 bornAs: xjxv1si
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-08-14"
+dateStarted: "2026-08-14"
 tags: [review, converge-loop, parse-defect]
 relatedTo: ["3044", "2908", "2470"]
 scope:
@@ -174,21 +175,21 @@ matching edit here every time `we:scripts/lib/review-escalation.mjs` grows a new
 
 ## Done when
 
-- [ ] `parseEscalationReason(body)` on a real `buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])`-built
+- [x] `parseEscalationReason(body)` on a real `buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])`-built
       body returns exactly `['size (602 ≥ 400 changed lines)']` — length 1, no `<!-- policy-set` element.
-- [ ] The same holds for the two-reason PR #1177 shape (`blast-radius (…)`, `gate-derivation (…)` + trailing
+- [x] The same holds for the two-reason PR #1177 shape (`blast-radius (…)`, `gate-derivation (…)` + trailing
       stamp): `parseEscalationReason` returns exactly those two strings, nothing else.
-- [ ] `assembleReviewDetail` on that `size`-only stamped body returns `disposition: {mode:'converge',
+- [x] `assembleReviewDetail` on that `size`-only stamped body returns `disposition: {mode:'converge',
       autoLand:true}` — not `null` — observable via `we:scripts/review-detail.mjs`'s own CLI output
       (`disposition: converge (autoLand=true)` line, `we:scripts/review-detail.mjs:165`) or the exported
       function directly.
-- [ ] `we:scripts/lib/review-core.mjs`'s exported `editorAllowedByReasons` returns `true` when fed
+- [x] `we:scripts/lib/review-core.mjs`'s exported `editorAllowedByReasons` returns `true` when fed
       `we:scripts/fetch-parked.mjs`'s `assembleParked(...).escalationReason` for that same `size`-only stamped
       body (today: `false`) — the concrete #2908 regression proof.
-- [ ] A body whose block terminates at a `## Something else` heading (the existing fixtures' shape, no stamp)
+- [x] A body whose block terminates at a `## Something else` heading (the existing fixtures' shape, no stamp)
       still parses unchanged — no regression on the already-covered case.
-- [ ] A legacy body with the reason block but NO trailing stamp (pre-#2567 shape) still parses unchanged.
-- [ ] `npm run test:unit` and `npm run check:standards` both green/0-errors.
+- [x] A legacy body with the reason block but NO trailing stamp (pre-#2567 shape) still parses unchanged.
+- [x] `npm run test:unit` and `npm run check:standards` both green/0-errors.
 
 ## Scope
 
@@ -231,13 +232,13 @@ slice (a half-applied stop condition is just a different wrong parse).
 
 ## Tasks
 
-1. Add failing fixtures first (RED) to `we:scripts/__tests__/review-detail.test.mjs` and
+1. [x] Add failing fixtures first (RED) to `we:scripts/__tests__/review-detail.test.mjs` and
    `we:scripts/__tests__/fetch-parked.test.mjs`, built via `buildEscalationReasonBlock`/`buildPolicyStampMarker`
    rather than hand-typed bodies, proving today's bug (extra array element / `disposition: null` /
    `editorAllowedByReasons` false).
-2. Fix `parseEscalationReason`'s stop condition in `we:scripts/review-detail.mjs` per the decided design.
-3. Confirm the new fixtures go GREEN; add the no-stamp-legacy and next-heading-control fixtures as regression
+2. [x] Fix `parseEscalationReason`'s stop condition in `we:scripts/review-detail.mjs` per the decided design.
+3. [x] Confirm the new fixtures go GREEN; add the no-stamp-legacy and next-heading-control fixtures as regression
    guards (must stay GREEN, unchanged behavior).
-4. Add the `editorAllowedByReasons` proof to `we:scripts/__tests__/fetch-parked.test.mjs`, importing the real
+4. [x] Add the `editorAllowedByReasons` proof to `we:scripts/__tests__/fetch-parked.test.mjs`, importing the real
    exported function from `we:scripts/lib/review-core.mjs` (not a re-derived copy).
-5. `npm run test:unit` and `npm run check:standards`; fix any incidental fallout.
+5. [x] `npm run test:unit` and `npm run check:standards`; fix any incidental fallout.
