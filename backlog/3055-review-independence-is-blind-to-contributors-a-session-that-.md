@@ -116,7 +116,7 @@ leaves the hole knowingly open.
 
 **A measured constraint on option (1), which the obvious framing gets wrong.** Git commit authorship carries
 **no session identity at all**. Every commit on `lane/3032-operation-engine` — the opener's `58cd55b3` and the
-second session's `137e7892` alike — is authored `Nicolas Gilbert <nic.g.gilbert@gmail.com>`; the git identity is
+second session's `137e7892` alike — is authored with the repo owner's own `name <email>`; the git identity is
 the human's in every lane. The only per-commit agent signal is the `Co-Authored-By` trailer, and it names a
 **model** (`Claude Opus 5 (1M context)` vs `Claude Fable 5`), not a session — two sessions on the same model are
 indistinguishable by it. So "read the commit authors" is not a cheap read of data that already exists: it first

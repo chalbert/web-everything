@@ -1,7 +1,8 @@
 /**
  * @file scripts/__tests__/close-session-sweep.test.mjs
- * @description Unit proof of the /closing-session learnings SWEEP core (#2614): re-scrub the drop-box (defence
- *   in depth on the write-seam), dedup the survivors, emit a ranked memory-candidate list. Proves an entry that
+ * @description Unit proof of the /closing-session learnings SWEEP core (#2614): re-validate the drop-box
+ *   against the SCHEMA (the content scrub moved to the publish seam in #3015), dedup the survivors, emit a
+ *   ranked memory-candidate list. Proves an entry that
  *   fails re-validation never reaches the candidate list, near-dupes collapse, and an absent drop-box is a
  *   clean no-op (empty candidates, exit-0 shape) — the common, correct close-out case.
  */
@@ -13,20 +14,24 @@ import { sweep, sweepFile } from '../conveyor/close-session-sweep.mjs';
 
 const e = (kind, area, summary, suggestion = 'fix it') => ({ kind, area, summary, suggestion });
 
-describe('sweep — re-scrub + dedup', () => {
-  it('drops entries that fail re-validation and collapses near-dupes among survivors', () => {
+describe('sweep — schema re-validation + dedup', () => {
+  it('drops entries that fail SCHEMA re-validation and collapses near-dupes among survivors', () => {
     const raw = [
       e('friction', 'lane gating', 'lane gate reruns full suite for docs only diff'),
       e('friction', 'lane gating', 'the lane gate reruns the full suite even for docs only diffs'),
       e('doc-gap', 'memory docs', 'the memory doc omits the sub-index budget rule'),
-      e('friction', 'leak', 'saw the key ghp_ABCDEFabcdef0123456789ABCDEF01234567 in a log'), // rejected by scrub
+      // #3015 — this entry used to be REJECTED by the scrub `validateEntry` ran. That scrub moved to the
+      // publish seam, so it now SURVIVES into the candidate list. Kept (not deleted) and inverted, so the
+      // suite states the new behaviour rather than silently testing a claim that stopped being true.
+      e('friction', 'leak', 'saw the key ghp_ABCDEFabcdef0123456789ABCDEF01234567 in a log'),
     ];
     const { candidates, stats } = sweep(raw);
     expect(stats.received).toBe(4);
-    expect(stats.rejected).toBe(1);
-    expect(stats.valid).toBe(3);
-    // two friction near-dupes collapse → 2 candidates total
-    expect(candidates).toHaveLength(2);
+    expect(stats.rejected).toBe(0);
+    expect(stats.valid).toBe(4);
+    // two friction near-dupes collapse; the doc-gap and the (now-surviving) leak entry stand alone → 3
+    expect(candidates).toHaveLength(3);
+    expect(candidates.some((c) => c.summary.includes('ghp_'))).toBe(true);
     const friction = candidates.find((c) => c.kind === 'friction');
     expect(friction.count).toBe(2);
     expect(candidates[0].count).toBeGreaterThanOrEqual(candidates[1].count); // ranked

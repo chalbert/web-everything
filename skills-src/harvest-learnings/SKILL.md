@@ -30,9 +30,14 @@ npm run harvest -- --min-sessions=2       # only what ≥2 distinct sessions ind
 [platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)):
 it reads every `*.jsonl` in the machine pool (`$LEARNINGS_POOL`, else `~/.claude/conveyor/learnings`) —
 one fixed directory outside any working copy, so a lane clone's drops and the primary checkout's are the
-**same** pool — re-applies the write-seam scrub (defence in depth),
+**same** pool — re-validates every entry against the drop-box SCHEMA (allow-list, `kind`, field caps),
 clusters near-duplicates **across sessions**, and ranks by `sessions` (distinct sessions) before `count`
 (raw entries). **Do not re-derive any of that in context** — read its output.
+
+> **That schema re-validation is NOT a secret scrub** (#3015). The content scrub moved off the append seam
+> to the publish seam, so a pool line carrying a secret now reaches this step and your context. It is
+> blocked on the way INTO a committed backlog card or memory file (`scrubPublish`), not on the way out of
+> the pool. Treat pool content as unscrubbed input: never paste a raw value forward.
 
 An **empty pool is the common, correct outcome.** Say so and stop; nothing observed since the last harvest
 is not a failure.

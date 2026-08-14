@@ -3,7 +3,8 @@
  * @description Unit proof of the PERIODIC cross-session learnings harvest core (#x2j0l3t) — the successor to
  *   the single-session close sweep. Proves the properties the collect/adjudicate split depends on: entries
  *   from MANY session files pool together; recurrence across DISTINCT sessions outranks one session repeating
- *   itself; one malformed line never costs the rest of the pool; the write-seam scrub is re-applied; an empty
+ *   itself; one malformed line never costs the rest of the pool; the SCHEMA is re-validated (the content
+ *   scrub moved to the publish seam in #3015, so a secret is no longer dropped here); an empty
  *   pool is a clean no-op; the `minSessions` floor DEFERS one-offs (leaves them in the pool) rather than
  *   discarding them; and archiving is an explicit, collision-safe acknowledgement — never a side effect of
  *   reading.
@@ -62,7 +63,7 @@ describe('pool discovery', () => {
   });
 });
 
-describe('readPool — line tolerance + re-scrub + session tagging', () => {
+describe('readPool — line tolerance + schema re-validation + session tagging', () => {
   it('pools entries across session files and tags each with its source session', () => {
     session('sess-a', e('friction', 'lane gating', 'lane gate reruns full suite for docs only diffs'));
     session('sess-b', e('friction', 'lane gating', 'the lane gate reruns the full suite even for docs only diffs'));
@@ -80,11 +81,17 @@ describe('readPool — line tolerance + re-scrub + session tagging', () => {
     expect(entries).toHaveLength(2);
   });
 
-  it('re-applies the write-seam scrub — a leaked secret never reaches a candidate', () => {
+  it('NO LONGER drops a secret-carrying line — the scrub moved to the publish seam (#3015)', () => {
+    // This test used to assert the opposite, and the inversion is the point: `readPool` re-runs
+    // `validateEntry`, which since #3015 checks the SCHEMA only. A pool line carrying a credential now
+    // reaches the candidate list, the red-team step, and an LLM's context. It is stopped on the way INTO a
+    // committed backlog/memory file (`scrubPublish`), not on the way out of the pool. Blocked from
+    // LANDING, not blocked from being READ — the honest statement of what the move bought and cost.
     session('sess-a', e('friction', 'leak', 'saw the key ghp_ABCDEFabcdef0123456789ABCDEF01234567 in a log'));
     const { entries, stats } = readPool(poolFiles(dir));
-    expect(stats.rejected).toBe(1);
-    expect(entries).toHaveLength(0);
+    expect(stats.rejected).toBe(0);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].summary).toContain('ghp_');
   });
 
   it('`ts` goes through the validator too — a hostile stamp never reaches stats.oldest', () => {

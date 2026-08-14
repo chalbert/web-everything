@@ -9,7 +9,8 @@
  *
  * WHAT THE CLOSE DELEGATES HERE (script-decidable, per we:docs/agent/platform-decisions.md
  * #deterministic-core-thin-judgment): read this session's delivery-agent drop-box (learnings-drop.mjs) →
- * re-validate every entry through the SAME scrub-gate the append used (defence in depth) → dedup/cluster the
+ * re-validate every entry through the SAME `validateEntry` the append uses (SCHEMA only since #3015 moved the
+ * content scrub to the publish seam — this drops malformed entries, not secret-carrying ones) → dedup/cluster the
  * survivors (learnings-dedup.mjs) → emit a deduped, ranked candidate list. The close then feeds those
  * survivors into its EXISTING memory-improvement intake (§1 candidate drafting → memory-worthiness gate →
  * §1a red-team → lane → PR). It does NOT build a parallel pipeline: capture is distributed (agents drop),
