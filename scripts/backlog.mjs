@@ -41,6 +41,14 @@ import { parseCostTokens, formatCostTokens } from './backlog/cost-rates.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
+// #2803 resolve-time scope reconciliation. Every one of these graphs is light and adds no measurable startup
+// cost to this CLI (which every hook and the conveyor shell out to): render-check imports only
+// route-import-graph, scope-lease only lane-partition, lane-manifest only backlog/id, and scope-lease-collect
+// runs its IO shell ONLY under a main-module check.
+import { reconcileScope } from './readiness/scope-reconcile.mjs';
+import { parseObservedFiles } from './readiness/scope-lease-collect.mjs';
+import { repoKeyFromSlug } from './readiness/lane-manifest.mjs';
+import { ROUTE_ENTRIES } from './lib/route-import-graph.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
 import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
@@ -245,6 +253,56 @@ function resolveFile(ref) {
   return matches[0];
 }
 
+// ── #2803 resolve-time scope reconciliation: the two IO shells the guard in transition() reads ──────────────
+
+/** The item's declared `scope:` as a plain array, or `null` when the item declares none (Fork C — a pre-#2613
+ *  legacy item). MUST go through gray-matter: `readField` (backlog/frontmatter.mjs:37) is SCALAR-only (it
+ *  regex-matches the rest of one line) and cannot read a block-list `scope:`. Same read `check-standards.mjs`
+ *  uses for its `scope:` shape rule, so the two never disagree on what the field says. Best-effort — a
+ *  malformed-YAML item is already reported by the gate; here it just reads as unscoped. */
+function readScopeList(content) {
+  try {
+    const data = requireCjs('gray-matter')(content)?.data;
+    const scope = data?.scope;
+    return Array.isArray(scope) ? scope.filter((s) => typeof s === 'string' && s.trim()) : null;
+  } catch { return null; }
+}
+
+/** This clone's repo-qualified changed-file set — the lane's committed range UNIONED with its dirty tree
+ *  (#2803 Fork B: THIS clone only; see scope-reconcile.mjs's header for why a sibling product clone is out of
+ *  reach). GIT ONLY — it parses nothing itself: the raw `git diff` + `git status` stdouts go to `parseObservedFiles`
+ *  (readiness/scope-lease-collect.mjs:105), which already unions the two halves, applies the rename-aware
+ *  `porcelainFiles`, repo-qualifies, and `normScope`s. Re-deriving that union inline would drift from the
+ *  collector on what `we:` means, and the collector's own header makes "composes, never reinvents" the rule.
+ *
+ *  BEST-EFFORT by contract: any git failure (not a repo, `git` missing, no `origin/main`, detached base, no
+ *  origin remote) returns `[]` with a printed note, so the guard degrades to a pass and a resolve is NEVER
+ *  blocked by a git hiccup — the same convention as the claim-baseline block and the claim cleanliness guard.
+ *  An unresolvable repo key is deliberately in that degrade set rather than a fallback: unqualified observed
+ *  paths can never match a `we:`-qualified declared entry, so every file would read as undeclared and a
+ *  presentation file among them would raise a FALSE hard error. */
+function observedFilesForResolve() {
+  const git = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    // `repoKeyFromSlug` (lane-manifest.mjs:171) takes an `owner/name` SLUG, not a remote URL: it splits on `/`
+    // and never strips `.git`, so the raw `git@github.com:chalbert/web-everything.git` would key as
+    // `web-everything.git` and NOTHING would ever match a `we:`-qualified declared entry — the guard would be
+    // silently inert. Normalize the URL to `owner/name` first, with the same pattern pr-land.mjs:830 uses.
+    const url = git(['remote', 'get-url', 'origin']).trim();
+    const slug = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1] ?? url;
+    const repoKey = repoKeyFromSlug(slug);
+    if (!repoKey) throw new Error(`origin remote "${url}" yields no repo key`);
+    const base = git(['merge-base', 'origin/main', 'HEAD']).trim();
+    if (!base) throw new Error('empty merge-base against origin/main');
+    const diffOut = git(['diff', '--name-only', '--end-of-options', `${base}...HEAD`]);
+    const porcelainOut = git(['status', '--porcelain']);
+    return parseObservedFiles({ diffOut, porcelainOut, repoKey });
+  } catch (e) {
+    console.error(`${DIM}note: resolve-time scope reconciliation (#2803) skipped — this clone's changed-file set could not be read (${e?.message?.split('\n')[0] || e}).${RST}`);
+    return [];
+  }
+}
+
 function transition(v) {
   const file = resolveFile(positional[0]);
   const rel = `backlog/${file}`;
@@ -307,6 +365,38 @@ function transition(v) {
     if (openKids.length && !argv.includes('--force'))
       die(`#${padded} is an epic with ${openKids.length} open child slice(s) — resolve or re-parent them first, or pass --force:\n${openKids.map((k) => `    #${k.num} — ${k.status}`).join('\n')}`);
     if (openKids.length) console.error(`${YEL}warning:${RST} ${DIM}--force: resolving epic #${padded} over ${openKids.length} open child(ren): ${openKids.map((k) => `#${k.num}`).join(', ')}${RST}`);
+  }
+  // Resolve-time scope reconciliation (#2803, epic #2804): diff the item's DECLARED `scope:` against the files
+  // this clone ACTUALLY changed, and refuse when it touched a presentation / route-graph surface it never
+  // declared. That is the self-declared-scope master bypass — declare a narrow non-UI scope, edit the UI
+  // anyway, and the UI-fidelity gate never looks at the item. Placed BEFORE applyTransition (the same shape as
+  // the #658 epic guard directly above, `--force` escape hatch included) so the contradiction is never written
+  // to disk. Fork D: only PRESENTATION drift is fatal — ordinary undeclared non-UI files are RETURNED by
+  // `reconcileScope` for a later consumer (#2812's record) and deliberately NOT printed here, because a
+  // non-empty `undeclared` set occurs on essentially every resolve and the noise would train the operator to
+  // ignore the line that also carries the real offenders.
+  //
+  // COVERAGE, stated so it is not mistaken for the enforcement point: this fires on the PRODUCER-AUTHORED
+  // resolve, in the lane clone that still holds `origin/main..HEAD` plus its dirty tree. The drain's on-land
+  // flip (`resolveLandedItem`, lane-drain.mjs) shells out to this same verb, but from a clone already synced to
+  // merged `origin/main` — the observed set there is EMPTY and this guard passes vacuously, which is the
+  // intended shape, since that call site wraps the subprocess in a `catch { flipped: false }` that would turn a
+  // hard refusal into a SILENT stranded-reopen rather than a visible failure. The real floor is #2812's
+  // gate-side check; this is a cheap producer-side speed bump.
+  if (v === 'resolve') {
+    const declared = readScopeList(before);
+    if (!declared?.length) {
+      // Fork C — an absent `scope:` PASSES with a note. An unscoped item is already refused at dispatch
+      // (`unshaped-no-scope`) and has its scope auto-prepared (#2613), so this is a pre-#2613 legacy item, not
+      // a bypass attempt; erroring would break resolves of old items for no fidelity gain.
+      console.error(`${DIM}note: #${idFromName(file)} declares no scope: — resolve-time scope reconciliation skipped (#2613 legacy item).${RST}`);
+    } else {
+      const { offending } = reconcileScope({ declared, observed: observedFilesForResolve(), routeGraph: { routeEntries: ROUTE_ENTRIES } });
+      if (offending.length && !argv.includes('--force'))
+        die(`#${idFromName(file)} touched ${offending.length} presentation/route surface(s) its scope: never declared — an under-scoped UI item cannot resolve (#2803):\n${offending.map((f) => `    ${f}`).join('\n')}\nDeclare them in scope: (and let the UI-fidelity gate see the item), or pass --force.`);
+      if (offending.length)
+        console.error(`${YEL}warning:${RST} ${DIM}--force: resolving #${idFromName(file)} over ${offending.length} undeclared presentation surface(s): ${offending.join(', ')}${RST}`);
+    }
   }
   const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
   if (res.error) die(`#${idFromName(file)} — ${res.error}`);
