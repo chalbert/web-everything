@@ -21,6 +21,15 @@ function run(args, input) {
   return JSON.parse(out);
 }
 
+/** Like `run`, but returns the raw stdout string — for the human-readable (non-`--json`) assertions. */
+function runRaw(args, input) {
+  return execFileSync('node', [CLI, ...args], {
+    encoding: 'utf8',
+    input: input ?? undefined,
+    stdio: input === undefined ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+  });
+}
+
 describe('parseArgs', () => {
   it('parses bare flags as true and =value flags as their value', () => {
     expect(parseArgs(['--blast-radius', '--size=500', '--json'])).toEqual({ 'blast-radius': true, size: '500', json: true });
@@ -84,5 +93,35 @@ describe('CLI end-to-end', () => {
     expect(r.disposition.action).toBe('ratify');
     expect(r.disposition.apply).toBe(false); // shadow default — a human still confirms
     expect(r.disposition.mode).toBe('shadow');
+  });
+});
+
+describe('#2787 session-free flip metric — CLI must distinguish metric-green from operator-armed', () => {
+  it('20 matches: stdout shows the metric AND land-mode: shadow (metric-green-but-operator-shadow) AND the un-armed sentence, never an "enforce armed" claim', () => {
+    const agreement = Array.from({ length: 20 }, () => ({ match: true }));
+    const out = runRaw(['--stdin'], JSON.stringify({ agreement }));
+    expect(out).toMatch(/flip-metric: 20\/20 consecutive matches, 0 divergence\(s\) in the last 20\/20 decided → FLIP-READY/);
+    expect(out).toMatch(/land-mode: shadow \(metric-green-but-operator-shadow\)/);
+    expect(out).toMatch(/held observe-only.*arm with landMode: enforce/);
+    expect(out).not.toMatch(/enforce armed/);
+  });
+
+  it('a below-trigger ledger: land-mode: shadow (operator-shadow-ceiling), still no armed claim', () => {
+    const agreement = Array.from({ length: 5 }, () => ({ match: true }));
+    const out = runRaw(['--stdin'], JSON.stringify({ agreement }));
+    expect(out).toMatch(/flip-metric: 5\/20 consecutive matches, 0 divergence\(s\) in the last 5\/20 decided → below trigger/);
+    expect(out).toMatch(/land-mode: shadow \(operator-shadow-ceiling\)/);
+    expect(out).not.toMatch(/enforce armed/);
+  });
+
+  it('--json on the session-free path emits { metric, landMode: { mode, reason, trail } }, metric keys unchanged', () => {
+    const agreement = Array.from({ length: 20 }, () => ({ match: true }));
+    const r = run(['--stdin', '--json'], JSON.stringify({ agreement }));
+    expect(Object.keys(r.metric).sort()).toEqual(
+      ['N', 'M', 'answer', 'consecutiveMatches', 'decided', 'divergencesInWindow', 'flipReady', 'windowSize'].sort(),
+    );
+    expect(r.landMode.mode).toBe('shadow');
+    expect(r.landMode.reason).toBe('metric-green-but-operator-shadow');
+    expect(r.landMode.trail.length).toBe(2);
   });
 });

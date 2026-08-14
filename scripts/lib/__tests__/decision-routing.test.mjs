@@ -365,6 +365,9 @@ describe('#2754 resolveLandMode — the gated flip (operator ceiling × metric)'
     const r = resolveLandMode({ records: matches(20), configMode: LAND_MODES.ENFORCE });
     expect(r.mode).toBe(LAND_MODES.ENFORCE);
     expect(r.reason).toBe('metric-green');
+    // #2787: the metric's own `answer` no longer claims the operator armed enforce — resolveLandMode's trail
+    // (not the metric) owns that claim, in the second trail entry.
+    expect(r.trail[0]).not.toMatch(/enforce armed/);
   });
 
   it('operator armed but metric below trigger → held SHADOW until the streak rebuilds', () => {
