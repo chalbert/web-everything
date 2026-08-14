@@ -12,6 +12,26 @@
  * NOT under a `.lanes/` clone. Everything else is allowed — lane clones, other repos, the scratchpad,
  * genuinely-personal `~/.claude/*` config that does NOT resolve into a repo, untracked scratch.
  *
+ * SECOND DECISION (#2997 Gap 1): deny the Edit/Write when the target sits inside a LANE CLONE whose LIVE lease
+ * belongs to ANOTHER SESSION. Until #2997 this guard read no lease, no session and no owner at all — its whole
+ * decision was the primary-vs-lane path test above — so an `Edit` to a tracked file inside a lane another
+ * session was actively working in succeeded silently. That is strictly WORSE than the Bash case #2367 already
+ * covers: `git reset --hard` at least leaves a reflog entry, whereas `Edit` overwrites with nothing to recover
+ * from. The ownership decision is `isForeignLease` (`lib/lane-lease.mjs`) and the lease location + read are
+ * `laneRootFromCwd` + `readLaneLease` imported from `guard-bash.mjs` — deliberately the SAME implementations
+ * the Bash guard uses, so the two guards can never drift on what "your lane" means.
+ *
+ * RULED (#2997): a lane holding NO live lease stays fully writable. The lease IS the ownership signal; with no
+ * lease there is no holder to protect, and the pool's own maintenance flows (provision, refresh, an operator
+ * inspecting a free lane) all operate on unleased clones. A stale lease reads as no lease, same as everywhere
+ * else. So this arm fires ONLY against a live foreign hold, never against an empty or expired one.
+ *
+ * KNOWN RESIDUAL (#2997): this arm separates SESSIONS, not sibling agents of one session. #2413's ratified
+ * statute is that no ambient env or process property tells siblings apart, so the sibling case is closed by an
+ * asserted minted slug — a per-operation channel the Bash guard has (the command string) and a file tool
+ * structurally does not. An `Edit` into a sibling's lane therefore still passes; the Bash-side #2997 arm and
+ * `lane-pool release` cover the sibling topology where a channel exists.
+ *
  * AGENT MEMORY IS NOT EXEMPT (2026-07-09, superseding a conflicting 2026-07-03 "memory is low-collision,
  * edit-in-place" note). The repo memory store is git-TRACKED project content: its SoT is `<repo>/
  * agent-memory-src/`, reachable via the `<repo>/.claude/agent-memory` symlink AND via the user-level
@@ -32,6 +52,12 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isForeignLease, isLeaseStale, describeLease } from './lib/lane-lease.mjs';
+// #2997 — the SAME lease-location + lease-read pair `guard-bash.mjs` uses for its #2367 arm. Imported rather
+// than re-implemented so the Edit/Write gate and the Bash gate can never disagree about which lane a path
+// belongs to or what its lease says. Importing guard-bash does NOT run its CLI (that block is gated on
+// `process.argv[1]` being guard-bash itself).
+import { laneRootFromCwd, readLaneLease } from './guard-bash.mjs';
 
 const PRIMARY_REPOS = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'];
 const SEP = path.sep;
@@ -65,9 +91,14 @@ export function workspaceRootOf(weRoot) {
  * Kept separate from the stdin/exit-code wrapper so it is unit-testable (mirrors guard-git-push.mjs).
  * @param {string} real  the target's resolved real path (symlinks already followed by the caller)
  * @param {string} weRoot  this guard's repo root (`<workspace>/<repo>`); `<workspace>` is its parent
+ * @param {{lease?: object|null, mySessionId?: string|null}} [ctx]  #2997 — the LIVE lease of the lane clone
+ *   `real` sits in (null when the target is not in a lane, or the lane holds no live lease), plus this
+ *   caller's durable session id. Liveness needs a clock and the lease needs an fs read, so BOTH are collected
+ *   by the CLI wrapper and injected here — keeping this function pure and unit-testable, exactly as
+ *   `guard-bash.mjs#reason` takes `foreignLiveLease` rather than reading the marker itself.
  * @returns {string|null}
  */
-export function laneGuardDecision(real, weRoot) {
+export function laneGuardDecision(real, weRoot, { lease = null, mySessionId = null } = {}) {
   if (!real) return null; // no path to judge (never block)
   const workspace = workspaceRootOf(weRoot);
   const primaries = PRIMARY_REPOS.map((r) => path.join(workspace, r) + SEP);
@@ -78,6 +109,24 @@ export function laneGuardDecision(real, weRoot) {
   // `~/.claude/projects/<slug>/memory` symlink), so a primary memory edit is denied like any tracked file.
   const inLane = real.includes(`${SEP}.lanes${SEP}`);
   const inPrimary = primaries.some((p) => (real + SEP).startsWith(p));
+
+  // #2997 Gap 1 — a lane clone is no longer unconditionally allowed. If it carries a LIVE lease held by
+  // ANOTHER session, this Edit/Write would overwrite their in-flight work with nothing to recover from (no
+  // reflog for a file write). Deny with the holder named, and a remedy — a bare refusal here would just become
+  // the next false-deny footgun (#2986/#2994), so the message says which lane to use instead and how to check.
+  if (inLane && isForeignLease({ lease, mySessionId })) {
+    return (
+      `edit BLOCKED — "${path.relative(workspace, real)}" is inside a lane clone that holds a LIVE lease owned ` +
+      `by ANOTHER session (${describeLease(lease)}). Writing here overwrites their in-flight work, and unlike a ` +
+      `Bash \`git reset\` an Edit/Write leaves no reflog entry to recover from (#2997/#2367). Work in the lane ` +
+      `YOU acquired instead:\n` +
+      `  node scripts/lane-pool.mjs status --json     # who holds what right now\n` +
+      `  node scripts/lane-pool.mjs acquire --purpose=<why>   # lease your own lane and edit THERE\n` +
+      `If that lease is stale/abandoned, release it deliberately (\`release --lane=N --force\`) rather than ` +
+      `writing over it.`
+    );
+  }
+
   if (!inPrimary || inLane) return null;
 
   const isMemory = real.includes(`${SEP}agent-memory-src${SEP}`)
@@ -113,7 +162,17 @@ if (process.argv[1] && realpathSyncSafe(process.argv[1]) === realpathSyncSafe(fi
         // Roots derived from this script's own location so the hook is portable:
         //   <workspace>/<repo>/scripts/guard-lane.mjs  →  <workspace> is the shared parent of every checkout.
         const weRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-        const msg = laneGuardDecision(resolveReal(file), weRoot);
+        const real = resolveReal(file);
+        // #2997 — collect the target lane's LIVE lease + this caller's durable session id (the impure half),
+        // then hand both to the pure decision. Keyed on `CLAUDE_CODE_SESSION_ID` FIRST, the SAME source
+        // `lane-pool.mjs acquire` stamps into `ownerSession` and `guard-bash.mjs` reads, so my own lease can
+        // never read as foreign through a string-source mismatch. The lease is located from the TARGET PATH,
+        // not the cwd — an Edit names its own file, and the reported cwd is unreliable (#2335).
+        const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || ev.session_id || null;
+        const laneRoot = laneRootFromCwd(real);
+        const raw = laneRoot ? readLaneLease(laneRoot) : null;
+        const lease = raw && !isLeaseStale(raw, Date.now()) ? raw : null; // stale ⇒ no live hold ⇒ allow
+        const msg = laneGuardDecision(real, weRoot, { lease, mySessionId });
         if (msg) { process.stderr.write('guard-lane: ' + msg + '\n'); process.exit(2); }
       }
     }

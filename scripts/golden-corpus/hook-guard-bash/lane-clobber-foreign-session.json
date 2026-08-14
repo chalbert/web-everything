@@ -1,0 +1,12 @@
+{
+  "id": "lane-clobber-foreign-session",
+  "cmd": "git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "foreignLiveLease": true
+  },
+  "basis": "#2367 row 1 — unmarked lease, ownerSession OTHER",
+  "expect": {
+    "reason": "This lane clone carries a LIVE lease held by ANOTHER session — a destructive git op here (reset --hard/clean -fd/checkout -- ./force-push) would clobber their in-flight work (#2367). If this really is your own lane, release it first (or re-acquire) rather than running this here; otherwise pick a different lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`."
+  }
+}

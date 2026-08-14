@@ -17,6 +17,9 @@ import {
   isForeignLease,
   laneMarkedSlug,
   assertedLaneSlug,
+  laneHolderSlug,
+  isContestedLease,
+  requiredAssertionSlug,
 } from '../lane-lease.mjs';
 
 const T0 = Date.parse('2026-07-05T12:00:00.000Z');
@@ -263,5 +266,108 @@ describe('laneMarkedSlug / assertedLaneSlug (#2413 — the marked-lease per-op s
     expect(assertedLaneSlug('FOO=1 LANE_SESSION=s2 git clean -fd')).toBe('s2');     // amid other assignments
     expect(assertedLaneSlug('')).toBeNull();
     expect(assertedLaneSlug(undefined)).toBeNull();
+  });
+});
+
+// ── #2997 — the minted per-holder channel, and the CONTESTED condition that arms it ──────────────────────
+//
+// #2413 built the per-holder slug and gated it on `workflowLane`, which only `--purpose=workflow-lane` sets.
+// Every other topology took an UNMARKED lease and fell back to the `ownerSession` compare, which answers
+// "mine" for every sibling agent of one session. Two recorded incidents walked through that residual:
+// 2026-08-08 (a `git reset --hard` in a lane a same-session sibling held) and 2026-08-14 (a `release --lane=5`
+// that dropped a different concurrent holder's lease). These pin the decision half of the closure.
+describe('#2997 — laneHolderSlug (the minted per-holder slug on EVERY lease)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('reads the dedicated `holder` field, independent of workflowLane', () => {
+    expect(laneHolderSlug(leaseBody({ session: 'Mac:1', acquiredAt: at, holder: 'build-2997-lane-3-ab12cd34' }))).toBe('build-2997-lane-3-ab12cd34');
+    expect(laneHolderSlug(leaseBody({ session: 'Mac:1', acquiredAt: at }))).toBeNull(); // pre-#2997 marker
+    expect(laneHolderSlug({ holder: '' })).toBeNull();
+    expect(laneHolderSlug({ holder: 42 })).toBeNull();
+    expect(laneHolderSlug(null)).toBeNull();
+  });
+  it('leaseBody OMITS holder when none is minted — a byte-identical marker to pre-#2997 (back-compat)', () => {
+    const b = leaseBody({ session: 's', acquiredAt: at });
+    expect('holder' in b).toBe(false);
+    expect(Object.keys(leaseBody({ session: 's', acquiredAt: at, holder: 'h-1' }))).toContain('holder');
+  });
+});
+
+describe('#2997 — isContestedLease (when ambient session identity provably cannot answer)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  const mine = leaseBody({ session: 'Mac:39367', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-mine' });
+  it('CONTESTED when another live lease carries the SAME ownerSession (the sibling-subagent topology)', () => {
+    const sibling = leaseBody({ session: 'Mac:39423', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-sib' });
+    expect(isContestedLease({ lease: mine, siblingLeases: [sibling] })).toBe(true);
+  });
+  it('NOT contested when the only other live lease belongs to a DIFFERENT session', () => {
+    const other = leaseBody({ session: 'Mac:2', acquiredAt: at, ownerSession: 'sess-other', holder: 'h-o' });
+    expect(isContestedLease({ lease: mine, siblingLeases: [other] })).toBe(false);
+  });
+  it('NOT contested when no sibling holds a lane — the solo topology pays nothing', () => {
+    expect(isContestedLease({ lease: mine, siblingLeases: [] })).toBe(false);
+    expect(isContestedLease({ lease: mine })).toBe(false);
+  });
+  it('a lease with no ownerSession is never contested (nothing to collide on; fail-open, as documented)', () => {
+    const idless = leaseBody({ session: 'Mac:1', acquiredAt: at, holder: 'h-x' });
+    expect(isContestedLease({ lease: idless, siblingLeases: [leaseBody({ session: 'Mac:2', acquiredAt: at, holder: 'h-y' })] })).toBe(false);
+  });
+  it('never throws on empty/absent args', () => {
+    expect(isContestedLease({})).toBe(false);
+    expect(isContestedLease()).toBe(false);
+    expect(isContestedLease({ lease: mine, siblingLeases: null })).toBe(false);
+  });
+});
+
+describe('#2997 — requiredAssertionSlug (the single shared "must this op prove itself?" decision)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  const sibling = leaseBody({ session: 'Mac:39423', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-sib' });
+  it('a MARKED lease keeps #2413 precedence — its minted session slug, contested or not (no refusal weakened)', () => {
+    const marked = leaseBody({ session: 'batch-x-lane5', acquiredAt: at, ownerSession: 'sess-shared', workflowLane: true, holder: 'h-m' });
+    expect(requiredAssertionSlug({ lease: marked, siblingLeases: [] })).toBe('batch-x-lane5');
+    expect(requiredAssertionSlug({ lease: marked, siblingLeases: [sibling] })).toBe('batch-x-lane5');
+  });
+  it('an UNMARKED but CONTESTED lease requires its minted holder slug — the #2997 arm', () => {
+    const mine = leaseBody({ session: 'Mac:39367', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-mine' });
+    expect(requiredAssertionSlug({ lease: mine, siblingLeases: [sibling] })).toBe('h-mine');
+  });
+  it('an UNMARKED UNCONTESTED lease requires nothing — the #2367 compare is sound, so no new friction', () => {
+    const mine = leaseBody({ session: 'Mac:39367', acquiredAt: at, ownerSession: 'sess-shared', holder: 'h-mine' });
+    expect(requiredAssertionSlug({ lease: mine, siblingLeases: [] })).toBeNull();
+  });
+  it('a CONTESTED lease with NO minted holder requires nothing — pre-#2997 markers stay fail-open, not wedged', () => {
+    const legacy = leaseBody({ session: 'Mac:39367', acquiredAt: at, ownerSession: 'sess-shared' });
+    expect(requiredAssertionSlug({ lease: legacy, siblingLeases: [sibling] })).toBeNull();
+  });
+  it('no lease ⇒ nothing to assert; empty args never throw', () => {
+    expect(requiredAssertionSlug({ lease: null, siblingLeases: [sibling] })).toBeNull();
+    expect(requiredAssertionSlug()).toBeNull();
+  });
+});
+
+describe('#2997 — leaseOwnedByCaller refuses the ownerSession fallback on a CONTESTED lease (the release incident)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  // The 2026-08-14 occurrence, verbatim: `Mac:39367 file-memory-rewrite-gap` ran `release --lane=5` and the
+  // pool dropped `Mac:39423 review-1222-r2` — both leases carrying one parent CLAUDE_CODE_SESSION_ID.
+  const victim = leaseBody({ session: 'Mac:39423', acquiredAt: at, ownerSession: 'sess-shared', holder: 'review-1222-r2-lane-5-9f3a1c07' });
+  it('a TARGETED release of a sibling holder\'s contested lease is REFUSED (it was ALLOWED before #2997)', () => {
+    expect(leaseOwnedByCaller({ lease: victim, session: 'Mac:39367', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(false);
+  });
+  it('…and is still ALLOWED when UNCONTESTED — #2452\'s fix for the acquire↔release ppid drift is untouched', () => {
+    expect(leaseOwnedByCaller({ lease: victim, session: 'Mac:39367', mySessionId: 'sess-shared', targeted: true, contested: false })).toBe(true);
+    expect(leaseOwnedByCaller({ lease: victim, session: 'Mac:39367', mySessionId: 'sess-shared', targeted: true })).toBe(true); // contested defaults false
+  });
+  it('the TRUE holder still releases its own contested lane by asserting the minted slug as --session', () => {
+    expect(leaseOwnedByCaller({ lease: victim, session: 'review-1222-r2-lane-5-9f3a1c07', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(true);
+    // …and the slug works for a SWEEP too, exactly like the exact-`session` match it generalizes.
+    expect(leaseOwnedByCaller({ lease: victim, session: 'review-1222-r2-lane-5-9f3a1c07', mySessionId: 'sess-shared', targeted: false, contested: true })).toBe(true);
+  });
+  it('a CONTESTED lease with no minted holder keeps the pre-#2997 fallback — never unreleasable', () => {
+    const legacy = leaseBody({ session: 'Mac:39423', acquiredAt: at, ownerSession: 'sess-shared' });
+    expect(leaseOwnedByCaller({ lease: legacy, session: 'Mac:39367', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(true);
+  });
+  it('the #2350 reserved carve-out still wins over the new holder channel (--release-reserved stays the ONE un-reserve)', () => {
+    const reserved = leaseBody({ session: 'memory-lane', acquiredAt: at, ownerSession: 'sess-shared', reserved: true, holder: 'h-res' });
+    expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(false);
+    expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: false })).toBe(false);
   });
 });

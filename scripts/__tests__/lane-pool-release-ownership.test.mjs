@@ -143,3 +143,79 @@ describe('lane-pool release ownership via ownerSession (#2452 Gap 2)', () => {
     expect(JSON.parse(sweep.out).released).toBe(1);
   });
 });
+
+// ── #2997 — the TARGETED release hole #2452's `targeted` gate did not close ──────────────────────────────
+//
+// THE LIVE OCCURRENCE (2026-08-14, ordinary delivery work, no probe and no override flag): a subagent finished
+// its task and ran `lane-pool.mjs release --lane=5` intending to drop its OWN lease
+// (`Mac:39367 file-memory-rewrite-gap`). It released a DIFFERENT concurrent holder's
+// (`Mac:39423 review-1222-r2`) and the pool accepted it, because both leases carried the same parent
+// `CLAUDE_CODE_SESSION_ID` and the ownership check resolved to "same session, therefore mine". Nothing was lost
+// only because that holder had already finished — a released lane is immediately re-issuable and the next
+// `acquire` runs `checkout -B --force` + `clean -fd` on it. So `release` alone is a data-loss path, and a fix
+// that only guarded destructive git ops would not have closed it.
+//
+// #2452 saw the mechanism and gated the `ownerSession` fallback behind `targeted`. But naming a lane only
+// proves the caller MEANT that lane, never that it HOLDS it — and this release named one.
+describe('lane-pool #2997 — a TARGETED release of a CONTESTED lease needs the minted holder slug', () => {
+  const acquireTwoSiblings = () => {
+    expect(runPool(['provision', '--count=2', ...poolArgs()], 'sess-uuid-shared').code).toBe(0);
+    // Two ordinary subagents of ONE session, each acquiring its own lane — the default shape of a delivery
+    // session, and the shape #2413's `workflowLane` marker never covers (nothing here passes that purpose).
+    const a = runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=file-memory-rewrite-gap', '--json'], 'sess-uuid-shared');
+    const b = runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=review-1222-r2', '--json'], 'sess-uuid-shared');
+    expect(a.code).toBe(0);
+    expect(b.code).toBe(0);
+    return { a: JSON.parse(a.out), b: JSON.parse(b.out) };
+  };
+
+  it('EVERY acquire now mints a per-holder slug and hands it to the acquirer (#2997)', () => {
+    const { a, b } = acquireTwoSiblings();
+    expect(a.holder).toBeTruthy();
+    expect(b.holder).toBeTruthy();
+    expect(a.holder).not.toBe(b.holder); // the one signal ownerSession structurally cannot provide
+    expect(a.holder).toMatch(/^file-memory-rewrite-gap-lane-\d+-[0-9a-f]{8}$/);
+  });
+
+  it('THE INCIDENT: a sibling\'s targeted `release --lane=N` no longer drops the other holder\'s lease', () => {
+    const { a, b } = acquireTwoSiblings();
+    // agent A releases B's lane by mistake — same CLAUDE_CODE_SESSION_ID, and it named the lane.
+    const wrong = runPool(['release', `--lane=${b.lane}`, ...poolArgs(), `--session=${a.holder}`, '--json'], 'sess-uuid-shared');
+    expect(wrong.code).toBe(0); // release logs + skips, it never hard-fails
+    expect(JSON.parse(wrong.out).released).toBe(0);
+    expect(wrong.out + wrong.err).toMatch(/CONTESTED/);
+    // the deny must NAME the remedy, or it becomes the next false-deny footgun (#2986/#2994)
+    expect(wrong.out + wrong.err).toMatch(new RegExp(`release --lane=${b.lane} --session=${b.holder}`));
+  });
+
+  it('the TRUE holder still releases its own contested lane, with no --force, by asserting its slug', () => {
+    const { b } = acquireTwoSiblings();
+    const right = runPool(['release', `--lane=${b.lane}`, ...poolArgs(), `--session=${b.holder}`, '--json'], 'sess-uuid-shared');
+    expect(right.code).toBe(0);
+    expect(JSON.parse(right.out).released).toBe(1);
+    expect(right.out + right.err).not.toMatch(/not yours/);
+  });
+
+  it('the OPERATOR escape is intact — --force still breaks a contested lease (stale-lane cleanup keeps working)', () => {
+    const { a, b } = acquireTwoSiblings();
+    const forced = runPool(['release', `--lane=${b.lane}`, '--force', ...poolArgs(), `--session=${a.holder}`, '--json'], 'sess-uuid-shared');
+    expect(forced.code).toBe(0);
+    expect(JSON.parse(forced.out).released).toBe(1);
+  });
+
+  it('MUST-ALLOW: an UNCONTESTED release is untouched — the #2452 ownerSession fallback still works alone', () => {
+    // One holder, no sibling ⇒ not contested ⇒ the durable-id fallback answers, exactly as #2452 shipped it.
+    expect(runPool(['provision', '--count=2', ...poolArgs()], 'sess-uuid-solo').code).toBe(0);
+    const solo = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=solo', '--json'], 'sess-uuid-solo').out);
+    const release = runPool(['release', `--lane=${solo.lane}`, ...poolArgs(), '--session=different-host-B', '--json'], 'sess-uuid-solo');
+    expect(release.code).toBe(0);
+    expect(JSON.parse(release.out).released).toBe(1);
+  });
+
+  it('a lease held by a genuinely DIFFERENT session is still refused, contested or not (no refusal weakened)', () => {
+    expect(runPool(['provision', '--count=2', ...poolArgs()], 'sess-uuid-A').code).toBe(0);
+    const theirs = JSON.parse(runPool(['acquire', ...poolArgs(), '--no-reset', '--purpose=theirs', '--json'], 'sess-uuid-A').out);
+    const release = runPool(['release', `--lane=${theirs.lane}`, ...poolArgs(), '--session=mine-host-B'], 'sess-uuid-B');
+    expect(release.out + release.err).toMatch(/not yours/);
+  });
+});

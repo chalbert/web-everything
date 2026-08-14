@@ -1,8 +1,9 @@
 ---
 bornAs: x9nlwgi
 kind: task
-status: open
+status: active
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-14"
 tags: [gate, footgun, lane]
 scope:
   - we:scripts/guard-lane.mjs
@@ -199,6 +200,39 @@ nothing at all — no matches, and not even a count for `-c`. That is how the fi
 concluded the Bash guard had no lease logic when it has four references to `isForeignLease`. Use
 `grep -a` on that file. Worth removing the NUL byte at some point; until then, treat a silent grep of
 it as a false negative.
+
+## Ruling (2026-08-14, delivered)
+
+**The per-holder slug is minted on EVERY acquire (option (a)), but the fail-CLOSED regime it enables is armed
+only where the ambient signal is provably ambiguous.** `we:scripts/lane-pool.mjs` stamps a `holder` slug into
+every lease and prints it to the acquirer; `we:scripts/lib/lane-lease.mjs` gains `isContestedLease` — "does
+another LIVE lease in this pool carry the same `ownerSession`?", i.e. is a sibling agent of my own session
+holding a lane right now. That predicate is the exact, script-decidable statement of "the durable session id
+cannot answer here", and it is what keeps the closure off the normal flow:
+
+- **uncontested** (one session, one lane): nothing changes. The #2367 `ownerSession` compare genuinely
+  distinguishes owner from foreigner, so no assertion is asked for. Pinned by must-ALLOW tests on both paths.
+- **contested**: the op must assert the lease's minted slug — `LANE_SESSION=<slug>` inline for a destructive
+  git op, `--session=<slug>` for a `release`. Absent or mismatched ⇒ deny, naming the slug and the remedy.
+
+Option (c) was re-probed as the card asked and rejected: the environment a subagent's Bash call sees carries
+`CLAUDE_CODE_SESSION_ID` (identical to the parent's), `CLAUDE_CODE_CHILD_SESSION=1` (a boolean, not an id) and
+`CLAUDE_PID` (the shared CLI process) — no per-subagent id. #2413's ratified statute holds.
+
+**`release` is closed, not only the destructive ops.** The 2026-08-14 occurrence was a `release`, and a released
+lane is immediately re-issuable, so `leaseOwnedByCaller` refuses its `ownerSession` fallback on a contested
+lease. `--force` still breaks any lease, so the operator's stale-lane cleanup and the lease-reaper (which always
+passes `--force`) are untouched, as is the drain's by-item `release --all-pools`.
+
+**A lane with NO live lease stays fully writable and releasable.** The lease IS the ownership signal; with no
+lease there is no holder to protect, and the pool's own flows (provision, refresh, an operator inspecting a free
+lane) all operate on unleased clones. A stale lease reads as no lease, everywhere.
+
+**Known residual, recorded deliberately.** Gap 1 (`Edit`/`Write`) closes the cross-SESSION hole only. The
+sibling case needs a per-operation assertion channel, which a Bash command string has and a file tool
+structurally does not — so an `Edit` into a sibling's lane still passes. Noted in `we:scripts/guard-lane.mjs`'s
+header. A lease minted before this shipped carries no `holder`, so it keeps the pre-#2997 fail-open behaviour
+rather than becoming unreleasable.
 
 ## Done when
 

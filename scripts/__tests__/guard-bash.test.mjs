@@ -3,9 +3,13 @@
  *   strict lane-only enforcement: a DIRECT push to `main` is blocked, a `lane/*` push is allowed, and the
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
+  siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
@@ -344,6 +348,105 @@ describe('guard-bash — marked (workflow-lane) lease slug-assertion block (#241
     expect(decide('git fetch origin && git reset --hard origin/main', marked())).toMatch(/must ASSERT the lease's own slug/);
     // the same chain, slug asserted on the destructive segment → allowed
     expect(decide(`git fetch origin && LANE_SESSION=${SLUG} git reset --hard origin/main`, marked())).toBeNull();
+  });
+});
+
+// ── #2997 — the contested-sibling arm, and the repro table it closes ─────────────────────────────────────
+describe('guard-bash — contested-sibling lease slug-assertion block (#2997)', () => {
+  const HOLDER = 'conveyor-delivery-lane-5-9f3a1c07';
+  const contested = (over = {}) => ({ primaryCwd: false, contestedHolderSlug: HOLDER, ...over });
+
+  // THE GAP, as the card's repro table states it. Rows 1–3 are the SHIPPED behaviour verified against
+  // #2367/#2413; row 4 is the hole this item closes — an unmarked lease whose ownerSession equals mine
+  // because a SIBLING AGENT of my own session holds it, which read as "my own lane" and was ALLOWED.
+  it('the 3-row repro table still decides exactly as #2367/#2413 shipped it (no refusal weakened)', () => {
+    const cmd = 'git reset --hard HEAD~3';
+    // row 1 — unmarked lease, ownerSession OTHER ⇒ DENY (#2367)
+    expect(reason(cmd, { primaryCwd: false, foreignLiveLease: true })).toMatch(/LIVE lease held by ANOTHER session/);
+    // row 2 — marked workflowLane, no slug asserted ⇒ DENY (#2413)
+    expect(reason(cmd, { primaryCwd: false, markedLeaseSlug: 'batch-x-2427' })).toMatch(/workflow-lane lease/);
+    // row 3 — unmarked lease, ownerSession MINE, and NO sibling holds a lane ⇒ ALLOW (genuinely my own lane)
+    expect(reason(cmd, { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: null })).toBeNull();
+  });
+
+  it('row 4 (THE GAP) — an unmarked lease held by a SIBLING of my own session is now DENIED', () => {
+    // Pre-#2997 this ctx produced exactly `null`: ownerSession matched, the lease was unmarked, and the
+    // guard had no third signal. The 2026-08-08 `reset --hard` in a same-session sibling's lane is this row.
+    expect(reason('git reset --hard HEAD~3', contested())).toMatch(/CONTESTED/);
+    expect(reason('git clean -fd', contested())).toMatch(/LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07/);
+    expect(reason('git checkout -- .', contested())).toMatch(/denied fail-closed/);
+    expect(reason('git push --force origin lane/x', contested())).toMatch(/CONTESTED/);
+  });
+
+  it('DENIES a destructive op that asserts the WRONG holder slug (fail-closed mismatch)', () => {
+    expect(reason('LANE_SESSION=some-other-lane-3-11112222 git reset --hard', contested())).toMatch(/a MISMATCH/);
+  });
+
+  it('ALLOWS the true holder\'s own op once it asserts the exact minted slug', () => {
+    expect(reason(`LANE_SESSION=${HOLDER} git reset --hard origin/main`, contested())).toBeNull();
+    expect(reason(`LANE_SESSION=${HOLDER} git clean -fd`, contested())).toBeNull();
+  });
+
+  it('MUST-ALLOW: an uncontested own lane is completely unaffected — no new friction on the normal flow', () => {
+    // The solo topology (one session, one lane) never sets contestedHolderSlug, so every ordinary refresh
+    // idiom stays exactly as allowed as it was before #2997.
+    const solo = { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: null };
+    expect(reason('git reset --hard origin/main', solo)).toBeNull();
+    expect(reason('git clean -fd', solo)).toBeNull();
+    expect(decide('git fetch origin -q && git reset --hard origin/main && git clean -fd', solo)).toBeNull();
+  });
+
+  it('a MARKED lease keeps #2413 precedence — the contested arm never displaces it', () => {
+    // Both signals present: the marked message (and the marked slug) must win, so #2413's refusal is intact.
+    const both = { primaryCwd: false, markedLeaseSlug: 'batch-x-2427', contestedHolderSlug: HOLDER };
+    expect(reason('git reset --hard', both)).toMatch(/workflow-lane lease/);
+    expect(reason(`LANE_SESSION=${HOLDER} git reset --hard`, both)).toMatch(/a MISMATCH/); // holder slug is NOT the marked slug
+    expect(reason('LANE_SESSION=batch-x-2427 git reset --hard', both)).toBeNull();
+  });
+
+  it('the LANE_CLOBBER_OK=1 escape passes a contested destructive op through (absence or mismatch)', () => {
+    expect(reason('LANE_CLOBBER_OK=1 git reset --hard', contested())).toBeNull();
+    expect(reason('LANE_CLOBBER_OK=1 LANE_SESSION=wrong git clean -fd', contested())).toBeNull();
+  });
+
+  it('never fires on a non-destructive command, nor from a primary cwd', () => {
+    expect(reason('git status', contested())).toBeNull();
+    expect(reason('git push origin lane/foo', contested())).toBeNull();
+    expect(reason('git reset --hard', { primaryCwd: true, contestedHolderSlug: HOLDER })).toBeNull();
+  });
+
+  it('decide() surfaces the #2997 denial across a &&-chained command (the real refresh idiom)', () => {
+    expect(decide('git fetch origin -q && git reset --hard origin/main', contested())).toMatch(/CONTESTED/);
+    expect(decide(`git fetch origin -q && LANE_SESSION=${HOLDER} git reset --hard origin/main`, contested())).toBeNull();
+  });
+});
+
+// The impure half of the #2997 Bash arm: which OTHER lanes in the pool hold a live lease. Proved against a
+// real on-disk pool layout, because that is where the "sibling" set actually comes from.
+describe('guard-bash — siblingLaneLeases reads the real pool layout (#2997)', () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'guard-bash-pool-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const pool = join(root, '.lanes', 'web-everything');
+  const NOW = Date.parse('2026-08-14T12:00:00.000Z');
+  const writeLease = (n, lease) => {
+    mkdirSync(join(pool, `lane-${n}`, '.git'), { recursive: true });
+    writeFileSync(join(pool, `lane-${n}`, '.git', '.lane-lease'), JSON.stringify(lease));
+  };
+  const live = (over) => ({ session: 's', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: 240, ...over });
+
+  it('returns every OTHER lane\'s LIVE lease, excluding this lane and any stale one', () => {
+    writeLease(3, live({ ownerSession: 'sess-shared', holder: 'h-3' }));                                   // this lane
+    writeLease(5, live({ ownerSession: 'sess-shared', holder: 'h-5' }));                                   // live sibling
+    writeLease(6, live({ ownerSession: 'sess-other', holder: 'h-6' }));                                    // live, other session
+    writeLease(7, { session: 's', acquiredAt: '2020-01-01T00:00:00.000Z', ttlMinutes: 240, holder: 'h-7' }); // STALE
+    mkdirSync(join(pool, 'lane-8'), { recursive: true });                                                   // no lease at all
+
+    const got = siblingLaneLeases(join(pool, 'lane-3'), NOW).map((l) => l.holder).sort();
+    expect(got).toEqual(['h-5', 'h-6']);
+  });
+
+  it('fails OPEN (empty) on a missing pool — a guard fault must never wedge the agent', () => {
+    expect(siblingLaneLeases(join(root, 'nope', 'lane-1'), NOW)).toEqual([]);
   });
 });
 

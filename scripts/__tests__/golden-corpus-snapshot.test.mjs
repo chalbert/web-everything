@@ -136,7 +136,9 @@ describe('Tier-A golden-corpus snapshot harness (#2273)', () => {
         .replace('{{PRIMARY_ROOT}}', WORKSPACE)
         .replace('{{LANE_ROOT}}', WORKSPACE)
         .replace('{{SCRATCHPAD_ROOT}}', SCRATCHPAD);
-      const decision = laneGuardDecision(real, WE_ROOT) ? 'deny' : 'allow';
+      // #2997 — a fixture may carry a `ctx` (the target lane's LIVE lease + the caller's session id), the
+      // impure inputs the CLI collects and hands to the pure decision. Absent ⇒ the pre-#2997 2-arg call.
+      const decision = laneGuardDecision(real, WE_ROOT, fx.ctx || {}) ? 'deny' : 'allow';
       expect(decision).toBe(fx.expect.decision);
     });
   });

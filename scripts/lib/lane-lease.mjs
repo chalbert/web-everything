@@ -96,8 +96,13 @@ export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
  *  byte-identical marker to today (back-compat). Normalization is the CALLER's job — this stays zero-import.
  *  `reserved` (#2350) marks a PERMANENT reserved lane: no TTL, never stale, off-limits to acquire/refresh/
  *  provision, dropped only by `release --release-reserved`. OMITTED when false so an ordinary acquire's marker
- *  stays byte-identical to today (same back-compat discipline as `predictedScope`). */
-export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved }) {
+ *  stays byte-identical to today (same back-compat discipline as `predictedScope`).
+ *  `holder` (#2997) is the MINTED PER-HOLDER slug every acquire now stamps — the one ownership signal that is
+ *  distinct between two SIBLING agents of the SAME session (`ownerSession` is identical for them by
+ *  construction, which is the whole #2997 gap). OMITTED when absent, so a `leaseBody` call that passes no
+ *  holder produces a byte-identical marker to today (an on-disk lease minted before #2997 simply has no
+ *  `holder`, ⇒ `laneHolderSlug` null ⇒ the pre-#2997 fail-open behaviour, unchanged). */
+export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_LEASE_TTL_MINUTES, host, pid, ownerSession, workflowLane, predictedScope, reserved, holder }) {
   return {
     session, purpose: purpose || null, acquiredAt, ttlMinutes, host: host || null,
     pid: pid ?? null, ownerSession: ownerSession ?? null,
@@ -107,6 +112,9 @@ export function leaseBody({ session, purpose, acquiredAt, ttlMinutes = DEFAULT_L
     // #2350 — a PERMANENT reserved lane. Included ONLY when true (omit-when-false keeps an ordinary acquire's
     // marker byte-identical to today); a reader keys on `isReservedLease`. A reserved lease never expires.
     ...(reserved ? { reserved: true } : {}),
+    // #2997 — the minted PER-HOLDER slug. Included ONLY when a non-empty string (omit-when-absent keeps a
+    // holder-less caller's marker byte-identical to today); a reader keys on `laneHolderSlug`.
+    ...(typeof holder === 'string' && holder ? { holder } : {}),
     // #2560 — advisory predicted file-scope, included ONLY when a non-empty array (omit-when-empty keeps a
     // scope-less acquire's marker byte-identical to today). A defensive copy so the caller can't alias in.
     ...(Array.isArray(predictedScope) && predictedScope.length ? { predictedScope: [...predictedScope] } : {}),
@@ -185,9 +193,13 @@ export function leaseOwnedBy(lease, session) {
  * "this lane"; naming the lane supplies the missing half. A sweep therefore keeps the old exact-`session`
  * rule (`leaseOwnedBy`) and anything else needs the explicit `--force`.
  */
-export function leaseOwnedByCaller({ lease, session, mySessionId, targeted = false } = {}) {
+export function leaseOwnedByCaller({ lease, session, mySessionId, targeted = false, contested = false } = {}) {
   if (!lease) return false;
   if (leaseOwnedBy(lease, session)) return true;
+  // #2997 — the MINTED PER-HOLDER slug is an ownership proof in its own right, asserted through the SAME
+  // `--session=` / `LANE_SESSION=` channel the exact-`session` match above already reads. This is what lets a
+  // holder release its own lane in the contested topology the `ownerSession` fallback below now refuses.
+  if (laneHolderSlug(lease) && !!session && laneHolderSlug(lease) === session) return true;
   if (!targeted) return false; // a SWEEP never widens past the exact-session match (see #2452 review, above)
   if (lease.workflowLane) return false; // marked lease: ownership is the minted slug ONLY (step 1 above)
   // #2452 review — a RESERVED lease is never releasable through the ownerSession fallback. #2350 makes
@@ -201,7 +213,72 @@ export function leaseOwnedByCaller({ lease, session, mySessionId, targeted = fal
   // unmarked lease that recorded no `ownerSession`, which is strictly weaker than the exact-`session` match
   // this fallback was meant to supplement. Ownership now needs both sides present AND equal; anything else
   // falls back to the explicit `--force`.
+  // #2997 — …and when the lease is CONTESTED, `ownerSession` may not answer at all. On 2026-08-14 a subagent
+  // ran `release --lane=5` meaning its OWN lease and dropped a DIFFERENT concurrent holder's, because both
+  // leases carried the same parent `CLAUDE_CODE_SESSION_ID` and this fallback resolved to "same session,
+  // therefore mine". #2452 already recorded WHY (`ownerSession` answers "same session", never "this lane") and
+  // gated the fallback behind `targeted` — but naming a lane only proves the caller MEANT that lane, not that
+  // it HOLDS it, and the incident was a targeted `--lane=5`. So when another LIVE lease in the pool shares this
+  // lease's `ownerSession` (`isContestedLease`), the ambient id is provably ambiguous and this fallback is
+  // refused: ownership must come from the minted `holder` slug above (or the explicit `--force`). A lease with
+  // no minted `holder` cannot be proven either way, so it keeps the pre-#2997 fallback rather than becoming
+  // unreleasable — the documented degraded mode for a marker written before this shipped.
+  if (contested && laneHolderSlug(lease)) return false;
   return !!lease.ownerSession && !!mySessionId && lease.ownerSession === mySessionId;
+}
+
+// #2997 — the minted PER-HOLDER ownership channel, generalizing #2413's marked-lane slug to EVERY lease ──────
+//
+// #2413 built the right answer (a slug minted per holder and asserted per operation) but gated it on the
+// `workflowLane` marker, which only `--purpose=workflow-lane` sets. Every other concurrent topology — ad-hoc
+// subagents, the conveyor's `conveyor-delivery`/`conveyor-fix`/`conveyor-prepare-*` dispatch — takes an
+// UNMARKED lease and falls back to the `ownerSession` compare, which cannot separate siblings of one session.
+// #2997 closes that residual by minting a `holder` slug on EVERY acquire and asserting it where the ambient
+// signal is provably ambiguous. The regime is scoped to exactly that case (see `isContestedLease`) so the
+// ordinary solo topology — one session, one lane — pays no new friction at all.
+
+/** The minted per-holder slug this lease carries, or null (an unmarked pre-#2997 marker, or a caller that
+ *  minted none). Pure. Distinct from `laneMarkedSlug`: that one answers only for a `workflowLane` lease and
+ *  reads the `session` field; this reads the dedicated `holder` field every acquire now stamps. */
+export function laneHolderSlug(lease) {
+  return lease && typeof lease.holder === 'string' && lease.holder ? lease.holder : null;
+}
+
+/**
+ * #2997 — is `lease` CONTESTED: does at least one OTHER live lease share its `ownerSession`? Pure — the caller
+ * supplies `siblingLeases` (the other lanes' leases, already filtered to LIVE ones and excluding this lane).
+ *
+ * This is the precise, script-decidable statement of "ambient session identity cannot answer here". When no
+ * sibling of this session holds another lane, `ownerSession` DOES distinguish owner from foreigner and the
+ * #2367 compare is sound — so nothing changes for the ordinary solo topology. The moment a second live lease
+ * carries the same `ownerSession`, that compare answers "mine" for every one of those holders, which is the
+ * exact condition behind both recorded incidents (2026-08-08 `reset --hard`, 2026-08-14 `release --lane=5`).
+ *
+ * A lease with no `ownerSession` is never contested — with no identity on the lease there is no shared id to
+ * collide on, and the surrounding checks are already in their documented fail-open degraded mode.
+ */
+export function isContestedLease({ lease, siblingLeases = [] } = {}) {
+  if (!lease || !lease.ownerSession) return false;
+  return (Array.isArray(siblingLeases) ? siblingLeases : []).some(
+    (s) => s && s !== lease && s.ownerSession === lease.ownerSession,
+  );
+}
+
+/**
+ * #2997 — the slug an operation must ASSERT to act on this lane, or null when no assertion is required.
+ * Pure; the single place both guards and `lane-pool release` agree on what "prove it is yours" means.
+ *
+ *   • a MARKED (`workflowLane`) lease ⇒ its #2413 minted `session` slug, ALWAYS (contested or not) — that
+ *     regime is unchanged and keeps precedence, so no existing refusal is weakened here.
+ *   • an UNMARKED but CONTESTED lease ⇒ its minted `holder` slug (#2997) — the new arm.
+ *   • anything else ⇒ null: the #2367 `ownerSession` compare is sound (uncontested), or there is no slug to
+ *     assert (a pre-#2997 marker), which keeps the documented fail-open posture rather than wedging a lane.
+ */
+export function requiredAssertionSlug({ lease, siblingLeases = [] } = {}) {
+  const marked = laneMarkedSlug(lease);
+  if (marked) return marked;
+  if (!isContestedLease({ lease, siblingLeases })) return null;
+  return laneHolderSlug(lease);
 }
 
 // #2413 — the minted-slug ownership channel for a MARKED (workflowLane) lease. In the parallel-/workflow

@@ -8,9 +8,13 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { laneGuardDecision, resolveReal, workspaceRootOf } from '../guard-lane.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 // A fake constellation: <workspace>/{webeverything,frontierui} primaries + a <workspace>/.lanes/ clone.
 const WORKSPACE = '/ws';
@@ -90,6 +94,106 @@ describe('laneGuardDecision (pure)', () => {
 
   it('never blocks on an empty path', () => {
     expect(laneGuardDecision('', WE_ROOT)).toBe(null);
+  });
+});
+
+// ── #2997 Gap 1 — the Edit/Write path finally has a lease check ──────────────────────────────────────────
+//
+// Until #2997 this guard's whole decision was the primary-vs-lane path test above: `laneGuardDecision(real,
+// weRoot)` took no lease, no session and no owner, so an Edit to a tracked file inside a lane ANOTHER session
+// was actively working in succeeded silently. That is strictly worse than the Bash case #2367 already covers —
+// `git reset --hard` leaves a reflog entry, an Edit leaves nothing to recover from.
+describe('#2997 Gap 1 — laneGuardDecision refuses a write into a FOREIGN-leased lane', () => {
+  const LANE_FILE = p('.lanes', 'web-everything', 'lane-3', 'scripts', 'x.mjs');
+  const leaseOf = (ownerSession, extra = {}) => ({
+    session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: '2026-08-14T12:00:00.000Z',
+    ttlMinutes: 240, ownerSession, ...extra,
+  });
+
+  it('DENIES an Edit into a lane whose LIVE lease belongs to another session', () => {
+    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+    expect(msg).toMatch(/BLOCKED/);
+    expect(msg).toMatch(/LIVE lease owned by ANOTHER session/);
+  });
+
+  it('the deny NAMES the holder and the remedy — a bare refusal is the next false-deny footgun (#2986/#2994)', () => {
+    const msg = laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+    expect(msg).toMatch(/leased by Mac:39423 \(review-1222-r2\)/); // who holds it
+    expect(msg).toMatch(/lane-pool\.mjs acquire/);                  // what to do instead
+    expect(msg).toMatch(/release --lane=N --force/);                // and how to reclaim a stale one
+  });
+
+  it('MUST-ALLOW: my OWN lane is untouched — no new friction on the normal flow', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-MINE'), mySessionId: 'sess-MINE' })).toBe(null);
+  });
+
+  it('RULED (#2997): a lane with NO live lease stays writable — the lease IS the ownership signal', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: null, mySessionId: 'sess-MINE' })).toBe(null);
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, {})).toBe(null);        // no ctx at all (the 2-arg callers)
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT)).toBe(null);
+  });
+
+  it('DEGRADED (no ownerSession on the lease, or no session id here) stays fail-OPEN, as isForeignLease specifies', () => {
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf(null), mySessionId: 'sess-MINE' })).toBe(null);
+    expect(laneGuardDecision(LANE_FILE, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: null })).toBe(null);
+  });
+
+  it('the PRIMARY refusal still wins and is unchanged — no existing deny is weakened by the new arm', () => {
+    // A primary path is not in a lane, so the lease arm cannot fire; the #2123 message must survive intact.
+    const msg = laneGuardDecision(p('webeverything', 'scripts', 'x.mjs'), WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' });
+    expect(msg).toMatch(/shared PRIMARY checkout/);
+    expect(msg).not.toMatch(/LIVE lease/);
+  });
+
+  it('applies to a lane in ANY pool, not just web-everything', () => {
+    const plateauFile = p('.lanes', 'plateau-app', 'lane-2', 'src', 'a.ts');
+    expect(laneGuardDecision(plateauFile, WE_ROOT, { lease: leaseOf('sess-OTHER'), mySessionId: 'sess-MINE' })).toMatch(/BLOCKED/);
+  });
+});
+
+// The impure half: the CLI wrapper must locate the lease from the TARGET PATH (an Edit names its own file;
+// the reported cwd is unreliable, #2335) and treat a STALE lease as no lease.
+describe('#2997 Gap 1 — the guard-lane CLI reads the target lane\'s lease off disk', () => {
+  const root = mkdtempSync(path.join(realpathSync(tmpdir()), 'guard-lane-lease-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const lane = path.join(root, '.lanes', 'web-everything', 'lane-4');
+  const target = path.join(lane, 'scripts', 'x.mjs');
+  const runHook = (lease, sessionId) => {
+    mkdirSync(path.join(lane, '.git'), { recursive: true });
+    mkdirSync(path.join(lane, 'scripts'), { recursive: true });
+    writeFileSync(target, '// x\n');
+    if (lease) writeFileSync(path.join(lane, '.git', '.lane-lease'), JSON.stringify(lease));
+    else rmSync(path.join(lane, '.git', '.lane-lease'), { force: true });
+    const guard = path.join(realpathSync(path.join(here, '..')), 'guard-lane.mjs');
+    const res = spawnSync(process.execPath, [guard], {
+      input: JSON.stringify({ tool_input: { file_path: target } }),
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId, LANE_GUARD_OFF: '' },
+      encoding: 'utf8',
+    });
+    return { code: res.status, err: res.stderr || '' };
+  };
+  const liveLease = (ownerSession) => ({
+    session: 'Mac:39423', purpose: 'review-1222-r2', acquiredAt: new Date(Date.now() - 60_000).toISOString(),
+    ttlMinutes: 240, ownerSession,
+  });
+
+  it('EXITS 2 (deny) for a write into a lane holding another session\'s live lease', () => {
+    const r = runHook(liveLease('sess-OTHER'), 'sess-MINE');
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/LIVE lease owned by ANOTHER session/);
+  });
+
+  it('exits 0 (allow) for the SAME write when the lease is my own', () => {
+    expect(runHook(liveLease('sess-MINE'), 'sess-MINE').code).toBe(0);
+  });
+
+  it('exits 0 (allow) when the foreign lease is STALE — a stale lease is no live hold', () => {
+    const stale = { ...liveLease('sess-OTHER'), acquiredAt: '2020-01-01T00:00:00.000Z' };
+    expect(runHook(stale, 'sess-MINE').code).toBe(0);
+  });
+
+  it('exits 0 (allow) when the lane holds no lease at all (the #2997 ruling)', () => {
+    expect(runHook(null, 'sess-MINE').code).toBe(0);
   });
 });
 

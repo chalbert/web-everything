@@ -26,8 +26,8 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`.
- *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug)
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane.
+ *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease in the pool shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
@@ -70,7 +70,7 @@
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname } from 'node:path';
 import {
@@ -85,6 +85,8 @@ import {
   describeLease,
   leaseOwnedBy,
   leaseOwnedByCaller,
+  laneHolderSlug,
+  isContestedLease,
 } from './lib/lane-lease.mjs';
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
@@ -469,12 +471,34 @@ function liveLease(dir, nowMs, ttlMs) {
   const lease = readLease(dir);
   return lease && !isLeaseStale(lease, nowMs, ttlMs) ? lease : null;
 }
+// #2997 — every OTHER lane's LIVE lease in `repo`'s pool. The input to `isContestedLease`, i.e. "is a sibling
+// agent of this lease's session holding a lane right now?". Best-effort: any read failure just yields a shorter
+// list, which can only make a lease read as UNcontested (today's behaviour) — never a spurious refusal.
+function liveLeasesInPoolExcept(repo, lane, nowMs, ttlMs) {
+  return existingLanes(repo)
+    .filter((n) => n !== lane)
+    .map((n) => liveLease(laneDir(repo, n), nowMs, ttlMs))
+    .filter(Boolean);
+}
 // Session identity must be STABLE across a consumer's separate `acquire` then `release` invocations, yet
 // DISTINCT between concurrent sessions on one host (the whole point — session B must not release session A's
 // lane). A per-process pid is unstable (each CLI call is a new pid); a bare hostname collides across
 // sessions. So: an explicit `--session` (what every flow should pass) wins; else `LANE_SESSION` env; else
 // the parent shell's pid (`ppid` — the same shell drives a flow's acquire+release, and differs per session).
 const defaultSession = () => flags.session || process.env.LANE_SESSION || `${hostname()}:${process.ppid}`;
+
+// #2997 — mint the PER-HOLDER slug stamped into every lease's `holder` field. This is the ownership signal that
+// `ownerSession` structurally cannot be: two sibling agents of one session inherit the SAME
+// `CLAUDE_CODE_SESSION_ID` verbatim (#2413's ratified statute), so ANY ambient env/process property reads
+// identically for both — which is exactly how a 2026-08-14 `release --lane=5` dropped a concurrent holder's
+// lease. A random component is what makes the slug un-shareable by accident; it is handed to the acquirer (and
+// only the acquirer) on stdout, so re-asserting it is proof of holding, not of belonging to the session.
+// Shaped `<purpose>-<lane>-<rand>` so a human/agent reading a deny message can tell whose it is, and restricted
+// to `assertedLaneSlug`'s charset so it survives an inline `LANE_SESSION=<slug>` assertion unchanged.
+function mintHolderSlug(dir, purpose) {
+  const tag = String(purpose || 'lane').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'lane';
+  return `${tag}-${basename(dir)}-${randomBytes(4).toString('hex')}`;
+}
 
 // ── core ops ──────────────────────────────────────────────────────────────────────────────────────
 function cloneLane(repo, n) {
@@ -713,10 +737,12 @@ function cmdRefresh(repo) {
 // clone: held ⇒ refresh/provision won't reset it out from under the drain (item 2's "a lane may sit on main"
 // is just the reset-to-origin/main state below, now protected by the hold).
 
-// Try to claim a specific lane's marker atomically (O_EXCL). Returns true iff THIS call created the marker.
-// A live lease owned by someone else ⇒ false (taken — #2337(b), NOT overridable by `--force`; the deliberate
-// override is `release --force` then re-acquire, per the ruling's "no new flag" contract). A stale marker ⇒
-// reclaimed (rm + retry, the small documented race). Own live lease ⇒ true (idempotent re-acquire).
+// Try to claim a specific lane's marker atomically (O_EXCL). Returns the claim's minted HOLDER SLUG (a truthy
+// string, #2997) iff THIS call created the marker, else null. A live lease owned by someone else ⇒ null (taken
+// — #2337(b), NOT overridable by `--force`; the deliberate override is `release --force` then re-acquire, per
+// the ruling's "no new flag" contract). A stale marker ⇒ reclaimed (rm + retry, the small documented race).
+// Own live lease ⇒ claimed (idempotent re-acquire) — and that path PRESERVES the existing `holder` slug, so an
+// idempotent re-acquire never invalidates the slug the current holder is already asserting.
 function tryClaimLane(dir, session, nowMs, ttlMs) {
   // #2367 — stamp a DURABLE session identity (`CLAUDE_CODE_SESSION_ID`, exposed to this subprocess) so a later
   // guard can tell "my own lease" from another live session's AUTHORITATIVELY — it is stable across a session's
@@ -725,11 +751,18 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
   // SOLE ownership signal (r2 removed the pid-ancestry fallback, whose chain overlap over-matched exactly that
   // shared-ancestor topology and so failed open while looking protective — see `isForeignLease`, lane-lease.mjs).
   // `pid` stays as an informational-only field (human-readable `status`/debug), never used for ownership.
-  const body = JSON.stringify(
+  const mintedHolder = mintHolderSlug(dir, flags.purpose);
+  const bodyFor = (holder) => JSON.stringify(
     leaseBody({
       session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(),
       host: hostname(), pid: process.pid,
       ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+      // #2997 — the minted PER-HOLDER slug, stamped on EVERY acquire rather than only on a `workflowLane` one.
+      // #2413 built this exact channel but gated it on that marker, so every other concurrent topology (ad-hoc
+      // subagents, the conveyor's `conveyor-*` dispatch) kept falling back to the `ownerSession` compare that
+      // cannot separate siblings. Minting it universally is what lets the guards and `release` demand proof of
+      // HOLDING (not merely of belonging to the same session) wherever that compare is provably ambiguous.
+      holder,
       // #2413 — `--purpose=workflow-lane` MARKS the lease: it stamps the dedicated `workflowLane: true` field
       // (not free-text purpose) that switches the destructive-op guard fail-closed for this lane, requiring a
       // sibling parallel lane to assert this lease's own minted `session` slug before it can clobber the clone.
@@ -746,18 +779,27 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
   ) + '\n';
   const file = LEASE_MARKER(dir);
   try {
-    writeFileSync(file, body, { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
-    return true;
+    writeFileSync(file, bodyFor(mintedHolder), { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
+    return mintedHolder;
   } catch (e) {
     if (e.code !== 'EEXIST') throw e;
   }
   const existing = readLease(dir);
-  if (leaseOwnedBy(existing, session)) { writeFileSync(file, body); return true; } // refresh our own hold
+  if (leaseOwnedBy(existing, session)) {
+    // #2997 — an IDEMPOTENT re-acquire of our own hold KEEPS the existing `holder` slug. Re-minting here would
+    // silently invalidate the slug the current holder is already asserting in its commands, turning its next
+    // legitimate destructive op into a mismatch deny — a self-inflicted false refusal.
+    const holder = laneHolderSlug(existing) || mintedHolder;
+    writeFileSync(file, bodyFor(holder));
+    return holder;
+  }
   if (isLeaseStale(existing, nowMs, ttlMs)) {
     rmSync(file, { force: true });                 // reclaim a stale lease (unlink→create race: acceptable)
-    try { writeFileSync(file, body, { flag: 'wx' }); return true; } catch { return false; }
+    // A reclaim is a NEW hold by a NEW holder, so it mints a fresh slug — the dead owner's slug must not carry
+    // over, or a returning zombie would still assert its way past the guard.
+    try { writeFileSync(file, bodyFor(mintedHolder), { flag: 'wx' }); return mintedHolder; } catch { return null; }
   }
-  return false; // a LIVE lease held by another session — this lane is taken, even with --force
+  return null; // a LIVE lease held by another session — this lane is taken, even with --force
 }
 
 // #2748 — the acquire-native reaper pass. Reclaims a PROVABLY-DEAD lease in `repo`'s pool before a fresh
@@ -878,6 +920,9 @@ function cmdAcquire(repo) {
   // reset path below can be skipped for an idempotent re-reserve (never `reset --hard` an already-populated
   // memory lane out from under itself).
   let targetWasReserved = false;
+  // #2997 — the per-holder slug this acquire minted, reported back to the acquirer below. It is the ONLY thing
+  // that distinguishes this holder from a sibling agent of the same session, so the acquirer must receive it.
+  let holderSlug = null;
   if (flags.lane !== undefined) {
     // Explicit lane: honor it or fail loudly (don't silently divert to another).
     const n = Number(flags.lane);
@@ -898,7 +943,8 @@ function cmdAcquire(repo) {
       }
       targetWasReserved = true; // an idempotent re-reserve — skip the reset so accrued content survives
     }
-    if (!tryClaimLane(dir, session, nowMs, ttlMs)) {
+    holderSlug = tryClaimLane(dir, session, nowMs, ttlMs);
+    if (!holderSlug) {
       const lease = readLease(dir);
       // #2350 — a RESERVED (permanent) lane is off-limits to an ordinary acquire; point at the deliberate
       // un-reserve (`release --release-reserved`), NOT `release --force` (which never drops a reserved lease).
@@ -926,7 +972,8 @@ function cmdAcquire(repo) {
       const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
       const pick = chooseFreeLane(infos, nowMs, ttlMs);
       if (pick === null) fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
-      if (tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs)) chosen = pick;
+      const claimed = tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs);
+      if (claimed) { chosen = pick; holderSlug = claimed; }
       else excluded.add(pick); // a concurrent acquire won this one — try the next
     }
   }
@@ -1013,7 +1060,15 @@ function cmdAcquire(repo) {
   // mis-points the shared pool-root sibling clones at itself. The pool-root siblings are a provision/refresh
   // concern; a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
   log(`${flags.reserve ? 'RESERVED' : 'acquired'} lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''}${flags.base ? ` @ base=${flags.base}` : ''}${flags.reserve ? ' — PERMANENT, off-limits to acquire/refresh/provision (#2350)' : ''} → ${dir}`);
-  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
+  // #2997 — hand the acquirer its minted holder slug. This is the one signal that separates THIS holder from a
+  // sibling agent of the same session, so it must reach the acquirer and nowhere else. It is needed only in the
+  // CONTESTED topology (another live lease shares this session id), which is exactly when the guards and
+  // `release` ask for it — hence "keep it if a sibling is live", not "prefix everything from now on".
+  // Rides stderr (`log`) so `--json`-less stdout stays the clean lane path the `LANE=$(…)` contract depends on.
+  log(`  holder slug: ${holderSlug} — if a SIBLING agent of your session also holds a lane, prove this one is yours:`);
+  log(`    release:        node scripts/lane-pool.mjs release --lane=${chosen} --session=${holderSlug}`);
+  log(`    destructive op: LANE_SESSION=${holderSlug} git reset --hard origin/${repo.branch}`);
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
   else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
 }
 
@@ -1115,6 +1170,8 @@ function cmdRelease(repo) {
   if (flags['all-pools']) return cmdReleaseAllPools(); // #2667 — cross-pool release-by-session
   const session = defaultSession();
   const force = !!flags.force;
+  const nowMs = Date.now();
+  const ttlMs = ttlMsFromFlags();
   let targets;
   // #2452 review — `targeted` is load-bearing for ownership, not cosmetic: only a release that NAMES one lane
   // may use the durable-`ownerSession` fallback below. A `--all` sweep keeps the exact-`session` rule.
@@ -1148,12 +1205,31 @@ function cmdRelease(repo) {
     // session's separate Bash-tool calls. #2452 review — the `--all` SWEEP is deliberately excluded: sibling
     // conveyor lanes are UNMARKED yet share one `ownerSession`, so a bare `release --all` would otherwise drop
     // a sibling's live hold with no `--force`. Naming the lane is what makes the intent unambiguous.
+    // #2997 — …and `targeted` alone was NOT enough. On 2026-08-14 a subagent ran `release --lane=5` meaning
+    // its OWN lease and released a DIFFERENT concurrent holder's: both leases carried the same parent
+    // `CLAUDE_CODE_SESSION_ID`, so the step-2 fallback resolved to "same session, therefore mine". Naming a
+    // lane proves the caller MEANT that lane, never that it HOLDS it. So when the lease is CONTESTED — another
+    // LIVE lease in this pool shares its `ownerSession`, i.e. a sibling agent of mine is holding a lane right
+    // now — the ambient id is provably ambiguous and the fallback is refused; ownership must come from the
+    // minted `holder` slug (passed as `--session=`/`LANE_SESSION=`) or the explicit `--force`. Nothing was lost
+    // in that incident only because the other holder had already finished; a released lane is immediately
+    // re-issuable and the next `acquire` resets it, so `release` alone is a data-loss path, not a bookkeeping one.
     const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
-    if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId, targeted })) {
+    const contested = isContestedLease({ lease, siblingLeases: liveLeasesInPoolExcept(repo, n, nowMs, ttlMs) });
+    if (!bypassOwnership && !leaseOwnedByCaller({ lease, session, mySessionId, targeted, contested })) {
+      const holder = laneHolderSlug(lease);
       log(
         `  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break` +
-        (!targeted && leaseOwnedByCaller({ lease, session, mySessionId, targeted: true })
+        (!targeted && leaseOwnedByCaller({ lease, session, mySessionId, targeted: true, contested })
           ? ` (a --all sweep never releases on the ownerSession match alone — re-run as \`release --lane=${n}\` to release just this one)`
+          : '') +
+        (contested && holder
+          ? `\n    This lease is CONTESTED (#2997): a SIBLING agent of your own session holds another lane right now,` +
+            ` so the session id reads "mine" for BOTH of you and cannot tell your lane from theirs — which is how a` +
+            ` release meant for one lane dropped another holder's lease on 2026-08-14.` +
+            `\n    If lane-${n} really is yours, prove it with the holder slug \`acquire\` printed for it:` +
+            `\n      node scripts/lane-pool.mjs release --lane=${n} --session=${holder}` +
+            `\n    If it is not, you probably meant the lane YOU acquired — check \`lane-pool.mjs status\` first.`
           : ''),
       );
       continue;

@@ -1,0 +1,12 @@
+{
+  "id": "lane-clobber-marked-unasserted",
+  "cmd": "git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "markedLeaseSlug": "batch-x-2427"
+  },
+  "basis": "#2413 row 2 — marked workflowLane, no slug asserted",
+  "expect": {
+    "reason": "This lane clone holds a LIVE workflow-lane lease (#2413) — a destructive git op here must ASSERT the lease's own slug inline: prefix `LANE_SESSION=batch-x-2427` (e.g. `LANE_SESSION=batch-x-2427 git reset --hard origin/main`). The slug was ABSENT, so this is denied fail-closed: a sibling parallel lane cannot be told apart by ambient session identity, so only the minted slug proves ownership. If this really is your lane, re-assert its slug; otherwise pick another lane. Sanctioned override (rare): prefix `LANE_CLOBBER_OK=1`."
+  }
+}
