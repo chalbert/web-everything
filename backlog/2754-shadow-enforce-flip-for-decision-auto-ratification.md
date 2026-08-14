@@ -3,8 +3,11 @@ bornAs: xu92z8m
 kind: story
 size: 3
 parent: "2753"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateStarted: "2026-08-14"
+dateResolved: "2026-08-14"
+graduatedTo: f6384ac5
 scope: ["we:scripts/lib/decision-routing.mjs", "we:scripts/conveyor/decision-route.mjs"]
 relatedTo: ["2704"]
 tags: [conveyor, decision, ratification, shadow, session-free]
@@ -38,5 +41,19 @@ The exact N/M and the "match" predicate (identical ruling vs. same disposition c
 - A named metric answers "how many consecutive matches, zero divergences, over the last M?" and is readable without a session.
 - The flip from `shadow` to `enforce` is defined as a one-line ruling gated on that metric crossing the trigger — and blocked (counter reset) by any divergence.
 - Reuses the #2704 disposer and the #2675 `LAND_MODES` seam — no second disposer or auto-ratify engine is built.
+
+## Resolution note (2026-08-14)
+
+Found already built during a preparation sweep — this card sat `open` while the work had landed weeks
+earlier. Commit `f6384ac5` ("WE #2754: define + gate the shadow->enforce flip for decision auto-ratification")
+implements exactly this scope: `computeAgreementMetric` and `resolveLandMode` in
+`we:scripts/lib/decision-routing.mjs`, and `ENFORCE_FLIP_TRIGGER` frozen at `N=20, M=20` (matching this card's
+starting proposal exactly). Verified each acceptance bullet against the live code before resolving, not taken
+on the commit title alone. The card was simply never transitioned — a bookkeeping gap, not a build gap.
+
+One real follow-up surfaced by this same code, filed separately: [#2787] — the session-free CLI path
+(`we:scripts/conveyor/decision-route.mjs`) never resolves the operator's `landMode` in its metric-only branch,
+so `computeAgreementMetric`'s `"FLIP-READY (enforce armed)"` string is printed even when the operator has not
+armed enforce. Observability-only, no control-flow risk, but a real operator-facing misread.
 
 locus: we
