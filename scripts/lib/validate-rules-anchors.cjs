@@ -304,21 +304,213 @@ function validateInvariantEnforcers(invariants, { exists, isOpenItem, anchorInde
   return errors;
 }
 
-/** The backlog item ids that are still LIVE (any status other than resolved/dropped), by NNN and by bornAs hash.
- *  Reads the backlog dir; the pure rule above takes the resulting predicate injected. */
-function collectOpenItemIds(backlogDir) {
-  const open = new Set();
+/** Every backlog item's real frontmatter `status`, keyed by NNN AND by bornAs hash. Reads the backlog dir;
+ *  the pure rules above/below take the resulting lookup injected. (#2842 widened this from the live/not-live
+ *  Set below to the actual value — the status word is what a prose status claim has to be checked against.) */
+function collectItemStatuses(backlogDir) {
+  const statuses = new Map();
   for (const name of fs.readdirSync(backlogDir)) {
     if (!name.endsWith('.md')) continue;
     const fm = (fs.readFileSync(path.join(backlogDir, name), 'utf8').match(/^---\n([\s\S]*?)\n---/) || [])[1] || '';
     const status = (fm.match(/^status:\s*["']?([\w-]+)/m) || [])[1];
-    if (!status || status === 'resolved' || status === 'dropped') continue;
+    if (!status) continue;
     const num = (name.match(/^(\d+)-/) || [])[1];
-    if (num) open.add(num);
+    if (num) statuses.set(num, status);
     const born = (fm.match(/^bornAs:\s*["']?([\w-]+)/m) || [])[1];
-    if (born) open.add(born);
+    if (born) statuses.set(born, status);
+  }
+  return statuses;
+}
+
+/** The backlog item ids that are still LIVE (any status other than resolved/dropped), by NNN and by bornAs hash.
+ *  A thin derivation over `collectItemStatuses`; the pure rule above takes the resulting predicate injected. */
+function collectOpenItemIds(backlogDir) {
+  const open = new Set();
+  for (const [id, status] of collectItemStatuses(backlogDir)) {
+    if (status === 'resolved' || status === 'dropped') continue;
+    open.add(id);
   }
   return open;
+}
+
+// ── #2842 · A STATUS CLAIM ABOUT A CITED #NNN MUST MATCH THAT ITEM'S REAL STATUS ──────────────────────────────
+//
+// THE DRIFT THIS STOPS. Statute prose annotates its cites with the cited item's settledness — `(#2398, resolved
+// — …)`, "#2785 is `status: open`", "owed on the **OPEN** line (#2840/#2785)". Nothing holds those annotations
+// true: the claim goes false the day the cited item's status changes, and no reader of the statute can tell. The
+// drift is not hypothetical — six sentences in platform-decisions.md asserted #2785/#2840 were OPEN months after
+// both resolved, and downstream rules composed on top of "not yet live".
+//
+// WHAT COUNTS AS A CLAIM — the tight grammar, chosen by measurement, not argument. A LOOSE grammar (any status
+// word within ~60 chars of a cite) was prototyped first: 52–124 candidates, ~75–95% false positives. It fires on
+// "`open→active→resolved` backlog flow" (a state machine), on "closed scored axes + open findings" (a noun), on
+// "without --session a scaffolded item is born `status: open`" (a mechanism, not the nearby cite). A gate that is
+// three-quarters noise gets suppressed — the same reasoning #2844's scope note above records for not classifying
+// statute prose heuristically. The TIGHT grammar below — the CITE ITSELF carries the status token — measured 0
+// false positives at every tuning tried. Only that ships. Three patterns:
+//
+//   A — ADJACENT PARENTHETICAL. `#NNNN` then `,` or `(`, an optional hedge, then a bare status word.
+//   B — EXPLICIT `status:` TOKEN. `#NNNN` … a copula (`is`/`are`/`stays`/`remains`/`still`) … `` `status: X` ``,
+//       within a short same-line adjacency.
+//   C — A DELIBERATE UPPERCASE `OPEN` governing the cite run that immediately follows it. Every cite in that run
+//       must be non-`resolved` and non-`dropped`.
+//
+// THREE GUARDS, each found by prototyping against the live corpus; guards 1 and 2 each have a real line that goes
+// wrong without them, so neither is decorative:
+//   1. `(?![-\w])` after the status word. Without it `#086 (open-core constellation)` is a false positive —
+//      "open" matched inside "open-core".
+//   2. C's run stops at the CLAUSE BOUNDARY, not a flat character budget. A 120-char window swept #2851 into
+//      "owed on the OPEN items #2840/#2785, tracked as outstanding preventions on #2851" — the OPEN claim governs
+//      the slash-run, not the trailing attribution. But the boundary is the END OF THE GOVERNED PARENTHETICAL,
+//      not the first punctuation mark: a naive `[^,;.)]` stop drops #2785 out of "(#2840 — …; #2785 — …)" and
+//      under-reports.
+//   3. B binds the NEAREST PRECEDING cite, not the leftmost. "**#2771**'s implementation **#2785** is
+//      `status: open`" — a left-to-right scan attributes the claim to #2771 and would go SILENT on real drift the
+//      moment the two cites' statuses differ. So B anchors on the `` `status: X` `` token and scans BACKWARDS.
+//   (2 and 3 are both the attribution-precision class #2861 owns.)
+//
+// DELIBERATELY OUT OF SCOPE: soft precedent framing with no status word — `precedent #840/#844/#477`,
+// `#1163 (golden precedent)`. Nearly all of the statute's 28 "precedent" uses are lineage lists making no
+// settledness claim; hard-erroring them means judging whether a lineage cite ASSERTS settledness, which is the
+// coin toss this rule refuses to make. The rule binds the claims that are WRITTEN DOWN; authors opt in by
+// writing the annotation.
+//
+// BLAST RADIUS, accepted deliberately. This rule fails `check:standards` REPO-WIDE on a change nobody made to
+// the doc: the moment a cited item's status flips, every unrelated commit is blocked until someone edits the
+// statute. That is the rule working — but it turns a routine `/resolve` into a stop-the-line for an author who
+// has never read this file. THEREFORE EVERY MESSAGE NAMES THE EXACT DOC LINE TO EDIT, twice: once as the
+// `path:line` prefix, once in the fix clause. That requirement is load-bearing, not a nicety — without it the
+// gate is the classic one that gets suppressed.
+
+const CLAIM_STATUS_WORDS = ['open', 'active', 'resolved', 'dropped', 'parked'];
+// A — the cite itself carries the status word: `#2398, resolved`, `#1073 (open, to slice)`. The trailing
+// `(?![-\w])` is guard 1 (`#086 (open-core …)` must not match).
+const CLAIM_A_RE = new RegExp(
+  String.raw`#(\d+)\s*[,(]\s*(?:(?:still|now|already)\s+)?(${CLAIM_STATUS_WORDS.join('|')})(?![-\w])`, 'g');
+// B — the explicit backticked token. Matched first, then attributed BACKWARDS (guard 3).
+const CLAIM_B_TOKEN_RE = /`status:\s*([\w-]+)`/g;
+// The copula must ASSERT the token, i.e. sit directly on it (optionally through a hedge). Measured: a copula
+// merely present somewhere in the lookback is the LOOSE grammar wearing a disguise — it re-admits both real
+// corpus false positives, `(#670).** Without --session a scaffolded item IS BORN `status: open`` and
+// `(… #083) — not by git. A racing agent IS DETECTED by the item reading `status: active``, where the token
+// describes a MECHANISM and the nearby cite is not its subject.
+const CLAIM_B_COPULA_RE = /\b(?:is|are|stays|remains|still)\b(?:\s+(?:now|still|already|currently|only))?\s*$/;
+// …and the claim must be in the SAME SENTENCE as the cite it is attributed to. Both false positives above also
+// cross a sentence end between the cite and the token; this is the second, independent half of that guard.
+const CLAIM_B_SENTENCE_END_RE = /[.!?](?:[\s*)"']|$)/;
+const CLAIM_B_WINDOW = 100;   // chars of same-line lookback; the widest real claim spans ~58
+const CLAIM_B_LAST_CITE_RE = /#(\d+)(?![\d])/g;
+// C — a DELIBERATE uppercase OPEN (case-sensitive on purpose: a lowercase "open" is ordinary prose).
+const CLAIM_C_TOKEN_RE = /\bOPEN\b/g;
+// …followed, within a short same-clause gap, by either a parenthetical or a bare slash-run of cites.
+const CLAIM_C_GAP_RE = /^([^,;.#()\n]{0,60})([#(])/;
+const CLAIM_C_SLASH_RUN_RE = /^#\d+(?:\s*\/\s*#\d+)*/;
+const LIVE_STATUSES_NOTE = 'non-resolved / non-dropped';
+
+/** All `#NNNN` ids inside a run of text, in order. Pure. */
+function citesIn(text) {
+  return [...String(text).matchAll(/#(\d+)/g)].map((m) => m[1]);
+}
+
+/**
+ * The text pattern C's `OPEN` token governs: the parenthetical or slash-run that directly follows it (guard 2).
+ * `null` when no cite run follows within the clause. Pure — exported for the fixture tests.
+ * @param {string} rest - the line text AFTER the OPEN token.
+ */
+function citeRunAfterOpen(rest) {
+  const gap = rest.match(CLAIM_C_GAP_RE);
+  if (!gap) return null;
+  const at = gap[1].length;
+  if (rest[at] === '(') {
+    // Boundary = the end of the GOVERNED PARENTHETICAL, so an inner `;` or `,` does not truncate the run.
+    let depth = 0;
+    for (let i = at; i < rest.length; i++) {
+      if (rest[i] === '(') depth++;
+      else if (rest[i] === ')') { depth--; if (depth === 0) return rest.slice(at + 1, i); }
+    }
+    return rest.slice(at + 1); // unterminated parenthetical — take the rest of the line
+  }
+  const run = rest.slice(at).match(CLAIM_C_SLASH_RUN_RE);
+  return run ? run[0] : null;
+}
+
+/**
+ * #2842 — an explicit status claim about a cited #NNN must match that item's real status. Pure + injectable
+ * (`statusOf`), so the whole rule is fixture-testable without the real tree.
+ * @param {Record<string,string>} srcByDoc - doc path → source text (the four RULE_DOCS).
+ * @param {{statusOf: (nnn: string) => (string|null)}} deps - real frontmatter status, or null when no item exists.
+ * @returns {Array<{message: string}>}
+ */
+function validateCitedItemStatusClaims(srcByDoc, { statusOf } = {}) {
+  const errors = [];
+  const seen = new Set();
+
+  // Every message names the doc line to edit TWICE — prefix and fix clause. See the blast-radius note above.
+  const push = (docPath, lineNo, cite, detail, fix) => {
+    const key = `${docPath}|${lineNo}|${cite}|${detail}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    errors.push({ message:
+      `${docPath}:${lineNo}: ${detail} Edit ${docPath}:${lineNo} — ${fix} (#2842: a status claim about a cited ` +
+      'item must match that item\'s real frontmatter status.)' });
+  };
+
+  const check = (docPath, lineNo, cite, claimed, quoted) => {
+    const real = statusOf ? statusOf(cite) : null;
+    if (real === null || real === undefined) {
+      push(docPath, lineNo, cite, `the prose claims #${cite} is ${quoted}, but there is no backlog item #${cite} ` +
+        'at all — the cite is DANGLING.',
+      'point the claim at a real item, or drop it');
+      return;
+    }
+    if (real !== claimed) {
+      push(docPath, lineNo, cite, `the prose claims #${cite} is ${quoted}, but #${cite} is really ` +
+        `\`status: ${real}\`.`,
+      `update the annotation to "${real}", or re-point the cite at an item that really is \`status: ${claimed}\``);
+    }
+  };
+
+  for (const [docPath, src] of Object.entries(srcByDoc || {})) {
+    String(src).split('\n').forEach((line, i) => {
+      const lineNo = i + 1;
+
+      // A — the cite carries the status word adjacently.
+      for (const m of line.matchAll(CLAIM_A_RE)) check(docPath, lineNo, m[1], m[2], `\`${m[2]}\``);
+
+      // B — the backticked `status: X` token, attributed BACKWARDS to the NEAREST preceding cite (guard 3).
+      for (const m of line.matchAll(CLAIM_B_TOKEN_RE)) {
+        const at = m.index;
+        const window = line.slice(Math.max(0, at - CLAIM_B_WINDOW), at);
+        const cites = [...window.matchAll(CLAIM_B_LAST_CITE_RE)];
+        if (!cites.length) continue;
+        const nearest = cites[cites.length - 1];
+        const between = window.slice(nearest.index + nearest[0].length);
+        if (CLAIM_B_SENTENCE_END_RE.test(between)) continue;   // different sentence — the cite is not the subject
+        if (!CLAIM_B_COPULA_RE.test(between)) continue;        // no assertion — a bare mention, not a claim
+        check(docPath, lineNo, nearest[1], m[1], `\`status: ${m[1]}\``);
+      }
+
+      // C — a deliberate uppercase OPEN governing the cite run right after it; every cite in the run must be live.
+      for (const m of line.matchAll(CLAIM_C_TOKEN_RE)) {
+        const run = citeRunAfterOpen(line.slice(m.index + m[0].length));
+        if (run === null) continue;
+        for (const cite of citesIn(run)) {
+          const real = statusOf ? statusOf(cite) : null;
+          if (real === null || real === undefined) {
+            push(docPath, lineNo, cite, `an uppercase "OPEN" claim governs #${cite}, but there is no backlog ` +
+              `item #${cite} at all — the cite is DANGLING.`,
+            'point the claim at a real item, or drop it');
+            continue;
+          }
+          if (real === 'resolved' || real === 'dropped')
+            push(docPath, lineNo, cite, `an uppercase "OPEN" claim governs #${cite}, but #${cite} is ` +
+              `\`status: ${real}\` — a ${real} item is not on an OPEN line.`,
+            `drop the OPEN framing, or name only items that are still ${LIVE_STATUSES_NOTE}`);
+        }
+      }
+    });
+  }
+  return errors;
 }
 
 // The full statute check (#2083) — fs gather + the four pure rules. Returns { errors, warnings } in the
@@ -352,11 +544,18 @@ function runStatuteCheck() {
 
   // #2844 — every registered operational invariant links an enforcer that exists, or an open item that owes it.
   const catalogue = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'lib', 'invariant-catalogue.json'), 'utf8'));
+  const itemStatuses = collectItemStatuses(path.join(ROOT, 'backlog'));
   const openIds = collectOpenItemIds(path.join(ROOT, 'backlog'));
   errors.push(...validateInvariantEnforcers(catalogue.invariants, {
     exists: (p) => fs.existsSync(path.join(ROOT, p)),
     isOpenItem: (id) => openIds.has(id),
     anchorIndex: buildAnchorIndex(),
+  }));
+
+  // #2842 — an explicit status claim about a cited #NNN must match that item's real status. Reuses the
+  // `srcByDoc` map the substance rule already built, so this costs no extra file reads.
+  errors.push(...validateCitedItemStatusClaims(srcByDoc, {
+    statusOf: (nnn) => (itemStatuses.has(nnn) ? itemStatuses.get(nnn) : null),
   }));
 
   return { errors, warnings: [] };
@@ -367,4 +566,5 @@ module.exports = {
   collectExplicitAnchorDefs, findDuplicateAnchors, findOrphanAnchors, collectAnchorReferences,
   anchorSubstance, validateAnchorSubstance, runStatuteCheck,
   collectEnforcerPaths, enforcerPathCandidates, validateInvariantEnforcers, collectOpenItemIds,
+  collectItemStatuses, validateCitedItemStatusClaims, citeRunAfterOpen,
 };
