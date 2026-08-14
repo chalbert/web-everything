@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock, reconcileEscalationReasonBlock } from '../lib/review-escalation.mjs';
+import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock, reconcileEscalationReasonBlock, decideDurableEscalationRecord } from '../lib/review-escalation.mjs';
 import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
 import { buildAuthorActorMarker } from '../lib/review-independence.mjs';
 
@@ -297,15 +297,15 @@ describe('review-escalation — #3044 reconcileEscalationReasonBlock (re-derive-
     expect(result).toEqual({ body, changed: false });
   });
 
-  it('a quoted/fenced example of the marker is never mistaken for a real block — appends fresh instead of "replacing" the documentation', () => {
+  it('a quoted/fenced example of the marker is never mistaken for a real block — and is never "replaced" either', () => {
     const documented = 'Here is what the block looks like:\n\n```\n'
       + buildEscalationReasonBlock(['old documented reason']) + '\n```\n\nEnd.';
     const result = reconcileEscalationReasonBlock(documented, ['new real reason']);
-    expect(result.changed).toBe(true);
-    // The quoted example survives verbatim — the write only ever appends past it.
-    expect(result.body.startsWith(documented)).toBe(true);
-    expect(result.body).toContain('old documented reason'); // untouched inside the fence
-    expect(result.body).toContain('new real reason'); // the freshly appended real block
+    // GUARD ON RAW (#3044-review F1): the trusted reader sees no real block here, but the marker BYTES are
+    // present, so appending would duplicate them — and duplicate again on every later pass. Write nothing.
+    // The call site then attests `durableRecorded` from `bodyHasEscalationReason` (false here) and falls
+    // through to its loud skip-stamp, so the reason is still recorded — just not in the body.
+    expect(result).toEqual({ body: documented, changed: false });
   });
 
   it('preserves content before the marker byte-for-byte on a replace, including an authored-by-actor stamp', () => {
@@ -336,6 +336,251 @@ describe('review-escalation — #3044 reconcileEscalationReasonBlock (re-derive-
       ['blast-radius (dep bump touches 12 files)', 'size (602 ≥ 400 changed lines)'],
     );
     expect(result).toEqual({ body, changed: false });
+  });
+
+  // ── #3044-review findings ──────────────────────────────────────────────────────────────────────────────
+  // F1 (BLOCKING) — THE APPEND LOOP. The first cut located the block ONLY on `blankQuotedRegions(src)`, the
+  // trusted reader, dropping the RAW-text guard both write sites used to carry. A body whose earlier content
+  // blanks its own appended block then never sees its own write, so every park pass appended another copy
+  // until the body hit its size cap. Review reproduced it at 1→6 blocks in five passes.
+  describe('F1 — the raw write-guard, so the drain can always see its own write (bounded, never a loop)', () => {
+    const REASONS = ['size (500 ≥ 400 changed lines)'];
+    const countBlocks = (b) => (b.match(/## Escalation reason/g) || []).length;
+
+    it('an unclosed fence before the block does NOT re-append — five passes stay at one block', () => {
+      // The exact repro from the review. `blankQuotedRegions` blanks an unclosed fence to end-of-body BY
+      // DESIGN, so the trusted reader sees nothing here — the raw guard is the only thing standing between
+      // this body and an unbounded append.
+      let body = '```\nunclosed fence' + buildEscalationReasonBlock(REASONS);
+      expect(bodyHasEscalationReason(body)).toBe(false); // the trusted reader is blind to it, as designed
+      expect(bodyAlreadyCarriesReasonBlock(body)).toBe(true); // the raw reader is not
+      const first = body;
+      for (let i = 0; i < 5; i += 1) {
+        const pass = reconcileEscalationReasonBlock(body, REASONS);
+        expect(pass.changed).toBe(false); // nothing to write — not "wrote a duplicate"
+        body = pass.body;
+      }
+      expect(body).toBe(first); // byte-identical after five passes
+      expect(countBlocks(body)).toBe(1);
+    });
+
+    it('…and does not grow even when the fresh reason set DIFFERS from the invisible block\'s', () => {
+      // The nastier variant: a re-score with new reasons. Nothing can be located, so nothing may be written —
+      // a replace would be a guess, and an append would be the loop.
+      const body = '```\nunclosed fence' + buildEscalationReasonBlock(REASONS);
+      const result = reconcileEscalationReasonBlock(body, ['blast-radius (dep bump touches 12 files)']);
+      expect(result).toEqual({ body, changed: false });
+    });
+
+    it('a marker mentioned only in prose also suppresses the append (the bytes are there either way)', () => {
+      const body = 'This PR was parked; see the `## Escalation reason` block on the sibling PR.';
+      expect(reconcileEscalationReasonBlock(body, REASONS)).toEqual({ body, changed: false });
+    });
+
+    it('the guard is the RAW reader, and a body with NO marker bytes at all still gets its first write', () => {
+      const result = reconcileEscalationReasonBlock('A plain description.', REASONS);
+      expect(result.changed).toBe(true);
+      expect(countBlocks(result.body)).toBe(1);
+    });
+  });
+
+  // F2 — the fail-safe protects content OUTSIDE the block, not inside it. The docblock used to claim it could
+  // "never delete content a human added", which is wider than the code: the block is drain-owned.
+  describe('F2 — the fail-safe boundary is the block, stated exactly', () => {
+    it('content OUTSIDE the block survives a replace byte-for-byte, before AND after', () => {
+      const before = 'PR description.\n\nSome prose a human wrote.';
+      const after = '\n## Notes\n\nA human section after the block.\n';
+      const body = before + buildEscalationReasonBlock(['blast-radius (x)']) + after;
+      const result = reconcileEscalationReasonBlock(body, ['blast-radius (x)', 'size (602 ≥ 400 changed lines)']);
+      expect(result.changed).toBe(true);
+      expect(result.body.startsWith(before)).toBe(true);
+      expect(result.body.endsWith(after)).toBe(true);
+    });
+
+    it('a human bullet INSIDE the block IS replaced — drain-owned, and the docblock says so', () => {
+      // Deliberate, not an oversight: a human note and a reason that no longer scores are the same shape
+      // (`- text`), so treating an unrecognised bullet as malformed would freeze exactly the shrink case this
+      // function exists for. Pinned so the boundary is a decision on the record, not an accident.
+      const body = 'Desc.\n\n## Escalation reason\n\n- blast-radius (x)\n'
+        + '- NOTE FROM A HUMAN: see the linked thread\n\n<!-- policy-set: v1 aaaaaaaaaaaa -->\n';
+      const result = reconcileEscalationReasonBlock(body, ['blast-radius (x)']);
+      expect(result.changed).toBe(true);
+      expect(result.body).not.toContain('NOTE FROM A HUMAN');
+      expect(result.body.startsWith('Desc.')).toBe(true); // …and everything outside is untouched
+    });
+  });
+
+  // F3 — "cannot be located unambiguously" must include "there are two of them". The non-global `exec` used
+  // to silently take the FIRST marker; the second block's own `## ` heading then terminated the region, so
+  // the trailing-content guard never fired either — the first was replaced and the second left orphaned.
+  describe('F3 — two real markers is ambiguous, and ambiguous is malformed', () => {
+    it('back-to-back real blocks leave the body untouched', () => {
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)'])
+        + buildEscalationReasonBlock(['other reason']);
+      const result = reconcileEscalationReasonBlock(body, ['blast-radius (x)', 'size (602 ≥ 400 changed lines)']);
+      expect(result).toEqual({ body, changed: false });
+    });
+
+    it('a second real marker anywhere later in the body is enough, even with prose between', () => {
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)'])
+        + '\nA paragraph in between.\n' + buildEscalationReasonBlock(['other reason']);
+      expect(reconcileEscalationReasonBlock(body, ['fresh reason'])).toEqual({ body, changed: false });
+    });
+
+    it('a FENCED second marker is not a second marker — it was already blanked, so the real one still reconciles', () => {
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)'])
+        + '\n\n```\n## Escalation reason\n\n- documented example\n\n<!-- policy-set: v1 aaaaaaaaaaaa -->\n```\n';
+      const result = reconcileEscalationReasonBlock(body, ['blast-radius (x)', 'size (602 ≥ 400 changed lines)']);
+      expect(result.changed).toBe(true);
+      expect(new Set(parsedReasonsOf(result.body)))
+        .toEqual(new Set(['blast-radius (x)', 'size (602 ≥ 400 changed lines)']));
+    });
+  });
+
+  // F4 — a LEGACY pre-#2567 block carries no trailing policy stamp, so it reads malformed and is frozen
+  // forever. Fail-safe rather than a bug (guessing the extent of a block with no terminator is how a body
+  // gets mangled), but it means the "re-derived every time" promise is void for exactly the oldest bodies.
+  // That shape is real: `we:scripts/review-detail.mjs`'s parser ships a named test for it.
+  it('F4 — a legacy block with NO trailing policy stamp is FROZEN, never reconciled and never corrupted', () => {
+    const body = 'Desc.\n\n## Escalation reason\n\n- blast-radius (x)\n';
+    expect(reconcileEscalationReasonBlock(body, ['blast-radius (x)', 'size (602 ≥ 400 changed lines)']))
+      .toEqual({ body, changed: false });
+  });
+
+  // F6 — the block "is bullets only" was an assertion nothing enforced. A multi-line reason round-tripped as
+  // its first line only, and the writer's own locate then called its own output malformed (line 2 is not a
+  // bullet), freezing the block permanently. Not reachable from today's `scoreEscalation`, so this closes a
+  // latent hole by making the guarantee real at the write.
+  describe('F6 — a reason is collapsed to one line, so the bullets-only grammar is enforced not assumed', () => {
+    it('a multi-line reason becomes one bullet, and its own output round-trips as clean', () => {
+      const block = buildEscalationReasonBlock(['line one\nline two']);
+      expect(block.split('\n').filter((l) => l.startsWith('- '))).toEqual(['- line one line two']);
+      // The block the writer just built must be one its own reader calls clean — the frozen-forever case.
+      const body = 'Desc.' + block;
+      expect(reconcileEscalationReasonBlock(body, ['line one\nline two']))
+        .toEqual({ body, changed: false }); // recognised AND compares equal to its own source reason
+    });
+
+    it('blank lines, tabs, a fence and stray padding all collapse', () => {
+      expect(buildEscalationReasonBlock(['a\n\nb']).includes('- a b')).toBe(true);
+      expect(buildEscalationReasonBlock(['```\nfenced\n```']).includes('- ``` fenced ```')).toBe(true);
+      expect(buildEscalationReasonBlock(['   indented reason']).includes('- indented reason')).toBe(true);
+      expect(buildEscalationReasonBlock(['reason   ']).includes('- reason\n')).toBe(true);
+      expect(buildEscalationReasonBlock(['   '])).toBe(''); // whitespace-only is no reason at all
+    });
+
+    it('a padded reason is the SAME reason — a re-park with it writes nothing (no rewrite-on-every-pass)', () => {
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)']);
+      expect(reconcileEscalationReasonBlock(body, ['  blast-radius (x)  ']).changed).toBe(false);
+    });
+  });
+
+  // F8 — mutations that survived the whole focused suite. Each assertion below reddens exactly one.
+  describe('F8 — the fail-safe DIRECTIONS, pinned individually', () => {
+    it('a real marker with an unreadable tail is MALFORMED (no-op), never an append', () => {
+      const body = 'Desc.\n\n## Escalation reason\n\nnot a bullet at all\n';
+      expect(reconcileEscalationReasonBlock(body, ['fresh reason'])).toEqual({ body, changed: false });
+      // Honest note on what this can and cannot prove. Since F1 restored the raw pre-check, flipping
+      // `!blockMatch` from `{malformed:true}` to `null` is now BEHAVIOURALLY EQUIVALENT here: a located real
+      // marker always implies the raw bytes, so the null path lands on the raw guard and fails safe anyway.
+      // That is defence in depth, not an untested branch — but it does mean no input can distinguish them, so
+      // the DIRECTION is pinned at the source instead of pretended to be pinned by a behaviour assertion.
+      const lib = readFileSync(resolve(HERE, '..', 'lib', 'review-escalation.mjs'), 'utf8');
+      expect(lib).toMatch(/if \(!blockMatch\) return \{ malformed: true \};/);
+    });
+
+    it('a ZERO-bullet block is malformed, not "a clean block that happens to be empty"', () => {
+      // `(?:- .*\n)+` → `*` would read this as clean and replace it.
+      const body = 'Desc.\n\n## Escalation reason\n\n\n<!-- policy-set: v1 aaaaaaaaaaaa -->\n';
+      expect(reconcileEscalationReasonBlock(body, ['fresh reason'])).toEqual({ body, changed: false });
+    });
+
+    it('a mid-line mention of the marker is not a marker (the line-start anchor)', () => {
+      // The tail here is a byte-perfect block, so dropping `(^|\n)` from `markerLineRe` makes this read as a
+      // CLEAN block starting mid-sentence — and the replace then eats the words before it.
+      const body = 'See ## Escalation reason\n\n- blast-radius (x)\n\n<!-- policy-set: v1 aaaaaaaaaaaa -->\n';
+      const result = reconcileEscalationReasonBlock(body, ['fresh reason']);
+      expect(result).toEqual({ body, changed: false });
+      expect(result.body.startsWith('See ')).toBe(true);
+    });
+
+    it('the replace region STOPS at the next `##` heading — a following section survives verbatim', () => {
+      // `regionEnd = scanned.length` would swallow this heading and everything under it.
+      const tail = '\n## Reviewer notes\n\nKeep me.\n';
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)']) + tail;
+      const result = reconcileEscalationReasonBlock(body, ['size (602 ≥ 400 changed lines)']);
+      expect(result.changed).toBe(true);
+      expect(result.body.endsWith(tail)).toBe(true);
+      expect(result.body).toContain('Keep me.');
+    });
+
+    it('a replace never doubles the blank line that led into the block', () => {
+      // Dropping the `.slice(2)` on the fresh block would leave `\n\n\n\n` before the marker.
+      const body = 'Desc.' + buildEscalationReasonBlock(['blast-radius (x)']);
+      const result = reconcileEscalationReasonBlock(body, ['size (602 ≥ 400 changed lines)']);
+      expect(result.body).toBe('Desc.' + buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)']));
+      expect(result.body).not.toMatch(/\n\n\n/);
+    });
+  });
+});
+
+// #3044-review F7 — the two call sites had ZERO tests naming any of this, and every mutation of the inline
+// `durableRecorded` branches survived the full focused suite. The decision is now a pure function, so each
+// direction reddens a named test.
+describe('review-escalation — #3044 decideDurableEscalationRecord (attest by effect, on the TRUSTED reader)', () => {
+  const REASONS = ['size (500 ≥ 400 changed lines)'];
+  const realBody = 'Desc.' + buildEscalationReasonBlock(REASONS);
+
+  describe('the write branch attests from the VERIFIED effect, never from having tried', () => {
+    it('changed + verified → true', () => {
+      expect(decideDurableEscalationRecord({ changed: true, verified: true, liveBody: '', reasons: REASONS })).toBe(true);
+    });
+    it('changed + UNVERIFIED → false, even though a well-formed block was computed and the edit "succeeded"', () => {
+      // `durableRecorded = true` here would end the pass claiming a record that a racing write may have
+      // clobbered — and suppress the skip-stamp that is the only remaining trace.
+      expect(decideDurableEscalationRecord({ changed: true, verified: false, liveBody: realBody, reasons: REASONS })).toBe(false);
+    });
+  });
+
+  describe('the no-write branch attests from the QUOTED-REGION-AWARE reader, never the raw bytes', () => {
+    it('unchanged + a real, well-formed block already present → true (the routine re-park with nothing new)', () => {
+      expect(decideDurableEscalationRecord({ changed: false, verified: false, liveBody: realBody, reasons: REASONS })).toBe(true);
+    });
+    it('unchanged + a body with NO block → false (the malformed/fail-safe case must stay loud)', () => {
+      expect(decideDurableEscalationRecord({ changed: false, verified: false, liveBody: 'Desc.', reasons: REASONS })).toBe(false);
+    });
+    it('unchanged + a marker that exists only inside a FENCE → false', () => {
+      // `liveBody.includes('## Escalation reason')` — the raw spelling — would attest here, and that is the
+      // exact GUARD-ON-RAW/ATTEST-ON-TRUSTED regression an earlier round already caught once.
+      const documented = 'Docs:\n\n```\n' + buildEscalationReasonBlock(['documented example']) + '\n```\n';
+      expect(bodyAlreadyCarriesReasonBlock(documented)).toBe(true); // raw says yes…
+      expect(decideDurableEscalationRecord({ changed: false, verified: false, liveBody: documented, reasons: REASONS })).toBe(false); // …trusted says no
+    });
+    it('a DE-ESCALATED park (no reasons) records nothing here — the skip-stamp must still fire', () => {
+      expect(decideDurableEscalationRecord({ changed: false, verified: false, liveBody: realBody, reasons: [] })).toBe(false);
+    });
+  });
+});
+
+// #3044-review F7 — the call-site WIRING, source-level (the same technique as pr-land's contract guards):
+// these branches live inside `runCli`, which no unit test can reach.
+describe('#3044 write-site wiring (source-level contract)', () => {
+  it('pr-land edits the body ONLY when the reconcile reports a change', () => {
+    const src = readFileSync(resolve(HERE, '..', 'pr-land.mjs'), 'utf8');
+    expect(src).toMatch(/const reconciled = reconcileEscalationReasonBlock\(liveBody, verdict\.reasons\)/);
+    expect(src).toMatch(/if \(reconciled\.changed\) ghC\(\['pr', 'edit'/);
+    // The old unguarded append (and its hand-rolled raw pre-check) stay gone — the guard lives in the
+    // reconcile function now, so a second one here would be a fork of it.
+    expect(src).not.toMatch(/liveBody \+ buildEscalationReasonBlock/);
+  });
+  it('merge-ai-prs attests durableRecorded through the shared pure decision, never inline branches', () => {
+    const src = readFileSync(resolve(HERE, '..', 'merge-ai-prs.mjs'), 'utf8');
+    expect(src).toMatch(/durableRecorded = decideDurableEscalationRecord\(\{ changed: reconciled\.changed, verified, liveBody, reasons: parkReasons \}\)/);
+    // …and never re-derives it inline from either reader.
+    expect(src).not.toMatch(/durableRecorded = bodyHasEscalationReason/);
+    expect(src).not.toMatch(/durableRecorded = verified/);
+    // The body write is still gated on the reconcile's own change decision.
+    expect(src).toMatch(/if \(reconciled\.changed\) \{/);
   });
 });
 

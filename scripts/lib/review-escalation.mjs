@@ -1555,12 +1555,29 @@ export function parsePolicyStamp(body) {
   return seen.size === 1 ? [...seen.values()][0] : null;
 }
 
+/**
+ * #3044-review F6 — collapse a reason to ONE line. The block's grammar is "bullets only", and every consumer
+ * (`parseEscalationReason` in `we:scripts/review-detail.mjs`, `locateEscalationBlock` below) reads it line by
+ * line. A reason carrying a newline breaks the round trip in both directions: the reader returns only the
+ * first line, and the WRITER's own locate then calls its own output malformed (line 2 is not a bullet), which
+ * freezes that block permanently. Not reachable from today's `scoreEscalation` — every reason it builds is a
+ * single line of paths and numbers — so this ENFORCES a guarantee that was previously only asserted.
+ * Also trims, so a trailing-space reason compares equal to its own round-tripped form (otherwise the
+ * set-comparison in `reconcileEscalationReasonBlock` would differ forever and rewrite on every pass).
+ */
+function normalizeReasonText(r) {
+  return String(r).replace(/\s+/g, ' ').trim();
+}
+
 /** Build the body block embedding the escalation reason(s) — APPENDED to the existing PR body at park time,
  *  never replacing it. Pure. Empty/absent `reasons` → `''` (nothing to append).
  *
+ *  Each reason is whitespace-collapsed to a single line (see {@link normalizeReasonText}) — the block IS
+ *  bullets only, and that is enforced here rather than assumed.
+ *
  *  Carries the policy stamp, because the reason and the rules that produced it are only useful together. */
 export function buildEscalationReasonBlock(reasons) {
-  const list = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
+  const list = (Array.isArray(reasons) ? reasons : []).filter(Boolean).map(normalizeReasonText).filter(Boolean);
   if (!list.length) return '';
   return `\n\n${ESCALATION_REASON_MARKER}\n\n${list.map((r) => `- ${r}`).join('\n')}\n\n${buildPolicyStampMarker()}\n`;
 }
@@ -1667,6 +1684,9 @@ export function blankQuotedRegions(body) {
  * (an unclosed fence, or an innocently indented one) could never see its own write, so the drain re-appended
  * the block on EVERY park pass until the body hit its size cap. Review traced it: not the feared silent
  * attestation — `durableRecorded` correctly stayed false and the warn fired — but an unbounded append loop.
+ *
+ * #3044 — the write guard now lives INSIDE {@link reconcileEscalationReasonBlock} (the two call sites ask it
+ * for a decision rather than pre-checking themselves), but it is still this raw reader that answers it.
  */
 export function bodyAlreadyCarriesReasonBlock(body) {
   return typeof body === 'string' && body.includes(ESCALATION_REASON_MARKER);
@@ -1690,18 +1710,36 @@ export function bodyHasEscalationReason(body) {
  * Three outcomes, each load-bearing for `reconcileEscalationReasonBlock`'s fail-safe:
  *   - `null` — no REAL marker (absent, or only present inside a quoted/fenced region — forgery-safe by
  *     construction, since a quoted marker is already blanked out of `scanned`). Caller appends.
- *   - `{ malformed: true }` — a real marker IS present, but either the bytes after it don't match the
- *     block's exact shape (no bullets, no policy stamp, …) or non-blank content follows the block before
- *     the next `##` heading / end of body. Either way the block's extent cannot be identified unambiguously,
- *     so the caller must fail safe: leave the body untouched rather than guess a replace region and risk
- *     deleting content a human added.
+ *   - `{ malformed: true }` — a real marker IS present, but the block's extent cannot be identified
+ *     unambiguously: MORE THAN ONE real marker (which block is "the" block?), or the bytes after the marker
+ *     don't match the block's exact shape, or non-blank content follows the block before the next `##`
+ *     heading / end of body. The caller must fail safe: leave the body untouched rather than guess a replace
+ *     region and delete content that sits outside the block.
  *   - `{ markerStart, regionEnd, reasons }` — a clean block. `markerStart`/`regionEnd` bound the region a
  *     replace may overwrite; `reasons` is the recorded reason list read off the block's bullets.
+ *
+ * TWO SHAPES THIS DELIBERATELY FREEZES, both stated so nobody re-derives them from the regex:
+ *   - #3044-review F3 — two real markers in one body. `markerLineRe` is a non-global `exec`, so a naive read
+ *     silently takes the FIRST and orphans the second; the second block's own `## ` heading then terminates
+ *     `regionEnd`, so the trailing-content guard never fires either. Counted explicitly instead.
+ *   - #3044-review F4 — a LEGACY pre-#2567 block, i.e. one with NO trailing `<!-- policy-set: … -->` stamp.
+ *     `blockRe` requires the stamp, so such a body reads malformed and is never reconciled — frozen as first
+ *     -park history forever. That shape is real (`we:scripts/review-detail.mjs`'s parser ships a named test
+ *     for it), so the PR's "re-derives against the CURRENT reason set every time" promise is void for exactly
+ *     the oldest bodies. Kept as-is on purpose: a stale block is visible and harmless, whereas guessing the
+ *     extent of a block whose terminator is absent is how a body gets mangled.
  */
 function locateEscalationBlock(scanned) {
   const markerLineRe = /(^|\n)(## Escalation reason)[ \t]*(?:\n|$)/;
   const markerMatch = markerLineRe.exec(scanned);
   if (!markerMatch) return null;
+
+  // AMBIGUOUS LOCATION IS MALFORMED (F3). Lookahead rather than consuming the terminating newline, so two
+  // markers on consecutive lines still count as two.
+  const markerCountRe = /(^|\n)## Escalation reason[ \t]*(?=\n|$)/g;
+  let markerCount = 0;
+  for (let m = markerCountRe.exec(scanned); m !== null; m = markerCountRe.exec(scanned)) markerCount += 1;
+  if (markerCount > 1) return { malformed: true };
 
   const markerStart = markerMatch.index + markerMatch[1].length;
   const afterMarkerLine = markerStart + (markerMatch[0].length - markerMatch[1].length);
@@ -1736,8 +1774,10 @@ function locateEscalationBlock(scanned) {
  * mistaken for the real thing, same reasoning as `bodyHasEscalationReason`) and `buildEscalationReasonBlock`
  * for the fresh block's exact bytes.
  *
- *   - No real marker, reasons non-empty → APPEND (today's behavior, unchanged): `body +
- *     buildEscalationReasonBlock(reasons)`, `changed:true`.
+ *   - No real marker AND no RAW marker bytes, reasons non-empty → APPEND (today's behavior, unchanged):
+ *     `body + buildEscalationReasonBlock(reasons)`, `changed:true`.
+ *   - No real marker but the RAW bytes already carry one → no-op, `changed:false`. See THE RAW PRE-CHECK
+ *     below; this is the append-loop guard, not a nicety.
  *   - Reasons empty (marker absent OR present) → no-op, `changed:false`. Mirrors existing precedent
  *     (`we:scripts/merge-ai-prs.mjs`: "a DE-ESCALATED human park has no fresh reasons... records NOTHING
  *     here") — a stale-but-non-empty block is left as first-park history, never blanked. Whether a body
@@ -1747,8 +1787,27 @@ function locateEscalationBlock(scanned) {
  *   - Real marker present, sets differ, reasons non-empty → REPLACE the block region (the marker line
  *     through its end boundary — the policy-stamp line, or up to the next `##` heading / end of body) with a
  *     freshly built block. Handles growth AND shrink identically.
- *   - Real marker present but the block is malformed, or non-blank content follows its end boundary → FAILS
- *     SAFE: no-op, `changed:false`, so an unexpected shape can never delete content a human added.
+ *   - Real marker present but the block is malformed (unreadable shape, or MORE THAN ONE real marker), or
+ *     non-blank content follows its end boundary → FAILS SAFE: no-op, `changed:false`.
+ *
+ * WHAT THE FAIL-SAFE DOES AND DOES NOT PROTECT (#3044-review F2 — the earlier claim here was wider than the
+ * code). It protects content OUTSIDE the block: everything before the marker (including the #2844
+ * authored-by-actor stamp) and everything past the block's end boundary is preserved byte-for-byte, and any
+ * shape it cannot bound exactly is left entirely alone. It does NOT protect content INSIDE the block: the
+ * block is drain-owned, and a human bullet added among the reasons IS replaced on the next reconcile. That is
+ * deliberate — a human note and a reason that no longer scores are the same shape (`- text`), so "treat an
+ * unrecognised bullet as malformed" would freeze exactly the shrink case this function exists for. An
+ * operator's note belongs in a PR comment, or outside the block.
+ *
+ * THE RAW PRE-CHECK, and why the trusted reader alone is not enough (#3044-review F1). `blankQuotedRegions`
+ * answers "is there a TRUSTWORTHY record" — it blanks quoted text, and an unclosed fence (or an `md.parse`
+ * fault) blanks the WHOLE body by design. "Would appending duplicate what is already here" is a DIFFERENT
+ * question, and for it the bytes count whether quoted or not. Answering it from the trusted reader is how the
+ * drain got an unbounded append loop: a body whose earlier content blanks its own appended block could never
+ * see its own write, so every park pass appended another copy until the body hit its size cap. So: raw bytes
+ * present + trusted reader sees nothing → write NOTHING. The call sites then attest `durableRecorded` from
+ * `bodyHasEscalationReason` (the trusted reader), which is false here — so the pass falls through to its loud
+ * skip-stamp fallback instead of silently claiming a record. GUARD ON RAW, ATTEST ON TRUSTED.
  *
  * @param {string} body
  * @param {Array<string>} reasons
@@ -1756,11 +1815,16 @@ function locateEscalationBlock(scanned) {
  */
 export function reconcileEscalationReasonBlock(body, reasons) {
   const src = typeof body === 'string' ? body : '';
-  const freshReasons = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
+  const freshReasons = (Array.isArray(reasons) ? reasons : []).filter(Boolean).map(normalizeReasonText).filter(Boolean);
   if (freshReasons.length === 0) return { body: src, changed: false };
 
   const located = locateEscalationBlock(blankQuotedRegions(src));
-  if (!located) return { body: src + buildEscalationReasonBlock(freshReasons), changed: true };
+  if (!located) {
+    // GUARD ON RAW (see the docblock): the trusted reader found nothing, but if the marker bytes are there at
+    // all, appending would duplicate them — and duplicate on every later pass, unboundedly.
+    if (bodyAlreadyCarriesReasonBlock(src)) return { body: src, changed: false };
+    return { body: src + buildEscalationReasonBlock(freshReasons), changed: true };
+  }
   if (located.malformed) return { body: src, changed: false };
 
   const recordedSet = new Set(located.reasons);
@@ -1773,6 +1837,32 @@ export function reconcileEscalationReasonBlock(body, reasons) {
   const freshBlock = buildEscalationReasonBlock(freshReasons).slice(2);
   const newBody = src.slice(0, located.markerStart) + freshBlock + src.slice(located.regionEnd);
   return { body: newBody, changed: true };
+}
+
+/**
+ * #3044-review F7 — does this human park carry a DURABLE drain-written record in the PR body? Pure, and
+ * extracted from `we:scripts/merge-ai-prs.mjs`'s park branch precisely because it was untestable inline:
+ * every mutation of the two branches survived the full suite (`= verified` → `= true`;
+ * `bodyHasEscalationReason(liveBody)` → `= true`; → `liveBody.includes('## Escalation reason')`).
+ *
+ * ATTEST BY EFFECT, NEVER BY HAVING TRIED (#2820 round 4 / #2857). When the reconcile wrote, only the
+ * post-write VERIFY re-read attests — an unconfirmed edit (a `gh` exit that lies, a racing write) must leave
+ * this false so the caller's skip-stamp still records the why, rather than ending the pass with no record.
+ *
+ * ATTEST ON TRUSTED, GUARD ON RAW. When the reconcile wrote NOTHING, `changed:false` covers three cases the
+ * drain must tell apart: the block is already current (attest), the block's shape was unreadable (do NOT
+ * attest), and the raw-guard case where the marker bytes exist but only inside a quoted region (do NOT
+ * attest). `bodyHasEscalationReason` — the QUOTED-REGION-AWARE reader — is true for exactly the first. The
+ * raw `body.includes(marker)` spelling would attest a body that merely DOCUMENTS the marker in a fenced
+ * example, suppressing the fallback and leaving the PR with no record and no warning.
+ *
+ * @param {{changed:boolean, verified:boolean, liveBody:string, reasons:Array<string>}} o
+ * @returns {boolean}
+ */
+export function decideDurableEscalationRecord({ changed, verified, liveBody, reasons } = {}) {
+  if (changed) return !!verified;
+  if (!(Array.isArray(reasons) ? reasons : []).filter(Boolean).length) return false;
+  return bodyHasEscalationReason(liveBody);
 }
 
 /**

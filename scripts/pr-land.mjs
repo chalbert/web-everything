@@ -878,7 +878,11 @@ function runCli() {
       // the jury ledger (#2641) will read it. Best-effort. #3044 — RECONCILE, not guard-then-append: a re-run
       // that scores a different reason set than the first park now replaces the stale block instead of leaving
       // it stamped once; a re-run that scores the SAME set writes nothing (`changed:false`), so this stays
-      // idempotent without the old raw-text duplicate-append guard.
+      // idempotent. The RAW-text duplicate-append guard did not go away — it moved INSIDE the reconcile
+      // function, which is the only place it can now be stated once for both write sites. It is still
+      // load-bearing: "would this duplicate" is a different question from "is there a trustworthy record",
+      // and answering it from the trusted reader made a body that blanks its own appended block (an unclosed
+      // fence) re-append on every pass, unboundedly.
       try {
         let liveBody = '';
         try { liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || ''; } catch { /* fetch miss — augment from empty */ }
