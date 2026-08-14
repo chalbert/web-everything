@@ -8,9 +8,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete } from '../merge-ai-prs.mjs';
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
-import { buildManifest } from '../readiness/lane-manifest.mjs';
+import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -3541,5 +3541,279 @@ describe('merge-ai-prs — #xc7p3q9: couple-join decoupled from the ready-to-mer
     expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 2, deferred: held })).toBe(true);
     expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 2, deferred: real })).toBe(false);
     expect(isConfirmSweepSettled({ merged: 0, pendingRebased: 0, considered: 0, deferred: [] })).toBe(true);
+  });
+});
+
+// #3004 — `blockWait` could clear a dependent's edge on a blocker whose WE carrier landed while its impl half was
+// still OPEN. `landedThisPass` is stamped on the WE-CARRIER merge, but a couple is impl-first/WE-last ACROSS repos,
+// so that set proves only half a couple. The fix adds NEGATIVE counter-evidence (`coupleIncomplete`) subtracted from
+// BOTH `provenLanded` and `stackProven`'s proof (1), derived IN THE CASCADE against refs that ACTUALLY merged.
+//
+// The load-bearing tests in here are the last three: the DISJOINTNESS/REACHABILITY case (which proves a plan-time
+// derivation would be inert, so this fix is not decorative), the REAL-WINDOW case (the impl's merge throws), and the
+// MERGED-SIBLING no-regression case (which pins the `\ mergedRefs` subtraction).
+describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longer clears a dependent\'s edge', () => {
+  const WE = null;                                    // the local WE clone (repo=null, key 'cwd') — runCli's convention
+  const FUI = 'chalbert/frontierui';
+  const localSlug = 'chalbert/web-everything';
+  const isLocalRepo = (repo) => repo == null || repo === localSlug;
+  const green = [{ name: 'test', conclusion: 'SUCCESS' }];
+  const ghPr = (number, headRefName, labels = []) =>
+    ({ number, title: 't', body: 'what changed and why', headRefName, statusCheckRollup: green, mergeable: 'MERGEABLE', mergeStateStatus: 'UNSTABLE', labels });
+
+  // ── the couple under test ──────────────────────────────────────────────────────────────────────────────────
+  // item 100 is a cross-repo couple: impl #55 (frontierui, manifest-less, joined) + WE carrier #77 (the resolve
+  // carrier, where `bornAs` — and therefore `landedThisPass` — is stamped). item 101 (#88) is `blockedBy: [100]`.
+  const REFS_A = ['lane/a-fui', 'lane/a-we'];
+  const mkVerdicts = ({ implDecision = 'merge' } = {}) => ([
+    { num: 55, repo: FUI, headRef: 'lane/a-fui', hasManifest: false, item: 100, blockedBy: [], stackParents: [], decision: implDecision },
+    { num: 77, repo: WE, headRef: 'lane/a-we', hasManifest: true, manifestRefs: REFS_A, item: 100, blockedBy: [], stackParents: [], decision: 'merge' },
+    { num: 88, repo: WE, headRef: 'lane/b-we', hasManifest: true, manifestRefs: ['lane/b-we'], item: 101, blockedBy: [100], stackParents: [], decision: 'merge' },
+  ]);
+  // the PASS-START open-PR snapshot (`openPrContext.prsByRepo`) — frozen before any merge, exactly as the real pass
+  // holds it. All three PRs are open here; the cascade's job is to subtract what it actually merged.
+  const mkPrsByRepo = () => new Map([
+    [WE, [ghPr(77, 'lane/a-we'), ghPr(88, 'lane/b-we')]],
+    [FUI, [ghPr(55, 'lane/a-fui')]],
+  ]);
+  const extraOpenItems = new Set([100, 101]);
+
+  // A FAITHFUL MINI of runCli's cascade loop (scripts/merge-ai-prs.mjs, the `for (;;)` at the `replan` call site):
+  // same `remaining` copy, same `sameCand` bookkeeping, same per-iteration re-derivation, same `landedThisPass`
+  // stamp keyed on `hasManifest`, same failed-merge `decision = 'skip'` flip, same `!progressed` break. The ONLY
+  // stubbed thing is the `gh pr merge` write itself — every plan/derivation call below is the REAL production
+  // function. `deriveCoupleIncomplete: false` reproduces TODAY's code (no counter-evidence reaches `replan`).
+  const runCascade = ({ verdicts, prsByRepo, failRefs = new Set(), deriveIncomplete = true }) => {
+    const landedThisPass = new Set();
+    const merged = [];
+    const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
+    let remaining = verdicts.map((v) => ({ ...v }));
+    const replan = (cands, coupleIncomplete = new Set()) => planLabelDrain(cands, { landedThisPass, coupleIncomplete, extraOpenItems });
+    const seenIncomplete = [];
+    let deferred = [];
+    for (let guard = 0; guard < 20; guard++) {
+      const coupleIncomplete = deriveIncomplete ? deriveCoupleIncomplete({ verdicts, merged, prsByRepo }) : new Set();
+      seenIncomplete.push(new Set(coupleIncomplete));
+      const plan = replan(remaining, coupleIncomplete);
+      deferred = plan.deferred;
+      if (!plan.ready.length) break;
+      let progressed = false;
+      for (const c of plan.ready) {
+        if (failRefs.has(c.headRef)) {                                   // the `gh pr merge` THROW
+          const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip';
+          continue;
+        }
+        merged.push({ num: c.num, repo: c.repo });
+        remaining = remaining.filter((x) => !sameCand(x, c));
+        if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    return { merged: merged.map((m) => m.num), deferred, landedThisPass, seenIncomplete };
+  };
+
+  // ── 1. the reproduction from the card, both directions ─────────────────────────────────────────────────────
+  const repro = (proof) => planLabelDrain(
+    [{ num: 20, item: 100, decision: 'skip', hasManifest: true },
+      { num: 30, item: 101, blockedBy: [100], decision: 'merge', hasManifest: true }],
+    proof);
+
+  it('the reproduction UNCHANGED still yields ready [30] — the default is a pure no-op on #999\'s liveness fix', () => {
+    const plan = repro({ landedThisPass: new Set([100]) });
+    expect(plan.ready.map((c) => c.num)).toEqual([30]);
+    expect(plan.deferred).toEqual([]);
+  });
+
+  it('the reproduction WITH coupleIncomplete yields deferred [30] waiting on item 100', () => {
+    const plan = repro({ landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+  });
+
+  // ── 2. the SIBLING predicate — stackProven proof (1) makes the same subtraction ─────────────────────────────
+  const stackCand = (num, item, stackParents) => ({ num, item, blockedBy: [], stackParents, decision: 'merge' });
+
+  it('stackProven: a stackParent in BOTH landedThisPass and coupleIncomplete is NOT proven → descendant defers', () => {
+    const proven = planLabelDrain([stackCand(30, 101, [100])], { landedThisPass: new Set([100]) });
+    expect(proven.ready.map((c) => c.num)).toEqual([30]);                 // control: proof (1) alone frees it
+    const withCounter = planLabelDrain([stackCand(30, 101, [100])], { landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
+    expect(withCounter.ready).toEqual([]);
+    expect(withCounter.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+  });
+
+  it('stackProven: the subtraction SHORT-CIRCUITS — a weaker later arm cannot undo the counter-evidence', () => {
+    // proof (3) `provenOnMain` and proof (4) `numeric-and-absent` both read "landed" for item 100. Neither may
+    // resurrect a couple the cascade has positively shown to be half-landed.
+    const plan = planLabelDrain([stackCand(30, 101, [100])], {
+      landedThisPass: new Set([100]), provenOnMain: new Set([100]), coupleIncomplete: new Set([100]),
+    });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred.map((d) => d.waitOn)).toEqual([[100]]);
+  });
+
+  it('provenLanded: the subtraction applies to the provenOnMain arm too (counter-evidence beats positive proof)', () => {
+    const plan = planLabelDrain([{ num: 30, item: 101, blockedBy: [100], decision: 'merge' }], {
+      provenOnMain: new Set([100]), extraOpenItems: new Set([100, 101]), coupleIncomplete: new Set([100]),
+    });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+  });
+
+  it('an empty coupleIncomplete leaves #999 F1/F2 byte-identical (explicit no-op control)', () => {
+    const bare = planLabelDrain([{ num: 2, item: 200, blockedBy: [100], decision: 'merge' }], { landedThisPass: new Set([100]), extraOpenItems: new Set([100, 200]) });
+    const seeded = planLabelDrain([{ num: 2, item: 200, blockedBy: [100], decision: 'merge' }], { landedThisPass: new Set([100]), extraOpenItems: new Set([100, 200]), coupleIncomplete: new Set() });
+    expect(seeded).toEqual(bare);
+    expect(seeded.ready.map((c) => c.num)).toEqual([2]);
+  });
+
+  // ── 3. ONE exported predicate — neither call site may re-inline its own copy ────────────────────────────────
+  const SRC = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+
+  it('single-source: coupleImplOpen is the ONLY couple-completeness test — joinImplToCouples does not re-inline it', () => {
+    // definition + the joinImplToCouples call site + the deriveCoupleIncomplete call site (docblock @link
+    // references are excluded by requiring the call parenthesis).
+    const calls = SRC.match(/coupleImplOpen\(/g) || [];
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    // the retired inline loop's own identifiers — a re-inline reintroduces one of these
+    expect(SRC).not.toContain('const implOpenNotLanding');
+    expect(SRC).not.toContain('openRefs.has(ref)');
+    // and the shared open-ref construction is single-sourced too (definition + cascade + resolve-on-land gate)
+    expect((SRC.match(/liveOpenHeadRefs\(/g) || []).length).toBeGreaterThanOrEqual(3);
+    // the pass-start-minus-merged subtraction exists EXACTLY once — in `liveOpenHeadRefs` itself. A second
+    // occurrence means a call site re-inlined it (the drift that produced #3004).
+    expect((SRC.match(/!mergedRefs\.has\(p\.headRefName\)/g) || []).length).toBe(1);
+  });
+
+  it('single-source, behavioural: joinImplToCouples stamps impl-open EXACTLY when coupleImplOpen says so', () => {
+    const openHeadRefs = new Set(['lane/a-fui', 'lane/a-we']);
+    const both = (implDecision) => {
+      const vs = mkVerdicts({ implDecision });
+      joinImplToCouples(vs, { contextComplete: true, openHeadRefs });
+      const carrier = vs.find((v) => v.num === 77);
+      const readyImplRefs = new Set(vs.filter((v) => v && !v.hasManifest && v.decision === 'merge' && v.coupleDefer !== true).map((v) => v.headRef).filter(Boolean));
+      return { stamped: carrier.coupleDeferReason === 'impl-open', predicate: coupleImplOpen(carrier, { openHeadRefs, landingRefs: readyImplRefs }) };
+    };
+    const landing = both('merge');                 // impl planned to merge → the couple reads whole
+    expect(landing.stamped).toBe(false);
+    expect(landing.predicate).toBe(false);
+    const notLanding = both('skip');               // impl red/held → the couple is NOT whole
+    expect(notLanding.stamped).toBe(true);
+    expect(notLanding.predicate).toBe(true);
+  });
+
+  it('coupleImplOpen: a manifest-less verdict is never a carrier, and a carrier never blocks on its OWN ref', () => {
+    expect(coupleImplOpen({ hasManifest: false, headRef: 'lane/a-fui', manifestRefs: REFS_A }, { openHeadRefs: new Set(REFS_A) })).toBe(false);
+    expect(coupleImplOpen({ hasManifest: true, headRef: 'lane/a-we', manifestRefs: ['lane/a-we'] }, { openHeadRefs: new Set(['lane/a-we']) })).toBe(false);
+    expect(coupleImplOpen({ hasManifest: true, headRef: 'lane/a-we', manifestRefs: REFS_A }, { openHeadRefs: new Set(REFS_A) })).toBe(true);
+    expect(coupleImplOpen({ hasManifest: true, headRef: 'lane/a-we', manifestRefs: REFS_A }, { openHeadRefs: new Set(REFS_A), landingRefs: new Set(['lane/a-fui']) })).toBe(false);
+  });
+
+  // ── 4. THE REACHABILITY / DISJOINTNESS TEST ────────────────────────────────────────────────────────────────
+  // This is the one that proves the fix is not decorative. A `coupleIncomplete` derived at PLAN time, from the SAME
+  // helper and the SAME plan-time inputs as the R7 `impl-open` gate, is DISJOINT from anything that can reach
+  // `landedThisPass`: every carrier the helper flags is already `coupleDefer:'impl-open'`, therefore absent from
+  // `plan.ready`, therefore never merged, therefore never in `landedThisPass`. Subtracting it could not change one
+  // answer. A future refactor that moves the derivation back to plan time fails HERE instead of going quietly inert.
+  describe('reachability — a PLAN-TIME derivation is provably inert (do not move it back)', () => {
+    const manifestFor = (item, refs) => ({ item, repos: refs.map((ref) => ({ repo: ref.endsWith('-we') ? 'we' : 'fui', ref })), blockedBy: [], stackParents: [] });
+    const ctxFor = () => reduceOpenPrContext({
+      listings: [
+        { repo: WE, prs: [ghPr(77, 'lane/a-we', ['ready-to-merge']), ghPr(88, 'lane/b-we', ['ready-to-merge'])] },
+        { repo: FUI, prs: [ghPr(55, 'lane/a-fui')] },
+      ],
+      reads: new Map([
+        ['cwd::77', { manifest: manifestFor(100, REFS_A), commits: [], degraded: false }],
+        ['cwd::88', { manifest: manifestFor(101, ['lane/b-we']), commits: [], degraded: false }],
+        [`${FUI}::55`, { manifest: null, commits: [], degraded: false }],
+      ]),
+      reconcileRan: true,
+    });
+
+    // the plan-time inputs, rebuilt exactly as planDrainPass / joinImplToCouples build them
+    const planTimeFlagged = (ctx, verdicts) => {
+      const openHeadRefs = new Set();
+      for (const prs of ctx.prsByRepo.values()) for (const p of prs) if (p && p.headRefName) openHeadRefs.add(p.headRefName);
+      const readyImplRefs = new Set(verdicts.filter((v) => v && !v.hasManifest && v.decision === 'merge' && v.coupleDefer !== true).map((v) => v.headRef).filter(Boolean));
+      return new Set(verdicts.filter((v) => v && v.hasManifest && v.item != null && coupleImplOpen(v, { openHeadRefs, landingRefs: readyImplRefs })).map((v) => asItemId(v.item)));
+    };
+
+    it('every carrier a plan-time coupleIncomplete would flag is ALREADY impl-open-deferred and absent from plan.ready', () => {
+      let sawNonEmpty = false;
+      for (const implDecision of ['merge', 'skip']) {                    // both shapes, so the assertion is not vacuous
+        const ctx = ctxFor();
+        const res = planDrainPass({ verdicts: mkVerdicts({ implDecision }), openPrContext: ctx, isLocalRepo, localSlug, label: 'ready-to-merge' });
+        const flagged = planTimeFlagged(ctx, res.verdicts);
+        if (flagged.size) sawNonEmpty = true;
+        for (const v of res.verdicts) {
+          if (!flagged.has(v.item == null ? null : asItemId(v.item)) || !v.hasManifest) continue;
+          expect(v.coupleDeferReason).toBe('impl-open');                 // the R7 gate already caught it
+        }
+        // DISJOINTNESS: nothing flagged can reach `ready` → can never reach `landedThisPass` → nothing to subtract
+        const readyItems = new Set(res.plan.ready.map((c) => (c.item == null ? null : asItemId(c.item))));
+        for (const id of flagged) expect(readyItems.has(id)).toBe(false);
+      }
+      expect(sawNonEmpty).toBe(true);                                    // the `skip` shape really does flag one
+    });
+
+    it('and the CASCADE derivation is NOT disjoint — it flags an item that DID reach landedThisPass', () => {
+      // Same pass, `implDecision: 'merge'` (the R7 gate clears the carrier, plan-time flagged set is EMPTY), but the
+      // impl's merge then throws. This is the exact gap a plan-time set structurally cannot see.
+      const ctx = ctxFor();
+      const verdicts = mkVerdicts({ implDecision: 'merge' });
+      planDrainPass({ verdicts, openPrContext: ctx, isLocalRepo, localSlug, label: 'ready-to-merge' });
+      expect(planTimeFlagged(ctx, verdicts).size).toBe(0);               // plan time sees NOTHING
+      const run = runCascade({ verdicts: mkVerdicts({ implDecision: 'merge' }), prsByRepo: mkPrsByRepo(), failRefs: new Set(['lane/a-fui']) });
+      expect(run.landedThisPass.has(100)).toBe(true);                    // the carrier landed anyway
+      expect([...run.seenIncomplete.at(-1)]).toContain(100);             // and the cascade DID flag it
+    });
+  });
+
+  // ── 5. THE REAL-WINDOW TEST — the impl's `gh pr merge` throws mid-cascade ───────────────────────────────────
+  it('real window: the impl merge THROWS, the carrier lands anyway, and the dependent DEFERS on the next replan', () => {
+    const run = runCascade({ verdicts: mkVerdicts(), prsByRepo: mkPrsByRepo(), failRefs: new Set(['lane/a-fui']) });
+    expect(run.merged).toEqual([77]);                                    // only the WE carrier landed
+    expect(run.landedThisPass.has(100)).toBe(true);                      // …and it stamped item 100 as landed
+    expect(run.deferred).toEqual([{ num: 88, item: 101, waitOn: [100] }]);  // the dependent held back
+  });
+
+  it('real window CONTROL: on today\'s wiring (no re-derived set reaching replan) the dependent wrongly LANDS', () => {
+    const run = runCascade({ verdicts: mkVerdicts(), prsByRepo: mkPrsByRepo(), failRefs: new Set(['lane/a-fui']), deriveIncomplete: false });
+    expect(run.merged).toEqual([77, 88]);                                // #88 merged past a half-landed blocker
+    expect(run.deferred).toEqual([]);
+  });
+
+  // ── 6. THE MERGED-SIBLING NO-REGRESSION TEST — pins the `\ mergedRefs` subtraction ──────────────────────────
+  it('merged sibling: an ordinary impl-first/WE-last couple stays whole — its dependent still lands the same pass', () => {
+    const run = runCascade({ verdicts: mkVerdicts(), prsByRepo: mkPrsByRepo() });
+    expect(run.merged).toEqual([55, 77, 88]);                            // impl → carrier → dependent, all in one pass
+    expect(run.deferred).toEqual([]);
+    expect([...run.seenIncomplete.at(-1)]).toEqual([]);                  // nothing incomplete once both halves merged
+  });
+
+  it('the \\ mergedRefs subtraction is load-bearing: WITHOUT it the healthy couple reads incomplete', () => {
+    const verdicts = mkVerdicts();
+    const prsByRepo = mkPrsByRepo();
+    const merged = [{ num: 55, repo: FUI }, { num: 77, repo: WE }];
+    expect([...deriveCoupleIncomplete({ verdicts, merged, prsByRepo })]).toEqual([]);          // with the subtraction
+    expect([...deriveCoupleIncomplete({ verdicts, merged: [], prsByRepo })]).toEqual([100]);   // without it → every healthy couple defers
+  });
+
+  it('liveOpenHeadRefs: a merged entry matching no verdict is REPORTED and fails the couple closed (#2899 J5)', () => {
+    const out = liveOpenHeadRefs({ verdicts: mkVerdicts(), merged: [{ num: 999, repo: FUI }], prsByRepo: mkPrsByRepo() });
+    expect(out.unmatchedMerges).toEqual([`${FUI}#999`]);
+    expect(out.mergedRefs.size).toBe(0);
+    expect(out.openHeadRefs.sort()).toEqual(['lane/a-fui', 'lane/a-we', 'lane/b-we']);
+  });
+
+  // ── 7. the residual is documented with the CORRECTED reason ────────────────────────────────────────────────
+  it('the provenOnMain carve-out is documented as a COST call, not "unrecoverable"', () => {
+    // unwrap the jsdoc line prefixes so an assertion is about the PROSE, not where the comment happens to wrap
+    const doc = SRC.slice(SRC.indexOf('#3004 residual'), SRC.indexOf('#3004 residual') + 1400).replace(/\n\s*\*\s?/g, ' ');
+    expect(doc).toContain('provenOnMain');
+    expect(doc).toContain('#2411');                        // the manifest lives in the PR BODY and survives the merge
+    expect(doc).toMatch(/JOIN KEY|join key/);              // what is actually missing
+    expect(doc).toMatch(/COST call, not an impossibility/); // the corrected framing, not "unrecoverable"
+    expect(doc).toMatch(/gh pr view <num> --json body/);    // the concrete read that makes it recoverable
   });
 });

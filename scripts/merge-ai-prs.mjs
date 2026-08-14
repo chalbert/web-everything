@@ -639,6 +639,116 @@ export function isStackedWeCoupleHalf(v) {
 }
 
 /**
+ * #3004 — the SINGLE-SOURCE couple-completeness predicate: does this WE carrier still have a sibling half that is
+ * OPEN and not accounted for? Pure. Extracted out of the loop that used to be inlined in {@link joinImplToCouples}
+ * so the CARRIER-side `impl-open` defer and the BLOCKER-side counter-evidence set agree, by construction, on what
+ * "the whole couple landed" means. A divergence between those two readings is the #3004 defect: the carrier gate
+ * says the couple is whole, the ordering gate believes it, and a dependent lands past a half-landed blocker.
+ *
+ * BOTH ref sets are ARGUMENTS rather than closed-over state, because the two call sites differ EXACTLY there and
+ * nowhere else:
+ *   - plan time ({@link joinImplToCouples}) passes `landingRefs = readyImplRefs` — the impl halves PLANNED to
+ *     merge this pass. "Planned" is the right reading there: the plan is about to be executed.
+ *   - in-cascade ({@link deriveCoupleIncomplete}) passes `landingRefs = mergedRefs` — the impl halves that
+ *     ACTUALLY merged. Mid-cascade a plan is already stale (an impl's `gh pr merge` can have thrown), so only a
+ *     real merge counts.
+ *
+ * A carrier's OWN head ref is never its own blocker (`ref === own` is skipped), and a manifest-less verdict is
+ * never a carrier (returns false). A ref absent from `openHeadRefs` reads as landed/closed — that is the caller's
+ * responsibility to get right (see `deriveCoupleIncomplete`'s `\ mergedRefs` subtraction).
+ *
+ * @param {{hasManifest?:boolean, headRef?:string, manifestRefs?:string[]}} carrier
+ * @param {{openHeadRefs?:(Set|Iterable<string>|null), landingRefs?:(Set|Iterable<string>|null)}} [refs]
+ * @returns {boolean}  true → at least one sibling ref is OPEN and NOT landing/landed → the couple is NOT whole.
+ */
+export function coupleImplOpen(carrier, { openHeadRefs = null, landingRefs = null } = {}) {
+  if (!carrier || !carrier.hasManifest) return false;             // carriers only — an impl half defines no couple
+  const open = openHeadRefs instanceof Set ? openHeadRefs : new Set(openHeadRefs || []);
+  const landing = landingRefs instanceof Set ? landingRefs : new Set(landingRefs || []);
+  const own = carrier.headRef;
+  for (const ref of Array.isArray(carrier.manifestRefs) ? carrier.manifestRefs : []) {
+    if (!ref || ref === own) continue;
+    if (open.has(ref) && !landing.has(ref)) return true;
+  }
+  return false;
+}
+
+/**
+ * #2899 J5 / #3004 — the LIVE open-head-ref view of a pass mid/post-cascade: the pass-start `openPrContext`
+ * snapshot MINUS the head refs actually merged this pass. Pure. Single-sourced because two gates need the exact
+ * same subtraction and a second copy would drift: the resolve-on-land B5 gate (does the whole couple look landed,
+ * so the card may flip?) and the #3004 in-cascade `coupleIncomplete` derivation (does the whole couple look
+ * landed, so a dependent's `blockedBy` edge may clear?). WITHOUT the subtraction the pass-start snapshot still
+ * lists every sibling that merged normally, so EVERY ordinary impl-first/WE-last couple would read incomplete —
+ * that is the one way this reading could suppress a legitimate clearance, so the subtraction is load-bearing.
+ *
+ * A `merged` entry matching no verdict (#2899 J5) yields no ref to subtract: it is REPORTED in `unmatchedMerges`
+ * and its ref stays "open", which fails the couple closed. That is the safe direction for both callers.
+ *
+ * @param {{verdicts?:Array, merged?:Array<{num:number, repo:(string|null)}>, prsByRepo?:(Map|null)}} o
+ * @returns {{mergedRefs:Set<string>, openHeadRefs:string[], unmatchedMerges:string[]}}
+ */
+export function liveOpenHeadRefs({ verdicts = [], merged = [], prsByRepo = null } = {}) {
+  const vs = Array.isArray(verdicts) ? verdicts : [];
+  const mergedRefs = new Set();
+  const unmatchedMerges = [];
+  for (const m of (Array.isArray(merged) ? merged : [])) {
+    const v = vs.find((x) => x && x.num === m.num && (x.repo || null) === (m.repo || null));
+    if (v && v.headRef) mergedRefs.add(v.headRef);
+    else unmatchedMerges.push(`${m.repo || 'cwd'}#${m.num}`);
+  }
+  const openHeadRefs = [];
+  for (const [, prs] of (prsByRepo instanceof Map ? prsByRepo : new Map())) {
+    for (const p of (Array.isArray(prs) ? prs : [])) {
+      if (p && p.headRefName && !mergedRefs.has(p.headRefName)) openHeadRefs.push(p.headRefName);
+    }
+  }
+  return { mergedRefs, openHeadRefs, unmatchedMerges };
+}
+
+/**
+ * #3004 — the NEGATIVE counter-evidence set for {@link planLabelDrain}: item ids whose WE carrier may have landed
+ * but whose couple is NOT whole (a sibling half is still open). Pure, and derived from the pass's LIVE state, not
+ * its plan.
+ *
+ * WHY THE CASCADE AND NOT PLAN TIME. `joinImplToCouples`'s R7 gate already refuses to let a carrier enter `ready`
+ * while a sibling is open-and-not-landing (it stamps `coupleDefer:'impl-open'`). So a carrier the SAME predicate
+ * flags at PLAN time is, by construction, deferred → never in `plan.ready` → never merged → its item never enters
+ * `landedThisPass`. A plan-time `coupleIncomplete` is therefore DISJOINT from `landedThisPass` and subtracting it
+ * could not change a single answer — a guard that cannot fire (the disjointness/reachability test pins this).
+ *
+ * The window that IS real opens only AFTER the plan: an impl half planned to merge (so the R7 gate cleared its
+ * carrier) whose `gh pr merge` then THROWS. The cascade flips it to `skip`, `replan` re-runs `planLabelDrain`
+ * WITHOUT the couple join, the carrier merges anyway, and its item enters `landedThisPass` with the impl still
+ * open. Re-deriving here — against refs ACTUALLY merged — is what catches that.
+ *
+ * Reads `verdicts` (not the cascade's `remaining`): the cascade removes a merged carrier from `remaining` but
+ * never mutates `verdicts`, so a landed carrier's `manifestRefs` stay in memory for the whole pass — which is
+ * exactly the carrier we need to interrogate.
+ *
+ * Deliberately NOT narrowed to the carriers that merged. Flagging a carrier that has not landed yet is inert
+ * (`planLabelDrain` consults this set only against ids that already hold POSITIVE proof, so an unlanded carrier's
+ * item is filtered by neither predicate), and the broad reading additionally fails CLOSED on the one edge case a
+ * narrow reading would miss: an item `provenOnMain` from a prior session that still has a live carrier verdict
+ * whose impl half is open. Deferring a dependent there is the safe direction, and it is the only direction this
+ * set can push — the subtraction never removes a defer.
+ *
+ * @param {{verdicts?:Array, merged?:Array<{num:number, repo:(string|null)}>, prsByRepo?:(Map|null)}} o
+ * @returns {Set<number|string>}  `asItemId`-keyed, matching `landedThisPass`.
+ */
+export function deriveCoupleIncomplete({ verdicts = [], merged = [], prsByRepo = null } = {}) {
+  const vs = Array.isArray(verdicts) ? verdicts : [];
+  const { mergedRefs, openHeadRefs } = liveOpenHeadRefs({ verdicts: vs, merged, prsByRepo });
+  const openSet = new Set(openHeadRefs);
+  const out = new Set();
+  for (const v of vs) {
+    if (!v || !v.hasManifest || v.item == null) continue;
+    if (coupleImplOpen(v, { openHeadRefs: openSet, landingRefs: mergedRefs })) out.add(asItemId(v.item));
+  }
+  return out;
+}
+
+/**
  * #2393 — the impl-PR→WE-manifest `laneRef` join. Pure. Closes the impl-orphan-always-ready hole: only a WE
  * lane carries a `.lane-manifest.json`, so a couple's IMPL PR (frontierui/plateau-app) — and any WE PR whose
  * manifest didn't parse — reads as a manifest-less ORPHAN, which `planLabelDrain` treats as always-ready. An
@@ -733,18 +843,16 @@ export function joinImplToCouples(verdicts, { carrierHealth = null, truncated = 
   // impl half is NOT a candidate verdict, so the impl-verdict→carrier propagation (B7) above never fires — yet the
   // impl PR is still OPEN in the blind context. Without this a WE carrier lands with the `active→resolved` flip
   // while its impl PR sits open (B7's stated invariant, un-covered on the carrier-only narrow).
+  // #3004 — the test itself is `coupleImplOpen`, the ONE exported predicate the in-cascade `coupleIncomplete`
+  // derivation also calls. Do NOT re-inline the loop here: the whole point is that the carrier-side defer and the
+  // blocker-side counter-evidence cannot drift apart. This call site's `landingRefs` are the PLANNED-to-merge impl
+  // refs; the cascade's are the refs that ACTUALLY merged (see `deriveCoupleIncomplete`).
   const readyImplRefs = new Set(list.filter((v) => v && !v.hasManifest && v.decision === 'merge' && v.coupleDefer !== true).map((v) => v.headRef).filter(Boolean));
   for (const v of list) {
     if (!v || !v.hasManifest) continue;               // carriers only
-    const own = v.headRef;
-    for (const ref of Array.isArray(v.manifestRefs) ? v.manifestRefs : []) {
-      if (!ref || ref === own) continue;
-      const implOpenNotLanding = openRefs.has(ref) && !readyImplRefs.has(ref);
-      if (implOpenNotLanding) {
-        v.coupleDefer = true;
-        if (v.coupleDeferReason !== 'held') v.coupleDeferReason = 'impl-open';
-        break;
-      }
+    if (coupleImplOpen(v, { openHeadRefs: openRefs, landingRefs: readyImplRefs })) {
+      v.coupleDefer = true;
+      if (v.coupleDeferReason !== 'held') v.coupleDeferReason = 'impl-open';
     }
   }
   return list;
@@ -1136,7 +1244,7 @@ export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, only
  * Pure.
  * @returns {{prsByRepo:Map, verdicts:Array, carrierHealth:Map, plan:{ready:Array, deferred:Array, staleLandedOpenItems:Array}}}
  */
-export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set() } = {}) {
+export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set() } = {}) {
   let prsByRepo = null;
   let vs = verdicts;
   if (!Array.isArray(vs)) {
@@ -1151,7 +1259,14 @@ export function planDrainPass({ verdicts = null, listings = null, openPrContext 
   const openHeadRefs = new Set();
   if (ctx.prsByRepo instanceof Map) for (const prs of ctx.prsByRepo.values()) for (const p of (Array.isArray(prs) ? prs : [])) { if (p && p.headRefName) openHeadRefs.add(p.headRefName); }
   joinImplToCouples(vs, { carrierHealth, truncated: !!ctx.truncated, contextComplete: !!ctx.contextComplete, openHeadRefs });
-  const plan = planLabelDrain(vs, { landedThisPass, provenOnMain, extraOpenItems: ctx.openItems, contextComplete: !!ctx.contextComplete, isWeRepo: isLocalRepo });
+  // #3004 — `coupleIncomplete` is FORWARDED here, never DERIVED here, and that is deliberate: do NOT "helpfully"
+  // move the derivation into this function. `joinImplToCouples` above has just stamped `coupleDefer:'impl-open'`
+  // on every carrier the same predicate would flag, and such a carrier lands in `deferred`, never `ready` — so it
+  // never merges and its item never enters `landedThisPass`. A set derived HERE is therefore DISJOINT from
+  // `landedThisPass` by construction and can never change an answer: the tests would pass (they hand-seed the set)
+  // while production behaviour stayed byte-identical. The live derivation belongs in the CASCADE, against refs
+  // that ACTUALLY merged — see `deriveCoupleIncomplete`. The disjointness/reachability test pins this.
+  const plan = planLabelDrain(vs, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: ctx.openItems, contextComplete: !!ctx.contextComplete, isWeRepo: isLocalRepo });
   return { prsByRepo, verdicts: vs, carrierHealth, plan };
 }
 
@@ -1210,6 +1325,27 @@ export function isConfirmSweepSettled({ merged = 0, pendingRebased = 0, consider
  * Orphan PRs (no manifest → item null, blockedBy [], stackParents []) are always ready, so this degrades to
  * the legacy unordered sweep when nothing carries a manifest.
  *
+ * #3004 — NEGATIVE COUNTER-EVIDENCE (`coupleIncomplete`). Both positive proofs above are keyed on the WE-CARRIER
+ * merge, but a couple is impl-first/WE-last ACROSS repos, so a blocker's WE half can land while its impl half is
+ * still open (its `gh pr merge` threw mid-cascade and flipped to `skip`; the in-cascade `replan` re-runs this
+ * function WITHOUT the couple join, so the carrier landed anyway). In that window `landedThisPass` says "landed"
+ * about half a couple. `coupleIncomplete` is the caller's set of item ids whose couple is NOT whole, and it
+ * SUBTRACTS from both predicates: `provenLanded` and `stackProven`'s proof (1). The shape of the module is
+ * preserved — an edge still clears only on POSITIVE proof, never on absence — and the subtraction can only ADD a
+ * defer, never remove one, so an empty/absent set is a byte-exact no-op on #999's liveness fix.
+ * The set is DERIVED IN THE CASCADE ({@link deriveCoupleIncomplete}), never at plan time: see that function for
+ * why a plan-time derivation is provably disjoint from `landedThisPass` and therefore inert.
+ *
+ * #3004 residual — the `provenOnMain` ARM IS NOT COVERED (documented so a later reader does not repeat an earlier,
+ * WRONG claim that it is unrecoverable). A carrier `bornAs`-proven on `main` from a PRIOR session has no live
+ * verdict this pass, so nothing in memory names its couple's refs. That record is NOT lost: #2411 moved the
+ * manifest into the PR BODY and `readPrManifest` reads the body FIRST, so a merged carrier's `manifestRefs` are
+ * perfectly readable via `gh pr view <num> --json body`, indefinitely. What is missing is the JOIN KEY — getting
+ * from a `bornAs` hash on `main` to that PR number costs a merged-PR search per proven item, per pass, on the hot
+ * path, for a strictly rarer window than the one #3004 closes. So the carve-out is a COST call, not an
+ * impossibility, and closing it is its own item that should start from "search merged PRs for the carrier and
+ * read its body manifest".
+ *
  * @param {Array<{num:number, item:(number|string|null), blockedBy:Array<number|string>, stackParents?:Array<number|string>, decision:'merge'|'skip'}>} candidates
  * #xc7p3q9 (R1) — the PLAN-WIDE fail-closed invariant: when `contextComplete === false`, a manifest-less verdict
  * from a NON-WE repo (`!isWeRepo(repo)`) MIGHT be a coupled impl whose carrier we could not read, so it must never
@@ -1217,10 +1353,10 @@ export function isConfirmSweepSettled({ merged = 0, pendingRebased = 0, consider
  * orphan the per-carrier gate structurally misses (an unreadable/unlisted carrier has no `manifestRefs` to key a
  * join on). #xc7p3q9 (R2) — a verdict's `waitOn` is NEVER allowed to name its OWN item (a self-referential wait is
  * structurally unsatisfiable — the livelock); such an edge is stripped.
- * @param {{landedThisPass?:Set, provenOnMain?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function}} [proof]  positive proof-of-land sets (both `asItemId`-keyed)
+ * @param {{landedThisPass?:Set, provenOnMain?:Set, coupleIncomplete?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function}} [proof]  the proof bag: positive proof-of-land sets plus (#3004) the NEGATIVE `coupleIncomplete` counter-evidence set (all `asItemId`-keyed)
  * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
  */
-export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false } = {}) {
+export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
@@ -1251,9 +1387,15 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
   //      already-numbered parent absent from this pass is landed.
   //   5. otherwise (a provisional hash, no proof, not a candidate) — NOT proven → defer. This is the stowaway
   //      guard: a descendant is never salvaged past a parent whose land we cannot positively prove.
+  //
+  // #3004 — proof (1) carries the SAME half-couple hole as `provenLanded` below, and here it guards the STRONGER
+  // invariant: landing a descendant past a parent whose impl half never landed drags half a parent onto `main`
+  // under the CHILD's number (the #2393 stowaway, at the couple level). So (1) makes the same subtraction, and it
+  // SHORT-CIRCUITS to `false` — counter-evidence about a half-landed couple must not be undone by falling through
+  // to the weaker arms (3)/(4). Proof (3) `provenOnMain` is not separately derivable (see the docblock residual).
   const stackProven = (sp) => {
     const id = asItemId(sp);
-    if (landedThisPass.has(id)) return true;   // (1)
+    if (landedThisPass.has(id)) return !coupleIncomplete.has(id);   // (1) — landed this run, unless its couple is provably NOT whole (#3004)
     if (openItems.has(id)) return false;       // (2)
     if (provenOnMain.has(id)) return true;     // (3)
     return typeof id === 'number' && Number.isFinite(id); // (4); a hash → false (5)
@@ -1266,7 +1408,11 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
   // pass (F1), and a stale/abandoned/impl-half PR still naming a LANDED item defers dependents permanently (F2).
   // POSITIVE proof only (never absence): the edge clears solely on landedThisPass OR provenOnMain, matching the
   // stowaway guard — an open blocker with no proof still defers.
-  const provenLanded = (id) => landedThisPass.has(id) || provenOnMain.has(id);
+  // #3004 — MINUS the negative counter-evidence. Positive proof is keyed on the WE-CARRIER merge, which proves
+  // only half of a cross-repo couple; `coupleIncomplete` names the items whose OTHER half is still open, and it
+  // overrides the positive read. Still never absence-based: an id absent from BOTH sets is unchanged, so an empty
+  // `coupleIncomplete` leaves #999's liveness fix byte-identical.
+  const provenLanded = (id) => (landedThisPass.has(id) || provenOnMain.has(id)) && !coupleIncomplete.has(id);
   const ready = [];
   const deferred = [];
   // #999/xq985wu F2 diagnostic — items proven landed yet STILL named by an open PR (present in `openItems`). The
@@ -3415,7 +3561,10 @@ async function runCli() {
   // #xc7p3q9 — the ONE re-plan wiring (shared by the dry-run report and the live cascade): re-orders the joined+
   // stamped `verdicts` across merges, threading the SAME extraOpenItems + contextComplete + WE-repo predicate the
   // seam used. No second, divergently-typed `planLabelDrain` invocation (R4).
-  const replan = (cands) => planLabelDrain(cands, { landedThisPass, provenOnMain, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo });
+  // #3004 — `coupleIncomplete` is a PER-ITERATION argument, not a closed-over constant: the cascade is stateful and
+  // the answer changes every time something merges (or fails to). It defaults empty, so the DRY-RUN report and any
+  // call that does not re-derive behave exactly as before.
+  const replan = (cands, coupleIncomplete = new Set()) => planLabelDrain(cands, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo });
   const toMerge = verdicts.filter((v) => v.decision === 'merge'); // @merge-gate-exempt the FINAL set actually merged; a held PR is `decision:'skip'` and MUST be excluded here — this is the hard AND that never lands a held PR
   const skipped = verdicts.filter((v) => v.decision === 'skip');
   // #xc7p3q9 (R6) — the held couple's members (its `skip` carrier + its deferred impl half — both carry
@@ -3473,7 +3622,16 @@ async function runCli() {
     const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
     let staleLandedOpenItems = [];
     for (;;) {
-      const plan = replan(remaining);
+      // #3004 — RE-DERIVE the negative counter-evidence immediately before every re-plan, from `verdicts`' carriers
+      // against the pass-start open-ref snapshot MINUS the refs actually merged so far. This is the only wiring
+      // that reaches a live plan: `planDrainPass`'s plan is consumed by the DRY-RUN report, while the live cascade
+      // orders exclusively through `replan`. It catches the real window — an impl half planned to merge (so the R7
+      // gate cleared its carrier) whose merge then THREW and flipped to `skip`, leaving its carrier's item in
+      // `landedThisPass` with the impl still open. The `\ mergedRefs` subtraction inside `liveOpenHeadRefs` is
+      // load-bearing in the OTHER direction: without it every healthy impl-first/WE-last couple would read
+      // incomplete (its impl is still in the pass-start snapshot) and every dependent would wrongly defer.
+      const coupleIncomplete = deriveCoupleIncomplete({ verdicts, merged, prsByRepo: openPrContext.prsByRepo });
+      const plan = replan(remaining, coupleIncomplete);
       deferred = plan.deferred;
       staleLandedOpenItems = plan.staleLandedOpenItems || [];
       if (!plan.ready.length) break;
@@ -3683,21 +3841,12 @@ async function runCli() {
       // #2899 jury J5 — a `merged` entry that matches no verdict is an INTEGRITY failure, not a silent skip: it
       // would leave that ref looking "still open", block its couple, and (pre-J2) drop the item with no trace.
       // Surface it and fail the gate closed for this pass rather than guessing.
-      const mergedRefs = new Set();
-      const unmatchedMerges = [];
-      for (const m of merged) {
-        const v = verdicts.find((x) => x && x.num === m.num && (x.repo || null) === (m.repo || null));
-        if (v && v.headRef) mergedRefs.add(v.headRef);
-        else unmatchedMerges.push(`${m.repo || 'cwd'}#${m.num}`);
-      }
+      // #3004 — this construction is now the EXPORTED, single-sourced `liveOpenHeadRefs`, shared with the
+      // in-cascade `coupleIncomplete` derivation. Both gates ask the same question ("did the whole couple land?")
+      // and must never drift on the answer; a second inline copy here is exactly the drift that produced #3004.
+      const { openHeadRefs, unmatchedMerges } = liveOpenHeadRefs({ verdicts, merged, prsByRepo: openPrContext.prsByRepo });
       if (unmatchedMerges.length && !AS_JSON) {
         process.stderr.write(`  ⚠ resolve-on-land: ${unmatchedMerges.join(', ')} merged but matched no verdict — cannot prove its couple landed; those items are DEFERRED (#2899)\n`);
-      }
-      const openHeadRefs = [];
-      for (const [, prs] of (openPrContext.prsByRepo instanceof Map ? openPrContext.prsByRepo : new Map())) {
-        for (const p of (Array.isArray(prs) ? prs : [])) {
-          if (p && p.headRefName && !mergedRefs.has(p.headRefName)) openHeadRefs.push(p.headRefName);
-        }
       }
       // #2899 jury J2/J3 — TOTALITY. Every id in `landedThisPass` must end in exactly ONE observable bucket:
       // resolved / already-resolved / deferred / failed. The first cut returned only the ids to flip, so a
