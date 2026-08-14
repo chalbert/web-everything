@@ -34,6 +34,9 @@
  * Pure, unit-tested through `review-core.mjs`'s re-exports in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
 import { CARE_LEVELS } from './review-escalation.mjs';
+// #2438's labelled data fence (#2967 moved it to a leaf so this module can reach it — `review-core.mjs`,
+// where it used to live, imports THIS module, so importing back would be a cycle).
+import { FENCED_DATA_RULE, fenceUntrusted } from './mandate-fence.mjs';
 
 /**
  * @typedef {Object} Finding
@@ -1370,7 +1373,11 @@ export function rosterPickedEvent(plan, { round = 0, at, charterForLens, reviewe
  */
 
 /** The subject-adapter contract descriptor (#2656) — the REQUIRED and OPTIONAL interface keys, single-sourced so
- *  `validateSubjectAdapter` and adapter authors name them once. Frozen. */
+ *  `validateSubjectAdapter` and adapter authors name them once. Frozen.
+ *  @test-only-export-ok: this is a PUBLISHED interface descriptor — its consumers are adapter authors (in this
+ *  repo the docblocks of design-pixels-adapter.mjs / decision-prose-adapter.mjs cite it, and out of it a sibling
+ *  repo's adapter would) plus the jury-core conformance assertions that pin the key sets. validateSubjectAdapter
+ *  deliberately keeps its own literals, so "no live importer" is the shape of a contract, not dead code (#2967a). */
 export const SUBJECT_ADAPTER_CONTRACT = Object.freeze({
   required: Object.freeze(['subject', 'extractTouchSet', 'resolveMethods']),
   optional: Object.freeze(['subjectNoun', 'mandatoryLenses', 'charterForLens', 'buildMandate']),
@@ -1424,8 +1431,15 @@ export function validateSubjectAdapter(adapter) {
  *     whole subject and mints brand-new blockers, so convergence is structurally unreachable.
  * Both default to the pre-#2950 behaviour (no goal block; round 1 = no anti-spiral clause).
  *
+ * #2967 — `fenced` routes the GOAL through the #2438 labelled data fence (`fenceUntrusted` + `FENCED_DATA_RULE`).
+ * The goal is caller-supplied text: the drain's PR-review path passes the PR TITLE, which comes straight off
+ * `gh pr view` and is written by whoever opened the PR. Unfenced, it lands in the juror's instruction text. That
+ * is the whole established fact — whether a crafted title could actually move a juror's verdict is UNMEASURED,
+ * and this parameter is hygiene, not a patched exploit. Opt-in (default `false`) so shipped callers' mandate text
+ * is byte-stable; the caller that feeds it untrusted text passes `true` (`we:scripts/operations/review-pr.mjs`).
+ *
  * @param {{subjectNoun?: string, mandate?: string|string[], defaultMandate?: string, isolationLine?: string,
- *   findingAnchor?: string, bodyLines?: string[], goal?: string, round?: number}} [o]
+ *   findingAnchor?: string, bodyLines?: string[], goal?: string, round?: number, fenced?: boolean}} [o]
  * @returns {string}
  */
 export function buildSubjectMandate({
@@ -1437,6 +1451,7 @@ export function buildSubjectMandate({
   bodyLines = [],
   goal = '',
   round = 1,
+  fenced = false,
 } = {}) {
   const mandates = (Array.isArray(mandate) ? mandate : [mandate]).filter(Boolean);
   const mandateLine = mandates.length ? mandates.join(', ') : defaultMandate;
@@ -1450,7 +1465,12 @@ export function buildSubjectMandate({
     // unanswerable without it, so the goal is stated before anything is asked of the juror.
     ...(isNonEmptyString(goal)
       ? [
-        `WHAT THIS ${String(subjectNoun).toUpperCase()} IS TRYING TO DO: ${String(goal).trim()}`,
+        // #2967 — fenced, the goal travels as labelled DATA (and the rule sentence that says so comes with it);
+        // unfenced, the text is exactly what it was before #2967 for every caller that has not opted in.
+        ...(fenced ? [FENCED_DATA_RULE] : []),
+        fenced
+          ? `WHAT THIS ${String(subjectNoun).toUpperCase()} IS TRYING TO DO, quoted in the goal block below:\n${fenceUntrusted('goal', String(goal).trim())}`
+          : `WHAT THIS ${String(subjectNoun).toUpperCase()} IS TRYING TO DO: ${String(goal).trim()}`,
         'Judge it against THAT goal and against the base it started from — never against an ideal implementation you',
         'would have written. A change can be imperfect and still be the right thing to accept.',
       ]

@@ -49,6 +49,16 @@
         "value": true,
         "impl": "PLUG_DRIFT_ENFORCED",
         "description": "Whether WE↔FUI plug shared-core drift is a hard ERROR (#1309). true — flipping to false lets the WE and FUI copies of a plug's shared core diverge silently."
+      },
+      "testOnlyExport": {
+        "value": false,
+        "impl": "TEST_ONLY_EXPORT_ENFORCED",
+        "description": "Whether an export that no non-test module imports and that its own module never references again is a hard ERROR (#2967a — the reduceLensJury 'extracted, tested, never wired' class). Currently WARN-FIRST (false), on the composeTraits precedent: a broad structural scan ships advisory until its carve-out set is confirmed false-positive-free, then flips. Raising it to true STRENGTHENS the gate."
+      },
+      "unfencedMandate": {
+        "value": true,
+        "impl": "UNFENCED_MANDATE_ENFORCED",
+        "description": "Whether a build…Mandate builder that splices a parameter into instruction text with no fenceUntrusted path is a hard ERROR (#2967b, #2438's fence). true from day one, with both live call sites fixed in the same change — the rule establishes that caller-supplied text reaches a mandate unfenced, NOT that such text can steer an agent's verdict (unmeasured). Flipping to false parks a source-hygiene gate behind a warning stream."
       }
     }
   },
@@ -63,6 +73,11 @@
       "value": [1, 2, 3, 5, 8, 13],
       "impl": "FIB",
       "description": "The allowed values for a backlog item's `size` field (the Fibonacci rule-set). A size outside this set is a hard ERROR. Adding a value (e.g. 21) or dropping the constraint loosens what the gate accepts."
+    },
+    "mandateFenceAllowedParams": {
+      "value": ["lens", "round", "roundCap", "contextIsolation", "subjectNoun", "findingAnchor", "fenced"],
+      "impl": "MANDATE_FENCE_ALLOWED_PARAMS",
+      "description": "The build…Mandate parameters exempt from the #2438 fence (#2967b) — CLOSED vocabularies, never caller free text: a validated lens name, round numbers, an isolation mode, the structural nouns a subject adapter supplies, and the boolean that turns the fence on. Adding a name here EXEMPTS a parameter from the gate, so it is a definition-of-green loosening and lives only in this file."
     }
   }
 }

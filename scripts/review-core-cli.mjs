@@ -229,7 +229,11 @@ export function buildMandateText({ kind, lens, findings, round, roundCap } = {})
     case 'validator':
       return buildValidatorMandate({ lens });
     case 'editor':
-      return buildEditorMandate({ findings, round: round != null ? Number(round) : undefined, roundCap });
+      // `fenced: true` (#2967) — `findings` is juror prose read from `--file`/stdin, and the editor it seeds has
+      // WRITE TOOLS on a live tree, so the finding list travels inside the #2438 labelled data fence (the same
+      // call `we:scripts/lib/converge-transports.mjs:206` already makes). Established: the text reached the
+      // mandate unfenced. NOT established: that it could steer the editor — nobody has measured that.
+      return buildEditorMandate({ findings, round: round != null ? Number(round) : undefined, roundCap, fenced: true });
     default:
       throw new Error(`buildMandateText: unknown mandate kind "${kind}" — must be one of lens, editor, validator`);
   }
