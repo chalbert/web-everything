@@ -11,6 +11,8 @@ import {
 } from '../fetch-parked.mjs';
 import { classifyChecks } from '../pr-land.mjs';
 import { parseEscalationReason } from '../review-detail.mjs';
+import { buildEscalationReasonBlock } from '../lib/review-escalation.mjs';
+import { editorAllowedByReasons } from '../lib/review-core.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -345,6 +347,32 @@ describe('escalationReason — the drain\'s reason block, parsed exactly (#2908 
 
   it('is present on every bundle, so a consumer can always ask', () => {
     expect(assembleParked({ view: base })).toHaveProperty('escalationReason');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #3101 — the real-world shape `bodyWith` above never exercises: `buildEscalationReasonBlock`'s trailing
+// `<!-- policy-set: … -->` stamp with NO heading after it (end-of-body), which is what the drain actually
+// writes. `bodyWith` always terminates the block with `## Something else` — a shape that already worked before
+// the fix and so never caught this. Built with the real writer, not a hand-typed body, so the fixture cannot
+// drift from what `buildEscalationReasonBlock` actually emits.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('escalationReason — the stamped, end-of-body shape buildEscalationReasonBlock actually writes (#3101)', () => {
+  const base = { number: 9, title: 't', files: [], state: 'OPEN', labels: [], headRefName: 'lane/x' };
+
+  it('the trailing policy-stamp comment is not read as a bogus extra reason', () => {
+    const body = `A PR description.${buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])}`;
+    expect(assembleParked({ view: { ...base, body } }).escalationReason).toEqual(['size (602 ≥ 400 changed lines)']);
+  });
+
+  it('THE #2908 REGRESSION PROOF: a stamped size-only park is editor-allowed — was false, is now true', () => {
+    const body = `A PR description.${buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])}`;
+    const escalationReason = assembleParked({ view: { ...base, body } }).escalationReason;
+    // The corrupted (pre-#3101) array would have carried the stamp as a bogus second element, and
+    // editorAllowedByReasons — imported here from its real, exported source, not re-derived — fails CLOSED on
+    // any reason it cannot canonicalize, forcing false on EVERY stamped park regardless of how low-risk its
+    // real reasons are. A `size`-only park is exactly the editor-ON case #2908 was built for.
+    expect(editorAllowedByReasons(escalationReason)).toBe(true);
   });
 });
 
