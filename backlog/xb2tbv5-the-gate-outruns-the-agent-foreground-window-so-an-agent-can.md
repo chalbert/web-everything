@@ -14,7 +14,8 @@ scope:
 # The gate outruns the agent foreground window, so an agent cannot finish a delivery arc
 
 **A delivery agent structurally cannot complete its own arc today, and the failure is silent.** Measured
-across eight occurrences on 2026-08-14, every one recovered by hand.
+across ten occurrences on 2026-08-14 (see the three shapes below — they are mutually exclusive outcomes and
+sum to the total), every one recovered by hand.
 
 ## The mechanism
 
@@ -31,7 +32,8 @@ failure — the same shape as the wedged-`claude` hang in [#3097]: not a red, ju
 Every brief in this session carried an explicit instruction — *"run `pr-land` in the FOREGROUND and WAIT
 for it"* — and it made no difference, because **the agents did**. The harness backgrounded the call anyway.
 Later briefs added *"poll its output file rather than stopping"*; one agent then looped — background, stop,
-be told it stopped, wait again — three times in a row. This is not addressable by wording.
+be told it stopped, wait again — three times in a row. Wording has not fixed it, across every phrasing
+tried this session.
 
 Observed shapes, all the same cause:
 - gate run backgrounded → agent stops → work uncommitted (4 of the 5 builds this session);
@@ -43,7 +45,7 @@ Observed shapes, all the same cause:
 This is a **phase-B blocker** for [#3102]. "Queue and supervise engine failures" assumes the engine can
 finish one unit of work unattended. Right now an agent-driven build reliably stops just short of landing,
 and because it surfaces as silence rather than as a failure, supervision has nothing to act on. Every one
-of the eight was found by a human checking, never by a signal.
+of the ten was found by a human checking, never by a signal.
 
 ## Approaches, and the fork is real
 
