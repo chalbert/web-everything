@@ -42,6 +42,16 @@
  *     supersedes the `ownerSession` compare for marked lanes only; unmarked leases keep the fail-open behavior
  *     above. The owning lane re-asserts the slug it acquired under and passes; a sibling never holds it and is
  *     denied. Same escape: `LANE_CLOBBER_OK=1`.
+ *   • the SAME destructive git op in a lane whose LIVE UNMARKED lease is CONTESTED (#2997) — another live lease
+ *     in the same pool carries the SAME `ownerSession`, i.e. a SIBLING AGENT of the caller's own session is
+ *     holding a lane right now. #2413's fail-closed regime was gated on the `workflowLane` marker, which only
+ *     `--purpose=workflow-lane` sets, so every other concurrent topology (ad-hoc subagents, the conveyor's
+ *     `conveyor-*` dispatch) fell back to the `ownerSession` compare — which answers "mine" for every sibling.
+ *     Same remedy as #2413 and the same minted-slug channel: assert the lease's own `holder` slug inline
+ *     (`LANE_SESSION=<slug>`, printed by `lane-pool.mjs acquire`); absence OR mismatch ⇒ deny. Scoped to the
+ *     CONTESTED case ONLY, so the ordinary solo topology (one session, one lane) is completely unaffected — a
+ *     lease nobody else's live lease shares an `ownerSession` with keeps the plain #2367 compare. Escape:
+ *     `LANE_CLOBBER_OK=1`.
  *   • a build that WRITES the shared PRIMARY tree, run at primary cwd (#2749/#2788 — the 4th arm under
  *     `#primary-read-only-lanes-only`) — an `npm run build`/`build:docs`/`build:demo` (or the `pnpm`/`yarn`/
  *     `run-s`/`run-p`/`npm-run-all` equivalent; `build:check` and `build:plugs` are excluded — the former
@@ -77,8 +87,9 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug } from './lib/lane-lease.mjs';
+import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug, requiredAssertionSlug } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
@@ -1237,8 +1248,12 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
  *  by the CLI via a lease-file read + a durable session-id compare — kept out of this pure function for the same
  *  reason) — gates the #2367 destructive-op rule. `ctx.markedLeaseSlug` = this lane clone carries a LIVE MARKED
  *  (workflowLane) lease whose minted slug is this string (computed by the CLI via the lease read) — gates the
- *  #2413 fail-closed destructive-op rule, which SUPERSEDES the #2367 ownerSession compare for a marked lane. */
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null } = {}) {
+ *  #2413 fail-closed destructive-op rule, which SUPERSEDES the #2367 ownerSession compare for a marked lane.
+ *  `ctx.contestedHolderSlug` = this lane clone carries a LIVE UNMARKED lease that is CONTESTED (a SIBLING live
+ *  lease in the same pool shares its `ownerSession`) and whose minted per-holder slug is this string (computed
+ *  by the CLI via the lease read + a sibling-lease scan) — gates the #2997 fail-closed destructive-op rule,
+ *  which supersedes the #2367 ownerSession compare in exactly the topology where that compare cannot answer. */
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -1291,6 +1306,21 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       if (asserted !== markedLeaseSlug)
         return `This lane clone holds a LIVE workflow-lane lease (#2413) — a destructive git op here must ASSERT the lease's own slug inline: prefix \`LANE_SESSION=${markedLeaseSlug}\` (e.g. \`LANE_SESSION=${markedLeaseSlug} git reset --hard origin/main\`). The slug was ${asserted ? `asserted as "${asserted}" — a MISMATCH` : 'ABSENT'}, so this is denied fail-closed: a sibling parallel lane cannot be told apart by ambient session identity, so only the minted slug proves ownership. If this really is your lane, re-assert its slug; otherwise pick another lane. Sanctioned override (rare): prefix \`LANE_CLOBBER_OK=1\`.`;
       return null; // slug asserted and matches → this is the owning lane's own op → allow
+    }
+    // #2997 — a LIVE UNMARKED but CONTESTED lease: another live lease in this pool carries the SAME
+    // `ownerSession`, so a SIBLING AGENT of my own session is holding a lane right now and the #2367 compare
+    // below reads "mine" for every one of us. This is the #2413 mechanism with its `workflowLane`-marker gate
+    // removed — the residual that gate left open, and the one a 2026-08-08 `reset --hard` and a 2026-08-14
+    // `release --lane=5` both walked straight through. Fail CLOSED on the same minted-slug channel: assert the
+    // lease's own `holder` slug inline, absence OR mismatch ⇒ deny. Only reached when the lease is NOT foreign
+    // (a different session's lease is already the #2367 case below) and IS contested — the solo topology never
+    // gets here, which is what keeps this off the normal flow.
+    if (contestedHolderSlug) {
+      if (clobberOk) return null; // the deliberate escape wins here too, exactly as for a marked lane
+      const asserted = assertedLaneSlug(s);
+      if (asserted !== contestedHolderSlug)
+        return `This lane clone holds a LIVE lease that is CONTESTED (#2997) — a SIBLING agent of your own session is holding another lane right now, so the durable session id says "mine" for BOTH of you and cannot tell your lane from theirs. A destructive git op here must ASSERT this lease's own minted holder slug inline: prefix \`LANE_SESSION=${contestedHolderSlug}\` (e.g. \`LANE_SESSION=${contestedHolderSlug} git reset --hard origin/main\`) — \`lane-pool.mjs acquire\` printed that slug when this lane was leased. The slug was ${asserted ? `asserted as "${asserted}" — a MISMATCH` : 'ABSENT'}, so this is denied fail-closed. If this really is your lane, re-assert its slug; if it is not, you are about to clobber a sibling's in-flight work — run this in the lane YOU acquired instead. Sanctioned override (rare): prefix \`LANE_CLOBBER_OK=1\`.`;
+      return null; // slug asserted and matches → this is the holder's own op → allow
     }
     // #2367 — a LIVE UNMARKED lease held by ANOTHER session (serial topology; the durable `ownerSession`
     // compare, fail-OPEN with no id). Unchanged for unmarked leases. Escape: `LANE_CLOBBER_OK=1`.
@@ -1545,12 +1575,52 @@ function commitsBehindUpstream(cwd) {
 // #2367 — read a lane clone's lease marker (`.git/<LEASE_FILENAME>`, written by `lane-pool.mjs acquire`).
 // Impure (fs read); mirrors lane-pool.mjs's own `readLease` (kept separate — this side has no reason to
 // depend on the CLI-flags-shaped lane-pool.mjs module). A missing/corrupt marker is "no lease" — fail open.
-function readLaneLease(laneRoot) {
+// #2997 — EXPORTED so `guard-lane.mjs` (the PreToolUse(Edit|Write) gate, which had no lease read at all) reuses
+// this exact reader together with `laneRootFromCwd`. The two guards must never drift on what "your lane" means,
+// so there is deliberately ONE implementation of the lease-location + lease-read pair and both import it.
+export function readLaneLease(laneRoot) {
   try {
     const parsed = JSON.parse(readFileSync(join(laneRoot, '.git', LEASE_FILENAME), 'utf8'));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+// #2997 — every OTHER lane's LIVE lease under the same `.lanes/` root as `laneRoot`. Impure (a readdir + a few
+// small file reads); the input to `isContestedLease`, i.e. "is a sibling agent of this lease's session holding
+// a lane right now?". Fails OPEN (empty list ⇒ never contested ⇒ today's behaviour) on any fs error — a guard
+// fault must never wedge the agent. Only ever called from the already-narrow destructive-op slice, so the cost
+// is paid on a tiny fraction of Bash calls.
+//
+// #2997 r2 (review F3, R2) — the scan is CROSS-POOL. A lane lives at `<…>/.lanes/<pool>/lane-N`, and the first
+// cut scanned only `<pool>`. But a session's sibling agents routinely hold lanes in DIFFERENT pools (a
+// cross-locus couple leases one lane in the web-everything pool and one in the plateau-app pool — the exact
+// shape `release --all-pools` exists for), and the ambient session id is precisely as ambiguous there. Those
+// read as UNcontested and the destructive op was allowed. Scanning every pool under `.lanes/` closes it.
+//
+// STILL OPEN, deliberately (review F3, R1): the sibling that holds NO lane of its own. A lane-less agent of
+// session S running a destructive op in S's only leased lane produces no second live lease anywhere, so
+// nothing is contested and the op is allowed. Closing that would mean demanding the minted slug for EVERY
+// destructive op in EVERY leased lane — a fail-closed default whose false-deny cost lands on every ordinary
+// solo flow. Not taken here; recorded on the card and in the PR body instead.
+export function siblingLaneLeases(laneRoot, nowMs = Date.now()) {
+  try {
+    const poolsRoot = dirname(dirname(laneRoot)); // `<…>/.lanes` — the parent of every pool
+    const out = [];
+    for (const pool of readdirSync(poolsRoot)) {
+      const poolDir = join(poolsRoot, pool);
+      let entries;
+      try { entries = readdirSync(poolDir); } catch { continue; } // a non-directory / unreadable entry: skip it
+      for (const name of entries) {
+        if (!/^lane-\d+$/.test(name) || join(poolDir, name) === laneRoot) continue;
+        const lease = readLaneLease(join(poolDir, name));
+        if (lease && !isLeaseStale(lease, nowMs)) out.push(lease);
+      }
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 
@@ -1562,16 +1632,25 @@ function readLaneLease(laneRoot) {
 //   • LIVE MARKED (workflowLane) lease ⇒ { <its minted slug>, false } — the #2413 fail-closed slug-assertion
 //     regime takes over; the ownerSession compare is NOT consulted (siblings share it, so it fails open in the
 //     one topology that matters — the whole reason marked lanes exist).
-//   • LIVE UNMARKED lease ⇒ { null, isForeignLease(ownerSession vs mine) } — the #2367 regime, unchanged (r2's
+//   • LIVE UNMARKED lease held by ANOTHER session ⇒ { null, null, true } — the #2367 regime, unchanged (r2's
 //     durable-ownerSession-alone compare; degraded no-id ⇒ fail-open allow).
+//   • LIVE UNMARKED lease that is MINE-or-indistinguishable AND CONTESTED (a sibling live lease in the pool
+//     shares its ownerSession) ⇒ { null, <its minted holder slug>, false } — the #2997 fail-closed regime, the
+//     residual #2413 left open by gating the same mechanism on the `workflowLane` marker.
+const NO_LEASE_CTX = { markedLeaseSlug: null, contestedHolderSlug: null, foreignLiveLease: false };
 function laneLeaseGuardCtx(cwd, mySessionId) {
   const laneRoot = laneRootFromCwd(cwd);
-  if (!laneRoot) return { markedLeaseSlug: null, foreignLiveLease: false };
+  if (!laneRoot) return NO_LEASE_CTX;
   const lease = readLaneLease(laneRoot);
-  if (!lease || isLeaseStale(lease, Date.now())) return { markedLeaseSlug: null, foreignLiveLease: false };
+  if (!lease || isLeaseStale(lease, Date.now())) return NO_LEASE_CTX;
   const marked = laneMarkedSlug(lease);
-  if (marked) return { markedLeaseSlug: marked, foreignLiveLease: false };
-  return { markedLeaseSlug: null, foreignLiveLease: isForeignLease({ lease, mySessionId }) };
+  if (marked) return { ...NO_LEASE_CTX, markedLeaseSlug: marked };
+  // A lease belonging to a provably DIFFERENT session is the #2367 case and keeps its own (clearer) message —
+  // so the #2997 contested arm below is only ever consulted for a lease this caller cannot be told apart from.
+  if (isForeignLease({ lease, mySessionId })) return { ...NO_LEASE_CTX, foreignLiveLease: true };
+  // `requiredAssertionSlug` is the ONE pure place that decides "must this op prove itself?", shared with
+  // `lane-pool release` — so the Bash guard and the pool can never disagree about which leases are contested.
+  return { ...NO_LEASE_CTX, contestedHolderSlug: requiredAssertionSlug({ lease, siblingLeases: siblingLaneLeases(laneRoot) }) };
 }
 
 // ── CLI: read the PreToolUse event, emit a deny decision when blocked ──────────────────────────────────
@@ -1582,6 +1661,7 @@ if (IS_CLI) {
   let staleBehind = 0;
   let foreignLiveLease = false;
   let markedLeaseSlug = null;
+  let contestedHolderSlug = null;
   let runInBackground = false;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
@@ -1611,9 +1691,9 @@ if (IS_CLI) {
     if (!primaryCwd && isLaneCwd(cwd) && isBacklogMutation(cmd)) staleBehind = commitsBehindUpstream(cwd);
     // #2367/#2413 — only pay for the lease read when it could possibly matter: a lane cwd about to run
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
-    if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
+    if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, runInBackground });
+  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },

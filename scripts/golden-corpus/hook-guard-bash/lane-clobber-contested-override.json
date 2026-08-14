@@ -1,0 +1,13 @@
+{
+  "id": "lane-clobber-contested-override",
+  "cmd": "LANE_CLOBBER_OK=1 git reset --hard HEAD~3",
+  "ctx": {
+    "primaryCwd": false,
+    "foreignLiveLease": false,
+    "contestedHolderSlug": "conveyor-delivery-lane-5-9f3a1c07"
+  },
+  "basis": "#2997 — allowed: the sanctioned LANE_CLOBBER_OK escape",
+  "expect": {
+    "reason": null
+  }
+}

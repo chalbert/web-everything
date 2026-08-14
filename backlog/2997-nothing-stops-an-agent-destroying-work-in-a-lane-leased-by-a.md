@@ -1,8 +1,9 @@
 ---
 bornAs: x9nlwgi
 kind: task
-status: open
+status: active
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-14"
 tags: [gate, footgun, lane]
 scope:
   - we:scripts/guard-lane.mjs
@@ -200,12 +201,96 @@ concluded the Bash guard had no lease logic when it has four references to `isFo
 `grep -a` on that file. Worth removing the NUL byte at some point; until then, treat a silent grep of
 it as a false negative.
 
+## Ruling (2026-08-14, delivered)
+
+**The per-holder slug is minted on EVERY acquire (option (a)), but the fail-CLOSED regime it enables is armed
+only where the ambient signal is provably ambiguous.** `we:scripts/lane-pool.mjs` stamps a `holder` slug into
+every lease and prints it to the acquirer; `we:scripts/lib/lane-lease.mjs` gains `isContestedLease` — "does
+another LIVE lease in this pool carry the same `ownerSession`?", i.e. is a sibling agent of my own session
+holding a lane right now. That predicate is the exact, script-decidable statement of "the durable session id
+cannot answer here", and it is what keeps the closure off the normal flow:
+
+- **uncontested** (one session, one lane): nothing changes. The #2367 `ownerSession` compare genuinely
+  distinguishes owner from foreigner, so no assertion is asked for. Pinned by must-ALLOW tests on both paths.
+- **contested**: the op must assert the lease's minted slug — `LANE_SESSION=<slug>` inline for a destructive
+  git op, `--session=<slug>` for a `release`. Absent or mismatched ⇒ deny, naming the slug and the remedy.
+
+Option (c) was re-probed as the card asked and rejected: the environment a subagent's Bash call sees carries
+`CLAUDE_CODE_SESSION_ID` (identical to the parent's), `CLAUDE_CODE_CHILD_SESSION=1` (a boolean, not an id) and
+`CLAUDE_PID` (the shared CLI process) — no per-subagent id. #2413's ratified statute holds.
+
+**`release` is closed, not only the destructive ops.** The 2026-08-14 occurrence was a `release`, and a released
+lane is immediately re-issuable, so `leaseOwnedByCaller` refuses its `ownerSession` fallback on a contested
+lease. `--force` still breaks any lease, so the operator's stale-lane cleanup and the lease-reaper (which always
+passes `--force`) are untouched, as is the drain's by-item `release --all-pools`.
+
+**A lane with NO live lease stays fully writable and releasable.** The lease IS the ownership signal; with no
+lease there is no holder to protect, and the pool's own flows (provision, refresh, an operator inspecting a free
+lane) all operate on unleased clones. A stale lease reads as no lease, everywhere.
+
+**Known residual, recorded deliberately.** Gap 1 (`Edit`/`Write`) closes the cross-SESSION hole only. The
+sibling case needs a per-operation assertion channel, which a Bash command string has and a file tool
+structurally does not — so an `Edit` into a sibling's lane still passes. Noted in `we:scripts/guard-lane.mjs`'s
+header. A lease minted before this shipped carries no `holder`, so it keeps the pre-#2997 fail-open behaviour
+rather than becoming unreleasable.
+
+## Ruling amended (2026-08-14, r2 — after independent review of PR #1234)
+
+The review found the first cut of Gap 1 **wrong in the ordinary case**, plus two narrower defects. All four
+corrections are in the same PR; the r1 ruling above stands except where amended here.
+
+**Gap 1 keys on a DECLARED OCCUPANT, not on `ownerSession`.** `acquire` stamps `ownerSession` from the env of
+the process that RUNS it. That is the working agent when an agent leases its own lane (the conveyor/dispatch
+brief's step 1), and the **dispatcher** when an operator leases a lane and hands the path to a spawned agent —
+which is the live shape of this pool. A reader of the marker cannot tell the two apart, so
+`ownerSession !== mySessionId` does not mean "someone else is working here"; for a dispatched lane it is true
+**by construction for that lane's own legitimate occupant**. As written, Gap 1 would have made every dispatched
+lane read-only for the agent sent to work in it, with the deny naming a lease whose `purpose` was minted *for*
+that agent. So the signal is split rather than patched:
+
+- `ownerSession` keeps its meaning — "who ran `acquire`" — and the #2367/#2452 `release` rules are untouched.
+- **Occupancy is its own lease field, `workerSession`**, written only by a session claiming the lane for
+  itself: `acquire --adopt`, or the new `we:scripts/lane-pool.mjs adopt --lane=N` hand-off command the worker
+  runs after a dispatcher leased the lane for it. `isForeignOccupancy` is what `we:scripts/guard-lane.mjs` now
+  reads.
+- **Consequence, stated plainly:** protection is per-lane opt-in. A lane whose occupant was never declared is
+  NOT refused — it stays writable exactly as on `main`. That is the deliberate trade: an undeclared lane cannot
+  be distinguished from a dispatched one, and a false DENY that locks an agent out of its own lane is strictly
+  worse than the silent-write hole it would be closing.
+- **As of this PR, nothing opts in.** Verified against the real pipeline (independent review, round 2): no
+  in-repo dispatch path calls `adopt` or `acquire --adopt` — not the conveyor delivery brief
+  (`we:skills-src/conveyor/delivery-agent-brief.md:42`, which self-acquires with no `--adopt`, despite being
+  the exact self-acquisition topology `--adopt` was built for), not `we:scripts/operations/dispatch-lane.mjs`,
+  not `we:docs/agent/delivery-loop.md`'s acquire example. So Gap 1's fix closes the false-DENY it was bounced
+  for, but the ORIGINAL hole Gap 1 was filed to close (F1) remains open in practice today — by dormancy, not
+  by design error. This is deliberate to disclose durably rather than let a future reader assume the repo's
+  own dispatch flows adopt their lanes; they don't, and nothing schedules a change. Follow-up filed: wire
+  `--adopt` into the dispatch surfaces (delivery brief, dispatch-lane brief, delivery-loop docs).
+
+**A STALE lease is never CONTESTED.** `release` staleness-checked the siblings but not the subject lease, so an
+expired lease with a live same-`ownerSession` sibling became unreleasable without `--force` — contradicting this
+card's own "a stale lease reads as no lease, everywhere" on the one path that ruling is about. Fixed and pinned.
+
+**The contested scan is CROSS-POOL** (`we:scripts/guard-bash.mjs`'s `siblingLaneLeases`,
+`we:scripts/lane-pool.mjs`'s `liveLeasesInPoolExcept`): a session's siblings routinely hold lanes in different
+pools, and the ambient id is exactly as ambiguous there.
+
+**Scope of the Gap 2 closure, qualified (this supersedes the unqualified "Done when" below).** The contested
+arm needs a SECOND live lease to exist. A sibling agent that holds **no lane of its own** — a lane-less review
+subagent, say — leaves nothing to find, so a lane whose holder is its session's only holder reads UNCONTESTED
+and a destructive op there is still ALLOWED. **The 2026-08-08 incident is therefore covered only if another
+lane was live under the same `ownerSession` at that moment; in the sole-holder shape it is NOT closed by this
+item.** Closing it would mean demanding the minted slug for every destructive op in every leased lane — a
+fail-closed default whose false-deny cost lands on every ordinary solo flow, and which this item does not take.
+
 ## Done when
 
-- An `Edit`/`Write` to a file inside a lane whose live lease is not the caller's is REFUSED, with a
-  message naming the holder and the remedy. (Gap 1.)
+- An `Edit`/`Write` to a file inside a lane **another session has declared it is working in** (`workerSession`,
+  set by `adopt` / `acquire --adopt`) is REFUSED, with a message naming the holder and the remedy. (Gap 1.)
+  A lane with no declared occupant stays writable — see the r2 amendment for why that is deliberate.
 - A destructive git op in a lane held by a **sibling agent of the caller's own session** is REFUSED
-  under an **unmarked** lease, not only under a `workflowLane`-marked one. (Gap 2.)
+  under an **unmarked** lease, not only under a `workflowLane`-marked one (Gap 2) — **when that sibling holds a
+  live lane of its own, in any pool.** The sole-holder shape is out of scope, per the r2 amendment.
 - Your OWN lane is unaffected on both paths — no new friction on the normal flow. Pin this with a
   must-ALLOW test, not only a must-deny one.
 - The existing #2367 cross-session deny and #2413 marked-lane fail-closed deny both still pass
