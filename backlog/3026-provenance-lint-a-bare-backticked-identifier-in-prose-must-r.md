@@ -213,7 +213,7 @@ filename-based escape was measured and only takes 503 → 339; it is not enough.
 exists, backlog prose stays author-and-review discipline.
 
 *(Sanity re-check while re-scoping this card, 2026-08-13: `npm run check:standards` on this checkout is
-**0 errors, 1312 warnings** — up from the 1279 cited above; that is corpus drift over the intervening
+**0 errors, 1314 warnings** on this branch — up from the 1279 cited above; that is corpus drift over the intervening
 period, not a provenance-gate regression, and the gate still ships at WARN.)*
 
 ## Readiness for the remaining scope — sizing, the open design fork, interface, tasks (added 2026-08-13)
@@ -283,7 +283,9 @@ or the reject-and-close fallback if A's measured noise is still too high.
   isAssertionSurfaceBacklogItem(statusOf(p)))`, where `statusOf(p)` extracts the leading `NNN` from the
   filename and looks it up in the `backlog` array already loaded at
   `we:scripts/check-standards.mjs:150-151` (`we:src/_data/backlog.js`) — no change to that loader is needed,
-  it already carries `.status` and a `byNum` map keyed the same way (`we:src/_data/backlog.js:135`); only a
+  it already carries `.status`; the loader returns a plain ARRAY, not a map — the `byNum` at
+  `we:src/_data/backlog.js:135` is local to `deriveProjectReadiness` and is not exported (verified:
+  `Array.isArray(b) === true`, `'byNum' in b === false`). A caller that wants lookup-by-number builds it. Only a
   filename→item lookup is new, reusing the leading-number extraction already at
   `we:src/_data/backlog.js:297` (`ID_TOKEN`), not inventing a new regex.
 - Findings shape, escape markers, WARN level, and the `provenance-lint: off`/`on` region mechanism are
