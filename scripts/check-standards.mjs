@@ -65,6 +65,7 @@ import {
   validateDeclaredModuleContract,
   findLockPointFiles, lockPointCandidatePaths,
   findTestOnlyExports,
+  scanPublishSecrets,
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 import {
@@ -1068,6 +1069,40 @@ try {
     const descriptor = { kind: 'repo-locus', file: finding.file };
     if (REPO_LOCUS_PREFIX_ENFORCED) err(msg, descriptor);
     else warn(msg, descriptor);
+  }
+}
+
+// ── 6f-i. PUBLISH-SEAM secret sweep on the committed corpus (#3015, under #2978 Fork 3) ───────────
+// The BACKSTOP of the hook + CLI + sweep trio (the shape #1574 established for locus prefixes). The two
+// write-time gates — `writeBacklogMd` for the CLI funnel, the `--pre` hooks for `Edit`/`Write` — deny
+// before the write; both can be bypassed (hooks disabled, a future writer that uses neither), so the
+// corpus itself is re-scanned here. A sweep is a LATER catch, not a same-turn deny: it stops a leak from
+// surviving a close-out, not from being written.
+//
+// Scope is the two committed corpora that carry harvested/authored prose: `backlog/*.md` and the memory
+// corpus (`agent-memory-src/*.md`). `reports/` is deliberately out — the same argument would apply, but
+// widening the sweep's blast radius is a separate call, not a rider on this one.
+//
+// The detector (`scrubPublish`) was calibrated against THIS corpus: on the 3,319 files present when it
+// landed it produced exactly two findings, both true (a real committer email in one card, and #3015's own
+// synthetic test marker), both fixed in that same change. It is narrower than the learnings append-seam
+// scrub by design — see we:scripts/lib/secret-scrub.mjs's header for the enumerated gaps.
+{
+  const docs = [];
+  for (const label of ['backlog', 'agent-memory-src']) {
+    const dir = join(ROOT, label);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.md')))
+      docs.push({ file: `${label}/${f}`, content: readFileSync(join(dir, f), 'utf8') });
+  }
+  for (const { file, reasons } of scanPublishSecrets(docs)) {
+    err(
+      `${file} carries ${reasons.join('; ')} — this file is COMMITTED and PUSHED, so a credential in it is a ` +
+      `published credential (#3015). Remove the value (and rotate it if it was ever real) and describe it ` +
+      `in words instead of pasting it. The write-time gates (writeBacklogMd, the backlog/memory --pre hooks) ` +
+      `should have caught this before the write — if they did not, that bypass is the real finding.`,
+      { kind: 'publish-secret-scrub', file },
+    );
   }
 }
 

@@ -6,7 +6,7 @@
  * THE RULE IT IMPLEMENTS: **collection is not adjudication.** A session — main loop or subagent — only ever
  * APPENDS what it observed (learnings-drop.mjs). It never decides what that observation is worth. Worth is
  * decided later, ONCE, over the whole cross-session pool. This file is the "later": read every pool file,
- * re-scrub, cluster across sessions, rank by recurrence, and hand a short candidate list to the `/harvest`
+ * re-validate it against the SCHEMA, cluster across sessions, rank by recurrence, and hand a short candidate list to the `/harvest`
  * skill's judgment half (red-team → route to backlog/memory → lane → PR).
  *
  * WHY NOT AT CLOSE (what close-session-sweep.mjs did, single-session):
@@ -25,8 +25,9 @@
  * consumed by a close — only `--archive` (after a harvest actually acted) moves them to `harvested/<stamp>/`.
  *
  * DESIGN: pure core (no I/O) + thin CLI, per we:docs/agent/platform-decisions.md
- * #deterministic-core-thin-judgment. The scrub is NOT re-implemented here — it shells the same
- * `validateEntry` the append seam used (defence in depth), and the same `dedup` clustering.
+ * #deterministic-core-thin-judgment. Nothing is re-implemented here — it shells the same `validateEntry`
+ * the append seam uses (SCHEMA only: allow-list, `kind`, caps — the content scrub moved to the publish
+ * seam in #3015, so this is not a secret filter) and the same `dedup` clustering.
  *
  * Usage:
  *   node scripts/conveyor/learnings-harvest.mjs [--dir=<pool>] [--threshold=0.6] [--min-sessions=1] [--json]
@@ -88,9 +89,17 @@ export function poolFiles(dir) {
  * readPool(files, { read }) → { entries, stats }. Reads each pool file LINE-TOLERANTLY: one malformed line
  * (a half-written append, a crashed agent) must never cost the rest of the pool, so it is counted in
  * `stats.malformed` and skipped rather than thrown. Each surviving entry is re-validated through the SAME
- * scrub the append used, and tagged with its `session` (the file's basename). `ts` arrives NORMALIZED out
- * of `validateEntry` (strict ISO or null) — this reader deliberately performs NO `raw.*` read, so no field
- * can route around the privacy boundary on its way to `stats.oldest`. `read` is injectable for tests.
+ * `validateEntry` the append used, and tagged with its `session` (the file's basename). `ts` arrives
+ * NORMALIZED out of `validateEntry` (strict ISO or null) — this reader deliberately performs NO `raw.*`
+ * read, so no field can route around the SCHEMA boundary on its way to `stats.oldest`. `read` is
+ * injectable for tests.
+ *
+ * THIS IS NO LONGER A SECRET SCRUB (#3015). It used to be described as re-applying the write-seam scrub
+ * "defence in depth"; that claim went false when #3015 moved the content scrub off `validateEntry` to the
+ * publish seam. What survives here is the SCHEMA check (allow-list, `kind`, caps). A hand-appended or
+ * corrupted pool line carrying a secret is therefore NOT dropped at read time any more: it reaches the
+ * red-team/routing steps — i.e. an LLM's context — and is stopped only on the way into a committed file,
+ * by `scrubPublish` at the backlog/memory write seams. Blocked from LANDING, not blocked from being READ.
  */
 export function readPool(files, { read = (p) => readFileSync(p, 'utf8') } = {}) {
   const entries = [];

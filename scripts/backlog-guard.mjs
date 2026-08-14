@@ -22,6 +22,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { idFromName } from './backlog/id.mjs';
+import { scrubPublish } from './lib/secret-scrub.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // two-form id (#2288): a landed NNN or a provisional `xNNNNNN` hash — keep in sync with id.mjs ID_TOKEN_RE.
@@ -81,11 +82,26 @@ if (argv.includes('--pre')) {
   // hand-authored with a numeric NNN- prefix (races concurrent sessions → duplicate ids, #2288/#2323).
   // Only a Write that CREATES a numeric-prefixed file not yet on disk is the footgun; editing a landed
   // NNN item, or writing a scaffold-minted xNNNNNN file, is fine.
+  const text = proposedContent(ev);
+
+  // #3015 — the PUBLISH-SEAM secret gate for the OTHER half of the write surface: a direct `Edit`/`Write`
+  // to a card body, which never goes through `scripts/backlog.mjs`'s `writeBacklogMd` (that funnel carries
+  // the same check for the CLI path). Deny BEFORE the tool call runs, so the leak never reaches disk — let
+  // alone a commit. `scrubPublish` is corpus-calibrated and deliberately narrower than the learnings
+  // append-seam scrub: it does NOT object to code, repo paths, or `we:`-prefixed citations.
+  //
+  // FIRST, ahead of the hand-numbering check below, deliberately: both can fire on the same `Write`, and a
+  // leaked credential is the more severe of the two. Reporting the id-hygiene nit first would hide it.
+  if (text.trim()) {
+    const leaks = scrubPublish(text);
+    if (leaks.length)
+      deny(`this edit would write ${leaks.join('; ')} into a backlog card (#3015). Cards are COMMITTED and PUSHED, so a credential in one is a published credential. Remove the value (and rotate it if it was ever real) and describe it in words instead of pasting it.`);
+  }
+
   const idTok = (file.match(BACKLOG_RE) || [])[1] || '';
   if (ev.tool_name === 'Write' && /^\d+$/.test(idTok) && !existsSync(file))
     deny(`new backlog file "${basename(file)}" is hand-numbered — mint items with \`node scripts/backlog.mjs scaffold "<title>"\`, which assigns a collision-free hash id (xNNNNNN). Hand-picking an NNN races concurrent sessions and mints duplicate ids (#2288/#2323). Run scaffold, then edit the file it creates.`);
 
-  const text = proposedContent(ev);
   if (!text.trim()) process.exit(0); // empty proposal — nothing to judge
   const { fm, body } = split(text);
 

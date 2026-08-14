@@ -50,6 +50,7 @@ import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 import { localToday } from './lib/local-date.mjs';
+import { scrubPublish } from './lib/secret-scrub.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,6 +129,19 @@ function writeBacklogMd(abs, rel, content) {
  * is a cheap belt-and-braces check, never a blocker on the resolve path.
  */
 function writeBacklogMdUnguarded(abs, rel, content) {
+  // #3015 — the PUBLISH-SEAM secret gate, and the load-bearing one. A backlog card is committed and pushed;
+  // this writer is the ONE funnel every CLI card-mutation goes through (scaffold/resolve/settle/retype/
+  // yield/prepare-stamp), and a CLI writes straight to `fs`, so the PreToolUse(Edit|Write) hooks never see
+  // it — the same mechanism gap #1574 documented for locus prefixes, one line above. Refuse BEFORE
+  // `writeFileSync`, mirroring the reject-before-persist shape the learnings append seam used to have.
+  // `scrubPublish` is deliberately narrower than the append-seam scrub — read its module header for what it
+  // does and does NOT catch.
+  const leaks = scrubPublish(content);
+  if (leaks.length) {
+    die(`secret-scrub: refusing to write ${rel} — the content carries ${leaks.join('; ')} (#3015). A backlog ` +
+        `card is COMMITTED and PUSHED, so a credential in it is a published credential. Remove the value (and ` +
+        `rotate it if it was ever real); describe it in words instead of pasting it.`);
+  }
   const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
   if (findings.length) {
     const { count, sample } = findings[0];

@@ -15,6 +15,7 @@
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
 import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
+import { scrubPublish } from './lib/secret-scrub.mjs';
 
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
@@ -1734,6 +1735,26 @@ export function scanRepoLocusPrefixes(docs) {
       }
     }
     if (unmarked.length) findings.push({ file, count: unmarked.length, sample: unmarked[0] });
+  }
+  return findings;
+}
+
+/**
+ * Scan docs (`[{ file, content }]`) for content that must never sit in a COMMITTED artifact — the #3015
+ * publish-seam sweep. Returns per-file findings `[{ file, reasons }]` (pure; the fs walk lives in
+ * check-standards.mjs, mirroring `scanRepoLocusPrefixes` directly above).
+ *
+ * THE BACKSTOP, NOT THE GATE. The two write-time gates (`writeBacklogMd` for the CLI funnel, the `--pre`
+ * hooks for `Edit`/`Write`) deny BEFORE the write. This sweep re-reads the corpus afterwards, so it catches
+ * only a write that used neither — a later catch, not a same-turn deny. It shares the ONE detector
+ * (`scrubPublish`, we:scripts/lib/secret-scrub.mjs) with both gates rather than re-stating the patterns; an
+ * unreachable second copy of a rule is drift waiting to happen.
+ */
+export function scanPublishSecrets(docs) {
+  const findings = [];
+  for (const { file, content } of docs) {
+    const reasons = scrubPublish(content);
+    if (reasons.length) findings.push({ file, reasons });
   }
   return findings;
 }
