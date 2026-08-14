@@ -153,7 +153,10 @@ describe('parseEscalationReason — the trailing policy-stamp comment does not r
     ]);
   });
 
-  it('a body whose block terminates at a "## Something else" heading (no stamp) still parses unchanged', () => {
+  // Named for what it actually proves — the bullet check (not a heading-specific check) ends the block at
+  // the first non-bullet line. A `##` heading is just one instance of "non-bullet content"; it has no
+  // special-cased stop condition of its own (see the docblock on `parseEscalationReason`).
+  it('trailing non-bullet content (here, a "## Something else" heading) ends the block, not just the stamp', () => {
     const body = [
       'Original PR body describing the change.',
       '',
@@ -170,6 +173,15 @@ describe('parseEscalationReason — the trailing policy-stamp comment does not r
       'gate-self (docs/agent/platform-decisions.md) — human review required',
       'size (612 ≥ 400 changed lines)',
     ]);
+  });
+
+  // #3101 F1 — the docblock claims the stop-on-first-non-bullet-line design "protects against any future
+  // trailing content appended after the stamp", not just the ONE known stamp shape. Pin that: a bullet
+  // appearing AFTER the stamp must not be read back in. Reddens if the stop is weakened from `break` to
+  // `continue` (which would skip the stamp instead of ending the block there).
+  it('a bullet appearing AFTER the trailing policy-stamp comment is not read back in as a reason', () => {
+    const body = `An unrelated PR description.${buildEscalationReasonBlock(['size (602 ≥ 400 changed lines)'])}- not a reason`;
+    expect(parseEscalationReason(body)).toEqual(['size (602 ≥ 400 changed lines)']);
   });
 
   it('a legacy body with the reason block but NO trailing stamp (pre-#2567 shape) still parses unchanged', () => {
