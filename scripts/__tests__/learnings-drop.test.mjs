@@ -54,30 +54,39 @@ describe('validateEntry — `ts` goes through the boundary too (no raw re-attach
   });
 });
 
-describe('validateEntry — the scrub gate rejects leaks', () => {
-  it('rejects an entry carrying an ABSOLUTE path', () => {
-    const r = validateEntry({ ...good, area: 'the file /Users/nic/workspace/webeverything/scripts/foo.mjs' });
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/absolute/i);
+// ── #3015: the content scrub MOVED OFF this seam ─────────────────────────────────────────────────
+// These cases used to assert `validateEntry` REJECTS each shape. They are kept — not deleted — and
+// inverted, because the inversion IS the behaviour change and it must be visible in the suite. The pool
+// file is machine-local and untracked; the gate that matters now stands at the publish seam
+// (`scrubPublish`, proven end-to-end in publish-secret-gate.test.mjs). Say it plainly: a secret-shaped
+// value now LANDS in the local pool and is READ by the harvest — it is blocked from being COMMITTED.
+describe('validateEntry — the content scrub no longer runs here (#3015)', () => {
+  it('ACCEPTS an entry carrying an ABSOLUTE path', () => {
+    const r = validateEntry({ ...good, area: 'the file /Users/nic/workspace/we/scripts/foo.mjs' });
+    expect(r.ok).toBe(true);
   });
-  it('rejects an entry carrying a TOKEN-shaped string', () => {
+  it('ACCEPTS an entry carrying a TOKEN-shaped string — the pool is not the boundary any more', () => {
     const r = validateEntry({ ...good, suggestion: 'rotate the leaked key ghp_ABCDEFabcdef0123456789ABCDEF01234567' });
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/token|github/i);
+    expect(r.ok).toBe(true);
+    expect(r.errors).toEqual([]);
   });
-  it('rejects an entry carrying a CODE block', () => {
-    const r = validateEntry({ ...good, summary: 'saw this ```js\nconst x = 1;\n``` fail' });
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/code/i);
+  it('ACCEPTS an entry carrying a CODE block', () => {
+    expect(validateEntry({ ...good, summary: 'saw this ```js\nconst x = 1;\n``` fail' }).ok).toBe(true);
   });
-  it('rejects a home-relative (~/) absolute path', () => {
-    expect(validateEntry({ ...good, area: 'lives under ~/workspace/webeverything/scripts' }).ok).toBe(false);
+  it('ACCEPTS a home-relative (~/) absolute path', () => {
+    expect(validateEntry({ ...good, area: 'lives under ~/workspace/we/scripts' }).ok).toBe(true);
   });
-  it('rejects a long base64/hex secret blob', () => {
-    expect(validateEntry({ ...good, suggestion: 'value was deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }).ok).toBe(false);
+  it('ACCEPTS a long base64/hex blob', () => {
+    expect(validateEntry({ ...good, suggestion: 'value was deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }).ok).toBe(true);
   });
-  it('rejects a source-code snippet (import/function)', () => {
-    expect(validateEntry({ ...good, summary: 'import { x } from "./y" was missing' }).ok).toBe(false);
+  it('the detector itself still WORKS — it is unwired here, not broken', () => {
+    // If this ever goes green-by-vacuity (the scrub deleted rather than relocated), the publish seam has
+    // nothing to call. `scrubReasons` is still exported from this module for exactly that reason.
+    expect(scrubReasons('rotate ghp_ABCDEFabcdef0123456789ABCDEF01234567').length).toBeGreaterThan(0);
+  });
+  it('the SCHEMA half of the boundary is untouched — caps and allow-list still reject', () => {
+    expect(validateEntry({ ...good, area: 'x'.repeat(FIELD_CAPS.area + 1) }).ok).toBe(false);
+    expect(validateEntry({ ...good, secretField: 'anything' }).ok).toBe(false);
   });
 });
 
@@ -233,8 +242,11 @@ describe('appendEntry — write round-trip', () => {
   });
 
   it('THROWS and does NOT create the file when the entry is rejected', () => {
+    // #3015: the rejection driver is now a SCHEMA violation (an out-of-allow-list key), not a secret in a
+    // value — a secret no longer fails validation here. The reject-before-write SHAPE is what this pins,
+    // and that shape is unchanged.
     const file = join(root, 'never.jsonl');
-    expect(() => appendEntry({ ...good, area: '/abs/path/leak/here' }, { file, root })).toThrow(/rejected/);
+    expect(() => appendEntry({ ...good, diff: 'a smuggled field' }, { file, root })).toThrow(/rejected/);
     expect(existsSync(file)).toBe(false);
   });
 });

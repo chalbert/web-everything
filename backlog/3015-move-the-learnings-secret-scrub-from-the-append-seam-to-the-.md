@@ -2,8 +2,9 @@
 bornAs: xby3o0h
 kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-14"
 tags: [conveyor, learnings, security]
 scope: [
   "we:scripts/lib/secret-scrub.mjs",
@@ -70,6 +71,38 @@ every path that writes backlog/memory content — the CLI funnel (`writeBacklogM
 scaffold/resolve/settle/retype/yield/prepare-stamp) and the `Edit`/`Write` tool (backlog body edits, memory
 files) — is scrub-gated for secrets/credentials/PII/high-entropy tokens/absolute paths, *before* the write,
 mirroring the append seam's own throw-before-write shape.
+
+> **BUILD CORRECTION (2026-08-14), and it changes the "Narrows" list below.** The subset this card decided
+> on — `SECRET_PATTERNS` + `PATH_PATTERNS` + `PII_PATTERNS` + `CRED_LABEL` + `isHighEntropyToken` — was
+> measured against the committed corpus before wiring, and it fires on **1,276 of 3,319** `backlog/*.md` +
+> memory files. Every sampled hit is legitimate content. Three families had to be retired BEYOND what this
+> card planned, and the honest framing is that the gate is narrower than written here:
+>
+> - **`PATH_PATTERNS`' filesystem rules — retired.** This card asserted absolute paths "are never legitimate
+>   in ... a backlog item". Measurement says otherwise: 1,077 files carry a match, and the matches are
+>   site-relative routes (`/backlog/NNN-slug`, `/blocks/component`, `/api/backlog`) and the repo's own
+>   documented machine conventions (the home-relative hooks settings file, `~/workspace/.lanes/<repo>/lane-N`
+>   — a path this repo prints in its own error messages). Only the `user:pass@host` inline-credential rule
+>   survives. A real `/Users/<name>/…` paste is therefore **not** blocked; #883 locus-prefix remains the path rule.
+> - **The `≥40-char base64` and `≥20-char hex` rules — replaced, not kept.** The base64 rule's character
+>   class includes `/`, so it fires on every long module path (343 files, e.g.
+>   `we:plugs/webregistries/CustomElementRegistry`). The hex rule fires on git SHA citations, which are
+>   legitimate and recurring; a SHA and a hex session token are the same string by shape. Both were replaced
+>   by two entropy detectors calibrated against this corpus (blob entropy ≥ 4.8 bits/char vs a corpus max of
+>   4.55; opaque-token vowel ratio < 0.20 vs a corpus min of 0.222). Measured detection on synthetic
+>   secrets: 79% / 100% / 65% for 32-byte base64, 45-byte base64, 32-byte base64url — and **0% for bare
+>   hex**. This is a probabilistic test, not a proof.
+> - **`isHighEntropyToken` — not reused.** It fires on ordinary hyphenated prose (`UTF-16-code-unit`,
+>   `JS-first-vs-CSS-first`) and on UUIDs that cards quote. `isOpaquePublishToken` is its calibrated twin.
+> - **`PII_PATTERNS` — narrowed.** Email is restricted to personal-mailbox shapes (a service local part like
+>   the git SSH remote, a `..`-containing domain, and single-character placeholders are exempt); IPv4
+>   excludes loopback/RFC1918/link-local. Without that, the localhost address and the repo's own SSH remote
+>   go red.
+>
+> **One real pre-existing hit was found and fixed**, which is separate from the harvest question this card
+> settled below: `backlog/3055` carried the repo owner's actual email address in prose. It was redacted in
+> the same change. The "no remediation needed" finding below still holds for its own claim — no harvest
+> output ever reached a committed artifact — but "the corpus was clean" was never established, and it wasn't.
 
 **Narrows, and this must be said honestly, not glossed over:**
 
@@ -183,9 +216,12 @@ export function scrubPublish(value) { /* string -> string[] */ }          // NEW
 3. **Adversarial — backlog, real path.** A test runs (in we:scripts/backlog.mjs's own CLI, via `scaffold`):
    ```bash
    node scripts/backlog.mjs scaffold --kind=story --size=1 --title='...' \
-     --digest='sk-SYNTHETIC0000TESTMARKERNOTREAL'
+     --digest='<the synthetic marker>'
    ```
-   (an obviously-synthetic marker, never a real credential shape from any live service) in a sandboxed
+   The marker is `sk-` followed by `SYNTHETIC0000TESTMARKERNOTREAL`; it is spelled out only in
+   we:scripts/__tests__/publish-secret-gate.test.mjs, never here — the whole-word form now trips the very
+   gate this card builds, which is itself a live demonstration that the sweep works on this corpus.
+   (An obviously-synthetic marker, never a real credential shape from any live service.) Run in a sandboxed
    backlog dir (mirroring we:scripts/__tests__/backlog-cli-snapshot.test.mjs's existing fixture pattern),
    asserts a non-zero exit with the rejection reason, and asserts **no new `backlog/*.md` file exists** on
    disk afterward.

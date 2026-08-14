@@ -21,6 +21,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeLineSync } from './lib/write-all-sync.mjs';
+import { scrubPublish } from './lib/secret-scrub.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -75,6 +76,21 @@ export function isMemoryIndexPath(file) {
     && /(?:^|\/)(?:memory|agent-memory|agent-memory-src)\/MEMORY\.md$/.test(file);
 }
 
+/**
+ * Is `file` ANY file in the memory corpus — the index, a category sub-index, or a numbered topic file?
+ * Same three directory spellings as `isMemoryIndexPath`, widened past `MEMORY.md` to every `*.md` leaf.
+ *
+ * WHY IT EXISTS (#3015). The memory corpus is COMMITTED and PUSHED, and — unlike the backlog — it has no
+ * CLI writer to mirror the gate into: memory topic files are hand-authored with the `Write`/`Edit` tools
+ * only. So this PreToolUse hook is the ONLY write-time gate they have, and it had been scoped to the index
+ * alone, which is a budget concern, not a leak concern. The BUDGET / tree-shape rules stay index-only (they
+ * are about the always-loaded file); the SECRET scrub applies to the whole corpus.
+ */
+export function isMemoryCorpusPath(file) {
+  return typeof file === 'string'
+    && /(?:^|\/)(?:memory|agent-memory|agent-memory-src)\/[^/]+\.md$/.test(file);
+}
+
 // #2273 — guard the CLI body behind an entry-point check (mirrors scripts/guard-bash.mjs) so importing
 // this module for its pure `checkBudget` export (the Tier-A golden-corpus snapshot harness) never also
 // runs the sweep / --pre gate / `process.exit(...)` as a side effect of the import.
@@ -86,7 +102,8 @@ if (process.argv.includes('--pre')) {
   let ev;
   try { ev = JSON.parse(readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }
   const file = ev?.tool_input?.file_path;
-  if (!isMemoryIndexPath(file)) process.exit(0); // not the memory index
+  if (!isMemoryCorpusPath(file)) process.exit(0); // not a memory-corpus file
+  const isIndex = isMemoryIndexPath(file);
   const ti = ev.tool_input ?? {};
   const onDisk = existsSync(file) ? readFileSync(file, 'utf8') : '';
   let proposed;
@@ -99,6 +116,17 @@ if (process.argv.includes('--pre')) {
   } else {
     proposed = ti.content ?? ti.new_string ?? onDisk;
   }
+  // #3015 — the PUBLISH-SEAM secret gate, on the WHOLE corpus (index + sub-indexes + topic files). Memory
+  // files are committed and pushed and have no CLI writer, so this hook is their only write-time gate.
+  // `scrubPublish` is corpus-calibrated and deliberately narrower than the learnings append-seam scrub: it
+  // does NOT object to code, repo paths, or the `we:`-prefixed citations a grounded memory note requires.
+  const leaks = scrubPublish(proposed);
+  if (leaks.length) {
+    console.error(`check:memory (--pre): this edit would write ${leaks.join('; ')} into the memory corpus (#3015). Memory files are COMMITTED and PUSHED, so a credential in one is a published credential. Remove the value (and rotate it if it was ever real) and describe it in words instead of pasting it.`);
+    process.exit(2);
+  }
+  // Everything below is INDEX-ONLY — the budget exists because MEMORY.md is injected into every session.
+  if (!isIndex) process.exit(0);
   const { v } = checkBudget(proposed);
   // Tree-shape gate (write-time): deny NEWLY-introduced leaf links into the always-loaded MEMORY.md map.
   // The default sweep flags absolute presence; here we block only leaf links not already on disk, so
