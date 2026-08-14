@@ -226,9 +226,20 @@ describe('lane-pool #2997 — a TARGETED release of a CONTESTED lease needs the 
   // holder has no one to be confused with, so there is nothing to prove.
   it('a STALE lease releases with NO --force even when a live sibling shares its ownerSession (review F2)', () => {
     const { a, b } = acquireTwoSiblings();
-    // Age B's lease out by 10 days, leaving everything else (including its minted holder slug) intact.
+    // Age B's lease out by 10 days, leaving everything else (including its minted holder slug) intact —
+    // EXCEPT `session`: rewrite it to a foreign slug, matching what a real dead holder's marker looks like
+    // (round 1's own repro used `session:"dead"`). #2997-review round 2, N1 — without this, `session` was
+    // left as whatever `defaultSession()` resolved to when B was acquired, which is `${hostname()}:${ppid}`
+    // of THIS test file's own vitest worker process — the SAME value `release` below resolves to (no
+    // `--session` given, same worker, same ppid). `leaseOwnedByCaller`'s step-1 exact-`session` match then
+    // returns true immediately, and the staleness/contested logic this test exists to pin is never reached:
+    // reverting the F2 fix left the whole suite green, because this test never exercised it.
     const marker = join(poolRoot, 'releaseowner', `lane-${b.lane}`, '.git', '.lane-lease');
-    const aged = { ...JSON.parse(readFileSync(marker, 'utf8')), acquiredAt: new Date(Date.now() - 10 * 864e5).toISOString() };
+    const aged = {
+      ...JSON.parse(readFileSync(marker, 'utf8')),
+      session: 'Mac:dead-agent',
+      acquiredAt: new Date(Date.now() - 10 * 864e5).toISOString(),
+    };
     writeFileSync(marker, JSON.stringify(aged, null, 2) + '\n');
     expect(a.holder).toBeTruthy(); // lane A is still LIVE and shares B's ownerSession — the contested shape
 

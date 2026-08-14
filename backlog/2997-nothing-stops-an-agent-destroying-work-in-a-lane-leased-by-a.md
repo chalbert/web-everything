@@ -257,6 +257,15 @@ that agent. So the signal is split rather than patched:
   NOT refused — it stays writable exactly as on `main`. That is the deliberate trade: an undeclared lane cannot
   be distinguished from a dispatched one, and a false DENY that locks an agent out of its own lane is strictly
   worse than the silent-write hole it would be closing.
+- **As of this PR, nothing opts in.** Verified against the real pipeline (independent review, round 2): no
+  in-repo dispatch path calls `adopt` or `acquire --adopt` — not the conveyor delivery brief
+  (`we:skills-src/conveyor/delivery-agent-brief.md:42`, which self-acquires with no `--adopt`, despite being
+  the exact self-acquisition topology `--adopt` was built for), not `we:scripts/operations/dispatch-lane.mjs`,
+  not `we:docs/agent/delivery-loop.md`'s acquire example. So Gap 1's fix closes the false-DENY it was bounced
+  for, but the ORIGINAL hole Gap 1 was filed to close (F1) remains open in practice today — by dormancy, not
+  by design error. This is deliberate to disclose durably rather than let a future reader assume the repo's
+  own dispatch flows adopt their lanes; they don't, and nothing schedules a change. Follow-up filed: wire
+  `--adopt` into the dispatch surfaces (delivery brief, dispatch-lane brief, delivery-loop docs).
 
 **A STALE lease is never CONTESTED.** `release` staleness-checked the siblings but not the subject lease, so an
 expired lease with a live same-`ownerSession` sibling became unreleasable without `--force` — contradicting this
