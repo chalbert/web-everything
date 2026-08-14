@@ -1,4 +1,5 @@
 ---
+bornAs: x9ylkp7
 kind: story
 size: 3
 parent: "3029"
@@ -25,7 +26,7 @@ watches to a terminal state. Fold it in so a clean build resolves its own in-fli
 `STUCK_ESCALATION_HOURS` (6h) `we:scripts/operations/wake.mjs` exits non-zero on every pass until a person
 closes the entry out. Nothing in `we:scripts/` reaches `resolveInFlight` from a command line, so closing one out
 today means hand-writing a script. The first real dispatch therefore red-lights the waker permanently. That is
-survivable only because nothing in production dispatches yet (#xaibmeu is what changes that), which is why this
+survivable only because nothing in production dispatches yet (#3096 is what changes that), which is why this
 should land before, or with, that one.
 
 ## What it must not do

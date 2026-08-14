@@ -143,11 +143,11 @@ reddens when the fixed line is broken (every mutation re-run and recorded):
 
 - The observer answers `running` or `unresolved` and never `succeeded`. `claude agents --json` reports LIVENESS,
   not outcome, and `--all` showed no terminal record for a completed background session, so "gone" collapses
-  *finished cleanly* and *died*. A real completion signal is #x9ylkp7. The standing cost is real and now
+  *finished cleanly* and *died*. A real completion signal is #3095. The standing cost is real and now
   bounded: every completed dispatch still needs a person to close its entry out, but it no longer wedges the
   item (see F1 above).
 - The conveyor still dispatches through the main-session bridge's `Agent` spawn; this operation is a second,
-  declared path rather than the only one. Routing the bridge through it is #xaibmeu.
+  declared path rather than the only one. Routing the bridge through it is #3096.
 - **Stop is still unprovided** (the spike's follow-up 3) and retry is still unowned (#3083). Neither is touched.
 
 ## Acceptance
@@ -170,14 +170,14 @@ REASSIGNED by name rather than footnoted.
 4. The spike did not return answer 3, so no written case for a missing kind is owed: `compute` / `judge` /
    `confirm` / `effect` describe an effect that begins, and nothing here extends the vocabulary.
 
-**REASSIGNED to #xaibmeu — a lane IS dispatched, and the scope-lease arbitration is exercised:**
+**REASSIGNED to #3096 — a lane IS dispatched, and the scope-lease arbitration is exercised:**
 
 > *"a lane IS dispatched through the declared operation … the same scope-lease arbitration … verified against a
 > real queue."*
 
 No `claude` process was ever started. `planTick` computes an *assignment*; the LEASE is taken later by the
 dispatched agent running `lane-pool acquire` from the brief, and that code path has not executed. Nor has
-`dispatchedGuard` been carried forward by any caller — it has no consumer in the repo yet. **#xaibmeu completes
+`dispatchedGuard` been carried forward by any caller — it has no consumer in the repo yet. **#3096 completes
 this clause**: it routes the conveyor's build dispatch through this operation, which is the first live dispatch,
 and is also where a background session's permission mode gets settled. #3037 is resolved on the declaration and
 the handle; it is not a claim that a lane has been dispatched.

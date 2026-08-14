@@ -1,4 +1,5 @@
 ---
+bornAs: xaibmeu
 kind: story
 size: 3
 parent: "3029"
@@ -31,7 +32,7 @@ delete the hand-spawn prose.
 - **The agent-runner CLI backend ruling**
   ([#agent-runner-cli-backend](../docs/agent/platform-decisions.md#agent-runner-cli-backend)) may want to own the
   spawn instead. This item is where the two designs meet; if the ruling wins, the operation becomes its caller.
-- **Land #x9ylkp7 first or with this.** Until the observer can resolve a finished build, every real dispatch
+- **Land #3095 first or with this.** Until the observer can resolve a finished build, every real dispatch
   leaves an entry the waker re-reports forever and eventually exits non-zero on.
 
 ## It carries the other half of #3037's acceptance
