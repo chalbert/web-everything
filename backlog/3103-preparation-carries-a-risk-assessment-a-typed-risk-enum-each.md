@@ -35,6 +35,39 @@ assembled from what actually went wrong is worth more than one assembled from wh
 | **unmeasured-impact** | the work may not unblock anything | measure the constraint before sizing | [#3071] — two rounds of correct work on the least-binding of three blockers |
 | **legibility** | the failure presents as silence, not as an error | assert the failure SURFACES, not just that it occurs | the gate-timeout stall (8×, none reported); a wedged `claude` hangs rather than reddens |
 
+## Second wave of evidence, same day (2026-08-14) — reviewing the PREPARATION itself, not just the build
+
+Seven cards were prepared (design decided, interfaces cited) and merged with no independent review, then
+independently reviewed after the fact as a separate pass. **All seven had real defects**, each landing on an
+enum entry already above — the taxonomy held without needing a ninth category:
+
+- **premise** — [#2803]'s design was reasoned from a resolve-time model the repo moved past ~2.5 weeks earlier
+  (since #2748 landed 2026-07-28: the drain owns the flip now, not the producing lane); [#3004]'s residual
+  claim ("unrecoverable") rested on a manifest-location fact that changed under #2411.
+- **blast-radius** — [#2842]'s proposed statute-lint rule would fail `check:standards` repo-wide the moment
+  anyone resolved one of three specific in-flight items — unmeasured and unnamed until review.
+- **consumer** — [#2787] named one print site for a bug that had two; the second was live on `main`, printing
+  the bug and its own fix on adjacent lines.
+- **interface** — [#2351] picked a lock key that turned out to be the resident drain daemon's own
+  whole-process lock; [#3063]'s render step needed data its producer never passed.
+- **decorative-guard, the sharpest hit** — [#3004] and [#3095]'s designs were **provable no-ops**: wired to
+  derive from inputs already structured to exclude the failing case, or to look up a value that is never
+  recorded anywhere. Not "might miss something" — literally could not fire, and the card's own `## Done when`
+  would have gone green against it, because every bullet was satisfiable on a hand-seeded fixture rather than
+  the real production path.
+- **population / unmeasured-impact** — [#2842] and [#2803] both *did* measure (against the real doc corpus,
+  against 426 historical merges) — the counter-evidence that measuring works when someone does it; the defect
+  in both was elsewhere (interface/premise), not in the measured claims themselves.
+- **legibility** — [#3063]'s wide catch would have turned an operator's typo into "REFUSED — start a fresh
+  run," silently re-charging a metered judge call rather than surfacing the actual mistake.
+
+**The new finding this wave adds, which changes how the enum gets applied, not what's in it**: self-verification
+(the preparer re-checking their own claim, item 8 of the checklist) caught real things earlier the same day —
+and caught NONE of these seven. The preparer is structurally the wrong person to catch an error in their own
+reasoning. Risk assessment during preparation and independent review of the preparation are not the same
+control and neither substitutes for the other — see `we:agent-memory-src/story-preparation-checklist.md`
+item 9, added from this same evidence.
+
 ## What is mechanical and what is not — the #2607 line
 
 [#2607] (deterministic core, thin judgment) says the script-decidable half belongs in a script. Splitting
