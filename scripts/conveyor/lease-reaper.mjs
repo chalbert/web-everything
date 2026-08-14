@@ -63,14 +63,32 @@ export function itemNumFromSession(session) {
 }
 
 /**
- * The item number a `lane/<num>-<slug>` head ref encodes (mirrors `itemNumFromSession`'s couple key), or null.
- * A conveyor PR is opened by `pr-land --ref=lane/<num>-<slug>`, so its head ref carries the item number.
+ * The item id a `lane/<num>-<slug>` head ref encodes (mirrors `itemNumFromSession`'s couple key), or null.
+ * A conveyor PR is opened by `pr-land --ref=lane/<num>-<slug>`, so its head ref carries the item id.
+ *
+ * THE GRAMMAR IS `pr-land`'S, NOT A SECOND ONE (#x9ylkp7, task 4). `we:scripts/pr-land.mjs` parses its own
+ * `--ref` with `^lane\/(x[a-z0-9]{5,7}|\d+)` — a backlog item is identified EITHER by its number OR by its
+ * `bornAs` hash (`x9ylkp7`), and the delivery-agent brief's `{{ITEM_NUM}}` is documented to be "the backlog
+ * item number (or `xNNNNNN` hash)". This matcher accepted only the digit half, so every hash-identified item's
+ * PR read as "no item at all". Widening it HERE rather than in a second copy is the whole point: the lease
+ * reaper and the dispatch observer (`we:scripts/operations/dispatch-lane-io.mjs`) both key PRs to items through
+ * this one function, so they can never disagree about which ref belongs to which item.
+ *
+ * WHAT THE WIDENING DOES **NOT** CHANGE, checked rather than assumed: {@link prStatesFromList} now mints
+ * hash-keyed entries too, but {@link itemNumFromSession} — the only thing that ever LOOKS a key up in the
+ * reaper — matches `(\d+)[a-z]?$` and so can only ever produce a digit key. A hash key is therefore
+ * unreachable on the reap path, and the new keys collide with no existing one. The reaper's behaviour is
+ * byte-identical; the observer is what the new keys are for. (`lease-reaper.test.mjs` pins exactly this.)
+ *
+ * A hash is lower-cased on the way out, matching `we:scripts/conveyor/queue-store.mjs`'s `normNum`; the digit
+ * branch is unaffected by that (`'3095'.toLowerCase()` is `'3095'`).
+ *
  * @param {string|null|undefined} headRef
  * @returns {string|null}
  */
 export function laneRefItemNum(headRef) {
-  const m = String(headRef ?? '').match(/^lane\/(\d+)[a-z]?-/i);
-  return m ? m[1] : null;
+  const m = String(headRef ?? '').match(/^lane\/(x[a-z0-9]{5,7}|\d+)[a-z]?-/i);
+  return m ? m[1].toLowerCase() : null;
 }
 
 /**

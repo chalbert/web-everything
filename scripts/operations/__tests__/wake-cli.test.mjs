@@ -32,7 +32,7 @@ import { applyPendingEffects } from '../effect-executor.mjs';
 import { createFileRunStore } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, dispatchLaneOperation } from '../dispatch-lane.mjs';
-import { LIST_TIMEOUT_ENV, createDispatchSinks } from '../dispatch-lane-io.mjs';
+import { LIST_TIMEOUT_ENV, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT, PR_LIST_TIMEOUT_ENV, createDispatchSinks } from '../dispatch-lane-io.mjs';
 import { assertHandleNotLive, closeOutEntry, flagValue } from '../wake.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -47,16 +47,26 @@ const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{S
 let dir;
 let binDir;
 let argvFile;
+let ghArgvFile;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'we-wake-cli-runs-'));
   binDir = mkdtempSync(join(tmpdir(), 'we-wake-cli-bin-'));
   argvFile = join(binDir, 'argv.txt');
+  ghArgvFile = join(binDir, 'gh-argv.txt');
   // THE STUB `claude`. `sh` builtins only, so it needs nothing on `PATH` itself — which lets the child run with
   // a `PATH` holding this directory and nothing else, and therefore with no way to reach a real `claude`.
   const stub = join(binDir, 'claude');
   writeFileSync(stub, '#!/bin/sh\nprintf \'%s\\n\' "$*" > "$STUB_ARGV_FILE"\nprintf \'%s\' "$STUB_AGENTS"\n');
   chmodSync(stub, 0o755);
+  // THE STUB `gh` (#x9ylkp7). The observer's second axis reads `gh pr list`, and the same rule applies: no real
+  // `gh` is on the child's `PATH`, so **no network call is made and no real repo is queried**. It records its
+  // argv for the same reason the `claude` stub does — the discovery query's failure mode is SILENCE (an empty
+  // page is indistinguishable from "no PR yet"), so `--state all` and `headRefName` are pinned across a real
+  // process boundary and not only in-process.
+  const ghStub = join(binDir, 'gh');
+  writeFileSync(ghStub, '#!/bin/sh\nprintf \'%s\\n\' "$*" > "$STUB_GH_ARGV_FILE"\nprintf \'%s\' "$STUB_PRS"\n');
+  chmodSync(ghStub, 0o755);
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -64,7 +74,7 @@ afterEach(() => {
 });
 
 /** Park a real dispatch run on disk, aged past the observer's 2-minute listing grace and far short of escalation. */
-async function parkOneDispatch() {
+async function parkOneDispatch({ ageMs = 10 * 60 * 1000 } = {}) {
   const registry = createRegistry();
   registry.register(dispatchLaneOperation({
     readTick: () => ({
@@ -89,9 +99,10 @@ async function parkOneDispatch() {
   run = (await applyPendingEffects(run, { sinks, store })).run;
   expect(run.effects[0].status).toBe('in-flight');
 
-  // TEN MINUTES OLD: past `LISTING_GRACE_MS` (a just-started session is legitimately still `running` even when
-  // absent), and nowhere near `STUCK_ESCALATION_HOURS`, which would make the CLI exit non-zero.
-  const startedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  // TEN MINUTES OLD by default: past `LISTING_GRACE_MS` (a just-started session is legitimately still `running`
+  // even when absent), and nowhere near `STUCK_ESCALATION_HOURS`, which would make the CLI exit non-zero.
+  // `ageMs` is what the escalation case dials up, so it can prove the 6h clock still bites.
+  const startedAt = new Date(Date.now() - ageMs).toISOString();
   run = { ...run, effects: run.effects.map((e) => ({ ...e, startedAt })) };
   store.write(run);
   return run;
@@ -110,7 +121,7 @@ async function parkOneDispatch() {
  * rather than lengthening it. The production default is untouched and is asserted, with its literal, in
  * `dispatch-lane-defaults.test.mjs`.
  */
-function runWakeCli(args = [], { agents = '[]' } = {}) {
+function runWakeCli(args = [], { agents = '[]', prs = '[]' } = {}) {
   return execFileSync(process.execPath, [WAKE_CLI, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -120,7 +131,10 @@ function runWakeCli(args = [], { agents = '[]' } = {}) {
       OPERATION_RUNS_DIR: dir,
       STUB_AGENTS: agents,
       STUB_ARGV_FILE: argvFile,
+      STUB_PRS: prs,
+      STUB_GH_ARGV_FILE: ghArgvFile,
       [LIST_TIMEOUT_ENV]: '0',
+      [PR_LIST_TIMEOUT_ENV]: '0',
     },
   });
 }
@@ -129,8 +143,14 @@ function runWakeCli(args = [], { agents = '[]' } = {}) {
  * Generous, because every case here spawns at least one real `node` child and vitest's default per-test bound
  * is five seconds — which under a loaded shard is the OTHER way this file could go red for a reason that is
  * not a defect. It is a ceiling on a hang, not a value anything races.
+ *
+ * RAISED with #x9ylkp7, which added four more child spawns to this file (two of them inside one case). Measured
+ * on the required gate's `--shard=1/2`, this file's own wall time went from ~78s standalone to ~512s under the
+ * fork storm — i.e. the per-case margin against the old 60s ceiling was thin and getting thinner. Raising a
+ * HANG ceiling costs only how long a genuine hang takes to be reported; leaving it costs a flaky required
+ * check, and a flaky required check teaches everyone to re-run instead of read.
  */
-const CHILD_PROCESS_TIMEOUT_MS = 60_000;
+const CHILD_PROCESS_TIMEOUT_MS = 120_000;
 
 describe('the waker CLI registers the dispatch observer — the half of the feature no test reached', () => {
   it('OBSERVES a parked dispatch with the real observer, not with an empty table', async () => {
@@ -162,6 +182,73 @@ describe('the waker CLI registers the dispatch observer — the half of the feat
     expect(out).toMatch(/liveness and not outcome/);
     expect(out).toMatch(new RegExp(`wake\\.mjs --resolve=${RUN_ID} --key=<effectKey>`));
     // `unresolved` WRITES NOTHING — the entry is still in flight, which is why a close-out surface has to exist.
+    expect(createFileRunStore(dir).read(RUN_ID).effects[0].status).toBe('in-flight');
+  }, CHILD_PROCESS_TIMEOUT_MS);
+});
+
+// ── #x9ylkp7 — the PR axis, across the same real process boundary ────────────────────────────────────────────
+
+describe('the waker CLI reads the PR axis too — the half that can finally answer `succeeded`', () => {
+  it('reads the PRs as `gh pr list --state all --json …headRefName`, and the query is pinned HERE too', async () => {
+    // The discovery query fails SILENTLY when it is wrong — an empty page is by design indistinguishable from
+    // "no PR yet" — so it is pinned in-process (`dispatch-lane-defaults.test.mjs`) AND across the boundary the
+    // CLI actually crosses, exactly as the `claude agents --json` argv is.
+    await parkOneDispatch();
+    runWakeCli([], { agents: '[]' });
+    expect(readFileSync(ghArgvFile, 'utf8').trim())
+      .toBe(`pr list --state all --limit ${PR_LIST_LIMIT} --json ${PR_LIST_JSON_FIELDS}`);
+  }, CHILD_PROCESS_TIMEOUT_MS);
+
+  it('a MERGED PR for the item RESOLVES the entry with no person — and the next pass no longer reports it', async () => {
+    // The item's whole purpose: before this, a finished build was re-reported on every pass forever, and past
+    // `STUCK_ESCALATION_HOURS` the waker exited non-zero on every pass until someone closed it out by hand.
+    const run = await parkOneDispatch();
+    const out = runWakeCli([], {
+      agents: '[]', // the session is already gone — liveness alone would say `unresolved`
+      prs: JSON.stringify([{
+        number: 4242,
+        headRefName: 'lane/3037-declare-dispatch',
+        state: 'MERGED',
+        // AFTER this entry's `startedAt`, which is what makes it attributable to THIS dispatch.
+        mergedAt: new Date(Date.parse(run.effects[0].startedAt) + 60_000).toISOString(),
+        labels: [],
+      }]),
+    });
+    expect(out).toMatch(/resolved .*→succeeded/);
+    expect(out).not.toMatch(/NEEDS A PERSON/);
+    const entry = createFileRunStore(dir).read(RUN_ID).effects[0];
+    expect(entry.status).toBe('applied');
+    expect(entry.result).toMatchObject({ resolvedBy: 'pr-merged', pr: 4242 });
+    // AND THE WEDGE IS GONE without anybody touching `--resolve`.
+    expect(runWakeCli([], { agents: '[]' })).toMatch(/none parked on a dispatch/);
+  }, CHILD_PROCESS_TIMEOUT_MS);
+
+  it('a PARKED PR still needs a person — terminal-looking is not the same as finished', async () => {
+    await parkOneDispatch();
+    const out = runWakeCli([], {
+      agents: '[]',
+      prs: JSON.stringify([{ number: 4243, headRefName: 'lane/3037-declare-dispatch', state: 'OPEN', mergedAt: null, labels: [{ name: 'review:pending' }] }]),
+    });
+    expect(out).toMatch(/NEEDS A PERSON/);
+    expect(out).toMatch(/PARKED for review/);
+    expect(createFileRunStore(dir).read(RUN_ID).effects[0].status).toBe('in-flight');
+  }, CHILD_PROCESS_TIMEOUT_MS);
+
+  it('an entry that never reaches a PR still ESCALATES at 6h — the clock is untouched by the new axis', async () => {
+    // The dominant case until real dispatch lands, and the one this item must not quietly change: no PR means
+    // no verdict from the PR axis, so the entry follows exactly the path it followed before — reported, then
+    // escalated past `STUCK_ESCALATION_HOURS` with a non-zero exit for whatever is watching exit codes.
+    await parkOneDispatch({ ageMs: 7 * 60 * 60 * 1000 });
+    let stdout = '';
+    try {
+      runWakeCli([], { agents: '[]', prs: '[]' });
+      expect.unreachable('a run stuck past the escalation threshold must exit non-zero');
+    } catch (e) {
+      stdout = String(e.stdout || '');
+      expect(e.status).toBe(1);
+    }
+    expect(stdout).toMatch(/ESCALATED — /);
+    expect(stdout).toMatch(/has been unresolved for 7\.\dh \(over 6h\)/);
     expect(createFileRunStore(dir).read(RUN_ID).effects[0].status).toBe('in-flight');
   }, CHILD_PROCESS_TIMEOUT_MS);
 });

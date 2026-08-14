@@ -34,6 +34,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normNum } from '../conveyor/queue-store.mjs';
+import { laneRefItemNum } from '../conveyor/lease-reaper.mjs';
+import { classifyPr } from '../conveyor/pr-watch.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES } from './dispatch-lane.mjs';
@@ -360,6 +362,23 @@ export const LIST_TIMEOUT_MS = 15 * 1000;
 export const LIST_TIMEOUT_ENV = 'WE_DISPATCH_LIST_TIMEOUT_MS';
 
 /**
+ * How long `gh pr list` gets. Longer than the agent listing because it is a NETWORK read against GitHub rather
+ * than a local daemon, and shorter than the tick because it fetches one bounded page and nothing else. Same
+ * reason for bounding it at all: it sits synchronously inside a waker pass that promises to be fail-soft per
+ * run, so a wedged `gh` must not stall every OTHER parked run in the pass.
+ */
+export const PR_LIST_TIMEOUT_MS = 30 * 1000;
+
+/** The env var that overrides {@link PR_LIST_TIMEOUT_MS}. `0` means UNBOUNDED. See {@link prListTimeoutMs}. */
+export const PR_LIST_TIMEOUT_ENV = 'WE_DISPATCH_PR_LIST_TIMEOUT_MS';
+
+/** How many PRs one discovery page carries. Matches the lease reaper's `--pr-limit` default. */
+export const PR_LIST_LIMIT = 400;
+
+/** The `--json` fields the discovery query MUST ask for. See {@link defaultListPrs} for why each one is here. */
+export const PR_LIST_JSON_FIELDS = 'number,state,mergedAt,labels,headRefName';
+
+/**
  * The listing timeout for THIS process — {@link LIST_TIMEOUT_MS} unless the environment overrides it.
  *
  * WHY THE KNOB EXISTS, and it is a test-determinism fix before it is an operator one (PR #1211 round 2, G3).
@@ -380,12 +399,34 @@ export const LIST_TIMEOUT_ENV = 'WE_DISPATCH_LIST_TIMEOUT_MS';
  * @returns {number} milliseconds; `0` = unbounded.
  */
 export function listTimeoutMs(env = process.env) {
-  const raw = String(env[LIST_TIMEOUT_ENV] ?? '').trim();
-  if (!raw) return LIST_TIMEOUT_MS;
+  return timeoutFromEnv(env, LIST_TIMEOUT_ENV, LIST_TIMEOUT_MS);
+}
+
+/**
+ * The `gh pr list` bound for THIS process — {@link PR_LIST_TIMEOUT_MS} unless the environment overrides it.
+ * Its own knob rather than a share of {@link LIST_TIMEOUT_ENV}: the two reads have different costs (a local
+ * daemon versus a network round-trip), so one number for both would be wrong for one of them, and an operator
+ * lengthening the network bound must not silently lengthen the liveness bound too.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {number} milliseconds; `0` = unbounded.
+ */
+export function prListTimeoutMs(env = process.env) {
+  return timeoutFromEnv(env, PR_LIST_TIMEOUT_ENV, PR_LIST_TIMEOUT_MS);
+}
+
+/**
+ * One env-overridable millisecond bound. REFUSES a malformed value rather than silently falling back — an
+ * operator who set a bound that never applied is in exactly the position this module's `WE_DISPATCH_AGENT_ARGS`
+ * refusal exists to prevent.
+ */
+function timeoutFromEnv(env, name, fallback) {
+  const raw = String(env[name] ?? '').trim();
+  if (!raw) return fallback;
   const ms = Number(raw);
   if (!Number.isFinite(ms) || ms < 0) {
     throw new TypeError(
-      `operations: ${LIST_TIMEOUT_ENV} must be a non-negative number of milliseconds (0 = unbounded), got ${JSON.stringify(raw)}`,
+      `operations: ${name} must be a non-negative number of milliseconds (0 = unbounded), got ${JSON.stringify(raw)}`,
     );
   }
   return ms;
@@ -582,50 +623,110 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
 }
 
 /**
- * THE OBSERVER — the #3084 half that asks how a dispatched build is going.
+ * THE OBSERVER — the #3084 half that asks how a dispatched build is going, on TWO axes (#x9ylkp7).
  *
- * IT ANSWERS `running` OR `unresolved`, AND NEVER `succeeded`. That is not an omission, it is what the tool
- * exposes. `claude agents --json` reports LIVENESS: a session is in the list or it is not. It carries no exit
- * status, no outcome, and (measured on 2.1.220, with `--all`) no terminal record for a completed session at
- * all. So "the session is gone" collapses *finished cleanly* and *died* into one observation, and the
- * vocabulary has exactly one honest word for that: `unresolved` — terminal for the observer, actionable by a
- * person, WRITES NOTHING. Answering `succeeded` there would record `applied` for a build that may have crashed,
- * and the run would advance past the step that exists to react to it.
+ * WHY LIVENESS ALONE COULD NEVER ANSWER `succeeded`. `claude agents --json` reports LIVENESS: a session is in
+ * the list or it is not. It carries no exit status, no outcome, and (measured on 2.1.220, with `--all`) no
+ * terminal record for a completed session at all. So "the session is gone" collapses *finished cleanly* and
+ * *died* into one observation, and the vocabulary has exactly one honest word for that: `unresolved` —
+ * terminal for the observer, actionable by a person, WRITES NOTHING. Answering `succeeded` on liveness alone
+ * would record `applied` for a build that may have crashed, and the run would advance past the step that
+ * exists to react to it. That has not changed and must not.
  *
  * THIS IS WHY `--all` IS NOT PASSED. It also lists COMPLETED sessions, so a finished build would keep reading
  * as `running` forever — the one mistake that makes an observer worse than none.
  *
- * WHAT THAT COSTS, STATED PROPERLY: `unresolved` writes nothing, so a finished dispatch is re-reported on EVERY
- * waker pass, and past `STUCK_ESCALATION_HOURS` the waker starts exiting non-zero on every pass until a person
- * closes the entry out (`node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=…`).
- * That is a standing cost per completed build, not a one-off line. The genuine completion signal for a delivery
- * agent is its PR, which the conveyor's own watcher (`we:scripts/conveyor/pr-watch.mjs`) already watches to a
- * terminal state; folding that in is #x9ylkp7.
+ * THE REAL COMPLETION SIGNAL IS THE PR, AND IT IS NOW READ. A delivery agent's outcome exists somewhere the
+ * agent listing cannot see: the pull request it opened, which `we:scripts/conveyor/pr-watch.mjs` already
+ * classifies to a terminal state. {@link classifyDispatchPr} finds this entry's PR by ITEM ID over the head
+ * refs and hands it to that same `classifyPr`, so exactly ONE classification — `merged` — reaches `succeeded`.
+ * `closed` (abandoned unmerged, or a manual close) and `parked` (mid-review, not failed) are AMBIGUOUS for this
+ * purpose and still answer `unresolved`; `pending` means "no verdict from the PR axis" and falls through to the
+ * liveness logic below, unchanged. Conflating *terminal* with *succeeded* is the exact bug this axis exists to
+ * close, so it is not enough that a PR reached an end state.
  *
- * WHAT IT NO LONGER COSTS. Until PR #1211's review it also locked the item out of dispatching AGAIN, forever —
- * the never-resolving entry composed with a double-dispatch guard that held on any in-flight record and a run
- * store that never prunes, so the operation was single-use per item. The guard now ages a stale hold out
- * (`dispatch-lane.mjs#dispatchStillHolds`), which is what keeps this deferral a cost rather than a wedge.
+ * THE PR AXIS RUNS FIRST, deliberately. A merged PR with a still-listed session is a real and expected shape —
+ * the agent's last act is `pr-land`, and it exits some seconds later — and that build IS done. Ordering
+ * liveness first would report it `running` for as long as the session lingered, i.e. the axis would be a
+ * fallback that the common case never reaches.
  *
- * ONE LISTING PER PASS. The table is built once per pass and MEMOIZES the read, so a run with several in-flight
- * entries — or several parked runs in one pass — costs one subprocess, not one per entry. Build a fresh table
- * for a fresh pass; the CLI at the bottom of `we:scripts/operations/wake.mjs` does exactly that.
+ * WHAT IT REFUSES TO RESOLVE ON: a STALE PR. Re-dispatch of one item is a designed path (the executor mints a
+ * fresh handle per retry and keeps `supersededHandles`; `dispatch-lane.mjs#dispatchStillHolds` ages a hold out
+ * so a second attempt can start at all), and under id-matching a PREDECESSOR's merged PR matches the new entry
+ * just as well as its own would. Resolving on it would mark a build that has barely begun `applied` on the
+ * strength of an earlier attempt — the same conflation arriving through the back door. So a merge is only this
+ * entry's if it happened at or after the entry's `startedAt`; anything else answers `unresolved`.
+ *
+ * WHAT THE MANUAL PATH STILL COSTS. Nothing here removes `wake.mjs`'s `closeOutEntry`
+ * (`--resolve=<runId> --key=<effectKey> --status=applied|failed`): the two coexist, and the manual one remains
+ * the answer for every genuinely ambiguous entry — which is still every dispatch that never reaches a PR.
+ *
+ * ONE LISTING PER PASS, PER AXIS. Both reads are built once per pass and MEMOIZED, so a run with several
+ * in-flight entries — or several parked runs in one pass — costs one subprocess each, not one per entry. Build
+ * a fresh table for a fresh pass; the CLI at the bottom of `we:scripts/operations/wake.mjs` does exactly that.
  *
  * @param {object} [o]
  * @param {() => object[]} [o.listAgents] - injectable `claude agents --json` reader.
- * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT reader goes through. See
+ * @param {() => object[]} [o.listPrs] - injectable `gh pr list` reader. Same seam, same reason: the whole PR
+ *   axis is testable with no network and no `gh`.
+ * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT readers go through. See
  *   {@link readTick} for why this is a second seam and not the same one.
  * @param {() => Date} [o.now]
  * @returns {Record<string, Function>} effect type → `async (entry, ctx) => {status, result?, error?}`.
  */
-export function createDispatchObservers({ exec = execFileSync, listAgents = () => defaultListAgents({ exec }), now = () => new Date() } = {}) {
+export function createDispatchObservers({
+  exec = execFileSync,
+  listAgents = () => defaultListAgents({ exec }),
+  listPrs = () => defaultListPrs({ exec }),
+  now = () => new Date(),
+} = {}) {
   // `undefined` is the not-yet-read sentinel, NOT `null`: a reader that returns `null` (or anything else the
   // check below refuses) must still be memoized, or every entry re-shells it — the exact per-entry cost this
   // memo removes. A THROW is not memoized, so a transient failure is retried rather than poisoning the pass.
   let listed;
+  let prList;
   return {
     [DISPATCH_EFFECT]: async (entry, ctx) => {
       const handle = String(ctx?.handle ?? entry?.handle ?? '');
+
+      // ── AXIS 1: THE PR. The only axis that can ever say `succeeded`. ─────────────────────────────────────
+      //
+      // LAZY, so an entry the axis cannot use (no item id on its payload) spends no subprocess, and a pass
+      // with nothing to look up shells no `gh` at all.
+      //
+      // A READ THAT FAILS IS NOT A VERDICT. `gh` missing, unauthenticated, rate-limited or wedged degrades
+      // this axis to OFF and falls through to liveness — exactly today's behaviour — rather than taking down
+      // an observer whose other axis still works. The lease reaper makes the same trade for the same reason
+      // (`fetchPrStates`: "any gh failure disables the axis"). It is the fail-SAFE direction: the cost is a
+      // completed build still needing a person, which is the status quo this item improves on, never a
+      // running build resolved on no evidence.
+      const num = entry?.payload?.num ?? null;
+      if (normNum(num)) {
+        if (prList === undefined) {
+          try { prList = listPrs(); } catch { prList = null; }
+        }
+        const { verdict, pr } = classifyDispatchPr({ num, startedAt: entry?.startedAt, prs: prList });
+        if (verdict === 'merged') {
+          // THE ONE PLACE `succeeded` BECOMES REACHABLE. `resolveInFlight` records `applied` and the run
+          // advances — which is correct precisely because a merged PR is a CLEAN outcome, the one thing no
+          // later step needs to react to. The result names the evidence, so the record says WHY it resolved.
+          return {
+            status: 'succeeded',
+            result: {
+              resolvedBy: 'pr-merged',
+              pr: pr?.number ?? null,
+              headRefName: pr?.headRefName ?? null,
+              mergedAt: pr?.mergedAt ?? null,
+            },
+          };
+        }
+        if (verdict !== 'pending') {
+          return { status: 'unresolved', error: unresolvedPrReason(verdict, pr, entry) };
+        }
+      }
+
+      // ── AXIS 2: LIVENESS. Unchanged — it is what answers while no PR exists yet, which is every dispatch
+      //    for most of its life, and the dominant case until real dispatch lands.
       if (listed === undefined) listed = listAgents();
       const sessions = listed;
       if (!Array.isArray(sessions)) {
@@ -642,11 +743,119 @@ export function createDispatchObservers({ exec = execFileSync, listAgents = () =
       }
       return {
         status: 'unresolved',
-        error: `session ${handle} is no longer listed by \`claude agents\`, which reports liveness and not outcome — `
-          + 'whether the build finished cleanly cannot be told from here. Check its PR, then close the entry out.',
+        error: `session ${handle} is no longer listed by \`claude agents\`, which reports liveness and not outcome, `
+          + 'and no MERGED PR for this item can be attributed to this dispatch — whether the build finished cleanly '
+          + 'cannot be told from here. Check its PR, then close the entry out.',
       };
     },
   };
+}
+
+/** The operator-facing reason one ambiguous PR verdict is NOT a resolution. Pure; never a status. */
+function unresolvedPrReason(verdict, pr, entry) {
+  const at = pr?.number ? `PR #${pr.number} (${pr.headRefName})` : 'its PR';
+  if (verdict === 'stale') {
+    return `every PR matching this item is a PREVIOUS attempt's — terminal before this dispatch started `
+      + `(${entry?.startedAt ?? 'unknown start'}) — so none of them says anything about THIS build. Resolving on one `
+      + 'would mark a build that may have barely begun `applied`. Check the item, then close the entry out.';
+  }
+  if (verdict === 'parked') {
+    return `${at} is PARKED for review, which is mid-flight rather than an outcome — the build may still be `
+      + 'corrected and re-landed. Land or close the PR, then close the entry out.';
+  }
+  return `${at} is CLOSED UNMERGED, which is terminal but is NOT success — an abandoned build and a manual close `
+    + 'look identical from here. Check what happened, then close the entry out.';
+}
+
+/**
+ * THE PR AXIS, PURE. Which verdict this entry's own PR supports, given one bounded `gh pr list` page.
+ *
+ * DISCOVERY IS BY ITEM ID OVER THE HEAD REFS, not by branch name — the fork this item ruled (approach 1). A
+ * dispatch entry carries NO PR reference and cannot: the payload holds `num`, `lane`, `sessionSlug`,
+ * `itemSpecPath`, `scope`, `prompt`, `expectedWithinMinutes`, and the head ref is minted LATER by the agent
+ * itself (`pr-land --ref=lane/{{ITEM_NUM}}-<slug>`, with the slug invented at that moment). So the exact ref is
+ * unknowable at observe time and `gh pr list --head` could only ever return empty. The repo already solved
+ * this: {@link laneRefItemNum} — pure, unit-tested, shared with the lease reaper — is the matcher, so the two
+ * can never disagree about which ref belongs to which item.
+ *
+ * THE STALE GUARD IS THE HONEST COST OF ID-MATCHING. Ids match a predecessor's PR as well as this build's, so a
+ * merge only counts when it happened at or after `startedAt` (which every in-flight entry carries — the
+ * executor stamps it, and re-stamps it on every retry). A MISSING or unparseable `startedAt` fails CLOSED: with
+ * no instant to compare against, no merge can be attributed, and the verdict is `stale`. The residual this
+ * does not close, stated rather than hidden: a predecessor's PR that merges AFTER a retry started is inside the
+ * window and would resolve the retry. Only a PR number stored on the entry could tell those apart, and that is
+ * approach 2 — a persisted field, a `pr-land`→run-store coupling and a migration, which is not this item.
+ *
+ * VERDICT PRIORITY among the PRs that survive the stale filter: `merged` > `pending` > `parked` > `closed`.
+ * `pending` outranks the two ambiguous terminals on purpose — an item with an abandoned PR AND a live open one
+ * must keep waiting on the live one, the same "open wins" safety the reaper's `prStatesFromList` applies for
+ * the same reason (the #2267 data-loss case, from the other side).
+ *
+ * @param {object} o
+ * @param {string|number|null} o.num - the item id off the entry's payload.
+ * @param {string|null} [o.startedAt] - when THIS dispatch attempt started.
+ * @param {object[]|null} [o.prs] - a parsed `gh pr list --state all --json …` page; `null` = the read failed.
+ * @returns {{verdict: 'merged'|'pending'|'parked'|'closed'|'stale', pr: object|null}}
+ */
+export function classifyDispatchPr({ num, startedAt = null, prs = null } = {}) {
+  const key = normNum(num);
+  // NO ITEM ID, or NO LISTING (the read failed / returned junk) → no verdict. `pending` is the word for "this
+  // axis has nothing to say", and it is indistinguishable from "no PR yet" ON PURPOSE: both mean fall through.
+  if (!key || !Array.isArray(prs)) return { verdict: 'pending', pr: null };
+
+  const mine = prs.filter((p) => laneRefItemNum(p?.headRefName) === key);
+  if (!mine.length) return { verdict: 'pending', pr: null }; // no PR yet — exactly today's behaviour
+
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+  // A MERGE BEFORE THIS ATTEMPT BEGAN belongs to a previous one. Non-merged PRs are kept as they are: they
+  // carry no merge instant to compare, and the verdicts they produce (`pending` / `parked` / `closed`) resolve
+  // nothing anyway. A PR that reads `merged` with no PARSEABLE `mergedAt` is dropped for the same reason a
+  // missing `startedAt` is — there is no instant, so nothing can be attributed, and fail-closed is the only
+  // safe direction.
+  const attributable = mine.filter((p) => {
+    if (classifyPr(p) !== 'merged') return true;
+    const mergedMs = p?.mergedAt ? Date.parse(p.mergedAt) : NaN;
+    return !Number.isNaN(mergedMs) && !Number.isNaN(startedMs) && mergedMs >= startedMs;
+  });
+  if (!attributable.length) return { verdict: 'stale', pr: mine[0] };
+
+  const RANK = { merged: 4, pending: 3, parked: 2, closed: 1 };
+  let best = null;
+  for (const p of attributable) {
+    const verdict = classifyPr(p);
+    if (!best || RANK[verdict] > RANK[best.verdict]) best = { verdict, pr: p };
+  }
+  return best;
+}
+
+/**
+ * `gh pr list --state all` — ONE bounded page of this repo's PRs, in the shape {@link classifyDispatchPr} and
+ * `pr-watch.mjs`'s `classifyPr` read.
+ *
+ * TWO PARTS OF THE QUERY ARE LOAD-BEARING, and both fail SILENTLY when wrong — an empty listing is by design
+ * indistinguishable from "no PR yet", so a query that matches nothing looks exactly like a fleet with no PRs
+ * open. Nothing reddens, the waker keeps escalating at 6h, and the feature reads as delivered. That is why
+ * `dispatch-lane-defaults.test.mjs` pins this argv rather than merely exercising the path:
+ *   - `--state all` — bare `gh pr list` defaults to OPEN only, which hides every MERGED PR, i.e. the single
+ *     classification this observer resolves on. Without it the whole axis is a no-op.
+ *   - `headRefName` in `--json` — the field the item match is made on. Without it every PR reads as belonging
+ *     to no item.
+ * `state`, `mergedAt` and `labels` are what `classifyPr` itself reads; `number` is for the record's evidence.
+ *
+ * SAME BOUNDED PAGE AS THE LEASE REAPER (`lease-reaper.mjs#fetchPrStates`): 400 is well past any plausible
+ * backlog of open+recent PRs, and a bound is what keeps one wedged read from being unbounded.
+ *
+ * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
+ */
+export function defaultListPrs({ exec = execFileSync, env = process.env } = {}) {
+  const out = exec('gh', ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: prListTimeoutMs(env),
+    killSignal: 'SIGKILL',
+  });
+  return JSON.parse(String(out || '[]'));
 }
 
 /**
