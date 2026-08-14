@@ -92,7 +92,7 @@ import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwi
 import { computeNetDiffSignals } from './merge-ai-prs.mjs';
 import {
   scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
-  buildEscalationReasonBlock, bodyAlreadyCarriesReasonBlock, reconcileRoster, ROSTER_TIMING,
+  reconcileEscalationReasonBlock, reconcileRoster, ROSTER_TIMING,
   isReviewHoldLabel, READY_TO_MERGE_LABEL, readyMergeConflictsWithHold, hasUnclearedReviewLabel,
 } from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile; #2832 — hold/ready self-consistency
 import { resolveJuryPlan } from './lib/review-core.mjs'; // #2635 — recompute the jury roster from the REAL diff at PR-open
@@ -875,13 +875,19 @@ function runCli() {
       catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
       // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
       // re-deriving the rubric — and, for #2635, so the roster-expansion re-alignment reason is trailed where
-      // the jury ledger (#2641) will read it. Best-effort + idempotent — the RAW-text guard, not the trusted
-      // reader: "would this duplicate" is a different question from "is there a trustworthy record", and using
-      // the trusted one here made a body that blanks its own appended block re-append on every pass.
+      // the jury ledger (#2641) will read it. Best-effort. #3044 — RECONCILE, not guard-then-append: a re-run
+      // that scores a different reason set than the first park now replaces the stale block instead of leaving
+      // it stamped once; a re-run that scores the SAME set writes nothing (`changed:false`), so this stays
+      // idempotent. The RAW-text duplicate-append guard did not go away — it moved INSIDE the reconcile
+      // function, which is the only place it can now be stated once for both write sites. It is still
+      // load-bearing: "would this duplicate" is a different question from "is there a trustworthy record",
+      // and answering it from the trusted reader made a body that blanks its own appended block (an unclosed
+      // fence) re-append on every pass, unboundedly.
       try {
         let liveBody = '';
         try { liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || ''; } catch { /* fetch miss — augment from empty */ }
-        if (!bodyAlreadyCarriesReasonBlock(liveBody)) ghC(['pr', 'edit', String(prNum), '--body', liveBody + buildEscalationReasonBlock(verdict.reasons)]);
+        const reconciled = reconcileEscalationReasonBlock(liveBody, verdict.reasons);
+        if (reconciled.changed) ghC(['pr', 'edit', String(prNum), '--body', reconciled.body]);
       } catch { /* best-effort — the label already carries the signal */ }
     }
     // #2832 — the producer applies `ready-to-merge` (applyLabel, on green) BEFORE this escalation verdict. When

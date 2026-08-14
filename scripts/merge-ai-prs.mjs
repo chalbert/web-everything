@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, bodyAlreadyCarriesReasonBlock, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -3336,38 +3336,36 @@ async function runCli() {
         // should have been: a REVIEWER action, `review-set-label.mjs --to=changes`, which strips it
         // deliberately and says why.
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
-        // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
-        // (never replace) the live body with the marked block at park time, then verify the write landed —
-        // best-effort (a write/verify miss is surfaced, never fatal: the label already carries the signal).
+        // operator opening it sees why a human is required without re-deriving it from the rubric. #3044 —
+        // RECONCILE the block against the CURRENT reason set at every park, not guard-then-append-once: a
+        // re-park that scores a different set than the first park replaces the stale block; a re-park scoring
+        // the SAME set writes nothing. Then verify the write landed — best-effort (a write/verify miss is
+        // surfaced, never fatal: the label already carries the signal).
         if (gate.humanRequired && !DRY_RUN) {
-          // The #2324 body block IS this human park's durable drain record. It exists only when there are reasons
-          // to embed: `buildEscalationReasonBlock([])` is '' (a DE-ESCALATED human park has no fresh reasons), so
-          // that case records NOTHING here and must NOT suppress the skip-stamp below (finding-1, round 3).
-          const reasonBlock = buildEscalationReasonBlock(parkReasons);
           let liveBody = '';
           try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
-          if (!bodyAlreadyCarriesReasonBlock(liveBody)) {
-            const newBody = liveBody + reasonBlock;
-            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', newBody], { stdio: ['ignore', 'ignore', 'pipe'] }); }
+          // Reconciling against '' when the fetch misses is the same fail-soft the old raw-guard took: worst
+          // case is a duplicate/overwritten block on the NEXT successful fetch, never a crash here.
+          const reconciled = reconcileEscalationReasonBlock(liveBody, parkReasons);
+          let verified = false;
+          if (reconciled.changed) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', reconciled.body], { stdio: ['ignore', 'ignore', 'pipe'] }); }
             catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${parkReasons.join('; ')}\n`); }
             // Verify the write actually landed (never trust the edit call's exit code alone — gh can succeed
             // against a stale body if two edits race). A miss is loud, not silent.
-            let verified = false;
             try { verified = bodyHasEscalationReason(JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''); } catch { /* verify miss — reported below as unverified */ }
             if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${parkReasons.join('; ')}\n`);
-            // #2820-review-fix (round 4) — attest the durable record from the VERIFIED effect of the body write,
-            // NOT from merely HAVING COMPUTED the block: an unconfirmed edit (gh exit lies / a racing write) must
-            // leave `durableRecorded` false so the skip loop still stamps the reason — otherwise the PR ends the
-            // pass with NO record at all (a regression vs main). #2857 sweeps this attest-by-effect class.
-            if (reasonBlock) durableRecorded = verified;
-          } else if (reasonBlock) {
-            // GUARD ON RAW, ATTEST ON TRUSTED — two different questions, and answering both from the raw
-            // reader was a regression this round's review caught. Raw correctly prevents a duplicate append
-            // (the bytes are there whether quoted or not), but a body that merely MENTIONS the marker as
-            // documentation would then also attest `durableRecorded`, suppress the skip-stamp fallback via
-            // `reviewParked`, and leave the PR with no drain-written record and no warning. Attesting from the
-            // trusted reader makes raw-true/trusted-false fall through to the loud fallback instead.
-            durableRecorded = bodyHasEscalationReason(liveBody);
+          }
+          // #3044-review F7 — the attest decision is the PURE `decideDurableEscalationRecord`, not two inline
+          // branches: every mutation of the inline form survived the whole suite. It encodes both rules —
+          // attest a WRITE only from its verified effect, and attest a NO-WRITE only from the quoted-region
+          // -aware `bodyHasEscalationReason` (so a malformed block, or a marker that exists only inside a
+          // fence, falls through to the loud skip-stamp instead of silently claiming a record).
+          // `reconcileEscalationReasonBlock` never reports `changed` for an empty reason set, so the guard
+          // below is just "a de-escalated human park records nothing here" — and must not CLOBBER a
+          // `durableRecorded` an earlier branch (the #xmnl36p clearance-revocation notice) already earned.
+          if (parkReasons.length) {
+            durableRecorded = decideDurableEscalationRecord({ changed: reconciled.changed, verified, liveBody, reasons: parkReasons });
           }
         }
         // #2820-review-fix (finding-1, round 3) — suppress the final skip-stamp ONLY when this branch actually
