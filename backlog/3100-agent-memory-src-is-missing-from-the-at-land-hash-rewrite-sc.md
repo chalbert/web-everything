@@ -1,4 +1,5 @@
 ---
+bornAs: xrghphg
 kind: story
 size: 3
 status: open
@@ -27,10 +28,10 @@ When the drain numbers a stranded hash (the `number-stranded` command of `we:scr
 it rewrites every hash cross-reference it finds in `we:backlog/` and `we:docs/agent/` — but `agent-memory-src/`
 is not in that set, so a citation living there is left pointing at an id that no longer exists anywhere.
 
-Today's real instance: `x6cdlmu → #3098` and `xl2q1zt → #3099` were numbered (commit `df8488e9`, "drain:
-JIT-number x6cdlmu→#3098, xl2q1zt→#3099 at land"). Every reference in `we:backlog/` was rewritten. The
-reference in `we:agent-memory-src/story-preparation-checklist.md:45` — `"epic \`xl2q1zt\`, first slice = the
-consumers check"` — was left pointing at `xl2q1zt`, an id that resolves to nothing anywhere in the repo (its
+Today's real instance: `3098 → #3098` and `3099 → #3099` were numbered (commit `df8488e9`, "drain:
+JIT-number 3098→#3098, 3099→#3099 at land"). Every reference in `we:backlog/` was rewritten. The
+reference in `we:agent-memory-src/story-preparation-checklist.md:45` — `"epic \`3099\`, first slice = the
+consumers check"` — was left pointing at `3099`, an id that resolves to nothing anywhere in the repo (its
 own item landed as `we:backlog/3099-story-preparation-a-card-must-carry-what-its-delivery-needs.md`). A
 human reviewer reading the sentence caught it; no gate flagged it.
 
@@ -65,15 +66,15 @@ entry would fall into that SAME existing branch, needing no new path-resolution 
 
 **3. Current blast radius, measured (not assumed).** `grep -rnoE '\bx[0-9a-z]{6}\b' we:agent-memory-src/`
 (excluding `bornAs:` lines) finds **10 hash-shaped occurrences across 7 distinct hashes in 7 files**:
-`xvwmwkx`, `x8918rc` (×2), `x53zzf9`, `xppjnof`, `xeccleu` (×2), `xl2q1zt`, `xonzpym` — in
+`xvwmwkx`, `3026` (×2), `2609`, `2666`, `2501` (×2), `3099`, `3027` — in
 `we:agent-memory-src/51-feedback_hookable_vs_judgment_rule.md`, `we:agent-memory-src/index-verif.md`,
 `we:agent-memory-src/resolve-on-land-or-conveyor-redispatches.md` (×2), `we:agent-memory-src/index-batch.md`,
 `we:agent-memory-src/plateau-loop-runs-on-dev-laptop-simple.md` (×2),
 `we:agent-memory-src/story-preparation-checklist.md`, `we:agent-memory-src/grep-every-name-you-cite-in-prose.md`
 (×2). Checked against `we:backlog/`: **none of the 7 hashes exist as a backlog filename any more** — every
 one already numbered and landed. Cross-checked via `bornAs` (`grep -rl "bornAs: <hash>" we:backlog/`), all 7
-resolve cleanly to a real landed item: `xvwmwkx`→#2685, `x8918rc`→#3026, `x53zzf9`→#2609, `xppjnof`→#2666,
-`xeccleu`→#2501, `xl2q1zt`→#3099, `xonzpym`→#3027. So this is not a one-off: **all 7 hash references agent
+resolve cleanly to a real landed item: `xvwmwkx`→#2685, `3026`→#3026, `2609`→#2609, `2666`→#2666,
+`2501`→#2501, `3099`→#3099, `3027`→#3027. So this is not a one-off: **all 7 hash references agent
 memory currently carries are already dead**, not just the one caught today.
 
 **4. The citation/provenance gate does not scan `agent-memory-src/` at all — confirmed at the file-list, not
