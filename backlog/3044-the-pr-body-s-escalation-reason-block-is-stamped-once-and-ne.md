@@ -2,8 +2,9 @@
 bornAs: xx15niz
 kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-14"
 tags: [review, converge-loop, gate]
 relatedTo: ["2908", "2324", "2844"]
 scope:
@@ -176,6 +177,29 @@ does NOT stop there today (see Observed-but-out-of-scope) and is deliberately no
 item. `bodyAlreadyCarriesReasonBlock` and `bodyHasEscalationReason` stay exported and in use elsewhere
 (`bodyHasEscalationReason` still does the post-write verify read in we:merge-ai-prs.mjs); only the two call sites'
 write-decision branches change what they call.
+
+**Corrected in review (round 1, F1) — the card was wrong to specify a trusted-reader locate ALONE.** Both write
+sites previously guarded the append on the RAW-text `bodyAlreadyCarriesReasonBlock`, deliberately: "would this
+duplicate what is already here" is a different question from "is there a trustworthy record", and for the first
+one the bytes count whether quoted or not. Locating only on `blankQuotedRegions` re-opened a known unbounded
+append loop — a body whose earlier content blanks its own appended block (an unclosed fence, or the `md.parse`
+fault path, which blanks the WHOLE body by design) never sees its own write, so every park pass appends another
+copy until the body hits its size cap. Reproduced at 1→6 blocks in five passes. **Decision: keep BOTH readers,
+each on its own question.** `reconcileEscalationReasonBlock` locates on the trusted reader (so a fenced example
+is never "replaced" and a forged block never authorizes anything), and falls back to a RAW pre-check before any
+append: raw bytes present + trusted reader blind → write nothing. The guard therefore moved INSIDE the function
+rather than disappearing, which is why `bodyAlreadyCarriesReasonBlock` still has a production caller and the
+:177 claim above still holds. On that path the call sites attest `durableRecorded` from the trusted reader
+(false), so the drain falls through to its loud skip-stamp instead of silently claiming a record — GUARD ON RAW,
+ATTEST ON TRUSTED, unchanged from before this item.
+
+**Also corrected in review:** the fail-safe protects content OUTSIDE the block, not inside it (the block is
+drain-owned — a human bullet among the reasons is replaced, because a human note and a no-longer-scoring reason
+are the same shape, so "unrecognised bullet → malformed" would freeze exactly the shrink case this item exists
+for). More than one real marker is now `malformed`, not a silent first-match guess. A LEGACY pre-#2567 block —
+one with no trailing policy stamp — reads malformed and is frozen forever; fail-safe rather than a bug, now
+stated in the docblock and pinned by a test. And `buildEscalationReasonBlock` whitespace-collapses each reason,
+so "the block is bullets only" is enforced instead of merely asserted.
 
 ## Tasks
 
