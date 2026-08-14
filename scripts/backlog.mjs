@@ -130,10 +130,13 @@ function writeBacklogMd(abs, rel, content) {
  */
 function writeBacklogMdUnguarded(abs, rel, content) {
   // #3015 — the PUBLISH-SEAM secret gate, and the load-bearing one. A backlog card is committed and pushed;
-  // this writer is the ONE funnel every CLI card-mutation goes through (scaffold/resolve/settle/retype/
-  // yield/prepare-stamp), and a CLI writes straight to `fs`, so the PreToolUse(Edit|Write) hooks never see
-  // it — the same mechanism gap #1574 documented for locus prefixes, one line above. Refuse BEFORE
-  // `writeFileSync`, mirroring the reject-before-persist shape the learnings append seam used to have.
+  // this writer is the ONE AUTHORING funnel every CLI card-mutation goes through (scaffold/resolve/settle/
+  // retype/yield/prepare-stamp), and a CLI writes straight to `fs`, so the PreToolUse(Edit|Write) hooks
+  // never see it — the same mechanism gap #1574 documented for locus prefixes, one line above.
+  // (`backlog-renumber-collisions.mjs` and `backlog/migrate-kind.mjs` write `backlog/*.md` directly via
+  // their own `writeFileSync` and bypass this funnel too — but both only rewrite EXISTING card content, so
+  // neither can introduce a NEW secret, and the `check:standards` corpus sweep covers them anyway.) Refuse
+  // BEFORE `writeFileSync`, mirroring the reject-before-persist shape the learnings append seam used to have.
   // `scrubPublish` is deliberately narrower than the append-seam scrub — read its module header for what it
   // does and does NOT catch.
   const leaks = scrubPublish(content);

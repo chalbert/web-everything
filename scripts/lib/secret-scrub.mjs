@@ -35,9 +35,13 @@
  *        • opaque token — a 20–256 char whitespace/slash-delimited segment over `[A-Za-z0-9+=_]`, not pure
  *          hex, entropy ≥ 3.0, vowel ratio < 0.20. Measured: the corpus's least-pronounceable such segment
  *          is `REGISTRY_SCRIPT_TYPE` at 0.222, so 0.20 leaves real margin under real identifiers.
- *   4. PII — public IPv4/IPv6 addresses and personal-mailbox-shaped email addresses.
+ *   4. PII — ONLY public IPv4/IPv6 addresses and personal-mailbox-shaped email addresses. Phone numbers and
+ *      street addresses are NOT covered (see "DOES NOT CATCH" below).
  *
  * ── WHAT `scrubPublish` DOES NOT CATCH (named, so the gap is a decision) ───────────────────────────
+ *   • LENGTH FLOORS — the blob rule requires ≥40 chars, the token rule ≥20 chars. So ANY opaque credential
+ *     under 20 characters is undetected, regardless of alphabet: a 16-char random alnum key, a 12-char
+ *     unlabeled password. This is the single most common leak shape not covered by anything below.
  *   • CODE, repo paths, and the repo's own name (`CODE_PATTERNS`, `CODE_EXT`/`DOC_EXT`, `REPO_NAMES`).
  *     Ratified out in #3015: the destination here is the repo's OWN corpus, where citing a `we:`-prefixed
  *     repo path is REQUIRED (#883, we:docs/agent/conventions.md) and quoting an identifier is ordinary
@@ -61,6 +65,8 @@
  *   • A secret SPLIT across two writes, or one added by a write path that calls neither `writeBacklogMd`
  *     nor the `Edit`/`Write` tools — the `check:standards` corpus sweep is the later backstop for that, and
  *     a sweep is a catch, not a same-turn deny.
+ *   • PII other than email/IPv4/IPv6 — phone numbers (E.164 or otherwise) and street addresses are NOT
+ *     covered. Catch-item 4 above is narrower than the word "PII" alone would suggest.
  */
 
 // ── entropy / character-class helpers ─────────────────────────────────────────────────────────────
@@ -227,8 +233,9 @@ const TOKEN_VOWEL_MAX = 0.20;
  * secret rather than an identifier. The publish-seam twin of `isHighEntropyToken`, tightened on three axes
  * that measurement showed were pure noise on committed prose:
  *   • `-` is EXCLUDED from the charset — hyphens spell hyphenated prose (`UTF-16-code-unit`) and UUIDs,
- *     both of which cards legitimately carry. Cost: base64url tokens containing `-` are missed here (the
- *     blob rule still sees them).
+ *     both of which cards legitimately carry. Cost: any 20–39 char opaque secret containing a hyphen or a
+ *     dot (e.g. a UUIDv4 used as an API key) is invisible to BOTH rules — the blob rule's own ≥40-char floor
+ *     means anything shorter than that never reaches it either, so there is no fallback catch here.
  *   • PURE HEX is exempt — a 40-char hex git SHA and a hex session token are indistinguishable by shape,
  *     and SHA citations are recurring, correct backlog content.
  *   • minimum length 20 (not 16) and a vowel-ratio ceiling on BOTH branches — `Tier2VlmJudgeModel` and

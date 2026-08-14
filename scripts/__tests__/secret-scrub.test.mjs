@@ -47,6 +47,13 @@ describe('scrubPublish — rejects a credential in every family it claims', () =
   reject('a labeled api_key', 'api_key=Synthetic0Value1Here2');
   reject('an unlabeled high-entropy opaque token', 'the value was Xk7Qz9Rw4Tn2Bv6Hy8Jm3Fd5Gs1Lp0Cw');
   reject('a long random base64 blob', 'blob n5FQ8vZ2xK7dW1jT6bR3yG9pC0mS4hL8uA5eN2qX7zV1oB6iD3kY9fJ4wP0tM8rH=');
+  // #3015 review F2 — the PII arm had zero reject fixtures (the "PASSES ordinary prose" block only pins the
+  // EXEMPTIONS, e.g. git@github.com, which stay green even if email/IPv4/IPv6 detection is deleted
+  // entirely). Each fixture below is isolated on purpose — it trips exactly ONE PII rule and nothing else —
+  // so deleting that rule's body (or dropping the PII_PATTERNS[2] IPv6 check) reddens exactly this test.
+  reject('a personal-mailbox email in ordinary prose', 'reach out to jordan.smith@example.com if the run fails');
+  reject('a public IPv4 address in ordinary prose', 'the staging bridge was reachable at 203.0.113.42 all afternoon');
+  reject('an IPv6 address in ordinary prose', 'the fallback route pointed at 2001:0db8:85a3:0000:0000:8a2e:0370:7334');
 
   it('is TOTAL — a non-string is a reason, never a throw', () => {
     for (const v of [undefined, null, 42, {}, []]) expect(scrubPublish(v)).toEqual(['not a string']);
@@ -134,5 +141,45 @@ describe('the entropy calibration is part of the contract (measured against the 
     // ...and the append seam still catches it (its "≥20 hex chars" rule), which is why the two seams are
     // separate functions rather than one with a flag.
     expect(scrubReasons('0722238c375844a363ea7c611eb82b381a64998b').join(' ')).toMatch(/hex/i);
+  });
+
+  // #3015 review F1 (CRITICAL) — the two fixtures above pin far-side boundaries (4.55 well under 4.8; the
+  // pronounceable identifiers well over 0.20), not the CONSTANTS themselves. A threshold could be loosened
+  // by a full point (BLOB_ENTROPY_MIN 4.8 → 5.5, TOKEN_VOWEL_MAX 0.20 → 0.05) and every existing test above
+  // would stay green. These two fixtures sit INSIDE the real margin, in the direction that catches a
+  // loosened threshold, so a future author can't turn the gate off by two digits without reddening here.
+  it('a blob just inside the calibrated margin is still caught — pins the constant, not a distant fixture', () => {
+    // Entropy 4.853055907333274 bits/char (computed with this file's own shannonEntropy — verified, not
+    // guessed), inside the requested ~4.83-4.88 window and just above BLOB_ENTROPY_MIN (4.8). Chosen so it
+    // does NOT independently trip the opaque-token rule (see the assertion below) — otherwise raising
+    // BLOB_ENTROPY_MIN alone (e.g. to 5.5) wouldn't redden this test, because the token rule would still
+    // catch the same string and mask the miss.
+    const nearThreshold = 'EaWUkzyI2EDhCuWmaPKCB9RrTZsSadbq2vnjpjpn';
+    expect(shannonEntropy(nearThreshold)).toBeGreaterThan(4.83);
+    expect(shannonEntropy(nearThreshold)).toBeLessThan(4.88);
+    expect(isOpaquePublishToken(nearThreshold)).toBe(false); // isolates the blob rule as the sole catcher
+    expect(scrubPublish(`the value looked like ${nearThreshold} in the log`))
+      .toEqual(['long opaque blob (≥40 chars, secret-level entropy)']);
+  });
+  it('a low-but-nonzero-vowel opaque token is still caught — pins the ceiling, not just the ratio-0 shape', () => {
+    // 2 vowels over 11 alphabetic chars (the other 11 chars are digits) = 0.1818 vowel ratio — inside the
+    // margin under TOKEN_VOWEL_MAX (0.20), unlike every OTHER positive fixture in this file, which sits at
+    // vowel ratio exactly 0 and pins nothing about the actual ceiling.
+    const lowVowel = 'XG6o6V1Tq753257UJY5cq1';
+    expect(isOpaquePublishToken(lowVowel)).toBe(true);
+    expect(scrubPublish(`the value looked like ${lowVowel} in the log`))
+      .toEqual(['opaque token (unpronounceable ≥20-char key/secret)']);
+  });
+});
+
+describe('the `/` in publishSegments\' split regex is load-bearing (#3015 review F5)', () => {
+  it('an opaque token embedded in a URL path is detected', () => {
+    // `value.split(/[\s/]+/)` — the `/` splits a URL path into segments, so a secret glued onto the end of
+    // a route (`https://api.example.com/v1/<token>`, no surrounding whitespace) still isolates to its own
+    // segment. Without the `/` in the split, this whole string is one token, which fails
+    // isOpaquePublishToken's `^[A-Za-z0-9+=_]+$` charset check (the `:`, `.`, `/` disqualify it) and the
+    // secret goes undetected — exactly the mutation this test pins against.
+    const url = 'https://api.example.com/v1/Xk7Qz9Rw4Tn2Bv6Hy8Jm3Fd5Gs1Lp0Cw';
+    expect(scrubPublish(url)).toEqual(['opaque token (unpronounceable ≥20-char key/secret)']);
   });
 });

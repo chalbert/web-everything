@@ -110,6 +110,24 @@ describe('gate 2 — `backlog-guard.mjs --pre` (the Edit/Write path into a card)
     const r = run('backlog-guard.mjs', ['--pre'], { input: preEvent(body(CLEAN)) });
     expect(r.status, r.stderr).toBe(0);
   });
+
+  // #3015 review F7 — `backlog-guard.mjs --pre` runs the secret scrub BEFORE the hand-numbering
+  // (id-hygiene) deny, on the stated rationale that "reporting the id-hygiene nit first would hide it"
+  // (a leaked credential is the more severe of the two). Both rules can fire on the SAME write — a
+  // hand-numbered NEW file whose body also carries a secret — and `deny()` exits on the first hit, so only
+  // the ordering decides which message the author actually sees. Pin it directly rather than leaving the
+  // rationale comment unverified.
+  it('when BOTH rules would fire on the same write, the secret-scrub denial wins — not the id-hygiene one', () => {
+    const numberedCard = 'backlog/9999-adversarial-ordering-probe.md'; // hand-numbered NNN-, not yet on disk
+    const ev = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(clone, numberedCard), content: body(`The value was ${MARKER}.`) },
+    });
+    const r = run('backlog-guard.mjs', ['--pre'], { input: ev });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/api-key-shaped token/); // the secret-scrub reason
+    expect(r.stderr).not.toMatch(/hand-numbered/); // NOT the id-hygiene reason — scrub ran first and exited
+  });
 });
 
 // ── 3. the memory Edit/Write hook — memory files have NO CLI writer, so this is their only gate ───────
@@ -141,7 +159,10 @@ describe('gate 3 — `check-memory.mjs --pre` (the only write-time gate the memo
 // `check-standards.mjs` cannot run against a throwaway clone (it walks `src/`, `site/`, `node_modules/`), so
 // a subprocess run here would prove nothing about the sweep and everything about the fixture. Instead the
 // pure rule is exercised directly, and a separate assertion pins that `check-standards.mjs` still CALLS it —
-// the two ways this backstop can break (rule stops detecting; rule stops being wired) each have a test.
+// two OF THE WAYS this backstop can break (rule stops detecting; rule stops being wired) each have a test.
+// A third way — the walk's glob silently matching zero files (e.g. `.endsWith('.md')` becoming
+// `.endsWith('.mdx')`) — would still look "wired" from the call-site regex alone, so the wiring test below
+// also asserts the walk actually finds files, not just that the call site's text is present.
 describe('gate 4 — the `check:standards` corpus sweep (the bypass backstop)', () => {
   it('FLAGS a card that reached disk carrying the synthetic marker (a hook-bypassing write)', async () => {
     const { scanPublishSecrets } = await import('../check-standards-rules.mjs');
@@ -167,6 +188,17 @@ describe('gate 4 — the `check:standards` corpus sweep (the bypass backstop)', 
     const src = readFileSync(join(ROOT, 'scripts', 'check-standards.mjs'), 'utf8');
     expect(src).toMatch(/scanPublishSecrets\(docs\)/);
     expect(src).toMatch(/for \(const label of \['backlog', 'agent-memory-src'\]\)/);
+    // The call-site regex above proves the TEXT is there, not that the walk it names actually finds any
+    // file — a glob that silently matches zero files (e.g. `.endsWith('.md')` → `.endsWith('.mdx')`) would
+    // still pass both checks above while scanning nothing. Replicate the same walk this call site runs
+    // (same directories, same `.md` filter) against the real repo tree and assert it is non-empty.
+    const docs = [];
+    for (const label of ['backlog', 'agent-memory-src']) {
+      const dir = join(ROOT, label);
+      if (!existsSync(dir)) continue;
+      for (const f of readdirSync(dir).filter((n) => n.endsWith('.md'))) docs.push(`${label}/${f}`);
+    }
+    expect(docs.length).toBeGreaterThan(0);
   });
 });
 
