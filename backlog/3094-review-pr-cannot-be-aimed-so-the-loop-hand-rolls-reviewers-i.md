@@ -16,7 +16,7 @@ scope:
 # `review-pr` cannot be aimed, so the loop hand-rolls reviewers instead of using it
 
 We have a declared review operation and the delivery loop does not use it. Over one session driving
-[#3090], [#3091], [#3037] and [#x6cdlmu] to merge, **every** review was a hand-written mandate passed to a
+[#3090], [#3091], [#3037] and [#3098] to merge, **every** review was a hand-written mandate passed to a
 headless process, and none went through the declared operation. That is a smell about the operation, not
 only about the driver: the loop routed around its own machinery because the machinery could not express the
 thing that made those reviews work.
@@ -32,7 +32,7 @@ It is under-powered for this loop in four specific ways.
 (`we:scripts/operations/review-pr.mjs:389`). Nothing can pass *"this author's recurring defect is a statistic
 computed over one population and applied to another's decision — hunt that first."*
 `we:docs/agent/delivery-loop.md` calls that the single highest-yield line in a mandate, and this session is
-the evidence: the [#3037] per-item dispatch lockout, [#x6cdlmu]'s false all-clear on a third of the board,
+the evidence: the [#3037] per-item dispatch lockout, [#3098]'s false all-clear on a third of the board,
 and [#3090]'s four rounds of population defects were each found by a reviewer told what shape to look for.
 
 **2. One juror, one lens.** `lens` takes a single value from `PANEL_LENSES`. [#3050] shipped the fan-out as
