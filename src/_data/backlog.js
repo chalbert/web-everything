@@ -72,7 +72,7 @@ const normalizeScope = (v) => {
 // Tier A already excludes decisions, non-open, blocked, project-pending and human-gated items; `kind !==
 // 'epic'` drops umbrellas (sliced into children, never built directly, and out of the build queue).
 const deriveUnshapedNoScope = (item) =>
-  item.tier === 'A' && item.kind !== 'epic' && !normalizeScope(item.scope);
+  item.tier === 'A' && item.kind !== 'epic' && item.kind !== 'feature' && !normalizeScope(item.scope);
 
 // Infer an item's repo-LOCUS when no explicit `locus:` is authored. Two PRECISE signals only — locus is
 // "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
@@ -182,6 +182,10 @@ function deriveProjectReadiness(items, projectStatus, builtSurfaceProjects = new
 // section rather than looking mysteriously absent. See docs/agent/backlog-workflow.md → Human gate.
 function deriveTier(item) {
   if (item.status !== 'open') return undefined;
+  // `feature` (#2691/#2998) is the grouping tier ABOVE epic — unlike an epic (which CAN be an unstoried,
+  // sized bucket and so IS buildable-as-a-whole), a feature never carries `size` and is never buildable
+  // work, so it carries no tier at all (not A, not B/C) — epic-parity stops here on purpose.
+  if (item.kind === 'feature') return undefined;
   const blockersClear = item.blockers.every((b) => b.status === 'resolved');
   if (item.kind !== 'decision' && blockersClear && !item.projectPending && !item.humanGate) return 'A';
   if (item.kind === 'decision' && blockersClear) return 'B';
@@ -473,7 +477,7 @@ module.exports = function backlog() {
     // By construction a Tier-C issue/idea always has open blockers, projectPending, or a humanGate, and a
     // Tier-C decision always has open blockers — so this chain yields a non-null reason for every not-ready item.
     item.notBatchableReason = (() => {
-      if (item.status !== 'open' || item.batchable || item.kind === 'epic') return null;
+      if (item.status !== 'open' || item.batchable || item.kind === 'epic' || item.kind === 'feature') return null;
       if (item.stopTheWorld) return 'stop-the-world';
       if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
       if (item.openBlockers.length) return 'blocked';   // any blocked item — build OR a Tier-C decision
@@ -521,7 +525,7 @@ module.exports = function backlog() {
     // demotion). Only an epic with an OPEN `blockedBy` stays non-sliceable: its decomposition may turn on
     // the blocker's outcome, so it shows "blocked by #NNN" until that clears. `batchable` (task/story) and
     // `sliceable` (epic) remain disjoint by kind, so the two pools never double-count.
-    item.sliceable = item.status === 'open' && item.kind === 'epic'
+    item.sliceable = item.status === 'open' && (item.kind === 'epic' || item.kind === 'feature')
       && item.blockers.every((b) => b.status === 'resolved');
 
     // Splittable (deterministic) — an open `story` too big to chain (`size` > 8, i.e. the 13 band) is the
@@ -867,7 +871,7 @@ module.exports = function backlog() {
     // An active epic is being SLICED — UNLESS it's an `ongoing` program (a perpetual umbrella like the
     // flagship exercise apps), which is legitimately always-active and is NOT a slice operation. Calling
     // those "slicing" overclaims, so they get their own Programs lane.
-    else if (it.kind === 'epic') (it.ongoing ? lanes.programs : lanes.slicing).push(lite);
+    else if (it.kind === 'epic' || it.kind === 'feature') (it.ongoing ? lanes.programs : lanes.slicing).push(lite);
     else lanes.building.push(lite);                       // story / task / anything else active
   }
   const byNumAsc = (a, b) => Number(a.num) - Number(b.num);
