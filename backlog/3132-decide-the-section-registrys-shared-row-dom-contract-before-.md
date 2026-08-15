@@ -5,6 +5,7 @@ parent: "2705"
 status: open
 dateOpened: "2026-08-15"
 preparedDate: "2026-08-15"
+relatedTo: ["3136"]
 tags: []
 ---
 
@@ -16,7 +17,8 @@ Preparing #2727 (S3, velocity panels) to build-ready found that the ratified v3 
 
 This item's `bornAs: x3hbiy3` **is** the item — `x3hbiy3` was its pre-JIT-numbering birth id, not a separate sibling. `grep -rl x3hbiy3 backlog/` finds only this file's own frontmatter.
 
-The other id named in the prep brief, `xyjz84p`, does **not** belong to this decision. `git log --all -S xyjz84p` finds it only in commit `b544c65f "prepare #2723 to build-ready: fleet bottleneck banner"` — the birth id of **#2723 (S8, fleet bottleneck banner)**, an unrelated card in the same epic (#2705) with no overlap with the section-registry DOM contract. **No duplicate/sibling decision card exists for this concern; nothing to merge.**
+**Correction (this addendum, independent review 2026-08-15): the original claim below about `xyjz84p` was wrong.**
+`git log --all -S xyjz84p` finds it in commit `b544c65f "prepare #2723 to build-ready: fleet bottleneck banner"` — but `xyjz84p` is not that commit's own card; it is the birth id of a SEPARATE card the same commit filed as a side finding while preparing #2723: `we:backlog/xyjz84p-ft-screen-slot-mechanism.md`, later JIT-numbered to **`we:backlog/3136-ft-screen-slot-mechanism.md`** (`status: open`, unruled). #3136 is not a duplicate of this decision — its scope is wider, naming a cross-slice slot/registration ambiguity across *three* producer files (#2721↔#2723, #2725↔#2729, #2726↔#2731/#2728) — but it is not unrelated either: its own Recommendation section explicitly names this card's exact design space, "**revisit option 2 [a generic `import.meta.glob`-based slot-registry module] specifically for #2725's section registry**," as still open. **That sub-question is NOT this decision's Fork 2 — an earlier draft of this correction conflated the two.** Fork 2 below decides a narrower, different question: DOM-container ownership between registrants that already call #2725's existing, explicit `registerSection()` — a registry-owned `group` key (its option 1) vs. a static shell-owned shared reference with no new API (its option 2). Fork 2 never evaluates auto-discovery at all; both of its options assume #2725's explicit `registerSection()` calls stay exactly as they are today. The "generic `import.meta.glob`-based slot-registry module" language belongs to **#3136's own option 2** (removing the need for those explicit calls entirely), not to anything #3132's Fork 2 considered. **So this decision does NOT supersede #3136 on the #2725-section-registry sub-question**: #3136's recommendation to revisit a generic auto-discovery slot-registry module for #2725 remains fully open and undecided by this item, alongside #3136's broader still-unresolved scope (#2721↔#2723's own mechanism choice, and #2726's marker-slot pair). Cross-reference added to #3136 pointing back here so a reader of either card sees the actual boundary: this item settles DOM-container ownership for the shared `.velocity` row; #3136 separately, and still, owns whether #2725's registration mechanism itself should become generic/auto-discovered. **No fully-duplicate sibling decision card exists; nothing to merge — #3136 is a broader, still-open item that this decision does not narrow.**
 
 ## Found while preparing #2727 to build-ready
 
@@ -86,11 +88,16 @@ export interface SectionDef {
 
 const SECTIONS = new Map<SectionId, SectionDef>();
 const GROUP_ROWS = new Map<string, HTMLElement>();
+const WRAPPERS = new Map<SectionId, HTMLElement>(); // per-registrant wrapper, memoized — closes the clobber
+  // hole for real: without this cache, every render() call would create+append a FRESH wrapper, producing a
+  // duplicate <div> per re-render instead of reusing one (caught in independent review, 2026-08-15).
 
 /** Resolve the container to pass to `def.render()`. Registry-owned — neither registrant creates or reaches
- *  into a co-tenant's container; each gets only the wrapper node IT owns. */
+ *  into a co-tenant's container; each gets only the wrapper node IT owns, and the SAME node on every call. */
 function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
   if (!def.group) return overview.querySelector(`[data-section="${def.id}"]`)!; // unchanged per-id shape
+  const cached = WRAPPERS.get(def.id);
+  if (cached) return cached; // idempotent: re-render calls reuse the same wrapper, never append a duplicate
   let row = GROUP_ROWS.get(def.group);
   if (!row) {
     row = document.createElement('div');
@@ -101,6 +108,7 @@ function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
   const wrapper = document.createElement('div');
   wrapper.dataset.section = def.id;
   row.appendChild(wrapper); // DOM order = registration order = the baseline's own append order
+  WRAPPERS.set(def.id, wrapper);
   return wrapper;
 }
 
@@ -109,7 +117,7 @@ function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
 // S5/S7 (#2726/#2729): registerSection({ id: 'rollup'|'dag', render })  — no `group`, own container, unchanged.
 ```
 
-**Skeptic: REFUTED (original static-shared-reference default flipped to the registry-owned `group` key).** The static option (2) has a genuine correctness hole: if two registrants secretly share one raw container and either does a naive "clear the whole container, then rebuild" on its own re-render (a reasonable reading of #2725's own "idempotent — safe to call repeatedly" contract), it wipes its co-tenant's nodes on every independent selection/tab-visibility change. Option (1) closes this **by construction** — each registrant is only ever handed its own owned wrapper, never a node a sibling also writes to. Option (2) is also not actually the smaller surface once compared honestly: the velocity+burnup grouping becomes undocumented knowledge living only inside the shell's implementation, invisible to anyone reading S3's or S4's own `registerSection` call; option (1)'s `group: 'velocity'` field is self-documenting at the exact call site a future reader would look. On YAGNI: checked for a second row-sharing case elsewhere in the epic's 24 children — S6a/#2731 and S6b/#2728 register into rollup's own marker slot, but that's mutually-exclusive per-kind dispatch (exactly one renders), not simultaneous co-tenancy, so "exactly one shared-row case today" holds; but a slot/group abstraction already recurring at smaller scale (rollup's own dispatch) undercuts dismissing option (1)'s `group` field as speculative machinery for a hypothetical that doesn't exist — the underlying need (more than one registrant landing in one container) already shows up twice in this epic, just implemented ad hoc each time today.
+**Skeptic: REFUTED (original static-shared-reference default flipped to the registry-owned `group` key).** The static option (2) has a genuine correctness hole: if two registrants secretly share one raw container and either does a naive "clear the whole container, then rebuild" on its own re-render (a reasonable reading of #2725's own "idempotent — safe to call repeatedly" contract), it wipes its co-tenant's nodes on every independent selection/tab-visibility change. Option (1) closes this **by construction** — each registrant is only ever handed its own owned wrapper, never a node a sibling also writes to. **Correction (independent review, 2026-08-15):** the pseudocode's earlier draft memoized the shared row (`GROUP_ROWS`) but not the per-registrant wrapper, so `containerFor` would itself have violated the very idempotency contract this fork exists to guarantee — appending a fresh duplicate `<div>` on every re-render instead of reusing one. Fixed above: `WRAPPERS` now memoizes per-`SectionId`, so `containerFor` returns the SAME wrapper node on every call for a given registrant, not just a stable row for the group. Option (2) is also not actually the smaller surface once compared honestly: the velocity+burnup grouping becomes undocumented knowledge living only inside the shell's implementation, invisible to anyone reading S3's or S4's own `registerSection` call; option (1)'s `group: 'velocity'` field is self-documenting at the exact call site a future reader would look. On YAGNI: checked for a second row-sharing case elsewhere in the epic's 24 children — S6a/#2731 and S6b/#2728 register into rollup's own marker slot, but that's mutually-exclusive per-kind dispatch (exactly one renders), not simultaneous co-tenancy, so "exactly one shared-row case today" holds; but a slot/group abstraction already recurring at smaller scale (rollup's own dispatch) undercuts dismissing option (1)'s `group` field as speculative machinery for a hypothetical that doesn't exist — the underlying need (more than one registrant landing in one container) already shows up twice in this epic, just implemented ad hoc each time today.
 
 **Screen: flagged(prioritization) → re-argued on merit, resolved.** The original default's rationale ("no new API surface... deferred until a second real need appears") was cost-based — prioritization dressed as a fork verdict, not a merit claim, exactly the pattern the two-confusion screen exists to catch. Re-derived on merit instead (per the Skeptic verdict above): option (1) is chosen because it closes an idempotency-clobber correctness hole *structurally* and is more self-documenting at the registration call site — not because it is less work. On the screen's layering question: this whole decision is plateau-app product-layer (confirmed under Prior art above — no WE standard/intent is being minted, nothing gets a `codifiedIn` claim), so "the shared contract" fork 2 rules on is the `registerSection`/`SectionDef` surface every S3/S4/S5/S7 registrant already codes against per #2725 — the correct altitude for this call, not an impl concern smuggled onto a standard-layer decision.
 

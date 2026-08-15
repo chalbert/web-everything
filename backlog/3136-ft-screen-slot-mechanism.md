@@ -3,7 +3,7 @@ bornAs: xyjz84p
 kind: decision
 status: open
 dateOpened: "2026-08-15"
-relatedTo: ["2705", "2721", "2723", "2725", "2726", "2727", "2728", "2729", "2731", "2732"]
+relatedTo: ["2705", "2721", "2723", "2725", "2726", "2727", "2728", "2729", "2731", "2732", "3132"]
 tags: []
 ---
 
@@ -89,3 +89,18 @@ file across separately-landing PRs is a real repeated-small-conflict-surface cos
 machinery isn't yet worth it. Whichever way each producer's own preparation rules, name it explicitly there
 and cite this item, so #2723's two-consumer default isn't assumed to generalize silently to the four-and-more
 cases.
+
+**Cross-reference (added 2026-08-15, independent review; corrected 2026-08-15 — an earlier draft of this
+paragraph mischaracterized what #3132 ruled).** `we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md`
+(prepared the same day, independently, then cross-linked back here) decided a narrower, different question for
+#2725's registry than this item's option 2: DOM-container ownership between registrants that already call
+#2725's existing, explicit `registerSection()` — its Fork 2 rules a registry-owned `group` key (its option 1)
+over a static shell-owned shared reference with no new API (its option 2), so co-tenant registrants (velocity,
+burnup) share one DOM row without clobbering each other's nodes — and #2725's own `## Decided design`/`##
+Interfaces` were amended to match. Fork 2 never evaluated auto-discovery; both of its options keep #2725's
+explicit `registerSection()` calls as the registration mechanism. **This item's own option 2 — replacing those
+explicit calls with a generic `import.meta.glob`-based slot-registry module — is a genuinely different,
+still-open question that #3132 did NOT settle.** So **this item is NOT superseded by #3132** for #2725 or for
+anything else: it stays fully open and authoritative for its whole scope, including the #2725
+registration-mechanism question, alongside #2721↔#2723's own mechanism choice and #2726's marker-slot pair
+(#2731/#2728).
