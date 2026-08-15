@@ -26,6 +26,8 @@ import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
+import { reviewPrepOperation, REVIEW_PREP_OP } from './review-prep.mjs';
+import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
@@ -47,6 +49,12 @@ export const OPERATIONS = Object.freeze({
   [REVIEW_PR_OP]: () => ({
     declaration: reviewPrOperation({ readPr: createReviewPrReader() }),
     sinks: createReviewPrSinks(),
+  }),
+  // backlog/xzdi27a-* — the sibling of `review-pr` for a BACKLOG CARD instead of a PR diff (no `gh`, no diff,
+  // no confirm suspend: a prep review's verdict is a note + a commit, applied in one CLI call end to end).
+  [REVIEW_PREP_OP]: () => ({
+    declaration: reviewPrepOperation({ readPrep: createReviewPrepReader() }),
+    sinks: createReviewPrepSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
