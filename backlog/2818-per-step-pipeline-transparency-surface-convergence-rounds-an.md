@@ -11,7 +11,7 @@ scope:
   - we:scripts/__tests__/review-detail.test.mjs
   - we:scripts/lib/pipeline-trace.mjs
   - we:scripts/lib/__tests__/pipeline-trace.test.mjs
-relatedTo: ["2486", "2642", "2641", "2567", "x55v5xy"]
+relatedTo: ["2486", "2642", "2641", "2567", "3113"]
 ---
 
 # Per-step pipeline transparency — surface convergence rounds and each stage trace
@@ -43,7 +43,7 @@ Verified against `main` (`c1a4d770`), not from the card's own claims:
   step 7, lines 166–192) runs entirely in-session — render, screenshot, Read, iterate — and writes **nothing to
   disk**. There is no ledger, no log, no PR field to fold. Fabricating a step for it would violate the "sourced
   from existing ledgers, not a parallel store" acceptance line this card itself states. Filed as its own
-  prerequisite: **[#x55v5xy]** "Persist a structured build-lane self-review record (Layer 1) so it can be
+  prerequisite: **[#3113]** "Persist a structured build-lane self-review record (Layer 1) so it can be
   traced" — an open decision (where it persists), not yet designed here. Until it lands, the per-item timeline
   this card builds renders a `status: 'not-yet-traced'` placeholder row for that stage rather than inventing
   data.
@@ -165,7 +165,7 @@ node scripts/lib/pipeline-trace.mjs assemble --pr=<n> \
 - [ ] `npm run check:standards` is 0 errors on the WE-side change; no `plateau-app` file is touched or claimed
       done by this card.
 - [ ] The card names #2486 and #2642 as the surfaces the review step composes with (done, above) and cross-
-      references [#x55v5xy] as the prerequisite for the self-review stage (done, above) — a future claimant
+      references [#3113] as the prerequisite for the self-review stage (done, above) — a future claimant
       does not have to re-derive either finding.
 
 ## Delivery shape
@@ -196,5 +196,5 @@ needed.
 From a board cell / PR, an operator can open the **convergence rounds** of its review (via #2486/#2642, not
 rebuilt here) and a **per-item pipeline timeline** — review, drain-escalation + care-level, and land, each
 sourced from an existing ledger via `we:scripts/lib/pipeline-trace.mjs`, with a placeholder row for
-build-self-review until [#x55v5xy] lands. Both themes; `plateau-app npm test` (for its own render, once filed)
+build-self-review until [#3113] lands. Both themes; `plateau-app npm test` (for its own render, once filed)
 + `we: check:standards` pass.

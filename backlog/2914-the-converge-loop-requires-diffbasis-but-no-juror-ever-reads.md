@@ -124,11 +124,11 @@ subcommand and their test files — so widening their signatures with a new opti
 is additive and cannot affect `/converge` or any other caller that never passes it.
 
 Explicitly NOT in scope: we:scripts/lib/converge-core.mjs (the newer subject-agnostic engine under the
-`#xyihiji` migration). Its `read` observation shape is a bare `{ ok, empty, material: string }`
+`#2970` migration). Its `read` observation shape is a bare `{ ok, empty, material: string }`
 (we:scripts/lib/converge-core.mjs:210-213) with no diff-provenance concept at all — it also serves the
 working-tree `/converge` loop, which has no "net vs three-dot `gh pr diff`" distinction to carry (there is no
 PR to `gh pr diff` against). Forcing a PR-specific field into a subject-agnostic core is a design question for
-whoever eventually does the #xyihiji migration, not this item's to answer.
+whoever eventually does the #2970 migration, not this item's to answer.
 
 ## Interfaces
 

@@ -161,7 +161,7 @@ we:scripts/lib/review-escalation.mjs:986-995) no longer needs to reach the posit
 fingerprint at all; the plain SHA-identity tier at the top of `acceptanceCoversHead`
 (we:scripts/lib/review-escalation.mjs:1278-1282) short-circuits it on the very next pass. It does **not** close
 #3021's title claim: a producer who relocates code themselves, outside `rebaseDropManifest`/`rebaseDropContent`,
-still reaches the SAME unmodified `normalizeContributionFingerprint`/`acceptanceCoversHead` x9xqexm tier this
+still reaches the SAME unmodified `normalizeContributionFingerprint`/`acceptanceCoversHead` 3023 tier this
 story does not touch, and the pinned residual test stays exactly as wide as it is today (see Verification,
 below). This narrows the residual's real-world exposure window; it does not close the digest-level collision.
 That is consistent with — not a reinterpretation of — this direction's own description above ("narrows rather
@@ -294,7 +294,7 @@ infrastructure this file does not otherwise use. An independent reviewer should 
   `we:scripts/lib/review-escalation.mjs` and unit-tested in
   `we:scripts/lib/__tests__/review-escalation.test.mjs` per Tasks item 2, above.
 - The pinned test `'THE KNOWN RESIDUAL, pinned at its WIDENED width: any offset-only relocation collides
-  (#x413mbt)'` (we:scripts/lib/__tests__/review-escalation.test.mjs:1198) is UNCHANGED and still passes — this
+  (#3021)'` (we:scripts/lib/__tests__/review-escalation.test.mjs:1198) is UNCHANGED and still passes — this
   story does not touch `normalizeContributionFingerprint`, so the residual's logical width is unchanged; only
   its real-world exposure (how often the drain's own operation reaches it) narrows.
 - `we:scripts/merge-ai-prs.mjs`'s escalation pass calls `shouldReattributeRebase` immediately after computing
