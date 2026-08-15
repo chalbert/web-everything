@@ -25,7 +25,7 @@
  * Each queued item resolves to exactly ONE outcome:
  *
  *   • openBlockers > 0                              → held "blocked"           (an unready item can't launch).
- *   • kind:epic                                     → held "needs-slice"       (a container — /slice it, never build; see below).
+ *   • kind:epic / kind:feature (grouping kinds)      → held "needs-slice"       (a container — /slice it, never build; see below).
  *   • kind:decision                                 → held "needs-decision"    (not a build — prepare/present it; see below).
  *   • no usable scope (absent / non-array / [])     → held "unshaped-no-scope" (NEVER launched to build — see below).
  *   • scope intersects an ACTIVE lease's scope      → held "overlaps lane-<n>" (a running lane owns those paths).
@@ -58,6 +58,7 @@
  */
 
 import { scopesOverlap, normScope } from './scope-lease.mjs';
+import { isGroupingKind } from '../check-standards-rules.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -168,13 +169,18 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
       held.push({ num, reason: 'blocked' });
       continue;
     }
-    // 2. A cleared `kind:epic` — HOLD `needs-slice`, ALWAYS (#2645). An epic is a CONTAINER; its work lives in
-    //    child stories/tasks, so it is NEVER directly buildable. Checked BEFORE the scope gate so an (almost always
-    //    scope-less) epic is not mislabeled `unshaped-no-scope` and auto-prepared — that would aim a build agent at
-    //    a container. A cleared epic is a slice TRIGGER: the /conveyor skill sees this hold and surfaces it for
-    //    `/slice` (decompose into buildable child stories, which dispatch on later ticks), rather than silently
-    //    stalling it. A BLOCKED epic is still `blocked` (checked first): it can't be sliced until its blockers clear.
-    if (item.kind === 'epic') {
+    // 2. A cleared GROUPING kind (`epic`, or `feature` — #2998 epic-parity) — HOLD `needs-slice`, ALWAYS
+    //    (#2645). A grouping kind is a CONTAINER; its work lives in children (an epic's stories/tasks, a
+    //    feature's epics), so it is NEVER directly buildable. Checked BEFORE the scope gate so an (almost
+    //    always scope-less) container is not mislabeled `unshaped-no-scope` and auto-prepared — that would
+    //    aim a build agent at a container, the exact hazard this branch exists to prevent. A cleared
+    //    grouping item is a slice TRIGGER: the /conveyor skill sees this hold and surfaces it for `/slice`
+    //    (decompose into buildable children, which dispatch on later ticks), rather than silently stalling
+    //    it. A BLOCKED grouping item is still `blocked` (checked first): it can't be sliced until its
+    //    blockers clear. `isGroupingKind` (scripts/check-standards-rules.mjs) is the single source of truth
+    //    for the grouping-kind set, shared with conveyor-state.mjs, so a future grouping kind needs one
+    //    update, not several scattered `kind === 'epic'` checks.
+    if (isGroupingKind(item.kind)) {
       held.push({ num, reason: 'needs-slice' });
       continue;
     }

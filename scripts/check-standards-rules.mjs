@@ -41,13 +41,24 @@ export const MATURITY_TRIGGER_RE = /^(externalConsumers>=\d+|realRuns>=\d+|adopt
 // correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
 // orthogonal field; fix-vs-feature, if ever wanted, is an optional `tags: [fix]` (never a field).
-export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision']);
+// `feature` (#2691, ratified 2026-08-08) is the grouping tier ABOVE epic — a root, flat, non-buildable
+// grouping node (epic-parity: never Tier-A, never sized as buildable work). See
+// docs/agent/backlog-workflow.md#feature-tier for the full ruling; #2998 is the plumbing tax it names.
+export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision', 'feature']);
 // The repo's single "build kind" rule: every kind except `decision` ships work (story/task build leaves,
 // epic is the umbrella). This is the canonical form of proposer.mjs's `isBuildable` and the backlog-health
 // audit's G2/G3 exec gate — keeping it here, beside the kind set, means a future kind rename surfaces it.
 // Defined as `!== 'decision'` (not a positive list) on purpose: a NEW build kind is auto-covered, and the
 // only silent-death vector is `decision` itself being renamed — pinned by the kinds test (#1473).
 export const isExecKind = (kind) => kind !== 'decision';
+// GROUPING kinds (#2998) — the container kinds that are never directly buildable: they hold no `scope:`,
+// never carry burndown `size` as buildable work, and are never dispatched to build — their work lives in
+// their children (an epic's stories/tasks, a feature's epics), so the readiness/dispatch layer must HOLD
+// them (needs-slice) rather than let them reach the build path, exactly like `deriveSliceable` in
+// src/_data/backlog.js treats them as one pool. `feature` (#2691) is epic-parity BY DESIGN — the grouping
+// tier ABOVE epic — so a future grouping kind only needs adding here once, not at every scattered
+// `kind === 'epic'` call site (scripts/readiness/dispatch-plan.mjs, scripts/readiness/conveyor-state.mjs).
+export const isGroupingKind = (kind) => kind === 'epic' || kind === 'feature';
 // G3 subject scope (#1498) — the backlog-health "ungoverned-arch" gate fires only when a build graduated
 // to a new named STANDARD ENTITY (a governable architectural noun), not a routine file-path / locus-prefixed
 // graduation (`we:`/`fui:`/`plateau:scripts/...`) or a `demo:`. The principle: a governance gate's subject is
@@ -254,6 +265,31 @@ export function validateBacklogItem(item, ctx) {
   if (item.parent !== undefined && !knownNums.has(String(item.parent)))
     err(`Backlog item "${item.id}" parent "#${item.parent}" does not resolve to an existing item`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'parent', String(item.parent), 'backlog/'));
+
+  // ── Feature-tier invariants (#2691, docs/agent/backlog-workflow.md#feature-tier; plumbing #2998) ──
+  // `feature` is the grouping tier ABOVE epic: a ROOT (carries no `parent` at all — the hole-free form of
+  // "the feature tier is structurally the top"; a `{story,epic,task}` parent-kind blacklist leaks via
+  // `feature → decision → epic` and drifts as kinds are added) and FLAT (no `kind: feature` ancestor —
+  // feature → feature nesting is a non-breaking future extension, not built yet). Promoting an existing
+  // epic to a feature is therefore a RE-PARENT (drop the `parent` edge), never a bare kind-flip.
+  if (item.kind === 'feature') {
+    if (item.parent !== undefined)
+      err(`Backlog item "${item.id}" is \`kind: feature\` but carries a \`parent\` ("#${item.parent}") — a feature is a ROOT: the tier above epic carries no \`parent\` at all. Promoting an epic to a feature is a re-parent (drop the \`parent\` edge), not a bare kind-flip.`);
+    // The ancestor walk needs the cross-item num→kind / num→parent maps (absent from a bare per-item ctx,
+    // e.g. a minimal synthetic fixture exercising only the ROOT half above) — cycle-guarded via `seen`.
+    if (ctx.kindByNum && ctx.parentByNum) {
+      const seen = new Set([String(item.num)]);
+      let cur = item.parent !== undefined ? String(item.parent) : undefined;
+      while (cur !== undefined && !seen.has(cur)) {
+        if (ctx.kindByNum.get(cur) === 'feature') {
+          err(`Backlog item "${item.id}" is \`kind: feature\` with a \`kind: feature\` ancestor (#${cur}) — features are FLAT (no feature → feature nesting; a non-breaking future extension, not built now).`);
+          break;
+        }
+        seen.add(cur);
+        cur = ctx.parentByNum.get(cur);
+      }
+    }
+  }
   // Resolution date is what the burndown plots — required once resolved.
   if (item.status === 'resolved' && !item.dateResolved)
     err(`Backlog item "${item.id}" is resolved but has no dateResolved — the burndown needs the resolution date`);
