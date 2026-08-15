@@ -3,7 +3,7 @@ kind: epic
 parent: "1391"
 status: open
 locus: plateau-app
-blockedBy: ["1753", "xwj9o7m"]
+blockedBy: ["1753", "3120"]
 childlessReason: blocked
 dateOpened: "2026-06-24"
 tags: []
@@ -28,7 +28,7 @@ cannot be honestly satisfied today, on **both** sides of this card's one integra
    *plan*, not code on disk. Writing this card's wiring against that plan would be citing an interface
    from another unbuilt card, not one "actually opened" — exactly the grounding rule's warning, doubled.
 2. **The data source doesn't exist either**, independent of #1753 landing — filed as
-   [#xwj9o7m](/backlog/xwj9o7m-dev-browser-shell-has-no-runtime-readable-capabilitymanifest/) (new,
+   [#3120](/backlog/3120-dev-browser-shell-has-no-runtime-readable-capabilitymanifest/) (new,
    2026-08-15). This card's own premise ("read the per-feature capability manifest from the loaded app")
    has nothing to read: zero implementations anywhere in the constellation export a `CapabilityManifest`
    (`we:capability-manifest/check.ts`'s `IMPLEMENTATION_MANIFESTS` is still empty), and even if one did,
