@@ -71,7 +71,7 @@ import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
-  countSourceLines, CITATION_GATES_ENFORCED,
+  makeMemoizedLineCounter, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
@@ -1136,31 +1136,23 @@ try {
   const anchorOwners = buildAnchorOwners(backlog);
   const emit = CITATION_GATES_ENFORCED ? err : warn;
   const relExists = (p) => existsSync(join(ROOT, p));
-  const relLineCount = (p) => { try { return countSourceLines(readFileSync(join(ROOT, p), 'utf8')); } catch { return null; } };
+  // Memoized by repo-relative path (#2863) — `findDanglingLoci` calls this once per CITING locus, and a
+  // popular file (platform-decisions.md, merge-ai-prs.mjs) is cited from many loci across the corpus. Without
+  // the cache that re-reads and re-splits the same file once per citation (measured: 145x / 40x, 113.7 MB of
+  // redundant I/O in one gate pass); with it, each distinct file is read at most once for the whole pass.
+  const relLineCount = makeMemoizedLineCounter((p) => readFileSync(join(ROOT, p), 'utf8'));
   // #3100 — gate 3b's resolution inputs, derived from the ALREADY-LOADED `backlog` array (no extra fs
   // pass): a hash-named item still on disk is PENDING (in-flight, self-heals at its own land); a landed
   // item's `bornAs` frontmatter names the hash it was born under (already landed — a citation still
   // carrying that hash is stale, not merely mid-flight).
   const pendingHashes = new Set(backlog.filter((b) => isHash(b.num)).map((b) => b.num));
   const bornAsHashes = new Set(backlog.filter((b) => isHash(b.bornAs)).map((b) => b.bornAs));
-  // Scan the same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog +
-  // docs/agent + agent-memory-src + reports + the two src/ research dirs (the latter render on the public
-  // /research/ page).
-  const scanFiles = [];
-  const pushDir = (dir, exts) => {
-    const abs = join(ROOT, dir);
-    if (!existsSync(abs)) return;
-    for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
-      scanFiles.push({ rel: `${dir}${f}`, content: readFileSync(join(abs, f), 'utf8') });
-  };
-  pushDir('backlog/', ['.md']);
-  pushDir('docs/agent/', ['.md']);
-  pushDir('agent-memory-src/', ['.md']);
-  pushDir('reports/', ['.md']);
-  pushDir('src/_data/researchTopics/', ['.json']);
-  pushDir('src/_includes/research-descriptions/', ['.njk']);
 
-  for (const { rel, content } of scanFiles) {
+  // Scan one file at a time — read, run the four detectors, discard — rather than materializing the whole
+  // scanned corpus into an array first (#2863). Every detector below is per-file and stateless, so nothing
+  // ever needs two files' content at once; the prior shape held ~3848 files' text (≈54 MB resident, 73 MB
+  // peak) for the whole pass for no benefit.
+  const scanFile = (rel, content) => {
     for (const f of findAnchorRulingMismatches(content, anchorOwners)) {
       const ownerList = f.owners.map((n) => `#${n}`).join(', ');
       emit(`${rel}: anchor \`#${f.anchor}\` is attributed to #${f.citedNum}, but that anchor's ruling ` +
@@ -1196,7 +1188,21 @@ try {
           { kind: 'citation-memory-hash-dangling', file: rel });
       }
     }
-  }
+  };
+  // Same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog + docs/agent +
+  // agent-memory-src + reports + the two src/ research dirs (the latter render on the public /research/ page).
+  const scanDir = (dir, exts) => {
+    const abs = join(ROOT, dir);
+    if (!existsSync(abs)) return;
+    for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
+      scanFile(`${dir}${f}`, readFileSync(join(abs, f), 'utf8'));
+  };
+  scanDir('backlog/', ['.md']);
+  scanDir('docs/agent/', ['.md']);
+  scanDir('agent-memory-src/', ['.md']);
+  scanDir('reports/', ['.md']);
+  scanDir('src/_data/researchTopics/', ['.json']);
+  scanDir('src/_includes/research-descriptions/', ['.njk']);
 }
 
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
