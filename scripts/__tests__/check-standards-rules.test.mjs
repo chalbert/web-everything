@@ -1847,6 +1847,59 @@ describe('validateDeclaredModuleContract', () => {
     expect(validateDeclaredModuleContract([mod('`deriveVerdict`, `VERDICTS`, `NEVER_IMPORTED`.', 'deriveVerdict, VERDICTS')]).errors).toEqual([]);
   });
 
+  it('FAILS on an undeclared import under the LAST declaration even with trailing prose after it (#2976)', () => {
+    // The header's last declaration only names `growOnlyRoster`. Trailing prose AFTER it mentions
+    // `normalizeFindings` in backticks merely to describe a past bug — that mention must not be folded
+    // into the declared set just because it sits after the final `from we:` line. Before the #2976 fix,
+    // the last declaration's slice ran to header.length, so this prose was (wrongly) counted as declared
+    // and the drift below went unreported.
+    const res = validateDeclaredModuleContract([{
+      file: 'scripts/lib/x.mjs',
+      content: '/**\n'
+        + ' *   from we:scripts/lib/jury-core.mjs — `a`.\n'
+        + ' *   from we:scripts/lib/review-core.mjs — `growOnlyRoster`.\n'
+        + ' *\n'
+        + ' * Trailing prose after the last declaration mentions `normalizeFindings` while describing a past\n'
+        + ' * bug — this mention is not a declaration.\n'
+        + ' */\n'
+        + "import { a } from './jury-core.mjs';\n"
+        + "import { growOnlyRoster, normalizeFindings } from './review-core.mjs';\n",
+    }]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/normalizeFindings/);
+    expect(res.errors[0].descriptor).toMatchObject({
+      kind: 'declared-contract-drift',
+      target: 'scripts/lib/review-core.mjs',
+      undeclared: ['normalizeFindings'],
+    });
+  });
+
+  it('FAILS on an undeclared import under the LAST declaration with NO blank-line separator before trailing prose (#2976 review r2)', () => {
+    // Same false negative as the test above, but WITHOUT a blank `*` line between the last declaration
+    // and the trailing prose — prose starts on the very next comment line. Before the r2 fix, the last
+    // declaration's boundary search only stopped at a blank comment line; with none present it fell
+    // back to header.length again, so `normalizeFindings` in the prose below was (wrongly) folded into
+    // the declared set and this exact drift went unreported a second time.
+    const res = validateDeclaredModuleContract([{
+      file: 'scripts/lib/x.mjs',
+      content: '/**\n'
+        + ' *   from we:scripts/lib/jury-core.mjs — `a`.\n'
+        + ' *   from we:scripts/lib/review-core.mjs — `growOnlyRoster`.\n'
+        + ' * Trailing prose immediately follows the last declaration (no blank line) and mentions\n'
+        + ' * `normalizeFindings` while describing a past bug — this mention is not a declaration.\n'
+        + ' */\n'
+        + "import { a } from './jury-core.mjs';\n"
+        + "import { growOnlyRoster, normalizeFindings } from './review-core.mjs';\n",
+    }]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/normalizeFindings/);
+    expect(res.errors[0].descriptor).toMatchObject({
+      kind: 'declared-contract-drift',
+      target: 'scripts/lib/review-core.mjs',
+      undeclared: ['normalizeFindings'],
+    });
+  });
+
   it('attributes each undeclared name to the RIGHT declared block', () => {
     const res = validateDeclaredModuleContract([{
       file: 'scripts/lib/x.mjs',
