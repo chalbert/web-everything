@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { deriveTier } = require('../backlog.js') as {
+const { deriveTier, deriveSliceable, deriveNotBatchableReason } = require('../backlog.js') as {
   deriveTier: (item: {
     status: string;
     kind: string;
@@ -17,6 +17,21 @@ const { deriveTier } = require('../backlog.js') as {
     projectPending?: boolean;
     humanGate?: { kind: string; what: string };
   }) => 'A' | 'B' | 'C' | undefined;
+  deriveSliceable: (item: {
+    status: string;
+    kind: string;
+    blockers: { status: string }[];
+  }) => boolean;
+  deriveNotBatchableReason: (item: {
+    status: string;
+    kind: string;
+    batchable?: boolean;
+    stopTheWorld?: boolean;
+    humanGate?: { kind: string; what: string };
+    openBlockers?: string[];
+    projectPending?: boolean;
+    size?: number;
+  }) => string | null;
 };
 
 /** Build a loader-shaped item; `blockedBy` is the lightweight `[{ status }]` array the loader attaches. */
@@ -79,6 +94,61 @@ describe('deriveTier — agent-readiness rubric', () => {
         expect(deriveTier(item({ status, kind: 'decision' }))).toBeUndefined();
         expect(deriveTier(item({ status, kind: 'story' }))).toBeUndefined();
       }
+    });
+  });
+
+  // `feature` (#2691/#2998) is the grouping tier ABOVE epic — epic-parity by design. These cases mirror
+  // the decision/story ones above, but for the guard at backlog.js:186 (`if (item.kind === 'feature')
+  // return undefined;`). MUTATION PROBE: temporarily deleting that guard makes an open, unblocked
+  // feature fall into the `item.kind !== 'decision' && blockersClear …` branch and return Tier 'A' — the
+  // first `it` below reddens on that mutation.
+  describe('Tier — feature is epic-parity: NEVER Tier-A/buildable (#2998)', () => {
+    it('an open feature with no blockers carries NO tier at all — not A, not B, not C', () => {
+      expect(deriveTier(item({ kind: 'feature' }))).toBeUndefined();
+    });
+
+    it('an open feature with every blocker resolved still carries no tier', () => {
+      expect(deriveTier(item({ kind: 'feature', blockers: [{ status: 'resolved' }] }))).toBeUndefined();
+    });
+
+    it('an open feature with an unresolved blocker still carries no tier — not demoted to C either', () => {
+      expect(deriveTier(item({ kind: 'feature', blockers: [{ status: 'open' }] }))).toBeUndefined();
+    });
+
+    it('a non-open feature carries no tier, same as any other kind', () => {
+      for (const status of ['active', 'resolved', 'parked']) {
+        expect(deriveTier(item({ status, kind: 'feature' }))).toBeUndefined();
+      }
+    });
+  });
+
+  describe('sliceable — feature gets epic-like decomposition readiness (#2998)', () => {
+    it('an open feature with every blocker resolved is sliceable, exactly like an epic', () => {
+      expect(deriveSliceable(item({ kind: 'feature' }))).toBe(true);
+      expect(deriveSliceable(item({ kind: 'epic' }))).toBe(true);
+    });
+
+    it('an open feature with an unresolved blocker is NOT sliceable — decomposition may turn on it', () => {
+      expect(deriveSliceable(item({ kind: 'feature', blockers: [{ status: 'open' }] }))).toBe(false);
+    });
+
+    it('a non-open feature is not sliceable', () => {
+      expect(deriveSliceable(item({ status: 'active', kind: 'feature' }))).toBe(false);
+    });
+
+    it('a feature is disjoint from non-grouping kinds — a story/decision is never sliceable', () => {
+      expect(deriveSliceable(item({ kind: 'story' }))).toBe(false);
+      expect(deriveSliceable(item({ kind: 'decision' }))).toBe(false);
+    });
+  });
+
+  describe('notBatchableReason — feature is excluded up front, like an epic (#2998)', () => {
+    it('an open feature never carries a batch-pool reason — it has its own slice pill instead', () => {
+      expect(deriveNotBatchableReason(item({ kind: 'feature' }))).toBeNull();
+      // Even shaped like it would otherwise read 'blocked' — the epic/feature short-circuit wins first.
+      expect(deriveNotBatchableReason(item({
+        kind: 'feature', openBlockers: ['1'], batchable: false,
+      }))).toBeNull();
     });
   });
 });
