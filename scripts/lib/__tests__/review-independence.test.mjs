@@ -9,9 +9,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  ACTOR_ENV, currentActorId, AUTHOR_ACTOR_MARKER, CLEARER_ACTOR_MARKER,
-  buildAuthorActorMarker, buildClearerActorMarker, parseAuthorActorId, parseClearerActorId,
-  readAuthorActorStamps, decideClearerIndependence, INDEPENDENCE,
+  ACTOR_ENV, currentActorId, AUTHOR_ACTOR_MARKER, CLEARER_ACTOR_MARKER, STAMP_LOST_MARKER,
+  buildAuthorActorMarker, buildClearerActorMarker, buildStampLostMarker, hasStampLostMarker,
+  parseAuthorActorId, parseClearerActorId, readAuthorActorStamps, decideClearerIndependence, INDEPENDENCE,
+  STAMP_REGIME_START, STAMP_STATUS, distinguishMissingAuthorStamp,
 } from '../review-independence.mjs';
 
 describe('currentActorId — the harness session identity, never an argv field', () => {
@@ -107,6 +108,55 @@ describe('the actor markers — a writer and a reader that agree (round-trip, no
     expect(parseClearerActorId([{ body: buildAuthorActorMarker('sess-a') }])).toBe('');
     expect(parseAuthorActorId(buildClearerActorMarker('sess-a'))).toBe('');
   });
+
+  // #3067 — the stamp-lost marker: presence-only, same shape as the other two markers, and DISTINCT from both.
+  it('the stamp-lost marker round-trips and is presence-only, not an id', () => {
+    const body = `PR body\n\n${buildStampLostMarker()}\n`;
+    expect(hasStampLostMarker(body)).toBe(true);
+    expect(hasStampLostMarker('no marker here')).toBe(false);
+    expect(hasStampLostMarker('')).toBe(false);
+    expect(hasStampLostMarker(undefined)).toBe(false);
+  });
+
+  it('the stamp-lost marker is a THIRD distinct name — never read as an author or clearer stamp', () => {
+    expect(STAMP_LOST_MARKER).not.toBe(AUTHOR_ACTOR_MARKER);
+    expect(STAMP_LOST_MARKER).not.toBe(CLEARER_ACTOR_MARKER);
+    expect(parseAuthorActorId(buildStampLostMarker())).toBe('');
+    expect(readAuthorActorStamps(buildStampLostMarker())).toEqual([]);
+    expect(parseClearerActorId([{ body: buildStampLostMarker() }])).toBe('');
+  });
+});
+
+describe('distinguishMissingAuthorStamp — #3067 detect + distinguish, a checkable date comparison', () => {
+  const BEFORE = '2026-08-01T00:00:00-04:00'; // predates STAMP_REGIME_START
+  const AFTER = '2026-08-10T00:00:00-04:00';  // postdates it
+
+  it('a PR predating the stamp regime is NEVER_STAMPED — old, tolerate', () => {
+    expect(distinguishMissingAuthorStamp({ prCreatedAt: BEFORE })).toBe(STAMP_STATUS.NEVER_STAMPED);
+  });
+
+  it('a PR postdating the stamp regime, with no stamp, is STRIPPED — do not tolerate', () => {
+    expect(distinguishMissingAuthorStamp({ prCreatedAt: AFTER })).toBe(STAMP_STATUS.STRIPPED);
+  });
+
+  it('exactly at the regime start counts as covered (>=), not excluded', () => {
+    expect(distinguishMissingAuthorStamp({ prCreatedAt: STAMP_REGIME_START })).toBe(STAMP_STATUS.STRIPPED);
+  });
+
+  it('an authorId present means nothing to distinguish, regardless of the date', () => {
+    expect(distinguishMissingAuthorStamp({ authorId: 'sess-a', prCreatedAt: AFTER })).toBe('');
+  });
+
+  it('a missing/unparseable date fails toward the OLD, tolerant behaviour, never invents a refusal', () => {
+    for (const prCreatedAt of [undefined, null, '', 'not-a-date', 42]) {
+      expect(distinguishMissingAuthorStamp({ prCreatedAt })).toBe(STAMP_STATUS.NEVER_STAMPED);
+    }
+  });
+
+  it('a custom regimeStart is honoured (injectable, so the constant is not hard-baked into every caller)', () => {
+    expect(distinguishMissingAuthorStamp({ prCreatedAt: BEFORE, regimeStart: '2026-07-01T00:00:00-04:00' }))
+      .toBe(STAMP_STATUS.STRIPPED);
+  });
 });
 
 describe('decideClearerIndependence — total over the four statuses, fail-closed on both unknowns', () => {
@@ -154,7 +204,7 @@ describe('decideClearerIndependence — total over the four statuses, fail-close
     }
   });
 
-  it('no author stamp → UNKNOWN_AUTHOR, and independence is NOT assumed', () => {
+  it('no author stamp, no date/marker info → UNKNOWN_AUTHOR (unchanged — #2844\'s own tolerance)', () => {
     for (const authorId of ['', '   ', undefined, null, 7]) {
       const d = decideClearerIndependence({ authorId, clearerId: 'sess-b' });
       expect(d.independent).toBe(false);
@@ -167,6 +217,44 @@ describe('decideClearerIndependence — total over the four statuses, fail-close
     expect(decideClearerIndependence({}).independent).toBe(false);
   });
 
+  // #3067 — the two OPT-IN routes to STAMP_LOST, and the proof neither one fires without the caller asking.
+  describe('#3067 — STAMP_LOST: a missing stamp that was written and lost, refused rather than tolerated', () => {
+    it('no author stamp + a prCreatedAt AT/AFTER the stamp regime → STAMP_LOST, refused', () => {
+      const d = decideClearerIndependence({ clearerId: 'sess-b', prCreatedAt: '2026-08-10T00:00:00-04:00' });
+      expect(d.independent).toBe(false);
+      expect(d.status).toBe(INDEPENDENCE.STAMP_LOST);
+      expect(d.reason).toMatch(/STAMP LOST/);
+      expect(d.reason).toMatch(/--repair/);
+    });
+
+    it('no author stamp + a prCreatedAt BEFORE the regime → still UNKNOWN_AUTHOR, still tolerated', () => {
+      const d = decideClearerIndependence({ clearerId: 'sess-b', prCreatedAt: '2026-08-01T00:00:00-04:00' });
+      expect(d.status).toBe(INDEPENDENCE.UNKNOWN_AUTHOR);
+    });
+
+    it('no author stamp + stampLostMarked:true → STAMP_LOST, refused, regardless of date', () => {
+      const d = decideClearerIndependence({ clearerId: 'sess-b', stampLostMarked: true });
+      expect(d.independent).toBe(false);
+      expect(d.status).toBe(INDEPENDENCE.STAMP_LOST);
+      expect(d.reason).toMatch(/STAMP LOST/);
+      expect(d.reason).toContain(STAMP_LOST_MARKER);
+    });
+
+    it('an author stamp PRESENT is decided as before — the new inputs never override a real stamp', () => {
+      const d = decideClearerIndependence({
+        authorId: 'sess-a', clearerId: 'sess-b', prCreatedAt: '2026-08-10T00:00:00-04:00', stampLostMarked: true,
+      });
+      expect(d.status).toBe(INDEPENDENCE.INDEPENDENT);
+    });
+
+    it('a caller that supplies neither new input sees BYTE-IDENTICAL behaviour to before #3067', () => {
+      const before = decideClearerIndependence({ authorId: '', clearerId: 'sess-b' });
+      const after = decideClearerIndependence({ authorId: '', clearerId: 'sess-b', prCreatedAt: undefined, stampLostMarked: undefined });
+      expect(after).toEqual(before);
+      expect(after.status).toBe(INDEPENDENCE.UNKNOWN_AUTHOR);
+    });
+  });
+
   it('every status carries a non-empty human reason (the record has to be readable, not just machine-true)', () => {
     const cases = [
       { authorId: 'a', clearerId: 'b' }, { authorId: 'a', clearerId: 'a' },
@@ -175,15 +263,16 @@ describe('decideClearerIndependence — total over the four statuses, fail-close
     for (const c of cases) expect(decideClearerIndependence(c).reason.length).toBeGreaterThan(20);
   });
 
-  it('INDEPENDENCE is frozen and exactly the four statuses the deciders branch on', () => {
+  it('INDEPENDENCE is frozen and exactly the five statuses the deciders branch on (#3067 added STAMP_LOST)', () => {
     expect(Object.isFrozen(INDEPENDENCE)).toBe(true);
-    expect(new Set(Object.values(INDEPENDENCE)).size).toBe(4);
+    expect(new Set(Object.values(INDEPENDENCE)).size).toBe(5);
     // `independent` must be true for EXACTLY ONE status — the property every consumer relies on.
     const produced = [
       decideClearerIndependence({ authorId: 'a', clearerId: 'b' }),
       decideClearerIndependence({ authorId: 'a', clearerId: 'a' }),
       decideClearerIndependence({ authorId: '', clearerId: 'b' }),
       decideClearerIndependence({ authorId: 'a', clearerId: '' }),
+      decideClearerIndependence({ authorId: '', clearerId: 'b', stampLostMarked: true }),
     ];
     expect(produced.filter((d) => d.independent)).toHaveLength(1);
     expect(new Set(produced.map((d) => d.status))).toEqual(new Set(Object.values(INDEPENDENCE)));
