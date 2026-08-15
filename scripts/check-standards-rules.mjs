@@ -2265,7 +2265,20 @@ export function validateDeclaredModuleContract(modules = []) {
     if (!decls.length) continue;
     for (let i = 0; i < decls.length; i += 1) {
       const target = decls[i][1];                                   // e.g. scripts/lib/jury-core.mjs
-      const body = header.slice(decls[i].index, i + 1 < decls.length ? decls[i + 1].index : header.length);
+      // Bound each declaration's own text. A middle declaration runs to the next one's start; the LAST
+      // declaration must NOT run to header.length — that folded every backticked name in the header's
+      // trailing prose (e.g. a paragraph explaining the rule itself) into the "declared" set, silently
+      // accepting an undeclared import under the last declaration (#2976). Stop it at the next blank
+      // comment line (` *` with no content) within the header instead, the same boundary a maintainer
+      // reading the block would see as "this declaration is over."
+      let end = header.length;
+      if (i + 1 < decls.length) {
+        end = decls[i + 1].index;
+      } else {
+        const blank = /\n[ \t]*\*[ \t]*\n/.exec(header.slice(decls[i].index));
+        if (blank) end = decls[i].index + blank.index + 1;
+      }
+      const body = header.slice(decls[i].index, end);
       const declared = new Set([...body.matchAll(/`([A-Za-z0-9_$]+)`/g)].map((m) => m[1]));
       // The matching real import. Modules import each other by relative specifier, so match on basename.
       const base = target.split('/').pop();

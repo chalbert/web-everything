@@ -1847,6 +1847,33 @@ describe('validateDeclaredModuleContract', () => {
     expect(validateDeclaredModuleContract([mod('`deriveVerdict`, `VERDICTS`, `NEVER_IMPORTED`.', 'deriveVerdict, VERDICTS')]).errors).toEqual([]);
   });
 
+  it('FAILS on an undeclared import under the LAST declaration even with trailing prose after it (#2976)', () => {
+    // The header's last declaration only names `growOnlyRoster`. Trailing prose AFTER it mentions
+    // `normalizeFindings` in backticks merely to describe a past bug — that mention must not be folded
+    // into the declared set just because it sits after the final `from we:` line. Before the #2976 fix,
+    // the last declaration's slice ran to header.length, so this prose was (wrongly) counted as declared
+    // and the drift below went unreported.
+    const res = validateDeclaredModuleContract([{
+      file: 'scripts/lib/x.mjs',
+      content: '/**\n'
+        + ' *   from we:scripts/lib/jury-core.mjs — `a`.\n'
+        + ' *   from we:scripts/lib/review-core.mjs — `growOnlyRoster`.\n'
+        + ' *\n'
+        + ' * Trailing prose after the last declaration mentions `normalizeFindings` while describing a past\n'
+        + ' * bug — this mention is not a declaration.\n'
+        + ' */\n'
+        + "import { a } from './jury-core.mjs';\n"
+        + "import { growOnlyRoster, normalizeFindings } from './review-core.mjs';\n",
+    }]);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].message).toMatch(/normalizeFindings/);
+    expect(res.errors[0].descriptor).toMatchObject({
+      kind: 'declared-contract-drift',
+      target: 'scripts/lib/review-core.mjs',
+      undeclared: ['normalizeFindings'],
+    });
+  });
+
   it('attributes each undeclared name to the RIGHT declared block', () => {
     const res = validateDeclaredModuleContract([{
       file: 'scripts/lib/x.mjs',
