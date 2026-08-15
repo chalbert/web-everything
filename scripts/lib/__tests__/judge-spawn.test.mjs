@@ -336,6 +336,12 @@ describe('parseJudgeOutcome — a validated object, or a throw carrying the SPAW
     expect(() => parseJudgeOutcome(JSON.stringify(bare))).toThrow('Not logged in · Please run /login');
   });
 
+  it('when `result` is empty, throws the raw parsed object and stderr instead of a useless placeholder (#xn85i4a)', () => {
+    const emptyResult = { is_error: true, result: '', stop_reason: 'end_turn', session_id: 'zzzz' };
+    expect(() => parseJudgeOutcome(JSON.stringify(emptyResult), 'exit code 1'))
+      .toThrow(/no result text[\s\S]*end_turn[\s\S]*zzzz[\s\S]*exit code 1/);
+  });
+
   it('throws when the enforced shape did not land, naming the stop reason it saw instead', () => {
     const noShape = { is_error: false, stop_reason: 'end_turn', result: 'here are my thoughts' };
     expect(() => parseJudgeOutcome(JSON.stringify(noShape))).toThrow(/structured_output/);
