@@ -2918,3 +2918,23 @@ export function findUnfencedMandateParams(modules = []) {
   }
   return { errors, warnings };
 }
+
+// ── scope defaults to FILE-LEVEL — dir-level scope finding (#2739/#2751) ──────────────────────
+// Extracted from the inline §6d-sexies WARN in check-standards.mjs so the rule has ONE shipped definition:
+// the gate imports and calls this, and the test file imports the SAME function instead of hand-mirroring it
+// (a hand-mirrored copy can drift from the rule it claims to pin — #2751). Pure: reads only the fields named.
+const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
+
+/**
+ * @param {{scope?: unknown, status?: string, scopeRationale?: string}} item - RAW (pre-loader) frontmatter.
+ * @returns {string[]} the repo-qualified, "/"-terminated scope entries to flag; [] when item.scope isn't an
+ *   array, item.status === 'resolved', or a non-empty (trimmed) item.scopeRationale justifies the span.
+ */
+export function dirLevelScopeFinding(item) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope)) return [];
+  if (item?.status === 'resolved') return [];
+  const rationale = typeof item?.scopeRationale === 'string' ? item.scopeRationale.trim() : '';
+  if (rationale) return [];
+  return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
+}
