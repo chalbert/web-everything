@@ -278,7 +278,7 @@ export function disposeDecisionRuling({ ledger = [], config, signals = {}, manda
 // shadow→enforce seam, and it deliberately mirrors that shape rather than inventing a new one. It does NOT build a
 // second disposer or auto-ratify engine; it DEFINES *when* the existing `decideDecisionDisposition` above is allowed
 // to flip `apply:false → apply:true`, gated on a concrete, tracked confidence metric read off a shadow-vs-human
-// agreement ledger. The flip is mechanical once the gate is green; a single divergence resets it and holds shadow.
+// agreement ledger. The flip is mechanical once the gate is green; a single divergence resets it and stays in shadow.
 // ====================================================================================================================
 
 /**
