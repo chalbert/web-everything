@@ -62,6 +62,19 @@
  * PURE except `currentActorId`, which reads one env var (and takes an injectable `env` so it is testable).
  * Deliberately a LEAF module: it imports nothing from the seams, so `review-set-label.mjs` can use it
  * without the import cycle a home inside `auto-land-seam.mjs` would create.
+ *
+ * #3067 — REPAIR THE STAMP INSTEAD OF FORBIDDING EVERY ROUTE THAT STRIPS IT. `#3066`'s deny-list over
+ * `gh`'s argument grammar can only ever enumerate spellings, and the web UI has no shell command for it to
+ * deny at all. A missing `authored-by-actor` stamp used to mean one thing — `unknown-author`, tolerated —
+ * whether the PR predates the stamp regime or had one stripped an hour ago. `distinguishMissingAuthorStamp`
+ * makes that a checkable date comparison instead of an assumption, and `decideClearerIndependence` now
+ * accepts the result (or a `we:scripts/pr-body-edit.mjs --repair` run's own `stampLostMarked` finding) and
+ * answers a NEW status, `STAMP_LOST`, that a stripped-but-once-stamped PR gets instead of `UNKNOWN_AUTHOR` —
+ * refused, not tolerated. Both new inputs (`prCreatedAt`, `stampLostMarked`) are OPT-IN: a caller that does
+ * not yet pass either sees byte-identical behaviour to before this item, which is why wiring them into
+ * `review-set-label.mjs` / `auto-land-seam.mjs` (so a live clear actually consults them) is left as this
+ * item's own owed follow-up rather than folded in here silently — the same discipline the TRUST_CHAIN
+ * paragraph above already applies to itself.
  */
 
 /** The env var carrying the harness session identity — #2367's `ownerSession` signal, single-named here. */
@@ -82,6 +95,14 @@ export function currentActorId(env = process.env) {
 export const AUTHOR_ACTOR_MARKER = 'authored-by-actor';
 /** The marker naming WHO cleared the verdict — stamped into the durable verdict COMMENT by review-set-label. */
 export const CLEARER_ACTOR_MARKER = 'cleared-by-actor';
+/**
+ * The marker recording that a PR's `authored-by-actor` stamp was found MISSING, checked against its edit
+ * history (`we:scripts/pr-body-edit.mjs --repair`), and could not be recovered — #3067's "mark the PR as
+ * stamp-lost" half. Stamped into the PR BODY, alongside where the author marker would have lived, so any
+ * reader of the body (the same read every caller already performs for `AUTHOR_ACTOR_MARKER`) can see the
+ * refusal reason without a second round-trip.
+ */
+export const STAMP_LOST_MARKER = 'author-stamp-lost';
 
 // An actor id is opaque, so the marker accepts any non-whitespace/non-`>` run — but bounded, so a runaway
 // body can never make the scan quadratic, and `-->` can never be swallowed into the captured id.
@@ -99,6 +120,12 @@ function buildActorMarker(marker, id) {
 export function buildAuthorActorMarker(id) { return buildActorMarker(AUTHOR_ACTOR_MARKER, id); }
 /** The verdict-comment stamp naming the clearer's session. Pure. */
 export function buildClearerActorMarker(id) { return buildActorMarker(CLEARER_ACTOR_MARKER, id); }
+/** The PR-body stamp recording an unrecoverable stripped author stamp. Pure. `note` defaults to a fixed token
+ *  — there is no id to record, only the fact that one was looked for (in the PR's edit history) and not found. */
+export function buildStampLostMarker(note = 'unrecoverable') { return buildActorMarker(STAMP_LOST_MARKER, note); }
+/** Does this PR body already carry the stamp-lost marker? Pure. Presence-only, mirroring `readAuthorActorStamps`
+ *  vs `parseAuthorActorId`: `pr-body-edit.mjs --repair` must not re-mark (and re-comment) a PR every re-run. */
+export function hasStampLostMarker(body) { return actorMarkerRe(STAMP_LOST_MARKER, '').test(String(body || '')); }
 
 /**
  * Every DISTINCT author-actor id a PR body carries, in the order first seen. Pure. Exported because the
@@ -165,15 +192,54 @@ export function parseClearerActorId(comments) {
 }
 
 /**
- * The four independence STATUSES. Frozen so every caller names them once instead of matching on a string.
- * Only `INDEPENDENT` means "the clearer is provably not the author"; the other three all mean the bar was
- * NOT met, and differ only in WHY — which is what lets the autonomous seam refuse all three while the
- * invoked CLI refuses the proven self-clear and reports the two unprovens in the durable record.
+ * The instant the `authored-by-actor` stamp regime began — the #2844 commit that introduced this file
+ * (`057a98cb`, 2026-08-08T09:17:52-04:00, the moment `pr-land.mjs` started writing the stamp at PR-open). A
+ * PR opened AT OR AFTER this instant that now carries no stamp did not merely predate the regime — one was
+ * written and is now gone. A PR opened BEFORE it legitimately has none; nothing ever wrote it one. This is
+ * the fact `distinguishMissingAuthorStamp` compares a PR's `createdAt` against (#3067).
+ */
+export const STAMP_REGIME_START = '2026-08-08T09:17:52-04:00';
+
+/** The two ways a PR can carry no author stamp — frozen so a caller names them instead of a string. */
+export const STAMP_STATUS = Object.freeze({
+  NEVER_STAMPED: 'never-stamped', // opened before the regime — a stamp was never expected; tolerate (#2844's own choice)
+  STRIPPED: 'stripped',           // opened at/after the regime, none present — one was written and lost; do NOT tolerate
+});
+
+/**
+ * #3067's DETECT + DISTINGUISH — is a missing author stamp merely OLD, or STRIPPED? A checkable date
+ * comparison, not a judgement call (the item's own framing). PURE.
+ *
+ * Deliberately conservative in the caller's favour on missing information: no `authorId` at all is not this
+ * function's business (it answers '' — there IS a stamp, nothing to distinguish); a missing/unparseable
+ * `prCreatedAt` answers `NEVER_STAMPED` rather than inventing a `STRIPPED` verdict from nothing — a caller
+ * that does not yet pass a date (every caller, until #3067's owed follow-up wires one through) sees IDENTICAL
+ * behaviour to before this function existed, never a new false refusal.
+ *
+ * @param {{authorId?:string, prCreatedAt?:string, regimeStart?:string}} o
+ * @returns {string} '' when a stamp IS present, else one of {@link STAMP_STATUS}.
+ */
+export function distinguishMissingAuthorStamp({ authorId, prCreatedAt, regimeStart = STAMP_REGIME_START } = {}) {
+  if (typeof authorId === 'string' && authorId.trim()) return ''; // a stamp exists — nothing to distinguish
+  const created = Date.parse(typeof prCreatedAt === 'string' ? prCreatedAt : '');
+  if (!Number.isFinite(created)) return STAMP_STATUS.NEVER_STAMPED;
+  const start = Date.parse(regimeStart);
+  return created >= start ? STAMP_STATUS.STRIPPED : STAMP_STATUS.NEVER_STAMPED;
+}
+
+/**
+ * The five independence STATUSES. Frozen so every caller names them once instead of matching on a string.
+ * Only `INDEPENDENT` means "the clearer is provably not the author"; the other four all mean the bar was
+ * NOT met, and differ only in WHY — which is what lets the autonomous seam refuse all four while the
+ * invoked CLI refuses the proven self-clear (and, once #3067's callers wire the two new inputs through, the
+ * proven stamp-lost) and reports the still-unproven two in the durable record.
  */
 export const INDEPENDENCE = Object.freeze({
   INDEPENDENT: 'independent',         // both ids known and DIFFERENT — the #2439 bar is met, machine-checked
   SELF_CLEAR: 'self-clear',           // both ids known and EQUAL — the author is clearing its own verdict
-  UNKNOWN_AUTHOR: 'unknown-author',   // no author stamp on the PR (opened before #2844, or outside pr-land)
+  UNKNOWN_AUTHOR: 'unknown-author',   // no author stamp, and the PR predates the stamp regime — TOLERATED (#2844)
+  STAMP_LOST: 'stamp-lost',           // no author stamp, but one was written (post-regime, or a repair run said
+                                       // so) and is now gone — #3067: refused, never tolerated as unknown-author
   UNKNOWN_CLEARER: 'unknown-clearer', // the clearing process supplied no actor id (no harness session)
 });
 
@@ -187,10 +253,20 @@ export const INDEPENDENCE = Object.freeze({
  * case could only ever make two DIFFERENT ids look equal (a false self-clear) or, with a differently-cased
  * forge, make the same id look distinct — the second is the unsafe direction, so exact match it is.
  *
- * @param {{authorId?:string, clearerId?:string}} o
+ * #3067's REPAIR-OR-REFUSE — a missing author stamp is no longer automatically `unknown-author`. Two
+ * INDEPENDENT signals can prove it was written and lost rather than never written, and either alone is
+ * enough: `prCreatedAt` (checked against {@link STAMP_REGIME_START} via {@link distinguishMissingAuthorStamp})
+ * catches it AUTOMATICALLY on any PR the regime covers; `stampLostMarked` (the caller's own read of
+ * {@link hasStampLostMarker} on the PR body) catches it for a PR a human/repair run has already investigated
+ * (`we:scripts/pr-body-edit.mjs --repair`) and could not recover — the marker outlives any one caller's date
+ * math, and covers a PR the date check cannot (e.g. its `createdAt` is unavailable to this caller). Both are
+ * OPT-IN: a caller supplying neither sees EXACTLY the old `unknown-author` behaviour (#2844's own tolerance,
+ * unchanged) — this is additive, not a silent behaviour change for every existing caller.
+ *
+ * @param {{authorId?:string, clearerId?:string, prCreatedAt?:string, stampLostMarked?:boolean}} o
  * @returns {{independent:boolean, status:string, reason:string}}
  */
-export function decideClearerIndependence({ authorId, clearerId } = {}) {
+export function decideClearerIndependence({ authorId, clearerId, prCreatedAt, stampLostMarked } = {}) {
   const author = typeof authorId === 'string' ? authorId.trim() : '';
   const clearer = typeof clearerId === 'string' ? clearerId.trim() : '';
 
@@ -203,6 +279,21 @@ export function decideClearerIndependence({ authorId, clearerId } = {}) {
     };
   }
   if (!author) {
+    const distinguished = distinguishMissingAuthorStamp({ authorId: author, prCreatedAt });
+    if (stampLostMarked || distinguished === STAMP_STATUS.STRIPPED) {
+      return {
+        independent: false,
+        status: INDEPENDENCE.STAMP_LOST,
+        reason: stampLostMarked
+          ? `STAMP LOST — this PR was investigated (\`${STAMP_LOST_MARKER}\` marker present) and no `
+            + `${AUTHOR_ACTOR_MARKER} stamp could be recovered from its edit history; a stamp existed and is `
+            + 'gone, so — unlike an old, never-stamped PR — this is NOT tolerated (#3067)'
+          : `STAMP LOST — this PR opened at ${prCreatedAt}, at/after the #2844 stamp regime began `
+            + `(${STAMP_REGIME_START}), and now carries no ${AUTHOR_ACTOR_MARKER} stamp: one was written and `
+            + `is gone, not merely never written. Run \`node scripts/pr-body-edit.mjs --pr=<n> --repair\` to `
+            + 'restore it (or mark it stamp-lost) before clearing — this is NOT tolerated as unknown-author (#3067)',
+      };
+    }
     return {
       independent: false,
       status: INDEPENDENCE.UNKNOWN_AUTHOR,
