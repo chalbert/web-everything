@@ -184,13 +184,19 @@ export interface SectionDef {
 }
 const SECTIONS = new Map<SectionId, SectionDef>();
 const GROUP_ROWS = new Map<string, HTMLElement>();
+const WRAPPERS = new Map<SectionId, HTMLElement>(); // per-registrant wrapper, memoized (#3132 correction,
+  // independent review 2026-08-15) — without this, containerFor would append a FRESH wrapper on every
+  // render() call instead of reusing one, violating the idempotency contract below.
 /** Idempotent — a section may re-register (e.g. HMR); the latest registration wins. Mirrors the
  *  `registerTabs`-style "safe to call again" shape already used across this codebase. */
 export function registerSection(def: SectionDef): void { SECTIONS.set(def.id, def); }
 /** Resolve the container to pass to `def.render()` (#3132). Registry-owned — neither registrant creates or
- *  reaches into a co-tenant's container; each gets only the wrapper node IT owns. */
+ *  reaches into a co-tenant's container; each gets only the wrapper node IT owns, and the SAME node on every
+ *  call, so repeated `render()` calls are genuinely idempotent over that node. */
 function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
   if (!def.group) return overview.querySelector(`[data-section="${def.id}"]`)!;
+  const cached = WRAPPERS.get(def.id);
+  if (cached) return cached;
   let row = GROUP_ROWS.get(def.group);
   if (!row) {
     row = document.createElement('div');
@@ -201,6 +207,7 @@ function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
   const wrapper = document.createElement('div');
   wrapper.dataset.section = def.id;
   row.appendChild(wrapper); // DOM order = registration order = the baseline's own append order
+  WRAPPERS.set(def.id, wrapper);
   return wrapper;
 }
 // S3 (#2727): registerSection({ id: 'velocity', group: 'velocity', render: renderVelocity });
@@ -287,6 +294,13 @@ export interface FeatureDetailRecord {
 export type SectionId = 'velocity' | 'burnup' | 'rollup' | 'dag';
 export interface SectionDef {
   readonly id: SectionId;
+  /** Optional shared-row co-tenancy key (#3132). Registrants sharing the same `group` render into sibling
+   *  wrapper nodes inside ONE registry-owned container (in registration order), instead of each getting its
+   *  own top-level container. Absent = the section keeps its own standalone container (rollup, dag). */
+  readonly group?: string;
+  /** Called every time the owning tab becomes visible or the selected feature changes. Must be idempotent
+   *  over the nodes THIS registrant owns — for a `group` registrant that means its own wrapper node, never
+   *  the shared row container a co-tenant also writes to (#3132's idempotency-clobber finding). */
   render(container: HTMLElement, feature: FeatureDetailRecord): void;
 }
 export function registerSection(def: SectionDef): void;
@@ -324,8 +338,12 @@ all unbuilt, all `blockedBy: ["2725", …]`) each call `registerSection({ id, re
 1. Add this card's shell module (`FeatureDetailRecord`, `SectionId`/`SectionDef`/`registerSection`,
    `RenderDetailOptions`, `renderDetail`). Import and call `registerTabs` from `@frontierui/blocks/tabs` at
    module load (mirrors `plateau-app:src/component-assembler/assembler.ts`'s own top-level call). Build the
-   fixed-order overview layout shell (velocity/burnup/rollup containers, in the v3 baseline's own order) and the
-   dag-tab container, each looked up via `SECTIONS.get(id)`.
+   fixed-order overview layout shell per the group-key design ruled by #3132 — velocity and burnup are NOT two
+   independent containers; they share one registry-owned `.velocity` row container (built lazily via
+   `containerFor`/`GROUP_ROWS` on first registration, `group: 'velocity'`), each landing in its own memoized
+   per-registrant wrapper (`WRAPPERS`) inside that row — followed by rollup's own standalone container, in the
+   v3 baseline's own order, plus the dag-tab container. Every section's render target is resolved via
+   `containerFor(def, overview)`, not a bare `SECTIONS.get(id)` lookup.
 2. Implement the sub-line exactly matching the baseline's own next-landing branching (`gated` → `"gated — no
    date"`, `shipped` → `"shipped"`, else the literal `nextLanding` string) plus points/pct/epicCount/velocity+trend.
 3. Implement the nothing-selected branch (cited) and the leaf branch (proposed design — reuse the empty-state
