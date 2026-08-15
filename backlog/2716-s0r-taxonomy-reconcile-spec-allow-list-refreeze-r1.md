@@ -32,7 +32,7 @@ All 71 `yes` cases each map to a v3 surface; the spec set = exactly 44 (S17, F13
 
 ## Resolved (2026-08-15) — code already landed via plateau-app PR #115, status was stale
 
-Found while reconciling this record: the deliverable was already built and merged weeks ago as `plateau-app:src/feature-tracker/feature-tracking.webcases.ts` (plateau-app PR #115, commit `da66083`, "WE #2716: FT taxonomy reconcile + SPEC allow-list refreeze R1 (plateau-app)"). This card's own `status: open` was a stale bookkeeping gap, not outstanding work — surfaced during `we:backlog/2693-*.md` prep, which filed `we:backlog/xv8qb99-*.md` for the fix.
+Found while reconciling this record: the deliverable was already built and merged weeks ago as `plateau-app:src/feature-tracker/feature-tracking.webcases.ts` (plateau-app PR #115, commit `da66083`, "WE #2716: FT taxonomy reconcile + SPEC allow-list refreeze R1 (plateau-app)"). This card's own `status: open` was a stale bookkeeping gap, not outstanding work — surfaced during `we:backlog/2693-*.md` prep, which filed `we:backlog/3131-*.md` for the fix.
 
 Re-verified independently against every acceptance clause at plateau-app HEAD before flipping status:
 - `SPEC_BEFORE_RENDER` freezes exactly the 44 named codes (S17, F13–15, M8/M13/M22/M23/M32/M38, E2–16, L2–13, C1–3, R1–4) — `SPEC_COUNT = 44`.

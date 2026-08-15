@@ -24,8 +24,8 @@ Graduate all 115 cases (8 families S/F/K/M/E/L/C/R) mirroring the plateau-app ca
 (plateau-app PR #115, merged 2026-07-27) is exactly S0r's acceptance — `FT_FAMILIES`, `FT_CASES` (115, derived),
 `SPEC_BEFORE_RENDER` (frozen at 44), `SPEC_COUNT`, `FT_FORECAST_RULE` (the §0 three-branch ruling), and
 `validateFtRegister()` enforcing all 5 invariants at module load. The `we:backlog/2716-*.md` tracker card
-itself is just stale (still `status: open`) — a separate tracker-hygiene gap, filed as #xcu5zqa
-(`we:backlog/xcu5zqa-resolve-2716-in-the-we-tracker-status-stale-code-already-shi.md`), not this item's
+itself is just stale (still `status: open`) — a separate tracker-hygiene gap, filed as #3133
+(`we:backlog/3133-resolve-2716-in-the-we-tracker-status-stale-code-already-shi.md`), not this item's
 concern. **A builder starting this item works directly on top of the already-shipped S0r constants — nothing
 here is actually waiting on #2716.** (Re-verify the commit is still on plateau-app's default branch at claim
 time — the substance-unblocked finding is only as current as this preparation pass.)
