@@ -871,12 +871,23 @@ export function buildVerdictComment({
   // this does not.
   //
   // WHY SHAPE, NOT NAMES. The sanitizer neutralizes the HTML-comment SYNTAX, not a list of marker names. Every
-  // marker this repo reads — `reviewed-sha`, `reviewed-diff`, `reviewed-contribution` (all three in
-  // `we:scripts/lib/review-escalation.mjs`), `cleared-human` (ditto), `cleared-by-actor` / `authored-by-actor`
-  // (`we:scripts/lib/review-independence.mjs`), `drain-{park,skip,land}-reason`
+  // MARKER this repo reads — `reviewed-sha`, `reviewed-diff`, `reviewed-contribution` (all three in
+  // `we:scripts/lib/review-escalation.mjs`), the `cleared-human` MARKER (ditto), `cleared-by-actor` /
+  // `authored-by-actor` (`we:scripts/lib/review-independence.mjs`), `drain-{park,skip,land}-reason`
   // (`we:scripts/merge-ai-prs.mjs`) — needs a literal `<!--` to open. Those parsers each hard-code their own
   // regex, so there is NO single list to derive a strip-set from; matching on the syntax is the only close that
   // covers a marker defined in a module this one does not import, or one invented after today.
+  //
+  // THE ONE PARSER THIS DOES NOT COVER, NAMED RATHER THAN LEFT IMPLICIT (#3060). `parseOperatorClearance`'s
+  // OTHER regex, `CLEARED_HUMAN_PROSE_RE` in `we:scripts/lib/review-escalation.mjs`, is not marker-shaped — it
+  // opens on the plain words "Cleared by … via `review-set-label.mjs --to=clear-human`", with no `<!--`
+  // anywhere, so escaping HTML-comment delimiters gives it no purchase at all. A `body`/`reason` field shaped
+  // like that sentence sailed straight through this boundary and parsed as a real clearance. It is closed
+  // separately, by anchoring THAT regex to the start of the rendered body under the known `clear-human`
+  // heading (a shape only this function's own preamble can produce, never a caller field, which is always
+  // appended later) — see the note on `CLEARED_HUMAN_PROSE_RE` for the reasoning. Said again so it is not
+  // missed: this render boundary is a complete answer for every `<!--`-opening marker, and an incomplete one for
+  // prose-shaped parsers, which need their own per-parser argument.
   //
   // WHY ESCAPE RATHER THAN DELETE. `&lt;!--` renders as a visible `<!--` on GitHub, so a `/review` write-up
   // that legitimately QUOTES a prior round's marker still reads correctly (#983's re-accept comment did exactly
@@ -924,20 +935,31 @@ export const DEFAULT_ACTOR = 'loop-console operator';
 
 /**
  * we:scripts/review-set-label.mjs#neutralizeCommentMarkers — make every HTML comment in a stretch of text INERT
- * to every marker parser in the constellation, while keeping it readable. PURE. The sanitizer that sits on
- * `buildVerdictComment`'s render boundary; see the long note there for why the boundary, and not the inputs, is
- * where this belongs.
+ * to every `<!--`-OPENING marker parser in the constellation, while keeping it readable. PURE. The sanitizer
+ * that sits on `buildVerdictComment`'s render boundary; see the long note there for why the boundary, and not
+ * the inputs, is where this belongs.
  *
  * WHAT IT DOES: escapes the DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;`. Nothing else is touched.
  *
- * WHY THAT IS SUFFICIENT, and how to falsify it. Every marker read anywhere in this repo is matched by a regex
- * that opens on a literal `<!--` (`REVIEWED_SHA_RE`, `REVIEWED_DIFF_RE`, `REVIEWED_CONTRIBUTION_RE`,
- * `CLEARED_HUMAN_RE` in `we:scripts/lib/review-escalation.mjs`; `actorMarkerRe` in
+ * WHY THAT IS SUFFICIENT for a marker parser, and how to falsify it. Every MARKER read anywhere in this repo is
+ * matched by a regex that opens on a literal `<!--` (`REVIEWED_SHA_RE`, `REVIEWED_DIFF_RE`,
+ * `REVIEWED_CONTRIBUTION_RE`, `CLEARED_HUMAN_RE` in `we:scripts/lib/review-escalation.mjs`; `actorMarkerRe` in
  * `we:scripts/lib/review-independence.mjs`; `drainReasonMarker` in `we:scripts/merge-ai-prs.mjs`). Remove every
  * literal `<!--` from a string and NONE of them can match it, whatever the marker is named, however the payload
  * is cased or spaced, and whether or not the marker was invented after this line was written. That is a
  * property of the marker SYNTAX, so it holds for markers this module cannot even see — which matters, because
  * those parsers each hard-code their own pattern and there is no shared registry to derive a strip-list from.
+ *
+ * WHAT IT IS NOT SUFFICIENT FOR (#3060, found FALSE against the code, not assumed true). Not every clearance
+ * READER in this repo is marker-shaped: `parseOperatorClearance`'s prose fallback, `CLEARED_HUMAN_PROSE_RE`,
+ * opens on the plain sentence "Cleared by … via `review-set-label.mjs --to=clear-human`" and contains no `<!--`
+ * at all, so this escape gives it no purchase — a caller-supplied field shaped like that sentence sailed
+ * straight through and parsed as a real clearance (`buildVerdictComment({to:'changes', body: thatSentence})`
+ * against pre-#3060 code). It is closed at its own definition instead, by anchoring the regex to the exact
+ * `clear-human` render shape rather than by widening what this function escapes — see the note beside
+ * `CLEARED_HUMAN_PROSE_RE` in `we:scripts/lib/review-escalation.mjs`. Read "every marker" above as scoped to
+ * marker-shaped parsers; it was never, and is not now, a claim about every parser this repo runs over a comment
+ * body.
  *
  * WHY IT IS NOT A DELETE. `&lt;!--` renders as a literal `<!--` in GitHub-flavoured markdown, so a quoted
  * marker still SAYS what the write-up meant it to say; the parsers read the raw body, where it is inert. The

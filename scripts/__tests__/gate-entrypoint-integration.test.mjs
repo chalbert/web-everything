@@ -60,10 +60,14 @@ if (a[0] === 'pr' && a[1] === 'view') {
   // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
   // #xmnl36p — _clearedBy adds the durable --to=clear-human attribution comment the operator ceremony writes,
   // so the entrypoint test can prove the drain READS it back and announces a re-hold that overrides it.
+  // #3060 — the heading is part of the fixture on purpose, not incidental. parseOperatorClearance's prose regex
+  // is now anchored to the exact clear-human heading-then-attribution shape buildVerdictComment renders (a
+  // caller field can never be first in the body); a fixture missing the heading would silently stop exercising
+  // the real prose-clearance path this test is FOR.
   if (fields.includes('headRefOid')) {
     const cs = [];
     if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' });
-    if (pr._clearedBy) cs.push({ body: 'Cleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
+    if (pr._clearedBy) cs.push({ body: '✅ review — \`review:human\` cleared via the sanctioned path\\n\\nCleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
     out({ headRefOid: pr._headRefOid || '', comments: cs });
   }
   if (fields.includes('comments')) out({ comments: [] });
