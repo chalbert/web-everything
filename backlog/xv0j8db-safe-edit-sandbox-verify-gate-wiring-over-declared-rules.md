@@ -80,6 +80,50 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > (now a fixed, immutable source for the engine's snapshot bookkeeping only) from what `verify` actually
 > inspects (the buffer's real mutable content) — see the corrected bullets.
 
+> **Review fix (2026-08-15, PR #1355, round 2):** the `runVerifyGate`'s `ok`/`findings` bullet below
+> originally had `verify` overwrite a single mutable closure variable (`lastFindings`) on **every** call,
+> then had `runVerifyGate` read it once at the end. Traced by hand against the real engine
+> (`we:scripts/autofix/engine.mjs`, lines 291-365) on a **failing** edit, `verify()` is called **four**
+> times per `runVerifyGate()` invocation, not once:
+> 1. Line 293, round 1's `before = await verify()` — checks the buffer's real, untouched `edit.after` →
+>    genuinely fails. This is the ONLY call whose content the engine has not yet touched.
+> 2. Line 331, the same round's post-write `after = await verify()` — checks the buffer immediately after
+>    the single hand-written fixer's write. That fixer only echoes `edit.after` back verbatim (this slice
+>    registers no content-mutating fixer), so the buffer's content here is **bit-identical** to call 1's —
+>    same failure, same result.
+> 3. Line 293 again, the **next** round's `before = await verify()` — but the engine has, in between,
+>    already taken its revert branch (line 353: `write(patch.file, snapshot)`, landing `edit.before` back
+>    in the buffer) and recorded the give-up. This call checks the **reverted, now-passing** buffer — a
+>    different, later, and by design misleading state for our purposes.
+> 4. Line 363, the trailing `final = await verify()` — checks the same already-reverted buffer again.
+>
+> With `lastFindings` overwritten on every call, calls 3 and 4 clobber the real failing findings captured
+> in calls 1–2 with `[]`, so `runVerifyGate` returned `{ ok: true, findings: [] }` for an edit that
+> genuinely violated its gate — the reverse of this card's own Done-when bullet, and worse than round 1's
+> no-op: round 1 shipped an inert no-op, this shipped a false pass a real edit could ride to a real file
+> write (Slice 3's `emitEdit()` trusts this boolean alone).
+>
+> **Fixed by a settle-once latch, not a "last write wins" variable.** `verify`'s closure captures its
+> report into a **frozen** `settledFindings` snapshot on its own **first call only** within a given
+> `runVerifyGate()` invocation, then ignores every call after that for reporting purposes (the return
+> value `{ ok, failures }` — what the *engine* uses to drive its own loop — is still computed fresh on
+> every call; only the externally-reported snapshot is frozen). This is provably equivalent to freezing at
+> "the call immediately before the revert decision" (call 2) for this design specifically, because calls 1
+> and 2 are guaranteed bit-identical: the buffer is untouched before call 1, and the single fixer this
+> slice registers never mutates content (it only echoes `edit.after`), so nothing changes between them.
+> Freezing at call 1 is simpler than trying to detect "the call right before a revert" from inside a
+> closure that has no visibility into the engine's own bookkeeping (`settledKeys`, `gaveUp`, round number)
+> — it needs no call-counting or round-tracking, just "don't let anything overwrite the first answer." A
+> `settled`-boolean-gated "latch on first non-empty call" was considered instead (freeze only once a
+> failure is actually observed, keep tracking empty calls) — rejected as strictly more machinery for the
+> same outcome here: since call 1 is always the untouched ground truth (nothing has run yet when it fires),
+> there is never a correct reason for a later call to improve on it, whether call 1 was empty or not.
+> **Scope boundary, stated not silently assumed:** this latch is sound *because* this slice registers only
+> the one echo-fixer. If a later slice ever registers a real content-mutating fixer here (multiple rounds,
+> genuine re-fix attempts), "freeze at call 1" would go stale — a future change must re-derive the latch
+> point (e.g. freeze at the last call before `settledKeys` gains this edit's key) rather than reuse this
+> reasoning unmodified.
+
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
   loop still runs, but with the fixer registry populated by exactly **one hand-written, single-purpose
@@ -95,9 +139,15 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   just-reverted) content, read directly from the buffer, *not* via the `read` adapter passed to
   `autofix()` (see next bullet for why those two must differ) — and map its `Finding[]` result to a
   **single synthetic `Failure`** (`{ id: `pending:${key}`, findings }`) when non-empty, or `{ ok: true,
-  failures: [] }` when empty. `verify` also stashes the latest `Finding[]` in a closure variable
-  (`lastFindings`) each call — `runVerifyGate`'s return value reads from that, not from `autofix()`'s own
-  `.ok`/`.applied`/`.gaveUp` (see the `runVerifyGate` bullet below for why). If linkage yields zero vectors
+  failures: [] }` when empty. The `{ ok, failures }` returned from *every* call is fresh/live — the engine
+  needs the true current state each time to drive its own loop correctly (round-break, target-cleared,
+  revert). Separately, `verify` also snapshots its `Finding[]` into a closure variable
+  (`settledFindings`) — but **only on its own first call** within this `runVerifyGate()` invocation; every
+  call after the first computes and returns its own fresh `{ ok, failures }` for the engine as normal, but
+  leaves `settledFindings` untouched. `runVerifyGate`'s return value reads from `settledFindings`, not from
+  `autofix()`'s own `.ok`/`.applied`/`.gaveUp` (see the `runVerifyGate` bullet below for why the latch is
+  first-call-only rather than "whatever ran last" — round 2 of PR #1355 found the naive "last write wins"
+  version reports a false pass). If linkage yields zero vectors
   (an uncovered rule, #1641's own coverage-gap concept), `verify` degrades to `{ ok: true, failures: [] }`
   unconditionally — an edit to an undeclared/uncovered rule cannot be gated by a vector that doesn't exist,
   so it passes vacuously (surfaced to the human via the coverage badge already shipped by #1641's registry,
@@ -118,16 +168,30 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   - `exists`/`remove` are left at the engine's defaults — `exists` just needs `read` to not throw (it
     never does, `edit.before` is always a real string for an existing pending edit), and `remove` (the
     file-didn't-exist path) is never reached since `existedBefore` is always `true` here.
-- **`runVerifyGate`'s `ok`/`findings` come from `verify`'s own `lastFindings`, not from `AutofixResult`.**
-  Because the proposed edit may already pass on `autofix()`'s very first internal `verify()` call (before
-  any target/fixer is ever touched), the loop can exit at `we:scripts/autofix/engine.mjs`, line 294 with
-  `applied: []` and `gaveUp: []` — both empty on a **pass**, which makes `AutofixResult.applied.length > 0`
-  / `.ok` unusable as the single-edit pass/fail signal (`.ok` reflects "is the whole run green," a
-  different, run-level concept from "did this one edit's content just get reverted"). `runVerifyGate`
-  instead returns `{ ok: lastFindings.length === 0, findings: lastFindings }` from the closure `verify`
-  populates on its own last call, and calls `autofix()` purely to drive the buffer to the correct settled
-  end-state (`after` kept on pass, `before` restored on fail) via its existing keep/revert bookkeeping —
-  the reporting and the buffer side-effect are deliberately decoupled.
+- **`runVerifyGate`'s `ok`/`findings` come from `verify`'s own `settledFindings` latch, not from
+  `AutofixResult`, and not from "whichever `verify()` call happened to run last."** Because the proposed
+  edit may already pass on `autofix()`'s very first internal `verify()` call (before any target/fixer is
+  ever touched), the loop can exit at `we:scripts/autofix/engine.mjs`, line 294 with `applied: []` and
+  `gaveUp: []` — both empty on a **pass**, which makes `AutofixResult.applied.length > 0` / `.ok` unusable
+  as the single-edit pass/fail signal (`.ok` reflects "is the whole run green," a different, run-level
+  concept from "did this one edit's content just get reverted").
+  - **Why not a plain "overwrite every call" variable:** `autofix()` calls `verify()` **more than once**
+    per run even on a single failing edit — line 293 (round 1, pre-write), line 331 (round 1, post-write),
+    line 293 again (round 2's pre-write check, which now runs **after** the engine's own revert already
+    landed `edit.before` back in the buffer), and line 363 (the trailing `final = await verify()`, also
+    post-revert). A variable that takes "whatever `verify` returned most recently" is overwritten by those
+    last two, **post-revert** calls — which correctly see a passing buffer (that's the revert doing its
+    job) but are the wrong thing to report externally, since they describe the *reverted* state, not the
+    *proposed edit* that was actually being gated. Round 2 of PR #1355 traced this exact sequence by hand
+    against the real engine and found it reports `{ ok: true, findings: [] }` for an edit that genuinely
+    failed — see the round-2 review-fix callout above for the full call-by-call trace.
+  - **The fix:** `verify`'s closure snapshots `settledFindings` on its **first call only** (see the `verify`
+    callback bullet above) and freezes it there for the rest of the `runVerifyGate()` invocation.
+    `runVerifyGate` returns `{ ok: settledFindings.length === 0, findings: settledFindings }`. `autofix()`
+    is still called for what it's for — driving the buffer to the correct settled end-state (`after` kept
+    on pass, `before` restored on fail) via its existing keep/revert bookkeeping — the reporting (frozen at
+    call 1) and the buffer side-effect (evolves across all calls) are deliberately decoupled, the same way
+    round 1's fix decoupled `read` (frozen) from what `verify` inspects (live).
 
 ## Interfaces and protocol
 
@@ -149,10 +213,13 @@ export interface VerifyGateResult {
 /**
  * Run the verify-gate over one pending edit. Assembles the `verify`/`read`/`write` callbacks — `read`
  * fixed to `edit.before` (the engine's revert-snapshot source), `write` delegating to the buffer, `verify`
- * checking the buffer's live content and stashing its own last `Finding[]` — then delegates the
- * propose/apply/accept/revert mechanics to the shared autofix engine's `autofix()`, which drives the
- * buffer to the correct end-state (`after` kept on pass, `before` restored on fail). The returned
- * `ok`/`findings` come from `verify`'s own last result, not from `autofix()`'s run-level `AutofixResult`.
+ * checking the buffer's live content on every call (so the engine's own loop always sees the true current
+ * state) while latching its externally-reported `Finding[]` snapshot on its OWN FIRST call only, immune to
+ * the engine's later post-revert re-checks — then delegates the propose/apply/accept/revert mechanics to
+ * the shared autofix engine's `autofix()`, which drives the buffer to the correct end-state (`after` kept
+ * on pass, `before` restored on fail). The returned `ok`/`findings` come from that frozen first-call
+ * snapshot, not from `autofix()`'s run-level `AutofixResult` and not from whichever `verify()` call the
+ * engine happened to make last.
  */
 export async function runVerifyGate(opts: {
   buffer: SafeEditBuffer;
@@ -176,14 +243,21 @@ own `write`-on-absent-key throw contract).
    confirm the cross-repo `.mjs` import resolves before writing the real adapter; record the outcome in
    the PR description either way.
 3. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` — the `verify`/`read`/`write`
-   callback adapters (per the corrected wiring above: `read` fixed to `edit.before`, `verify` reading the
-   buffer's live content directly and stashing `lastFindings`), the single synthetic-`Failure` +
-   single-purpose fixer, and `runVerifyGate()` (reshaping from `lastFindings`, not `AutofixResult`).
+   callback adapters (per the corrected wiring above: `read` fixed to `edit.before`, `verify` computing a
+   fresh `{ ok, failures }` from the buffer's live content on *every* call, but latching its externally
+   reported `Finding[]` into `settledFindings` on its own first call only), the single synthetic-`Failure`
+   + single-purpose fixer, and `runVerifyGate()` (reading `{ ok, findings }` from `settledFindings`, never
+   from `AutofixResult` and never from "whatever `verify()` ran last").
 4. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` — a green-path case (edit
    passes, `ok: true`, and `buffer.get(key)?.after` still reads the proposed content — unchanged), a
    red-path case (edit fails a fixture vector, `ok: false` with findings, **and** `buffer.get(key)?.after`
    reads back as `edit.before`, confirmed by re-reading the buffer after the call — proves the engine's own
-   revert path fired, not a no-op), and the zero-linkage-degrades-to-pass case.
+   revert path fired, not a no-op), and the zero-linkage-degrades-to-pass case. **The red-path case is the
+   regression test for PR #1355 round 2** and must specifically assert the reported result stays `{ ok:
+   false, findings: [...] }` even though `verify` is invoked multiple times by `autofix()` including calls
+   made *after* the buffer has already been reverted to `before` (spy/count the `verify` mock's call
+   arguments or instrument it to assert at least one post-revert call happened during the run, so the test
+   can't silently pass by coincidence of only ever calling `verify` once).
 5. Run `plateau-app:` `npm test` scoped to the new files.
 
 ## Done when
@@ -191,7 +265,10 @@ own `write`-on-absent-key throw contract).
 - `runVerifyGate()` against a fixture edit that satisfies its linked vectors returns `{ ok: true, findings: [] }`.
 - `runVerifyGate()` against a fixture edit that violates a linked vector returns `{ ok: false, findings: [...] }`
   **and** the buffer's content for that target is back to `before` (proves the engine's own revert path
-  fired, not a no-op).
+  fired, not a no-op) — **and this holds even though the underlying `verify` callback is invoked multiple
+  times over the course of the run, including at least once after the engine's internal revert has already
+  restored the buffer to its passing `before` state** (the PR #1355 round-2 regression: a naive "report
+  whatever `verify` returned last" implementation reports a false `{ ok: true, findings: [] }` here instead).
 - `runVerifyGate()` against an edit whose `ruleKind` has zero linked vectors returns `{ ok: true, findings: [] }`.
 - `plateau-app:` `npm test` is green with the new files included.
 
