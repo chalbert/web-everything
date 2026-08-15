@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 5
-blockedBy: ["1635"]
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: #1635 has shipped and routing is in real use, AND the persona model carries capability/expertise (not just ownership), AND a real workload shows owner-only routing under-serving"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
@@ -15,7 +16,7 @@ tags: [dev-browser, ownership, task-queue, ai-generated, accepted-on-merit, diss
 
 # Capability-matched task queue
 
-> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the capability-matched-queue delta is real and on-moat — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** [#1635](/backlog/1635-ownership-aware-routing-in-context/) has shipped and its routing value is proven (`blockedBy: 1635`). Everything below is retained as the **settled** merit rationale (the concession), not an open question.
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the capability-matched-queue delta is real and on-moat — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger (all three, AND):** (1) [#1635](/backlog/1635-ownership-aware-routing-in-context/) has shipped and its routing value is proven in real use, (2) the persona model carries capability/expertise (not just ownership), (3) a real workload shows owner-only routing under-serving. Parked `maturityGated` on this compound trigger — not a bare `blockedBy` edge, which would only encode condition (1) and let the readiness engine promote this to agent-ready the moment #1635 resolves even though (2) and (3) are still unmet. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
