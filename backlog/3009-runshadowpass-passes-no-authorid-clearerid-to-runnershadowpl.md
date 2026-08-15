@@ -1,15 +1,16 @@
 ---
 bornAs: x7snbvd
 kind: story
-size: 2
+size: 3
 parent: "2572"
 status: open
-blockedBy: ["2844"]
 scope:
   - we:scripts/review-runner.mjs
   - we:scripts/lib/review-runner-core.mjs
+  - we:scripts/lib/auto-land-seam.mjs
   - we:scripts/__tests__/review-runner.test.mjs
   - we:scripts/lib/__tests__/review-runner-core.test.mjs
+  - we:scripts/lib/__tests__/auto-land-seam.test.mjs
 dateOpened: "2026-08-08"
 tags: [review, review-runner, converge-daemon, shadow-mode, self-clear, review-independence]
 ---
@@ -209,3 +210,263 @@ section's "**This is latent, not live**" no longer holds and should be restated 
 and `blockedBy: ["2844"]` is now a stale edge on a resolved blocker — sweep it under
 [#1231](/backlog/1231-sweep-the-stale-blockedby-edges-items-marked-blocked-whose-b/). Neither is changed here:
 this pass is capture-only and does not move item state.
+
+## Preparation — re-verified against LIVE code, per `we:agent-memory-src/story-preparation-checklist.md` (2026-08-15)
+
+Re-ran every load-bearing claim in this card against `main` at the lane's current base, rather than trusting
+the 2026-08-09 note. All prior claims still hold, re-read directly:
+
+- `we:scripts/review-runner.mjs:182`'s `runShadowPass` call still passes neither `authorId` nor `clearerId`
+  (the card's own line citation drifted by one line since filing; re-confirmed against current `main`).
+- `we:scripts/lib/review-runner-core.mjs`'s `runnerShadowPlan` (lines 108–114) already accepts and forwards
+  both — PR #1100 wired this half; nothing left to do there.
+- `we:scripts/lib/auto-land-seam.mjs`'s SAFETY RAIL 4 (lines 147–162) still evaluates
+  `decideClearerIndependence` before the shadow branch and, on refusal, still returns
+  `observeOnly({ ..., action: intent.action, reason: 'self-clear-refused: …' })` verbatim — `action` echoes
+  the CLEAR intent even though the seam is refusing to clear it (line 157).
+- `we:scripts/lib/review-independence.mjs`'s `decideClearerIndependence` (lines 193–205) still checks
+  `!clearer` before `!author` — with no ids supplied the status is `unknown-clearer`, confirmed again.
+- `we:scripts/lib/review-runner-core.mjs`'s `buildShadowRecord` (line 158) still computes
+  `wouldClear = intent.action === LAND_ACTIONS.CLEAR` — reads the raw disposition intent, never the seam's
+  plan.
+- **#1100 is merged** (`gh pr view 1100`: `state: MERGED`, `mergedAt: 2026-08-09T12:40:01Z`) and
+  `we:backlog/2844-*.md` is `status: resolved` — this pass confirms the 2026-08-09 note's finding still
+  holds; `blockedBy: ["2844"]` is cleared in this card's frontmatter below.
+
+**New finding this pass, correcting how the card's own "why `wouldClear` does not move" section reads
+`we:scripts/lib/review-runner-core.mjs`**: `buildShadowRecord`'s `action` field
+(`we:scripts/lib/review-runner-core.mjs:177`, `action: plan.action`) is **already** plan-sourced, not
+intent-sourced. The residual bug is entirely inside `we:scripts/lib/auto-land-seam.mjs`'s rail 4, which puts
+the wrong value INTO `plan.action` in the first place (see Decided design). Fixing `plan.action` upstream
+fixes `buildShadowRecord`'s `action` field for free — only `wouldClear` needs its own one-line fix.
+
+### Decided design
+
+The card names one real fork and does not decide it: "the fix has to recognize the `self-clear-refused`
+reason token specifically (or, cleaner, have `we:scripts/lib/auto-land-seam.mjs`'s rail-4 branch set
+`action: LAND_ACTIONS.KEEP_PARKED` instead of echoing `intent.action` … worth raising with whoever authors
+this fix, since that repair may belong upstream in #1100's own file rather than downstream here." Deciding it
+now:
+
+**Fix upstream, in `we:scripts/lib/auto-land-seam.mjs`'s SAFETY RAIL 4** — change the `observeOnly(...)`
+call's `action: intent.action` (line 157) to `action: LAND_ACTIONS.KEEP_PARKED`. Reasoning:
+
+- It fixes the bug at its source. `AutoLandPlan.action` (`we:scripts/lib/auto-land-seam.mjs:81`) is documented
+  `'clear'|'keep-parked'` — the land-path action the plan represents — and a refused clear IS a keep-parked
+  outcome, the same way rail 1's `observeOnly` already reports `keep-parked` there (`action: intent.action` is
+  correct in rail 1 only because the guarding `if` already proved `intent.action !== CLEAR`, and `LAND_ACTIONS`
+  has exactly two values, so the two statements are equivalent). Rail 4 setting the literal
+  `LAND_ACTIONS.KEEP_PARKED` makes that parity explicit rather than accidental.
+- **Checked for other consumers before deciding this was safe.** `plan.action` from `decideAutoLand` /
+  `runAutoLandSeam` has exactly one production reader anywhere in the repo —
+  `we:scripts/lib/review-runner-core.mjs:177`'s `buildShadowRecord` (grepped `\.action\b` across
+  `we:scripts/lib/auto-land-seam.mjs` and every importer). `we:scripts/lib/auto-land-seam.mjs`'s own
+  `applyAutoLand` gates on `plan.apply`, never `plan.action`. `runAutoLandSeam` has zero production callers
+  today (grepped `scripts/**/*.mjs` excluding `__tests__`) — only its own test file calls it. This is a
+  genuinely contained, no-other-blast-radius fix.
+- **Checked it doesn't silently break existing tests.** Read every assertion in
+  `we:scripts/lib/__tests__/auto-land-seam.test.mjs`'s SAFETY-RAIL-4 block (lines 182–274) — none assert
+  `res.plan.action` or `decideAutoLand(...).action` for the self-clear-refused path today, so the change is
+  additive there (new assertions to add per Tasks, not existing ones that would need fixing).
+
+The rejected alternative — pattern-match `plan.reason` for the `self-clear-refused:` prefix inside
+`buildShadowRecord` instead — was rejected because it (a) leaves the actual defect (`AutoLandPlan.action`
+lying about the effective action) live for any future reader of `decideAutoLand`, and (b) couples
+`we:scripts/lib/review-runner-core.mjs` to `we:scripts/lib/auto-land-seam.mjs`'s reason-STRING format instead
+of its typed `action` field, exactly the string-sniffing `LAND_ACTIONS` (a frozen enum) exists to avoid.
+
+**Consequence for `we:scripts/lib/review-runner-core.mjs`'s `buildShadowRecord`**: once `plan.action` is
+trustworthy, change `wouldClear = intent.action === LAND_ACTIONS.CLEAR` to
+`wouldClear = plan.action === LAND_ACTIONS.CLEAR` (line 158) — now consistent with the `action` field on the
+same returned object (`action: plan.action`, unchanged), both reading the seam's EFFECTIVE decision rather
+than the raw disposition intent.
+
+**Threading the ids into `we:scripts/review-runner.mjs`.** `clearerId` is a pure env read
+(`currentActorId()`, `we:scripts/lib/review-independence.mjs:76`) — resolve it ONCE in `main()`, not inside
+`runShadowPass`, so `runShadowPass` stays exactly as pure as its own docstring already claims ("PURE-ish: I/O
+is confined to the injected `loadLedger` seam") and so a test calling it directly gets deterministic behavior
+with no dependence on the harness's own `CLAUDE_CODE_SESSION_ID` — this preparation's own shell already has
+one set (`echo $CLAUDE_CODE_SESSION_ID` prints a real value), so a `runShadowPass` that fell back to it
+internally would pass or fail depending on WHAT ran the test, exactly the anti-pattern
+`we:scripts/lib/__tests__/auto-land-seam.test.mjs:248-250` already documents and avoids by passing
+`clearerId: ''` explicitly.
+
+`authorId` is per-PR and needs the PR body, which `we:scripts/review-runner.mjs` does not fetch today
+(confirmed: `discoverPending` line 103 and `lookupLabels` line 124 both call `gh` with `--json number,labels`
+only). Ride the EXISTING `gh` calls rather than add a new hop — the same "ride the existing read" pattern
+`we:scripts/review-set-label.mjs:448-450` already uses for this exact stamp (that call already asks for
+`labels,headRefOid,headRefName,state,body`; add `,body` to this file's two calls). Resolve `authorId` per PR
+via `parseAuthorActorId` (`we:scripts/lib/review-independence.mjs:143`) — reuse verbatim, per this card's own
+acceptance criteria, never re-derive the marker regex.
+
+`partitionRunnerPRs` → `partitionAgentClearable` (`we:scripts/lib/review-escalation.mjs:791-804`) rebuilds
+each clearable item as `{ pr, repo, labels: item.labels }` and drops every other field — so `body` does NOT
+survive partitioning. (`partitionAgentClearable` has exactly one caller in the repo, `partitionRunnerPRs` —
+grepped — so it could safely be widened to preserve extra fields, but doing so touches a third library file
+for no benefit here.) Cheaper and just as correct: build a `pr → authorId` `Map` from the PRE-partition
+`discovered` array in `main()`, and pass it into `runShadowPass` as a new 4th parameter alongside `clearerId`,
+looked up per PR inside the loop by `item.pr` (which DOES survive partitioning unchanged).
+
+### Interfaces and protocol
+
+`we:scripts/review-runner.mjs`:
+
+```js
+// discoverPending (line 103) / lookupLabels (line 124) — add `body` to the existing gh --json field list,
+// no new gh hop:
+//   gh pr list --repo <slug> --label review:pending --state open --json number,labels,body --limit 200
+//   gh pr view <n> --repo <slug> --json number,labels,body
+// both now map `body: typeof row.body === 'string' ? row.body : ''` into each returned item.
+
+import { currentActorId, parseAuthorActorId } from './lib/review-independence.mjs';
+
+// runShadowPass (line 176) — new 4th, optional, options arg. Backward compatible: existing 3-arg callers keep
+// working, with authorId/clearerId undefined on every call (⇒ unknown-clearer, fail-closed — never a silent
+// WOULD-clear regression for a caller that hasn't been updated yet).
+export function runShadowPass(
+  clearable, config, loadLedger = loadLedgerFromDurableLog, { authorIdByPr, clearerId } = {},
+) {
+  const records = [];
+  for (const item of clearable) {
+    const subject = `${item.repo}#${item.pr}`;
+    let ledger = [];
+    try { ledger = loadLedger(subject) || []; } catch { ledger = []; }
+    const authorId = authorIdByPr instanceof Map ? authorIdByPr.get(item.pr) : undefined;
+    const { intent, plan } = runnerShadowPlan({ ledger, config, currentLabels: item.labels, authorId, clearerId });
+    records.push(buildShadowRecord({ item, ledger, intent, plan }));
+  }
+  return records;
+}
+
+// main() (line 192) — after `discovered` is resolved and alongside the existing partitionRunnerPRs(discovered)
+// call:
+const authorIdByPr = new Map(discovered.map((d) => [d.pr, parseAuthorActorId(d.body || '')]));
+const clearerId = currentActorId();
+const records = runShadowPass(clearable, config, undefined, { authorIdByPr, clearerId });
+```
+
+`we:scripts/lib/auto-land-seam.mjs` — SAFETY RAIL 4, one field changes, no signature change:
+
+```js
+// before (line 157):
+      action: intent.action,                 // BUG: always LAND_ACTIONS.CLEAR here — the refusal never shows
+// after:
+      action: LAND_ACTIONS.KEEP_PARKED,       // the effective action IS keep-parked; the intent's CLEAR never happens
+```
+
+`we:scripts/lib/review-runner-core.mjs` — `buildShadowRecord`, one field changes, no signature change:
+
+```js
+// before (line 158): const wouldClear = intent.action === LAND_ACTIONS.CLEAR;
+// after:               const wouldClear = plan.action === LAND_ACTIONS.CLEAR;
+```
+
+No new error shapes: every failure path already fails closed today (empty `authorId`/`clearerId` ⇒
+`unknown-*` ⇒ `independent: false` ⇒ observe-only, unchanged by this fix). No data migration — nothing
+persisted changes shape; this is a pure logic/threading fix over process-local state.
+
+### Tasks
+
+1. `we:scripts/lib/auto-land-seam.mjs` — SAFETY RAIL 4: `action: intent.action` → `action: LAND_ACTIONS.KEEP_PARKED`
+   in the `observeOnly(...)` call (line 157). Lightly reword the `AutoLandPlan.action` JSDoc (line 81) to say
+   it is the plan's EFFECTIVE action, which can diverge from the intent's on a rail-4 refusal.
+2. `we:scripts/lib/__tests__/auto-land-seam.test.mjs` — pin the fix: add
+   `expect(res.plan.action).toBe(LAND_ACTIONS.KEEP_PARKED)` (or the `decideAutoLand(...).action` equivalent)
+   to the adversarial-enforce self-clear test (lines 183–201), the end-to-end self-clear test (lines 216–223),
+   and the unknown-id loop (lines 240–257).
+3. `we:scripts/lib/review-runner-core.mjs` — `buildShadowRecord`: `wouldClear = intent.action === LAND_ACTIONS.CLEAR`
+   → `wouldClear = plan.action === LAND_ACTIONS.CLEAR` (line 158). Adjust the adjacent doc comment (line 147)
+   accordingly.
+4. `we:scripts/lib/__tests__/review-runner-core.test.mjs`:
+   - Update the existing "records mutated:false / applied:false and wouldClear:true for a clean auto-dispose"
+     test (lines 189–201): pass explicit independent `authorId`/`clearerId` into its `runnerShadowPlan` call
+     (mirror the pair already used at lines 116–123) — otherwise it starts failing once `wouldClear` reads
+     `plan.action` (no ids ⇒ `unknown-clearer` ⇒ keep-parked, contradicting the test's own name).
+   - Add a test proving this card's own acceptance criterion literally: a synthetic self-clear
+     (`authorId === clearerId`) and each unknown-id case (absent author, absent clearer) each yield, via
+     `buildShadowRecord`, `wouldClear: false`, `action: 'keep-parked'`, and `reason` starting with
+     `self-clear-refused:`.
+5. `we:scripts/review-runner.mjs`:
+   - Import `{ currentActorId, parseAuthorActorId }` from `we:scripts/lib/review-independence.mjs`.
+   - `discoverPending` (line 99) and `lookupLabels` (line 119): add `,body` to each `gh` `--json` field list;
+     map `body` into each returned item.
+   - `runShadowPass` (line 176): add the 4th `{ authorIdByPr, clearerId }` options arg per Interfaces above;
+     look up `authorId` per PR from `authorIdByPr`.
+   - `main()` (line 192): build `authorIdByPr` from `discovered` and resolve `clearerId` via `currentActorId()`;
+     pass both into `runShadowPass`.
+6. `we:scripts/__tests__/review-runner.test.mjs`:
+   - Update the three existing `runShadowPass(...)` calls (lines 50, 61, 72–75) to pass an explicit independent
+     `{ authorIdByPr, clearerId }` 4th argument — otherwise they start failing the same way as task 4's first
+     bullet.
+   - Add a test pinning the `summary.wouldClear`/`summary.wouldKeepParked` crossover this card's acceptance
+     criteria name: derive the same counts `we:scripts/review-runner.mjs:256-257` computes
+     (`records.filter(r => r.wouldClear).length` / the negation) directly over `runShadowPass`'s returned
+     records — once with an independent pair (counted in `wouldClear`), once with `authorId === clearerId`
+     (counted in `wouldKeepParked`). (`main()` itself is not unit-testable without shelling `gh`, so the
+     honest unit of this claim is `runShadowPass`'s records, which `main()` merely filters.)
+7. Run `npm run test:unit -- review-runner review-runner-core auto-land-seam` and `npm run check:standards`
+   before opening the PR.
+
+### Delivery shape
+
+One piece, not incremental. All six touched files are small, mechanical, non-overlapping edits inside one
+coherent fix (one field flip upstream, one field flip downstream, one signature-compatible parameter thread,
+and the tests each of those three changes obligates) — nothing here is safely shippable half-done, since
+threading `authorId` without the `we:scripts/lib/auto-land-seam.mjs` action fix (or vice versa) leaves the
+shadow log still wrong for the case this item exists to fix. Lands as a single PR.
+
+**Heads-up for the builder, not a blocker:** `we:scripts/lib/auto-land-seam.mjs` is a `tier: 'policy'`
+TRUST_CHAIN file (`we:scripts/lib/gate-config.mjs:141-146`, `role: 'auto-land-seam'`) — editing it forces
+`review:human` on the resulting PR (an agent may not self-clear an edit to its own auto-land machinery).
+Expect a human `/review`, not an agent auto-clear, before this lands.
+
+### Revised size: 3 (was 2)
+
+Basis: the original scope (`we:scripts/review-runner.mjs`, `we:scripts/lib/review-runner-core.mjs`, their two
+test files) covered only the id-threading half. Preparation found the `wouldClear`/`action` misreport's root
+cause lives in a THIRD production file, `we:scripts/lib/auto-land-seam.mjs` (plus its test file) — six files
+total, each a small mechanical edit, still one coherent PR, but past the two-file footprint the original size
+assumed.
+
+### Frontmatter update (applied to this card)
+
+`blockedBy: ["2844"]` removed — #2844 (PR #1100) is `status: resolved`, confirmed again this pass; the edge
+has been stale since 2026-08-09 per this card's own note above. `scope:` gains
+`we:scripts/lib/auto-land-seam.mjs` and `we:scripts/lib/__tests__/auto-land-seam.test.mjs`. `size:` becomes 3.
+
+### Preparation status — PREPARED, not yet BUILD-READY
+
+Items 1–8 of `we:agent-memory-src/story-preparation-checklist.md` are done: scope+consumers checked
+(including the partition-drops-`body` interface hazard and the single-consumer check on `plan.action`), size
+revised with basis stated, acceptance criteria are testable (Done when, below), the design fork the card
+itself named is now decided (not left open, not split away), interfaces are real signatures, tasks are
+ordered, delivery shape is stated, and the risky part — would this fix silently break EXISTING tests — was
+de-risked during prep by reading every affected assertion rather than assuming (found and named the two test
+files whose existing assertions would start failing: `we:scripts/lib/__tests__/review-runner-core.test.mjs`
+lines 189–201, and all three `runShadowPass` calls in `we:scripts/__tests__/review-runner.test.mjs`).
+
+**Item 9 — independent review of this preparation — has NOT happened yet.** Per the checklist's own
+"prepared" vs "build-ready" distinction, this card is PREPARED but not yet BUILD-READY: it needs an
+independently-sessioned review of this preparation (not just the eventual diff) before a builder should
+start.
+
+### Done when
+
+- Breaking the `we:scripts/lib/auto-land-seam.mjs` fix (reverting `action: LAND_ACTIONS.KEEP_PARKED` back to
+  `action: intent.action` in SAFETY RAIL 4) reddens the new assertions in
+  `we:scripts/lib/__tests__/auto-land-seam.test.mjs`'s self-clear-refused tests (Task 2).
+- Breaking the `we:scripts/lib/review-runner-core.mjs` fix (reverting `wouldClear` to read `intent.action`)
+  reddens the new synthetic self-clear / unknown-id test in
+  `we:scripts/lib/__tests__/review-runner-core.test.mjs` (Task 4's second bullet).
+- Calling `we:scripts/review-runner.mjs`'s `runShadowPass` (directly, unit-level) with a synthetic clean
+  ledger and `authorId === clearerId` produces a record with `wouldClear: false` and `reason` starting
+  `self-clear-refused: self-clear`.
+- The same call with either id absent produces `wouldClear: false` and `reason` starting
+  `self-clear-refused: unknown-author` / `self-clear-refused: unknown-clearer` respectively (matching
+  `decideClearerIndependence`'s clearer-checked-first order).
+- The same call with a genuinely independent, both-known pair produces `wouldClear: true` (proves the fix
+  does not fail-closed EVERYTHING — only the genuinely-unproven/self-clear cases).
+- `summary.wouldClear` / `summary.wouldKeepParked` (`we:scripts/review-runner.mjs:256-257`) visibly cross over
+  between the independent-pair case and the self-clear case, pinned by the new test in Task 6.
+- `npm run test:unit` is green and `npm run check:standards` is 0 errors with all six files' changes in
+  place.
