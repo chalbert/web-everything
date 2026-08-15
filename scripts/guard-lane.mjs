@@ -90,6 +90,20 @@ const SEP = path.sep;
  *
  * A lane always lives at `<workspace>/.lanes/<pool>/lane-N`, so splitting on the `.lanes` segment recovers the
  * true root wherever the script is running from.
+ *
+ * KNOWN, ACCEPTED RESIDUAL (#2305): a lane directory that is ITSELF a symlink resolving outside `.lanes/`
+ * reopens this exact hole one layer up. `weRoot` is derived from `fileURLToPath(import.meta.url)`, and Node
+ * realpaths an ES module's main entry when it loads it — so if `<workspace>/.lanes/<pool>/lane-N` were a
+ * symlink to, say, `/elsewhere/lane-N`, the script would load as `/elsewhere/lane-N/scripts/guard-lane.mjs`,
+ * the `.lanes` segment is gone before this function ever sees the string, and the `dirname` fallback picks
+ * `/elsewhere` as the workspace — the wrong primaries, same failure shape as the bug this function fixes.
+ * NOT REACHABLE TODAY: every lane this guard can run inside is produced by `lane-pool.mjs`'s `cloneLane`
+ * (`git clone --reference … dest`), which always materializes `dest` as a real directory — `git clone` has no
+ * code path that leaves a symlink in its place, and no other producer of a `.lanes/<pool>/lane-N` path exists.
+ * So the gap is real in this pure function but has no live trigger under the current lane-provisioning story.
+ * Revisit if that ever changes (a lane provisioner that symlinks, or a hand-made symlinked lane) — the fix
+ * would be resolving each PATH SEGMENT up to (not including) the file, rather than the whole module URL, so a
+ * symlinked leaf cannot erase an interior `.lanes` segment.
  */
 export function workspaceRootOf(weRoot) {
   const s = String(weRoot || '');
