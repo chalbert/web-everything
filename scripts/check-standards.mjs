@@ -66,6 +66,7 @@ import {
   findLockPointFiles, lockPointCandidatePaths,
   findTestOnlyExports,
   scanPublishSecrets,
+  dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 import {
@@ -761,7 +762,7 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
     // Resolved items are historical (no author will re-scope a shipped item), so they are skipped.
     const scopeRationale = typeof raw?.scopeRationale === 'string' ? raw.scopeRationale.trim() : '';
     if (raw?.status !== 'resolved' && !scopeRationale) {
-      const dirs = scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
+      const dirs = dirLevelScopeFinding(raw);
       if (dirs.length)
         warn(`Backlog item "${id}" has directory-level scope entr${dirs.length > 1 ? 'ies' : 'y'} ${JSON.stringify(dirs)} (a repo-qualified prefix ending in "/") — scope defaults to FILE-LEVEL (#2739/#2679). A bare directory scope re-creates the coarse serialization finer leases removed: file-disjoint items stall behind one broad dir-scope. NARROW it to the specific files this item writes (never fewer than the real write-set — an under-scope breaches the lease at build time), OR, if the item genuinely spans the directory / is inherently cross-cutting, add a short \`scopeRationale:\` note stating why and this flag clears.`);
     }
