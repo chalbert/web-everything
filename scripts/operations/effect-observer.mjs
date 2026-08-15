@@ -9,9 +9,9 @@
  * caller, because only the caller knows what a `start.build` handle means.
  *
  * WHAT AN OBSERVER IS: `async (entry, ctx) => { status, result?, error? }` where `status` is one of
- * {@link OBSERVATIONS} — `running`, `succeeded` or `unresolved`. Note what is NOT in that list: any word for
- * "it failed". Two vocabularies that had one re-ran real work before the third removed it; the docblock on
- * {@link OBSERVATIONS} has the whole account, and it is the load-bearing comment in this file.
+ * {@link OBSERVATIONS} — `running`, `succeeded`, `resolved` or `unresolved`. Note what is NOT in that list: any
+ * word for "it failed". Two vocabularies that had one re-ran real work before the third removed it; the
+ * docblock on {@link OBSERVATIONS} has the whole account, and it is the load-bearing comment in this file.
  *
  * WHAT THIS DOES NOT DO, deliberately:
  *   - it ships NO concrete observer of its own. The seam is here; #3070's ruling names the host. The FIRST one
@@ -19,7 +19,9 @@
  *     registers a `claude agents`-backed observer, and the waker's CLI binds it. Its LIVENESS axis can only
  *     ever answer `running` or `unresolved`, for the reason {@link OBSERVATIONS} gives: the tool reports
  *     liveness, which is not an outcome. `succeeded` is reached on a second axis — the agent's own PR, merged
- *     (#x9ylkp7) — which is an outcome, and is the only classification that resolves.
+ *     (#x9ylkp7) — which is an outcome, and is the only classification that resolves. It does not (yet) use
+ *     `resolved` (#3085): a merged PR is always the CLEAN case, so it has never needed the word that hands a
+ *     non-clean outcome onward instead of judging it.
  *   - it does not decide that overdue work is DEAD. `expectedBy` passing means "go look", not "give up" —
  *     the observer is what knows, and an `expectedBy` is an estimate rather than a deadline. A waker that
  *     fails an entry on a clock alone would kill slow-but-healthy work, which is the failure the three-bucket
@@ -33,7 +35,7 @@
 import { inFlightEntries, resolveInFlight } from './effect-executor.mjs';
 
 /**
- * What an observer may answer. Three words, and the ONE thing they have in common is that none of them asks
+ * What an observer may answer. Four words, and the ONE thing they have in common is that none of them asks
  * the executor to do something the model cannot express.
  *
  * TWO EARLIER VOCABULARIES WERE WRONG, both measured re-running real work (PR #1186 rounds 1-3):
@@ -51,28 +53,51 @@ import { inFlightEntries, resolveInFlight } from './effect-executor.mjs';
  *                    say this, because the alternative is closing out work that is still happening.
  *   - `succeeded`  — the work ran and finished CLEANLY. Records `applied` and the run advances, which is
  *                    correct precisely because there is no bad outcome for a later step to react to.
- *   - `unresolved` — terminal for the observer, and NOT actionable by this machine. The build failed, or the
- *                    dispatch never took, or the answer is ambiguous. WRITES NOTHING: the entry stays
- *                    in-flight and is reported for a person. That is the honest state, and it costs one poll
- *                    a tick rather than one dispatch a tick.
+ *   - `resolved`   — the work ran to a KNOWN outcome that the observer is handing onward rather than judging
+ *                    itself (#3085). Records `applied` — the effect DID run, on the same terms `succeeded`
+ *                    does — but unlike `succeeded` it makes NO claim the outcome was good: an accompanying
+ *                    `error` is not a contradiction here, and `result` may itself describe a failure (a
+ *                    non-zero exit, a log tail). A declaration whose later step `reads: ['findings.<step>']`
+ *                    (#3082 gave the effect step that finding to write) sees it and reacts.
+ *   - `unresolved` — terminal for the observer, and NOT actionable by this machine. The dispatch never took,
+ *                    or the answer is ambiguous. WRITES NOTHING: the entry stays in-flight and is reported
+ *                    for a person. That is the honest state, and it costs one poll a tick rather than one
+ *                    dispatch a tick.
  *
- * WHY `unresolved` COLLAPSES TWO CASES THE MODEL CANNOT TELL APART. "The build failed" and "the dispatch never
- * started" want different answers — react to the outcome, and retry respectively — and the engine can express
- * NEITHER today:
- *   - an `effect` step writes no finding (`engine.mjs`), and `reads:` is rooted at `input|findings|verdict`,
- *     so no later step can see an effect's `result`. A failing build that records `applied` advances the run
- *     past the step that exists to react to it, and the human is asked "Land it?" with nothing to indicate
- *     anything went wrong. Measured.
- *   - retrying is a RETRY POLICY — how many times, how far apart, when to stop — and nothing owns one.
- * Both are filed. Until they exist, reporting and stopping is the only answer that is not a guess.
+ * A DECLARATION THAT NEVER READS A `resolved` FINDING ADVANCES PAST IT ANYWAY, AND THAT IS DELIBERATE
+ * (#3085's second half). Neither this module nor the waker refuses to advance a run whose reacting step does
+ * not exist — ignoring a `resolved` finding is the declaration's own choice, exactly like ignoring any other
+ * finding the engine ever records. Making that choice NOT the declaration's — the waker refusing to advance
+ * past an outcome nobody reads — would mean the engine judging a declaration by what it declared, which is a
+ * different and bigger call than this item makes (`reads:` is already the whole mechanism a declaration has
+ * for opting in to anything) and is left alone here.
+ *
+ * `unresolved` USED TO COLLAPSE TWO CASES THE MODEL COULD NOT TELL APART; NOW IT COLLAPSES ONE (#3085).
+ * "The build failed" and "the dispatch never started" want different answers — react to the outcome, and
+ * retry respectively:
+ *   - REACTING is now possible, and `resolved` (above) is the word for it. Before #3082 an `effect` step wrote
+ *     no finding at all (`reads:` is rooted at `input|findings|verdict`, and there was nothing to root into),
+ *     so a failing build that recorded `applied` advanced the run past the step that existed to react to it,
+ *     and the human was asked "Land it?" with nothing to indicate anything went wrong. Measured. `resolved`
+ *     is the observer's side of that fix: it says "here is what happened", not "it went fine".
+ *   - RETRYING is still not possible: it is a RETRY POLICY — how many times, how far apart, when to stop —
+ *     and nothing owns one (#3083, open). "The dispatch never took" therefore still answers `unresolved`, and
+ *     so does the genuinely ambiguous case (an observer that cannot tell `resolved` from not).
+ * So `unresolved` is narrower than it was, not gone: it is scoped to exactly the half `resolved` cannot cover
+ * — "no policy exists for what happens next" — which is the retry half #3083 has not ruled on.
  */
-export const OBSERVATIONS = Object.freeze(['running', 'succeeded', 'unresolved']);
+export const OBSERVATIONS = Object.freeze(['running', 'succeeded', 'resolved', 'unresolved']);
 
 /**
- * How each observation lands in the run record. Only ONE of them writes: `succeeded`. `unresolved` maps to
- * nothing on purpose — see {@link OBSERVATIONS} — so there is no status for the next caller to misread.
+ * How each observation lands in the run record. `succeeded` and `resolved` BOTH write `applied` — the
+ * run-record's status answers "did the effect run", and both did; whether the OUTCOME was good is a question
+ * for `result`/`error`, not `status` (#3085). The run-record only HAS `applied` or `failed` as terminal
+ * statuses (`resolveInFlight`, `effect-executor.mjs`), and `failed` is reserved for the executor's own
+ * "certainly nothing landed, safe to retry" signal — reusing it here would reopen the exact collision
+ * {@link OBSERVATIONS} exists to avoid. `unresolved` maps to nothing on purpose — so there is no status for
+ * the next caller to misread.
  */
-const TERMINAL_STATUS = Object.freeze({ succeeded: 'applied' });
+const TERMINAL_STATUS = Object.freeze({ succeeded: 'applied', resolved: 'applied' });
 
 /** Why an in-flight entry was not observed. Reported rather than thrown — one bad entry must not stop a pass. */
 export const SKIPS = Object.freeze({
@@ -183,12 +208,14 @@ export async function observeRun(run, { observers = {}, now = new Date() } = {})
     }
     // `succeeded` MEANS cleanly, so an `error` alongside it is a contradiction, not extra detail. Refused
     // rather than passed through: this is the one machine-checkable invariant the contract has, and the whole
-    // point of the vocabulary is that a word means one thing.
-    if (answer.error != null && answer.error !== '') {
+    // point of the vocabulary is that a word means one thing. `resolved` makes no such claim (#3085) — it
+    // hands the outcome onward instead of judging it — so this check is `succeeded`-only.
+    if (status === 'succeeded' && answer.error != null && answer.error !== '') {
       errors.push({
         key: entry.key,
         type: entry.type,
-        error: `observer answered \`succeeded\` with an error (${String(answer.error)}) — say \`unresolved\` if it did not finish cleanly`,
+        error: `observer answered \`succeeded\` with an error (${String(answer.error)}) — say \`resolved\` if it ran `
+          + 'to a known outcome that was not clean, or `unresolved` if the outcome cannot be told at all',
       });
       continue;
     }
