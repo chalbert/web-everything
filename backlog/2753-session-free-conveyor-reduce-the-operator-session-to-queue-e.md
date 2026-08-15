@@ -3,7 +3,7 @@ bornAs: xthv8dq
 kind: epic
 status: open
 dateOpened: "2026-07-28"
-relatedTo: ["2677", "2445", "2527", "2626", "2636", "2464", "2703", "x501fk9"]
+relatedTo: ["2677", "2445", "2527", "2626", "2636", "2464", "2703", "3118"]
 tags: [conveyor, session-free, plateau-loop, roadmap]
 ---
 
@@ -35,11 +35,11 @@ The mechanical core of the tick already landed — this epic sequences what rema
 
 The open items below, in dependency order, are what still stands between "serial tick retired" (#2703) and "no session in the loop":
 
-1. **#x501fk9 — where the conveyor's headless agent-spawning lives — the LONG POLE / critical path.** *(Was
+1. **#3118 — where the conveyor's headless agent-spawning lives — the LONG POLE / critical path.** *(Was
    #2464, "agent-runner CLI backend"; #2464 is resolved — its literal ask, the spawn/steer/stop/resume runner,
    already shipped under #2530 on 2026-07-16, wired only to `plateau-app`'s per-click build endpoint. The
    remaining gap is wiring the conveyor's own headless runner to spawn agents itself — a genuine open fork
-   [WE-native runner vs. a cross-process call into `plateau-app`], filed as #x501fk9.)* Until it's decided and
+   [WE-native runner vs. a cross-process call into `plateau-app`], filed as #3118.)* Until it's decided and
    built, a session must still spawn the delivery agents (the #2703 interim bridge above). **Flag it as the
    critical path; nothing downstream reaches zero-session without it.**
 2. **#2418 — coordinator delegates the review pipeline.** The main loop stops running the review glue by hand and delegates it (scripts the glue, templates the renders). Review pipeline feeders: **#2636 / #2649 / #2642** (jury-based PR review to convergence, the subject-agnostic jury engine, and juror management).
@@ -56,4 +56,4 @@ Two mechanizations on the critical path were un-owned; this epic files them as c
 
 ## Ownership note — sequences, does not duplicate
 
-This epic is a **roadmap / coordinator**: it owns the ordering, the critical-path call, and the two gap children. It is intentionally **not nested under another epic** because it spans several (#2677, #2445, #2527, #2626, #2636). Each referenced item keeps its own scope; this epic only makes the "get to app-run" story a single owned thing, with a named long pole (#x501fk9, formerly #2464) and a clear finish line (session = queue + expose-state, nothing more).
+This epic is a **roadmap / coordinator**: it owns the ordering, the critical-path call, and the two gap children. It is intentionally **not nested under another epic** because it spans several (#2677, #2445, #2527, #2626, #2636). Each referenced item keeps its own scope; this epic only makes the "get to app-run" story a single owned thing, with a named long pole (#3118, formerly #2464) and a clear finish line (session = queue + expose-state, nothing more).

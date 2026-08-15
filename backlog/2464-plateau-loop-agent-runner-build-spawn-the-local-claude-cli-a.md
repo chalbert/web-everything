@@ -37,5 +37,5 @@ runner (`we:skills-src/conveyor/runner.mjs`, #2702) still can't spawn agents its
 "interim bridge"), and #2753 / #3102 both still cite *this card's number* as the critical path to
 zero-session delivery. That remaining gap is real but is a different, undecided shape (does the conveyor
 get its own WE-native runner, or call `plateau-app`'s cross-process — a genuine fork, not a rebuild) — filed
-as **#x501fk9** (`session-free-conveyor-where-does-headless-agent-spawning-liv`), parented under #2753.
-**#2753 and #3102 should point their critical-path line at #x501fk9, not this card, once it lands.**
+as **#3118** (`session-free-conveyor-where-does-headless-agent-spawning-liv`), parented under #2753.
+**#2753 and #3102 should point their critical-path line at #3118, not this card, once it lands.**

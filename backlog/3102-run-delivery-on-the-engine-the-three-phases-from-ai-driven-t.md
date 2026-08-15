@@ -61,10 +61,10 @@ machinery existing rather than working.
 ## Phase B — the conveyor into the engine (queue + supervise)
 
 **Already owned by [#2753]**, which sequences the remaining items into a DAG and names the critical path:
-**#x501fk9, where the conveyor's headless agent-spawning lives** — the one open item that removes
+**#3118, where the conveyor's headless agent-spawning lives** — the one open item that removes
 agent-spawning from the session. *(Was #2464; #2464 resolved 2026-08-15 — its literal ask, the
 spawn/steer/stop/resume runner, already shipped under #2530, wired only to `plateau-app`'s per-click build
-endpoint. The remaining gap, and the open fork deciding it, is #x501fk9.)* Nothing downstream reaches
+endpoint. The remaining gap, and the open fork deciding it, is #3118.)* Nothing downstream reaches
 zero-session without it. [#2612] is the interim main-session operator and is explicitly a bridge, not the
 end state.
 
