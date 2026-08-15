@@ -60,7 +60,13 @@ Considered and rejected: giving `safe-edit/` its own forge client or git-plumbin
 already settled and shipped specifically so later consumers wouldn't re-invent them).
 
 - **Discard** = `SafeEditBuffer.revert(key)`. Nothing else runs — no file write, no branch, no PR. This
-  is the "throwaway" half of the sandbox: a discarded edit leaves **zero trace** on disk or on the forge.
+  is the "throwaway" half of the sandbox: a discarded edit leaves **zero trace on disk or on the forge, with
+  one disclosed, bounded exception** — a discard landing while an `emitEdit()` for the same key is already
+  in flight, specifically during the ide-bridge `patch()` call's own internal `await`, cannot un-write the
+  file that call already committed (checkpoint B still stops the PR from opening; see the round-7 callout
+  below for the full mechanism and why this residual window is accepted rather than closed here). A discard
+  with no concurrent `emitEdit()` in flight — the common case, and the only case `discardEdit()` alone can
+  ever produce — is unaffected and remains truly zero-trace.
 
   > **Review fix (2026-08-15, PR #1355, round 3):** the `emitEdit()` step 1 bullet below originally took a
   > caller-supplied `gatePassed: boolean` and refused only when that boolean was `false` — the interface
@@ -109,7 +115,12 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > buffer's content on the pass path; the only thing that could make the write's subject differ from what
   > was gated is an *external* mutation racing the async window, and capturing once + never re-reading is
   > exactly what makes that impossible for an already-in-flight emit (a concurrent edit isn't picked up
-  > until the *next* propose/emit cycle — correct, since it wasn't gated yet).
+  > until the *next* propose/emit cycle — correct, since it wasn't gated yet). **(PR #1355 round 9 — see
+  > `xv0j8db`'s round-9 review-fix callout for the authoritative, cross-linked statement of exactly when the
+  > engine's loop does and does not invoke a fixer or call `write()`, reconciling this paragraph with that
+  > card's own `write` bullet; this paragraph now cites that section rather than independently restating the
+  > engine's internals, per the round-8 finding that the two cards' independent restatements had drifted
+  > apart.)**
   >
   > This buffer-can-mutate-during-emit fact is now stated explicitly, not left implicit, and is enforced by
   > a dedicated test — see Task 2 and the corresponding Done-when bullet below.
@@ -141,7 +152,12 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > - **Checkpoint A** — after `runVerifyGate()` resolves `{ ok: true }`, before `IdeBridgeRegistry.patch()`.
   >   Closes the exact repro in the BLOCKER finding: discard lands during the gate's own (now-confirmed-async,
   >   see `xv0j8db`'s round-7 fix) verify work, and the write never happens.
-  > - **Checkpoint B** — after the ide-bridge patch succeeds, before the forge PR-open. A discard landing
+  > - **Checkpoint B** — after the ide-bridge patch succeeds, before the forge PR-open. **(Round 8 found this
+  >   round's original placement — before the credential-resolution call that step 3 also bundled — was not
+  >   actually immediately before the PR-open; fixed round 9 by moving checkpoint B to after credential
+  >   resolution. See the round-8/9 addendum callout below for the finding and fix; the "before the forge
+  >   PR-open" framing in this paragraph was always the intent, just not what the numbered steps delivered
+  >   until round 9.)** A discard landing
   >   during the (also-awaited) file-write call itself cannot be intercepted — by the time checkpoint B could
   >   run, `IdeBridgeRegistry.patch()` has already committed the file write, and cancelling an in-flight
   >   provider call is out of scope (ide-bridge is an already-shipped package this slice only calls, never
@@ -172,6 +188,37 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > and closes the whole "buffer changed under an in-flight emit" bug class with one mechanism instead of a
   > carve-out per cause. The caller (the future UI) is expected to just let the user click "emit" again,
   > which will re-capture the buffer's now-current `{ content, token }` and gate that.
+
+  > **Independent reviewer addendum (round 8), fixed round 9 — checkpoint B was not actually "immediately
+  > before" the irrevocable forge call.** The numbered steps below previously read step 3 as one bundled
+  > step — "resolve a `ForgeCredential` via the credential-source registry, then
+  > `ForgeProviderRegistry.openPullRequest(...)`" — with checkpoint B firing *before* both. Credential
+  > resolution is itself an `await`ed call; checkpoint B firing ahead of it left an unguarded async window
+  > (credential resolution) between the check and the actual irrevocable action, contradicting the
+  > `Interfaces` block's stronger prose claim ("immediately before `ForgeProviderRegistry.openPullRequest()`")
+  > — the identical shape as the disclosed ide-bridge-`patch()` residual, except undisclosed. A revert or
+  > re-propose landing during credential resolution would sail past checkpoint B (already passed by then) and
+  > reach `openPullRequest()` for content the buffer no longer holds — the exact BLOCKER round 7 closed,
+  > reopened through this second gap.
+  >
+  > **Fixed by splitting the old bundled step 3 into its two calls and moving checkpoint B to sit between
+  > them** — after credential resolution, immediately before `openPullRequest()`, matching what the
+  > `Interfaces` block already claimed (that prose did not need to change; the numbered steps did). See the
+  > corrected numbered list below. This is strictly *more* protective than the old placement, not a
+  > trade-off: `isCurrent()` checks the buffer's current state, not "has anything changed since the last
+  > check," so moving the check later still catches everything the earlier placement caught (a revert/
+  > re-propose during the ide-bridge write) *plus* the new case (one landing during credential resolution).
+  > The one behavioral change this causes: a revert/re-propose landing during the ide-bridge write **or**
+  > during credential resolution now lets credential resolution actually run (and be discarded) before the
+  > abort, whereas the old placement could skip it entirely when the mutation landed during the ide-bridge
+  > write. `ForgeProviderRegistry.openPullRequest()` itself is still never reached in either case — only the
+  > (harmless, no external side effect) credential-source call's occurrence differs. Task 2's checkpoint-B
+  > test and its Done-when bullet are updated to match — see below.
+
+  > **Independent reviewer addendum (round 8), fixed round 9 — the "zero trace on disk" guarantee above is
+  > qualified to match the disclosed residual, not stand uncontradicted a few paragraphs above it.** See the
+  > corrected Discard bullet's own text above this callout block — same "unstated-guarantee vs. actual
+  > behavior" shape this PR was bounced on twice before.
 
 - **Emit**, in order:
   0. Capture `const { after: content, token } = buffer.snapshot(key) ?? {};` as the function's first
@@ -204,13 +251,17 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      is, exactly like every other ide-bridge caller). `content` is the exact same value step 1 just gated —
      never `opts.edit.after`, never a fresh buffer re-read (see the round-4 fix above for why either of
      those would reopen the TOCTOU gap).
-  2a. **Checkpoint B (PR #1355 round 7).** Immediately after step 2 succeeds and before step 3 runs:
-     `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — same synchronous
-     check, guarding the PR-open. Cannot undo the file write step 2 already made (a disclosed, accepted
-     residual limitation — see the round-7 callout above for why) but does stop a PR being opened for
-     content the buffer no longer holds.
-  3. Resolve a `ForgeCredential` via the credential-source registry, then
-     `ForgeProviderRegistry.openPullRequest(...)` with a `body` rendered by the pr-body renderer from a
+  3. Resolve a `ForgeCredential` via the credential-source registry. (PR #1355 round 9 — split out of the
+     old bundled step 3 below, so checkpoint B can sit *after* this `await`, not before it; see the round-8
+     addendum callout above.)
+  3a. **Checkpoint B (PR #1355 round 7, relocated round 9).** Immediately after step 3 resolves and before
+     step 4 runs: `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — the same
+     synchronous check as checkpoint A, now genuinely immediately before the true irrevocable action
+     (`openPullRequest()`), matching the `Interfaces` block's claim. Cannot undo the file write step 2 already
+     made (a disclosed, accepted residual limitation — see the round-7 callout above for why) but does stop a
+     PR being opened for content the buffer no longer holds, whether the staleness landed during step 2's
+     ide-bridge write or step 3's credential resolution.
+  4. `ForgeProviderRegistry.openPullRequest(...)` with a `body` rendered by the pr-body renderer from a
      `ConformanceEvidenceManifest` this function assembles from: `edit.before` and the captured `content`
      (verify evidence — `before.passed` computed by calling `checkContentAgainstVectors({ ruleKind:
      edit.target.ruleKind, appId, content: edit.before, registry, index })` (the helper `xv0j8db` exports,
@@ -223,7 +274,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      (the only level #141 Fork 2 ratified for v1 — `auto-merge` is not reachable from this slice, by
      construction, since nothing here calls a merge API), and the app/impl identity already available from
      the declared-rules registry's `appId`.
-  4. Return the `PullRequestRef` (url + number) on success, or a typed failure naming which step failed
+  5. Return the `PullRequestRef` (url + number) on success, or a typed failure naming which step failed
      (`patch-unavailable` / `auth-unavailable` / `forge-unavailable` / `forge-error`) — never a bare thrown
      exception, matching every sibling registry's own `{ ok, reason }` outcome shape.
 - **No auto-merge, no deployed-app patch.** Both are explicitly out of scope per the #141 Fork 2
@@ -274,7 +325,10 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
  * lock and a live user can keep editing while this function's several `await`s are in flight, so a second
  * read could observe different content than the gate checked). `token` guards the two irrevocable actions
  * that follow: immediately before `IdeBridgeRegistry.patch()` and immediately before
- * `ForgeProviderRegistry.openPullRequest()`, `emitEdit()` synchronously re-checks `buffer.isCurrent(key,
+ * `ForgeProviderRegistry.openPullRequest()` — note credential resolution (an `await`ed call of its own) sits
+ * *between* the ide-bridge write and the PR-open, so the second check runs after credential resolution, not
+ * before it (PR #1355 round 8/9 — the check must be genuinely immediately before the irrevocable call, not
+ * merely before the step that contains it) — `emitEdit()` synchronously re-checks `buffer.isCurrent(key,
  * token)` and aborts with `{ ok: false, reason: 'stale-edit' }` if the buffer's pending edit for `key` was
  * reverted OR re-proposed since the snapshot was taken (PR #1355 round 7 — closes the BLOCKER where a
  * `discardEdit()` landing while this function's `await`s are still in flight left the write and the
@@ -334,10 +388,20 @@ export async function emitEdit(opts: {
      ...edit, after: 'mutated-after-gate' })` on the SAME key during the in-flight `await`. Assert
      `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }` with zero downstream calls — this is round
      4's old scenario, now asserting the corrected (abort, not proceed) outcome.
-   - **A checkpoint-B case:** the fake `ideBridge.patch` succeeds but, as a side effect before returning,
-     calls `buffer.revert(key)` on the same key. Assert `emitEdit()` returns `{ ok: false, reason:
-     'stale-edit' }` and that the forge/credential-source calls never happened, proving checkpoint B (not
-     just checkpoint A) is wired in.
+   - **A checkpoint-B case, ide-bridge-write timing:** the fake `ideBridge.patch` succeeds but, as a side
+     effect before returning, calls `buffer.revert(key)` on the same key. Assert `emitEdit()` returns
+     `{ ok: false, reason: 'stale-edit' }` and that `forge.openPullRequest` never happened, proving
+     checkpoint B (not just checkpoint A) is wired in. **(PR #1355 round 8/9 correction:** because checkpoint
+     B now sits *after* credential resolution, not before it, `credentialSource`'s resolve call MAY have
+     already happened by the time this fires — assert on `forge.openPullRequest` never being called, not on
+     the credential-source call count.)
+   - **A checkpoint-B case, credential-resolution timing (new, round 9):** the fake credential-source
+     resolver succeeds but, as a side effect before returning, calls `buffer.revert(key)` on the same key.
+     Assert `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }` and that `forge.openPullRequest` never
+     happened — this is the specific case round 8 found unguarded under the old checkpoint-B placement
+     (before credential resolution): a mutation landing *during* credential resolution used to sail past
+     checkpoint B and reach `openPullRequest()`; this test fails against that old placement and passes
+     against the corrected one.
    - **A true green-path case, unchanged:** no buffer mutation during the `await`s — `emitEdit()` succeeds
      normally, both checkpoints pass, and the write/PR-open both carry the originally captured `content`.
 3. Confirm the pr-body renderer's `ConformanceEvidenceManifest` input shape (defined at
@@ -369,14 +433,17 @@ export async function emitEdit(opts: {
   `ConformanceEvidenceManifest`'s `after` evidence must both carry the content captured at `emitEdit()`'s
   start, never the caller's original `opts.edit.after` (PR #1355 round 4's original guarantee, still true on
   the no-mutation path).
-- **(PR #1355 round 7, finding 1 — the BLOCKER, superseding round 4's now-corrected expectation)
-  `emitEdit()` aborts with `{ ok: false, reason: 'stale-edit' }`, and calls none of
-  ide-bridge/forge/credential-source beyond whichever step's checkpoint caught it, whenever the buffer's
-  pending edit for `key` is reverted OR re-proposed at any point between `emitEdit()`'s initial snapshot and
-  its next irrevocable step** — covering: a revert during the gate call (checkpoint A, the literal BLOCKER
-  repro), a re-propose during the gate call (checkpoint A — this is round 4's old scenario, now asserting
-  abort instead of silent-proceed), and a revert landing after the ide-bridge write succeeds but before the
-  forge PR-open (checkpoint B).
+- **(PR #1355 round 7, finding 1 — the BLOCKER, superseding round 4's now-corrected expectation; checkpoint
+  B's placement corrected round 8/9) `emitEdit()` aborts with `{ ok: false, reason: 'stale-edit' }`, and
+  `forge.openPullRequest` is never called, whenever the buffer's pending edit for `key` is reverted OR
+  re-proposed at any point between `emitEdit()`'s initial snapshot and the true irrevocable forge call** —
+  covering: a revert during the gate call (checkpoint A, the literal BLOCKER repro), a re-propose during the
+  gate call (checkpoint A — this is round 4's old scenario, now asserting abort instead of silent-proceed), a
+  revert landing after the ide-bridge write succeeds but before credential resolution, and a revert landing
+  during credential resolution itself (checkpoint B — now positioned immediately after credential resolution
+  and immediately before `openPullRequest()`, per the round-8/9 fix, so it catches both of the latter two
+  cases; `credentialSource`'s resolve call itself MAY still occur before the abort in either case, since it
+  is not the irrevocable action being guarded).
 - **(PR #1355 round 7, finding 3 — the cosmetic spec-completeness gap) The
   `ConformanceEvidenceManifest`'s `before.passed` field is actually computed, not left for an implementer to
   guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `xv0j8db`'s

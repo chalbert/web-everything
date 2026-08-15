@@ -200,6 +200,60 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    can land — which is exactly the point: it can only stay green if the buffer read genuinely precedes the
 >    async call, so a future reorder that moved the read after an `await` would make this test fail loudly,
 >    where every prior test stays green. See Task 4a and its Done-when bullet.
+> - **Gap in the above, found in round 8 review:** the fault-injection point (inside the fake
+>   `checkContentAgainstVectors`) only fires *after* `content` has already been captured in **every**
+>   ordering, including the buggy one this callout's own motivating example names — `await
+>   registry.linkage(appId, index)` inserted **before** the `content` capture, not just between the capture
+>   and the oracle call. Because the fake only mutates as a side effect of `checkContentAgainstVectors`
+>   itself running, a reorder that moves the buffer read to *after* an earlier, independent `await` (the
+>   named `linkage()` example) still has `content` captured immediately before `checkContentAgainstVectors`
+>   is called in the reordered version too — so the injected mutation is still strictly post-capture, and
+>   Task 4a's test stays green despite the invariant being violated one line earlier than where it's
+>   checking. See Task 4b (new, round 9), which retargets the injection to the earlier site the example
+>   itself names, closing this gap without weakening Task 4a (which still catches the later-reorder case Task
+>   4b does not).
+
+> **Review fix (2026-08-15, PR #1355, round 9) — the authoritative statement of what the real engine does on
+> a pass, reconciling this card's `write` bullet below with `x00bvy0`'s round-4 safety argument.** Round 8
+> found the two cards making what read as directly opposed claims about `we:scripts/autofix/engine.mjs`'s
+> pass-path behavior: this card's `write` bullet below says "on the pass path this writes `edit.after` back
+> over itself"; `x00bvy0`'s round-4 paragraph says the engine's loop "exits at its very first `verify()` call
+> with no fixer ever invoked" on a pass. **Both were independently-restated claims about the same external
+> symbol — this section is now the single authoritative statement; `x00bvy0`'s round-4 paragraph has been
+> edited to cite it rather than restate it (see that card).**
+>
+> Traced directly against the real, in-repo `we:scripts/autofix/engine.mjs` (lines 291–298 of `autofix()`):
+> every round starts with `const before = await verify();` immediately followed by `if (before.ok) break;`
+> — this check runs **before** the loop resolves a target, resolves a fixer, or calls `write()` at all. So
+> **the two claims describe two different, non-overlapping cases, not a contradiction**:
+> 1. **`x00bvy0` describes the case where `verify()`'s very first call, within a given `runVerifyGate()`
+>    invocation, already reports `{ ok: true }`** — i.e. the live buffer content already satisfies its
+>    linked vectors the moment the gate is asked to check it. In this case the loop breaks at line 294
+>    immediately: no target is picked, `registry.resolve()` is never called, the single-purpose fixer's
+>    `fix()` is never invoked, and `write()` is never called. `x00bvy0`'s claim is correct, exactly as
+>    stated, for this case.
+> 2. **This card's `write` bullet describes the case where `verify()`'s first call reports `{ ok: false }`**
+>    (the synthetic `pending:${key}` `Failure` fires because the live content currently violates a linked
+>    vector) — only then does the loop resolve the single-purpose fixer, call `write(patch.file,
+>    patch.newContent)` (line 330) with the fixer's returned content, and re-verify. "On the pass path" in
+>    that bullet means the **round's own accept branch** (`targetCleared && newFailures.length === 0` at line
+>    337) — reachable only after an initial fail, never on a `runVerifyGate()` invocation that passed from
+>    its very first check. Both claims are true; they are about different points in the loop.
+>
+> **The real hazard round 8 raised survives this reconciliation and is fixed here, at the source, rather
+> than argued away.** The single-purpose fixer's `fix()` was previously specified only as "return the
+> buffer's already-known `after` content verbatim," ambiguous about *when* that content is read — round 8
+> correctly read this as a value captured once, earlier (e.g. at `emitEdit()`'s snapshot), not a fresh read.
+> If so: in case 2 above, `write()` lands whatever the fixer returns, and if that's a **stale**, earlier-
+> captured value rather than the buffer's *current* live content, it can silently overwrite a fresher write
+> that landed on the same key between the fixer's capture and this `write()` call — `isCurrent()` at
+> checkpoint A (in `x00bvy0`) only aborts `emitEdit()` itself; it does nothing to protect this internal
+> engine-driven write from using stale data. **Fixed by making the single-purpose fixer's `fix()` read the
+> buffer's CURRENT, live content fresh — synchronously, at `fix()`-call time — never a value captured
+> earlier.** See the corrected fixer bullet below. With that fix, whatever `write()` echoes back is always
+> whatever is genuinely live in the buffer at that instant, so the echo-write can never regress a fresher
+> value to a staler one — it is a true no-op on the buffer's actual state, not merely a no-op relative to a
+> snapshot that may already be wrong.
 
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
@@ -207,7 +261,11 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   fixer registered just for this call**, whose job is to return the buffer's already-known `after`
   content verbatim for a **single synthetic `Failure`** meaning "there is a pending edit for this
   target" — the "fix" is a no-op lookup, not generation, so the loop's own verify/accept/revert machinery
-  does all the real work unmodified.
+  does all the real work unmodified. **(PR #1355 round 9)** The fixer's `fix()` reads that content
+  **fresh from the live buffer, synchronously, at `fix()`-call time** (`buffer.get(key)?.after`) — never a
+  value captured earlier (e.g. at gate-invocation start) — so the `write()` it triggers (see the read/write
+  bullet below, and the round-9 callout above) can only ever echo back whatever is genuinely live at that
+  instant, never a stale snapshot that could silently overwrite a fresher concurrent write on the same key.
 - **`verify` callback:** its FIRST statement, synchronously and before anything else runs, is `const
   content = buffer.get(key)?.after;` (PR #1355 round 7 — see that round's callout above for why this
   ordering is the whole safety argument and how it is enforced, not just stated). Only after that local is
@@ -244,10 +302,15 @@ in plateau-app would duplicate a loop that already exists and is already tested 
     is exactly what a **revert** restores (same file, lines 347/353). Wiring `read` to the fixed `before`
     means a revert correctly restores `before` — not whatever the buffer most recently held.
   - `write` = `SafeEditBuffer.write(key, content)` — the real, mutable side effect, unchanged from the
-    original design. On the pass path this writes `edit.after` back over itself (already there, a
-    no-op in content terms); on the fail path the engine's own revert calls `write(file, snapshot)`,
-    i.e. `SafeEditBuffer.write(key, edit.before)` — **this is the actual revert**, landing `before` in the
-    real buffer.
+    original design. **(See the round-9 callout above for the authoritative statement of when this fires at
+    all.)** On a round whose first `verify()` call already reports `{ ok: true }`, `write()` is never called
+    — nothing writes anything (this is `x00bvy0`'s round-4 case). On a round whose first `verify()` call
+    reports `{ ok: false }`, the engine calls the fixer and `write()`s its (now always freshly-read, per the
+    fixer bullet above) content back — a no-op in content terms since the fixer just re-read what's already
+    there — and if that round's re-verify then reports clean, the accept branch keeps it (`write` "on the
+    pass path" in the sense of that round's own accept/revert branch, not the whole gate call); on the fail
+    path the engine's own revert calls `write(file, snapshot)`, i.e. `SafeEditBuffer.write(key, edit.before)`
+    — **this is the actual revert**, landing `before` in the real buffer.
   - `exists`/`remove` are left at the engine's defaults — `exists` just needs `read` to not throw (it
     never does, `edit.before` is always a real string for an existing pending edit), and `remove` (the
     file-didn't-exist path) is never reached since `existedBefore` is always `true` here.
@@ -369,7 +432,24 @@ own `write`-on-absent-key throw contract).
    Assert `runVerifyGate()`'s result matches the PRE-mutation content's expected pass/fail outcome, not the
    post-mutation one. This test can only pass against an implementation that captured `content` before
    calling the (now-mutating) fake — i.e. it fails loudly if a future refactor moves the buffer read after
-   an `await`, where every other test in this file stays green regardless of that ordering.
+   an `await`, where every other test in this file stays green regardless of that ordering. **This test's
+   fault-injection point is inside `checkContentAgainstVectors`'s own fake, so it only catches a reorder that
+   moves the buffer read to *after* that specific call — see Task 4b for the earlier-await case this one
+   cannot catch (PR #1355 round 8/9).**
+4b. **Write the earlier-await regression test (PR #1355 round 8 finding, closed round 9) — retargets the
+   fault injection to the site the round-7 callout's own motivating example names, not just a later one.**
+   Fake `registry.linkage` (the call `verify` makes immediately after capturing `content`, per the ordering
+   above) so that, on its first invocation only, as a side effect before it resolves, it calls
+   `buffer.write(key, 'mutated-during-linkage-await')` on the same key. Assert `runVerifyGate()`'s result
+   matches the PRE-mutation content's expected pass/fail outcome, not the post-mutation one — same shape as
+   Task 4a, but the mutation now fires at the exact site (an `await` ahead of the buffer read, per the
+   round-7 callout's own `linkage()` example) that Task 4a's injection point cannot reach, because Task 4a's
+   fake only ever runs *after* `content` has already been captured in every ordering including the buggy
+   one. This test is meaningless (and passes vacuously) against the current implementation, where `content`
+   is captured before `linkage` is ever called — that is the point: it can only stay green if the buffer
+   read genuinely precedes every subsequent call, including one a future refactor might make async and move
+   ahead of the read. Task 4a and 4b together cover both reorder directions named across rounds 7 and 8;
+   neither subsumes the other.
 5. **Enforce the single-fixer scope boundary (PR #1355 round 3) — do not leave it as prose.** In
    `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`: (a) inside `runVerifyGate()`, before
    calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
@@ -409,11 +489,16 @@ own `write`-on-absent-key throw contract).
   keeps exactly ONE fixer registered but makes it return content different from what it read, and confirms
   `runVerifyGate()` throws; the round-3 two-fixer test above cannot exercise this guard on its own, because
   the fixer-count check throws before `autofix()` (and therefore `fix()`) is ever reached.
-- **(PR #1355 round 7, finding 2) The synchronous-first-read invariant is mechanically enforced, not just
-  documented:** the Task 4a test — where `checkContentAgainstVectors` mutates the buffer as a side effect
-  of its first (otherwise-async) call, before resolving — passes only because `verify` already captured
-  `content` before making that call, and would fail if a future implementation moved the buffer read after
-  any `await`.
+- **(PR #1355 round 7, finding 2; retargeted round 8, closed round 9) The synchronous-first-read invariant
+  is mechanically enforced for BOTH reorder directions, not just documented and not just the later one:**
+  the Task 4a test — where `checkContentAgainstVectors` mutates the buffer as a side effect of its first
+  (otherwise-async) call, before resolving — passes only because `verify` already captured `content` before
+  making that call, and would fail if a future implementation moved the buffer read after that particular
+  `await`. **The Task 4b test closes the gap round 8 found in 4a alone:** it mutates the buffer inside a
+  fake `registry.linkage` instead, so it would fail if a future implementation moved the buffer read after
+  an *earlier* `await` (the round-7 callout's own named example — `linkage()` growing an `await` of its own,
+  ahead of the buffer read) — a reorder Task 4a's own injection point cannot reach because Task 4a's fake
+  only ever runs after `content` is already captured in either ordering.
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape
