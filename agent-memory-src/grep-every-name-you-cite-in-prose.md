@@ -21,7 +21,7 @@ prose **is** the deliverable. Code gets a compiler and a test; a JSDoc header an
 nothing. A "verified:" or "measured:" preface in front of an unchecked claim is the worst form,
 because it spends the reader's trust to skip the check.
 
-**Worked example (PR #1112 / `#xonzpym`, Aug 2026).** Four independent review rounds; the technical
+**Worked example (PR #1112 / `#3027`, Aug 2026).** Four independent review rounds; the technical
 substance held up under re-measurement every round; **seven** false citations found across them,
 one per round, including `collectOpenItemIds` (no such symbol anywhere), a suite comment asserting
 as *verified fact* that only one tree imported a module (a second tree did, in production glue),
@@ -44,7 +44,7 @@ closed, not the instances.
   sharp axis here is **provenance in authored prose** — the deliverable itself, not a status report.
 
 **Mechanisation:** the name-does-not-exist half is script-decidable and filed as a `check:standards`
-gate over prose lines **added** by a change (`#x8918rc`, extending the `#2821` citation-verification
+gate over prose lines **added** by a change (`#3026`, extending the `#2821` citation-verification
 family in `we:scripts/lib/citation-check.mjs`). Measured while filing it: corpus-wide the check is
 unusable (1,814 unresolved tokens, dominated by legitimately-proposed names in unbuilt items), but
 diff-scoped over PR #1112's own prose it produced **1 finding, the real one, and no false positives**.

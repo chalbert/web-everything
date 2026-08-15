@@ -17,6 +17,9 @@
  *   • findAnchorRulingMismatches — gate "anchor-authority resolution" (#2821 gate 10, the 11-vs-1 core).
  *   • findDanglingLoci           — gate 5 (`we:<path>:<line>` must resolve to a real file + in-range line).
  *   • findOutOfScopeHashSlugs    — gate 3 (a `xNNNNNN` hash-slug cited outside the at-land rewrite scope).
+ *   • findDanglingMemoryHashSlugs — gate 3b (#3100): a `xNNNNNN` hash-slug cited INSIDE the rewrite scope
+ *     (`agent-memory-src/`) that does not resolve to anything live — see that function's header for why
+ *     directory membership alone (gate 3's test) is the wrong tool for a dir the rewriter DOES cover.
  *   • findUnresolvedIdentifiers  — the PROVENANCE gate (#3026): a bare backticked identifier in prose must
  *     resolve against the tree, or carry an explicit not-asserted marker.
  *
@@ -37,12 +40,24 @@ export const CITATION_GATES_ENFORCED = false;
 
 // ── The at-land hash→NNN rewrite scope. numberPendingHashes (we:scripts/lane-drain.mjs#numberPendingHashes),
 // via the numbering brain applyLedger (we:scripts/backlog/id.mjs#applyLedger), rewrites hash→NNN only in
-// these two dirs. A hash slug cited from anywhere else never self-heals → dead link post-land (#2821 gate 3).
-export const HASH_REWRITE_DIRS = ['backlog/', 'docs/agent/'];
+// these dirs. A hash slug cited from anywhere else never self-heals → dead link post-land (#2821 gate 3).
+// `agent-memory-src/` joined this set at #3100 — the compiled agent-memory bundle every future session
+// loads into context, so a dangling hash there silently misdirects every session, not just one card.
+export const HASH_REWRITE_DIRS = ['backlog/', 'docs/agent/', 'agent-memory-src/'];
 
 // The dirs the rewriter does NOT cover but where a hash-slug citation still renders / is cite-able.
 // Same set as DERIVED_ARTIFACT_DIRS in check-standards-rules.mjs (#2180) — kept as its own constant so the
 // gate-3 scope is legible at the call site.
+//
+// `agent-memory-src/` deliberately does NOT belong here (#3100), even though it is a real dir where a
+// dead hash-slug can live. This list means "the rewriter never touches this dir, so ANY hash-slug found
+// here is presumptively dead" — true for reports/ and the two research dirs (nothing ever numbers them),
+// but FALSE for agent-memory-src/ once it joined HASH_REWRITE_DIRS above: a hash-slug there DOES
+// self-heal, but only AT THE MOMENT the item it names lands — so gate 3's unconditional "in this dir ⇒
+// WARN" would false-positive on every citation to a still-pending item mid-flight (#3100 independent
+// review, mutation-confirmed: adding agent-memory-src/ here fires on ordinary in-flight citations the
+// widened rewrite scope makes self-healing). The dir needs a RESOLUTION check instead of a MEMBERSHIP
+// check — see findDanglingMemoryHashSlugs.
 export const HASH_SLUG_OUT_OF_SCOPE_DIRS = [
   'reports/',
   'src/_data/researchTopics/',
@@ -254,6 +269,57 @@ export function findOutOfScopeHashSlugs(text, relPath, { outOfScopeDirs = HASH_S
   const fileLink = new RegExp(`\\b(${HASH_SLUG})-[a-z0-9-]+\\.md\\b`, 'g');
   for (const m of text.matchAll(hashRef)) findings.push({ slug: m[1], form: 'hash-ref' });
   for (const m of text.matchAll(fileLink)) findings.push({ slug: m[1], form: 'file-link' });
+  return findings;
+}
+
+/**
+ * Gate 3b (#3100) — a hash-slug cited in `agent-memory-src/` that does not resolve to anything LIVE.
+ *
+ * WHY THIS IS NOT JUST "run findOutOfScopeHashSlugs with agent-memory-src/ added to outOfScopeDirs". That
+ * was the fix the #3100 card originally proposed, and its own independent review mutation-tested it and
+ * found it wrong: `agent-memory-src/` is now INSIDE the rewrite scope (`HASH_REWRITE_DIRS`), meaning a
+ * hash-slug cited there DOES self-heal — but only AT THE MOMENT the item it names lands, not before. A
+ * membership test ("is this dir out of scope?") can't tell "this hash is mid-flight and will self-heal at
+ * its own land" apart from "this hash already landed and its citation was never rewritten" apart from
+ * "this hash never existed" — it would WARN on all three, including the first, which is not a defect.
+ *
+ * So this checks RESOLUTION instead of directory membership, the same way a human reviewer would (and the
+ * way #3100's own independent review did by hand): does the cited hash resolve against something real?
+ *   • a currently-tracked `backlog/<hash>.md` file (still pending/in-flight) — NOT a defect: the next time
+ *     that item lands, the now-widened rewrite scope rewrites this exact citation to `#NNN` automatically.
+ *   • a `bornAs: <hash>` record in a landed `backlog/NNN-*.md` (the item already landed under a real
+ *     number) — a genuine defect: the citation should already read `#NNN` and does not, either because it
+ *     was written before this fix widened the rewrite scope, or because it was hand-typed after the item
+ *     had already landed. Flagged as `dead-landed`.
+ *   • neither — the hash never existed on this tree (typo, or an abandoned/rebased lane's throwaway id).
+ *     Flagged as `unresolved`.
+ *
+ * @param text the file body (raw), expected to be an `agent-memory-src/*.md` file.
+ * @param opts.pendingHashes Set<hash> — hashes with a currently-tracked `backlog/<hash>.md` (still
+ *        in-flight; self-heals at that item's own land — never flagged).
+ * @param opts.bornAsHashes  Set<hash> — hashes with a `bornAs: <hash>` record in a landed backlog item
+ *        (already landed under a real number; a citation still carrying the hash is stale).
+ * @returns array of `{ slug, form, reason }` (form: 'hash-ref' | 'file-link'; reason: 'dead-landed' |
+ *          'unresolved').
+ */
+export function findDanglingMemoryHashSlugs(text, { pendingHashes = new Set(), bornAsHashes = new Set() } = {}) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '') return findings;
+  const classify = (slug) => {
+    if (pendingHashes.has(slug)) return null; // still in-flight — self-heals at its own land, not a defect
+    if (bornAsHashes.has(slug)) return 'dead-landed';
+    return 'unresolved';
+  };
+  const hashRef = new RegExp(`#(${HASH_SLUG})\\b`, 'g');
+  const fileLink = new RegExp(`\\b(${HASH_SLUG})-[a-z0-9-]+\\.md\\b`, 'g');
+  for (const m of text.matchAll(hashRef)) {
+    const reason = classify(m[1]);
+    if (reason) findings.push({ slug: m[1], form: 'hash-ref', reason });
+  }
+  for (const m of text.matchAll(fileLink)) {
+    const reason = classify(m[1]);
+    if (reason) findings.push({ slug: m[1], form: 'file-link', reason });
+  }
   return findings;
 }
 

@@ -564,17 +564,21 @@ const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
  * topological (blockedBy) order — the drain is the sole SERIAL writer to main (#2290), so unlike scaffold's
  * randomized gap-fill (#2292, which only exists to stop PARALLEL births colliding) there is no collision to
  * avoid; max+1 keeps numbers contiguous (the #2288 "no burned gap numbers" goal). Records each `hash→NNN`
- * in the ledger, then blind-replaces EVERY ledgered hash across all `backlog/*.md` (filenames + contents)
- * AND `docs/agent/*.md` (#2428 — the cite-able STATUTE layer, e.g. platform-decisions.md, cites pending
+ * in the ledger, then blind-replaces EVERY ledgered hash across all `backlog/*.md` (filenames + contents),
+ * `docs/agent/*.md` (#2428 — the cite-able STATUTE layer, e.g. platform-decisions.md, cites pending
  * hashes too; the same blind rewrite scope must cover it or a citation like "Build carried by #x…" dangles
- * permanently once the item lands with a real NNN, proven twice — repaired by hand in PR #408) —
- * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
- * already-numbered blocker by its old hash. Commits the rename+rewrites in ONE scoped commit; the caller
- * publishes. Best-effort like the rest of the reconcile: a failure is reported, the land stands.
+ * permanently once the item lands with a real NNN, proven twice — repaired by hand in PR #408), AND
+ * `agent-memory-src/*.md` (#3100 — the compiled agent-memory bundle every future session loads into
+ * context; a dangling hash there is silently READ and misdirects every session from then on, not merely
+ * discoverable like a stale backlog cross-ref) — numbering each item AND repairing any cross-lane
+ * `blockedBy`/`parent`/`#ref` that still points at an already-numbered blocker by its old hash. Commits the
+ * rename+rewrites in ONE scoped commit; the caller publishes. Best-effort like the rest of the reconcile: a
+ * failure is reported, the land stands.
  */
 export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const BL = join(CWD, 'backlog');
   const DOCS = join(CWD, 'docs', 'agent');
+  const MEMORY = join(CWD, 'agent-memory-src');
   let stems;
   try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
   catch { return { assigned: [], committed: false, error: 'cannot read backlog/' }; }
@@ -601,7 +605,23 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     .filter((rel) => trackedDocs.has(rel))
     .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
 
-  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles];
+  // #3100 — extend the blind rewrite scope to `agent-memory-src/*.md`, the same way #2428 extended it to
+  // `docs/agent/*.md`: the compiled agent-memory bundle every future session loads into context can cite a
+  // pending hash ("filed #x…") exactly like a backlog `blockedBy` or a statute doc does, and without this a
+  // citation there is left dangling permanently once the item lands numbered (a dead pointer READ, not just
+  // discoverable, by every session from then on — the #3100 motivating instance). Same shape as docsFiles:
+  // `name` is the full repo-relative path so `pathFor` below routes it via the same `includes('/')` branch
+  // docs entries already use — no new path-resolution case needed. Only TRACKED files are read/rewritten.
+  let memoryNames;
+  try { memoryNames = readdirSync(MEMORY).filter((f) => f.endsWith('.md')); }
+  catch { memoryNames = []; } // agent-memory-src/ missing is not fatal — just nothing to sweep there
+  const trackedMemory = new Set((quietGit(CWD, ['ls-files', 'agent-memory-src/*.md']) || '').split('\n').filter(Boolean));
+  const memoryFiles = memoryNames
+    .map((f) => `agent-memory-src/${f}`)
+    .filter((rel) => trackedMemory.has(rel))
+    .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
+
+  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles];
   const contentByName = new Map(files.map((f) => [f.name, f.content]));
   // Resolve a `files` entry's `name` to its on-disk absolute + commit-relative path — a backlog stem (bare,
   // no `/`) lives under `backlog/`; a docs entry (`name` already a full repo-relative path) lives as-is.
