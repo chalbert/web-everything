@@ -103,7 +103,7 @@ title: Backlog
 <div id="panel-tracked" role="tabpanel" aria-labelledby="tab-tracked">
 {% set statusOrder = ["open", "active", "preparing", "parked", "resolved"] %}
 {# Item kinds present in the backlog, in preferred order — the one merged nature+hierarchy axis (#466/#487). #}
-{% set kindOrder = ["story", "epic", "task", "decision"] %}
+{% set kindOrder = ["feature", "story", "epic", "task", "decision"] %}
 {% set kindChips = [] %}
 {% for k in kindOrder %}{% if (backlog | where("kind", k) | length) %}{% set kindChips = (kindChips.push(k), kindChips) %}{% endif %}{% endfor %}
 {# Agile-point estimates, in Fibonacci order; only sizes actually present become chips. #}
@@ -131,7 +131,7 @@ title: Backlog
             </div>
             <div class="status-filter" role="group" aria-label="Filter by kind">
                 {% for k in kindChips %}
-                <we-filter-chip data-kind-chip="{{ k }}" selected class="fui-filter-chip--selected" title="{% if k == 'epic' %}umbrella — rolls up child stories/tasks{% elif k == 'task' %}bounded sub-work under a parent{% elif k == 'decision' %}a design fork to ratify (Tier B){% else %}an independently valuable, sized deliverable{% endif %}">{{ k | title }}</we-filter-chip>
+                <we-filter-chip data-kind-chip="{{ k }}" selected class="fui-filter-chip--selected" title="{% if k == 'feature' %}grouping tier above epic — product-level grouping epics roll up into{% elif k == 'epic' %}umbrella — rolls up child stories/tasks{% elif k == 'task' %}bounded sub-work under a parent{% elif k == 'decision' %}a design fork to ratify (Tier B){% else %}an independently valuable, sized deliverable{% endif %}">{{ k | title }}</we-filter-chip>
                 {% endfor %}
             </div>
             {% if sizeChips | length %}
@@ -499,7 +499,7 @@ title: Backlog
             {# Build a chip per kind PRESENT IN THE TABLE — `tableRows`, not just open items — so a pinned
                in-flight decision/batch (status:active) still gets its kind chip. Otherwise its row carries a
                kind with no matching chip, and the JS kind-filter (all chips pressed = that set only) hides it. #}
-            {% for k in ["story", "epic", "task", "decision"] %}{% if tableRows | where("kind", k) | length %}
+            {% for k in ["feature", "story", "epic", "task", "decision"] %}{% if tableRows | where("kind", k) | length %}
             <we-filter-chip data-pkind="{{ k }}" selected class="fui-filter-chip--selected">{{ k | title }}</we-filter-chip>
             {% endif %}{% endfor %}
         </div>

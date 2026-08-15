@@ -41,7 +41,10 @@ export const MATURITY_TRIGGER_RE = /^(externalConsumers>=\d+|realRuns>=\d+|adopt
 // correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
 // orthogonal field; fix-vs-feature, if ever wanted, is an optional `tags: [fix]` (never a field).
-export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision']);
+// `feature` (#2691, ratified 2026-08-08) is the grouping tier ABOVE epic — a root, flat, non-buildable
+// grouping node (epic-parity: never Tier-A, never sized as buildable work). See
+// docs/agent/backlog-workflow.md#feature-tier for the full ruling; #2998 is the plumbing tax it names.
+export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision', 'feature']);
 // The repo's single "build kind" rule: every kind except `decision` ships work (story/task build leaves,
 // epic is the umbrella). This is the canonical form of proposer.mjs's `isBuildable` and the backlog-health
 // audit's G2/G3 exec gate — keeping it here, beside the kind set, means a future kind rename surfaces it.
@@ -254,6 +257,31 @@ export function validateBacklogItem(item, ctx) {
   if (item.parent !== undefined && !knownNums.has(String(item.parent)))
     err(`Backlog item "${item.id}" parent "#${item.parent}" does not resolve to an existing item`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'parent', String(item.parent), 'backlog/'));
+
+  // ── Feature-tier invariants (#2691, docs/agent/backlog-workflow.md#feature-tier; plumbing #2998) ──
+  // `feature` is the grouping tier ABOVE epic: a ROOT (carries no `parent` at all — the hole-free form of
+  // "the feature tier is structurally the top"; a `{story,epic,task}` parent-kind blacklist leaks via
+  // `feature → decision → epic` and drifts as kinds are added) and FLAT (no `kind: feature` ancestor —
+  // feature → feature nesting is a non-breaking future extension, not built yet). Promoting an existing
+  // epic to a feature is therefore a RE-PARENT (drop the `parent` edge), never a bare kind-flip.
+  if (item.kind === 'feature') {
+    if (item.parent !== undefined)
+      err(`Backlog item "${item.id}" is \`kind: feature\` but carries a \`parent\` ("#${item.parent}") — a feature is a ROOT: the tier above epic carries no \`parent\` at all. Promoting an epic to a feature is a re-parent (drop the \`parent\` edge), not a bare kind-flip.`);
+    // The ancestor walk needs the cross-item num→kind / num→parent maps (absent from a bare per-item ctx,
+    // e.g. a minimal synthetic fixture exercising only the ROOT half above) — cycle-guarded via `seen`.
+    if (ctx.kindByNum && ctx.parentByNum) {
+      const seen = new Set([String(item.num)]);
+      let cur = item.parent !== undefined ? String(item.parent) : undefined;
+      while (cur !== undefined && !seen.has(cur)) {
+        if (ctx.kindByNum.get(cur) === 'feature') {
+          err(`Backlog item "${item.id}" is \`kind: feature\` with a \`kind: feature\` ancestor (#${cur}) — features are FLAT (no feature → feature nesting; a non-breaking future extension, not built now).`);
+          break;
+        }
+        seen.add(cur);
+        cur = ctx.parentByNum.get(cur);
+      }
+    }
+  }
   // Resolution date is what the burndown plots — required once resolved.
   if (item.status === 'resolved' && !item.dateResolved)
     err(`Backlog item "${item.id}" is resolved but has no dateResolved — the burndown needs the resolution date`);
