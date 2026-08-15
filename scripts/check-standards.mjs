@@ -553,6 +553,11 @@ const backlogCtx = {
   graduatedKinds,
   knownNums: new Set(backlog.map((i) => i.num).filter(Boolean)), // every item's num — for parent resolution
   reportExists: (rel) => existsSync(join(ROOT, rel)),
+  // num→kind / num→parent maps (feature-tier FLAT invariant, #2691/#2998) — the same shape the
+  // parent-deadlock guard + epic↔child coherence block below build separately; kept here too so
+  // `validateBacklogItem` can walk a feature's ancestor chain purely from `ctx`.
+  kindByNum: new Map(backlog.map((i) => [i.num, i.kind])),
+  parentByNum: new Map(backlog.filter((i) => i.parent !== undefined).map((i) => [i.num, String(i.parent)])),
 };
 for (const item of backlog) {
   const { errors: itemErrors, warnings: itemWarnings } = validateBacklogItem(item, backlogCtx);
@@ -822,20 +827,23 @@ for (const item of backlog) {
     if ((colour.get(n) || WHITE) === WHITE) visit(n, [n]);
 }
 
-// Parent-deadlock guard (#142): a child must never list its own EPIC parent in `blockedBy`. An epic
-// resolves only AFTER all its children (the no-open-slice rollup guard below) — so "child blocked until
-// the epic resolves" is an unbreakable cycle the plain blockedBy walk can't see (the edge is implicit in
-// the parent rollup, not in `blockedEdges`): the epic waits on the child, the child waits on the epic.
-// Scoped to a child whose parent is `kind: epic` — a SLICED STORY/decision parent resolves on its own
-// merits, so "wait for the parent's foundational work" is a legitimate edge there and is NOT flagged.
-// Scoped to non-resolved children: a resolved one already escaped the deadlock, so flagging it is noise.
+// Parent-deadlock guard (#142, epic-parity extended to `feature` by #2691/#2998): a child must never list
+// its own EPIC (or FEATURE — same grouping-tier rollup shape) parent in `blockedBy`. A grouping-tier item
+// resolves only AFTER all its children (the no-open-slice rollup guard below) — so "child blocked until the
+// parent resolves" is an unbreakable cycle the plain blockedBy walk can't see (the edge is implicit in the
+// parent rollup, not in `blockedEdges`): the parent waits on the child, the child waits on the parent.
+// Scoped to a child whose parent is `kind: epic` or `kind: feature` — a SLICED STORY/decision parent
+// resolves on its own merits, so "wait for the parent's foundational work" is a legitimate edge there and
+// is NOT flagged. Scoped to non-resolved children: a resolved one already escaped the deadlock, so flagging
+// it is noise.
 const kindByNum = new Map(backlog.map((i) => [i.num, i.kind]));
 for (const item of backlog) {
   if (item.status === 'resolved' || item.parent === undefined || !Array.isArray(item.blockedBy)) continue;
   const parentNum = String(item.parent);
-  if (kindByNum.get(parentNum) !== 'epic') continue;
+  const parentKind = kindByNum.get(parentNum);
+  if (parentKind !== 'epic' && parentKind !== 'feature') continue;
   if (item.blockedBy.some((raw) => String(raw) === parentNum))
-    err(`Backlog item "${item.id}" lists its own epic parent #${parentNum} in \`blockedBy\` — a deadlock: an epic resolves only after all its children, so the child can never start. The \`parent: ${parentNum}\` edge already expresses the rollup; drop #${parentNum} from blockedBy (re-point it at the real open prerequisite if one exists).`);
+    err(`Backlog item "${item.id}" lists its own ${parentKind} parent #${parentNum} in \`blockedBy\` — a deadlock: a grouping-tier item resolves only after all its children, so the child can never start. The \`parent: ${parentNum}\` edge already expresses the rollup; drop #${parentNum} from blockedBy (re-point it at the real open prerequisite if one exists).`);
 }
 
 // Build the parent→children index once (reused by the epic↔child coherence block below).
@@ -888,26 +896,27 @@ try {
   err(`stdout-flush scan failed: ${e.message}`);
 }
 
-// Epic ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4):
-// an epic's resolution state must agree with its children.
-//   B — a RESOLVED epic with an open child is the `⚠ open slice` contradiction: the
-//       umbrella was closed while work still lives under it. Reopen the epic or close the child.
-//   A — a non-resolved epic that is BLOCKED and has no open child must say WHY it's stalled
+// Epic/feature ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4, epic-parity
+// extended to `feature` by #2691/#2998): a grouping-tier item's resolution state must agree with its
+// children.
+//   B — a RESOLVED epic/feature with an open child is the `⚠ open slice` contradiction: the
+//       umbrella was closed while work still lives under it. Reopen it or close the child.
+//   A — a non-resolved epic/feature that is BLOCKED and has no open child must say WHY it's stalled
 //       (a `childlessReason`) so the tile doesn't read as abandoned.
-//   C — a storied epic whose every child is resolved is the `all slices done` review cue:
-//       reconcile it (resolve the epic, or add the next slice). Warn, don't fail — it's a nudge.
+//   C — a storied epic/feature whose every child is resolved is the `all slices done` review cue:
+//       reconcile it (resolve it, or add the next slice/child). Warn, don't fail — it's a nudge.
 const CHILDLESS_REASONS = new Set(['blocked', 'undecided', 'untriaged', 'program']);
 for (const item of backlog) {
-  if (item.kind !== 'epic') continue;
+  if (item.kind !== 'epic' && item.kind !== 'feature') continue;
   const kids = childrenOf.get(item.num) || [];
   if (!kids.length) continue;
   const openKids = kids.filter((k) => k.status !== 'resolved');
   if (item.status === 'resolved' && openKids.length)
-    err(`Backlog item "${item.id}" is a resolved epic but has ${openKids.length} open child slice(s) (${openKids.map((k) => `#${k.num}`).join(', ')}) — a closed umbrella with live work under it. Reopen the epic or resolve/re-parent the open child(ren).`);
+    err(`Backlog item "${item.id}" is a resolved ${item.kind} but has ${openKids.length} open child slice(s) (${openKids.map((k) => `#${k.num}`).join(', ')}) — a closed umbrella with live work under it. Reopen it or resolve/re-parent the open child(ren).`);
   else if (item.status !== 'resolved' && (item.blockedBy?.length) && !openKids.length && !CHILDLESS_REASONS.has(item.childlessReason))
-    err(`Backlog item "${item.id}" is a blocked epic with no open children and no childlessReason — set childlessReason: ${[...CHILDLESS_REASONS].join('|')} so the board shows why it's stalled, or add the next slice.`);
+    err(`Backlog item "${item.id}" is a blocked ${item.kind} with no open children and no childlessReason — set childlessReason: ${[...CHILDLESS_REASONS].join('|')} so the board shows why it's stalled, or add the next slice.`);
   else if (item.status !== 'resolved' && !openKids.length && !item.ongoing && !CHILDLESS_REASONS.has(item.childlessReason))
-    warn(`Backlog item "${item.id}" is an epic whose every child is resolved ('all slices done') — reconcile it: resolve the epic (its scope is delivered) or scaffold the next slice.`);
+    warn(`Backlog item "${item.id}" is a ${item.kind} whose every child is resolved ('all slices done') — reconcile it: resolve it (its scope is delivered) or scaffold the next slice.`);
   // An `ongoing: true` epic (a perpetual program, e.g. the flagship exercise apps) is intentionally never
   // a resolve cue — between slices it legitimately has every child resolved without being "done".
   // Likewise an epic that DECLARES a `childlessReason` (blocked / undecided / untriaged / program) is in a
