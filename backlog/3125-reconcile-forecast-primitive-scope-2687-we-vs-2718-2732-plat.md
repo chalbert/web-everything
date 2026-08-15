@@ -18,11 +18,11 @@ tags: []
 Flagged retroactively (2026-08-15): this item was resolved by an autonomous prep agent the same day it was
 opened and prepared (`dateOpened == preparedDate == dateResolved == 2026-08-15`), with **no `ratifiedBy:`
 frontmatter field and no `## Ruling` block** naming a human, and no PR comment recording an explicit human
-ratify utterance. Per `we:docs/agent/backlog-workflow.md:295-296`, every `decision` item requires explicit
+ratify utterance. Per `we:docs/agent/backlog-workflow.md:313-314`, every `decision` item requires explicit
 human ratification before `resolved` — the *only* sanctioned auto-ratify is the fork-existence test
-collapsing to exactly one coherent branch (`:296`). This item does not qualify for that exception: its own
+collapsing to exactly one coherent branch (`:314`). This item does not qualify for that exception: its own
 **Skeptic (pass 4)** rated axis 2 `SURVIVES-WITH-AMENDMENT` (a red-team that amended a branch), which per
-`we:docs/agent/backlog-workflow.md:296` and `we:backlog/2821-*.md` gate 1b is explicitly named as a "live
+`we:docs/agent/backlog-workflow.md:314` and `we:backlog/2821-*.md` gate 1b is explicitly named as a "live
 fork" tell that "is never an auto-close" — validation-gate archetype exempts this item from needing `## Fork
 N` shape (see *Why this is a validation gate*, above), but does **not** exempt it from needing a human's
 actual sign-off.
