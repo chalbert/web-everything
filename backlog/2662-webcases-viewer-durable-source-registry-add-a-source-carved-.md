@@ -57,7 +57,7 @@ AFTER #104 (`blockedBy: 2550`) to avoid touching the same files in parallel.
 chalbert/plateau-app` confirms PR #104 `state: MERGED`, `mergedAt: 2026-07-22T18:49:30Z`, and the merged code
 matches #2550's Part-2 acceptance. But `backlog/2550-*.md` frontmatter is still `status: open`, so the
 readiness engine (`we:scripts/check-readiness.mjs`) still counts this as an unresolved blocker. Filed
-[#x8ua0pa](/backlog/x8ua0pa-resolve-2550-its-tracked-deliverable-plateau-app-pr-104-alre.md) — a size-1
+[#3126](/backlog/3126-resolve-2550-its-tracked-deliverable-plateau-app-pr-104-alre.md) — a size-1
 mechanical status splice — rather than working around it here. **A builder should confirm that item is
 resolved (or resolve #2550 directly) before claiming this one**, since the readiness tool will otherwise
 refuse to surface it as unblocked.
@@ -282,7 +282,7 @@ fail at runtime; it exists so a future rename of the registry key doesn't silent
 
 1. **WE slice-0 PR** (small, own PR, lands first): add `'webcase-source'` to `WriteVerb` + `label`/`loadRef`
    to `WriteRequest` in `we:contracts/backlog.ts`, mirroring commit `48812b52`. Gate: WE `check:standards`.
-2. Confirm [#x8ua0pa](/backlog/x8ua0pa-resolve-2550-its-tracked-deliverable-plateau-app-pr-104-alre.md) is
+2. Confirm [#3126](/backlog/3126-resolve-2550-its-tracked-deliverable-plateau-app-pr-104-alre.md) is
    resolved (or resolve #2550 directly) so this item reads as unblocked before claiming it.
 3. Add `plateau-app:src/backlog-view/webcases-sources.json` (seed `{}`).
 4. Add `plateau-app:src/backlog-view/webcases-source-registry.ts` (`applySourceRegistration`,

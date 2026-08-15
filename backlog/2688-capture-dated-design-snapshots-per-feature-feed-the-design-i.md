@@ -168,7 +168,7 @@ note. No consumer is wired yet (#2728/S6b consumes later, once it itself is unbl
 
 The deferred half of the original card — auto-capturing a snapshot from a design-studio committee run instead of
 running the CLI by hand — is real future work, not dropped silently. Filed as
-[#xmio19r](/backlog/xmio19r-auto-capture-a-design-snapshot-when-the-design-studio-commit.md), a child of #2676 not
+[#3127](/backlog/3127-auto-capture-a-design-snapshot-when-the-design-studio-commit.md), a child of #2676 not
 yet buildable (#2676 has no committee-run product slice filed to block on — revisit once it is sliced).
 
 Spun off the **feature-tracking-screen** design session (design committee → red-team → refine loop) under epic

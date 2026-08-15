@@ -7,7 +7,7 @@ parent: "2577"
 status: open
 dateOpened: "2026-07-20"
 scope: ["we:scripts/backlog/ruling-record.mjs", "we:scripts/backlog/__tests__/ruling-record.test.mjs", "we:docs/agent/backlog-workflow.md"]
-relatedTo: ["2574", "2576", "2649", "2654", "2641", "355", "xo9tlnu"]
+relatedTo: ["2574", "2576", "2649", "2654", "2641", "355", "3128"]
 tags: [decision-record, schema, ruler]
 ---
 
@@ -129,7 +129,7 @@ but this shape is decision-item-specific).
  *                                         //   VERDICTS — NOT #2576's original "1-5" text; that text was never
  *                                         //   implemented by the shipped engine (verdict is categorical, not 1-5
  *                                         //   numeric). Reconciling #2576's text against what shipped is filed
- *                                         //   separately: xo9tlnu (does not block this story — this field follows
+ *                                         //   separately: 3128 (does not block this story — this field follows
  *                                         //   the LIVE engine, per the "verify against live code" prep discipline)
  *  @property {string} [reason] */
 
@@ -247,7 +247,7 @@ no incremental-landing constraint and no sequencing risk with concurrent lanes.
   existing decision items predate it (only 2 already carry `ratifiedBy`); retroactively gating would be an
   unmeasured, repo-wide blast-radius risk this story does not take on.
 - The #2576-vs-jury-core rating-scale reconciliation — filed separately as
-  [xo9tlnu](/backlog/xo9tlnu-reconcile-2576-per-option-1-5-ratings-text-against-jury-core/) (a `kind: decision`,
+  [3128](/backlog/3128-reconcile-2576-per-option-1-5-ratings-text-against-jury-core/) (a `kind: decision`,
   since it's a real either/or on which text is authoritative, not a build).
 
 ## Independent review (2026-08-15)
@@ -259,6 +259,6 @@ ratifier field" grounding claim was false — `#2828` and `#2851` both carry `ra
 truthfully supply a `ruledBy` value — the task/Done-when now specify a documented `"operator"` default (grounded
 in the ratification-gate invariant, not invented) plus a second real fixture (#2851/#2828) exercising the
 field-present path. The `JurorRating`/`FoldedJuror` "mirrors verbatim" overclaim was also corrected to state the
-actual (deliberate) differences. Confidence after fixes: **High** — naming-collision, sibling-item (xo9tlnu), and
+actual (deliberate) differences. Confidence after fixes: **High** — naming-collision, sibling-item (3128), and
 scope/blast-radius findings all held up under independent verification; the two defects found were corrected in
 place rather than deferred.
