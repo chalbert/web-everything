@@ -17,7 +17,7 @@ admitted sources into the #1034 design-critique rubric as codified heuristic **g
 is distinct from the citation-only provenance the v2 rubric already carries (#1587): a table cell naming
 *which* source grounds an axis is not itself a codified heuristic, it is an index. **Scoped to the 4 axes
 backed by exactly one admitted source**; the 4 multi-source axes are deferred to a follow-on
-(`#xbjw3vw` — "Distillation pipeline — multi-source rubric axes into codified heuristics") because they need
+(`#3116` — "Distillation pipeline — multi-source rubric axes into codified heuristics") because they need
 a source-reconciliation call this item does not.
 
 ## Blocker status (verified against live state, 2026-08-15)
@@ -64,17 +64,17 @@ source and 4 by two:
 | 2 | Spacing & rhythm | `apple-hig` | 1 | **yes** |
 | 4 | Typographic scale | `apple-hig` | 1 | **yes** |
 | 5 | Consistency / token use | `nielsen-heuristics` | 1 | **yes** |
-| 3 | Alignment & structure | `apple-hig`, `nielsen-heuristics` | 2 | no → `#xbjw3vw` |
-| 6 | Grouping & proximity | `apple-hig`, `uicrit-uist24` | 2 | no → `#xbjw3vw` |
-| 7 | Visual hierarchy & emphasis | `uicrit-uist24`, `apple-hig` | 2 | no → `#xbjw3vw` |
-| 8 | Aesthetic polish / craft | `apple-hig`, `uicrit-uist24` | 2 | no → `#xbjw3vw` |
+| 3 | Alignment & structure | `apple-hig`, `nielsen-heuristics` | 2 | no → `#3116` |
+| 6 | Grouping & proximity | `apple-hig`, `uicrit-uist24` | 2 | no → `#3116` |
+| 7 | Visual hierarchy & emphasis | `uicrit-uist24`, `apple-hig` | 2 | no → `#3116` |
+| 8 | Aesthetic polish / craft | `apple-hig`, `uicrit-uist24` | 2 | no → `#3116` |
 
 A multi-source axis needs a reconciliation call this item's pattern doesn't cover — how the #1588
 credibility weight orders/blends two sources whose guidance could overlap or conflict (e.g. `apple-hig`
-0.75 vs `uicrit-uist24` 1.0 both grounding axis 6) — so it is out of scope here, carried by `#xbjw3vw`
+0.75 vs `uicrit-uist24` 1.0 both grounding axis 6) — so it is out of scope here, carried by `#3116`
 (`blockedBy: ["1589"]`, since it extends this item's v3 pattern to v4). This item alone distills 3 of the 4
 ledger rows (`w3c-apg`, `apple-hig`, `nielsen-heuristics`); `uicrit-uist24` stays `distilledInto: null` here
-— explicitly deferred, not forgotten (its `trackingItem` moves from `"1589"` to `"xbjw3vw"`).
+— explicitly deferred, not forgotten (its `trackingItem` moves from `"1589"` to `"3116"`).
 
 ## Interfaces / protocol
 
@@ -84,7 +84,7 @@ table, e.g. `### Distilled guidance (v3)`, with one short paragraph per axis 1/2
 name the specific sub-principle of its source it synthesizes (not the source's title alone — e.g. Nielsen's
 *numbered* heuristic, the specific WCAG/APG success criterion, the named HIG section), state it in original
 wording, and say what a critique should concretely flag. Axes 3/6/7/8 get a one-line placeholder ("pending —
-multi-source, tracked by `#xbjw3vw`") so the doc never silently implies full coverage. Worked example to
+multi-source, tracked by `#3116`") so the doc never silently implies full coverage. Worked example to
 calibrate depth/tone (axis 5, `nielsen-heuristics`):
 
 > **5 — Consistency & token use.** Codified from Nielsen's heuristic #4, *Consistency and standards*: the
@@ -99,7 +99,7 @@ already accepts a non-empty array). Set:
 - `w3c-apg.distilledInto` → `["we:docs/agent/vision-tiers.md#design-critique-rubric-ratified-1034 v3 axis 1 (Contrast & legibility)"]`
 - `apple-hig.distilledInto` → the two-entry array for axes 2 and 4 (same reference shape)
 - `nielsen-heuristics.distilledInto` → the one-entry array for axis 5
-- `uicrit-uist24.trackingItem` → `"xbjw3vw"` (was `"1589"`); `distilledInto` stays `null`
+- `uicrit-uist24.trackingItem` → `"3116"` (was `"1589"`); `distilledInto` stays `null`
 
 **3. `we:src/_data/credibilityWeighting.js`** — no code change. Verified: every affected row's committed
 `credibilityWeight` already recompute-matches `computeCredibilityWeight({kind: row.kind}).weight` with no
@@ -112,9 +112,9 @@ against real ledger data (#1592 found it had zero callers outside its own unit t
 `we:src/_data/designKnowledgeWatch.json`, `we:src/_data/credibilityWeighting.js` via `createRequire`, and
 `computeDesignKnowledgeConformance` from `we:scripts/check-standards-rules.mjs`):
 - each of `w3c-apg` / `apple-hig` / `nielsen-heuristics` has a non-empty `distilledInto` array
-- `uicrit-uist24` still has `distilledInto: null` and `trackingItem === "xbjw3vw"`
+- `uicrit-uist24` still has `distilledInto: null` and `trackingItem === "3116"`
 - each row's committed `credibilityWeight` equals `computeCredibilityWeight({kind: row.kind}).weight`
-- `computeDesignKnowledgeConformance(watch)` returns `{ total: 4, distilled: 3, pending: 1, pendingList: ['uicrit-uist24 (#xbjw3vw)'] }`
+- `computeDesignKnowledgeConformance(watch)` returns `{ total: 4, distilled: 3, pending: 1, pendingList: ['uicrit-uist24 (#3116)'] }`
 
 ## Tasks (ordered)
 
@@ -122,19 +122,19 @@ against real ledger data (#1592 found it had zero callers outside its own unit t
    version-bump to v3, add the axes-3/6/7/8 pending placeholder.
 2. Flip `distilledInto` on the `w3c-apg` / `apple-hig` / `nielsen-heuristics` rows of
    `we:src/_data/designKnowledgeWatch.json`.
-3. Update `trackingItem` on the `uicrit-uist24` row to `"xbjw3vw"`.
+3. Update `trackingItem` on the `uicrit-uist24` row to `"3116"`.
 4. Write `we:scripts/__tests__/design-knowledge-distillation.test.mjs` per the four assertions above.
 5. `npx vitest run we:scripts/__tests__/design-knowledge-distillation.test.mjs` green.
 6. `npm run check:standards` — confirm the design-knowledge NUDGE now reads `3/4 distilled … pending:
-   uicrit-uist24 (#xbjw3vw)`, 0 errors.
+   uicrit-uist24 (#3116)`, 0 errors.
 
 ## Done when
 
 - [ ] `we:docs/agent/vision-tiers.md` rubric is `v3`; axes 1/2/4/5 each carry an original-wording
       distilled-guidance paragraph naming its source's specific sub-principle; axes 3/6/7/8 carry the
-      pending placeholder citing `#xbjw3vw`.
+      pending placeholder citing `#3116`.
 - [ ] `we:src/_data/designKnowledgeWatch.json`: `w3c-apg` / `apple-hig` / `nielsen-heuristics` rows have
-      non-empty `distilledInto`; `uicrit-uist24` row unchanged except `trackingItem: "xbjw3vw"`.
+      non-empty `distilledInto`; `uicrit-uist24` row unchanged except `trackingItem: "3116"`.
 - [ ] `we:scripts/__tests__/design-knowledge-distillation.test.mjs` exists and is green, pinning the exact
       `{ total: 4, distilled: 3, pending: 1 }` conformance shape.
 - [ ] `npm run check:standards` — 0 errors, design-knowledge NUDGE reads 3/4 distilled.
@@ -147,7 +147,7 @@ breaking). Lands as **one incremental PR** behind `main` — no branch-splitting
 ## Relationships
 
 - **parent #1585** — design-knowledge intake program; this is its content-distillation track.
-- **`#xbjw3vw`** — the multi-source-axis follow-on this item defers to (`blockedBy: ["1589"]`).
+- **`#3116`** — the multi-source-axis follow-on this item defers to (`blockedBy: ["1589"]`).
 - **#1586 / #1587 / #1588 / #1591** — the ledger, rubric-provenance, weighting-decision, and
   weighting-meta-schema siblings this item consumes; all resolved.
 - **#1035 / #1036 / #1553** — downstream consumers of the distilled guidance content (not yet built; this
