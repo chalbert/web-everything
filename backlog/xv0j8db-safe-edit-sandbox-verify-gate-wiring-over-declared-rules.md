@@ -123,6 +123,29 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > genuine re-fix attempts), "freeze at call 1" would go stale — a future change must re-derive the latch
 > point (e.g. freeze at the last call before `settledKeys` gains this edit's key) rather than reuse this
 > reasoning unmodified.
+>
+> **Review fix (2026-08-15, PR #1355, round 3): the boundary above was prose-only — nothing enforced it.**
+> Reviewed as "impact: degraded" — a future engineer editing
+> `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` to add a second, content-mutating fixer
+> would silently violate the settle-once latch's single-fixer precondition, with no test or assertion
+> reddening to catch it; the file would keep compiling and passing every other test while quietly
+> reintroducing round 2's false-pass bug class. Fixed two ways, both checkable now (this slice owns
+> `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` and constructs the fixer registry itself
+> — this is not a "some future slice, elsewhere" risk, it is this file's own registration path):
+> 1. **Runtime assertion in `runVerifyGate()`, not deferred to a future implementation.** Before calling
+>    `autofix()`, assert the fixer registry it is about to pass in resolves to exactly one fixer for the
+>    synthetic `pending:${key}` failure kind — throw synchronously (a programming-error throw, per this
+>    card's own "throws only on a programming error" contract below) if not. This makes "more than one
+>    fixer registered" fail loudly the moment someone adds a second one, instead of silently drifting.
+> 2. **A same-content assertion on the one fixer that IS registered.** The single-purpose fixer's `fix()`
+>    asserts (dev-mode, throws on violation) that the patch it is about to return is bit-identical to what
+>    it read — i.e. it actually is a no-op echo, not just documented as one. A future engineer who edits the
+>    fixer body to actually transform content (rather than adding a second fixer) reddens this assertion
+>    immediately rather than silently invalidating the "calls 1 and 2 are bit-identical" argument the latch
+>    depends on.
+>
+> Both are captured as real Tasks/Done-when items below (see Task 6 and the corresponding Done-when
+> bullet), not left as a comment a future implementer could silently ignore.
 
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
@@ -258,7 +281,16 @@ own `write`-on-absent-key throw contract).
    made *after* the buffer has already been reverted to `before` (spy/count the `verify` mock's call
    arguments or instrument it to assert at least one post-revert call happened during the run, so the test
    can't silently pass by coincidence of only ever calling `verify` once).
-5. Run `plateau-app:` `npm test` scoped to the new files.
+5. **Enforce the single-fixer scope boundary (PR #1355 round 3) — do not leave it as prose.** In
+   `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`: (a) inside `runVerifyGate()`, before
+   calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
+   `pending:${key}` failure — throw synchronously if not; (b) inside the single-purpose fixer's `fix()`,
+   assert (dev-mode, throws on violation) that the patch content it returns is bit-identical to what it
+   read, i.e. it is genuinely a no-op echo. Add a test in
+   `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` that registers a second,
+   content-mutating fixer against a fixture buffer and asserts `runVerifyGate()` throws rather than
+   silently running the settle-once latch against a now-invalid precondition.
+6. Run `plateau-app:` `npm test` scoped to the new files.
 
 ## Done when
 
@@ -270,6 +302,11 @@ own `write`-on-absent-key throw contract).
   restored the buffer to its passing `before` state** (the PR #1355 round-2 regression: a naive "report
   whatever `verify` returned last" implementation reports a false `{ ok: true, findings: [] }` here instead).
 - `runVerifyGate()` against an edit whose `ruleKind` has zero linked vectors returns `{ ok: true, findings: [] }`.
+- **`runVerifyGate()` throws when the fixer registry it builds resolves to more than one fixer for the
+  `pending:${key}` failure, and the single-purpose fixer's `fix()` throws if the patch it would return is
+  not bit-identical to what it read** — asserted by a test that registers a second, content-mutating fixer
+  against a fixture buffer and confirms `runVerifyGate()` throws rather than silently proceeding (the PR
+  #1355 round-3 fix for the previously-prose-only single-fixer scope boundary).
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape

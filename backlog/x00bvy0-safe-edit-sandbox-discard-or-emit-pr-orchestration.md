@@ -41,6 +41,9 @@ handling; every one of those already has a resolved backlog item and a shipped p
   PR body string.
 - `plateau-app:packages/dev-browser/src/credential-source/` — resolves the `ForgeCredential` (a token plus
   identity) the forge write authenticates with.
+- `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` — Slice 2's `runVerifyGate()`
+  (already a hard `blockedBy` dependency of this slice, see front matter), called directly by `emitEdit()`
+  itself — not merely by some future caller — per the correction below.
 
 **Consumers:**
 - **None yet inside the repo** — this is the terminal slice; its consumer is a dev-browser panel/UI
@@ -58,12 +61,29 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
 
 - **Discard** = `SafeEditBuffer.revert(key)`. Nothing else runs — no file write, no branch, no PR. This
   is the "throwaway" half of the sandbox: a discarded edit leaves **zero trace** on disk or on the forge.
+
+  > **Review fix (2026-08-15, PR #1355, round 3):** the `emitEdit()` step 1 bullet below originally took a
+  > caller-supplied `gatePassed: boolean` and refused only when that boolean was `false` — the interface
+  > never called `runVerifyGate()` itself. The prose said "this function re-checks rather than trusting the
+  > caller," but the actual `Interfaces` block just re-read a value the caller computed and handed in, with
+  > no independent verification. That is the identical failure mode rounds 1 and 2 already had to fix
+  > inside `xv0j8db` (a failing edit reported/treated as passing), just relocated to this sibling card: if a
+  > future implementer builds this exactly to spec and the caller's `gatePassed` is ever stale, cached, or
+  > wrong (a race, a bug, a bypassed UI check), `emitEdit()` writes the real file and opens a real PR for
+  > content that never actually passed the declared-rules gate. Fixed by having `emitEdit()` call
+  > `runVerifyGate()` itself — see the corrected step 1 and the `Interfaces` block below. `emitEdit()` no
+  > longer accepts a `gatePassed` boolean at all; there is nothing left for a caller to get wrong.
+
 - **Emit**, in order:
-  1. Read the gate-passed content from the buffer (`buffer.get(key)`); refuse (return an error result,
-     never partially proceed) if the last `runVerifyGate()` result for this key was not `ok: true` — the
-     caller (the future UI) is expected to have already gated the "emit" affordance on that, but this
-     function re-checks rather than trusting the caller, per the same "never fake a pass" discipline the
-     autofix engine itself uses.
+  1. Call `runVerifyGate({ buffer, edit, appId, registry, index })` (Slice 2's gate — `emitEdit()` calls it
+     directly, itself; it does not accept a caller-supplied `gatePassed` boolean and does not trust one).
+     Refuse — return `{ ok: false, reason: 'not-gate-passed' }`, never partially proceed — unless the
+     result is `{ ok: true }`. The caller (the future UI) may well have already run the gate once, earlier,
+     to decide whether to even show the "emit" affordance — that's fine and expected — but `emitEdit()`
+     re-derives the answer itself, against the buffer's real current content, every time it runs, so a
+     stale/racy/bypassed caller-side check can never cause a failing edit to reach a real file write or a
+     real PR. This is the same "never fake a pass" discipline the autofix engine itself uses, now actually
+     wired into the interface rather than only stated in prose.
   2. `IdeBridgeRegistry.patch({ location, contents: edit.after })` — writes the real file via whichever
      provider is available (FS-Access or the VS Code extension; degrades to an error result if neither
      is, exactly like every other ide-bridge caller).
@@ -88,6 +108,8 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
 ```ts
 // plateau-app:packages/dev-browser/src/safe-edit/emit.ts
 import type { SafeEditBuffer, DeclaredEdit } from './buffer';
+import { runVerifyGate } from './verify-gate'; // Slice 2 — emitEdit() calls this itself, never a caller-supplied boolean
+import type { DeclaredRuleRegistry, VectorIndex } from '../declared-rules';
 import type { IdeBridgeRegistry } from '../ide-bridge';
 import type { ForgeProviderRegistry, ForgeRepo } from '../forge';
 import type { CredentialSourceRegistry } from '../credential-source'; // resolves the ForgeCredential
@@ -113,29 +135,39 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
 
 /**
  * Emit a gate-passed edit as a PR: write the real file (ide-bridge), resolve the forge credential, open
- * the PR (forge) with a rendered conformance-evidence body (pr-body). Re-checks gate-passed status itself
- * — never trusts the caller.
+ * the PR (forge) with a rendered conformance-evidence body (pr-body). Calls `runVerifyGate()` itself
+ * against the buffer's real current content before doing anything else — takes no `gatePassed` boolean
+ * from the caller, so there is nothing for a stale/racy/bypassed caller-side check to get wrong.
  */
 export async function emitEdit(opts: {
   buffer: SafeEditBuffer;
   key: string;
-  gatePassed: boolean; // the caller's last runVerifyGate() result for this key
+  edit: DeclaredEdit;
+  appId: string;
+  registry: DeclaredRuleRegistry; // passed through to runVerifyGate()
+  index: VectorIndex;             // passed through to runVerifyGate()
   repo: ForgeRepo;
   ideBridge: IdeBridgeRegistry;
   forge: ForgeProviderRegistry;
   credentialSource: CredentialSourceRegistry;
-  appId: string;
 }): Promise<EmitResult>;
 ```
 
 ## Tasks
 
 1. Write `plateau-app:packages/dev-browser/src/safe-edit/emit.ts` — `discardEdit()`, `emitEdit()`, and
-   the small `ConformanceEvidenceManifest` assembly helper described above.
+   the small `ConformanceEvidenceManifest` assembly helper described above. `emitEdit()` must call
+   `runVerifyGate()` (imported from `./verify-gate`, Slice 2) itself as its first step — it must not accept
+   or trust a caller-supplied `gatePassed` boolean; there is no such parameter in the corrected interface.
 2. Write `plateau-app:packages/dev-browser/src/safe-edit/emit.test.ts` — one case per `EmitFailureReason`
    (fake registries returning unavailable/error), one green-path case asserting the four calls happen in
-   order with the right arguments (a spy on each fake registry), and a `discardEdit` case asserting no
-   ide-bridge/forge/credential-source call happens at all.
+   order with the right arguments (a spy on each fake registry), a `discardEdit` case asserting no
+   ide-bridge/forge/credential-source call happens at all, and **the regression test for PR #1355 round
+   3**: a case that seeds the buffer with content that genuinely violates a fixture's linked vector (the
+   same fixture pattern Slice 2's own red-path test uses), calls `emitEdit()` on it, and asserts it returns
+   `{ ok: false, reason: 'not-gate-passed' }` with zero calls to ide-bridge/forge/credential-source —
+   proving the rejection comes from `emitEdit()`'s own internal `runVerifyGate()` call against real failing
+   content, not from a caller having passed (or forgotten to pass) any boolean.
 3. Confirm the pr-body renderer's `ConformanceEvidenceManifest` input shape (defined at
    `plateau-app:packages/dev-browser/src/pr-body/renderer.ts`) accepts the fields this slice can actually
    supply (subject/impl/commit are optional per the renderer's own `renderSubject` — already read; no
@@ -147,11 +179,16 @@ export async function emitEdit(opts: {
 
 - `discardEdit()` reverts the buffer and calls none of ide-bridge/forge/credential-source (asserted via
   spies that record zero calls).
-- `emitEdit()` with `gatePassed: false` returns `{ ok: false, reason: 'not-gate-passed' }` and calls none
-  of the four downstream registries.
-- `emitEdit()` with `gatePassed: true` and every fake registry succeeding returns `{ ok: true, url, number }`,
-  and the fake ide-bridge/credential-source/forge/pr-body renderer were each called exactly once with the
-  edit's real `after` content reaching the ide-bridge `patch` call.
+- `emitEdit()` called against buffer content that genuinely fails the gate (verified independently by
+  calling `runVerifyGate()` on the same fixture in the test and asserting `ok: false` first) returns
+  `{ ok: false, reason: 'not-gate-passed' }` and calls none of the four downstream registries — **this is
+  the regression test for PR #1355 round 3**: it must hold with no `gatePassed` argument anywhere in the
+  call, because `emitEdit()` derives the answer itself from the buffer's real content via its own internal
+  `runVerifyGate()` call, not from anything the caller claims.
+- `emitEdit()` called against buffer content that genuinely passes the gate, with every fake registry
+  succeeding, returns `{ ok: true, url, number }`, and the fake ide-bridge/credential-source/forge/pr-body
+  renderer were each called exactly once with the edit's real `after` content reaching the ide-bridge
+  `patch` call.
 - `emitEdit()` with any one fake registry returning unavailable/error returns the matching
   `EmitFailureReason` and does not proceed to the steps after it (e.g. an unavailable ide-bridge never
   reaches the forge call).
