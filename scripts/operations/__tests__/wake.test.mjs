@@ -110,6 +110,53 @@ describe('observeRun — folding terminal answers into the record', () => {
     expect(out.resolved[0]).toMatchObject({ status: 'succeeded', recordedAs: 'applied' });
   });
 
+  // #3085: `resolved` hands a KNOWN outcome onward instead of judging it — unlike `succeeded`, an `error`
+  // alongside it is not a contradiction, and `result` may itself describe a failure.
+  it('`resolved` records `applied` with a failing `result`, unlike `succeeded` which refuses one', async () => {
+    const { run } = await parked();
+    const out = await observeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'resolved', result: { exit: 1, log: 'BUILD FAILED' } }) },
+    });
+    expect(out.run.effects[0]).toMatchObject({ status: 'applied', result: { exit: 1, log: 'BUILD FAILED' } });
+    expect(out.resolved[0]).toMatchObject({ status: 'resolved', recordedAs: 'applied' });
+  });
+
+  it('`resolved` permits an `error` alongside the result — it makes no clean-outcome claim', async () => {
+    const { run } = await parked();
+    const out = await observeRun(run, {
+      observers: { 'start.build': async () => ({ status: 'resolved', result: { exit: 1 }, error: 'BUILD FAILED' }) },
+    });
+    expect(out.errors).toEqual([]);
+    expect(out.run.effects[0]).toMatchObject({ status: 'applied', result: { exit: 1 }, error: 'BUILD FAILED' });
+  });
+
+  // THE PROBE FROM #3085 ITSELF: a declaration with a reacting step sees a dispatched build's failing outcome,
+  // and nothing re-dispatches it — `resolved` records `applied`, same as `succeeded`.
+  it('a declaration with a reacting step sees the outcome the waker resolved, and nothing re-dispatches', async () => {
+    const r = createRegistry();
+    r.register(op('fx-react', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      react: confirmStep({
+        reads: ['findings.go'],
+        asks: (v) => `The build ${v.findings.go.effects[0].result.exit === 0 ? 'passed' : 'FAILED'}. Land anyway?`,
+        of: () => 'human',
+      }),
+    }));
+    const store = createMemoryRunStore();
+    let run = advanceWhileRunning(startRun({ op: 'fx-react', id: 'run-react', input: { pr: 7 }, registry: r }), { registry: r });
+    run = (await applyPendingEffects(run, { sinks: SINKS, store })).run;
+    const pass = await wakePass({
+      store,
+      observers: { 'start.build': async () => ({ status: 'resolved', result: { exit: 1, log: 'BUILD FAILED' } }) },
+      resolveFor: () => ({ registry: r, sinks: SINKS }),
+    });
+    expect(pass.runs[0].resolved).toEqual([{ key: 'run-react#0#0', type: 'start.build', status: 'resolved', recordedAs: 'applied' }]);
+    const rec = store.read('run-react');
+    expect(rec.findings.go.effects[0].result).toEqual({ exit: 1, log: 'BUILD FAILED' });
+    expect(rec.pending).toMatchObject({ kind: 'confirm', asks: 'The build FAILED. Land anyway?' });
+  });
+
   // THE ONE THAT TOOK THREE ROUNDS. Anything that is over but not a clean success WRITES NOTHING — there is
   // no status meaning "this is done and nobody should touch it", so writing one always licensed the next
   // caller to retry or to advance. The entry stays in-flight and a person decides.
@@ -151,7 +198,7 @@ describe('observeRun — folding terminal answers into the record', () => {
       expect(out.run.effects[0].status).toBe('in-flight');
       expect(out.errors[0].error).toMatch(/expected one of/);
     }
-    expect(OBSERVATIONS).toEqual(['running', 'succeeded', 'unresolved']);
+    expect(OBSERVATIONS).toEqual(['running', 'succeeded', 'resolved', 'unresolved']);
   });
 
   it('createEffectObserver validates its wiring at construction, not at the first pass', () => {
