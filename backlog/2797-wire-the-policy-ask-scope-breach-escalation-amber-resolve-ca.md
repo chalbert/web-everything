@@ -5,7 +5,7 @@ size: 5
 parent: "2555"
 status: open
 locus: plateau-app
-blockedBy: ["x8i5whs"]
+blockedBy: ["3114"]
 dateOpened: "2026-07-31"
 tags: [plateau-loop, console, console-board, scope-lease, canonical-2554]
 scope:
@@ -24,7 +24,7 @@ scope:
 # Wire the escalated (policy=park) scope-breach onto UC-A16, the amber Resolve card
 
 Promote a scope-breached lane from A4's ratified agent-only default (§2574) to the new UC-A16 amber you-card
-(minted by [#x8i5whs]) once its breach escalates under `breachMidBuild: 'park'` — the one policy branch
+(minted by [#3114]) once its breach escalates under `breachMidBuild: 'park'` — the one policy branch
 `we:scripts/readiness/scope-lease.mjs`'s `breachOutcome` already computes but the board's read-model doesn't
 yet consume. Wiring only: the live policy/retry-count signal the original digest called a prerequisite is
 **already shipped** (§2560/§2598/§2589, all `status: resolved`); this item is the remaining consumer-side map
@@ -32,7 +32,7 @@ from that live signal into the card the operator sees. The verb button itself ne
 "resolve-at-drain plumbing" — it rides the same generic, deliberately-unwired `we-button.lb-verb` affordance
 every other you-act verb on the board already uses (`plateau-app:src/backlog-view/lane-board.ts:1660-1683`).
 Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the default; blocked on
-[#x8i5whs] because the amber card's UC-id doesn't exist in the ratified taxonomy yet.
+[#3114] because the amber card's UC-id doesn't exist in the ratified taxonomy yet.
 
 ## Findings from verification against live code (2026-08-15)
 
@@ -57,13 +57,13 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
    the route menu" — exactly the behavior this story wires. The design doc's own prose ("only policy = ask
    turns this into a you-card", `plateau-app:docs/backlog-console-design.md:295`) is loose paraphrase of
    §2574's ruling, not a literal token; the code is ground truth. This story targets `action === 'park'`.
-3. **No UC-id exists for the promoted card — filed as [#x8i5whs].** The ratified taxonomy is hard-pinned at
+3. **No UC-id exists for the promoted card — filed as [#3114].** The ratified taxonomy is hard-pinned at
    37 states / 17 you-act verbs across `plateau-app:src/backlog-view/card-state-read-model.test.ts:85`,
    `plateau-app:src/backlog-view/card-taxonomy.webcases.test.ts:69,111,278,323`, and
    `plateau-app:src/backlog-view/card-taxonomy-docs.test.ts:26,76,303` and
    `plateau-app:src/backlog-view/lane-board.test.ts:617`. §2574's own Fork 4 requires any count change to be
    "a separate decision that supersedes §6e with lineage — never an edit folded into A4's transition table"
-   (`plateau-app:docs/backlog-console-design.md:311-313`). [#x8i5whs] is that decision (mints `UC-A16`); this
+   (`plateau-app:docs/backlog-console-design.md:311-313`). [#3114] is that decision (mints `UC-A16`); this
    story is `blockedBy` it and targets the UC-id it ratifies.
 4. **The `'pause'` and `'resolve-at-drain'` branches need NO new card.** `breachOutcome`'s `'pause'` branch
    sets `holdSource: 'sibling-lane'` — a hand-off to the cross-lane family the board already renders (UC-B2
@@ -99,7 +99,7 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
   (`plateau-app:src/backlog-view/card-state-read-model.ts:260-270`).
 - **Taxonomy:** add ONE new WEB CASE to `CONSOLE_CARD_CASES['console-card-lifecycle']`
   (`plateau-app:src/backlog-view/card-taxonomy.webcases.ts`, alongside cases 1–15), carrying the grammar
-  [#x8i5whs] ratifies (seed proposal: `assert: actor=you edge=amber primary=Resolve rendered=yes uc=UC-A16
+  [#3114] ratifies (seed proposal: `assert: actor=you edge=amber primary=Resolve rendered=yes uc=UC-A16
   glyph=octagon-alert motion=shake verbGlyph=split`), title "escalated — scope breach", description citing
   the `breachMidBuild=park` cause and the escalation-ladder routes
   (`we:scripts/readiness/scope-lease.mjs:290-299` `BREACH_ESCALATION_LADDER`).
@@ -110,7 +110,7 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
   at `:62`).
 - **Design doc:** extend the §6e "full 37-state manifest" prose
   (`plateau-app:docs/backlog-console-design.md:440-471`) to 38 states / 18 you-act verbs, recording UC-A16's
-  glyph/motion/verb-glyph once [#x8i5whs] ratifies them.
+  glyph/motion/verb-glyph once [#3114] ratifies them.
 
 ## Interfaces touched
 
@@ -127,7 +127,7 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
 
 ## Tasks
 
-1. Confirm [#x8i5whs] is ratified; take its final `glyph`/`motion`/`verbGlyph` tokens (may differ from the
+1. Confirm [#3114] is ratified; take its final `glyph`/`motion`/`verbGlyph` tokens (may differ from the
    seed proposal after the four-lens rating pass).
 2. Add the UC-A16 webcase to `plateau-app:src/backlog-view/card-taxonomy.webcases.ts` with the ratified grammar.
 3. Update the taxonomy-count conformance assertions (37→38, and the A-family count 15→16 where asserted
@@ -149,7 +149,7 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
 
 ## Done when
 
-- [ ] [#x8i5whs] is ratified (a prerequisite gate, not this story's own work).
+- [ ] [#3114] is ratified (a prerequisite gate, not this story's own work).
 - [ ] A `ScopePicture` fixture with one lease whose `outcome = { action: 'park', escalated: true, ... }`
       and a `building` card owning that lease renders as `UC-A16`, not `UC-A4` — proven by a unit test on
       `overlayToSignals`/`deriveCardState` (fixtures/injected data; a live demo is not required — the dev
@@ -168,7 +168,7 @@ Deferred out of #2792 (chrome-consistency) because #2574 keeps agent-state the d
 
 ## Delivery shape
 
-Two items, in order: [#x8i5whs] (the taxonomy-extension decision) must ratify before this story's PR opens —
+Two items, in order: [#3114] (the taxonomy-extension decision) must ratify before this story's PR opens —
 its ruling fixes the UC-id and grammar tokens this story's diff needs to cite verbatim. Once ratified, this
 story lands as ONE incremental PR behind `main` (no flag needed): the new rule sits strictly ABOVE UC-A4 in
 precedence and only fires on a new signal (`escalatedBreach`) nothing currently sets, so it is inert until
