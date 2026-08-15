@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "2676"
 status: parked
-blockedBy: ["x8lmsau"]
+blockedBy: ["3124"]
 dateOpened: "2026-07-27"
 tags: []
 ---
@@ -38,7 +38,7 @@ own phase" into the **agent-side build-ui skill/method** (we:docs/agent/build-ui
 a human/agent builds ANY UI by hand. This card is about the **design-studio tool itself doing that
 automatically as a product feature**, which is a different, unbuilt thing.
 
-Filed x8lmsau (decision: which of #2676's four NEW pieces ships first) as the blocker. Parked on it rather
+Filed 3124 (decision: which of #2676's four NEW pieces ships first) as the blocker. Parked on it rather
 than left silently open — per we:docs/agent/backlog-workflow.md's hold model, a single tracked blocker is a
 `blockedBy` park, no `parkedReason` needed. **Re-prepare this card once that decision resolves and its chosen
 slice lands** — at that point items 1–8 of the checklist (scope, size, acceptance, design, interfaces, tasks,

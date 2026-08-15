@@ -26,10 +26,10 @@ A new backlog file added in an unlanded lane must carry a hash id (xNNNNNN), nev
   the call site and `we:scripts/check-standards-rules.mjs:2104-2139` (`duplicateBacklogNums` +
   `strandedHashesOnMain`, the two existing id-hygiene detectors).
 - **The incident is real and correctly cited.** Commit `86fd66fe` ("prevention items for the
-  hand-numbering/collision-corruption class") filed this exact item (`bornAs: xxhnbew`) plus two siblings
+  hand-numbering/collision-corruption class") filed this exact item (`bornAs: 2548`) plus two siblings
   after "the #558 incident (hand-numbered ids collided with a concurrent session; the drain collision-heal
-  blanked 6 files)": `xgagt89` → landed as **#2546** ("make the drain collision-heal renumber
-  content-preserving"), `xgl2ptq` → landed as **#2547** ("batch-scaffold helper"). Both still `open`. This
+  blanked 6 files)": `2546` → landed as **#2546** ("make the drain collision-heal renumber
+  content-preserving"), `2547` → landed as **#2547** ("batch-scaffold helper"). Both still `open`. This
   item is the strongest of the three — it prevents the mistake, where the other two only limit the damage or
   reduce the temptation to hand-batch.
 - **A write-time half already exists and does NOT cover this gap.** `we:scripts/backlog-guard.mjs`'s
