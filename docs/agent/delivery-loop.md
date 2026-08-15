@@ -31,7 +31,10 @@ version of this page wrote them as one requirement and was wrong about two:
 ```bash
 # 1. a lane of its OWN — never the driver's, and never the primary checkout.
 #    This is tool isolation, not identity: two reviewers editing one tree rebase under each other.
-node scripts/lane-pool.mjs acquire --purpose=review-1234 --json
+#    --adopt stamps the acquiring process as the lane's occupant (workerSession) — this headless
+#    reviewer both acquires and edits, the self-acquire topology --adopt is for, so guard-lane.mjs
+#    refuses an Edit/Write from any OTHER session from the moment it acquires (#2997 r2 / #3107).
+node scripts/lane-pool.mjs acquire --purpose=review-1234 --adopt --json
 
 # 2. a derived id. Independence does NOT depend on this — headless is already distinct. What the
 #    derivation buys is DETERMINISM: the same seed names the same actor, so a re-review is traceable.
