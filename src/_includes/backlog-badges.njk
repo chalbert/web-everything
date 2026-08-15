@@ -28,7 +28,7 @@
    `epic`/`task` self-name here (they replaced the old unsized-stand-in `workItemBadge`); a `story` shows
    its kind alongside the size badge; a `decision` keeps the indigo it had as a `type`. #}
 {% macro kindBadge(kind, scale='sm') %}{# #1208: KIND taxonomy → FUI `<we-tag>` categorical (set,value) mode (#1670); per-value palette in we:src/css/style.css. `scale` kept for call-site compat but no longer sizes the pill (the FUI tag owns its geometry). #}
-<we-tag set="kind" value="{{ kind }}" title="{% if kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}">{{ kind }}</we-tag>
+<we-tag set="kind" value="{{ kind }}" title="{% if kind == 'feature' %}feature — the grouping tier above epic; rolls up its child epics (#2691){% elif kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}">{{ kind }}</we-tag>
 {% endmacro %}
 
 {# Status Indicator surface (#1621 status half) — lifecycle state → FUI `<we-badge>` (transient CE, loaded
@@ -90,7 +90,7 @@
 {# The epic-status badge cluster — picks exactly one of: ongoing program / unsliced·why / all slices done /
    ⚠ open slice. ONE place so the tile and the detail page read identically. #}
 {% macro epicStatusBadge(item, scale='sm') %}
-{% if item.kind == 'epic' %}
+{% if item.kind == 'epic' or item.kind == 'feature' %}
 {%- if item.ongoing and item.status != 'resolved' -%}
 <we-badge tone="info" title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances.">ongoing program</we-badge>
 {%- elif not (item.children | length) -%}{{ unslicedBadge(item.childlessReason, scale) }}
@@ -147,7 +147,7 @@
 {%- if item.stopTheWorld %}{% set nb = backlogMeta.notBatchableMeta['stop-the-world'] %} <we-badge tone="error" icon="⊗" title="{{ nb.tip }}">{{ nb.label }}</we-badge>
 {%- elif item.humanGate %}{% set hg = backlogMeta.humanGateMeta[item.humanGateKind] %} <we-badge tone="error" icon="⊗" title="{{ hg.tip if hg else 'Held on a human-only action — an agent can’t clear it. See the item for what to do.' }}{% if item.humanGate.what %} — {{ item.humanGate.what }}{% endif %}">{{ hg.label if hg else 'human-gated' }}</we-badge>
 {%- elif item.openBlockers.length %} <we-badge tone="error" icon="⊗" title="Blocked — waiting on an unresolved prerequisite (blockedBy). Not workable until it resolves.">blocked by {% for n in item.openBlockers %}#{{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</we-badge>
-{%- elif item.projectPending and item.kind != 'epic' %}{% set nb = backlogMeta.notBatchableMeta['project-pending'] %} <a href="/projects/{{ item.relatedProject }}/" title="{{ nb.tip }} — held on project `{{ item.relatedProject }}` ({{ item.relatedProjectStatus }}); open it to ship/graduate, or re-home this item." style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }}; text-decoration:none;">⊗ {{ nb.label }} · {{ item.relatedProject }}</a>
+{%- elif item.projectPending and item.kind != 'epic' and item.kind != 'feature' %}{% set nb = backlogMeta.notBatchableMeta['project-pending'] %} <a href="/projects/{{ item.relatedProject }}/" title="{{ nb.tip }} — held on project `{{ item.relatedProject }}` ({{ item.relatedProjectStatus }}); open it to ship/graduate, or re-home this item." style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }}; text-decoration:none;">⊗ {{ nb.label }} · {{ item.relatedProject }}</a>
 {%- elif item.status == 'parked' and item.parkedReason %}{% set pr = backlogMeta.parkedReasonMeta[item.parkedReason] %} <we-badge tone="warning" icon="⏸" title="{{ pr.tip if pr else 'Parked — a deliberate hold; see the item for the reason.' }}">{{ pr.label if pr else item.parkedReason }}</we-badge>
 {%- elif item.priority == 'low' %}{% set pm = backlogMeta.priorityMeta.low %} <we-badge tone="neutral" icon="▽" title="{{ pm.tip }}">{{ pm.label }}</we-badge>
 {%- endif %}{% endmacro %}
