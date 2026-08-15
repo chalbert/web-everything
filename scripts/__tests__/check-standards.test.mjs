@@ -20,7 +20,7 @@ import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDemos } from '../lib/demos-loader.cjs';
 import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import { loadAdapters } from '../lib/adapters-loader.cjs';
-import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
+import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, dirLevelScopeFinding } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -311,28 +311,12 @@ describe('scope: must be repo-qualified', () => {
 });
 
 // ── scope defaults to FILE-LEVEL — a bare directory scope is FLAGGED unless justified (#2739) ──
-// Mirrors the inline check-standards.mjs branch (§6d-sexies) that WARNS on a repo-qualified scope prefix ending
-// in `/` (a whole-directory lease) unless the item carries a `scopeRationale:` note or is already resolved. Same
-// mirror pattern as `classifyScope` above: the script isn't importable, so we re-express the decision as a pure
-// `dirLevelScopeFinding` and pin it with the requested unit cases plus a standing false-positive corpus guard.
+// Exercises the SHIPPED `dirLevelScopeFinding` (check-standards-rules.mjs, #2751) — the same pure predicate
+// check-standards.mjs's §6d-sexies WARN calls — against synthetic fixtures plus a standing real-corpus sanity
+// check. #2751 extracted this out of a hand-mirrored local copy (which could drift from the rule it claimed to
+// pin, undetectably) so this test now imports and runs the exact code the gate runs.
 describe('scope defaults to file-level — dir-level scope flagged unless justified', () => {
   const matter = require('gray-matter');
-  const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
-
-  /**
-   * Pure mirror of the inline warn: returns the repo-qualified dir-level entries (prefix ending in `/`) that
-   * would be FLAGGED for `item`, or `[]` when the item is exempt (resolved, or carries a non-empty
-   * scopeRationale) or is entirely file-level. A bare (non-repo-qualified) entry is NOT counted here — it is a
-   * separate hard error (classifyScope → 'bare'), so it never double-signals as a dir-level finding.
-   */
-  const dirLevelScopeFinding = (item) => {
-    const scope = item?.scope;
-    if (!Array.isArray(scope)) return [];
-    if (item?.status === 'resolved') return [];
-    const rationale = typeof item?.scopeRationale === 'string' ? item.scopeRationale.trim() : '';
-    if (rationale) return [];
-    return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
-  };
 
   it('flags a bare directory scope entry (prefix ending in "/")', () => {
     expect(dirLevelScopeFinding({ status: 'open', scope: ['we:scripts/readiness/'] }))
@@ -364,11 +348,14 @@ describe('scope defaults to file-level — dir-level scope flagged unless justif
   });
 
   it('never flags an item whose scope is already file-level or justified across the REAL backlog', () => {
-    // False-positive guard: assert the finding only ever lands on an UNjustified, non-resolved, dir-level
-    // scope — i.e. every flagged item really does carry a `/`-terminated entry, no rationale, and isn't
-    // resolved. This is the soundness invariant (it never fires on a file-level or justified item), the same
-    // standing-corpus discipline the repo-qualified guard above uses — NOT an assertion of zero findings (the
-    // finer-lease debt is exactly what the warning surfaces, so real dir-scoped items legitimately match).
+    // Real-corpus sanity/fuzz check (#2751): NOT a drift guard — the shipped `dirLevelScopeFinding`'s own filter
+    // chain already guarantees these three properties the moment it returns a non-empty array, so no future
+    // behavior change to the function itself could fail this loop (that job belongs to the wiring test below,
+    // which pins registration, and to the unit cases above, which pin behavior). What THIS loop actually checks
+    // is that the shipped predicate stays well-typed over real, messy backlog frontmatter — i.e. every flagged
+    // item really does carry a `/`-terminated entry, no rationale, and isn't resolved — NOT an assertion of zero
+    // findings (the finer-lease debt is exactly what the warning surfaces, so real dir-scoped items legitimately
+    // match).
     const dir = join(ROOT, 'backlog');
     for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
       let data;
@@ -382,5 +369,28 @@ describe('scope defaults to file-level — dir-level scope flagged unless justif
         for (const entry of finding) expect(entry.endsWith('/'), `${file}: ${entry}`).toBe(true);
       }
     }
+  });
+
+  // ── #2751 wiring: §6d-sexies must call the SHIPPED function, not re-derive it inline ─────────────
+  // Same technique as check-standards-rules.test.mjs:2376 ("rule 19 is WIRED"): a mutated/reverted call site
+  // could otherwise leave every test above green because they exercise the imported function directly, never
+  // check-standards.mjs's own use of it. This reads the gate's OWN source and asserts §6d-sexies still imports
+  // and calls `dirLevelScopeFinding` — un-swallowed by a try/catch, since a rule that WARNS may not be silenced.
+  it('§6d-sexies is WIRED: check-standards.mjs imports and calls the shipped dirLevelScopeFinding', () => {
+    const gate = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
+    expect(gate).toMatch(/dirLevelScopeFinding,?\s*\n?\s*\} from '\.\/check-standards-rules\.mjs';/);
+    const from = gate.indexOf('// ── 6d-sexies.');
+    expect(from).toBeGreaterThan(-1);
+    const nextSection = gate.indexOf('\n// ── ', from + 1);
+    const section = gate.slice(from, nextSection < 0 ? undefined : nextSection);
+    expect(section).toMatch(/const dirs = dirLevelScopeFinding\(raw\);/);
+    // Narrow, local window around the call site — the §6d-sexies section also legitimately wraps the earlier
+    // gray-matter frontmatter parse in its OWN unrelated try/catch (malformed YAML is skipped, reported
+    // elsewhere), so a whole-section try/catch scan would false-positive on that. What must never happen is
+    // THIS call (plus its `warn`) getting silently swallowed, so check only the text immediately around it.
+    const callIdx = section.indexOf('const dirs = dirLevelScopeFinding(raw);');
+    expect(callIdx).toBeGreaterThan(-1);
+    const localWindow = section.slice(Math.max(0, callIdx - 200), callIdx + 200);
+    expect(localWindow).not.toMatch(/try\s*\{/);
   });
 });
