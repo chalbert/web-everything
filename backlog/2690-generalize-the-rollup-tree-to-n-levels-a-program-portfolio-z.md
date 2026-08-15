@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "2676"
 status: open
-blockedBy: ["2726", "x7l22sz"]
+blockedBy: ["2726", "3123"]
 dateOpened: "2026-07-26"
 tags: []
 ---
@@ -44,13 +44,13 @@ build-ready right now; recording why rather than forcing a design around either 
    higher tier rolls up points or outcomes" is not a detail to leave for the builder — per checklist item 4
    it must be named as its own decision, the same way the sibling **#2689** (configurable hierarchy levels)
    was already split out of this same design session instead of buried in a story. Split to
-   **#x7l22sz** ("Name the tier above feature (rollup basis: points vs outcome-metrics)"), which also
+   **#3123** ("Name the tier above feature (rollup basis: points vs outcome-metrics)"), which also
    carries a recommendation (PROGRAM — reuses points/velocity/forecast verbatim; INITIATIVE/OKR OBJECTIVE
-   both need a new non-points aggregation primitive that doesn't exist yet). Added `blockedBy: ["x7l22sz"]`.
+   both need a new non-points aggregation primitive that doesn't exist yet). Added `blockedBy: ["3123"]`.
 
 **Not viable to prepare further (interfaces/tasks/Done-when) until both blockers clear**: the interface this
 story would specify (what a program/portfolio node exposes to the rollup renderer) is exactly what fork 2
 above decides, and the renderer it would extend is exactly what #2726 has not yet built. Preparing
 interfaces/tasks now would be inventing a contract against code that doesn't exist — the failure mode the
 checklist's #2803/#2351 examples warn against (reasoning from a state the repo hasn't reached). Re-open
-preparation once #2726 lands and #x7l22sz ratifies.
+preparation once #2726 lands and #3123 ratifies.

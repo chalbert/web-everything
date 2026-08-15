@@ -30,7 +30,7 @@ complete ones.
 
 **How to apply / guard-rails:**
 - Verify before resolving — a merged *branch name* is not proof. #2666's lane branch was
-  named `xppjnof-conveyor-redci-autoheal`, but the only merged commit was `file card`; the
+  named `2666-conveyor-redci-autoheal`, but the only merged commit was `file card`; the
   implementation never landed (it was `blockedBy`). Resolving it on the branch name alone
   would have been wrong. Confirm the scope's files/behavior are actually on main.
 - Do NOT resolve **epics** because one child PR merged — an epic resolves only when every
