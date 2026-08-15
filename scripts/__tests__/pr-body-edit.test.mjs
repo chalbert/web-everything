@@ -2,7 +2,7 @@
  * @file pr-body-edit.test.mjs — the stamp survives a body rewrite, and the guard denies the raw command.
  */
 import { describe, it, expect } from 'vitest';
-import { withCarriedStamps } from '../pr-body-edit.mjs';
+import { withCarriedStamps, recoverAuthorIdFromHistory } from '../pr-body-edit.mjs';
 import { buildAuthorActorMarker, parseAuthorActorId, readAuthorActorStamps } from '../lib/review-independence.mjs';
 import { reason } from '../guard-bash.mjs';
 
@@ -40,6 +40,50 @@ describe('withCarriedStamps', () => {
     const { body, carried } = withCarriedStamps('no stamp here', 'new');
     expect(carried).toEqual([]);
     expect(readAuthorActorStamps(body)).toEqual([]);
+  });
+});
+
+describe('recoverAuthorIdFromHistory — #3067\'s recovery from GitHub\'s OWN edit-history record', () => {
+  it('finds the stamp in a single prior body snapshot', () => {
+    expect(recoverAuthorIdFromHistory([`old body\n\n${stamp(A)}`])).toBe(A);
+  });
+
+  it('the SAME id repeated across several snapshots still resolves — duplication is not a conflict', () => {
+    expect(recoverAuthorIdFromHistory([`v1\n\n${stamp(A)}`, `v2\n\n${stamp(A)}`, 'v3 no stamp'])).toBe(A);
+  });
+
+  it('DIFFERENT ids across history are AGREEMENT-OR-NOTHING, same discipline as the live-body reader', () => {
+    expect(recoverAuthorIdFromHistory([`v1\n\n${stamp(A)}`, `v2\n\n${stamp(B)}`])).toBe('');
+  });
+
+  it('no stamp anywhere in the history recovers nothing', () => {
+    expect(recoverAuthorIdFromHistory(['v1 plain', 'v2 also plain'])).toBe('');
+  });
+
+  it('empty/non-array input recovers nothing rather than throwing', () => {
+    expect(recoverAuthorIdFromHistory([])).toBe('');
+    expect(recoverAuthorIdFromHistory(undefined)).toBe('');
+    expect(recoverAuthorIdFromHistory(null)).toBe('');
+  });
+
+  // THE WEB-UI TEST CASE (#3067's own "done when" bullet: "the web-UI route is the test case"). No shell
+  // command can intercept a web-UI body edit — `guard-bash.mjs` has nothing to deny — so the live body simply
+  // arrives with its stamp gone, indistinguishable BY ORIGIN from any other edit route. What recovers it is
+  // that GitHub's timeline records `changes.body.from` identically no matter what wrote the edit — `gh`, the
+  // REST/GraphQL API, or a human typing into the web UI. This proves the recovery logic doesn't need to know,
+  // or care, which route stripped the stamp.
+  it('recovers a stamp stripped by a route no shell guard can see — the timeline does not care who edited', () => {
+    const openedBody = `Resolve #1234: fix the thing.\n\n${stamp(A)}`;
+    // The web UI edit: GitHub's timeline records the body AS IT STOOD before the edit (`changes.body.from`),
+    // then the live body moves on to whatever the human typed — here, with the stamp gone.
+    const timelineFromBodies = [openedBody];
+    const liveBodyAfterWebEdit = 'Resolve #1234: fix the thing, revised for clarity.'; // no stamp
+    expect(readAuthorActorStamps(liveBodyAfterWebEdit)).toEqual([]); // confirms the strip actually happened
+    const recovered = recoverAuthorIdFromHistory(timelineFromBodies);
+    expect(recovered).toBe(A);
+    // And the recovered id restores cleanly onto the live body via the SAME carry-forward the base mode uses.
+    const { body } = withCarriedStamps(buildAuthorActorMarker(recovered), liveBodyAfterWebEdit);
+    expect(parseAuthorActorId(body)).toBe(A);
   });
 });
 
