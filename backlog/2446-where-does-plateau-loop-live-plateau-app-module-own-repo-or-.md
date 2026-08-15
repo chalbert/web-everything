@@ -26,7 +26,11 @@ backlog CLI — into a resident coordinator managing a registry of projects (WE,
 Today that **engine core** is ~4,600 lines of already-repo-parameterized Node under WE's scripts dir
 (`we:scripts/merge-ai-prs.mjs` 2448 lines, `we:scripts/pr-land.mjs` 1015, `we:scripts/lane-pool.mjs`
 1124), keyed by a hardcoded three-name registry (`CONSTELLATION_REPO_NAMES` at
-`we:scripts/merge-ai-prs.mjs:826`). **WE holds zero implementation by statute
+`we:scripts/merge-ai-prs.mjs:826`; **re-verified 2026-08-15: now 6,776 lines** — `we:scripts/merge-ai-prs.mjs`
+4121 / `we:scripts/pr-land.mjs` 1206 / `we:scripts/lane-pool.mjs` 1449 — **still 100% single-sourced in
+`we:scripts/`**, the registry constant unchanged in content and now at `we:scripts/merge-ai-prs.mjs:1736`;
+growth only sharpens the statute violation below, it does not change the shape of the call). **WE holds
+zero implementation by statute
 ([#constellation-placement](../docs/agent/platform-decisions.md#constellation-placement) rule 1, #1282),
 so the engine cannot stay in WE** — that is the forced invariant, not a live option.
 
@@ -42,6 +46,26 @@ Two pieces move on different tests, and keeping them separate is what un-tangles
 There is **one real fork** (the engine core's canonical home); the migration *timing* is not a second
 fork — with cost removed it collapses to "when do we pay the move," pure prioritization — so it is folded
 into the recommended default as a **staged rollout with a named trigger**, not ratified separately.
+
+## For the ratifying human — the one thing to weigh (2026-08-15)
+
+This item is fully researched; what's left is a genuine either/or, not a research gap, so it is **not**
+auto-ratifiable (the fork-existence test names two coherent branches, (a) and (b) — see Fork 1) and
+needs your explicit ratify/override. The crux in one line: **do you read
+[#reusable-neutral-home](../docs/agent/platform-decisions.md#reusable-neutral-home) (#1788) by its
+letter (it names *plateau* as the neutral home → (a)), or by its principle ("the member that is not
+itself coordinated" → (b), because plateau-app *is* a coordinated subject of this engine)?** Everything
+else in this item — the prior-art survey, the skeptic pass, the statute reconciliation, the staged
+rollout mechanics — is downstream of that one interpretive call.
+
+- **Ratify (b) as written** (own repo, staged, graduation triggers below) — the prepared default, and
+  the one the skeptic/screen passes survived. Also amends #1788 as drafted in *Statute reconciliation*.
+- **Override to (a)** (plateau-app permanent) — valid if you judge the coordinated-subject coupling
+  tolerable, or prefer #1788's letter over its principle. Cheaper today, accepts the version-lock risk
+  the prior-art survey flags (no coordinator in the bors/Prow/Zuul survey lives inside a repo it
+  coordinates).
+
+Both are real; this call does not resolve on more research.
 
 ## Un-defer (2026-07-28)
 
@@ -183,8 +207,9 @@ anchor (the standing home of this turf) and records the #1788 amendment above.
 
 - **Now (staged interim):** the engine core graduates from `we:scripts/` into `plateau:tools/` beside
   the existing `plateau:tools/drain-daemon/`; `CONSTELLATION_REPO_NAMES`
-  (`we:scripts/merge-ai-prs.mjs:826`) is unchanged; the pool `siblingClone*` resolution
-  (`we:scripts/merge-ai-prs.mjs:869`) keeps its current `frontierui`/`plateau-app` shape.
+  (`we:scripts/merge-ai-prs.mjs:1736`, re-verified 2026-08-15) is unchanged; the pool `siblingClone*`
+  resolution (`we:scripts/merge-ai-prs.mjs:1804`, re-verified 2026-08-15) keeps its current
+  `frontierui`/`plateau-app` shape.
 - **On graduation (own repo):** adds a fourth name to `CONSTELLATION_REPO_NAMES`, provisions a fourth
   pool clone, and edits the anchors named in the reconciliation — the concrete diff staging defers.
 
@@ -205,6 +230,36 @@ is re-checked against the real diff at PR open.
 | simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
 | standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 | standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+
+## Re-verified (2026-08-15) — still current, cost of waiting is rising
+
+Walked the live tree and open-item state against every load-bearing claim above; nothing has gone
+stale, and the un-ratified wait is getting more expensive, not less:
+
+- **Engine core, re-measured:** 6,776 lines (up from ~4,600 at prep — see the Digest correction above),
+  still 100% in `we:scripts/`, still keyed by the same 3-name `CONSTELLATION_REPO_NAMES`. The statute
+  violation the fork exists to resolve has only grown.
+- **None of the three staged-rollout graduation triggers has fired:** (i) registry is still exactly
+  `web-everything`/`frontierui`/`plateau-app` — no fourth repo; (ii) [#554](/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/)
+  (the SaaS/external-adopter trigger) is still `status: open`, unstarted; (iii) no reported CI/release
+  divergence between the engine and plateau-app. The staged interim (co-located, cheap) is still the
+  correct place to be *today* — this does not change the Fork 1 call, it confirms the rollout's timing
+  logic is holding.
+- **[#2448](/backlog/2448-re-anchor-the-gate-self-trust-chain-when-the-delivery-engine/)
+  (gate-self re-anchoring) is now `status: resolved`** — the first-hop migration cost the *Cost note*
+  above warns about is already substantially de-risked.
+- **The sibling deferred decision, [#2444](/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/)
+  (agent runner), ratified 2026-07-16** without waiting on #2456's unattended-autonomy gate — independent
+  confirmation that this epic's decisions don't need that gate to proceed, exactly as this item's own
+  *Un-defer* section already argued for placement.
+- **Rising cost of inaction:** epic [#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)
+  currently carries **14 open children** stalled on this call directly or transitively (registry #2472,
+  config-over-convention #2465, the orchestrator rewrite #2469, and others). [#2469](/backlog/2469-plateau-loop-rewrite-the-parallel-orchestrator-as-plain-node/)'s
+  own 2026-08-15 preparation finding independently re-derived the same wall this item already names in
+  *Delegation* below — a fresh, un-primed session hit "the actual content here is exactly what #2446
+  was opened to answer" on its own, which is corroboration, not new information (it does not change
+  either fork branch). Ratifying this item is what unblocks that queue; leaving it un-ratified is the
+  status quo cost, not a neutral hold.
 
 ## Delegation
 
