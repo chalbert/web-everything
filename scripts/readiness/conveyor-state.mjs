@@ -53,6 +53,7 @@ import { deriveInfraByNum, readInfraStore, resolveInfraStorePath, correlateCause
 // as "no predicted scope". scope-lease.mjs is import-clean (no node built-ins), safe for the pure core.
 import { normScope } from './scope-lease.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
+import { isGroupingKind } from '../check-standards-rules.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -430,11 +431,13 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * task that authors each item's `scope:` upstream; once that lands the item is scoped and dispatches to BUILD.
  * Surfacing them here is how the skill decides to AUTO-PREPARE: "these cleared items have no scope — prepare it so
  * they can build and parallelize." An item counts as unshaped when its scope is absent / non-array / empty /
- * all-blank (the SAME `normScope`-emptiness test the dispatcher keys on) AND it is NOT a `kind:epic` — an epic is
- * held `needs-slice` BEFORE the scope gate in the dispatcher (a container is sliced, never scope-authored), so this
- * excludes epics to mirror that precedence EXACTLY: a scope-less epic surfaces ONLY in {@link deriveNeedsSlice},
- * never here. Without that guard an armed scope-less epic (the common case — epics rarely carry scope) would appear
- * in BOTH sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes.
+ * all-blank (the SAME `normScope`-emptiness test the dispatcher keys on) AND it is NOT a grouping kind (`epic`, or
+ * `feature` — #2998 epic-parity; {@link isGroupingKind}) — a grouping kind is held `needs-slice` BEFORE the scope
+ * gate in the dispatcher (a container is sliced, never scope-authored), so this excludes grouping kinds to mirror
+ * that precedence EXACTLY: a scope-less container surfaces ONLY in {@link deriveNeedsSlice}, never here. Without
+ * that guard an armed scope-less container (the common case — containers rarely carry scope) would appear in BOTH
+ * sets, and the skill's §3b would aim a prepare-scope agent at a container — the very hazard #2645 closes (and the
+ * exact regression a cleared `kind:feature` reached before #2998's fix, since only `epic` was excluded here).
  * A `kind:decision` is excluded for the SAME reason (#2647): it is held `needs-decision` before the scope gate (a
  * decision is prepared/presented, never scope-authored), and surfaces ONLY in {@link deriveDecisions}. So the two
  * surfaces never disagree with `plan.held`. Reads `buildQueued` from the session-local sidecar when
@@ -442,34 +445,37 @@ export function deriveClearedNotReady(buildQueue, clearedNums) {
  * cleared this session. Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (scope+kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-epic, non-decision rows (spelling kept)
+ * @returns {Array<{num:(string|null), scope:*}>} the armed, no-usable-scope, non-grouping, non-decision rows (spelling kept)
  */
 export function deriveUnshaped(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
-    // Epics are held `needs-slice` and decisions `needs-decision`, both BEFORE the scope gate (see deriveNeedsSlice
-    // / deriveDecisions) — exclude both so a scope-less container/decision is not double-surfaced as unshaped
-    // (which would drive §3b to prepare-scope a container #2645, or a decision that needs no build scope #2647).
-    .filter((r) => r.buildQueued && r.kind !== 'epic' && r.kind !== 'decision' && normScope(r.scope).length === 0)
+    // Grouping kinds (epic/feature) are held `needs-slice` and decisions `needs-decision`, both BEFORE the scope
+    // gate (see deriveNeedsSlice / deriveDecisions) — exclude both so a scope-less container/decision is not
+    // double-surfaced as unshaped (which would drive §3b to prepare-scope a container #2645/#2998, or a decision
+    // that needs no build scope #2647).
+    .filter((r) => r.buildQueued && !isGroupingKind(r.kind) && r.kind !== 'decision' && normScope(r.scope).length === 0)
     .map((r) => ({ num: r.num, scope: r.scope }));
 }
 
 /**
- * The NEEDS-SLICE set (#2645): the ARMED (cleared-for-build) queue rows that are a `kind:epic`. An epic is a
- * CONTAINER — its work lives in child stories/tasks — so the dispatcher NEVER launches it to build; it holds every
- * cleared epic `needs-slice` (mirroring how {@link deriveUnshaped} tracks the `unshaped-no-scope` holds), and the
- * /conveyor skill reads THIS set to surface each for `/slice` so a cleared epic is decomposed into buildable
- * children instead of silently stalling. Each entry carries `epicState` so the skill routes precisely: `unsliced`
- * → `/slice`; `done` → resolve; `tracking` / `program` / `parked` → no slice (its children ARE the work / a
- * recorded reason gates it). Kept aligned with the dispatch plan's `needs-slice` holds — the two surfaces read the
- * same `kind:epic` signal off the same enriched rows, so they never disagree on which cleared items are epics.
+ * The NEEDS-SLICE set (#2645, extended #2998): the ARMED (cleared-for-build) queue rows that are a GROUPING kind
+ * (`epic`, or `feature` — epic-parity; {@link isGroupingKind}). A grouping kind is a CONTAINER — its work lives in
+ * children (an epic's stories/tasks, a feature's epics) — so the dispatcher NEVER launches it to build; it holds
+ * every cleared grouping item `needs-slice` (mirroring how {@link deriveUnshaped} tracks the `unshaped-no-scope`
+ * holds), and the /conveyor skill reads THIS set to surface each for `/slice` so a cleared container is decomposed
+ * into buildable children instead of silently stalling. Each entry carries `epicState` so the skill routes
+ * precisely: `unsliced` → `/slice`; `done` → resolve; `tracking` / `program` / `parked` → no slice (its children
+ * ARE the work / a recorded reason gates it). Kept aligned with the dispatch plan's `needs-slice` holds — the two
+ * surfaces read the same `isGroupingKind` signal off the same enriched rows, so they never disagree on which
+ * cleared items are containers.
  * Pure — shapes the queue via {@link shapeQueue} and filters; no fs / clock.
  * @param {{queue?:object[]}|object[]|null|undefined} buildQueue  the build-queue rows (kind-enriched by the shell)
  * @param {Array<string|number>|null|undefined} clearedNums  the sidecar's cleared ids, or null to use frontmatter
- * @returns {Array<{num:(string|null), epicState:(string|null)}>} the armed, `kind:epic` rows (stored spelling kept)
+ * @returns {Array<{num:(string|null), epicState:(string|null)}>} the armed, grouping-kind rows (stored spelling kept)
  */
 export function deriveNeedsSlice(buildQueue, clearedNums = null) {
   return shapeQueue(buildQueue, clearedNums)
-    .filter((r) => r.buildQueued && r.kind === 'epic')
+    .filter((r) => r.buildQueued && isGroupingKind(r.kind))
     .map((r) => ({ num: r.num, epicState: r.epicState }));
 }
 
@@ -541,8 +547,9 @@ export function assembleConveyorState({
     // Armed rows with NO predicted scope — the dispatcher NEVER builds these; the /conveyor skill reads this set
     // to AUTO-PREPARE each item's scope upstream, after which it dispatches to build (#2613 auto-prepare).
     unshaped: deriveUnshaped(buildQueue, clearedNums),
-    // Armed `kind:epic` rows — the dispatcher NEVER builds an epic (a container); the /conveyor skill reads this
-    // set to SURFACE each for `/slice` so a cleared epic is decomposed into buildable children (#2645).
+    // Armed grouping-kind (`epic`/`feature`) rows — the dispatcher NEVER builds a container; the /conveyor skill
+    // reads this set to SURFACE each for `/slice` so a cleared container is decomposed into buildable children
+    // (#2645, extended #2998).
     needsSlice: deriveNeedsSlice(buildQueue, clearedNums),
     // Armed `kind:decision` rows — the dispatcher NEVER builds a decision; the /conveyor skill reads this set to
     // drive each by its `prepared` state: UNPREPARED → prepare-decision agent; PREPARED → present its forks (#2647).
