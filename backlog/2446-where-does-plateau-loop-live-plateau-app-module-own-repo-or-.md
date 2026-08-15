@@ -47,16 +47,24 @@ There is **one real fork** (the engine core's canonical home); the migration *ti
 fork — with cost removed it collapses to "when do we pay the move," pure prioritization — so it is folded
 into the recommended default as a **staged rollout with a named trigger**, not ratified separately.
 
-## For the ratifying human — the one thing to weigh (2026-08-15)
+## For the ratifying human — the two things to weigh (2026-08-15)
 
 This item is fully researched; what's left is a genuine either/or, not a research gap, so it is **not**
 auto-ratifiable (the fork-existence test names two coherent branches, (a) and (b) — see Fork 1) and
-needs your explicit ratify/override. The crux in one line: **do you read
-[#reusable-neutral-home](../docs/agent/platform-decisions.md#reusable-neutral-home) (#1788) by its
-letter (it names *plateau* as the neutral home → (a)), or by its principle ("the member that is not
-itself coordinated" → (b), because plateau-app *is* a coordinated subject of this engine)?** Everything
-else in this item — the prior-art survey, the skeptic pass, the statute reconciliation, the staged
-rollout mechanics — is downstream of that one interpretive call.
+needs your explicit ratify/override. There are **two** independent judgments, not one — the bullets below
+each name a distinct route to (a):
+
+1. **The interpretive call:** do you read
+   [#reusable-neutral-home](../docs/agent/platform-decisions.md#reusable-neutral-home) (#1788) by its
+   letter (it names *plateau* as the neutral home → (a)), or by its principle ("the member that is not
+   itself coordinated" → (b), because plateau-app *is* a coordinated subject of this engine)?
+2. **The risk-tolerance call:** independent of how you read #1788, do you judge the coordinated-subject
+   coupling (plateau-app hosting the engine that also lands its own PRs) an acceptable version-lock risk,
+   or does the prior-art survey's warning (no bors/Prow/Zuul-class coordinator lives inside a repo it
+   coordinates) tip you to (b) regardless of the text question?
+
+Everything else in this item — the prior-art survey, the skeptic pass, the statute reconciliation, the
+staged rollout mechanics — is downstream of these two judgments, not of either one alone.
 
 - **Ratify (b) as written** (own repo, staged, graduation triggers below) — the prepared default, and
   the one the skeptic/screen passes survived. Also amends #1788 as drafted in *Statute reconciliation*.
@@ -249,13 +257,32 @@ stale, and the un-ratified wait is getting more expensive, not less:
   (gate-self re-anchoring) is now `status: resolved`** — the first-hop migration cost the *Cost note*
   above warns about is already substantially de-risked.
 - **The sibling deferred decision, [#2444](/backlog/2444-plateau-loop-phase-1-agent-runner-shape-cli-spawn-contract-s/)
-  (agent runner), ratified 2026-07-16** without waiting on #2456's unattended-autonomy gate — independent
-  confirmation that this epic's decisions don't need that gate to proceed, exactly as this item's own
-  *Un-defer* section already argued for placement.
+  (agent runner), ratified 2026-07-16** — but via an *independent, item-specific* trigger, not because
+  #2456's gate was met or waived generally: #2444's own "Un-deferred + prepared" note records that
+  [#2530](/backlog/2530-build-endpoint-supervised-builder-post-api-backlog-build-dra/) (the supervised
+  builder) gave it a consumer, and that the daemon's operating evidence "would not shape this contract
+  anyway." **This is corrected from an earlier draft of this section, which overclaimed #2444's
+  ratification as general confirmation that the epic's decisions don't need #2456's gate — that is false**:
+  sibling [#2472](/backlog/2472-plateau-loop-multi-project-registry-manage-we-frontier-ui-an/) (multi-project
+  registry) remains, as of this re-verification, explicitly "Deferred behind the phase-1 evidence gate
+  (#2456)" in its own text, and [#2469](/backlog/2469-plateau-loop-rewrite-the-parallel-orchestrator-as-plain-node/)'s
+  2026-08-15 finding independently confirms that gate is still live for #2472. #2444 is the exception (its
+  own independent trigger fired), not the rule. This item's own case for not waiting on #2456 rests on the
+  *Un-defer* section's argument above (the engine core's canonical home is settled by statute + the
+  prior-art survey, not by the operating window measuring the console) — **not** on #2444's precedent, and
+  the *Scope note (honest)* above stands uncontradicted: #2456 still blocks #2444-class runtime-stability
+  questions on its own multi-week gate; it simply turned out not to be the only path to un-defer #2444.
 - **Rising cost of inaction:** epic [#2445](/backlog/2445-plateau-loop-extract-the-delivery-machinery-into-a-coordinat/)
-  currently carries **14 open children** stalled on this call directly or transitively (registry #2472,
-  config-over-convention #2465, the orchestrator rewrite #2469, and others). [#2469](/backlog/2469-plateau-loop-rewrite-the-parallel-orchestrator-as-plain-node/)'s
-  own 2026-08-15 preparation finding independently re-derived the same wall this item already names in
+  currently carries **14 open children** (excluding this item). Of those, **3 directly reference this
+  decision** in their own text or `blockedBy` — [#2469](/backlog/2469-plateau-loop-rewrite-the-parallel-orchestrator-as-plain-node/)
+  (`blockedBy: ["2446"]`), [#2465](/backlog/2465-plateau-loop-config-over-convention-gating-review-drain-mode/),
+  and [#2456](/backlog/2456-review-the-drain-daemon-s-first-weeks-of-operating-evidence/) — while the
+  remaining 11 (including #2472, which cites #2456 rather than #2446 directly) are blocked **transitively
+  via the epic**: #2445's own "Phase 1 re-scoped" section defers agent spawning, steering, UI, and the
+  multi-project registry until both the runner decision (#2444) and the placement decision (#2446)
+  resolve, so the queue behind the epic waits on this call even where an individual child's text does not
+  name #2446. [#2469](/backlog/2469-plateau-loop-rewrite-the-parallel-orchestrator-as-plain-node/)'s own
+  2026-08-15 preparation finding independently re-derived the same wall this item already names in
   *Delegation* below — a fresh, un-primed session hit "the actual content here is exactly what #2446
   was opened to answer" on its own, which is corroboration, not new information (it does not change
   either fork branch). Ratifying this item is what unblocks that queue; leaving it un-ratified is the
