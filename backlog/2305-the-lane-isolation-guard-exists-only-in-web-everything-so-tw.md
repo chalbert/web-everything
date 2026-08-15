@@ -85,4 +85,19 @@ any machine without the hook, including CI, and that trade needs its own decisio
 
 - [x] An edit to any constellation primary is denied from any of the three repos and their lanes.
 - [x] There is one source of the rule, not three copies that can diverge.
-- [ ] The symlinked-lane case is either closed or recorded as accepted with its reachability stated.
+- [x] The symlinked-lane case is either closed or recorded as accepted with its reachability stated.
+
+## 2026-08-15 — symlinked-lane case recorded as accepted, not closed
+
+Recorded permanently in [we:scripts/guard-lane.mjs](../scripts/guard-lane.mjs) (the `workspaceRootOf` doc
+comment) rather than left only on this card, so it is not rediscovered: Node realpaths an ES module's main
+entry on load, so a lane directory that is itself a symlink resolving outside `.lanes/` would erase the
+`.lanes` segment before `workspaceRootOf` sees it, reopening the launch-location hole one layer up.
+
+**Reachability, stated:** not reachable today. Every lane this guard can run inside is produced by
+[we:scripts/lane-pool.mjs](../scripts/lane-pool.mjs)'s `cloneLane` (`git clone --reference … dest`), which
+always materializes a real directory — `git clone` has no code path that leaves a symlink in its place — and
+no other producer of a `.lanes/<pool>/lane-N` path exists. A pure-function regression test pins the mechanism
+in [we:scripts/__tests__/guard-lane.test.mjs](../scripts/__tests__/guard-lane.test.mjs) (`workspaceRootOf` on
+a post-realpath symlinked-leaf string) so the gap stays documented and visible if lane provisioning ever
+changes.
