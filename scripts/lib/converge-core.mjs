@@ -467,10 +467,24 @@ export function convergeStep(state, obs, { conflict = false, requiredTestGreen =
       { verdict: VERDICTS.NEEDS_HUMAN, outcome: NEGOTIATION_OUTCOMES.ESCALATE, reason: ESCALATION_REASONS.NOTHING_TO_REVIEW });
   }
 
+  // ── 1c. MALFORMED OBSERVATION (#2975). An `editResult` or `redTeamResult` can only exist because a panel ran
+  //    and produced findings to edit against or an accept to ratify — so either arriving with NO `lensResults`
+  //    for this round is not "no panel yet," it is a caller that dropped the panel it already has. Read that
+  //    way, this shape fell through to the branch below, which re-panels the UNCHANGED pre-edit material and
+  //    silently discards the edit/red-team result — the loop could then reduce, accept, and LAND without the
+  //    post-edit material ever having been read, exactly the gap this module's own header promises never
+  //    happens. This check MUST run BEFORE the `!obs.panel.observed` short-circuit or it is unreachable from
+  //    this input shape — that ordering bug, not a missing check, was the root cause.
+  if (!obs.panel.observed && (obs.edit.observed || obs.redTeam.observed)) {
+    return terminate(CONVERGE_ACTIONS.ESCALATE,
+      { round: state.round, verdict: VERDICTS.NEEDS_HUMAN, reason: ESCALATION_REASONS.STALE_OBSERVATIONS, observedRound: obs.round ?? null },
+      { verdict: VERDICTS.NEEDS_HUMAN, outcome: NEGOTIATION_OUTCOMES.ESCALATE, reason: ESCALATION_REASONS.STALE_OBSERVATIONS });
+  }
+
   // ── A read that succeeded but no panel yet → judge it.
   if (!obs.panel.observed) return { action: CONVERGE_ACTIONS.PANEL, state };
 
-  // ── 1c. STALE OBSERVATIONS. A panel/edit observation must be stamped for the round this core is on.
+  // ── 1d. STALE OBSERVATIONS. A panel/edit observation must be stamped for the round this core is on.
   if (obs.round !== state.round) {
     return terminate(CONVERGE_ACTIONS.ESCALATE,
       { round: state.round, verdict: VERDICTS.NEEDS_HUMAN, reason: ESCALATION_REASONS.STALE_OBSERVATIONS, observedRound: obs.round ?? null },
