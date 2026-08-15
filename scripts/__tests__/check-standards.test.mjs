@@ -164,6 +164,69 @@ describe('validateBacklogItem — sibling reference + sizing rules', () => {
   });
 });
 
+// ── Feature-tier invariants (#2691, ratified — docs/agent/backlog-workflow.md#feature-tier; plumbing #2998) ──
+describe('validateBacklogItem — feature-tier invariants (ROOT + FLAT, #2691/#2998)', () => {
+  it('errors when a feature carries a parent (ROOT invariant)', () => {
+    const res = run({ kind: 'feature', parent: '100' });
+    expect(messages(res)).toContainEqual(expect.stringContaining('is `kind: feature` but carries a `parent`'));
+  });
+
+  it('accepts a parent-less open feature (the well-formed root shape)', () => {
+    expect(run({ kind: 'feature' }).errors).toEqual([]);
+  });
+
+  it('errors on BOTH invariants at once for a feature nested under a feature', () => {
+    // "a feature with a parent, and a feature under a feature" — the #2998 Done-when fixture: #999's
+    // parent (#100) is ITSELF kind:feature, so the malformed item trips the ROOT check (carries a parent
+    // at all) and the FLAT check (that parent is a feature ancestor) simultaneously.
+    const ctx = {
+      ...FIXTURE_CTX,
+      knownNums: new Set(['100']),
+      kindByNum: new Map([['999', 'feature'], ['100', 'feature']]),
+      parentByNum: new Map([['999', '100']]),
+    };
+    const res = validateBacklogItem({ ...baseItem, kind: 'feature', parent: '100' }, ctx);
+    const msgs = res.errors.map((e) => e.message);
+    expect(msgs).toContainEqual(expect.stringContaining('is `kind: feature` but carries a `parent`'));
+    expect(msgs).toContainEqual(expect.stringContaining('is `kind: feature` with a `kind: feature` ancestor'));
+  });
+
+  it('FLAT invariant walks past a non-feature intermediate ancestor (feature → epic → feature)', () => {
+    const ctx = {
+      ...FIXTURE_CTX,
+      knownNums: new Set(['100', '101']),
+      kindByNum: new Map([['999', 'feature'], ['101', 'epic'], ['100', 'feature']]),
+      parentByNum: new Map([['999', '101'], ['101', '100']]),
+    };
+    const res = validateBacklogItem({ ...baseItem, kind: 'feature', parent: '101' }, ctx);
+    expect(res.errors.map((e) => e.message)).toContainEqual(expect.stringContaining('kind: feature` ancestor (#100)'));
+  });
+
+  it('does not error on FLAT when no feature ancestor exists, even several hops up', () => {
+    const ctx = {
+      ...FIXTURE_CTX,
+      knownNums: new Set(['100', '101']),
+      kindByNum: new Map([['999', 'feature'], ['101', 'epic'], ['100', 'story']]),
+      parentByNum: new Map([['999', '101'], ['101', '100']]),
+    };
+    // Still errors on ROOT (a feature with any parent is malformed) but never on FLAT.
+    const res = validateBacklogItem({ ...baseItem, kind: 'feature', parent: '101' }, ctx);
+    const msgs = res.errors.map((e) => e.message);
+    expect(msgs).toContainEqual(expect.stringContaining('is `kind: feature` but carries a `parent`'));
+    expect(msgs).not.toContainEqual(expect.stringContaining('kind: feature` ancestor'));
+  });
+
+  it('is cycle-safe (a corrupt parent chain never infinite-loops)', () => {
+    const ctx = {
+      ...FIXTURE_CTX,
+      knownNums: new Set(['100']),
+      kindByNum: new Map([['999', 'feature'], ['100', 'epic']]),
+      parentByNum: new Map([['999', '100'], ['100', '999']]), // 999 ↔ 100 cycle
+    };
+    expect(() => validateBacklogItem({ ...baseItem, kind: 'feature', parent: '100' }, ctx)).not.toThrow();
+  });
+});
+
 // ── False-positive safety over the REAL data (the #247 dry-run, now a standing test) ──
 describe('validateBacklogItem — real backlog stays clean', () => {
   // Load the live registries exactly as check-standards.mjs does, build the same resolution table,
@@ -186,6 +249,8 @@ describe('validateBacklogItem — real backlog stays clean', () => {
     graduatedKinds: buildGraduatedKinds({ blocks, intents, protocols, projects, plugs, capabilityIds, adapters, demos }),
     knownNums: new Set(backlog.map((b) => b.num).filter(Boolean)),
     reportExists: (rel) => existsSync(join(ROOT, rel)),
+    kindByNum: new Map(backlog.map((b) => [b.num, b.kind])),
+    parentByNum: new Map(backlog.filter((b) => b.parent !== undefined).map((b) => [b.num, String(b.parent)])),
   };
 
   it('emits zero errors for every real backlog item', () => {

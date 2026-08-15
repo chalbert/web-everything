@@ -220,6 +220,55 @@ describe('dispatchPlan — a cleared kind:epic is HELD "needs-slice", never buil
   });
 });
 
+describe('dispatchPlan — a cleared kind:feature is HELD "needs-slice", never built (#2998)', () => {
+  // `feature` (#2691) is the grouping tier ABOVE epic — epic-parity BY DESIGN: it is a CONTAINER (its work
+  // lives in child epics), never directly buildable. Regression coverage for the #1312 review finding: a
+  // cleared (buildQueued) feature item previously fell through the epic-only check to the scope gate, which
+  // would auto-prepare + eventually BUILD a container — "aim a build agent at a container", the exact hazard
+  // the epic branch exists to prevent. Mirrors the kind:epic block above one-for-one.
+  it('holds a scope-less feature "needs-slice" even in a fully-idle pool with free lanes (never built, never auto-prepared)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'feature' }], // no scope, but feature → needs-slice, NOT unshaped-no-scope
+      leases: [],
+      freeLanes: [2, 3],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('holds a feature "needs-slice" even when it carries a scope (a feature is never a direct build)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'feature', scope: ['src/a/'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('blocked takes precedence over needs-slice (a blocked feature can\'t be sliced until its blockers clear)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'feature', openBlockers: ['9'] }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+
+  it('needs-slice holds the feature while a disjoint story on the same tick still launches', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'feature', scope: ['src/a/'] }, // feature → held needs-slice
+        { num: 2, kind: 'story', scope: ['src/b/'] }, // buildable story → launches
+      ],
+      leases: [],
+      freeLanes: [7],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 7 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+});
+
 describe('dispatchPlan — a cleared kind:decision is HELD "needs-decision", never built (#2647)', () => {
   // A decision is NOT build work; its lifecycle is prepare (research + author forks) then present (surface to
   // ratify). Like an epic, a cleared decision must not launch to build AND must not fall through to the scope gate

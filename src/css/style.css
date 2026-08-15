@@ -2012,7 +2012,9 @@ we-tag[set="tier"],
 .fui-tag[data-cat-set="kind"],
 .fui-tag[data-cat-set="tier"] { text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
 
-/* kind vocabulary — story (blue) · epic (violet) · decision (indigo) · task (slate). */
+/* kind vocabulary — feature (teal) · story (blue) · epic (violet) · decision (indigo) · task (slate). */
+we-tag[set="kind"][value="feature"],
+.fui-tag[data-cat-set="kind"][data-cat-value="feature"]     { background:#ccfbf1; color:#0f766e; --cat-bg:#ccfbf1; --cat-color:#0f766e; --cat-shape:9999px; }
 we-tag[set="kind"][value="story"],
 .fui-tag[data-cat-set="kind"][data-cat-value="story"]       { background:#dbeafe; color:#1e40af; --cat-bg:#dbeafe; --cat-color:#1e40af; --cat-shape:9999px; }
 we-tag[set="kind"][value="epic"],
