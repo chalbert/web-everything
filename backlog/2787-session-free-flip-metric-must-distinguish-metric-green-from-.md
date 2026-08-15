@@ -3,8 +3,10 @@ bornAs: xjo9hle
 kind: story
 size: 1
 parent: "2753"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
 scope: ["we:scripts/lib/decision-routing.mjs", "we:scripts/conveyor/decision-route.mjs"]
 tags: [conveyor, decision, ratification, observability]
 ---
@@ -168,24 +170,37 @@ function can't know.
 
 ## Done when
 
-- [ ] `grep -rn "enforce armed\|holds shadow" we:scripts/` returns zero hits. (Both parentheticals gone, both
-      `answer` branches, one check.)
-- [ ] A named test fails if the fix is reverted. Revert the `answer` template edit alone and the new
+- [x] `grep -rn "enforce armed\|holds shadow" we:scripts/` returns zero hits. (Both parentheticals gone, both
+      `answer` branches, one check.) Verified 2026-08-15: zero hits in the two scope files
+      (`we:scripts/lib/decision-routing.mjs`, `we:scripts/conveyor/decision-route.mjs`) — the string template
+      no longer emits either parenthetical. A broad `grep -rn` over all of `we:scripts/` also matches the test
+      files' `.not.toMatch(/enforce armed/)` assertions (task 5's required regression test) and one incidental
+      prose comment reworded in this pass (`"resets it and holds shadow"` → `"resets it and stays in shadow"`)
+      to avoid the false-positive substring match; those are proofs of absence, not the bug.
+- [x] A named test fails if the fix is reverted. Revert the `answer` template edit alone and the new
       session-free CLI test must go RED on the `/enforce armed/` assertion — run it and confirm, don't infer.
-- [ ] The session-free CLI, given 20 matches, prints the metric AND `land-mode: shadow
+      Confirmed 2026-08-15: reverting `computeAgreementMetric`'s `answer` template alone turns
+      `we:scripts/conveyor/__tests__/decision-route.test.mjs`'s `#2787 … 20 matches` test RED on the
+      `.not.toMatch(/enforce armed/)` assertion; restored and reran green.
+- [x] The session-free CLI, given 20 matches, prints the metric AND `land-mode: shadow
       (metric-green-but-operator-shadow)` AND the "held observe-only — arm with `landMode: enforce`" sentence.
-      Asserted on real stdout, not on a return value.
-- [ ] `we:scripts/conveyor/decision-route.mjs` contains no armed/un-armed wording and no `flipReady` ternary of
+      Asserted on real stdout, not on a return value. Covered by
+      `we:scripts/conveyor/__tests__/decision-route.test.mjs`'s `runRaw`-based assertions on real stdout.
+- [x] `we:scripts/conveyor/decision-route.mjs` contains no armed/un-armed wording and no `flipReady` ternary of
       its own — grep the file for `armed` and `flipReady`; the only hits should be inside a comment. (This is
-      the checkable form of "sourced from `resolveLandMode`, not re-derived".)
-- [ ] `--json` on the session-free path emits `{ metric, landMode: { mode, reason, trail } }`, and `metric`'s
+      the checkable form of "sourced from `resolveLandMode`, not re-derived".) Verified: the only `armed` hits
+      are inside the file's header comment; zero `flipReady` hits.
+- [x] `--json` on the session-free path emits `{ metric, landMode: { mode, reason, trail } }`, and `metric`'s
       own keys are byte-for-byte the same set as before (`consecutiveMatches`, `divergencesInWindow`,
-      `windowSize`, `decided`, `N`, `M`, `flipReady`, `answer`) — additive only.
-- [ ] `planDecision`'s DISPOSITION BEHAVIOR is unchanged: the existing suites in
+      `windowSize`, `decided`, `N`, `M`, `flipReady`, `answer`) — additive only. Asserted by the `--json` test
+      in `we:scripts/conveyor/__tests__/decision-route.test.mjs`.
+- [x] `planDecision`'s DISPOSITION BEHAVIOR is unchanged: the existing suites in
       `we:scripts/lib/__tests__/decision-routing.test.mjs` and
       `we:scripts/conveyor/__tests__/decision-route.test.mjs` pass untouched. Its printed OUTPUT does change —
       the ledger path's `land-mode` trail loses `(enforce armed)` too — and that is intended, not a regression.
-      Confirm by eye on the reproduction in Scope and consumers.
+      Confirm by eye on the reproduction in Scope and consumers. Both suites pass in full (53 + 11 tests
+      green); the ledger-path trail change was confirmed by eye against the reproduction shown in Scope and
+      consumers.
 
 ## Delivery shape
 
