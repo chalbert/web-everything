@@ -16,11 +16,16 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  BRIEF_PLACEHOLDERS,
+  BRIEF_TOKEN_RE,
   DISPATCH_EFFECT,
+  DISPATCH_LISTING_GRACE_MINUTES,
+  fillBrief,
 } from '../dispatch-lane.mjs';
 import {
   LIST_TIMEOUT_ENV,
   LIST_TIMEOUT_MS,
+  LISTING_GRACE_MS,
   PR_LIST_JSON_FIELDS,
   PR_LIST_LIMIT,
   PR_LIST_TIMEOUT_ENV,
@@ -175,6 +180,57 @@ describe('the PR discovery query — the one thing fixtures cannot prove', () =>
   it('parses the page, and an empty answer is an empty array rather than a throw', () => {
     expect(defaultListPrs({ exec: () => '[{"number":7}]', env: {} })).toEqual([{ number: 7 }]);
     expect(defaultListPrs({ exec: () => '', env: {} })).toEqual([]);
+  });
+});
+
+// ── PR #1211 round-3 review, H3 — the "one source of truth" derivation, asserted by nothing until now ─────────
+
+describe('LISTING_GRACE_MS is DERIVED, not a second literal that can drift from DISPATCH_LISTING_GRACE_MINUTES', () => {
+  it('stays the minutes constant times 60_000 — reddens if either side is ever re-literalised', () => {
+    // The docblock on `LISTING_GRACE_MS` (dispatch-lane-io.mjs) says this derivation exists so the pure guard's
+    // own copy of the same window (`dispatch-lane.mjs#dispatchStillHolds`'s default) cannot drift from it. That
+    // claim was asserted by nothing: mutating `LISTING_GRACE_MS` back to a bare `2 * 60 * 1000` literal left
+    // every test in this directory green. This is the identical defect class as round 2's G5
+    // (`DISPATCH_HOLD_GRACE_MINUTES`), pinned the same way — with the LITERAL, not only the constant.
+    expect(DISPATCH_LISTING_GRACE_MINUTES).toBe(2);
+    expect(LISTING_GRACE_MS).toBe(DISPATCH_LISTING_GRACE_MINUTES * 60_000);
+  });
+});
+
+// ── PR #1211 round-3 review, H5 (advisory) — a placeholder broken by a BRACE or NEWLINE fills verbatim ────────
+//
+// `BRIEF_TOKEN_RE`'s docblock (dispatch-lane.mjs) already names this limit honestly: a token carrying an
+// interior brace or newline is the one spelling outside its class, so it never matches at all. That means it
+// never reaches `fillBrief`'s substitute-or-refuse-or-report branches either — it just survives the `.replace`
+// untouched, filled into the dispatched agent's prompt VERBATIM, with `unknownTokens` staying `[]` because
+// nothing ever saw it as a token. This pins that CURRENT behavior so a future change to `BRIEF_TOKEN_RE` cannot
+// silently alter it without a test noticing. Widening the regex to also catch these two spellings is welcome
+// but not required — the bar here is lower than H3/H4 because the gap is already documented, not misdocumented.
+
+describe('fillBrief: a token broken by an interior brace or newline is filled verbatim and unreported', () => {
+  const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b' };
+
+  it('neither spelling matches BRIEF_TOKEN_RE at all — confirming why fillBrief cannot see it', () => {
+    expect([...'{{ITEM_\nNUM}}'.matchAll(BRIEF_TOKEN_RE)]).toEqual([]);
+    expect([...'{{ITEM{NUM}}'.matchAll(BRIEF_TOKEN_RE)]).toEqual([]);
+  });
+
+  it('an interior NEWLINE: {{ITEM_\\nNUM}} survives fillBrief verbatim, with an empty unknownTokens', () => {
+    const { prompt, unknownTokens } = fillBrief(`${BRIEF}\nbroken: {{ITEM_\nNUM}}`, VALUES);
+    expect(prompt).toContain('{{ITEM_\nNUM}}');
+    expect(unknownTokens).toEqual([]);
+  });
+
+  it('an interior BRACE: {{ITEM{NUM}} survives fillBrief verbatim, with an empty unknownTokens', () => {
+    const { prompt, unknownTokens } = fillBrief(`${BRIEF}\nbroken: {{ITEM{NUM}}`, VALUES);
+    expect(prompt).toContain('{{ITEM{NUM}}');
+    expect(unknownTokens).toEqual([]);
+  });
+
+  it('the five real placeholders still fill normally alongside the broken one', () => {
+    const { prompt } = fillBrief(`${BRIEF}\nbroken: {{ITEM{NUM}}`, VALUES);
+    for (const name of BRIEF_PLACEHOLDERS) expect(prompt).not.toContain(`{{${name}}}`);
   });
 });
 
