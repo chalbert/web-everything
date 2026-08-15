@@ -33,7 +33,8 @@ Full handoff + recommended order: `plateau:branding-proposals/TRANSITION.md`.
 
 - **#2249** decide the system-wide visual language (flat vs rich-dimensional) — gates all marks + site.
 - **#2250** WE mark system call (multi-color umbrella vs monochrome) — amendment to #2209.
-- **#2251** finalize the WE mark (constellation Venn, executed properly).
+- **#2251** finalize the WE mark (construction pending #2249+#2250 ratification — the constellation-Venn
+  brief this was originally filed with is the branch #2250's prepared analysis excludes).
 - **#2252** finalize the FUI mark (Round-3 shortlist through the loop).
 - **#2253** finalize the Plateau mark (flat vs rich).
 - **#2254** Web Everything website UI — review & redesign direction (big; will slice).
