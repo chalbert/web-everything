@@ -33,6 +33,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTransition, applySettle } from '../backlog/frontmatter.mjs';
 import { decide } from '../guard-bash.mjs';
+import { findShrinkingCategories } from '../mine-golden-corpus.mjs';
 import { laneGuardDecision } from '../guard-lane.mjs';
 import { scanRepoLocusPrefixes } from '../check-standards-rules.mjs';
 import { checkBudget } from '../check-memory.mjs';
@@ -164,5 +165,44 @@ describe('Tier-A golden-corpus snapshot harness (#2273)', () => {
       expect(loadCategory(cat).length).toBe(count);
     }
     expect(Object.values(index.counts).reduce((a, b) => a + b, 0)).toBe(index.total);
+  });
+
+  // #3104 — the golden-corpus miner was found 12 fixtures behind its own committed corpus (a
+  // spec-derived scenario list, `hook-guard-bash`'s re-exec/subshell-closer cases, that existed only
+  // as hand-added fixture files the miner's source never learned about) PLUS a growing-history scan
+  // window (`--backlog-scan`) that had started to fall short on rarer transition verbs — and a re-mine
+  // that regenerates FEWER fixtures than committed silently DELETES the difference on write, deleting
+  // a pinned guard guarantee with no failing assertion to show for it. `findShrinkingCategories`
+  // (exported by `scripts/mine-golden-corpus.mjs`) is the property that closes that hole: this suite
+  // asserts the PROPERTY itself, against synthetic count maps, independent of whatever today's real
+  // corpus/history drift happens to be — so it keeps catching a regression of this KIND, not just the
+  // 12 fixtures that were found missing this time.
+  describe('findShrinkingCategories() — the re-mine-must-not-silently-drop-a-fixture guard (#3104)', () => {
+    it('flags nothing when every category holds steady or grows', () => {
+      const existing = { 'hook-guard-bash': 34, 'backlog-claim': 12, 'backlog-settle': 0 };
+      const mined = { 'hook-guard-bash': 34, 'backlog-claim': 15, 'backlog-settle': 1 };
+      expect(findShrinkingCategories(existing, mined)).toEqual([]);
+    });
+
+    it('flags a category whose mined count falls below its committed count, with the exact deficit', () => {
+      const existing = { 'hook-guard-bash': 34, 'backlog-release': 12 };
+      const mined = { 'hook-guard-bash': 22, 'backlog-release': 1 };
+      expect(findShrinkingCategories(existing, mined)).toEqual([
+        { category: 'hook-guard-bash', existing: 34, mined: 22, missing: 12 },
+        { category: 'backlog-release', existing: 12, mined: 1, missing: 11 },
+      ]);
+    });
+
+    it('treats a category the miner no longer produces AT ALL as mined=0 — the severest case, not "n/a"', () => {
+      const existing = { 'hook-guard-lane': 8 };
+      const mined = {}; // the category is entirely absent from this run's output
+      expect(findShrinkingCategories(existing, mined)).toEqual([
+        { category: 'hook-guard-lane', existing: 8, mined: 0, missing: 8 },
+      ]);
+    });
+
+    it('a brand-new category with no prior committed count is never "shrinking" — nothing to compare against', () => {
+      expect(findShrinkingCategories({}, { 'backlog-settle': 1 })).toEqual([]);
+    });
   });
 });

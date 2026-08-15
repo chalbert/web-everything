@@ -24,9 +24,9 @@
  * "corpus as-of" marker — never a wall-clock timestamp, so the manifest stays byte-stable on rerun).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { applyTransition, applySettle, readField } from './backlog/frontmatter.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 import { decide } from './guard-bash.mjs';
@@ -43,9 +43,16 @@ const flag = (name, fallback) => {
 };
 const LIMIT = Number(flag('limit', '12'));
 const LOCUS_SCAN = Number(flag('locus-scan', '800'));
-const BACKLOG_SCAN_CAP = Number(flag('backlog-scan', '600'));
+// #3104 — was 600. This repo's `backlog/*.md` status-touching history has grown to ~2870 commits
+// (7951 total repo commits), and a 600-commit window no longer reaches far enough back to refill
+// LESS-COMMON verbs (measured: `release` found only 1/12 candidates, `claim` 10/12, within the last
+// 600) — a SILENT, cap-driven shrink on every re-mine, not a code bug. 3500 gives headroom over the
+// measured total; the FORCE-REFUSE guard below (`findShrinkingCategories`) is the durable backstop
+// for whenever growth outpaces this again, so this number only needs to be "enough for now."
+const BACKLOG_SCAN_CAP = Number(flag('backlog-scan', '3500'));
 // `resolve` (not `join`) so an ABSOLUTE `--out` is honored as-is; a relative one stays repo-relative.
 const OUT = resolve(ROOT, flag('out', 'scripts/golden-corpus'));
+const FORCE = argv.includes('--force');
 
 // ── git plumbing (impure — isolated here; all classification logic above this line, or imported, is pure) ──
 function git(args) {
@@ -222,6 +229,21 @@ function buildGuardBashFixtures() {
     { id: 'lane-clobber-contested-sibling', cmd: 'git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 row 4 (THE GAP) — unmarked lease held by a SIBLING of my own session' },
     { id: 'lane-clobber-contested-asserted', cmd: 'LANE_SESSION=conveyor-delivery-lane-5-9f3a1c07 git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 — allowed: the true holder re-asserts its minted slug' },
     { id: 'lane-clobber-contested-override', cmd: 'LANE_CLOBBER_OK=1 git reset --hard HEAD~3', ctx: { primaryCwd: false, foreignLiveLease: false, contestedHolderSlug: 'conveyor-delivery-lane-5-9f3a1c07' }, basis: '#2997 — allowed: the sanctioned LANE_CLOBBER_OK escape' },
+    // #3104 — r5 F1/F2 (re-exec + subshell-closer). These 12 existed as committed fixture FILES but
+    // were never added HERE, so a blind re-mine silently deleted them (the miner didn't know they
+    // existed) — the bug this item exists to fix. Restored verbatim from the committed corpus.
+    { id: 'reexec-backtick-substitution', cmd: 'echo `npm run build`', ctx: { primaryCwd: true }, basis: 'r5 F1 — bash re-executes a backtick substitution. Base never caught this spelling at all.' },
+    { id: 'reexec-command-substitution', cmd: 'OUT="$(cd . && npm run build)"', ctx: { primaryCwd: true }, basis: 'r5 F1 — bash re-executes a `$( … )` body. Confirmed really building under real bash.' },
+    { id: 'reexec-escape-exported', cmd: 'MAIN_SESSION_BUILD_OK=1 bash -c "npm run build"', ctx: { primaryCwd: true }, basis: "r5 F1 — a leading `VAR=1` prefix is EXPORTED into the re-executed command (verified: `FOO=1 bash -c 'echo $FOO'` prints 1), so the sanctioned escape must still disarm the arm through the recursion." },
+    { id: 'reexec-eval-direnv-hook', cmd: 'eval "$(direnv hook bash)"', ctx: { primaryCwd: true }, basis: 'r5 F1 precision mirror — the standard `eval "$(… hook …)"` idiom runs nothing deniable.' },
+    { id: 'reexec-eval-string', cmd: 'eval "echo done; echo hi > config/app.json"', ctx: { primaryCwd: true }, basis: 'r5 F1 — bash re-executes an `eval` string. Confirmed really writing the primary tree under real bash.' },
+    { id: 'reexec-shell-c-string', cmd: 'bash -c "git status && git push origin main"', ctx: {}, basis: 'r5 F1 — bash re-executes a `-c` script string; base denied it only by ACCIDENT (its quote-blind split tore the quoted argument at the `&&`), and the quote-aware split of r1–r4 lost that. Confirmed really pushing under real bash in a PATH-stubbed sandbox.' },
+    { id: 'reexec-shell-c-string-benign', cmd: 'bash -c "npm run test:unit"', ctx: { primaryCwd: true }, basis: 'r5 F1 precision mirror — the recursion reads a lot of new text at command position, so a nested command that writes nothing must stay allowed.' },
+    { id: 'reexec-substitution-benign', cmd: 'echo "$(git rev-parse --short HEAD)"', ctx: { primaryCwd: true }, basis: 'r5 F1 precision mirror — the house idiom for reading git state inside a command.' },
+    { id: 'subshell-closer-benign', cmd: '(eleventy --version) >/dev/null', ctx: { primaryCwd: true }, basis: 'r5 F2 precision mirror — the eleventy no-write flag allowlist has to terminate on a group closer too, or `--version)` reads as an unknown flag and a command that writes nothing is denied.' },
+    { id: 'subshell-closer-benign-group', cmd: '(git status; git diff) | head -40', ctx: { primaryCwd: true }, basis: 'r5 F2 precision mirror — a read-only group with a trailing pipe.' },
+    { id: 'subshell-closer-trailing-comment', cmd: '(npm exec -- vite build) #x', ctx: { primaryCwd: true }, basis: 'r5 F2 — same class, trailing comment instead of a redirect.' },
+    { id: 'subshell-closer-trailing-token', cmd: '(pnpm exec vite build) >/dev/null', ctx: { primaryCwd: true }, basis: 'r5 F2 — the r3 closer peel was POSITIONAL (only a `)` that ended the segment), so one trailing token re-opened the hole. Confirmed really building under real bash.' },
   ];
   return scenarios.map((s) => ({
     id: s.id, cmd: s.cmd, ctx: s.ctx, basis: s.basis,
@@ -288,6 +310,22 @@ function buildGuardLaneFixtures() {
   ];
 }
 
+// ── safety guard (#3104) — never let a re-mine silently DELETE a fixture the corpus currently holds.
+// Pure (no fs/git of its own — takes plain count maps) so it's unit-testable in isolation from the
+// real corpus/history: `scripts/__tests__/golden-corpus-snapshot.test.mjs` exercises this directly
+// with synthetic before/after count maps, independent of whatever the real repo's drift happens to be
+// today. A category present in `existingCounts` but ABSENT from `minedCounts` (the miner no longer
+// knows how to produce that category at all — the most severe form of this failure) counts as
+// mined=0, not as "not applicable". ──────────────────────────────────────────────────────────────
+export function findShrinkingCategories(existingCounts, minedCounts) {
+  const out = [];
+  for (const [category, existing] of Object.entries(existingCounts || {})) {
+    const mined = (minedCounts || {})[category] ?? 0;
+    if (mined < existing) out.push({ category, existing, mined, missing: existing - mined });
+  }
+  return out;
+}
+
 // ── write ────────────────────────────────────────────────────────────────────────────────────────
 function writeCategory(name, items) {
   const dir = join(OUT, name);
@@ -307,13 +345,43 @@ function main() {
   const guardBash = buildGuardBashFixtures();
   const guardLane = buildGuardLaneFixtures();
 
-  mkdirSync(OUT, { recursive: true });
+  // Compute counts BEFORE any write — `writeCategory` deletes a category's directory before
+  // repopulating it, so the shrink check below has to run on freshly-mined counts held in memory,
+  // never on partial on-disk state from this same run.
   const counts = {};
-  for (const verb of Object.keys(backlog)) counts[`backlog-${verb}`] = writeCategory(`backlog-${verb}`, backlog[verb]);
-  counts.memory = writeCategory('memory', memory);
-  counts['hook-locus-prefix'] = writeCategory('hook-locus-prefix', locus);
-  counts['hook-guard-bash'] = writeCategory('hook-guard-bash', guardBash);
-  counts['hook-guard-lane'] = writeCategory('hook-guard-lane', guardLane);
+  for (const verb of Object.keys(backlog)) counts[`backlog-${verb}`] = backlog[verb].length;
+  counts.memory = memory.length;
+  counts['hook-locus-prefix'] = locus.length;
+  counts['hook-guard-bash'] = guardBash.length;
+  counts['hook-guard-lane'] = guardLane.length;
+
+  // #3104 — REFUSE rather than silently drop. Compare against the EXISTING committed index.json (the
+  // corpus as it stands right now), not anything this run has touched yet.
+  const existingIndexPath = join(OUT, 'index.json');
+  const existingCounts = existsSync(existingIndexPath)
+    ? (JSON.parse(readFileSync(existingIndexPath, 'utf8')).counts || {})
+    : {};
+  const shrinking = findShrinkingCategories(existingCounts, counts);
+  if (shrinking.length && !FORCE) {
+    console.error('REFUSING to re-mine: this run would DELETE fixture(s) the corpus currently holds — nothing was written.');
+    for (const s of shrinking) {
+      console.error(`  ${s.category}: committed ${s.existing} → this run ${s.mined} (${s.missing} fixture(s) would be lost)`);
+    }
+    console.error('A mined category can shrink for two reasons: (1) the miner\'s own source (this file) no');
+    console.error('longer covers a case it used to — e.g. a spec-derived scenario list that fell behind');
+    console.error('hand-added fixture files, or (2) its git-history scan window (--backlog-scan/--locus-scan)');
+    console.error('no longer reaches far enough back to refill a capped category as the repo has grown.');
+    console.error('Diagnose which before re-running. Pass --force to write anyway (rare — only once you have');
+    console.error('confirmed the drop is intentional).');
+    process.exit(1);
+  }
+
+  mkdirSync(OUT, { recursive: true });
+  for (const verb of Object.keys(backlog)) writeCategory(`backlog-${verb}`, backlog[verb]);
+  writeCategory('memory', memory);
+  writeCategory('hook-locus-prefix', locus);
+  writeCategory('hook-guard-bash', guardBash);
+  writeCategory('hook-guard-lane', guardLane);
 
   // Deterministic "as-of" marker: the newest date among every mined (git-sourced) fixture — NOT
   // wall-clock `now` — so the manifest is byte-stable across reruns against the same repo state.
@@ -347,4 +415,7 @@ function main() {
   for (const [k, v] of Object.entries(counts)) console.log(`  ${k}: ${v}`);
 }
 
-main();
+// Only run the (impure, git-shelling) miner when this file is executed as the CLI — never on import,
+// so `findShrinkingCategories` above is importable from a test (#3104) without side-effecting the
+// real corpus on disk.
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main();
