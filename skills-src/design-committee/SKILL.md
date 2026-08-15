@@ -43,7 +43,9 @@ for "a couple of options".
    blind seats cannot write the same file.
 5. **Screenshot every candidate, both themes** — *build-ui.md → 3*. The candidates are the PNGs, never the HTML.
 6. **Judge on the rendered pixels** — hand the PNGs to `/jury` with `subject: design-pixels` (or, for a fork
-   between candidates, the explainer channel in *build-ui.md → 4*).
+   between candidates, the explainer channel in *build-ui.md → 4*). For an **interaction-model** fork, the
+   explainer channel needs the operable candidates themselves, driven over the same data — not just their
+   PNGs (*build-ui.md → 4*'s interaction-model rule).
 7. **Freeze the ruling** into webcases — *build-ui.md → 5*. A ruling that lives only in chat is not ruled.
 
 ## Stop rules
