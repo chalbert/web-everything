@@ -3,8 +3,11 @@ bornAs: xj4zte0
 kind: story
 size: 2
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
+graduatedTo: none
 scope:
   - we:scripts/check-standards.mjs
   - we:scripts/lib/citation-check.mjs
