@@ -121,10 +121,24 @@ async function parkOneDispatch({ ageMs = 10 * 60 * 1000 } = {}) {
  * rather than lengthening it. The production default is untouched and is asserted, with its literal, in
  * `dispatch-lane-defaults.test.mjs`.
  */
-function runWakeCli(args = [], { agents = '[]', prs = '[]' } = {}) {
+/**
+ * THE REAL CEILING ON A HANG (PR #1211 round-3 review, H4). `execFileSync` below is SYNCHRONOUS, so vitest's
+ * own per-test bound (`CHILD_PROCESS_TIMEOUT_MS`) cannot interrupt it — vitest can only fail the test AFTER the
+ * call already returned. Passed as `execFileSync`'s own `timeout` option, Node itself enforces this one: if the
+ * child has not exited by the deadline, Node sends it `killSignal` (`SIGKILL`) and `execFileSync` throws.
+ *
+ * Sixty seconds is comfortably above every real case in this file (the stub `claude`/`gh` do nothing but write
+ * a file and print) and comfortably below `CHILD_PROCESS_TIMEOUT_MS`, so the two bounds do not race each other
+ * — this one fires first and produces a clean, reported kill; `CHILD_PROCESS_TIMEOUT_MS` never needs to.
+ */
+const EXEC_TIMEOUT_MS = 60_000;
+
+function runWakeCli(args = [], { agents = '[]', prs = '[]', execTimeoutMs = EXEC_TIMEOUT_MS } = {}) {
   return execFileSync(process.execPath, [WAKE_CLI, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: execTimeoutMs,
+    killSignal: 'SIGKILL',
     env: {
       HOME: process.env.HOME,
       PATH: binDir,
@@ -142,15 +156,43 @@ function runWakeCli(args = [], { agents = '[]', prs = '[]' } = {}) {
 /**
  * Generous, because every case here spawns at least one real `node` child and vitest's default per-test bound
  * is five seconds — which under a loaded shard is the OTHER way this file could go red for a reason that is
- * not a defect. It is a ceiling on a hang, not a value anything races.
+ * not a defect. THIS IS A FLOOR, NOT A CEILING (PR #1211 round-3 review, H4): it only raises vitest's own
+ * per-test bound so a slow-but-healthy run under a loaded shard is not mistaken for a hang. It bounds nothing
+ * about a genuine hang — `EXEC_TIMEOUT_MS` above is what does that, by being passed into `execFileSync`'s own
+ * `timeout` option, which Node enforces even though the call is synchronous.
  *
  * RAISED with #x9ylkp7, which added four more child spawns to this file (two of them inside one case). Measured
  * on the required gate's `--shard=1/2`, this file's own wall time went from ~78s standalone to ~512s under the
- * fork storm — i.e. the per-case margin against the old 60s ceiling was thin and getting thinner. Raising a
- * HANG ceiling costs only how long a genuine hang takes to be reported; leaving it costs a flaky required
- * check, and a flaky required check teaches everyone to re-run instead of read.
+ * fork storm — i.e. the per-case margin against the old 60s bound was thin and getting thinner. Raising this
+ * bound costs only how long a slow-but-healthy run takes to be reported as passing; leaving it costs a flaky
+ * required check, and a flaky required check teaches everyone to re-run instead of read.
  */
 const CHILD_PROCESS_TIMEOUT_MS = 120_000;
+
+// ── PR #1211 round-3 review, H4 — proving the ceiling is real, not merely trusted by inspection ───────────────
+
+describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s per-test bound', () => {
+  it('is SIGKILLed once EXEC_TIMEOUT_MS is exceeded — the run terminates rather than hanging', async () => {
+    await parkOneDispatch();
+    // Sleeps well past the small `execTimeoutMs` this case chooses, so the assertion below proves a REAL kill
+    // (the elapsed wall time stays near the chosen bound) rather than the stub simply finishing on its own.
+    const stub = join(binDir, 'claude');
+    writeFileSync(stub, '#!/bin/sh\nsleep 5\nprintf \'%s\\n\' "$*" > "$STUB_ARGV_FILE"\nprintf \'%s\' "$STUB_AGENTS"\n');
+    chmodSync(stub, 0o755);
+
+    const startedAt = Date.now();
+    let caught;
+    try {
+      runWakeCli([], { agents: '[]', execTimeoutMs: 300 });
+      expect.unreachable('a wedged child must be killed, not allowed to run to completion');
+    } catch (e) {
+      caught = e;
+    }
+    // KILLED, not merely slow: if `timeout` did nothing, this would take ~5000ms (the stub's own sleep).
+    expect(Date.now() - startedAt).toBeLessThan(4000);
+    expect(caught.signal).toBe('SIGKILL');
+  }, CHILD_PROCESS_TIMEOUT_MS);
+});
 
 describe('the waker CLI registers the dispatch observer — the half of the feature no test reached', () => {
   it('OBSERVES a parked dispatch with the real observer, not with an empty table', async () => {
