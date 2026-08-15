@@ -51,6 +51,14 @@ export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision', 'feat
 // Defined as `!== 'decision'` (not a positive list) on purpose: a NEW build kind is auto-covered, and the
 // only silent-death vector is `decision` itself being renamed — pinned by the kinds test (#1473).
 export const isExecKind = (kind) => kind !== 'decision';
+// GROUPING kinds (#2998) — the container kinds that are never directly buildable: they hold no `scope:`,
+// never carry burndown `size` as buildable work, and are never dispatched to build — their work lives in
+// their children (an epic's stories/tasks, a feature's epics), so the readiness/dispatch layer must HOLD
+// them (needs-slice) rather than let them reach the build path, exactly like `deriveSliceable` in
+// src/_data/backlog.js treats them as one pool. `feature` (#2691) is epic-parity BY DESIGN — the grouping
+// tier ABOVE epic — so a future grouping kind only needs adding here once, not at every scattered
+// `kind === 'epic'` call site (scripts/readiness/dispatch-plan.mjs, scripts/readiness/conveyor-state.mjs).
+export const isGroupingKind = (kind) => kind === 'epic' || kind === 'feature';
 // G3 subject scope (#1498) — the backlog-health "ungoverned-arch" gate fires only when a build graduated
 // to a new named STANDARD ENTITY (a governable architectural noun), not a routine file-path / locus-prefixed
 // graduation (`we:`/`fui:`/`plateau:scripts/...`) or a `demo:`. The principle: a governance gate's subject is

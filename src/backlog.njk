@@ -168,10 +168,11 @@ title: Backlog
     </div>
     </details>
     {% endif %}
-    {# Legend for the `unsliced · <why>` badge — why a childless epic has no child stories yet. Only shown
-       if some childless epic carries a recorded reason. Colours match childlessReasonMeta / the badges. #}
+    {# Legend for the `unsliced · <why>` badge — why a childless epic (or feature — #2998 epic-parity: the
+       grouping tier ABOVE epic gets the same badge via epicStatusBadge) has no child slices yet. Only shown
+       if some childless epic/feature carries a recorded reason. Colours match childlessReasonMeta / the badges. #}
     {% set hasUnslicedReason = false %}
-    {% for item in backlog %}{% if item.kind == 'epic' and not (item.children | length) and item.childlessReason %}{% set hasUnslicedReason = true %}{% endif %}{% endfor %}
+    {% for item in backlog %}{% if (item.kind == 'epic' or item.kind == 'feature') and not (item.children | length) and item.childlessReason %}{% set hasUnslicedReason = true %}{% endif %}{% endfor %}
     {% if hasUnslicedReason %}
     <details class="bk-collapse" data-persist="legend-unsliced" open>
     <summary>Epic status legend</summary>

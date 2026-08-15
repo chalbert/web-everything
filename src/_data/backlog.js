@@ -192,6 +192,34 @@ function deriveTier(item) {
   return 'C';
 }
 
+// SLICEABLE (#2998) — a PURE derivation (extracted like `deriveTier`, for direct regression testing over
+// synthetic items) of "this open item is a grouping container ready to be carved into slices, not built
+// directly." An open `epic` OR `feature` with every `blockedBy` resolved is sliceable — `feature` is
+// epic-parity-by-design (the grouping tier ABOVE epic; see `deriveTier`'s feature branch above): it never
+// carries `size` or a tier, so its only readiness action is decomposition, exactly like an epic. Only an
+// OPEN `blockedBy` withholds sliceability — its decomposition may turn on the blocker's outcome. See the
+// call site in `derive()` (below) for the full "why slicing is orthogonal to tier" rationale.
+function deriveSliceable(item) {
+  return item.status === 'open' && (item.kind === 'epic' || item.kind === 'feature')
+    && item.blockers.every((b) => b.status === 'resolved');
+}
+
+// NOT-BATCHABLE REASON (#2998) — a PURE derivation (extracted like `deriveTier`/`deriveSliceable`) of the
+// single reason an OPEN item isn't in the batch pool. `epic` and `feature` are both excluded up front —
+// both are grouping containers with their own slice pills (`sliceable`), never a batch-pool member — so a
+// feature reads `null` here exactly like an epic, not 'oversized'/'blocked'/etc. See the call site in
+// `derive()` (below) for the full precedence rationale.
+function deriveNotBatchableReason(item) {
+  if (item.status !== 'open' || item.batchable || item.kind === 'epic' || item.kind === 'feature') return null;
+  if (item.stopTheWorld) return 'stop-the-world';
+  if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
+  if (item.openBlockers.length) return 'blocked';   // any blocked item — build OR a Tier-C decision
+  if (item.projectPending) return 'project-pending';
+  if (item.kind === 'decision') return 'decision';  // Tier-B, ready to ratify — decision-ready badge covers it
+  if (item.kind === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
+  return null;
+}
+
 // BUILD STATE (#2472) — where an item sits in the LOCAL loop pipeline, the first "backlog-driven console"
 // increment (#2474 → #2472): the `/backlog/` tracker joining the batch skill's offline loop-state files it
 // didn't read before, so a card can show live-ish pipeline position, not just its static `status`. This is
@@ -476,16 +504,7 @@ module.exports = function backlog() {
     // (which is reserved for a Tier-B, ready-to-ratify decision the decision-ready badge already explains).
     // By construction a Tier-C issue/idea always has open blockers, projectPending, or a humanGate, and a
     // Tier-C decision always has open blockers — so this chain yields a non-null reason for every not-ready item.
-    item.notBatchableReason = (() => {
-      if (item.status !== 'open' || item.batchable || item.kind === 'epic' || item.kind === 'feature') return null;
-      if (item.stopTheWorld) return 'stop-the-world';
-      if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
-      if (item.openBlockers.length) return 'blocked';   // any blocked item — build OR a Tier-C decision
-      if (item.projectPending) return 'project-pending';
-      if (item.kind === 'decision') return 'decision';  // Tier-B, ready to ratify — decision-ready badge covers it
-      if (item.kind === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
-      return null;
-    })();
+    item.notBatchableReason = deriveNotBatchableReason(item);
 
     // HAS-PREDICTED-SCOPE readiness lens (#2618) — an OPEN, unblocked, agent-ready (Tier-A) BUILD item that
     // carries NO predicted `scope:` reads as dev-ready but is NOT fully shaped. It mirrors the exact
@@ -525,8 +544,7 @@ module.exports = function backlog() {
     // demotion). Only an epic with an OPEN `blockedBy` stays non-sliceable: its decomposition may turn on
     // the blocker's outcome, so it shows "blocked by #NNN" until that clears. `batchable` (task/story) and
     // `sliceable` (epic) remain disjoint by kind, so the two pools never double-count.
-    item.sliceable = item.status === 'open' && (item.kind === 'epic' || item.kind === 'feature')
-      && item.blockers.every((b) => b.status === 'resolved');
+    item.sliceable = deriveSliceable(item);
 
     // Splittable (deterministic) — an open `story` too big to chain (`size` > 8, i.e. the 13 band) is the
     // `/split` skill's story-class candidate: real buildable work, but better cut into ≤5 slices first
@@ -905,6 +923,10 @@ module.exports.deriveProjectReadiness = deriveProjectReadiness;
 // Named export of the pure tier rubric for direct regression testing (the decision-with-open-blocker
 // demotion); inert to the Eleventy build, which only invokes the default function export.
 module.exports.deriveTier = deriveTier;
+// Named exports of the pure sliceable / not-batchable-reason derivations (#2998) for direct regression
+// testing — inert to the Eleventy build, which only invokes the default function export.
+module.exports.deriveSliceable = deriveSliceable;
+module.exports.deriveNotBatchableReason = deriveNotBatchableReason;
 // Named export of the pure build-state precedence (#2472) for direct regression testing — inert to the
 // Eleventy build, which only invokes the default function export.
 module.exports.deriveBuildState = deriveBuildState;
