@@ -43,7 +43,7 @@ attributed to S1b); the design section below still specifies K6's detail-panel t
 - **`plateau-app:src/feature-tracker/burnup.ts`** (S4, `we:backlog/2732-*.md`, UNBUILT, `blockedBy:
   ["2727", ...]`) — shares the same `.velocity` 3-column grid row in the ratified mock as this card's
   spark + cycle panels (burn-up is historically the 3rd column). See
-  `we:backlog/x3hbiy3-decide-the-section-registrys-shared-row-dom-contract-before-.md` (filed by this
+  `we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md` (filed by this
   preparation) — the DOM-ownership contract between S3 and S4's registrations is undecided.
 - **`plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts`** (S0b, `we:backlog/2720-*.md`,
   UNBUILT) and **`plateau-app:src/feature-tracker/feature-tracking.golden.test.ts`** (S0c,
@@ -176,7 +176,7 @@ confident wrong contract"):
   re-verify against whatever S1a actually ships.
 - **From S2's section registry** (`plateau-app:src/feature-tracker/detail.ts`): assumed to expose a
   `registerSection({ id, group?, render(feature): HTMLElement | HTMLElement[] })` call — `group` per the
-  shared-row proposal in `we:backlog/x3hbiy3-*.md` (this preparation's filed decision) so S3 and S4 can
+  shared-row proposal in `we:backlog/3132-*.md` (this preparation's filed decision) so S3 and S4 can
   both target the historical `.velocity` grid without importing each other. **Also this card's assumption,
   not S2's ruling** — re-verify against #2725's actual API once it exists.
 
@@ -254,7 +254,7 @@ and discovering the mismatch at review time (the #2803/#2351-class failure this 
 land in sequence (none has started; the whole chain is unbuilt). This is a structural property of a
 systematically pre-sliced epic (`we:backlog/2705-*.md`'s 18-slice, `blockedBy`-ordered plan), not a defect
 unique to this card — S3 is correctly positioned 5th in that chain. A second, cross-slice gap was found and
-filed separately rather than worked around: `we:backlog/x3hbiy3-decide-the-section-registrys-shared-row-dom-contract-before-.md`
+filed separately rather than worked around: `we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md`
 (the S2/S3/S4 shared-`.velocity`-row DOM-ownership contract). Once S1a + S2 land, re-open this card,
 supersede the two PROPOSED interfaces with the real ones (task 1 above), and re-run item 9 (independent
 review) before claiming it build-ready. Item 9 has not run and cannot meaningfully run yet — there is
