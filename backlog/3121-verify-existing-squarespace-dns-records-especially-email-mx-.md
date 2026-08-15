@@ -1,4 +1,5 @@
 ---
+bornAs: xe1hwtk
 kind: task
 status: open
 humanGate: { kind: deploy, what: "Registrar (Squarespace) DNS access + a Cloudflare dashboard zone-add are both human-only steps; nothing here is agent-executable." }

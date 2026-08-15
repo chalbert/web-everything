@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "777"
 status: open
-blockedBy: ["2377", "2376", "2378", "2375", "xuy000v"]
+blockedBy: ["2377", "2376", "2378", "2375", "3122"]
 scope:
   - we:tests/a11y/sitemap-routes.ts
   - we:tests/a11y/rendered-site-a11y.spec.ts
@@ -42,9 +42,9 @@ fired.
 
 **This item's own trigger condition — "once `ENFORCED_ROUTES` equals the derived set" — genuinely does
 not hold, and no open backlog item was driving it there.** Filed
-[#xuy000v](/backlog/xuy000v-remediate-the-10-red-warn-only-we-docs-a11y-routes-completin/) — "Remediate the 10
+[#3122](/backlog/3122-remediate-the-10-red-warn-only-we-docs-a11y-routes-completin/) — "Remediate the 10
 red warn-only WE-docs a11y routes, completing the #867 ratchet drain" — to close that gap and added it
-to `blockedBy` above. **Do not start building this item until #xuy000v resolves.** Landing #xuy000v will
+to `blockedBy` above. **Do not start building this item until #3122 resolves.** Landing #3122 will
 itself flip the drain-trigger test red by design ("drain complete — execute the #867 flip") — that is
 the intended forcing function, not a regression, and this item should land immediately after (same
 session/batch, ideally) to clear it. Everything below is the decided design so the build can start the
@@ -103,7 +103,7 @@ open).
 
 **`we:tests/a11y/sitemap-routes.ts`:**
 ```ts
-// Replaces ENFORCED_ROUTES (lines 39-75). Starts empty at flip time IF #xuy000v fully drained the set
+// Replaces ENFORCED_ROUTES (lines 39-75). Starts empty at flip time IF #3122 fully drained the set
 // (re-measure — do not assume). Any route still red at execution time becomes an explicit, dated entry
 // here instead, per the ratified "experimental surfaces opt out visibly and temporarily" shape.
 export const WARN_ROUTES: ReadonlySet<string> = new Set<string>([
@@ -171,8 +171,8 @@ untouched (that logic doesn't change). Replace:
 ## Tasks (build order)
 
 1. **Re-measure** (`deriveScopeCRoutes(fetchSitemapPaths())` against a live server) — confirm the
-   derived set now fully equals `ENFORCED_ROUTES` (i.e. `#xuy000v` actually landed the fix). If any
-   route has drifted red since #xuy000v landed, either fix it first or add it to the new `WARN_ROUTES`
+   derived set now fully equals `ENFORCED_ROUTES` (i.e. `#3122` actually landed the fix). If any
+   route has drifted red since #3122 landed, either fix it first or add it to the new `WARN_ROUTES`
    as an explicit, dated opt-out — do not flip over a red route silently.
 2. `we:tests/a11y/sitemap-routes.ts`: rename `ENFORCED_ROUTES` → `WARN_ROUTES` (empty, or seeded per
    step 1), invert `gatedRoutes()` to throw on empty derive, remove `isDrainComplete` +

@@ -3,8 +3,8 @@ kind: story
 size: 3
 parent: "1104"
 status: open
-blockedBy: ["xe1hwtk"]
-humanGate: { kind: deploy, what: "DONE 2026-07-02/07-03 for the gated preview: `wrangler deploy` (Workers Static Assets) + secrets set + full cross-repo GitHub Actions auto-deploy; live at web-everything.nicgilbert.workers.dev. Remaining human step for PUBLIC go-live (now UNBLOCKED — #2127 resolved, but gated on #xe1hwtk's DNS/email check first): point the Squarespace domain's nameservers to Cloudflare + set `workers_dev=false`. NOT agent-executable — see 'Go-live runbook' below." }
+blockedBy: ["3121"]
+humanGate: { kind: deploy, what: "DONE 2026-07-02/07-03 for the gated preview: `wrangler deploy` (Workers Static Assets) + secrets set + full cross-repo GitHub Actions auto-deploy; live at web-everything.nicgilbert.workers.dev. Remaining human step for PUBLIC go-live (now UNBLOCKED — #2127 resolved, but gated on #3121's DNS/email check first): point the Squarespace domain's nameservers to Cloudflare + set `workers_dev=false`. NOT agent-executable — see 'Go-live runbook' below." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 tags: []
@@ -61,12 +61,12 @@ records why rather than forcing one.
 1. **Add the domain to the Cloudflare account first** (dashboard → Add a site), *before* touching
    nameservers at the registrar. This triggers Cloudflare's automatic scan/import of the domain's
    existing DNS records.
-2. **Verify the import caught everything, especially email** — [#xe1hwtk](/backlog/xe1hwtk-verify-existing-squarespace-dns-records-especially-email-mx-/)
+2. **Verify the import caught everything, especially email** — [#3121](/backlog/3121-verify-existing-squarespace-dns-records-especially-email-mx-/)
    (filed 2026-08-15, new during this preparation pass): Squarespace commonly also hosts a domain's email
    (MX/SPF/DKIM/TXT), and Cloudflare's auto-import is not guaranteed complete. Diff the imported zone
    against the live Squarespace DNS records before proceeding — otherwise the nameserver switch can
    silently break existing email with no code-level signal that anything went wrong. This item now
-   `blockedBy` #xe1hwtk for that reason.
+   `blockedBy` #3121 for that reason.
 3. **Point the Squarespace domain's nameservers at the two Cloudflare nameservers** the dashboard
    assigns. Propagation can take up to 24-48h; Cloudflare emails/dashboards confirm when the zone is
    active.
