@@ -31,6 +31,14 @@ version of this page wrote them as one requirement and was wrong about two:
 ```bash
 # 1. a lane of its OWN — never the driver's, and never the primary checkout.
 #    This is tool isolation, not identity: two reviewers editing one tree rebase under each other.
+#    The DRIVER runs this acquire, but the driver is NOT who edits in the lane — the headless
+#    reviewer spawned in step 3, under a session id step 2 hasn't even derived yet, is. So the
+#    driver must NOT pass --adopt here: --adopt stamps the CALLING process (the driver) as the
+#    lane's occupant (workerSession), and a driver that adopts on its own session id arms
+#    guard-lane.mjs's Edit/Write refusal against the reviewer it is about to spawn — the reviewer's
+#    own first edit then gets refused as foreign (#3107 bounce). Leave this a plain acquire; the
+#    reviewer declares itself the occupant in step 3, under ITS OWN session id, which is the
+#    dispatcher → worker hand-off `adopt` exists for (#2997 r2).
 node scripts/lane-pool.mjs acquire --purpose=review-1234 --json
 
 # 2. a derived id. Independence does NOT depend on this — headless is already distinct. What the
@@ -41,7 +49,10 @@ node --input-type=module -e '
 
 # 3. the mandate on STDIN. `claude -p "text"` works fine — this page previously claimed it errors and
 #    that was never tested. stdin is for size: a mandate has no ARG_MAX ceiling there, and argv stays a
-#    fixed, assertable flag list (judge-spawn.mjs:60).
+#    fixed, assertable flag list (judge-spawn.mjs:60). The mandate's FIRST instruction — before any
+#    Edit/Write — must have the reviewer adopt the lane itself, now running under its own (derived)
+#    CLAUDE_CODE_SESSION_ID: `node scripts/lane-pool.mjs adopt --lane=<n>`. Only after that call does
+#    guard-lane.mjs record the reviewer's OWN session as the occupant and start refusing every other one.
 cd <that lane> && CLAUDE_CODE_SESSION_ID=<derived> \
   claude -p --session-id <derived> --model opus --effort high --permission-mode bypassPermissions < mandate.txt
 ```

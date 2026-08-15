@@ -40,8 +40,15 @@ diff to convergence with an adversarial subagent**, open a PR (`ready-to-merge`,
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
 LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-delivery \
-  --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}}) && cd "$LANE"
+  --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --adopt) && cd "$LANE"
 ```
+
+- `--adopt` stamps YOU (the process running this acquire) as the lane's declared occupant
+  (`workerSession`) — you are self-acquiring and self-editing in the same run, the exact topology
+  `--adopt` was built for, so `we:scripts/guard-lane.mjs`'s `Edit`/`Write` refusal is armed against every
+  OTHER session from the moment you acquire (#2997 r2 / #3107). It degrades to a no-op when
+  `CLAUDE_CODE_SESSION_ID` is absent from your env (`workerSession` stays null, matching today's
+  unchanged fail-open behavior) — nothing else to do here.
 
 - `--lane={{LANE}}` takes the exact lane the dispatch plan assigned (it was in the free-lane set at plan time).
   If that lane lost its race to a sibling, `acquire` fails loud — report it and exit; the conveyor re-plans.

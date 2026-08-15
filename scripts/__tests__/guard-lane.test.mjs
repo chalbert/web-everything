@@ -241,6 +241,82 @@ describe('#2997 Gap 1 — the guard-lane CLI reads the target lane\'s lease off 
   });
 });
 
+// #3107 (PR #1286 bounce) — OWED prevention test: run the delivery-loop.md review-spawn RECIPE's
+// acquire→derive→spawn shape for real through the actual `adopt` CLI + the actual `guard-lane.mjs` hook (not
+// just the pure decision), and assert the reviewer's own subsequent Edit SUCCEEDS.
+//
+// The recipe has THREE actors sharing one lane: a DRIVER that leases it, and a headless REVIEWER — spawned
+// under a DIFFERENT, later-DERIVED `CLAUDE_CODE_SESSION_ID` — that is the one who actually edits. Before the
+// #3107 fix, the doc had the DRIVER pass `--adopt` on its OWN acquire call, which stamps the CALLING
+// process (the driver) as `workerSession` — so when the reviewer, running under its derived id, made its
+// first Edit, `isForeignOccupancy` read it as a DIFFERENT session occupying the lane and `guard-lane.mjs`
+// BLOCKED it (confirmed against `laneGuardDecision` directly in the bounce). The fix: the driver's acquire
+// carries NO `--adopt`; the reviewer instead runs `lane-pool.mjs adopt --lane=N` itself, as its first act,
+// under its own derived id — the dispatcher→worker hand-off `adopt` was built for (#2997 r2).
+//
+// Step 1 (the driver's `acquire --purpose=review-1234 --json`, no `--adopt`) is reproduced by writing the
+// lease marker with the exact shape `tryClaimLane`'s `bodyFor` mints for an unadopted acquire (`workerSession:
+// null`) — acquire's own reap pass shells out to `gh`/`git` against a real remote, which a hermetic unit test
+// must not depend on. Steps 3 (`adopt`) and the guard check run through the REAL CLI scripts, unmocked — the
+// exact two commands the fixed doc tells the reviewer to run.
+describe('#3107 — the delivery-loop.md review-spawn recipe: driver acquires (no --adopt), reviewer self-adopts', () => {
+  const root = mkdtempSync(path.join(realpathSync(tmpdir()), 'guard-lane-recipe-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const poolRoot = path.join(root, '.lanes');
+  const lane = path.join(poolRoot, 'web-everything', 'lane-9');
+  const target = path.join(lane, 'scripts', 'reviewed.mjs');
+  const leaseFile = path.join(lane, '.git', '.lane-lease');
+  const laneCliDir = realpathSync(path.join(here, '..'));
+
+  const DRIVER = 'sess-DRIVER';
+  // Step 2's `deriveSessionId("rv-1234-r1")` output stands in for the reviewer's own, distinct id.
+  const REVIEWER = 'sess-REVIEWER-rv-1234-r1-derived';
+
+  const runLanePool = (args, sessionId) =>
+    spawnSync(process.execPath, [path.join(laneCliDir, 'lane-pool.mjs'), ...args, `--pool=web-everything`], {
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId, LANE_POOL_ROOT: poolRoot },
+      encoding: 'utf8',
+    });
+  const runGuard = (sessionId) => {
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, '// x\n');
+    const res = spawnSync(process.execPath, [path.join(laneCliDir, 'guard-lane.mjs')], {
+      input: JSON.stringify({ tool_input: { file_path: target } }),
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId, LANE_GUARD_OFF: '' },
+      encoding: 'utf8',
+    });
+    return { code: res.status, err: res.stderr || '' };
+  };
+
+  it('step 1 fixture: the DRIVER acquired without --adopt — no occupant declared yet', () => {
+    mkdirSync(path.dirname(leaseFile), { recursive: true });
+    writeFileSync(leaseFile, JSON.stringify({
+      session: 'driver-review-1234', purpose: 'review-1234',
+      acquiredAt: new Date().toISOString(), ttlMinutes: 240,
+      ownerSession: DRIVER, holder: 'review-1234-lane-9-abcd1234',
+      workerSession: null, // the #3107 fix: no --adopt at driver-acquire time
+    }));
+    expect(runGuard(REVIEWER).code).toBe(0); // fail-open pre-adopt (RESIDUAL 1) — not yet the assertion under test
+  });
+
+  it('step 3: the spawned REVIEWER runs `adopt --lane=9` itself, under its OWN derived session id', () => {
+    const res = runLanePool(['adopt', '--lane=9', '--json'], REVIEWER);
+    expect(res.status, res.stderr).toBe(0);
+    expect(JSON.parse(res.stdout).workerSession).toBe(REVIEWER);
+  });
+
+  it('OWED prevention: the reviewer\'s own subsequent Edit now SUCCEEDS — the #3107 bounce is closed', () => {
+    expect(runGuard(REVIEWER).code).toBe(0);
+  });
+
+  it('and the guard still refuses every OTHER session — including the driver that only ran acquire', () => {
+    const driver = runGuard(DRIVER);
+    expect(driver.code).toBe(2);
+    expect(driver.err).toMatch(/DIFFERENT session has declared it is working in/);
+    expect(runGuard('sess-INTRUDER').code).toBe(2);
+  });
+});
+
 // End-to-end path classification through a real symlink chain — the exact shape that let the interactive
 // memory hole exist: `~/.claude/projects/<slug>/memory` → `<repo>/.claude/agent-memory` → `agent-memory-src`.
 describe('resolveReal + decision through the user-level memory symlink', () => {
