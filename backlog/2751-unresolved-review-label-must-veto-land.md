@@ -7,8 +7,10 @@ scope:
   - we:scripts/check-standards-rules.mjs
   - we:scripts/check-standards.mjs
   - we:scripts/__tests__/check-standards.test.mjs
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-08-15"
+graduatedTo: none
 tags: [review-gate, drain, conveyor, fold-in]
 scopeRationale: Re-scoped 2026-08-15 prep (see finding below) — the original land-gate ask is already shipped, so the only remaining buildable work is the #2739 fold-in cleanup. we:scripts/check-standards-rules.mjs gets the new exported pure predicate; we:scripts/check-standards.mjs is the one call-site it replaces; we:scripts/__tests__/check-standards.test.mjs is where the hollow test lives and the new wiring test is added.
 ---
@@ -101,6 +103,10 @@ const dirs = dirLevelScopeFinding(raw);
 ## Delivery shape
 
 Single small PR, lands as one piece (no flag/incremental staging needed) — a pure refactor (extract + import + one new test) across three files with no behavior change and nothing to migrate. Gate: `npm run check:standards` (0 errors, WARN output unchanged) plus the touched vitest file.
+
+## Closing note (2026-08-15) — fold-in cleanup shipped
+
+The remaining fold-in scope is built: `dirLevelScopeFinding` is now a shipped, exported pure function in `we:scripts/check-standards-rules.mjs`; `we:scripts/check-standards.mjs`'s §6d-sexies calls it (no inline re-derivation of `dirs` remains); `we:scripts/__tests__/check-standards.test.mjs` imports the shipped function (its local hand-mirrored copy is deleted) and gained a new wiring test that reads `we:scripts/check-standards.mjs`'s own source and asserts the import + call site stay live outside any try/catch (verified RED against a manual revert before finalizing). `npm run check:standards` output is unchanged for the actual rule (the only diff was the two touched files' own line-count self-reports in an unrelated lock-point warning). The touched test file is green (39/39). Resolved with `graduatedTo: none` — a refactor of existing code, no new entity. Primary ask remains shipped under #2820 (see Prep finding above).
 
 ## Cross-references
 
