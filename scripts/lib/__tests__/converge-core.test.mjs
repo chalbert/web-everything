@@ -279,6 +279,60 @@ describe('convergeStep — the fail-closed decisions', () => {
     expect(r.reason).toBe(ESCALATION_REASONS.STALE_OBSERVATIONS);
   });
 
+  // #2975 — a driver that reports `editResult` (or `redTeamResult`) without re-sending `lensResults` used to hit
+  // the `!obs.panel.observed` short-circuit BEFORE the staleness/consistency guard could ever see it, so it got a
+  // fresh `panel` action seeded with the PRE-edit material instead of the escalation the module's own header
+  // promises. That panel could then land on material nobody judged, with the round's prior findings never
+  // re-confirmed.
+  it('ESCALATES an editResult reported with no lensResults for the round — not a fresh panel on stale material', () => {
+    const malformed = obs({ readResult: READ_OK, editResult: { advanced: true } });
+    expect(malformed.panel.observed).toBe(false); // sanity: this is exactly the "no panel" shape
+    const r = convergeStep(stateWith(), malformed);
+    expect(r.action).toBe(CONVERGE_ACTIONS.ESCALATE);
+    expect(r.action).not.toBe(CONVERGE_ACTIONS.PANEL);
+    expect(r.reason).toBe(ESCALATION_REASONS.STALE_OBSERVATIONS);
+    expect(r.verdict).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('ESCALATES a redTeamResult reported with no lensResults for the round — same malformed shape', () => {
+    const malformed = obs({ readResult: READ_OK, redTeamResult: RED_TEAM_CLEAN });
+    expect(malformed.panel.observed).toBe(false);
+    const r = convergeStep(stateWith(), malformed);
+    expect(r.action).toBe(CONVERGE_ACTIONS.ESCALATE);
+    expect(r.reason).toBe(ESCALATION_REASONS.STALE_OBSERVATIONS);
+  });
+
+  it('#2975 END TO END — the reproduction from the backlog item can no longer reach `land`', () => {
+    // 1. init → read is implicit (stateWith() starts at round 1, nothing observed).
+    let state = stateWith();
+
+    // 2. A round-1 panel over "AAA", every mandate fenced with it → PANEL.
+    let r = convergeStep(state, obs({ readResult: { material: 'AAA' } }));
+    expect(r.action).toBe(CONVERGE_ACTIONS.PANEL);
+    state = r.state;
+
+    // 3. Round-1 lensResults carrying a `security` finding → EDIT, round still 1.
+    r = convergeStep(state, obs({
+      readResult: { material: 'AAA' },
+      lensResults: [{ lens: 'security', ok: true, findings: [blocker('a real security defect')] }, ...cleanPanel(['correctness', 'simplicity', 'standards-conformance'])],
+    }));
+    expect(r.action).toBe(CONVERGE_ACTIONS.EDIT);
+    expect(r.state.round).toBe(1);
+    state = r.state;
+
+    // 4. `editResult: { advanced: true }` with NO `lensResults` — the malformed shape. The real CLI carries
+    //    `readResult` forward within a round (see converge-cli.mjs's `carry`), so `readResult` still reads OK
+    //    here exactly as it would for a live driver; what is missing is `lensResults`. Must escalate, not hand
+    //    back a fresh `panel` seeded with the same pre-edit "AAA" material.
+    r = convergeStep(state, obs({ readResult: { material: 'AAA' }, editResult: { advanced: true } }));
+    expect(r.action).toBe(CONVERGE_ACTIONS.ESCALATE);
+    expect(r.action).not.toBe(CONVERGE_ACTIONS.PANEL);
+    expect(r.action).not.toBe(CONVERGE_ACTIONS.LAND);
+    expect(r.reason).toBe(ESCALATION_REASONS.STALE_OBSERVATIONS);
+    // The loop is DONE — there is no path left from here to a `land` over unread material.
+    expect(r.state.done).toBe(true);
+  });
+
   it('lands a clean panel ONLY after a red-team fails to break it (#2707)', () => {
     const clean = obs({ readResult: READ_OK, lensResults: cleanPanel() });
     const first = convergeStep(stateWith(), clean);
