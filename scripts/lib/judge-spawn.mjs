@@ -434,8 +434,21 @@ export function parseJudgeOutcome(stdout, stderr = '') {
   }
 
   if (parsed?.is_error) {
-    // The CLI's OWN error text, verbatim — never reworded.
-    throw new Error(`judge-spawn: the juror failed: ${parsed.result ?? '<no result text>'}`);
+    if (parsed.result) {
+      // The CLI's OWN error text, verbatim — never reworded.
+      throw new Error(`judge-spawn: the juror failed: ${parsed.result}`);
+    }
+    // `result` is empty — the CLI gave no error text at all (reproduced twice in one night, cause
+    // unknown, resolved both times by a blind retry). A bare "<no result text>" placeholder left the
+    // caller nothing to act on, so surface everything else that IS available: the raw parsed object
+    // (stop_reason, subtype, session_id, whatever else the CLI emitted) plus the stderr stream the
+    // caller passed in — including its `exit code N` fallback when the process produced no stderr.
+    const tail = String(stderr).trim().slice(-600);
+    throw new Error(
+      `judge-spawn: the juror failed with no result text. ` +
+      `parsed: ${JSON.stringify(parsed).slice(0, 600)}\n` +
+      (tail ? `stderr[-600..]: ${tail}` : 'stderr: <empty>'),
+    );
   }
 
   const value = parsed?.structured_output;
