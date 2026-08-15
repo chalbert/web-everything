@@ -84,11 +84,27 @@ the real code, and both are now fixed on that PR:
 **What is true now.** Sanitization is a property of `buildVerdictComment`'s SHAPE, not of a list of field names.
 One `neutralizeCommentMarkers` call sits on the render boundary between the prose region (which may carry any
 caller free text, present or future) and the trusted marker block (built only by validating `build*Marker`
-helpers). It escapes the HTML-comment DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;` — so no marker parser
-in the constellation can match caller bytes, whatever the marker is named and whether or not it existed when
-the line was written. `buildClearedHumanMarker`, the one builder that embeds free text below that boundary, now
-strips `<` alongside `>`. The pin is a suite that reads the builder's option names off the function itself and
-drives a forgery payload through every one, so a field added later is covered with no test edit.
+helpers). It escapes the HTML-comment DELIMITERS — `<!--` → `&lt;!--`, `-->` → `--&gt;` — so no **marker-shaped**
+parser in the constellation (one that opens on a literal `<!--`) can match caller bytes, whatever the marker is
+named and whether or not it existed when the line was written. `buildClearedHumanMarker`, the one builder that
+embeds free text below that boundary, now strips `<` alongside `>`. The pin is a suite that reads the builder's
+option names off the function itself and drives a forgery payload through every one, so a field added later is
+covered with no test edit.
+
+### Second correction — the "no marker parser" claim above still overreached (#3060)
+
+The line just above said sanitizing HTML-comment delimiters means "no marker parser in the constellation can
+match caller bytes" — true of every parser that opens on `<!--`, but `parseOperatorClearance` in
+we:scripts/lib/review-escalation.mjs runs a SECOND regex, `CLEARED_HUMAN_PROSE_RE`, that is not marker-shaped
+at all: it matches the plain sentence "Cleared by … via we:scripts/review-set-label.mjs --to=clear-human", with
+no `<!--` anywhere in it. This render boundary's escape has no purchase on that shape, and a `body`/`reason`
+field carrying that sentence parsed as a genuine clearance right through it — reproduced against pre-#3060 code
+(`buildVerdictComment({to:'changes', actor:'attacker-agent', body: thatSentence})` → `parseOperatorClearance`
+read `{actor: 'Nicolas Gilbert'}` from an ordinary `changes` verdict). #3060 closed it separately, by anchoring
+`CLEARED_HUMAN_PROSE_RE` to the exact `clear-human` heading-then-attribution shape only `buildVerdictComment`'s
+own preamble can produce — never a caller field, which is always appended later in the body. The invariant this
+module states is therefore scoped to marker-shaped (`<!--`-opening) parsers, and is stated that way at its three
+homes: `neutralizeCommentMarkers`'s docstring, the render-boundary note in `buildVerdictComment`, and here.
 - It joins `--actor` / `--reason` in `projectVerdictCommentLength`, so an over-long channel trips the size
   pre-flight before any `gh` call (the PR #1057 lesson about unprojected free text).
 - The two in-repo callers state their own surface: the `review-pr` operation
