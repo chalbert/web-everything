@@ -145,6 +145,15 @@ describe('deriveUnshaped — armed rows with no predicted scope (the auto-prepar
     expect(deriveUnshaped(buildQueue, ['10', '20'])).toEqual([{ num: '20', scope: null }]); // the story only
     expect(deriveDecisions(buildQueue, ['10', '20'])).toEqual([{ num: '10', prepared: false, preparedDate: null }]); // the decision only
   });
+
+  it('EXCLUDES a scope-less feature — it is needs-slice, NOT unshaped, exactly like an epic (#1312 review regression, #2998)', () => {
+    // Regression coverage: a scope-less `kind:feature` previously satisfied the empty-scope test and would have
+    // false-surfaced here (aiming a prepare-SCOPE agent at a container) because only `kind === 'epic'` was excluded.
+    // `feature` (#2691) is epic-parity by design, so it must be excluded the same way and surface ONLY via needsSlice.
+    const buildQueue = { queue: [{ num: '10', kind: 'feature' }, { num: '20', kind: 'story' }] };
+    expect(deriveUnshaped(buildQueue, ['10', '20'])).toEqual([{ num: '20', scope: null }]); // the story only
+    expect(deriveNeedsSlice(buildQueue, ['10', '20'])).toEqual([{ num: '10', epicState: null }]); // the feature only
+  });
 });
 
 describe('deriveDecisions — armed kind:decision rows (the prepare/present surface, #2647)', () => {
@@ -202,6 +211,18 @@ describe('deriveNeedsSlice — armed kind:epic rows (the /slice surface, #2645)'
   it('with clearedNums = null, falls back to the committed buildQueued flag', () => {
     const buildQueue = { queue: [{ num: '10', kind: 'epic', buildQueued: true }, { num: '20', kind: 'epic', buildQueued: false }] };
     expect(deriveNeedsSlice(buildQueue, null)).toEqual([{ num: '10', epicState: null }]);
+  });
+
+  it('also returns ARMED kind:feature rows — epic-parity (#2998)', () => {
+    const buildQueue = {
+      queue: [
+        { num: '10', kind: 'feature', epicState: 'unsliced' }, // armed feature → needs-slice, same as an epic
+        { num: '20', kind: 'story', scope: ['we:src/a.ts'] }, // armed story → NOT needs-slice
+      ],
+    };
+    expect(deriveNeedsSlice(buildQueue, ['10', '20'])).toEqual([
+      { num: '10', epicState: 'unsliced' },
+    ]);
   });
 
   it('empty / null build queue → []', () => {

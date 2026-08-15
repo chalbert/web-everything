@@ -20,7 +20,7 @@
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs retype  <NNN> [--to=<kind>] [--size=N] [--status=parked]  # SANCTIONED pack-phase flag-fix — retype a mis-flagged item / bump size / park it through the CLI instead of a raw primary-tree Edit (no LANE_GUARD_OFF). Frontmatter-only (#2123)
  *   node scripts/backlog.mjs yield    <NNN-slug>                 # move a LOCAL-ONLY NNN collision to the next free number (the guard's "a new item takes the next free number; yield this one"). Refuses a git-tracked file — NNN is immutable
- *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN] [--session=<slug>]   # --kind ∈ story|epic|task|decision (#466/#487). --session ⇒ born `active`+`scaffoldedBy` (owned until settle, #670); without it, born `open` (default)
+ *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN] [--session=<slug>]   # --kind ∈ story|epic|task|decision|feature (#466/#487/#2691). --session ⇒ born `active`+`scaffoldedBy` (owned until settle, #670); without it, born `open` (default)
  *   node scripts/backlog.mjs settle   <NNN>                         # born-active scaffold (--session) → open: publish it once digest+edges+body are authored (#670)
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
@@ -53,7 +53,7 @@ import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTo
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
 import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
-import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
+import { scanRepoLocusPrefixes, BACKLOG_KINDS } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
@@ -638,7 +638,7 @@ function scaffold() {
     if (legacyType || legacyWorkitem) kind = legacyType === 'decision' ? 'decision' : (legacyWorkitem || 'story');
     else kind = 'story';
   }
-  if (!['story', 'epic', 'task', 'decision'].includes(kind)) die(`--kind must be story|epic|task|decision (got "${kind}")`);
+  if (!BACKLOG_KINDS.has(kind)) die(`--kind must be one of ${[...BACKLOG_KINDS].join('|')} (got "${kind}")`);
   const size = flag('size') !== undefined ? Number(flag('size')) : undefined;
   const title = flag('title');
   if (!title) die('scaffold needs --title="…"');
@@ -795,7 +795,7 @@ function retype() {
   const toSize = flag('size');
   const toStatus = flag('status');
   if (!toKind && toSize === undefined && !toStatus) die('retype needs at least one of --to=<kind> / --size=N / --status=<s>');
-  if (toKind && !['story', 'epic', 'task', 'decision'].includes(toKind)) die(`--to must be story|epic|task|decision (got "${toKind}")`);
+  if (toKind && !BACKLOG_KINDS.has(toKind)) die(`--to must be one of ${[...BACKLOG_KINDS].join('|')} (got "${toKind}")`);
   const curStatus = readField(src, 'status') || 'open';
   if (curStatus === 'resolved' && !argv.includes('--force')) die(`#${idFromName(file)} is resolved — retyping a closed item is almost certainly a mistake; pass --force if deliberate`);
   const changes = [];
@@ -1238,14 +1238,14 @@ switch (verb) {
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}resolve-parent${RST} <childNNN>   #2752 on-land: auto-resolve the child's parent EPIC iff every parent:-edge child is resolved + no judgment marker (else escalate/no-op); EDIT-ONLY\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
-      `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
+      `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision|feature] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
       `  ${GRN}prioritize${RST} <NNN> [--to=low|--clear]   set or clear the item's \`priority\` frontmatter (the field readiness/batch ranks by); frontmatter-only\n` +
       `  ${GRN}tier${RST} <NNN> --to=pinned|normal|someday|won't [--clear]   set the build-queue TIER (#2528, the coarse ordering bucket); frontmatter-only\n` +
       `  ${GRN}rank${RST} <NNN> --to=<key> | --after=<NNN> [--before=<NNN>]   set the build-queue LexoRank (#2528, manual drag-order within a tier)\n` +
       `  ${GRN}weights${RST} [--show] | --set=<key>=<n>   read/edit the build-queue scoring config (#2528; validated: sum 100, ≤5, none >50%)\n` +
       `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
       `  ${GRN}number-stranded${RST} [--dry-run]      number every TRACKED hash-id backlog file in this checkout (a hash that reached main via a numbering-bypassing land; #2319/#2288)\n` +
-      `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
+      `  ${GRN}scaffold${RST} --kind=story|epic|task|decision|feature --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
       `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}cost${RST} <NNN> --tokens="in:.. cw:.. cr:.. out:.." (or --in= --cw= --cr= --out=) [--sessions=<n>]   accrue a session's token usage into the card's cumulative costTokens; costUsd is DERIVED from it (close cost-on-card)\n` +
