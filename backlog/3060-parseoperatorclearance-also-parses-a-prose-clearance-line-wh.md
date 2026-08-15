@@ -2,10 +2,13 @@
 bornAs: xeahxy4
 kind: story
 size: 1
-status: open
+status: resolved
 relatedTo: ["2898", "2895", "3039", "2946"]
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/review-set-label.mjs"]
 dateOpened: "2026-08-10"
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
+graduatedTo: scripts/lib/review-escalation.mjs
 tags: [review, marker, forgery, invariant, capture]
 ---
 
@@ -13,7 +16,8 @@ tags: [review, marker, forgery, invariant, capture]
 
 The clearance record has TWO parsers, and only one of them opens on `<!--`. `CLEARED_HUMAN_PROSE_RE` matches a plain sentence, so caller-supplied prose in a `--body-file` (or any raw PR comment) forges a clearance record that the render-boundary escape shipped in PR #1147 leaves untouched — there are no delimiters to escape. Non-gating today, but it falsifies the invariant that fix rests on.
 
-> **Capture only.** Nothing is built here. The fix is framed below without being chosen.
+> **Capture only, at filing.** Nothing was built at the time this card was opened — the fix was framed below
+> without being chosen. See **Resolved** at the bottom for what was actually built.
 
 ## The two parsers
 
@@ -120,3 +124,55 @@ producer closed (or `buildClearedHumanMarker` made total) first. That is a findi
 - A test pins whichever option is taken, driving the prose payload through `buildVerdictComment` the way the
   existing #1147 suite drives the marker payload.
 - The non-gating claim above is re-checked at fix time, not assumed.
+
+## Resolved
+
+**Chose narrowing `CLEARED_HUMAN_PROSE_RE`**, the second option framed above — not the render-boundary escape
+(would have turned the boundary into a content rule, the thing #1147 deliberately avoided) and not dropping the
+fallback (the empty-actor producer that defeats `buildClearedHumanMarker` is still open, so the fallback is not
+provably safe to remove).
+
+The narrowed regex anchors to the exact shape only `buildVerdictComment`'s own `clear-human` render can produce
+— the heading immediately followed by the attribution line, at the very START of the comment body:
+
+```
+/^✅ review — `review:human` cleared via the sanctioned path\n\nCleared by (.+?) via `review-set-label\.mjs --to=clear-human`/g
+```
+
+Every caller-supplied field (`body`, `reason`, `channel`, …) is appended strictly LATER in the rendered body —
+the heading and attribution always come first — so a forged sentence in a caller field can never satisfy `^`.
+The reproduction in this card's body now returns `null`. The legacy pre-marker shape (PR #1106, pinned in
+`we:scripts/lib/__tests__/review-escalation.test.mjs`'s `LEGACY_CLEARANCE` fixture) still parses, because it
+carries exactly this heading-then-attribution shape at the start of its body.
+
+**Re-checked the non-gating claim at fix time**, per the last Definition-of-done bullet: `gh pr list --state
+open` on `chalbert/web-everything` still shows zero PRs carrying `review:human`, so there is still no live
+subject a narrower regex could break.
+
+**What shipped:**
+
+- [we:scripts/lib/review-escalation.mjs#parseOperatorClearance](../scripts/lib/review-escalation.mjs) —
+  `CLEARED_HUMAN_PROSE_RE` narrowed as above, with the reasoning (why anchoring is sufficient, and what it
+  deliberately does not close) written beside it.
+- [we:scripts/review-set-label.mjs#neutralizeCommentMarkers](../scripts/review-set-label.mjs) — docstring
+  restated: its sufficiency claim is scoped to `<!--`-opening (marker-shaped) parsers, with
+  `CLEARED_HUMAN_PROSE_RE` named as the one parser it does not and cannot cover, and where that gets closed
+  instead.
+- `buildVerdictComment`'s render-boundary note (same file) — same restatement, so a reader at either home gets
+  the accurate claim.
+- [#2898](/backlog/2898-the-review-verdict-comment-claims-the-loop-console-for-every/)'s correction section — a
+  second correction added: its own "no marker parser… can match caller bytes" line inherited the same overclaim
+  and is now scoped the same way.
+- Tests: a new `describe` block in
+  [we:scripts/__tests__/review-set-label.test.mjs](../scripts/__tests__/review-set-label.test.mjs) drives the
+  prose payload through `buildVerdictComment` on every non-`clear-human` verdict target and every caller field
+  (mirroring the #1147 marker-forgery suite's shape), plus a legacy-shape regression test. One hermetic fixture
+  in `we:scripts/__tests__/gate-entrypoint-integration.test.mjs` built a bare (heading-less) prose clearance
+  comment for its own drain-reads-it-back test; updated to the real heading-prefixed shape so it keeps exercising
+  the path it is for instead of silently going dark under the narrower regex.
+
+**Not done, and deliberately, restated so it is not re-litigated as a gap:** a raw `gh pr comment` — no CLI
+involved — can still open with the exact heading-then-attribution bytes by hand and forge a clearance record.
+That residual is unchanged by this fix; it is the unforgeable-actor gap #2895 already deferred to
+[#2946](/backlog/2946-human-presence-gesture-webauthn-makes-the-gate-self-clearanc/), and nothing merges on a
+forged clearance either way (`decideReviewGate` still parks; `applyLabel` is unchanged).
