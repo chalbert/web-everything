@@ -251,15 +251,60 @@ export function countSourceLines(text) {
 }
 
 /**
+ * Wrap a raw file-text reader in a per-path memoizing cache, for `findDanglingLoci`'s injected `lineCount`
+ * (#2863). Without this, `check-standards.mjs` re-reads and re-splits the SAME cited file once per locus
+ * OCCURRENCE citing it — measured: `docs/agent/platform-decisions.md` (355 KB) read and line-split 145 times,
+ * `scripts/merge-ai-prs.mjs` (207 KB) 40 times, 113.7 MB of redundant I/O and string-splitting in one gate
+ * pass across only 279 distinct files out of 1513 reads. Cost is O(citations × file size) and grows every
+ * time a popular file gains another citation. A `Map` keyed on the repo-relative path fixes it: same file,
+ * many citing loci, ONE read.
+ *
+ * I/O-free and pure by construction: the caller injects `readFileText` (e.g.
+ * `(p) => readFileSync(join(ROOT, p), 'utf8')`), so this is exercisable with a synthetic COUNTING reader that
+ * asserts it is invoked once per distinct path even when the returned function is called many times with the
+ * same path (see scripts/__tests__/citation-check.test.mjs).
+ *
+ * @param readFileText (relPath:string) => string — throws (or returns non-string) for a missing/unreadable
+ *        file, which this treats the same way `findDanglingLoci`'s original inline closure did: cache `null`.
+ * @returns (relPath:string) => number|null — a drop-in replacement for the `lineCount` option.
+ */
+export function makeMemoizedLineCounter(readFileText) {
+  const cache = new Map();
+  return (relPath) => {
+    if (cache.has(relPath)) return cache.get(relPath);
+    let count;
+    try {
+      const text = readFileText(relPath);
+      count = typeof text === 'string' ? countSourceLines(text) : null;
+    } catch {
+      count = null;
+    }
+    cache.set(relPath, count);
+    return count;
+  };
+}
+
+/**
  * Gate 3 — hash-slug outside the at-land rewrite scope. A `xNNNNNN` hash-slug citation living in a dir the
  * hash→NNN rewriter never touches (reports/, the two research dirs) will dangle permanently once the item
  * lands with a real NNN. We match only the two citation FORMS the drift takes — a `#xNNNNNN` cross-ref and
  * a `xNNNNNN-slug.md` file link — so a stray word can't trip it.
  *
+ * DEDUPED PER SLUG, PER FILE (#2863). The raw regexes below are occurrence-scanners: the same slug cited 11
+ * times in one file, or cited in both forms (a `#xNNNNNN` cross-ref AND a `xNNNNNN-slug.md` file link), is
+ * still ONE problem a reader fixes once — not 11 (or 2-3) separate warnings. Measured on this corpus before
+ * the dedupe: 85 warnings for 30 distinct slugs, one slug alone yielding 11. Every duplicate also carried the
+ * identical `{kind, file}` descriptor, so `--scope` could not tell them apart — the opposite of the per-file
+ * keying #1389 established for the sibling `findDanglingLoci` rule above (which dedupes by exact locus text).
+ * So this dedupes down to ONE finding per distinct slug per call (a call is already one file, per the caller's
+ * per-file scan loop): the FIRST form the slug is seen in (hash-ref scanned before file-link) is what the
+ * finding reports, which is enough for the caller's message to name a concrete citation to fix.
+ *
  * @param text    the file body (raw).
  * @param relPath the file's repo-relative path (decides in/out of scope).
  * @param opts.outOfScopeDirs default HASH_SLUG_OUT_OF_SCOPE_DIRS.
- * @returns array of `{ slug, form }` (form: 'hash-ref' | 'file-link'); empty if relPath is in rewrite scope.
+ * @returns array of `{ slug, form }` (form: 'hash-ref' | 'file-link'), one entry per distinct slug; empty if
+ *          relPath is in rewrite scope.
  */
 export function findOutOfScopeHashSlugs(text, relPath, { outOfScopeDirs = HASH_SLUG_OUT_OF_SCOPE_DIRS } = {}) {
   const findings = [];
@@ -267,8 +312,10 @@ export function findOutOfScopeHashSlugs(text, relPath, { outOfScopeDirs = HASH_S
   if (!outOfScopeDirs.some((d) => relPath.startsWith(d))) return findings; // in-scope dir self-heals at land
   const hashRef = new RegExp(`#(${HASH_SLUG})\\b`, 'g');
   const fileLink = new RegExp(`\\b(${HASH_SLUG})-[a-z0-9-]+\\.md\\b`, 'g');
-  for (const m of text.matchAll(hashRef)) findings.push({ slug: m[1], form: 'hash-ref' });
-  for (const m of text.matchAll(fileLink)) findings.push({ slug: m[1], form: 'file-link' });
+  const seen = new Map(); // slug → form of its first-seen citation
+  for (const m of text.matchAll(hashRef)) if (!seen.has(m[1])) seen.set(m[1], 'hash-ref');
+  for (const m of text.matchAll(fileLink)) if (!seen.has(m[1])) seen.set(m[1], 'file-link');
+  for (const [slug, form] of seen) findings.push({ slug, form });
   return findings;
 }
 

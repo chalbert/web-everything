@@ -26,6 +26,7 @@ import {
   findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
   countSourceLines,
+  makeMemoizedLineCounter,
   CROSS_REPO_LOCI,
   findUnresolvedIdentifiers,
   buildIdentifierIndex,
@@ -258,6 +259,66 @@ describe('findOutOfScopeHashSlugs — gate 3 (hash-slug outside the at-land rewr
   it('does NOT fire on a word that merely starts with x + letters but is not a hash-slug form', () => {
     // `xoverflow` has 8 chars after x; a real slug is exactly `x`+6 and cited as `#x...` or `x...-slug.md`.
     expect(findOutOfScopeHashSlugs('the xoverflow example and extended prose', 'reports/r.md')).toHaveLength(0);
+  });
+
+  // #2863 — dedupe by slug, per file. A slug repeated N times (whatever the mix of forms) is one reader-visible
+  // problem, so it must be one finding, not one per occurrence.
+  it('DEDUPES: a slug cited 11 times as a hash-ref in one file yields exactly ONE finding', () => {
+    const text = Array.from({ length: 11 }, () => '#xntcdet').join(' and ');
+    const hits = findOutOfScopeHashSlugs(text, 'reports/repeats.md');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toEqual({ slug: 'xntcdet', form: 'hash-ref' });
+  });
+
+  it('DEDUPES across BOTH cited forms — a hash-ref and a file-link for the same slug collapse to one finding', () => {
+    const text = 'first cited as #xntcdet, later linked as [it](xntcdet-ratify-gate.md), and again #xntcdet.';
+    const hits = findOutOfScopeHashSlugs(text, 'reports/mixed-forms.md');
+    expect(hits).toHaveLength(1);
+    // The FIRST-seen form wins (hash-ref is scanned before file-link) — enough for the message to point at a
+    // concrete citation; which exact form is reported is not the load-bearing behaviour, dedup-to-one is.
+    expect(hits[0].slug).toBe('xntcdet');
+    expect(hits[0].form).toBe('hash-ref');
+  });
+
+  it('still reports TWO findings for two genuinely DIFFERENT slugs in the same file', () => {
+    const hits = findOutOfScopeHashSlugs('cites #xntcdet twice: #xntcdet, and also #x9kptqv once', 'reports/two.md');
+    expect(hits.map((h) => h.slug).sort()).toEqual(['x9kptqv', 'xntcdet']);
+  });
+});
+
+describe('makeMemoizedLineCounter — gate 5\'s line-count reader, memoized per path (#2863)', () => {
+  it('reads a given path AT MOST ONCE even when queried many times, INCLUDING interleaved with other paths', () => {
+    const tree = { 'docs/agent/platform-decisions.md': 'l1\nl2\nl3\n', 'scripts/merge-ai-prs.mjs': 'a\nb\n' };
+    const reads = [];
+    const counter = makeMemoizedLineCounter((p) => { reads.push(p); return tree[p]; });
+    // Simulate many citing loci hitting the same popular file, interleaved with a second file's citations —
+    // the real shape (#2863 measured platform-decisions.md read 145x, merge-ai-prs.mjs 40x in one gate pass).
+    for (let i = 0; i < 20; i++) {
+      expect(counter('docs/agent/platform-decisions.md')).toBe(3);
+      if (i % 5 === 0) expect(counter('scripts/merge-ai-prs.mjs')).toBe(2);
+    }
+    expect(reads).toEqual(['docs/agent/platform-decisions.md', 'scripts/merge-ai-prs.mjs']); // one read, each, ever
+  });
+
+  it('caches a MISSING/unreadable file as null too, so a dangling locus does not re-throw on every occurrence', () => {
+    let calls = 0;
+    const counter = makeMemoizedLineCounter((p) => { calls++; throw new Error(`ENOENT: ${p}`); });
+    expect(counter('scripts/nope.mjs')).toBeNull();
+    expect(counter('scripts/nope.mjs')).toBeNull();
+    expect(counter('scripts/nope.mjs')).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('drops in as findDanglingLoci\'s lineCount option and still resolves correctly, just with fewer reads', () => {
+    const tree = { 'scripts/real.mjs': 'l1\nl2\n' };
+    const fileExists = (p) => Object.hasOwn(tree, p);
+    let reads = 0;
+    const lineCount = makeMemoizedLineCounter((p) => { reads++; return tree[p]; });
+    // Two DIFFERENT loci in the same citing text, both pointing at the same file.
+    const hits = findDanglingLoci('at we:scripts/real.mjs:2 and also we:scripts/real.mjs:3', { fileExists, lineCount });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].reason).toBe('line-out-of-range');
+    expect(reads).toBe(1); // one file, one read, despite two distinct loci resolving against it
   });
 });
 
