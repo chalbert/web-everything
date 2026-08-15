@@ -2251,6 +2251,36 @@ function headerComment(src) {
 }
 
 /**
+ * Bound the LAST `from we:… —` declaration in a header by where ITS OWN backtick-list grammar
+ * actually ends, rather than by searching for a blank comment line (#2976 review r2). Searching for a
+ * blank line only closed the false negative when a blank `*` line happens to separate the declaration
+ * from whatever prose follows — trailing prose that immediately follows on the very next comment line
+ * (no blank-line separator) fell back to `header.length` again, folding that prose's backticked names
+ * into the "declared" set and reproducing the exact false negative #2976 exists to catch.
+ *
+ * The grammar itself is the real boundary: `name` (aside)?, `name` (aside)?, …, — a run of backticked
+ * names and optional parenthetical asides (which may contain arbitrary prose, including words, and may
+ * themselves span multiple comment lines), joined by commas/`+`/whitespace/dashes. The first character
+ * that sits OUTSIDE both a backtick pair and a paren and is a bare letter is prose, not a continuation
+ * of the list — whether or not a blank line separates it from the declaration. `scanFrom` must be the
+ * offset right after the declaration's own `from we:<path> —` text (never inside it — the path itself
+ * is full of letters).
+ */
+function lastDeclarationEnd(header, scanFrom) {
+  let parenDepth = 0;
+  let inBacktick = false;
+  for (let i = scanFrom; i < header.length; i += 1) {
+    const ch = header[i];
+    if (ch === '`') { inBacktick = !inBacktick; continue; }
+    if (inBacktick) continue;
+    if (ch === '(') { parenDepth += 1; continue; }
+    if (ch === ')') { parenDepth = Math.max(0, parenDepth - 1); continue; }
+    if (parenDepth === 0 && /[A-Za-z]/.test(ch)) return header.lastIndexOf('\n', i) + 1;
+  }
+  return header.length;
+}
+
+/**
  * Diff each module's DECLARED contract block against its actual import specifiers. Pure.
  * @param {Array<{file: string, content: string}>} modules
  * @returns {{errors: Array<{message: string, descriptor?: object}>, warnings: Array<object>}}
@@ -2265,18 +2295,18 @@ export function validateDeclaredModuleContract(modules = []) {
     if (!decls.length) continue;
     for (let i = 0; i < decls.length; i += 1) {
       const target = decls[i][1];                                   // e.g. scripts/lib/jury-core.mjs
-      // Bound each declaration's own text. A middle declaration runs to the next one's start; the LAST
-      // declaration must NOT run to header.length — that folded every backticked name in the header's
-      // trailing prose (e.g. a paragraph explaining the rule itself) into the "declared" set, silently
-      // accepting an undeclared import under the last declaration (#2976). Stop it at the next blank
-      // comment line (` *` with no content) within the header instead, the same boundary a maintainer
-      // reading the block would see as "this declaration is over."
+      // Bound each declaration's own text. A middle declaration runs to the next one's start (exact —
+      // that next `from we:` match IS the boundary). The LAST declaration has no such anchor, and must
+      // NOT run to header.length — that folded every backticked name in the header's trailing prose
+      // (e.g. a paragraph explaining the rule itself) into the "declared" set, silently accepting an
+      // undeclared import under the last declaration (#2976). Bound it by its own backtick-list
+      // grammar instead (lastDeclarationEnd) — not by searching for a blank line, which only closes
+      // the false negative when a blank line happens to separate the declaration from what follows.
       let end = header.length;
       if (i + 1 < decls.length) {
         end = decls[i + 1].index;
       } else {
-        const blank = /\n[ \t]*\*[ \t]*\n/.exec(header.slice(decls[i].index));
-        if (blank) end = decls[i].index + blank.index + 1;
+        end = lastDeclarationEnd(header, decls[i].index + decls[i][0].length);
       }
       const body = header.slice(decls[i].index, end);
       const declared = new Set([...body.matchAll(/`([A-Za-z0-9_$]+)`/g)].map((m) => m[1]));
