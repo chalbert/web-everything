@@ -33,3 +33,37 @@ are explicitly *"per whichever candidate is the emerging MVP (#097)"*, and the
 pricing page is *"wired to checkout (#183/#297)"* — and #297 is itself now blocked
 on #097's pricing shape. With no MVP/product or pricing chosen, there is no concrete
 conversion surface to author. Unblocks when #097 picks the MVP + pricing.
+
+## Re-checked 2026-08-15 — still not build-ready, no new blocker filed
+
+Attempted to prepare this item per the story-preparation checklist (decided design,
+interfaces, ordered tasks, testable `Done when`). Verified against live repo state
+rather than re-stating the 2026-06 notes:
+
+- **#097 has an emerging spine but no concrete pricing.** [#094](/backlog/094-ai-upgrader-tools/)
+  (AI upgrader) is resolved and #097 now names it *"the emerging MVP spine"* — so the
+  demo this item would lead with is no longer hypothetical. But #097 carries
+  `ongoing: true` (a perpetual living-strategy doc, never expected to resolve) and its
+  body still states no pricing shape has been fixed.
+- **The parent epic's deferral has not been lifted.** [#181](/backlog/181-commercialization-infrastructure/)'s
+  2026-06-11 note — *"deprioritized until the product is in a much better state
+  … re-open the implementation stories when the product is near first sale"* — is
+  unchanged since it was written, and every sibling build in the epic still carries the
+  identical deferred stance: [#182](/backlog/182-license-key-issuance-validation/)
+  (license issuance) ruled its shape but explicitly deferred the *build* until "near
+  first sale"; [#297](/backlog/297-implement-lemon-squeezy-mor-checkout-webhook-license-issuanc/)
+  (the checkout this item's pricing page would wire to) is still `open` +
+  `blockedBy: ["097"]` with no chosen pricing shape and no live Lemon Squeezy store.
+- **`check:readiness --select` does not surface this item** — it is not in the
+  agent-ready/batchable pool, consistent with the unresolved `blockedBy` edge.
+- **No new blocker item filed** — the block is already fully tracked (`blockedBy:
+  ["097"]` plus the cross-referenced deferral notes on #181/#182/#297); a duplicate
+  blocker card would add noise, not information.
+
+**Conclusion: genuinely not viable to bring to build-ready yet.** Authoring a decided
+design / interfaces / tasks against copy and pricing that don't exist would be exactly
+the "prepared a card nothing measured as unblocking anything" failure mode the
+preparation checklist warns against (cf. #3071). Leave `status: open` +
+`blockedBy: ["097"]` as-is — it correctly encodes the real gate. Re-attempt preparation
+once #097's body names a concrete pricing shape (or the #181 epic's deferral note is
+explicitly lifted), whichever comes first.
