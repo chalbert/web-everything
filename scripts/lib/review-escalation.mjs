@@ -1175,10 +1175,39 @@ export function normalizeContributionFingerprint(diffText) {
  * these bytes. That is not a new exposure — #2895 already ruled the unforgeable actor signal deferred (#2946),
  * and this record is used ONLY to make an automated re-hold LOUD and ATTRIBUTED, never to permit a merge. A
  * forged clearance comment cannot land anything: `decideReviewGate` still parks, and `applyLabel` is unchanged.
+ *
+ * #3060 — `CLEARED_HUMAN_PROSE_RE` IS NOT MARKER-SHAPED, and that mattered more than it first looked. It opens
+ * on plain words, not `<!--`, so `neutralizeCommentMarkers`'s render-boundary escape (which strips exactly the
+ * HTML-comment delimiter, by design — see its docstring in `we:scripts/review-set-label.mjs`) has no purchase on
+ * it: a caller-supplied `body`/`reason`/`--body-file` line shaped like `Cleared by X via
+ * \`review-set-label.mjs --to=clear-human\`` sailed straight through the escape and parsed as a real clearance —
+ * `buildVerdictComment({to:'changes', actor:'attacker-agent', body: thatSentence})` produced a comment
+ * `parseOperatorClearance` read as `{actor: 'X'}`, with no `<!--` anywhere in it to neutralize. Repro pinned in
+ * `we:scripts/__tests__/review-set-label.test.mjs`.
+ *
+ * THE FIX HERE IS A NARROWED REGEX, not a render-boundary escape (the other option on the table, and the one
+ * `neutralizeCommentMarkers`'s shape-not-names argument would suggest) — because the prose form's real shape is
+ * already known and fixed: `buildVerdictComment` always renders it as the FIRST content after the `clear-human`
+ * heading, at the very start of the comment BODY, and every caller-supplied field (`body` included) is appended
+ * strictly LATER, after the heading and the attribution paragraph. So requiring the match to start at byte 0 of
+ * the body, immediately preceded by the exact `clear-human` heading, keeps every genuine clearance (the legacy
+ * pre-marker ones this regex exists for, and every one `buildVerdictComment` writes today) while refusing a
+ * caller-supplied field, which can never be first — `to`/`heading` are not a caller input. `g` (not `m`) is kept
+ * so the `while (exec())` loop below terminates: `^` with no `m` flag only ever matches position 0, so a single
+ * hit (or none) is the most `exec` can return before `lastIndex` moves past it.
+ *
+ * WHAT THIS DOES NOT CLOSE, restated so it is not overclaimed a second time: a raw `gh pr comment` (or any
+ * comment not built by `buildVerdictComment`) can still open with the exact heading-then-attribution bytes by
+ * hand, with no CLI involved — the CLI is one route in, not the whole exposure, exactly as the card that drove
+ * this fix (#3060) found. That residual is the same unforgeable-actor gap #2895 already deferred to #2946; nothing
+ * merges on a forged clearance either way (`decideReviewGate` still parks, `applyLabel` is unchanged).
  */
 export const CLEARED_HUMAN_MARKER = 'cleared-human';
 const CLEARED_HUMAN_RE = new RegExp(`<!--\\s*${CLEARED_HUMAN_MARKER}:\\s*([^>]*?)\\s*-->`, 'g');
-const CLEARED_HUMAN_PROSE_RE = /^Cleared by (.+?) via `review-set-label\.mjs --to=clear-human`/gm;
+// #3060 — anchored to the START of the comment body, immediately after the exact `clear-human` heading
+// `buildVerdictComment` renders. A caller-supplied field is always appended LATER in the body, so it can never
+// satisfy `^`. See the long note above for why this is sufficient without becoming a render-boundary escape.
+const CLEARED_HUMAN_PROSE_RE = /^✅ review — `review:human` cleared via the sanctioned path\n\nCleared by (.+?) via `review-set-label\.mjs --to=clear-human`/g;
 
 /**
  * Build the operator-clearance marker for a `--to=clear-human` verdict comment. Pure. Empty actor → '' (no
