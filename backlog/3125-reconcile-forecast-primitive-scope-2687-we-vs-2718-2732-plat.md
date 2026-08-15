@@ -13,6 +13,28 @@ tags: []
 
 # Reconcile forecast-primitive scope: #2687 (WE) vs #2718/#2732 (plateau-app:src/feature-tracker/forecast.ts) — already-ratified thresholds via #2719
 
+## ⚠ Ratification gap — needs operator attention
+
+Flagged retroactively (2026-08-15): this item was resolved by an autonomous prep agent the same day it was
+opened and prepared (`dateOpened == preparedDate == dateResolved == 2026-08-15`), with **no `ratifiedBy:`
+frontmatter field and no `## Ruling` block** naming a human, and no PR comment recording an explicit human
+ratify utterance. Per `we:docs/agent/backlog-workflow.md:295-296`, every `decision` item requires explicit
+human ratification before `resolved` — the *only* sanctioned auto-ratify is the fork-existence test
+collapsing to exactly one coherent branch (`:296`). This item does not qualify for that exception: its own
+**Skeptic (pass 4)** rated axis 2 `SURVIVES-WITH-AMENDMENT` (a red-team that amended a branch), which per
+`we:docs/agent/backlog-workflow.md:296` and `we:backlog/2821-*.md` gate 1b is explicitly named as a "live
+fork" tell that "is never an auto-close" — validation-gate archetype exempts this item from needing `## Fork
+N` shape (see *Why this is a validation gate*, above), but does **not** exempt it from needing a human's
+actual sign-off.
+
+**This note does not reopen or reverse the ruling** — the underlying technical verdict (no named WE-side
+reuse consumer for a standalone forecast primitive; #2718/#2719 already cover #2687's ask) was independently
+re-checked and stands on its merits. What's missing is only the provenance record. Next step for whoever
+reviews this next: either (a) add a retroactive `ratifiedBy:` field + a `## Ruling` block naming the human
+who reviewed and affirms the verdict, dated when that review happens — or (b) if the operator disagrees with
+the ruling on review, reopen this item (`status: active` or `open`) and re-run ratification properly. Do not
+resolve this gap by fabricating a ratification.
+
 ## Digest — resolved: #2687 superseded
 
 **Verdict: NO — a separate WE-side generic forecast primitive is not worth keeping as its own build item.**
