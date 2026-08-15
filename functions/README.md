@@ -22,25 +22,29 @@ tests + this runbook; the Worker itself lives at the repo root so `wrangler.toml
   `binding = "ASSETS"`, `run_worker_first = true`).
 - `functions/__tests__/gate.test.ts` — the gate's unit tests (`npx vitest run functions`).
 
-## Deploy — production path: Workers Builds ↔ GitHub git integration (2026-07-02)
+## Deploy — production path: `.github/workflows/deploy.yml` (corrected 2026-07-03)
 
-Auto-build + deploy on every push to `main`, with a preview per non-production branch. One-time setup in
-the Cloudflare dashboard **Create application → import `chalbert/web-everything`** (a GitHub OAuth step):
+**Not** Cloudflare's own Workers Builds git integration — that dashboard "Create application → import
+`chalbert/web-everything`" flow was tried and disconnected: a single-repo Cloudflare checkout can't reach
+the sibling `../frontierui` repo that `build:docs` needs (see below), so it can never produce a working
+build. The actual deployer is a **cross-repo GitHub Action** (`we:.github/workflows/deploy.yml`), which runs
+on every push to `main`:
 
-| Field | Value |
-|---|---|
-| Repository | `chalbert/web-everything` |
-| Build command | `npm run build:docs` |
-| Deploy command | `npx wrangler deploy` *(the default — now correct: `wrangler.toml` is a Worker config)* |
-| Non-production branch deploy command | `npx wrangler versions upload` *(default)* |
-| Path | `/` |
-| Node version | pinned by `we:.nvmrc` (`22`) |
+1. Checks out `chalbert/web-everything` **and** `chalbert/frontierui` as siblings under `$GITHUB_WORKSPACE`
+   (the FUI checkout needs a `FUI_READ_TOKEN` fine-grained PAT, `Contents:Read` on `chalbert/frontierui`).
+2. Builds FUI's tools first (`npm run build:tools`, ratified #1946/#2016 ordering) — produces
+   `dist/tools/component-render/cli.mjs`, which WE's Eleventy build shells out to.
+3. Builds the WE site (`npm run build:docs`, **not** `npm run build` — the demo build (`build:demo` →
+   `vite build`) resolves an alias graph into the sibling FUI repo that a bare single-repo checkout can't
+   provide; the public gated site is the self-contained Eleventy docs build).
+4. Deploys via `cloudflare/wrangler-action@v3` (`command: deploy`), pinned to `wranglerVersion: "4.106.0"`
+   — the version verified to honor `run_worker_first = ["/*"]` (see `we:wrangler.toml`'s comment: an
+   earlier boolean form leaked ungated content).
 
-**Why `build:docs`, not `npm run build`:** the demo build (`build:demo` → `vite build`) resolves an alias
-graph into the *sibling FUI repo*, absent on Cloudflare's single-repo checkout. The public gated site is
-the self-contained Eleventy docs build.
+Repo secrets it needs (`Settings → Secrets and variables → Actions`): `FUI_READ_TOKEN`,
+`CLOUDFLARE_API_TOKEN` (Workers Scripts · Edit), `CLOUDFLARE_ACCOUNT_ID`.
 
-**Secrets** are set once on the Worker and persist across deploys:
+**Worker secrets** (separate from the above — set once on the Worker itself, persist across deploys):
 
 ```sh
 wrangler secret put GATE_CODE               # the shared entry code
@@ -48,8 +52,14 @@ wrangler secret put GATE_COOKIE_SECRET      # a long random HMAC key (e.g. opens
 ```
 
 Until the secrets are set the gate **fails closed** (splash for everyone — a lockout, never a content
-leak). **Go-live gate:** pointing the real domain / lifting the splash stays blocked by the #2127
-claims-truth audit; the gated `*.workers.dev` (or `web-everything.<subdomain>`) deploy is safe ahead of it.
+leak).
+
+**Go-live gate:** the #2127 claims-truth audit that used to block this **is resolved** (2026-07-02) — see
+[#1137](/backlog/1137-public-deploy-we-site-live-behind-a-splash-shared-entry-code/). The gated
+`*.workers.dev` preview is already live; pointing the real (Squarespace) domain and flipping
+`workers_dev=false` in `we:wrangler.toml` is the sole remaining step, and it is a **human** one (registrar
+DNS + Cloudflare dashboard access an agent doesn't hold) — see #1137's card for the runbook and its
+DNS/email-continuity prerequisite.
 
 ### Manual fallback (credentialed, one-off)
 
