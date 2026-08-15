@@ -220,6 +220,58 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > corrected Discard bullet's own text above this callout block — same "unstated-guarantee vs. actual
   > behavior" shape this PR was bounced on twice before.
 
+  > **Independent reviewer addendum (round 10), fixed round 11 — checkpoint B's manifest assembly re-bundles
+  > the exact mistake round 8/9 just split apart, just relocated one step later.** The round-9 numbered list
+  > folded the `ConformanceEvidenceManifest` assembly — which requires an `await checkContentAgainstVectors(...)`
+  > call to compute `before.passed` — into the SAME step as `openPullRequest()`, with only a vague "can run
+  > any time before the manifest is assembled" note governing when that `await` may happen relative to
+  > checkpoint B. That phrasing resolves *when relative to manifest assembly* the check may run, but never
+  > states it must run *before checkpoint B fires* — an implementer following the numbered list literally
+  > could place the `await` after checkpoint B and before `openPullRequest()`, reopening an unguarded async
+  > window between the check and the true irrevocable call, the identical shape round 8 found (and round 9
+  > closed) on the credential-resolution seam.
+  >
+  > **Fixed by giving manifest assembly its own numbered step, placed strictly before checkpoint B — not
+  > "any time before," a fixed position in the sequence.** See the corrected numbered list below: the
+  > `ConformanceEvidenceManifest` (including its `before.passed` `await`) is now step 3a, checkpoint B is
+  > 3b, and step 4 is nothing but the literal `openPullRequest()` call with the already-assembled manifest —
+  > no `await` of any kind sits between checkpoint B and the call it guards, closing this the same way round
+  > 9 closed the credential-resolution gap: by moving the check to sit immediately before the one call it is
+  > actually meant to protect, rather than "somewhere before it."
+
+  > **Independent reviewer addendum (round 10), fixed round 11 — a resolved-but-discarded live credential
+  > has no revoke path (disclosed, not fixed).** See the new "Disclosed residual" bullet below, just above
+  > "Emit, in order," for the disclosed residual this callout names.
+
+  > **Review fix (2026-08-15, PR #1355, round 11) — BLOCKER, fixed in `xv0j8db`, threaded through here.** A
+  > concurrent `discardEdit()` landing while `runVerifyGate()`'s own internal engine loop is mid-fail-branch
+  > used to reach `SafeEditBuffer.write(key, undefined)` and throw uncaught (see `xv0j8db`'s round-11
+  > callout for the full trace — `we:scripts/autofix/engine.mjs` lines 291-330). `xv0j8db` fixes this at the
+  > source and reports it back via a new `VerifyGateResult.aborted?: 'edit-vanished'` field. `emitEdit()`'s
+  > step 1 (below) now checks that field FIRST, before its ordinary `ok`-branch: `aborted === 'edit-vanished'`
+  > maps to `{ ok: false, reason: 'stale-edit' }`, never `'not-gate-passed'` — the edit was withdrawn out
+  > from under the gate, not rejected by it, and `'stale-edit'` is the reason this interface already uses
+  > for every other "the buffer moved out from under you" outcome (checkpoints A and B). This adds no new
+  > failure reason and no new checkpoint — it is a third way the SAME `'stale-edit'` reason can be reached,
+  > alongside checkpoints A and B, all three driven by the buffer changing under an in-flight `emitEdit()`.
+
+- **Disclosed residual (PR #1355, round 10) — a resolved-but-discarded credential is left to expire, not
+  revoked.** Step 3 (below) resolves a `ForgeCredential` via the credential-source registry before
+  checkpoint B runs. Checked `plateau-app:packages/dev-browser/src/credential-source/` directly: the
+  `github-app-broker` source's `provide()`/`mintToken()` actively mints a real, short-lived installation
+  token via a backend call. If checkpoint B then aborts the emit with `stale-edit` immediately after (a
+  case this card's own tests exercise — see Task 2's checkpoint-B, credential-resolution-timing case), that
+  already-minted credential is simply dropped: no `revoke`/`invalidate` method exists anywhere in the
+  credential-source seam (`CredentialSource`, `CredentialOutcome`, and the registry's `resolve`/`provide`
+  methods carry none). This is **not treated as a blocker** — the token is short-lived by design and is
+  never persisted or logged, so the exposure window is bounded and closes on its own — but it is a live,
+  unused, write-scoped credential left to expire naturally rather than being invalidated, and closing it
+  would require the credential-source package itself (a different, already-shipped package this slice only
+  calls, never edits — see Scope above) to grow a revoke capability, which is out of this slice's scope. A
+  follow-up task against that package, not a fix here, is the honest way to close this; naming it explicitly
+  (this bullet) is the fix this round actually makes, matching how the ide-bridge-`patch()` write residual
+  under Discard above is stated rather than silently absent.
+
 - **Emit**, in order:
   0. Capture `const { after: content, token } = buffer.snapshot(key) ?? {};` as the function's first
      statement — synchronous, before any `await`, and a single atomic buffer call (PR #1355 round 7 —
@@ -234,13 +286,16 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      (Slice 2's gate — `emitEdit()` calls it directly, itself; it does not accept a caller-supplied
      `gatePassed` boolean and does not trust one — see the round-3 fix above — and it checks the SAME
      captured `content`, not a value that could have drifted from what step 2 writes — see the round-4 fix
-     above). Refuse — return `{ ok: false, reason: 'not-gate-passed' }`, never partially proceed — unless
-     the result is `{ ok: true }`. The caller (the future UI) may well have already run the gate once,
-     earlier, to decide whether to even show the "emit" affordance — that's fine and expected — but
-     `emitEdit()` re-derives the answer itself, against the captured current content, every time it runs, so
-     a stale/racy/bypassed caller-side check can never cause a failing edit to reach a real file write or a
-     real PR. This is the same "never fake a pass" discipline the autofix engine itself uses, now actually
-     wired into the interface rather than only stated in prose.
+     above). **(PR #1355 round 11)** If the result's `aborted === 'edit-vanished'`, return `{ ok: false,
+     reason: 'stale-edit' }` immediately — a concurrent `discardEdit()` raced `runVerifyGate()`'s own
+     internal engine loop (see the round-11 callout above); this is checked FIRST, before the ordinary
+     `ok`/`not-gate-passed` branch below. Otherwise, refuse — return `{ ok: false, reason: 'not-gate-passed'
+     }`, never partially proceed — unless the result is `{ ok: true }`. The caller (the future UI) may well
+     have already run the gate once, earlier, to decide whether to even show the "emit" affordance — that's
+     fine and expected — but `emitEdit()` re-derives the answer itself, against the captured current
+     content, every time it runs, so a stale/racy/bypassed caller-side check can never cause a failing edit
+     to reach a real file write or a real PR. This is the same "never fake a pass" discipline the autofix
+     engine itself uses, now actually wired into the interface rather than only stated in prose.
   1a. **Checkpoint A (PR #1355 round 7).** Immediately after step 1 resolves `{ ok: true }` and before step
      2 runs: `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — synchronous,
      with nothing between this check and step 2's call that could let the buffer change again. Catches a
@@ -254,26 +309,33 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   3. Resolve a `ForgeCredential` via the credential-source registry. (PR #1355 round 9 — split out of the
      old bundled step 3 below, so checkpoint B can sit *after* this `await`, not before it; see the round-8
      addendum callout above.)
-  3a. **Checkpoint B (PR #1355 round 7, relocated round 9).** Immediately after step 3 resolves and before
-     step 4 runs: `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — the same
-     synchronous check as checkpoint A, now genuinely immediately before the true irrevocable action
-     (`openPullRequest()`), matching the `Interfaces` block's claim. Cannot undo the file write step 2 already
-     made (a disclosed, accepted residual limitation — see the round-7 callout above for why) but does stop a
-     PR being opened for content the buffer no longer holds, whether the staleness landed during step 2's
-     ide-bridge write or step 3's credential resolution.
-  4. `ForgeProviderRegistry.openPullRequest(...)` with a `body` rendered by the pr-body renderer from a
-     `ConformanceEvidenceManifest` this function assembles from: `edit.before` and the captured `content`
-     (verify evidence — `before.passed` computed by calling `checkContentAgainstVectors({ ruleKind:
-     edit.target.ruleKind, appId, content: edit.before, registry, index })` (the helper `xv0j8db` exports,
-     PR #1355 round 7 — the same check the gate itself runs, applied to the pre-edit baseline instead of the
-     proposed content) and setting `before.passed = result.length === 0`; this is a pure check against the
-     fixed `edit.before` string, not the mutable buffer, so it carries none of the token/staleness risk the
-     content-bearing steps above do, and can run any time before the manifest is assembled — `after.passed:
-     true` since emit only runs post-gate, and `after`'s content is `content`, the same captured value that
-     was gated and written — not `opts.edit.after`), the `autonomy: 'open-pr'` level
+  3a. **Assemble the `ConformanceEvidenceManifest` in full (PR #1355 round 11 — its own step, pinned strictly
+     before checkpoint B, not "any time before the manifest is assembled").** Build the manifest from
+     `edit.before` and the captured `content`: `before.passed` computed by `await
+     checkContentAgainstVectors({ ruleKind: edit.target.ruleKind, appId, content: edit.before, registry,
+     index })` (the helper `xv0j8db` exports, PR #1355 round 7 — the same check the gate itself runs,
+     applied to the pre-edit baseline instead of the proposed content), setting `before.passed = result.length
+     === 0`; `after.passed: true` since emit only runs post-gate, and `after`'s content is `content`, the
+     same captured value that was gated and written — not `opts.edit.after`; the `autonomy: 'open-pr'` level
      (the only level #141 Fork 2 ratified for v1 — `auto-merge` is not reachable from this slice, by
-     construction, since nothing here calls a merge API), and the app/impl identity already available from
-     the declared-rules registry's `appId`.
+     construction, since nothing here calls a merge API); and the app/impl identity already available from
+     the declared-rules registry's `appId`. This step's `await` is a pure check against the fixed
+     `edit.before` string, not the mutable buffer, so it carries none of the token/staleness risk the
+     content-bearing steps above do — but it MUST still complete, in full, before checkpoint B (next) runs:
+     nothing async may sit between checkpoint B and step 4's literal `openPullRequest()` call, the same
+     discipline round 9 already applied to credential resolution.
+  3b. **Checkpoint B (PR #1355 round 7, relocated round 9, position re-pinned round 11).** Immediately after
+     step 3a completes and before step 4 runs: `if (!buffer.isCurrent(key, token)) return { ok: false,
+     reason: 'stale-edit' };` — the same synchronous check as checkpoint A, now genuinely immediately before
+     the true irrevocable action (`openPullRequest()`), matching the `Interfaces` block's claim, with nothing
+     — not credential resolution, not manifest assembly — awaited between this check and that call. Cannot
+     undo the file write step 2 already made (a disclosed, accepted residual limitation — see the round-7
+     callout above for why) but does stop a PR being opened for content the buffer no longer holds, whether
+     the staleness landed during step 2's ide-bridge write, step 3's credential resolution, or step 3a's
+     manifest assembly.
+  4. `ForgeProviderRegistry.openPullRequest(...)` with a `body` rendered by the pr-body renderer from the
+     `ConformanceEvidenceManifest` already assembled in step 3a — no further `await` of any kind happens in
+     this function between checkpoint B and this call.
   5. Return the `PullRequestRef` (url + number) on success, or a typed failure naming which step failed
      (`patch-unavailable` / `auth-unavailable` / `forge-unavailable` / `forge-error`) — never a bare thrown
      exception, matching every sibling registry's own `{ ok, reason }` outcome shape.
@@ -296,7 +358,9 @@ import { renderPrBody } from '../pr-body/renderer';
 
 export type EmitFailureReason =
   | 'not-gate-passed'
-  | 'stale-edit' // PR #1355 round 7 — buffer.isCurrent(key, token) failed at checkpoint A or B
+  | 'stale-edit' // buffer.isCurrent(key, token) failed at checkpoint A or B (PR #1355 round 7), OR
+                 // runVerifyGate() reported `aborted: 'edit-vanished'` (PR #1355 round 11) — three
+                 // distinct trigger points, one reason, all meaning "the buffer moved under you"
   | 'patch-unavailable'
   | 'auth-unavailable'
   | 'forge-unavailable'
@@ -314,10 +378,13 @@ export interface EmitResult {
 export function discardEdit(buffer: SafeEditBuffer, key: string): void;
 
 /**
- * Emit a gate-passed edit as a PR: write the real file (ide-bridge), resolve the forge credential, open
- * the PR (forge) with a rendered conformance-evidence body (pr-body). Calls `runVerifyGate()` itself
- * against the buffer's real current content before doing anything else — takes no `gatePassed` boolean
- * from the caller, so there is nothing for a stale/racy/bypassed caller-side check to get wrong.
+ * Emit a gate-passed edit as a PR: write the real file (ide-bridge), resolve the forge credential, assemble
+ * the conformance-evidence manifest, open the PR (forge) with a body rendered from it (pr-body). Calls
+ * `runVerifyGate()` itself against the buffer's real current content before doing anything else — takes no
+ * `gatePassed` boolean from the caller, so there is nothing for a stale/racy/bypassed caller-side check to
+ * get wrong; if that call reports `aborted: 'edit-vanished'` (a concurrent `discardEdit()` raced its own
+ * internal engine loop — PR #1355 round 11), that maps to `{ ok: false, reason: 'stale-edit' }` immediately,
+ * ahead of the ordinary `ok`/`not-gate-passed` check.
  * Reads the buffer exactly ONCE, as its first (synchronous, pre-`await`) statement, via `buffer.snapshot(key)`,
  * into a local `content` + `token` pair — `content` is the SAME value that gets gated (`runVerifyGate()`)
  * and written (`IdeBridgeRegistry.patch()` and the PR-body evidence); `opts.edit.after` and any later
@@ -325,10 +392,13 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
  * lock and a live user can keep editing while this function's several `await`s are in flight, so a second
  * read could observe different content than the gate checked). `token` guards the two irrevocable actions
  * that follow: immediately before `IdeBridgeRegistry.patch()` and immediately before
- * `ForgeProviderRegistry.openPullRequest()` — note credential resolution (an `await`ed call of its own) sits
- * *between* the ide-bridge write and the PR-open, so the second check runs after credential resolution, not
- * before it (PR #1355 round 8/9 — the check must be genuinely immediately before the irrevocable call, not
- * merely before the step that contains it) — `emitEdit()` synchronously re-checks `buffer.isCurrent(key,
+ * `ForgeProviderRegistry.openPullRequest()` — note credential resolution AND the (also-`await`ing)
+ * conformance-evidence-manifest assembly both sit *between* the ide-bridge write and the PR-open, so the
+ * second check runs after BOTH of them, immediately before `openPullRequest()` and nothing else (PR #1355
+ * round 8/9 for credential resolution, round 11 for manifest assembly — the check must be genuinely
+ * immediately before the irrevocable call, not merely before the step that contains it, and every `await`
+ * that produces an input the irrevocable call needs must be pinned to a fixed position relative to the
+ * check, never left as "any time before") — `emitEdit()` synchronously re-checks `buffer.isCurrent(key,
  * token)` and aborts with `{ ok: false, reason: 'stale-edit' }` if the buffer's pending edit for `key` was
  * reverted OR re-proposed since the snapshot was taken (PR #1355 round 7 — closes the BLOCKER where a
  * `discardEdit()` landing while this function's `await`s are still in flight left the write and the
@@ -355,6 +425,9 @@ export async function emitEdit(opts: {
    the small `ConformanceEvidenceManifest` assembly helper described above. `emitEdit()` must call
    `runVerifyGate()` (imported from `./verify-gate`, Slice 2) itself as its first step — it must not accept
    or trust a caller-supplied `gatePassed` boolean; there is no such parameter in the corrected interface.
+   **(PR #1355 round 11)** If that call's result has `aborted === 'edit-vanished'`, `emitEdit()` must return
+   `{ ok: false, reason: 'stale-edit' }` immediately, checked BEFORE the ordinary `ok`/`not-gate-passed`
+   branch.
    `emitEdit()` must read `buffer.snapshot(key)` exactly ONCE, destructuring `content`/`token` locals, as its
    first (synchronous, pre-`await`) statement, and use that SAME `content` for both the `runVerifyGate()`
    call and the `IdeBridgeRegistry.patch()`/`ConformanceEvidenceManifest` content — never `opts.edit.after`,
@@ -365,6 +438,10 @@ export async function emitEdit(opts: {
    `ConformanceEvidenceManifest` assembly must compute `before.passed` via
    `checkContentAgainstVectors({ ruleKind: edit.target.ruleKind, appId, content: edit.before, registry,
    index })`, never leave it unset/hardcoded (PR #1355 round 7, the round-6 spec-completeness finding).
+   **(PR #1355 round 11)** This manifest-assembly `await` must run to completion, in code, strictly BEFORE
+   checkpoint B's `isCurrent()` check — the manifest is a fully-built value by the time checkpoint B runs,
+   never an in-flight `await` straddling it, so nothing async separates checkpoint B from the literal
+   `openPullRequest()` call it guards.
 2. Write `plateau-app:packages/dev-browser/src/safe-edit/emit.test.ts` — one case per `EmitFailureReason`
    (fake registries returning unavailable/error), one green-path case asserting the four calls happen in
    order with the right arguments (a spy on each fake registry), a `discardEdit` case asserting no
@@ -402,6 +479,21 @@ export async function emitEdit(opts: {
      (before credential resolution): a mutation landing *during* credential resolution used to sail past
      checkpoint B and reach `openPullRequest()`; this test fails against that old placement and passes
      against the corrected one.
+   - **A checkpoint-B case, manifest-assembly timing (new, round 11):** the fake `checkContentAgainstVectors`
+     (called during manifest assembly, step 3a, to compute `before.passed`) succeeds but, as a side effect
+     before resolving, calls `buffer.revert(key)` on the same key. Assert `emitEdit()` returns `{ ok: false,
+     reason: 'stale-edit' }` and that `forge.openPullRequest` never happened — this is the case round 10
+     found unguarded under a design that only pinned manifest assembly "any time before" checkpoint B: a
+     mutation landing during manifest assembly's own `await` must still be caught by checkpoint B, which
+     requires the assembly to have already fully completed (and checkpoint B to run immediately after it,
+     immediately before step 4) rather than the two racing arbitrarily.
+   - **The vanished-edit mapping case (new, round 11):** a fake `runVerifyGate` that resolves to `{ ok:
+     false, findings: [...], aborted: 'edit-vanished' }` (standing in for a concurrent `discardEdit()` having
+     raced `runVerifyGate()`'s own internal engine loop — the scenario `xv0j8db`'s own Task 4c exercises
+     against the real engine). Assert `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }`, NOT `{ ok:
+     false, reason: 'not-gate-passed' }`, and that zero downstream calls (ide-bridge/forge/credential-source)
+     happened — proving `emitEdit()` checks `aborted` before falling through to the ordinary
+     `not-gate-passed` branch.
    - **A true green-path case, unchanged:** no buffer mutation during the `await`s — `emitEdit()` succeeds
      normally, both checkpoints pass, and the write/PR-open both carry the originally captured `content`.
 3. Confirm the pr-body renderer's `ConformanceEvidenceManifest` input shape (defined at
@@ -444,6 +536,21 @@ export async function emitEdit(opts: {
   and immediately before `openPullRequest()`, per the round-8/9 fix, so it catches both of the latter two
   cases; `credentialSource`'s resolve call itself MAY still occur before the abort in either case, since it
   is not the irrevocable action being guarded).
+- **(PR #1355 round 10, fixed round 11) Checkpoint B also catches a revert landing during manifest
+  assembly's `before.passed` `await`, not just during credential resolution or the ide-bridge write** — the
+  checkpoint-B manifest-assembly-timing test asserts `emitEdit()` returns `{ ok: false, reason: 'stale-edit'
+  }` and `forge.openPullRequest` is never called when the revert lands inside `checkContentAgainstVectors`'s
+  own `await` during step 3a; this requires manifest assembly to be fully complete, and checkpoint B to run
+  immediately after it with nothing else awaited in between, per the round-11 fix to the numbered steps
+  above — a design that left manifest assembly "any time before the manifest is assembled" could let this
+  land after checkpoint B and still reach `openPullRequest()`.
+- **(PR #1355 round 11, finding 1 — closes the BLOCKER `xv0j8db`'s own internal engine loop could otherwise
+  throw uncaught) `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }`, never `'not-gate-passed'` and
+  never a rejected promise, whenever `runVerifyGate()` reports `aborted: 'edit-vanished'`** — the
+  vanished-edit mapping test asserts this against a fake `runVerifyGate()` returning that shape, with zero
+  downstream calls; the real end-to-end trigger (a `discardEdit()` racing the gate's own internal engine
+  loop) is exercised directly against the real engine by `xv0j8db`'s own Task 4c, so this card's test covers
+  the mapping, not a re-simulation of the internal race.
 - **(PR #1355 round 7, finding 3 — the cosmetic spec-completeness gap) The
   `ConformanceEvidenceManifest`'s `before.passed` field is actually computed, not left for an implementer to
   guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `xv0j8db`'s

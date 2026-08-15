@@ -255,6 +255,90 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > value to a staler one — it is a true no-op on the buffer's actual state, not merely a no-op relative to a
 > snapshot that may already be wrong.
 
+> **Review fix (2026-08-15, PR #1355, round 11) — BLOCKER, a new uncaught-exception bug introduced by
+> round 9's own fix.** Round 9 made the fixer's `fix()` read `buffer.get(key)?.after` fresh, live, at
+> `fix()`-call time. It did not account for the live read observing `undefined` — which happens exactly
+> when a real `discardEdit()` (`buffer.revert(key)`, which *deletes* the entry) lands after `verify()`'s
+> first call has already captured a genuine, failing `content` (latching `settledFindings`) but before the
+> engine's fail-branch reaches the fixer. Traced against the real engine
+> (`we:scripts/autofix/engine.mjs`, lines 291-330): round 1's `before = await verify()` (line 293) can
+> genuinely fail on real, still-present content — `verify`'s own synchronous-first-read invariant (round 7)
+> guarantees THAT capture is pre-discard — but `verify`'s subsequent `await checkContentAgainstVectors(...)`
+> is exactly the kind of real, multi-hop async work (round 7/8 already established
+> `ConformanceVectorOracle.run()` has genuine internal `await`s) during which a concurrent `discardEdit()`
+> click can land and resolve *before* `verify()`'s own promise settles. By the time the engine
+> synchronously resolves the target and fixer and calls `fixer.fix(target, { read })` (line 314), the
+> buffer entry is already gone. Previously specified, the fixer's fresh read returns `undefined`, and the
+> fixer returned `{ file: patch.file, newContent: undefined, summary: ... }` — a well-formed-looking
+> `Patch` object whose `newContent` is `undefined` — so the engine proceeded to `write(patch.file,
+> patch.newContent)` (line 330), i.e. `SafeEditBuffer.write(key, undefined)`, which hits `xzewkfa`'s own
+> documented contract
+> (`we:backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer.md:192`, Interfaces block:
+> "Throws if no edit is pending for `key`") — because `revert()` already deleted the entry, this is
+> indistinguishable, from `SafeEditBuffer`'s point of view, from a genuine caller bug. The throw is not
+> caught anywhere in this design — it propagates out of `autofix()`, out of `runVerifyGate()`,
+> and out of `emitEdit()`'s `await runVerifyGate(...)` call as a bare exception, contradicting `x00bvy0`'s
+> own "never a bare thrown exception" contract (Done-when, step 5).
+>
+> **Fixed at both of the two places a vanished entry can be observed mid-loop, not just the one that
+> crashes first:**
+> 1. **The fixer's `fix()` treats a vanished entry as "can't safely produce a patch," using the `Fixer`
+>    contract's OWN pre-existing, documented `null` convention** (`we:scripts/autofix/engine.mjs`'s own
+>    `Fixer` typedef: "Return `null` when it can't safely produce one... the engine records a give-up rather
+>    than guessing") **— never a `Patch` with `undefined` content.** When the fresh read
+>    (`buffer.get(key)?.after`) is `undefined`, `fix()` returns `null`. This routes the engine into its
+>    already-existing, already-safe "fixer produced no patch" give-up branch (line 320-324:
+>    `gaveUp.push(...); settledKeys.add(tKey); continue;`) — which never calls `write()` at all — instead of
+>    reaching line 330's `write()` call with a broken argument. This is not a new mechanism; it is using a
+>    contract the engine already enforces for every other fixer, which this design's `fix()` had simply
+>    never been specified to honor for this one input.
+> 2. **`verify` degrades the same way on the same condition**, because `autofix()` calls `verify()` again on
+>    the very next round after a give-up (the `while` loop at line 291, then `before = await verify()` at
+>    line 293) — by then the entry is still gone, so `verify`'s own first-statement capture, `const content =
+>    buffer.get(key)?.after;`, is *also* `undefined` on that call. Passing `undefined` to
+>    `checkContentAgainstVectors()` would either throw inside `ConformanceVectorOracle.run()` (a second,
+>    different uncaught-exception path) or silently misreport. Fixed: immediately after that first-statement
+>    capture, `verify` checks `content === undefined` and, if so, returns `{ ok: true, failures: [] }`
+>    synchronously WITHOUT calling `checkContentAgainstVectors()` at all — a "nothing left to verify" degrade,
+>    not a crash, matching the same "missing → clear degrade, never throw" convention `xzewkfa`'s own
+>    `read`/`get`/`token`/`isCurrent` methods already use for every case except `write`'s deliberate
+>    programmer-error throw.
+> 3. **Both sites latch a new closure flag, `editVanished`, on whichever of the two first observes the
+>    missing entry** (order doesn't matter — only the first observation counts, the same "first call wins"
+>    shape `settledFindings` already uses). `runVerifyGate()`'s final return checks this flag BEFORE falling
+>    back to the `settledFindings`-derived result: if `editVanished` is `true`, it returns `{ ok: false,
+>    findings: settledFindings, aborted: 'edit-vanished' }` — a new, optional field on `VerifyGateResult`
+>    (see Interfaces below) — instead of a plain `{ ok, findings }`. `emitEdit()` maps this to its own typed
+>    `stale-edit` reason (see `x00bvy0`'s corrected step 1) rather than the generic `not-gate-passed` a bare
+>    `settledFindings`-derived `ok: false` would otherwise produce — distinguishing "the edit was discarded
+>    out from under the gate" from "the edit's content genuinely failed the gate," which `settledFindings`
+>    alone cannot: call 1's findings are real and correctly captured either way.
+>
+> **Why this doesn't need to touch the at-entry programmer-error throw.** `runVerifyGate()` already throws
+> synchronously, before calling `autofix()` at all, if `buffer.get(key)` is absent the moment it is invoked
+> (a genuine caller bug — see the paragraph below the Interfaces block). That check and `verify()`'s own
+> first, synchronous read happen back-to-back with no `await` between them, so a discard cannot land in that
+> gap — the at-entry throw and the mid-loop degrade this fix adds cover two provably disjoint windows, not
+> two competing answers to the same question.
+>
+> **Self-check: does the abort leave the buffer in a state a fresh `propose()` can build on cleanly?** Yes.
+> Neither of the two fixes above ever calls `SafeEditBuffer.write()` on the vanished-entry path — the fixer
+> returns `null` (no write at all) and `verify`'s degrade short-circuits before any write is even reachable
+> from that round. The buffer's stored state for `key` is exactly what `revert()` already left it as (no
+> entry) — untouched by this fix — so a subsequent `propose()` on the same key allocates fresh off
+> `xzewkfa`'s permanent per-key "last generation issued" counter exactly as it would after any other
+> `revert()`, with nothing left over from the aborted gate run to clean up. (A narrower variant — a
+> re-`propose()` on the same key landing, instead of nothing, in the same window the discard could have
+> landed in — is not "vanished": `buffer.get(key)?.after` reads the *new* proposal's content, not
+> `undefined`, so neither degrade fires; `verify` and the fixer both operate on the new content normally,
+> `settledFindings` stays latched to call 1's original findings, and `runVerifyGate()` reports a plain `{
+> ok: false }` for the *original* edit with no `aborted` flag — safe, if less specific, since `emitEdit()`
+> still refuses to write or open a PR either way and the caller is expected to re-invoke on a fresh `emit`
+> click, exactly as the round-7 callout above already establishes for an ordinary re-propose race.)
+>
+> Enforced by a regression test that reddens against the pre-round-11 design — see Task 4c and its
+> Done-when bullet.
+
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
   loop still runs, but with the fixer registry populated by exactly **one hand-written, single-purpose
@@ -266,10 +350,26 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   value captured earlier (e.g. at gate-invocation start) — so the `write()` it triggers (see the read/write
   bullet below, and the round-9 callout above) can only ever echo back whatever is genuinely live at that
   instant, never a stale snapshot that could silently overwrite a fresher concurrent write on the same key.
+  **Structural guarantee, not just prose (PR #1355 round 11):** the fixer object is constructed fresh,
+  inline, inside this call to `runVerifyGate()`, and its closure captures only `buffer` and `key` — both
+  fixed, stable references for the whole call — never a `content`/`after` value. There is no wider-scoped
+  local holding content that a future refactor could accidentally fall back to; the ONLY place `.after`
+  content can enter the fixer's returned patch is that one live `buffer.get(key)?.after` read, textually
+  the first (and only content-bearing) statement in `fix()`. **(PR #1355 round 11)** If that fresh read is
+  `undefined` — the entry was deleted by a concurrent `discardEdit()` since this round's `verify()` call
+  captured its own (still-valid, pre-discard) content — `fix()` returns `null`, per the `Fixer` contract's
+  own documented "can't safely produce one" convention, rather than returning a `Patch` whose `newContent`
+  is `undefined`. See the round-11 callout above for the full trace of why this matters and the
+  `verify`-side companion fix below.
 - **`verify` callback:** its FIRST statement, synchronously and before anything else runs, is `const
   content = buffer.get(key)?.after;` (PR #1355 round 7 — see that round's callout above for why this
-  ordering is the whole safety argument and how it is enforced, not just stated). Only after that local is
-  captured does `verify` do any of its real work, all of it operating on `content`, never on a fresh buffer
+  ordering is the whole safety argument and how it is enforced, not just stated). **(PR #1355 round 11)** If
+  that capture is `undefined` (the entry was deleted by a concurrent `discardEdit()` since an earlier round
+  of this same `runVerifyGate()` call last saw it present), `verify` returns `{ ok: true, failures: [] }`
+  synchronously right there, WITHOUT calling `checkContentAgainstVectors()` — passing `undefined` as
+  `content` to the oracle is never attempted — and latches the shared `editVanished` flag (see the round-11
+  callout above). Only when `content` is a real string does `verify` do any of its real work, all of it
+  operating on `content`, never on a fresh buffer
   read: given the target's `ruleKind` and the app id, call
   `plateau-app:packages/dev-browser/src/declared-rules/registry.ts`'s `linkage(appId, index)` to find the
   vector ids gating this rule, then `await checkContentAgainstVectors({ ruleKind, appId, content, registry,
@@ -338,6 +438,14 @@ in plateau-app would duplicate a loop that already exists and is already tested 
     on pass, `before` restored on fail) via its existing keep/revert bookkeeping — the reporting (frozen at
     call 1) and the buffer side-effect (evolves across all calls) are deliberately decoupled, the same way
     round 1's fix decoupled `read` (frozen) from what `verify` inspects (live).
+  - **(PR #1355 round 11)** `runVerifyGate` checks the shared `editVanished` flag (see the round-11 callout
+    above) BEFORE falling back to the plain `settledFindings`-derived return: if `editVanished` is `true`
+    (either `verify` or the fixer observed the buffer entry deleted mid-loop), it returns `{ ok: false,
+    findings: settledFindings, aborted: 'edit-vanished' }` instead of the plain shape — `settledFindings`
+    itself is still whatever call 1 genuinely captured (real findings from real, pre-discard content), so
+    the `aborted` flag adds information rather than replacing it. When `editVanished` is `false` (the
+    ordinary case), `runVerifyGate` returns exactly the plain `{ ok, findings }` shape as before — the
+    `aborted` field is present only on this one new path.
 
 ## Interfaces and protocol
 
@@ -355,6 +463,14 @@ export interface VerifyGateResult {
   readonly ok: boolean;
   /** Findings from the failing run, when `ok` is false — surfaced to the human, never silently dropped. */
   readonly findings: readonly { readonly detail: string }[];
+  /**
+   * PR #1355 round 11. Present (and `'edit-vanished'`) only when a concurrent `discardEdit()` deleted the
+   * buffer entry for this key partway through this call's own internal engine loop — after `verify()`'s
+   * first call had already captured genuine, real findings (still reflected in `findings` above), but
+   * before the loop settled. Absent on every ordinary pass/fail outcome. `emitEdit()` maps this to its own
+   * `stale-edit` failure reason rather than `not-gate-passed`, since the edit was withdrawn, not rejected.
+   */
+  readonly aborted?: 'edit-vanished';
 }
 
 /**
@@ -384,7 +500,10 @@ export async function checkContentAgainstVectors(opts: {
  * the shared autofix engine's `autofix()`, which drives the buffer to the correct end-state (`after` kept
  * on pass, `before` restored on fail). The returned `ok`/`findings` come from that frozen first-call
  * snapshot, not from `autofix()`'s run-level `AutofixResult` and not from whichever `verify()` call the
- * engine happened to make last.
+ * engine happened to make last. Never throws when the buffer entry is deleted mid-run by a concurrent
+ * `discardEdit()` (PR #1355 round 11) — `verify` and the single-purpose fixer both degrade cleanly on a
+ * vanished entry instead of letting the engine's own internal `write()` call throw, and the result carries
+ * `aborted: 'edit-vanished'` in that case (see `VerifyGateResult` above).
  */
 export async function runVerifyGate(opts: {
   buffer: SafeEditBuffer;
@@ -414,7 +533,14 @@ own `write`-on-absent-key throw contract).
    }` from that call's own capture on *every* call, but latching its externally reported `Finding[]` into
    `settledFindings` on its own first call only; `read` fixed to `edit.before`), the single
    synthetic-`Failure` + single-purpose fixer, and `runVerifyGate()` (reading `{ ok, findings }` from
-   `settledFindings`, never from `AutofixResult` and never from "whatever `verify()` ran last").
+   `settledFindings`, never from `AutofixResult` and never from "whatever `verify()` ran last"). **(PR
+   #1355 round 11)** `verify` and the single-purpose fixer must each check for a vanished buffer entry
+   (`buffer.get(key)` returning `undefined`) BEFORE doing anything else with `content`: `verify` returns `{
+   ok: true, failures: [] }` synchronously without calling `checkContentAgainstVectors()`; the fixer's
+   `fix()` returns `null` without attempting the bit-identical assertion from Task 5 (there is no content to
+   compare — returning `null` is itself the correct, non-violating response). Both latch the shared
+   `editVanished` closure flag; `runVerifyGate()`'s return checks it before falling back to the plain
+   `settledFindings`-derived shape (see the round-11 callout and the `VerifyGateResult.aborted` field above).
 4. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` — a green-path case (edit
    passes, `ok: true`, and `buffer.get(key)?.after` still reads the proposed content — unchanged), a
    red-path case (edit fails a fixture vector, `ok: false` with findings, **and** `buffer.get(key)?.after`
@@ -450,6 +576,33 @@ own `write`-on-absent-key throw contract).
    read genuinely precedes every subsequent call, including one a future refactor might make async and move
    ahead of the read. Task 4a and 4b together cover both reorder directions named across rounds 7 and 8;
    neither subsumes the other.
+4c. **Write the vanished-buffer-entry regression test (PR #1355 round 11, finding 1 — the BLOCKER).** Fake
+   `checkContentAgainstVectors` so that its FIRST invocation resolves with genuine failing findings (a real
+   fixture failure, so the loop's fail-branch runs) and, as a side effect immediately before resolving,
+   calls `buffer.revert(key)` on the same key — simulating a `discardEdit()` click landing exactly during
+   the gate's own first, still-in-flight oracle check, i.e. after `verify`'s synchronous content capture but
+   before the engine's fail-branch reaches the fixer. Assert three things: (1) `runVerifyGate()` does not
+   throw and its returned promise resolves normally (spy or wrap the call so a rejected promise fails the
+   test loudly, not silently); (2) the result is `{ ok: false, findings: [...the genuine pre-revert
+   findings...], aborted: 'edit-vanished' }`; (3) `SafeEditBuffer.write` (spy on the real buffer instance) is
+   never called with `undefined` as its second argument across the whole run — this is what proves the
+   fixer's `null`-return path fired instead of reaching the engine's `write(patch.file, patch.newContent)`
+   call with a broken argument. This test fails (throws, uncaught) against the pre-round-11 design and
+   passes only against the corrected one.
+4d. **Write the fresh-fixer-read regression test (PR #1355 round 11, finding 3 — the round-9 fix was
+   prose-only).** Fake `checkContentAgainstVectors` so that its FIRST invocation resolves with genuine
+   failing findings (fail-branch runs) and, as a side effect immediately before resolving, calls
+   `buffer.write(key, 'mutated-still-failing')` on the same key (a normal `write`, not a `revert` — the
+   entry stays present, just with different content) — simulating a fresh edit landing on the same key while
+   the gate's own first oracle check for THIS run is still in flight. Spy on `SafeEditBuffer.write` and
+   assert that the write call the engine makes immediately after invoking the fixer (i.e. the call the
+   fixer's returned patch triggers, before any revert-driven write) carries `'mutated-still-failing'` — the
+   POST-mutation content — not the original pre-mutation content. This test can only pass against a fixer
+   that reads `buffer.get(key)?.after` fresh, live, at `fix()`-call time, per the round-9 fix; it fails
+   against a hypothetical implementation that reused a `content` value captured earlier (e.g. closed over
+   from `verify`'s own already-captured local), which is exactly the regression round 8 warned about and
+   round 9 fixed only in prose — this test is what makes that fix mechanically enforced rather than merely
+   stated, mirroring how Task 4a/4b enforce `verify`'s own synchronous-read invariant.
 5. **Enforce the single-fixer scope boundary (PR #1355 round 3) — do not leave it as prose.** In
    `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`: (a) inside `runVerifyGate()`, before
    calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
@@ -499,6 +652,20 @@ own `write`-on-absent-key throw contract).
   an *earlier* `await` (the round-7 callout's own named example — `linkage()` growing an `await` of its own,
   ahead of the buffer read) — a reorder Task 4a's own injection point cannot reach because Task 4a's fake
   only ever runs after `content` is already captured in either ordering.
+- **(PR #1355 round 11, finding 1 — the BLOCKER) `runVerifyGate()` never throws when a concurrent
+  `discardEdit()` deletes the buffer entry partway through the internal engine loop's fail-branch** — the
+  Task 4c test (fake `checkContentAgainstVectors` reports a genuine failure on its first call, then reverts
+  the buffer as a side effect before resolving) resolves normally to `{ ok: false, findings: [...], aborted:
+  'edit-vanished' }`, and `SafeEditBuffer.write` is never called with `undefined` content anywhere in the
+  run — proving the fixer's `null`-return path (not the engine's `write()` call) is what handles a vanished
+  entry.
+- **(PR #1355 round 11, finding 3) The round-9 "fixer reads live content fresh at `fix()`-call time" fix is
+  mechanically enforced, not just stated:** the Task 4d test — where a fake `checkContentAgainstVectors`
+  mutates the buffer's content (not deletes it) as a side effect of its first call, before resolving —
+  passes only if the write the engine makes immediately after invoking the fixer carries the POST-mutation
+  content; it fails against a fixer implementation that instead echoes a value captured earlier (e.g. from
+  `verify`'s own closure), the exact regression round 8 warned about and round 9's prose alone could not
+  prevent a future refactor from reintroducing.
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape
