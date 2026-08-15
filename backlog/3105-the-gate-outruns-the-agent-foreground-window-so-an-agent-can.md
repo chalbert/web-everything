@@ -76,3 +76,36 @@ be duplicating a check that a machine with no timeout already performs.
   full suite, say so in the brief, so nobody reads "gate green" as more than it is.
 - The 120s figure is the observed tool window, not a documented constant — confirm it before building
   against it.
+
+## Fresh evidence, 2026-08-14 (later the same day) — independent reviewers hit this too
+
+The original ten occurrences were all delivery agents (build + `pr-land`). Tonight the same mechanism hit
+**independent review processes** — headless `claude -p` reviewers spawned to gate PRs, not just the agents
+building them. This widens the blast radius: the stall is not specific to a delivery arc's own shape, it is
+generic to any agent-driven process whose gate step exceeds the ~120s foreground window.
+
+- **#1255's review** stalled mid-gate; finished by hand (same recovery pattern as a stalled build — verify
+  the substantive work on disk, run the remaining gate personally, record the verdict).
+- **#1258, #1259, #1260, #1261's reviews** all appeared stalled at once (no output beyond the harmless
+  "workspace has not been trusted" startup message), attributed at the time to a spike in concurrent lane
+  load. Four fresh retries were launched. On checking each original before trusting the retries:
+  **#1259 and #1260 had actually completed on their own** (`review:accepted`, with real mutation-verification
+  evidence in the verdict) — just very slowly under heavy concurrent system load, not stalled at all. Their
+  retries were redundant and had to be killed to avoid wasted work and a possible conflicting verdict.
+  **#1258 and #1261 were genuinely stalled** and needed the same manual-finish recovery as every prior
+  occurrence.
+
+**New finding worth naming on its own:** the *"Ignoring N permissions.allow entries ... this workspace has
+not been trusted"* message that every fresh lane prints on a headless `claude -p` launch is a **red herring**
+for diagnosing this stall — `claude --help` confirms the trust dialog is skipped entirely in non-interactive
+(`-p`) mode, so that message never blocks anything. It was being read as a symptom of "stuck," which is what
+produced the two redundant retries above. The real diagnostic is silence in the output file past the point
+where a gate run should have printed a result, correlated with the shard timing in `## The mechanism` above
+— not the startup banner.
+
+This does not change the fork in `## Approaches` — it is the same root cause, now confirmed to hit a second
+class of agent-driven process. It does add a fourth observed shape to `## The mechanism`'s list: **review
+gate run backgrounded → reviewer stops → verdict never recorded**, sometimes recoverable by just waiting
+longer (as #1259/#1260 showed) rather than assuming stalled and relaunching — a live process and a genuinely
+stalled one are not distinguishable from output alone under heavy load, which is itself worth weighing in
+whichever `## Approaches` fork gets ruled.
