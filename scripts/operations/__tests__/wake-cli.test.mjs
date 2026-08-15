@@ -190,7 +190,22 @@ describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s 
     }
     // KILLED, not merely slow: if `timeout` did nothing, this would take ~5000ms (the stub's own sleep).
     expect(Date.now() - startedAt).toBeLessThan(4000);
-    expect(caught.signal).toBe('SIGKILL');
+    // THE RELIABLE FIELD, NOT `.signal` (CI run 31883946063, shard 2/4 — reproduced identically on two runs).
+    // `execFileSync`'s `timeout` is enforced by node's OWN native `spawnSync` binding (`src/spawn_sync.cc`):
+    // when the deadline fires, `OnKillTimerTimeout()` calls `SetError(UV_ETIMEDOUT)` — synchronously, on the
+    // spot — and ONLY THEN sends `killSignal` to the child. `.code` is reconstructed straight from that same
+    // errno a moment later (`internal/child_process.js`: `result.error = new ErrnoException(result.error, …)`),
+    // so it is set on every timeout-fired kill, full stop. `.signal`, by contrast, comes from a SEPARATE
+    // native path — the child's actual `waitpid` exit status, captured by `OnExit()` once the OS has finished
+    // tearing the process down — and is copied onto the thrown error by a later `ObjectAssign` a step after
+    // `.code` is already fixed. Verified locally (Node v22.1.0, macOS): both fields normally arrive together
+    // (`code: 'ETIMEDOUT', signal: 'SIGKILL'`) — but CI's `.signal` came back `undefined` on an otherwise-fast
+    // (~2.3s for this whole 16-test file — nowhere near the stub's 5s sleep, so genuinely interrupted early),
+    // correctly-terminated run, meaning THAT hop is where the flake lives, not in whether the child was
+    // actually killed. `.code` needs no such second hop, so it is what this test leans on; `.signal` is still
+    // asserted as a bonus check on the (typical) runs where node does supply it, but no longer required.
+    expect(caught.code).toBe('ETIMEDOUT');
+    if (caught.signal != null) expect(caught.signal).toBe('SIGKILL');
   }, CHILD_PROCESS_TIMEOUT_MS);
 });
 
