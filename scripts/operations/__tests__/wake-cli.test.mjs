@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,10 +121,31 @@ async function parkOneDispatch({ ageMs = 10 * 60 * 1000 } = {}) {
  * rather than lengthening it. The production default is untouched and is asserted, with its literal, in
  * `dispatch-lane-defaults.test.mjs`.
  */
-function runWakeCli(args = [], { agents = '[]', prs = '[]' } = {}) {
+/**
+ * THE REAL CEILING ON A HANG (PR #1211 round-3 review, H4). `execFileSync` below is SYNCHRONOUS, so vitest's
+ * own per-test bound (`CHILD_PROCESS_TIMEOUT_MS`) cannot interrupt it — vitest can only fail the test AFTER the
+ * call already returned. Passed as `execFileSync`'s own `timeout` option, Node itself enforces this one: if the
+ * child has not exited by the deadline, Node sends it `killSignal` (`SIGKILL`) and `execFileSync` throws.
+ *
+ * Sixty seconds is comfortably above every real case in this file (the stub `claude`/`gh` do nothing but write
+ * a file and print) and comfortably below `CHILD_PROCESS_TIMEOUT_MS`, so the two bounds do not race each other
+ * — this one fires first and produces a clean, reported kill; `CHILD_PROCESS_TIMEOUT_MS` never needs to.
+ */
+const EXEC_TIMEOUT_MS = 60_000;
+
+function runWakeCli(args = [], { agents = '[]', prs = '[]', execTimeoutMs = EXEC_TIMEOUT_MS, detached = false } = {}) {
   return execFileSync(process.execPath, [WAKE_CLI, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: execTimeoutMs,
+    killSignal: 'SIGKILL',
+    // `detached` makes `node wake.mjs` the leader of its OWN process group instead of joining this test file's
+    // (the default). Only the wedged-child case below needs this: `execFileSync`'s timeout only ever signals the
+    // ONE pid it spawned directly, so a wedged grandchild (the stub `claude` process `wake.mjs` itself execs,
+    // synchronously and with no timeout of its own) is orphaned, not killed, when that fires — and an orphaned
+    // infinite loop is a real, permanent CPU leak on whatever machine runs this file. A DEDICATED group lets the
+    // catch block below take the whole group out in one shot instead.
+    detached,
     env: {
       HOME: process.env.HOME,
       PATH: binDir,
@@ -142,15 +163,108 @@ function runWakeCli(args = [], { agents = '[]', prs = '[]' } = {}) {
 /**
  * Generous, because every case here spawns at least one real `node` child and vitest's default per-test bound
  * is five seconds — which under a loaded shard is the OTHER way this file could go red for a reason that is
- * not a defect. It is a ceiling on a hang, not a value anything races.
+ * not a defect. THIS IS A FLOOR, NOT A CEILING (PR #1211 round-3 review, H4): it only raises vitest's own
+ * per-test bound so a slow-but-healthy run under a loaded shard is not mistaken for a hang. It bounds nothing
+ * about a genuine hang — `EXEC_TIMEOUT_MS` above is what does that, by being passed into `execFileSync`'s own
+ * `timeout` option, which Node enforces even though the call is synchronous.
  *
  * RAISED with #x9ylkp7, which added four more child spawns to this file (two of them inside one case). Measured
  * on the required gate's `--shard=1/2`, this file's own wall time went from ~78s standalone to ~512s under the
- * fork storm — i.e. the per-case margin against the old 60s ceiling was thin and getting thinner. Raising a
- * HANG ceiling costs only how long a genuine hang takes to be reported; leaving it costs a flaky required
- * check, and a flaky required check teaches everyone to re-run instead of read.
+ * fork storm — i.e. the per-case margin against the old 60s bound was thin and getting thinner. Raising this
+ * bound costs only how long a slow-but-healthy run takes to be reported as passing; leaving it costs a flaky
+ * required check, and a flaky required check teaches everyone to re-run instead of read.
  */
 const CHILD_PROCESS_TIMEOUT_MS = 120_000;
+
+// ── PR #1211 round-3 review, H4 — proving the ceiling is real, not merely trusted by inspection ───────────────
+
+// Round three of this flake (CI run 31890521468, job 95025986829) falsified the previous fix's assertion in a
+// THIRD, different way: the stub's marker file was PRESENT, meaning the run finished as if nothing had been
+// killed. Chasing that as another timing/signal-delivery mystery (as rounds one and two each did) turned out to
+// be the wrong move: local reproduction with debug instrumentation (timestamps + exit codes written by the stub
+// itself, `TMPDIR`-scoped so no environment could interfere) found the REAL defect, on the FIRST local run —
+// `sleep`, the command the stub used to simulate being wedged, is an EXTERNAL binary (`/bin/sleep` or
+// equivalent), and this file deliberately restricts the child's `PATH` to a directory holding only the `claude`
+// and `gh` stubs (`runWakeCli`'s `PATH: binDir`) — that restriction is BY DESIGN, the thing that guarantees no
+// real `claude` is reachable. So `sleep N` inside the stub resolves to nothing: `sh` prints
+// "sleep: command not found", exits that one statement 127, and the script falls straight through to the
+// marker-file write — NOT after N seconds, but after however long the surrounding `node wake.mjs` process takes
+// to start up and reach the call at all (irrelevant, low-hundreds-of-ms overhead on a quiet machine). The three
+// rounds of "flakiness" were never a signal-delivery race: they were a coin flip between that overhead and
+// whatever `execTimeoutMs` the assertion happened to be using that round — nothing here was ever proving a
+// wedged child gets killed, on CI OR locally, and no amount of widening the OUTCOME margin (tried and verified
+// to still fail — see git history) fixes a stub that was never actually blocking.
+//
+// THE FIX: stop depending on an external command to simulate "wedged". `while :; do :; done` is pure `sh`
+// syntax (`:` is the shell no-op builtin) — it needs NOTHING on `PATH`, so it cannot silently no-op the way
+// `sleep` did, and unlike `sleep N` it has NO natural completion to race against: the only way past it is a
+// signal. That makes `stubRanToCompletion` a true proof of "was genuinely still wedged when killed" rather than
+// a coin flip against unrelated startup overhead, and it means the margin below only has to absorb real
+// scheduling/signal-delivery slack, not paper over a stub that finishes on its own.
+const WEDGED_KILL_DEADLINE_MS = 1_000; // the `execFileSync` `timeout` — still 60x smaller than production's 60s
+const WEDGED_OUTCOME_MARGIN_MS = 8_000; // room for CI's slower signal delivery; the loop never completes on its own
+
+describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s per-test bound', () => {
+  it('is SIGKILLed once EXEC_TIMEOUT_MS is exceeded — the run terminates rather than hanging', async () => {
+    await parkOneDispatch();
+    // A PURE-BUILTIN INFINITE LOOP, not `sleep` (see the block comment above for why `sleep` silently no-ops
+    // under this file's deliberately-restricted `PATH`). It only writes its marker file (proof of having run to
+    // completion) if it ever falls out of the loop — which, needing no external command and having no timer of
+    // its own, only a signal can make happen.
+    const stub = join(binDir, 'claude');
+    writeFileSync(
+      stub,
+      '#!/bin/sh\nwhile :; do :; done\nprintf \'%s\\n\' "$*" > "$STUB_ARGV_FILE"\nprintf \'%s\' "$STUB_AGENTS"\n',
+    );
+    chmodSync(stub, 0o755);
+
+    const startedAt = Date.now();
+    let caught;
+    try {
+      runWakeCli([], { agents: '[]', execTimeoutMs: WEDGED_KILL_DEADLINE_MS, detached: true });
+      expect.unreachable('a wedged child must be killed, not allowed to run to completion');
+    } catch (e) {
+      caught = e;
+    } finally {
+      // GROUP-KILL, NOT JUST THE ONE PID `execFileSync`'s own timeout already signalled. `wake.mjs` is orphaned
+      // by that kill, not the grandchild `claude` stub it was itself synchronously blocked on (spawnSync's
+      // timeout only ever targets the pid it directly spawned) — and this stub, unlike the `sleep`-based one it
+      // replaced, has no natural end, so an orphaned copy spins one CPU core forever. `detached: true` above put
+      // `wake.mjs` (and everything it spawns, which inherits its process group) in a group of its own, so this
+      // takes the whole thing out in one shot. `ESRCH` here means the group was already fully gone — the good
+      // outcome, not an error.
+      if (caught?.pid) {
+        try { process.kill(-caught.pid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+    const elapsedMs = Date.now() - startedAt;
+    // THE STUB'S MARKER FILE — written only by the `printf … > "$STUB_ARGV_FILE"` line, which the loop above can
+    // only reach by exiting, which it never does on its own. If that file exists, the loop was somehow escaped
+    // without the kill ever landing; if it does not, the stub was still spinning when it was killed. This is a
+    // DETERMINISTIC fact by the time `execFileSync` returns (SIGKILL never lets the shell reach the `printf`
+    // after a genuine kill), so there is nothing to gain by polling for it.
+    const stubRanToCompletion = existsSync(argvFile);
+
+    // OBSERVABLE OUTCOME, NOT NODE'S OWN ERROR METADATA (rounds one and two of this flake, CI runs 31888620937
+    // and its predecessor). `.code`/`.signal` proved unreliable twice, in two different ways, for reasons
+    // neither tracing Node's C++ `spawn_sync.cc` nor deliberate local reproduction could pin down — so this
+    // asserts the OUTCOME that metadata was only ever a proxy for, straight from the filesystem and the wall
+    // clock:
+    expect(elapsedMs).toBeLessThan(WEDGED_OUTCOME_MARGIN_MS); // the kill (or vitest's own bound) cut this short
+    expect(stubRanToCompletion).toBe(false); // …and the loop was never escaped on its own
+
+    // `.code`/`.signal` are still worth knowing WHEN a run is unhealthy — logged (never asserted) so a real
+    // regression (the wedged child NOT actually being killed) still carries Node's own diagnosis alongside the
+    // outcome-based proof above.
+    if (elapsedMs >= WEDGED_OUTCOME_MARGIN_MS || stubRanToCompletion) {
+      // eslint-disable-next-line no-console
+      console.error('wedged-claude kill diagnostics (informational only, never asserted):', {
+        elapsedMs, stubRanToCompletion, code: caught?.code, signal: caught?.signal,
+        status: caught?.status, killed: caught?.killed, message: caught?.message,
+      });
+    }
+  }, CHILD_PROCESS_TIMEOUT_MS);
+});
 
 describe('the waker CLI registers the dispatch observer — the half of the feature no test reached', () => {
   it('OBSERVES a parked dispatch with the real observer, not with an empty table', async () => {
