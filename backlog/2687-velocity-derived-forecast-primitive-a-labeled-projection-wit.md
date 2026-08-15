@@ -3,9 +3,11 @@ bornAs: x08qg0p
 kind: story
 size: 5
 parent: "2505"
-status: open
+status: resolved
 blockedBy: ["3125"]
 dateOpened: "2026-07-26"
+dateResolved: "2026-08-15"
+resolutionNote: "Superseded by #2718 (S1a, plateau-app:src/feature-tracker/forecast.ts) + #2719 (DEC, ratified thresholds) per #3125's ruling (2026-08-15, validation-gate NO — no named WE-side reuse consumer for a standalone primitive). #2718 covers this item's whole ask (FORECAST/FORECAST·CAVEAT/NO FORECAST/TOO NOISY vocabulary, projection-window emitter, honest-forecast policy); its Acceptance gained an explicit denominator-honesty line carrying forward this item's fourth clause. #2732's blockedBy corrected from #2687 to #2718 in the same resolution."
 tags: []
 ---
 
