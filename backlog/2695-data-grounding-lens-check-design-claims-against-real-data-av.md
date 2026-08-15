@@ -32,7 +32,7 @@ two already-resolved siblings from the same design session:
   jury panel reaches `accept`. It is subject-agnostic (works over a PR diff, a rendered design, or decision
   prose alike) and already instructs the agent to hunt for "a claim the material asserts but did not earn"
   — the same general shape as a data-grounding check, just not yet pointed at data specifically.
-- **The "emit as a follow-up item" half is also already generic** — `#xdompzx`/`#2823`'s prevention
+- **The "emit as a follow-up item" half is also already generic** — `#2942`/`#2823`'s prevention
   introspection. Every red-team finding is already REQUIRED to carry `prevention` (the guard/capture work
   that would close the gap) and `preventionCaptured` (`we:skills-src/jury/subject-jury.workflow.js:307-312`,
   the `FINDING_INTROSPECTION_PROPERTIES` shared by the panel and the red-team schemas). When

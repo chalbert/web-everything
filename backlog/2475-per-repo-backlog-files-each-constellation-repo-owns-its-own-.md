@@ -6,7 +6,7 @@ parent: "2472"
 status: open
 priority: low
 dateOpened: "2026-07-13"
-blockedBy: ["x22ecxe"]
+blockedBy: ["3129"]
 tags: []
 ---
 
@@ -26,7 +26,7 @@ repos) — and the card silently assumes the expensive branch without naming the
 
 Per the carve rule in `we:docs/agent/backlog-workflow.md` ("a fork lives in a `kind: decision` item, never
 inline in a story body"), the fork is carved out to
-[a new decision item, x22ecxe](/backlog/x22ecxe-per-repo-backlog-data-model-distributed-backlog-md-tooling-p/),
+[a new decision item, 3129](/backlog/3129-per-repo-backlog-data-model-distributed-backlog-md-tooling-p/),
 parented under this item and blocking it. That item also flags a headline finding worth reading in full: the
 premise this card and its parent epic (#2472) were framed on — that per-repo files are *the* way to get
 cross-repo orchestration — may already be moot, since
@@ -35,6 +35,6 @@ before this card was opened) shipped a working, centralized alternative that is 
 production (`we:agent-memory-src/conveyor-main-drive-cross-repo-playbook.md` documents 8 cross-repo items
 landed this way in one session).
 
-**Do not hand this card to a builder until x22ecxe is ratified.** Once it is, re-derive this story's design
+**Do not hand this card to a builder until 3129 is ratified.** Once it is, re-derive this story's design
 (interfaces, tasks, acceptance) from the ruling — the resulting build may look nothing like "each repo gets
 its own backlog/*.md," depending on which branch wins.
