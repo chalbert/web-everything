@@ -121,17 +121,20 @@ export function buildAnchorOwners(items, { doc = 'docs/agent/platform-decisions.
  * reference, and a cross-reference to an anchor with no attributing number, must NOT fire. We fire on only
  * two tight *attribution* shapes, and only for anchors we can resolve (present in the owner map):
  *
- *   A. anchor immediately followed by an attribution paren whose LEADING token is a number —
- *      `#anchor (#2439, …)` or `[…](#anchor) (#2439)`. A trailing PROSE paren — `#anchor (independence
- *      rests on …)` — does not match (it does not open with `#NNN`), so real cross-refs are safe.
+ *   A. anchor immediately followed by an attribution paren whose LEADING token is a number, AND whose
+ *      number immediately closes or hands off to a comma-separated sibling — `#anchor (#2439, …)` or
+ *      `[…](#anchor) (#2439)`. A trailing PROSE paren — `#anchor (independence rests on …)` — does not
+ *      match (it does not open with `#NNN`), so real cross-refs are safe; neither does a paren whose
+ *      leading number is itself the subject of a PROSE clause — `#anchor (#9999 tracks the build slice)`
+ *      — because `#9999` is not followed by a comma or the paren's own close (#2861).
  *   B. an anchor and a number sharing ONE parenthetical group — `(#2439, #anchor-name)` /
  *      `(#anchor-name, #2439)`. A number in a *different* paren than the anchor (e.g. a preceding
  *      `**Ratified … (#2563).**` clause that then mentions the anchor in prose) is NOT in the same group,
  *      so it does not match.
  *
  * The heading-definition form `{#anchor}` is never a citation and is excluded (we only match `#anchor`
- * and `](#anchor)`). Cross-repo / numeric noise can't be an anchor because the anchor must resolve in
- * `anchorOwners`.
+ * and `](#anchor)` — a bare `#` immediately preceded by `{` never seeds shape A). Cross-repo / numeric
+ * noise can't be an anchor because the anchor must resolve in `anchorOwners`.
  *
  * @param text     the file body (raw). Newlines are normalised so a citation split across lines still matches.
  * @param anchorOwners Map<anchorName, Set<ownerNum>> from buildAnchorOwners.
@@ -164,10 +167,23 @@ export function findAnchorRulingMismatches(text, anchorOwners) {
   };
 
   // Shape A: `#anchor` — optionally closing a markdown link (`)`) or a backtick/quote wrapper (`` ` `` / `'`
-  // / `"`) — directly followed by an attribution paren whose LEADING token is `#NNN`. The trailing-wrapper
-  // class covers the real backtick-wrapped form `` `#anchor` (#NNN) ``. A trailing PROSE paren does not
-  // open with `#NNN`, so real cross-refs stay safe.
-  const shapeA = new RegExp(`(?:\\]\\(#|#)(${anchorAlt})[)\`'"]*\\s*\\(\\s*#(\\d{3,5})\\b`, 'g');
+  // / `"`) — directly followed by an attribution paren whose LEADING token is `#NNN` AND whose trailing edge
+  // (mod a backtick/quote wrapper) is a comma or the paren's own close. That trailing requirement is the
+  // shape-A analogue of shape B's comma-adjacency hardening below: `#anchor (#2439, …)` / `#anchor (#2439)`
+  // are citation-list parens — the number IS (the start of) the paren's content — but `#anchor (#9999 tracks
+  // the build slice)` is a PROSE paren that merely OPENS with a number; `#9999` is the subject of its own
+  // clause, not an attribution. A bare `\(\s*#(\d{3,5})\b` with no tail check can't tell them apart, and
+  // that gap is exactly the false positive #2861 reproduces: `[foo](#foo-anchor) (#9999 tracks the build
+  // slice)` — the wrapper class steps over the markdown link's own closing `)` (correctly — that's the
+  // anchor's OWN group, not an attribution), then the loose tail let `#9999`'s unrelated prose paren read as
+  // `#foo-anchor`'s attribution merely for sitting next to it.
+  // A bare `#` is also never preceded by `{` — `{#anchor}` is a HEADING DEFINITION (see module header), not
+  // a citation, so it must not seed shape A regardless of what (if anything) follows it. The `](#` alternative
+  // (markdown link) is unaffected — a link target is always a real citation, never a heading anchor.
+  const shapeA = new RegExp(
+    `(?:\\]\\(#|(?<!\\{)#)(${anchorAlt})[)\`'"]*\\s*\\(\\s*#(\\d{3,5})\\b[\`'"]*\\s*[,)]`,
+    'g',
+  );
   for (const m of flat.matchAll(shapeA)) record(m[1], m[2], 'A', m.index);
 
   // Shape B: a single parenthetical group holding the anchor and a number as COMMA-SEPARATED attribution
