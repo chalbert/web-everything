@@ -6,7 +6,7 @@ parent: "2705"
 status: open
 blockedBy: ["2721", "2718"]
 scope: ["plateau-app:src/feature-tracker/banner.ts", "plateau-app:src/feature-tracker/banner.css", "plateau-app:src/feature-tracker/mount.ts"]
-relatedTo: ["2705", "2718", "2719", "2721", "2729", "xyjz84p"]
+relatedTo: ["2705", "2718", "2719", "2721", "2729", "3136"]
 dateOpened: "2026-07-27"
 tags: []
 ---
@@ -114,7 +114,7 @@ Banner, scan BLOCKER flag, and DAG lead cite the SAME feature+pts (single-source
 - **The same "registers into X's slot, does NOT edit [the parent]" pattern appears in exactly one other place
   in this epic** — #2729 (S7 · one-hop dependency DAG, "registers into S2's dep-tab slot — does NOT edit the
   detail shell"), consuming #2725 (S2)'s slot. No card (#2721, #2723, #2725, or #2729) previously named a
-  concrete mechanism for either pair. Filed as its own coordination item (`xyjz84p`, relatedTo above) rather
+  concrete mechanism for either pair. Filed as its own coordination item (`3136`, relatedTo above) rather
   than silently resolved only in this card, since #2725/#2729 haven't been prepared yet and could otherwise
   invent an incompatible mechanism independently.
 
@@ -206,7 +206,7 @@ free — the UNFILTERED check, see `totalGatedPts`'s own doc comment above) — 
 `multi`-vs-`single` branch precisely because it can co-occur with either.
 
 **2. The mount-seam (producer/consumer wiring) — see Grounding's scope-correction note and the coordination
-item (`xyjz84p`) for why this needed deciding at all.** The mount file (S1b) pre-builds the empty container
+item (`3136`) for why this needed deciding at all.** The mount file (S1b) pre-builds the empty container
 (`<div class="bottleneck" id="bottleneck" role="region" aria-label="Fleet bottleneck"></div>`, no import of
 the banner module, since it cannot exist yet when S1b lands). When THIS slice lands, it:
 - adds the banner module, exporting `renderBottleneckBanner(state: BottleneckState): string` — a pure
@@ -339,7 +339,7 @@ citation error — `plateau-app:src/feature-tracker/feature-tracking.webcases.ts
 also flagged, as a naming transparency issue rather than a defect, that `bottleneckIdOf` is a rename of
 #2718's own `bottleneckId` and should be marked explicitly as such for whoever next prepares S1a — now called
 out in the interface's own doc comment above. Separately, the reviewer found the coordination item
-(`xyjz84p`) undercounted its own scope — two producer/consumer pairs named, five more registering slices
+(`3136`) undercounted its own scope — two producer/consumer pairs named, five more registering slices
 existed across two more producer files — and that item has been widened in place with the fuller count and a
 revised recommendation. Confidence after fixes: **High** — every citation into
 `plateau-app:src/backlog-view/lane-board.ts` and the fetched v3 artifact held up, the render-order-bug claim
