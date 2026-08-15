@@ -3,7 +3,7 @@ bornAs: xthv8dq
 kind: epic
 status: open
 dateOpened: "2026-07-28"
-relatedTo: ["2677", "2445", "2527", "2626", "2636", "2464", "2703"]
+relatedTo: ["2677", "2445", "2527", "2626", "2636", "2464", "2703", "x501fk9"]
 tags: [conveyor, session-free, plateau-loop, roadmap]
 ---
 
@@ -35,7 +35,13 @@ The mechanical core of the tick already landed — this epic sequences what rema
 
 The open items below, in dependency order, are what still stands between "serial tick retired" (#2703) and "no session in the loop":
 
-1. **#2464 — agent-runner CLI backend — the LONG POLE / critical path.** It spawns the local `claude` CLI as supervised children from the runner. This is *the one open item that removes agent-spawning from the session* — until it lands, a session must still spawn the delivery agents (the #2703 interim bridge above). **Flag it as the critical path; nothing downstream reaches zero-session without it.**
+1. **#x501fk9 — where the conveyor's headless agent-spawning lives — the LONG POLE / critical path.** *(Was
+   #2464, "agent-runner CLI backend"; #2464 is resolved — its literal ask, the spawn/steer/stop/resume runner,
+   already shipped under #2530 on 2026-07-16, wired only to `plateau-app`'s per-click build endpoint. The
+   remaining gap is wiring the conveyor's own headless runner to spawn agents itself — a genuine open fork
+   [WE-native runner vs. a cross-process call into `plateau-app`], filed as #x501fk9.)* Until it's decided and
+   built, a session must still spawn the delivery agents (the #2703 interim bridge above). **Flag it as the
+   critical path; nothing downstream reaches zero-session without it.**
 2. **#2418 — coordinator delegates the review pipeline.** The main loop stops running the review glue by hand and delegates it (scripts the glue, templates the renders). Review pipeline feeders: **#2636 / #2649 / #2642** (jury-based PR review to convergence, the subject-agnostic jury engine, and juror management).
 3. **#2626 (ratify) + #2742 (DO/D1 operational-state store).** #2626 decides the operational state store (session-local sidecars now → a shared DO/D1 store at product). #2742 stands that shared store up so a **session-free runner can read operational state cross-session**. #2742 is `blockedBy` #2703 (✓), #2626, and #2642.
 4. **#2505 / #2555 / #2508 — the console surface.** The operable backlog console, the launch-review board, and operable backlog actions (claim / prioritize / launch / resolve from the UI). This **replaces the chat as the operator UI** — the "expose/read state" half of the target, made a real surface.
@@ -50,4 +56,4 @@ Two mechanizations on the critical path were un-owned; this epic files them as c
 
 ## Ownership note — sequences, does not duplicate
 
-This epic is a **roadmap / coordinator**: it owns the ordering, the critical-path call, and the two gap children. It is intentionally **not nested under another epic** because it spans several (#2677, #2445, #2527, #2626, #2636). Each referenced item keeps its own scope; this epic only makes the "get to app-run" story a single owned thing, with a named long pole (#2464) and a clear finish line (session = queue + expose-state, nothing more).
+This epic is a **roadmap / coordinator**: it owns the ordering, the critical-path call, and the two gap children. It is intentionally **not nested under another epic** because it spans several (#2677, #2445, #2527, #2626, #2636). Each referenced item keeps its own scope; this epic only makes the "get to app-run" story a single owned thing, with a named long pole (#x501fk9, formerly #2464) and a clear finish line (session = queue + expose-state, nothing more).
