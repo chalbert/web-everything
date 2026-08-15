@@ -53,6 +53,23 @@ describe('the guard protects the primaries wherever it is launched from', () => 
     // A directory merely NAMED `.lanes` at the end is not a lane path — the segment must be interior.
     expect(workspaceRootOf(p('webeverything', '.lanes'))).toBe(p('webeverything'));
   });
+
+  // #2305 — KNOWN, ACCEPTED RESIDUAL, recorded so it is not rediscovered as a surprise. Node realpaths an ES
+  // module's main entry on load, so a lane directory that is ITSELF a symlink resolving outside `.lanes/`
+  // would erase the `.lanes` segment before `workspaceRootOf` ever sees the string — reopening the exact hole
+  // the launch-location fix above closed, one layer up. This test does not exercise the CLI wrapper (it
+  // cannot force Node's own module-loading realpath from inside a test); it pins the PURE function's behavior
+  // on the string a symlink-following load would hand it, so the mechanism stays documented and testable.
+  // NOT REACHABLE TODAY: `lane-pool.mjs`'s `cloneLane` always produces a real `git clone`d directory for
+  // `.lanes/<pool>/lane-N`, never a symlink, and no other producer of a lane path exists — see the
+  // `workspaceRootOf` doc comment in guard-lane.mjs for the full reachability note.
+  it('RESIDUAL (accepted, not reachable today): a symlinked lane leaf erases the `.lanes` segment and workspaceRootOf falls back to the wrong root', () => {
+    // What a symlink-following module load hands the function once `.lanes/web-everything/lane-9` has been
+    // realpathed away to some other location outside the workspace entirely.
+    const asIfSymlinkedLane = path.join('/elsewhere', 'lane-9');
+    expect(workspaceRootOf(asIfSymlinkedLane)).toBe('/elsewhere'); // wrong: should be WORKSPACE
+    expect(workspaceRootOf(asIfSymlinkedLane)).not.toBe(WORKSPACE);
+  });
 });
 
 describe('laneGuardDecision (pure)', () => {
