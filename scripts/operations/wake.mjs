@@ -70,8 +70,10 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
     runId: run.id,
     resolved: observed.resolved,
     stillRunning: observed.stillRunning,
-    // Terminal for the observer, not actionable by this machine — the build failed, the dispatch never took,
-    // or the answer was ambiguous. Nothing was written; a person decides. See `effect-observer.mjs`.
+    // Terminal for the observer, not actionable by this machine — the dispatch never took, or the answer is
+    // ambiguous. "The build failed" no longer lands here (#3085): an observer that knows the outcome answers
+    // `resolved` instead, which writes `applied` and lets a later step react. Nothing is written for an
+    // `unresolved` entry; a person decides. See `effect-observer.mjs`.
     unresolved: observed.unresolved.map((u) => ({
       ...u,
       hoursStuck: hoursStuck((run.effects || []).find((e) => e.key === u.key), now),
@@ -99,8 +101,14 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
   }
 
   // No special case for a failure, and that is the fix rather than an omission: `unresolved` writes no status,
-  // so there is nothing here to special-case. Three earlier vocabularies each wrote one and each got acted on
-  // by some caller — the account is on `OBSERVATIONS` in `we:scripts/operations/effect-observer.mjs`.
+  // so there is nothing here to special-case. `resolved` (#3085) writes `applied` and is folded into `advance`
+  // below on the SAME terms `succeeded` always was — the waker calls `advance` and nothing else (#3070), so a
+  // declaration with no step reading the outcome (`reads: ['findings.<step>']`) advances past it silently.
+  // THAT IS DELIBERATE, not an omission left for later: ignoring a `resolved` finding is the declaration's own
+  // choice, the same as ignoring any other finding the engine ever records. Refusing to advance past one nobody
+  // reads would mean the waker judging a declaration by what it declared — a different, bigger call than this
+  // item makes, and not this file's to make on its own. Three earlier vocabularies each wrote a status some
+  // caller specially acted on — the account is on `OBSERVATIONS` in `we:scripts/operations/effect-observer.mjs`.
   try {
     for (let turn = 0; turn < 64; turn += 1) {
       const status = runStatus(current, { registry });

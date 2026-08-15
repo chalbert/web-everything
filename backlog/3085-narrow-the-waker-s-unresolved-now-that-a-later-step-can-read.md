@@ -3,10 +3,13 @@ bornAs: xv4ljwp
 kind: story
 size: 1
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-13"
 tags: [plateau-loop, operations, engine, dispatch, waker]
 blockedBy: ["3083"]
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
+graduatedTo: none
 scope:
   - we:scripts/operations/effect-observer.mjs
   - we:scripts/operations/wake.mjs
@@ -58,5 +61,36 @@ it regardless. Splitting one half out while the other keeps the collapsed word i
 
 ## Done when
 
-- [ ] An observer can report an outcome a declaration reacts to, without any caller re-dispatching.
-- [ ] A declaration that ignores the outcome behaves in a way this item states deliberately.
+- [x] An observer can report an outcome a declaration reacts to, without any caller re-dispatching.
+- [x] A declaration that ignores the outcome behaves in a way this item states deliberately.
+
+## How it resolved
+
+A fourth word, `resolved`, sits between `succeeded` and `unresolved` in `OBSERVATIONS`
+(`we:scripts/operations/effect-observer.mjs`). It answers exactly the shape in "What is now expressible"
+above, but through its own name instead of borrowing `succeeded`'s: it records `applied` — the effect DID
+run, on the same terms `succeeded` does, so nothing re-dispatches it — but makes NO claim the outcome was
+good. Unlike `succeeded`, an accompanying `error` is not refused, and `result` may itself describe a failure
+(a non-zero exit, a log tail). `succeeded` is untouched and keeps meaning *cleanly*; the one production
+observer that reaches it (`we:scripts/operations/dispatch-lane-io.mjs`'s merged-PR axis) never needed the new
+word and is not touched.
+
+That narrows `unresolved` to what #3083 still has no policy for: "the dispatch never took" and the genuinely
+ambiguous case. "The build failed" now answers `resolved` instead — reported to a later step, not swallowed.
+
+**The ignore question, settled:** a declaration with no step reading `findings.<step>` advances past a
+`resolved` finding silently, and that is deliberate rather than an oversight this item left open. It is the
+declaration's own choice, exactly like ignoring any other finding the engine ever records — `reads:` is
+already the whole mechanism a declaration has for opting in to anything, and there is no mechanism anywhere
+else in the engine that forces a later step to consume an earlier one's output. Making the waker refuse to
+advance past a `resolved` finding nobody reads would mean the waker judging a declaration by what it
+declared — a different, and bigger, call than a size-1 item narrowing a vocabulary word, and out of scope for
+`we:scripts/operations/effect-observer.mjs`/`we:scripts/operations/wake.mjs` alone (it would need
+engine-level enforcement, not a new observer word). Both files now say this in the load-bearing comments, so
+the next reader finds the reasoning where the code is, not only here.
+
+Covered in `we:scripts/operations/__tests__/wake.test.mjs`: `resolved` records `applied` with a failing
+`result`; it permits an `error` alongside without being refused (unlike `succeeded`); and an end-to-end test
+drives a dispatch through the waker into a `confirm` step whose `reads: ['findings.go']` sees the failing
+outcome and asks "The build FAILED. Land anyway?" — the reviewer's probe from #3082/#1186, now reachable
+through an observer rather than only a synchronous sink.
