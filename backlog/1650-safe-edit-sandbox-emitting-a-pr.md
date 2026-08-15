@@ -22,6 +22,15 @@ tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-meri
 > - **Slice 3 — [#x00bvy0](/backlog/x00bvy0-safe-edit-sandbox-discard-or-emit-pr-orchestration/)** (size 3, blocked by Slices 1 and 2): wires a gate-passed edit to the already-shipped ide-bridge/forge/pr-body/credential-source packages — discard reverts, emit writes the file + opens the PR.
 >
 > The three form a linear DAG (`1 → 2 → 3`), the split rubric's disfavored shape *unless* incremental delivery is genuinely valuable — it is here: each slice ships an independently testable, demoable capability (a working propose/revert buffer; then a working live conformance gate over a proposed edit; then a working discard-or-PR action), not a half-built registry with no consumer. **Out of scope for all three, named so it isn't silently assumed:** no dev-browser panel/UI exists yet to mount these behind clickable affordances — that is separate, unfiled work; these three slices ship the underlying *mechanism* library, not the panel.
+>
+> **Follow-up filed, not silently dropped (2026-08-15, #1355 review):** this Digest's own scope bullet
+> promises the developer can "see the effect immediately" in the sandbox before choosing discard/emit —
+> but none of the three slices ever applies the buffer's proposed content to a *running* instance (the
+> buffer is fs/DOM-free, the gate only checks conformance, emit only writes the real file post-gate). That
+> live-preview capability is real, separate, unscoped work, tracked at
+> [#x1l80ae](/backlog/x1l80ae-safe-edit-sandbox-live-preview-against-a-running-instance/) rather than left
+> implicit. **This epic resolving (once all 3 slices land) ships the propose→gate→emit mechanism, not
+> live preview** — don't read epic-resolved as "the full Digest shipped" without checking x1l80ae too.
 
 ## Digest
 

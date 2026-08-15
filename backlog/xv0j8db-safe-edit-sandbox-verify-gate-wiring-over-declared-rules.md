@@ -70,6 +70,16 @@ injected-into for exactly this kind of second consumer, so building a parallel "
 in plateau-app would duplicate a loop that already exists and is already tested (6 vitest cases at
 `we:scripts/autofix/__tests__/engine.test.mjs`).
 
+> **Review fix (2026-08-15, PR #1355):** the `read`/`write` bullet below originally set
+> `read = SafeEditBuffer.get(key)?.after`. Traced against the real engine
+> (`we:scripts/autofix/engine.mjs`, lines 326-330), the engine's own revert only ever restores
+> `snapshot = read(patch.file)` — the value `read` returned **immediately before** the fixer's write. With
+> `read` wired to `.after`, that snapshot is *also* `after` (the fixer's "fix" returns `after` verbatim, so
+> nothing ever changes it) — so the "revert" was writing `after` back over `after`: a no-op that never
+> reaches `edit.before`. That breaks this card's own Done-when bullet below. Fixed by decoupling `read`
+> (now a fixed, immutable source for the engine's snapshot bookkeeping only) from what `verify` actually
+> inspects (the buffer's real mutable content) — see the corrected bullets.
+
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
   loop still runs, but with the fixer registry populated by exactly **one hand-written, single-purpose
@@ -81,15 +91,43 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   `plateau-app:packages/dev-browser/src/declared-rules/registry.ts`'s `linkage(appId, index)` to find the
   vector ids gating this rule, then run `ConformanceVectorOracle`
   (`plateau-app:packages/core/src/conformance-engine/conformanceVectors.ts`) scoped to those vector ids
-  against the buffer's **current** (possibly just-reverted) content, and map its `Finding[]` result to the
-  engine's `VerifyState` shape (`{ ok: boolean; failures: Failure[] }`) — `ok` is `findings.length === 0`.
-  If linkage yields zero vectors (an uncovered rule, #1641's own coverage-gap concept), `verify` degrades
-  to `{ ok: true, failures: [] }` — an edit to an undeclared/uncovered rule cannot be gated by a vector
-  that doesn't exist, so it passes vacuously (surfaced to the human via the coverage badge already shipped
-  by #1641's registry, not re-invented here).
-- **`read`/`write` callbacks:** `read` = `SafeEditBuffer.get(key)?.after` — the currently-proposed
-  content; `write` = `SafeEditBuffer.write(key, content)`. Both delegate straight to Slice 1's buffer; no
-  new storage.
+  against **`SafeEditBuffer.get(key)?.after`** — the buffer's real, mutable, **current** (possibly
+  just-reverted) content, read directly from the buffer, *not* via the `read` adapter passed to
+  `autofix()` (see next bullet for why those two must differ) — and map its `Finding[]` result to a
+  **single synthetic `Failure`** (`{ id: `pending:${key}`, findings }`) when non-empty, or `{ ok: true,
+  failures: [] }` when empty. `verify` also stashes the latest `Finding[]` in a closure variable
+  (`lastFindings`) each call — `runVerifyGate`'s return value reads from that, not from `autofix()`'s own
+  `.ok`/`.applied`/`.gaveUp` (see the `runVerifyGate` bullet below for why). If linkage yields zero vectors
+  (an uncovered rule, #1641's own coverage-gap concept), `verify` degrades to `{ ok: true, failures: [] }`
+  unconditionally — an edit to an undeclared/uncovered rule cannot be gated by a vector that doesn't exist,
+  so it passes vacuously (surfaced to the human via the coverage badge already shipped by #1641's registry,
+  not re-invented here).
+- **`read`/`write` callbacks — corrected wiring:** these two calls serve **different** purposes inside
+  `autofix()` and must not both point at the buffer's live, mutable content:
+  - `read` returns the **fixed, immutable pre-edit baseline** — `edit.before`, captured once from
+    `buffer.get(key)?.before` before the call, and returned as-is on every call regardless of the buffer's
+    live state. The engine uses `read` for exactly one thing that matters here: the pre-write `snapshot`
+    it captures right before writing the fixer's patch (`we:scripts/autofix/engine.mjs`, line 329), which
+    is exactly what a **revert** restores (same file, lines 347/353). Wiring `read` to the fixed `before`
+    means a revert correctly restores `before` — not whatever the buffer most recently held.
+  - `write` = `SafeEditBuffer.write(key, content)` — the real, mutable side effect, unchanged from the
+    original design. On the pass path this writes `edit.after` back over itself (already there, a
+    no-op in content terms); on the fail path the engine's own revert calls `write(file, snapshot)`,
+    i.e. `SafeEditBuffer.write(key, edit.before)` — **this is the actual revert**, landing `before` in the
+    real buffer.
+  - `exists`/`remove` are left at the engine's defaults — `exists` just needs `read` to not throw (it
+    never does, `edit.before` is always a real string for an existing pending edit), and `remove` (the
+    file-didn't-exist path) is never reached since `existedBefore` is always `true` here.
+- **`runVerifyGate`'s `ok`/`findings` come from `verify`'s own `lastFindings`, not from `AutofixResult`.**
+  Because the proposed edit may already pass on `autofix()`'s very first internal `verify()` call (before
+  any target/fixer is ever touched), the loop can exit at `we:scripts/autofix/engine.mjs`, line 294 with
+  `applied: []` and `gaveUp: []` — both empty on a **pass**, which makes `AutofixResult.applied.length > 0`
+  / `.ok` unusable as the single-edit pass/fail signal (`.ok` reflects "is the whole run green," a
+  different, run-level concept from "did this one edit's content just get reverted"). `runVerifyGate`
+  instead returns `{ ok: lastFindings.length === 0, findings: lastFindings }` from the closure `verify`
+  populates on its own last call, and calls `autofix()` purely to drive the buffer to the correct settled
+  end-state (`after` kept on pass, `before` restored on fail) via its existing keep/revert bookkeeping —
+  the reporting and the buffer side-effect are deliberately decoupled.
 
 ## Interfaces and protocol
 
@@ -109,9 +147,12 @@ export interface VerifyGateResult {
 }
 
 /**
- * Run the verify-gate over one pending edit. Delegates the propose/apply/accept/revert mechanics
- * entirely to the shared autofix engine's `autofix()` — this function only assembles the
- * `verify`/`read`/`write` callbacks and reshapes the single-edit result.
+ * Run the verify-gate over one pending edit. Assembles the `verify`/`read`/`write` callbacks — `read`
+ * fixed to `edit.before` (the engine's revert-snapshot source), `write` delegating to the buffer, `verify`
+ * checking the buffer's live content and stashing its own last `Finding[]` — then delegates the
+ * propose/apply/accept/revert mechanics to the shared autofix engine's `autofix()`, which drives the
+ * buffer to the correct end-state (`after` kept on pass, `before` restored on fail). The returned
+ * `ok`/`findings` come from `verify`'s own last result, not from `autofix()`'s run-level `AutofixResult`.
  */
 export async function runVerifyGate(opts: {
   buffer: SafeEditBuffer;
@@ -135,11 +176,14 @@ own `write`-on-absent-key throw contract).
    confirm the cross-repo `.mjs` import resolves before writing the real adapter; record the outcome in
    the PR description either way.
 3. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` — the `verify`/`read`/`write`
-   callback adapters, the single synthetic-`Failure` + single-purpose fixer, and `runVerifyGate()`.
+   callback adapters (per the corrected wiring above: `read` fixed to `edit.before`, `verify` reading the
+   buffer's live content directly and stashing `lastFindings`), the single synthetic-`Failure` +
+   single-purpose fixer, and `runVerifyGate()` (reshaping from `lastFindings`, not `AutofixResult`).
 4. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` — a green-path case (edit
-   passes, `ok: true`), a red-path case (edit fails a fixture vector, `ok: false` with findings, and the
-   buffer's content is reverted to `before` — confirmed by re-reading the buffer after the call), and the
-   zero-linkage-degrades-to-pass case.
+   passes, `ok: true`, and `buffer.get(key)?.after` still reads the proposed content — unchanged), a
+   red-path case (edit fails a fixture vector, `ok: false` with findings, **and** `buffer.get(key)?.after`
+   reads back as `edit.before`, confirmed by re-reading the buffer after the call — proves the engine's own
+   revert path fired, not a no-op), and the zero-linkage-degrades-to-pass case.
 5. Run `plateau-app:` `npm test` scoped to the new files.
 
 ## Done when
