@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -174,8 +174,9 @@ const CHILD_PROCESS_TIMEOUT_MS = 120_000;
 describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s per-test bound', () => {
   it('is SIGKILLed once EXEC_TIMEOUT_MS is exceeded — the run terminates rather than hanging', async () => {
     await parkOneDispatch();
-    // Sleeps well past the small `execTimeoutMs` this case chooses, so the assertion below proves a REAL kill
-    // (the elapsed wall time stays near the chosen bound) rather than the stub simply finishing on its own.
+    // Sleeps well past the small `execTimeoutMs` this case chooses, and only writes its marker file (proof of
+    // having run to completion) AFTER that sleep — so the assertions below can tell "killed early" apart from
+    // "ran to completion" without reading anything Node attaches to the thrown error.
     const stub = join(binDir, 'claude');
     writeFileSync(stub, '#!/bin/sh\nsleep 5\nprintf \'%s\\n\' "$*" > "$STUB_ARGV_FILE"\nprintf \'%s\' "$STUB_AGENTS"\n');
     chmodSync(stub, 0o755);
@@ -188,24 +189,39 @@ describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s 
     } catch (e) {
       caught = e;
     }
-    // KILLED, not merely slow: if `timeout` did nothing, this would take ~5000ms (the stub's own sleep).
-    expect(Date.now() - startedAt).toBeLessThan(4000);
-    // THE RELIABLE FIELD, NOT `.signal` (CI run 31883946063, shard 2/4 — reproduced identically on two runs).
-    // `execFileSync`'s `timeout` is enforced by node's OWN native `spawnSync` binding (`src/spawn_sync.cc`):
-    // when the deadline fires, `OnKillTimerTimeout()` calls `SetError(UV_ETIMEDOUT)` — synchronously, on the
-    // spot — and ONLY THEN sends `killSignal` to the child. `.code` is reconstructed straight from that same
-    // errno a moment later (`internal/child_process.js`: `result.error = new ErrnoException(result.error, …)`),
-    // so it is set on every timeout-fired kill, full stop. `.signal`, by contrast, comes from a SEPARATE
-    // native path — the child's actual `waitpid` exit status, captured by `OnExit()` once the OS has finished
-    // tearing the process down — and is copied onto the thrown error by a later `ObjectAssign` a step after
-    // `.code` is already fixed. Verified locally (Node v22.1.0, macOS): both fields normally arrive together
-    // (`code: 'ETIMEDOUT', signal: 'SIGKILL'`) — but CI's `.signal` came back `undefined` on an otherwise-fast
-    // (~2.3s for this whole 16-test file — nowhere near the stub's 5s sleep, so genuinely interrupted early),
-    // correctly-terminated run, meaning THAT hop is where the flake lives, not in whether the child was
-    // actually killed. `.code` needs no such second hop, so it is what this test leans on; `.signal` is still
-    // asserted as a bonus check on the (typical) runs where node does supply it, but no longer required.
-    expect(caught.code).toBe('ETIMEDOUT');
-    if (caught.signal != null) expect(caught.signal).toBe('SIGKILL');
+    const elapsedMs = Date.now() - startedAt;
+    // THE STUB'S MARKER FILE — written only by the `printf … > "$STUB_ARGV_FILE"` line AFTER its `sleep 5`. If
+    // that file exists, the stub ran to completion and nothing was actually killed; if it does not, the stub
+    // was interrupted mid-sleep, before it ever reached that line.
+    const stubRanToCompletion = existsSync(argvFile);
+
+    // OBSERVABLE OUTCOME, NOT NODE'S OWN ERROR METADATA (CI run 31888620937, shard 2/4 — round two of this
+    // flake). Round one (this file's prior fix, commit 191f3eb9) traced Node's C++ `spawn_sync.cc` and argued
+    // `.code` is the reliable field because it is set synchronously from the SAME errno that fires the kill,
+    // while `.signal` alone comes from a separate, later `waitpid`/`OnExit()` hop. That reasoning held up in
+    // isolation, but the VERY NEXT CI run falsified its conclusion: `.code` came back `undefined` too, on a
+    // run where the whole 16-test file (this case plus 15 others, each spawning real children) finished in
+    // 1688ms total — nowhere near the stub's 5s sleep, so the kill plainly WAS real and fast; only Node's own
+    // bookkeeping of *how* it died raced under whatever load that specific runner was under. Chasing which
+    // field survives that race next is whack-a-mole with no floor — `execFileSync`'s error-metadata population
+    // on that CI runner has now proven unreliable twice, in two different ways, for reasons neither the C++
+    // source nor deliberate local reproduction (single-run and 6-way-parallel loops against a CPU + fork-storm
+    // background load, on this machine) could pin down. So this asserts the OUTCOME the metadata was only ever
+    // a proxy for, straight from the filesystem and the wall clock, both of which are unambiguous regardless of
+    // which hop of Node's own error-object plumbing happened to finish in time:
+    expect(elapsedMs).toBeLessThan(4000); // did not run to the stub's full 5s sleep
+    expect(stubRanToCompletion).toBe(false); // …and never reached its post-sleep marker-file write
+
+    // `.code`/`.signal` are still worth knowing WHEN a run is unhealthy — logged (never asserted) so a real
+    // regression (the wedged child NOT actually being killed) still carries Node's own diagnosis alongside the
+    // outcome-based proof above.
+    if (elapsedMs >= 4000 || stubRanToCompletion) {
+      // eslint-disable-next-line no-console
+      console.error('wedged-claude kill diagnostics (informational only, never asserted):', {
+        elapsedMs, stubRanToCompletion, code: caught?.code, signal: caught?.signal,
+        status: caught?.status, killed: caught?.killed, message: caught?.message,
+      });
+    }
   }, CHILD_PROCESS_TIMEOUT_MS);
 });
 
