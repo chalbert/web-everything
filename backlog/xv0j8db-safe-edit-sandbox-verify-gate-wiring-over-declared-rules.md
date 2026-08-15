@@ -144,8 +144,24 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    immediately rather than silently invalidating the "calls 1 and 2 are bit-identical" argument the latch
 >    depends on.
 >
-> Both are captured as real Tasks/Done-when items below (see Task 6 and the corresponding Done-when
+> Both are captured as real Tasks/Done-when items below (see Task 5 and the corresponding Done-when
 > bullet), not left as a comment a future implementer could silently ignore.
+>
+> **Review fix (2026-08-15, PR #1355, round 4).** Two findings, both in this callout:
+> 1. **Stale cross-reference** — the line above pointed to "Task 6," but the two guards it describes (the
+>    fixer-count throw and the bit-identical throw) are Task 5's content; Task 6 is only "run `npm test`
+>    scoped to the new files." Fixed by correcting the pointer to Task 5 (above).
+> 2. **Only one test scenario existed for two guards.** Task 5's one described test (register a SECOND,
+>    content-mutating fixer, assert `runVerifyGate()` throws) can only ever exercise guard 1 (the
+>    fixer-count check), because that check runs *before* `autofix()` is called, so the second fixer's own
+>    `fix()` — and therefore guard 2, the bit-identical assertion inside the single fixer's `fix()` — is
+>    never reached by that scenario. Guard 2 had no test of its own: if a future engineer implemented guard
+>    1 correctly but never actually wrote guard 2's bit-identical assertion (or wrote it wrong), no test
+>    would catch it, and round 2's false-pass bug class could reappear silently the day the fixer body is
+>    edited in place instead of a second fixer being added. Fixed by adding a SECOND, distinct test
+>    scenario to Task 5/Done-when — see below — that keeps the fixer count at exactly one (so guard 1
+>    does not short-circuit) but makes that one fixer return content that differs from what it read (a
+>    stand-in for "someone edited the fixer body to actually transform content"), isolating guard 2.
 
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
@@ -286,10 +302,19 @@ own `write`-on-absent-key throw contract).
    calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
    `pending:${key}` failure — throw synchronously if not; (b) inside the single-purpose fixer's `fix()`,
    assert (dev-mode, throws on violation) that the patch content it returns is bit-identical to what it
-   read, i.e. it is genuinely a no-op echo. Add a test in
-   `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` that registers a second,
-   content-mutating fixer against a fixture buffer and asserts `runVerifyGate()` throws rather than
-   silently running the settle-once latch against a now-invalid precondition.
+   read, i.e. it is genuinely a no-op echo. Add TWO tests in
+   `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts`, one per guard, because guard (a)
+   short-circuits before guard (b) ever runs and a single scenario can only ever exercise the first
+   (PR #1355 round 4):
+   - **Guard (a):** register a SECOND, content-mutating fixer (two fixers total for the synthetic
+     `pending:${key}` failure) against a fixture buffer and assert `runVerifyGate()` throws rather than
+     silently running the settle-once latch against a now-invalid precondition.
+   - **Guard (b), isolated from guard (a):** keep exactly ONE fixer registered (so guard (a)'s
+     exactly-one-fixer check passes and does not short-circuit) but make that one fixer return content that
+     differs from what it read — a content-mutating single fixer, standing in for a future engineer having
+     edited the fixer body in place instead of adding a second fixer — and assert `runVerifyGate()` throws
+     from the bit-identical assertion inside `fix()`. This is the ONLY scenario that can actually reach and
+     redden guard (b): with two fixers, `fix()` on the single-purpose fixer is never called at all.
 6. Run `plateau-app:` `npm test` scoped to the new files.
 
 ## Done when
@@ -303,10 +328,14 @@ own `write`-on-absent-key throw contract).
   whatever `verify` returned last" implementation reports a false `{ ok: true, findings: [] }` here instead).
 - `runVerifyGate()` against an edit whose `ruleKind` has zero linked vectors returns `{ ok: true, findings: [] }`.
 - **`runVerifyGate()` throws when the fixer registry it builds resolves to more than one fixer for the
-  `pending:${key}` failure, and the single-purpose fixer's `fix()` throws if the patch it would return is
-  not bit-identical to what it read** — asserted by a test that registers a second, content-mutating fixer
-  against a fixture buffer and confirms `runVerifyGate()` throws rather than silently proceeding (the PR
-  #1355 round-3 fix for the previously-prose-only single-fixer scope boundary).
+  `pending:${key}` failure** — asserted by a test that registers a second, content-mutating fixer against a
+  fixture buffer and confirms `runVerifyGate()` throws rather than silently proceeding (the PR #1355
+  round-3 fix for the previously-prose-only single-fixer scope boundary).
+- **The single-purpose fixer's `fix()` throws if the patch it would return is not bit-identical to what it
+  read, exercised in isolation from the guard above** — asserted by a SEPARATE test (PR #1355 round 4) that
+  keeps exactly ONE fixer registered but makes it return content different from what it read, and confirms
+  `runVerifyGate()` throws; the round-3 two-fixer test above cannot exercise this guard on its own, because
+  the fixer-count check throws before `autofix()` (and therefore `fix()`) is ever reached.
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape
