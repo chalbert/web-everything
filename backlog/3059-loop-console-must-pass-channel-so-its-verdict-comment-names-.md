@@ -2,12 +2,18 @@
 bornAs: x1xh0ib
 kind: story
 size: 1
-status: open
+status: resolved
 blockedBy: ["2898"]
 relatedTo: ["2470", "2644"]
 scope:
   - plateau:tools/dev-panel/vite-plugin.ts
+  - plateau:tools/drain-daemon/cli.mjs
+  - plateau:tools/drain-daemon/lib.mjs
+  - plateau:tools/drain-daemon/lib.test.mjs
 dateOpened: "2026-08-10"
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
+graduatedTo: none
 tags: [review, cli, attribution, loop-console, cross-repo]
 ---
 
@@ -41,3 +47,13 @@ itself. Left undone, the console's records are indistinguishable from any other 
 - An accept recorded from the review console posts `Recorded by <actor> via the Plateau Loop review console.`
 - The channel is server-side in the panel's handler, never taken from the request body.
 - A plateau-side test asserts the argv carries `--channel=`, alongside the existing `--repo`/`--to` assertions.
+
+## Delivery
+
+`daemonReviewSetLabel` in `plateau:tools/dev-panel/vite-plugin.ts` now appends
+`--channel=the Plateau Loop review console` unconditionally, from a module-level constant — never read off the
+client body. The drain-daemon CLI shim (`plateau:tools/drain-daemon/cli.mjs` → `buildSetLabelArgs` in
+`plateau:tools/drain-daemon/lib.mjs`) forwards `--channel=` through to the WE `we:scripts/review-set-label.mjs`
+CLI, which has accepted it since #2898. `plateau:tools/drain-daemon/lib.test.mjs` gained a case asserting
+`buildSetLabelArgs` emits `--channel=` when given one and omits it otherwise, alongside the existing
+`--repo`/`--to`/`--actor` assertions. Delivered in chalbert/plateau-app#140.
