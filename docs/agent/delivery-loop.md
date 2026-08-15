@@ -43,8 +43,13 @@ node --input-type=module -e '
 #    that was never tested. stdin is for size: a mandate has no ARG_MAX ceiling there, and argv stays a
 #    fixed, assertable flag list (judge-spawn.mjs:60).
 cd <that lane> && CLAUDE_CODE_SESSION_ID=<derived> \
-  claude -p --session-id <derived> --model opus --permission-mode bypassPermissions < mandate.txt
+  claude -p --session-id <derived> --model opus --effort high --permission-mode bypassPermissions < mandate.txt
 ```
+
+`--effort` is set here, explicitly, for the same reason `--model` is: a review verdict is judgment-shaped
+work, and leaving effort at its inherited default is the same under-spend model routing exists to fix, on
+the other axis — see *Effort routing* in `we:docs/agent/backlog-workflow.md#effort-routing`. A mechanical
+spawn (a named one-file fix, a pointer check) wants `--effort low` instead; judgment wants `high`/`xhigh`.
 
 Run it in the background and keep working; the verdict arrives on the PR. Several at once is normal —
 see *Parallelism* below.

@@ -517,6 +517,48 @@ The failure this kills is concrete: the first #1855 front-B sweep returned **fab
 
 **Batch interaction — calibration re-learns, it doesn't break.** A serial `/batch` calibrates its point budget from a context-% reading mapped to points resolved (*Running a batch* → *Calibrating*). Delegating execution moves the file-reading churn off the loop, but the loop **still does claim → brief → summary → close-review per item, in sequence** — so its context still grows **roughly linearly in items**, just on a gentler slope (*unlike* the parallel `/workflow` path, where points resolve entirely in worktree contexts, which is why that path skips calibration). So delegated-serial calibration stays valid; what changes is that **`capacityPoints` re-converges *upward*** — the same context budget buys more points, i.e. **bigger batches**. The EMA absorbs that over a few sessions; the transient while it climbs is a short **under-estimate** (safe — it stops early with budget to spare). The old **mixed-mode** caveat (some items delegate, some run inline → bimodal cost-per-point in one `capacityPoints`) is **narrowed, not retired**: delegation is now the standard path, but row 4's inline branch survives, and a whole session falls off the slope when a **harness instruction forbids the Agent tool** — the one direction that can **over**-shoot. That case is written once, and not here: *Calibrating the budget* → **the no-Agent sample** carries both required actions. If the bimodal noise bites, calibrate against *loop-context cost* rather than raw points. Otherwise: **let delegated-serial `/batch` calibrate normally and expect `capacityPoints` to rise**; single-item `/next` has no calibration; the parallel `/workflow` lanes are the natural place to pin `model: "sonnet"` on their `agent()` calls.
 
+## Effort routing — the second axis alongside model tier {#effort-routing}
+
+Ratified by [#3106](/backlog/3106-agent-launches-should-size-reasoning-effort-to-the-work-not-/). Model
+tier (above) answers *which model* runs the work; **effort answers how hard it thinks before answering**,
+and it is a genuinely separate knob — the Agent tool and the Workflow tool's `agent()` call both accept an
+`effort` of `low`/`medium`/`high`/`xhigh`/`max` (the CLI's own enum; `scripts/lib/judge-spawn.mjs:234`),
+independent of `model`. Routing model but leaving effort at its inherited default reproduces the exact
+over/under-spend problem model routing exists to fix, just on the other axis: a mechanical one-file diff run
+at high effort burns reasoning re-deriving what the brief already states; a real, unresolved fork run at
+default effort returns a plausible-sounding wrong answer instead of a right one. **Same discipline as model
+routing: don't omit it, don't default-cheap** — every spawn sets `effort` explicitly, the same way
+`agent-memory-src/always-set-subagent-model-explicitly.md` requires an explicit `model`.
+
+**Route on the SHAPE of the work, not a lookup table.** The model-routing table above works because its
+rows name a *shape* (pointer / prepared-and-bounded / judgment), not a mechanical if/else; effort follows
+the same pattern — this is deliberately not a stricter or more rigid rule than model routing, just the same
+one applied to the other axis:
+
+- **Mechanical / pointer work → `low`.** An exact "to land" checklist, a one-file fix named verbatim by
+  whoever asked for it, a state flip — anything where the brief already contains the answer and the spawn's
+  job is only to apply it. **Worked example (#3106):** the same session's regex-plus-comment fix, where an
+  independent reviewer named the exact change to make — nothing left to reason through, so nothing to spend
+  extra effort on.
+- **Execution-to-spec (prepared/DoR, bounded, not judgment-shaped) → `low`/`medium`.** The Sonnet rung's
+  criteria above (holds against the current tree, single locus, no contract/shared-gate/cross-repo seam)
+  also bound how much thinking the work needs — a card that re-validated clean is a brief to execute, not a
+  question to reason through.
+- **Judgment-shaped work → `high`/`xhigh`.** A real unresolved fork, an ambiguous root-cause call — **worked
+  example (#3106):** "does this protection do anything in production, or is it opt-in-and-unused" — anything
+  where a wrong-but-plausible answer is the failure mode, not a slow one. This is the Opus rung's territory
+  by definition (judgment stays inline or spawns Opus, per the table above), and effort should match: an
+  agent reasoning through a fork at `low` effort is the cheap-model failure mode wearing a different
+  disguise.
+
+**The asymmetry is the same as model's: when torn, go up.** Over-spending effort on an easy item wastes
+tokens; under-spending on a judgment call writes a confident-but-wrong conclusion the parent can't
+distinguish from a right one without independently re-deriving it — which defeats the point of delegating.
+
+**Watch for:** this stays a convention, not a lookup table. A task's true shape can diverge from its `size`
+or `kind` the same way the model table warns about (a `story·3` can still hide a real design call) — route
+on what the brief actually asks the spawn to *do*, never on a field alone.
+
 ## Running a batch — chain several small items, stop on a solid condition
 
 > Use via the `batch-backlog-items` skill (`/batch`, `/batch-next`). A batch works several **agent-ready** items back-to-back **without stopping for approval between them** — to run a bit longer and progress faster — while keeping a real validation stop at every seam and a hard backstop that guarantees it ends. It **reuses the single-item arc unchanged** (*Selecting*, *Working an item*, *Closing out*); it only adds the loop and the stop rule below.
