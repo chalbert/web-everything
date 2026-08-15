@@ -114,12 +114,75 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > This buffer-can-mutate-during-emit fact is now stated explicitly, not left implicit, and is enforced by
   > a dedicated test — see Task 2 and the corresponding Done-when bullet below.
 
+  > **Review fix (2026-08-15, PR #1355, round 7) — BLOCKER, closed structurally.** Round 6 found the round-4
+  > fix above still false: it captures `content` once and never checks the buffer again, so `discardEdit()`
+  > (`buffer.revert(key)`) can run — deleting the entry outright — **while `emitEdit()`'s own `await`s
+  > (`runVerifyGate()`, the ide-bridge patch, credential resolution, the forge PR-open) are still in
+  > flight**, and the write + PR-open proceed anyway with the pre-discard content. This is round 4's own bug
+  > shape (trust a value captured before an `await` instead of the true current state), just on `revert()`
+  > instead of `propose()`. Patching `emitEdit()` a fourth time to re-read the buffer one more time would
+  > only relocate the same race to whatever new line does the re-reading — this is round 7 precisely because
+  > that pattern (narrow the capture, get bounced, narrow again) has now repeated six times. The actual gap
+  > is structural: nothing `emitEdit()` captures lets it later ask "is this still the live edit?" — `content`
+  > is just a string, indistinguishable from a coincidentally-identical string proposed fresh after a revert.
+  >
+  > **Fixed by consuming `xzewkfa`'s new generation token (see that card's round-7 fix) instead of adding
+  > another re-read.** `emitEdit()`'s step 0 now captures `{ after: content, token }` together, atomically,
+  > via `buffer.snapshot(key)` — still exactly one buffer read, still the function's first statement, still
+  > before any `await` — and then re-validates that token, synchronously, immediately before each of the two
+  > remaining irrevocable actions (the ide-bridge write and the forge PR-open), via `buffer.isCurrent(key,
+  > token)`. Because each check is synchronous and immediately followed by the call it's guarding (nothing
+  > else can run in between on a single JS thread), "checked current" and "acted on" can never drift apart
+  > for that step. If either check fails, `emitEdit()` aborts immediately and returns `{ ok: false, reason:
+  > 'stale-edit' }` — no partial write, no partial PR — because between the check and the call there is
+  > provably no gap left for the buffer to change again.
+  >
+  > **Two checkpoints, not one, because there are two irrevocable actions:**
+  > - **Checkpoint A** — after `runVerifyGate()` resolves `{ ok: true }`, before `IdeBridgeRegistry.patch()`.
+  >   Closes the exact repro in the BLOCKER finding: discard lands during the gate's own (now-confirmed-async,
+  >   see `xv0j8db`'s round-7 fix) verify work, and the write never happens.
+  > - **Checkpoint B** — after the ide-bridge patch succeeds, before the forge PR-open. A discard landing
+  >   during the (also-awaited) file-write call itself cannot be intercepted — by the time checkpoint B could
+  >   run, `IdeBridgeRegistry.patch()` has already committed the file write, and cancelling an in-flight
+  >   provider call is out of scope (ide-bridge is an already-shipped package this slice only calls, never
+  >   edits — see Scope above). Checkpoint B is the next available honest opportunity: it stops the PR from
+  >   being opened for content that's already been discarded, even though it cannot undo the file write that
+  >   raced ahead of it. **This narrower residual window (revert landing exactly during the ide-bridge
+  >   `patch()` call's own `await`) is a disclosed, accepted limitation, not a silently-swept-away one** — it
+  >   would take ide-bridge itself gaining cancellation support to close, which is a different package's
+  >   scope. It is also a materially smaller window than the one this round closes: it requires the discard
+  >   click to land inside a single provider I/O call rather than anywhere across the gate's entire
+  >   (multi-`await`, oracle-calling) verify sequence.
+  >
+  > **This also changes — and, on reflection, corrects — round 4's answer for the sibling case, a
+  > *re-propose* on the same key during an in-flight emit.** Round 4 chose to ignore a concurrent re-propose
+  > and proceed with the originally-captured content, reasoning "a concurrent edit isn't picked up until the
+  > next propose/emit cycle." A re-propose bumps the same generation token a revert invalidates (see
+  > `xzewkfa`'s round-7 fix — both are "the key's identity changed" from the token's point of view, by
+  > design, since distinguishing "reverted" from "re-proposed with different content" would need the buffer
+  > to track *why* a generation changed, not just *that* it did, for no real benefit here), so under this
+  > round's mechanism the two cases are structurally identical and **both now abort** with `{ ok: false,
+  > reason: 'stale-edit' }` rather than one aborting and the other silently proceeding on stale content. This
+  > is a deliberate, stated revision of round 4's choice: "silently emit a PR for content the buffer no
+  > longer holds because the user kept typing" has the same user-surprise shape as the BLOCKER this round
+  > fixes (a PR opens for content the user does not currently see as live), just softer — round 4's own
+  > reasoning ("wasn't gated yet") is still true of the *new* proposal, but says nothing about whether it's
+  > still correct to act on the *old* one once it's no longer what the buffer holds. Unifying both under one
+  > `stale-edit` abort is simpler than a scheme that has to first classify *which* kind of change happened,
+  > and closes the whole "buffer changed under an in-flight emit" bug class with one mechanism instead of a
+  > carve-out per cause. The caller (the future UI) is expected to just let the user click "emit" again,
+  > which will re-capture the buffer's now-current `{ content, token }` and gate that.
+
 - **Emit**, in order:
-  0. Capture `const content = buffer.get(key)?.after;` as the function's first statement — synchronous,
-     before any `await`. This is the ONLY read of the buffer's content `emitEdit()` ever performs; every
-     later step reuses this same local, never `opts.edit.after` and never a fresh `buffer.get(key)` call.
-     (`opts.edit` is still used for `edit.before`, `edit.target`, and other non-content fields — only
-     `.after`, the field the write and the gate must agree on, is banned from re-use post-capture.)
+  0. Capture `const { after: content, token } = buffer.snapshot(key) ?? {};` as the function's first
+     statement — synchronous, before any `await`, and a single atomic buffer call (PR #1355 round 7 —
+     `snapshot()` returns `content` and its generation `token` together so they can never be captured on
+     either side of a future refactor's `await`). This is the ONLY read of the buffer's content `emitEdit()`
+     ever performs; every later step reuses this same `content` local, never `opts.edit.after` and never a
+     fresh `buffer.get(key)` call. `token` is used only for the recheck in steps 1a/2a below — it never
+     appears in the write or the PR body. (`opts.edit` is still used for `edit.before`, `edit.target`, and
+     other non-content fields — only `.after`, the field the write and the gate must agree on, is banned
+     from re-use post-capture.)
   1. Call `runVerifyGate({ buffer, edit: { ...opts.edit, after: content }, appId, registry, index })`
      (Slice 2's gate — `emitEdit()` calls it directly, itself; it does not accept a caller-supplied
      `gatePassed` boolean and does not trust one — see the round-3 fix above — and it checks the SAME
@@ -131,17 +194,32 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      a stale/racy/bypassed caller-side check can never cause a failing edit to reach a real file write or a
      real PR. This is the same "never fake a pass" discipline the autofix engine itself uses, now actually
      wired into the interface rather than only stated in prose.
+  1a. **Checkpoint A (PR #1355 round 7).** Immediately after step 1 resolves `{ ok: true }` and before step
+     2 runs: `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — synchronous,
+     with nothing between this check and step 2's call that could let the buffer change again. Catches a
+     `discardEdit()` (or a re-propose) that landed anywhere during step 1's `await`s, including inside
+     `runVerifyGate()`'s own oracle calls.
   2. `IdeBridgeRegistry.patch({ location, contents: content })` — writes the real file via whichever
      provider is available (FS-Access or the VS Code extension; degrades to an error result if neither
      is, exactly like every other ide-bridge caller). `content` is the exact same value step 1 just gated —
      never `opts.edit.after`, never a fresh buffer re-read (see the round-4 fix above for why either of
      those would reopen the TOCTOU gap).
+  2a. **Checkpoint B (PR #1355 round 7).** Immediately after step 2 succeeds and before step 3 runs:
+     `if (!buffer.isCurrent(key, token)) return { ok: false, reason: 'stale-edit' };` — same synchronous
+     check, guarding the PR-open. Cannot undo the file write step 2 already made (a disclosed, accepted
+     residual limitation — see the round-7 callout above for why) but does stop a PR being opened for
+     content the buffer no longer holds.
   3. Resolve a `ForgeCredential` via the credential-source registry, then
      `ForgeProviderRegistry.openPullRequest(...)` with a `body` rendered by the pr-body renderer from a
      `ConformanceEvidenceManifest` this function assembles from: `edit.before` and the captured `content`
-     (verify evidence — `before.passed: false` iff the pre-edit content would have failed the same gate,
-     `after.passed: true` since emit only runs post-gate, and `after`'s content is `content`, the same
-     captured value that was gated and written — not `opts.edit.after`), the `autonomy: 'open-pr'` level
+     (verify evidence — `before.passed` computed by calling `checkContentAgainstVectors({ ruleKind:
+     edit.target.ruleKind, appId, content: edit.before, registry, index })` (the helper `xv0j8db` exports,
+     PR #1355 round 7 — the same check the gate itself runs, applied to the pre-edit baseline instead of the
+     proposed content) and setting `before.passed = result.length === 0`; this is a pure check against the
+     fixed `edit.before` string, not the mutable buffer, so it carries none of the token/staleness risk the
+     content-bearing steps above do, and can run any time before the manifest is assembled — `after.passed:
+     true` since emit only runs post-gate, and `after`'s content is `content`, the same captured value that
+     was gated and written — not `opts.edit.after`), the `autonomy: 'open-pr'` level
      (the only level #141 Fork 2 ratified for v1 — `auto-merge` is not reachable from this slice, by
      construction, since nothing here calls a merge API), and the app/impl identity already available from
      the declared-rules registry's `appId`.
@@ -158,7 +236,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
 ```ts
 // plateau-app:packages/dev-browser/src/safe-edit/emit.ts
 import type { SafeEditBuffer, DeclaredEdit } from './buffer';
-import { runVerifyGate } from './verify-gate'; // Slice 2 — emitEdit() calls this itself, never a caller-supplied boolean
+import { runVerifyGate, checkContentAgainstVectors } from './verify-gate'; // Slice 2 — emitEdit() calls runVerifyGate() itself, never a caller-supplied boolean; checkContentAgainstVectors is the round-7 before.passed helper
 import type { DeclaredRuleRegistry, VectorIndex } from '../declared-rules';
 import type { IdeBridgeRegistry } from '../ide-bridge';
 import type { ForgeProviderRegistry, ForgeRepo } from '../forge';
@@ -167,6 +245,7 @@ import { renderPrBody } from '../pr-body/renderer';
 
 export type EmitFailureReason =
   | 'not-gate-passed'
+  | 'stale-edit' // PR #1355 round 7 — buffer.isCurrent(key, token) failed at checkpoint A or B
   | 'patch-unavailable'
   | 'auth-unavailable'
   | 'forge-unavailable'
@@ -188,12 +267,19 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
  * the PR (forge) with a rendered conformance-evidence body (pr-body). Calls `runVerifyGate()` itself
  * against the buffer's real current content before doing anything else — takes no `gatePassed` boolean
  * from the caller, so there is nothing for a stale/racy/bypassed caller-side check to get wrong.
- * Reads the buffer exactly ONCE, as its first (synchronous, pre-`await`) statement, into a local `content`
- * — the SAME value is what gets gated (`runVerifyGate()`) and what gets written (`IdeBridgeRegistry.patch()`
- * and the PR-body evidence); `opts.edit.after` and any later `buffer.get(key)` read are never used for
- * content past that point (PR #1355 round 4 — the buffer has no lock and a live user can keep editing while
- * this function's several `await`s are in flight, so a second read could observe different content than the
- * gate checked).
+ * Reads the buffer exactly ONCE, as its first (synchronous, pre-`await`) statement, via `buffer.snapshot(key)`,
+ * into a local `content` + `token` pair — `content` is the SAME value that gets gated (`runVerifyGate()`)
+ * and written (`IdeBridgeRegistry.patch()` and the PR-body evidence); `opts.edit.after` and any later
+ * `buffer.get(key)` read are never used for content past that point (PR #1355 round 4 — the buffer has no
+ * lock and a live user can keep editing while this function's several `await`s are in flight, so a second
+ * read could observe different content than the gate checked). `token` guards the two irrevocable actions
+ * that follow: immediately before `IdeBridgeRegistry.patch()` and immediately before
+ * `ForgeProviderRegistry.openPullRequest()`, `emitEdit()` synchronously re-checks `buffer.isCurrent(key,
+ * token)` and aborts with `{ ok: false, reason: 'stale-edit' }` if the buffer's pending edit for `key` was
+ * reverted OR re-proposed since the snapshot was taken (PR #1355 round 7 — closes the BLOCKER where a
+ * `discardEdit()` landing while this function's `await`s are still in flight left the write and the
+ * PR-open to proceed anyway; see `xzewkfa`'s generation-token addition and this card's round-7 callout for
+ * the full mechanism and its one disclosed residual limitation).
  */
 export async function emitEdit(opts: {
   buffer: SafeEditBuffer;
@@ -215,10 +301,16 @@ export async function emitEdit(opts: {
    the small `ConformanceEvidenceManifest` assembly helper described above. `emitEdit()` must call
    `runVerifyGate()` (imported from `./verify-gate`, Slice 2) itself as its first step — it must not accept
    or trust a caller-supplied `gatePassed` boolean; there is no such parameter in the corrected interface.
-   `emitEdit()` must read `buffer.get(key)?.after` exactly ONCE, into a `content` local, as its first
-   (synchronous, pre-`await`) statement, and use that SAME local for both the `runVerifyGate()` call and the
-   `IdeBridgeRegistry.patch()`/`ConformanceEvidenceManifest` content — never `opts.edit.after`, never a
-   second `buffer.get(key)` read (PR #1355 round 4).
+   `emitEdit()` must read `buffer.snapshot(key)` exactly ONCE, destructuring `content`/`token` locals, as its
+   first (synchronous, pre-`await`) statement, and use that SAME `content` for both the `runVerifyGate()`
+   call and the `IdeBridgeRegistry.patch()`/`ConformanceEvidenceManifest` content — never `opts.edit.after`,
+   never a second `buffer.get(key)` read (PR #1355 round 4). `emitEdit()` must synchronously re-check
+   `buffer.isCurrent(key, token)` at checkpoint A (immediately before `IdeBridgeRegistry.patch()`) and
+   checkpoint B (immediately before `ForgeProviderRegistry.openPullRequest()`), returning `{ ok: false,
+   reason: 'stale-edit' }` and doing nothing further if either check fails (PR #1355 round 7). The
+   `ConformanceEvidenceManifest` assembly must compute `before.passed` via
+   `checkContentAgainstVectors({ ruleKind: edit.target.ruleKind, appId, content: edit.before, registry,
+   index })`, never leave it unset/hardcoded (PR #1355 round 7, the round-6 spec-completeness finding).
 2. Write `plateau-app:packages/dev-browser/src/safe-edit/emit.test.ts` — one case per `EmitFailureReason`
    (fake registries returning unavailable/error), one green-path case asserting the four calls happen in
    order with the right arguments (a spy on each fake registry), a `discardEdit` case asserting no
@@ -227,13 +319,27 @@ export async function emitEdit(opts: {
    same fixture pattern Slice 2's own red-path test uses), calls `emitEdit()` on it, and asserts it returns
    `{ ok: false, reason: 'not-gate-passed' }` with zero calls to ide-bridge/forge/credential-source —
    proving the rejection comes from `emitEdit()`'s own internal `runVerifyGate()` call against real failing
-   content, not from a caller having passed (or forgotten to pass) any boolean — and **the regression test
-   for PR #1355 round 4**: a case where the fake `ideBridge.patch` (or a hook on the fake `runVerifyGate`/
-   forge dependency) itself calls `buffer.propose(key, { ...edit, after: 'mutated-after-gate' })` on the
-   SAME key *during* `emitEdit()`'s in-flight `await` (simulating the live user continuing to edit while the
-   emit is outstanding), then asserts the fake `ideBridge.patch` was actually called with the ORIGINAL,
-   gated content, not `'mutated-after-gate'` — proving the write is pinned to what was captured/gated, not
-   re-read from a buffer that can and does keep changing underneath an in-flight emit.
+   content, not from a caller having passed (or forgotten to pass) any boolean — and, **superseding round
+   4's regression test with round 7's corrected expectation** (round 4 asserted the write proceeds with the
+   originally-captured content on a concurrent re-propose; round 7's callout above explains why that is now
+   treated the same as a revert, i.e. an abort, not a silent proceed):
+   - **The regression test for PR #1355 round 7, finding 1 (the BLOCKER) — revert during in-flight emit:** a
+     case where the fake `runVerifyGate` (or a hook inside it) itself calls `buffer.revert(key)` on the SAME
+     key *during* `emitEdit()`'s in-flight `await`, simulating a `discardEdit()` click landing mid-gate.
+     Assert `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }` and that NEITHER `ideBridge.patch` NOR
+     any forge/credential-source call happened — proving checkpoint A actually stopped the write, not just
+     that some later assertion caught a bad body.
+   - **The regression test for PR #1355 round 7 — re-propose during in-flight emit:** a case where the fake
+     `runVerifyGate` (or a hook on the fake ide-bridge/forge dependency) itself calls `buffer.propose(key, {
+     ...edit, after: 'mutated-after-gate' })` on the SAME key during the in-flight `await`. Assert
+     `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }` with zero downstream calls — this is round
+     4's old scenario, now asserting the corrected (abort, not proceed) outcome.
+   - **A checkpoint-B case:** the fake `ideBridge.patch` succeeds but, as a side effect before returning,
+     calls `buffer.revert(key)` on the same key. Assert `emitEdit()` returns `{ ok: false, reason:
+     'stale-edit' }` and that the forge/credential-source calls never happened, proving checkpoint B (not
+     just checkpoint A) is wired in.
+   - **A true green-path case, unchanged:** no buffer mutation during the `await`s — `emitEdit()` succeeds
+     normally, both checkpoints pass, and the write/PR-open both carry the originally captured `content`.
 3. Confirm the pr-body renderer's `ConformanceEvidenceManifest` input shape (defined at
    `plateau-app:packages/dev-browser/src/pr-body/renderer.ts`) accepts the fields this slice can actually
    supply (subject/impl/commit are optional per the renderer's own `renderSubject` — already read; no
@@ -258,12 +364,26 @@ export async function emitEdit(opts: {
 - `emitEdit()` with any one fake registry returning unavailable/error returns the matching
   `EmitFailureReason` and does not proceed to the steps after it (e.g. an unavailable ide-bridge never
   reaches the forge call).
-- **`emitEdit()`'s write always reflects the exact content that was gated, even if the buffer is mutated
-  again (via `buffer.propose()` on the same key) while `emitEdit()` is still in flight** — this is the
-  regression test for PR #1355 round 4: the `IdeBridgeRegistry.patch()` call and the
+- **`emitEdit()`'s write always reflects the exact content that was gated, on the true green path where the
+  buffer is untouched while `emitEdit()` is in flight** — the `IdeBridgeRegistry.patch()` call and the
   `ConformanceEvidenceManifest`'s `after` evidence must both carry the content captured at `emitEdit()`'s
-  start, never a later, possibly-mutated re-read of the buffer and never the caller's original
-  `opts.edit.after`.
+  start, never the caller's original `opts.edit.after` (PR #1355 round 4's original guarantee, still true on
+  the no-mutation path).
+- **(PR #1355 round 7, finding 1 — the BLOCKER, superseding round 4's now-corrected expectation)
+  `emitEdit()` aborts with `{ ok: false, reason: 'stale-edit' }`, and calls none of
+  ide-bridge/forge/credential-source beyond whichever step's checkpoint caught it, whenever the buffer's
+  pending edit for `key` is reverted OR re-proposed at any point between `emitEdit()`'s initial snapshot and
+  its next irrevocable step** — covering: a revert during the gate call (checkpoint A, the literal BLOCKER
+  repro), a re-propose during the gate call (checkpoint A — this is round 4's old scenario, now asserting
+  abort instead of silent-proceed), and a revert landing after the ide-bridge write succeeds but before the
+  forge PR-open (checkpoint B).
+- **(PR #1355 round 7, finding 3 — the cosmetic spec-completeness gap) The
+  `ConformanceEvidenceManifest`'s `before.passed` field is actually computed, not left for an implementer to
+  guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `xv0j8db`'s
+  `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`) against `edit.before` and sets
+  `before.passed` to whether that check returned zero findings, asserted by a test that seeds a fixture
+  where `edit.before` itself would fail the gate and confirms the assembled manifest's `before.passed` is
+  `false` even though the emit as a whole succeeds (because gating only ever runs against `content`/`after`).
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape

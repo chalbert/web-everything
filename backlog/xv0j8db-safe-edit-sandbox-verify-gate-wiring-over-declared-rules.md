@@ -163,6 +163,44 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    does not short-circuit) but makes that one fixer return content that differs from what it read (a
 >    stand-in for "someone edited the fixer body to actually transform content"), isolating guard 2.
 
+> **Review fix (2026-08-15, PR #1355, round 7) — DEGRADED finding, closed with a stated invariant plus a
+> test that would catch its violation, not just prose.** The round-6 review traced
+> `ConformanceVectorOracle.run()` (`we:packages/core/src/conformance-engine/conformanceVectors.ts:297-301`,
+> in the `plateau-app` repo) and found it contains genuine internal `await`s (`await
+> this.#bindings.create(vector)`, `await runConformanceVector(...)`). The round-2/round-4 safety arguments
+> above are true **only** because `verify`'s closure reads the buffer synchronously, as its first
+> statement, before ever calling into that async oracle — an ordering nothing above actually asserts or
+> tests. A future engineer who reorders `verify` (e.g. to look up `linkage()` from a registry that grows an
+> `await` of its own, ahead of the buffer read) would silently reopen the exact TOCTOU class rounds 1–4
+> already spent effort closing, with every existing test still green, because none of them can distinguish
+> "read before the await" from "read after it" — they only ever exercise the single-threaded, no-real-race
+> case.
+>
+> **The invariant, stated as a testable precondition, not left implicit:** *no `await` may occur between
+> `verify()` being invoked and its first, synchronous read of `buffer.get(key)?.after` into a local.*
+> Everything downstream of that point — including the call into `ConformanceVectorOracle` — must operate on
+> that local, never on a fresh buffer read.
+>
+> **Enforced two ways:**
+> 1. **Structurally, by construction:** `verify`'s implementation is written as `const content =
+>    buffer.get(key)?.after; /* ... then, and only then ... */ const findings = await
+>    checkContentAgainstVectors({ ruleKind, appId, content, registry, index });` — i.e. the buffer read is
+>    textually the callback's first statement and nothing before it can await, because nothing precedes it.
+>    (`checkContentAgainstVectors` is a new exported helper — see the Interfaces block below — factoring the
+>    oracle call out of the closure so `x00bvy0` can reuse the same check for its `before.passed` field
+>    without going through the whole `autofix()` loop; see that card's round-7 fix.)
+> 2. **With a regression test that fails if a future implementation violates the invariant, not just one
+>    that happens to pass under the current single-threaded implementation.** The test fakes
+>    `checkContentAgainstVectors` (or the oracle it wraps) so that, as a side effect *inside* the fake, on
+>    its first invocation it mutates the buffer for the same key (`buffer.write(key, 'mutated-during-oracle-await')`)
+>    before resolving — simulating exactly the race finding 2 describes: the buffer changing while the
+>    oracle's own `await` is outstanding. The test then asserts `runVerifyGate()`'s reported result reflects
+>    the PRE-mutation content's pass/fail outcome, not the post-mutation one. This test is meaningless (and
+>    passes vacuously) against an implementation that reads the buffer only ONCE before the fake's mutation
+>    can land — which is exactly the point: it can only stay green if the buffer read genuinely precedes the
+>    async call, so a future reorder that moved the read after an `await` would make this test fail loudly,
+>    where every prior test stays green. See Task 4a and its Done-when bullet.
+
 - **No `Fixer`/`fixerRegistry` is registered.** This slice never *proposes* a patch — Slice 1's buffer
   already holds the human/AI-proposed `after` content. `autofix()`'s `verify -> apply -> accept/revert`
   loop still runs, but with the fixer registry populated by exactly **one hand-written, single-purpose
@@ -170,17 +208,23 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   content verbatim for a **single synthetic `Failure`** meaning "there is a pending edit for this
   target" — the "fix" is a no-op lookup, not generation, so the loop's own verify/accept/revert machinery
   does all the real work unmodified.
-- **`verify` callback:** given the target's `ruleKind` and the app id, call
+- **`verify` callback:** its FIRST statement, synchronously and before anything else runs, is `const
+  content = buffer.get(key)?.after;` (PR #1355 round 7 — see that round's callout above for why this
+  ordering is the whole safety argument and how it is enforced, not just stated). Only after that local is
+  captured does `verify` do any of its real work, all of it operating on `content`, never on a fresh buffer
+  read: given the target's `ruleKind` and the app id, call
   `plateau-app:packages/dev-browser/src/declared-rules/registry.ts`'s `linkage(appId, index)` to find the
-  vector ids gating this rule, then run `ConformanceVectorOracle`
+  vector ids gating this rule, then `await checkContentAgainstVectors({ ruleKind, appId, content, registry,
+  index })` — a new exported helper (see Interfaces below) that runs `ConformanceVectorOracle`
   (`plateau-app:packages/core/src/conformance-engine/conformanceVectors.ts`) scoped to those vector ids
-  against **`SafeEditBuffer.get(key)?.after`** — the buffer's real, mutable, **current** (possibly
-  just-reverted) content, read directly from the buffer, *not* via the `read` adapter passed to
-  `autofix()` (see next bullet for why those two must differ) — and map its `Finding[]` result to a
-  **single synthetic `Failure`** (`{ id: `pending:${key}`, findings }`) when non-empty, or `{ ok: true,
-  failures: [] }` when empty. The `{ ok, failures }` returned from *every* call is fresh/live — the engine
-  needs the true current state each time to drive its own loop correctly (round-break, target-cleared,
-  revert). Separately, `verify` also snapshots its `Finding[]` into a closure variable
+  against `content` and returns its `Finding[]`. `verify` maps that result to a **single synthetic
+  `Failure`** (`{ id: `pending:${key}`, findings }`) when non-empty, or `{ ok: true, failures: [] }` when
+  empty. The `{ ok, failures }` returned from *every* call is computed fresh from that call's own `content`
+  capture — the engine needs the true current state each time to drive its own loop correctly (round-break,
+  target-cleared, revert), and because `content` is re-captured (synchronously, first) on every call to
+  `verify`, later calls DO see the buffer's true live state (e.g. post-revert) even though each individual
+  call's own oracle check operates on a value nothing can change out from under it once captured. Separately,
+  `verify` also snapshots its `Finding[]` into a closure variable
   (`settledFindings`) — but **only on its own first call** within this `runVerifyGate()` invocation; every
   call after the first computes and returns its own fresh `{ ok, failures }` for the engine as normal, but
   leaves `settledFindings` untouched. `runVerifyGate`'s return value reads from `settledFindings`, not from
@@ -240,6 +284,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 import { autofix } from '@webeverything/autofix-engine';
 import type { SafeEditBuffer, DeclaredEdit } from './buffer';
 import { DeclaredRuleRegistry, type VectorIndex } from '../declared-rules';
+import type { DeclaredRuleKind } from '../declared-rules/types';
 import { ConformanceVectorOracle } from '@plateau/core/conformance-engine'; // existing in-repo import, unchanged
 
 export interface VerifyGateResult {
@@ -248,6 +293,24 @@ export interface VerifyGateResult {
   /** Findings from the failing run, when `ok` is false — surfaced to the human, never silently dropped. */
   readonly findings: readonly { readonly detail: string }[];
 }
+
+/**
+ * Run the app's declared-rules linkage + `ConformanceVectorOracle` check against one piece of already-
+ * captured content — factored out of `verify`'s closure (PR #1355 round 7) so it (a) is the one place the
+ * synchronous-read-then-async-check ordering has to be gotten right, and (b) is reusable by `x00bvy0`'s
+ * `emitEdit()` to compute its `ConformanceEvidenceManifest.before.passed` field against `edit.before`
+ * without engaging the whole `autofix()` loop for a value the loop itself never touches. Pure with respect
+ * to the buffer — it takes `content` as a plain string, never reads the buffer itself, so it carries no
+ * ordering risk of its own; the caller (`verify`, or `emitEdit()`) is the one responsible for capturing
+ * `content` synchronously before calling this.
+ */
+export async function checkContentAgainstVectors(opts: {
+  ruleKind: DeclaredRuleKind;
+  appId: string;
+  content: string;
+  registry: DeclaredRuleRegistry;
+  index: VectorIndex;
+}): Promise<readonly { readonly detail: string }[]>;
 
 /**
  * Run the verify-gate over one pending edit. Assembles the `verify`/`read`/`write` callbacks — `read`
@@ -281,12 +344,14 @@ own `write`-on-absent-key throw contract).
 2. Smoke-test the import in isolation (a throwaway `vite-node` one-liner is enough — not committed) to
    confirm the cross-repo `.mjs` import resolves before writing the real adapter; record the outcome in
    the PR description either way.
-3. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` — the `verify`/`read`/`write`
-   callback adapters (per the corrected wiring above: `read` fixed to `edit.before`, `verify` computing a
-   fresh `{ ok, failures }` from the buffer's live content on *every* call, but latching its externally
-   reported `Finding[]` into `settledFindings` on its own first call only), the single synthetic-`Failure`
-   + single-purpose fixer, and `runVerifyGate()` (reading `{ ok, findings }` from `settledFindings`, never
-   from `AutofixResult` and never from "whatever `verify()` ran last").
+3. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts` — `checkContentAgainstVectors()`
+   (the extracted, buffer-free linkage + oracle check, PR #1355 round 7), and the `verify`/`read`/`write`
+   callback adapters (per the corrected wiring above: `verify` captures `content` synchronously as its
+   first statement, then `await`s `checkContentAgainstVectors(content)`, computing a fresh `{ ok, failures
+   }` from that call's own capture on *every* call, but latching its externally reported `Finding[]` into
+   `settledFindings` on its own first call only; `read` fixed to `edit.before`), the single
+   synthetic-`Failure` + single-purpose fixer, and `runVerifyGate()` (reading `{ ok, findings }` from
+   `settledFindings`, never from `AutofixResult` and never from "whatever `verify()` ran last").
 4. Write `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.test.ts` — a green-path case (edit
    passes, `ok: true`, and `buffer.get(key)?.after` still reads the proposed content — unchanged), a
    red-path case (edit fails a fixture vector, `ok: false` with findings, **and** `buffer.get(key)?.after`
@@ -297,6 +362,14 @@ own `write`-on-absent-key throw contract).
    made *after* the buffer has already been reverted to `before` (spy/count the `verify` mock's call
    arguments or instrument it to assert at least one post-revert call happened during the run, so the test
    can't silently pass by coincidence of only ever calling `verify` once).
+4a. **Write the synchronous-first-read regression test (PR #1355 round 7, finding 2).** Fake
+   `checkContentAgainstVectors` so that, on its first invocation only, as a side effect before it resolves,
+   it calls `buffer.write(key, 'mutated-during-oracle-await')` on the same key `verify` is checking —
+   simulating the buffer changing while `ConformanceVectorOracle`'s real internal `await`s are outstanding.
+   Assert `runVerifyGate()`'s result matches the PRE-mutation content's expected pass/fail outcome, not the
+   post-mutation one. This test can only pass against an implementation that captured `content` before
+   calling the (now-mutating) fake — i.e. it fails loudly if a future refactor moves the buffer read after
+   an `await`, where every other test in this file stays green regardless of that ordering.
 5. **Enforce the single-fixer scope boundary (PR #1355 round 3) — do not leave it as prose.** In
    `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`: (a) inside `runVerifyGate()`, before
    calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
@@ -336,6 +409,11 @@ own `write`-on-absent-key throw contract).
   keeps exactly ONE fixer registered but makes it return content different from what it read, and confirms
   `runVerifyGate()` throws; the round-3 two-fixer test above cannot exercise this guard on its own, because
   the fixer-count check throws before `autofix()` (and therefore `fix()`) is ever reached.
+- **(PR #1355 round 7, finding 2) The synchronous-first-read invariant is mechanically enforced, not just
+  documented:** the Task 4a test — where `checkContentAgainstVectors` mutates the buffer as a side effect
+  of its first (otherwise-async) call, before resolving — passes only because `verify` already captured
+  `content` before making that call, and would fail if a future implementation moved the buffer read after
+  any `await`.
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape
