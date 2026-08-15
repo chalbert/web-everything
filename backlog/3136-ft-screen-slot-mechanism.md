@@ -3,7 +3,7 @@ bornAs: xyjz84p
 kind: decision
 status: open
 dateOpened: "2026-08-15"
-relatedTo: ["2705", "2721", "2723", "2725", "2726", "2727", "2728", "2729", "2731", "2732"]
+relatedTo: ["2705", "2721", "2723", "2725", "2726", "2727", "2728", "2729", "2731", "2732", "3132"]
 tags: []
 ---
 
@@ -89,3 +89,12 @@ file across separately-landing PRs is a real repeated-small-conflict-surface cos
 machinery isn't yet worth it. Whichever way each producer's own preparation rules, name it explicitly there
 and cite this item, so #2723's two-consumer default isn't assumed to generalize silently to the four-and-more
 cases.
+
+**Cross-reference (added 2026-08-15, independent review): the #2725-section-registry sub-question above is now
+ruled, not open.** `we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md` (prepared
+the same day, independently, then cross-linked back here) decided #2725's own registry mechanism — its Fork 2
+rules the registry-owned `group` key (its option 1) rather than a generic `import.meta.glob`-based slot-registry
+module (this item's option 2) — and #2725's own `## Decided design`/`## Interfaces` were amended to match. So
+**for #2725 specifically, this item is superseded by #3132**; do not re-open that sub-question here. This item
+stays open and authoritative for its broader remaining scope: #2721↔#2723's own mechanism choice and #2726's
+marker-slot pair (#2731/#2728), neither of which #3132 rules on.
