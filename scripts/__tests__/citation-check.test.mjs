@@ -24,6 +24,7 @@ import {
   findAnchorRulingMismatches,
   findDanglingLoci,
   findOutOfScopeHashSlugs,
+  findDanglingMemoryHashSlugs,
   countSourceLines,
   CROSS_REPO_LOCI,
   findUnresolvedIdentifiers,
@@ -257,6 +258,51 @@ describe('findOutOfScopeHashSlugs — gate 3 (hash-slug outside the at-land rewr
   it('does NOT fire on a word that merely starts with x + letters but is not a hash-slug form', () => {
     // `xoverflow` has 8 chars after x; a real slug is exactly `x`+6 and cited as `#x...` or `x...-slug.md`.
     expect(findOutOfScopeHashSlugs('the xoverflow example and extended prose', 'reports/r.md')).toHaveLength(0);
+  });
+});
+
+describe('findDanglingMemoryHashSlugs — gate 3b (#3100): resolution, not directory membership', () => {
+  it('does NOT fire on a hash-slug that is still PENDING (a tracked backlog/<hash>.md exists) — self-heals at its own land', () => {
+    const hits = findDanglingMemoryHashSlugs('this note cites #xpend01, still in flight', {
+      pendingHashes: new Set(['xpend01']),
+      bornAsHashes: new Set(),
+    });
+    expect(hits).toHaveLength(0);
+  });
+
+  it('FAILS on a hash-slug whose item already LANDED (a `bornAs` match exists) — stale, should read #NNN', () => {
+    const hits = findDanglingMemoryHashSlugs('filed #xlanded, 2026-07-26', {
+      pendingHashes: new Set(),
+      bornAsHashes: new Set(['xlanded']),
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ slug: 'xlanded', form: 'hash-ref', reason: 'dead-landed' });
+  });
+
+  it('FAILS on a hash-slug that resolves to NEITHER a pending file NOR a bornAs record — never existed', () => {
+    const hits = findDanglingMemoryHashSlugs('see [the item](xghost1-notes.md) for detail', {
+      pendingHashes: new Set(),
+      bornAsHashes: new Set(),
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ slug: 'xghost1', form: 'file-link', reason: 'unresolved' });
+  });
+
+  it('does NOT false-positive on the SAME hash cited in a dir gate 3 (membership) would have flagged — the #3100 interface bug this gate exists to avoid', () => {
+    // The card's own independent review found: adding agent-memory-src/ to HASH_SLUG_OUT_OF_SCOPE_DIRS
+    // (gate 3's membership test) would WARN on this exact case, because it does not distinguish
+    // "mid-flight, will self-heal at its own land" from "already dead". This gate must not repeat that.
+    const hits = findDanglingMemoryHashSlugs('cites #xinflight — the item this note is ABOUT is still open', {
+      pendingHashes: new Set(['xinflight']),
+      bornAsHashes: new Set(),
+    });
+    expect(hits).toHaveLength(0);
+  });
+
+  it('degenerate input never throws', () => {
+    expect(findDanglingMemoryHashSlugs('', {})).toEqual([]);
+    expect(findDanglingMemoryHashSlugs(null, {})).toEqual([]);
+    expect(findDanglingMemoryHashSlugs('no hashes here', {})).toEqual([]);
   });
 });
 

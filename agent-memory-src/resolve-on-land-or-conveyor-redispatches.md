@@ -10,7 +10,7 @@ delivered and merged to `origin/main`, yet their `backlog/*.md` card was still
 `status: open`. Confirmed cases: **#2609** (dispatch-plan script + scope field),
 **#2611** (`scripts/readiness/conveyor-state.mjs` tick state-read), **#2614** (learnings
 drop-box + close-session sweep), **#2664** (jury workflow meta pure-literal + materialFile).
-Each shipped under its **born-hash** lane (`WE #x53zzf9…`, JIT-numbered to the item at land),
+Each shipped under its **born-hash** lane (`WE #2609…`, JIT-numbered to the item at land),
 the merge landed the code, but nothing flipped the card's `status`.
 
 **Why it bites:** the conveyor (#2612) reads the backlog for `buildQueued`/`open` work. An

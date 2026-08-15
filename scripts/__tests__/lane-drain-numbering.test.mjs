@@ -5,8 +5,9 @@
  * blockedBy's it, and the queued token), then drives the numberer and asserts it: mints the next NNN from
  * `max+1`, renames the file, rewrites cross-refs via the ledger, and commits — the sole-writer id
  * assignment the whole scheme hinges on. Also covers the #2428 extension of the same blind rewrite to
- * `docs/agent/*.md` (the cite-able statute layer). The pure decider (`applyLedger`) is unit-tested in
- * scripts/backlog/__tests__/id.test.mjs; this proves the FS/git boundary.
+ * `docs/agent/*.md` (the cite-able statute layer) and the #3100 extension to `agent-memory-src/*.md` (the
+ * compiled agent-memory bundle every future session loads into context). The pure decider (`applyLedger`)
+ * is unit-tested in scripts/backlog/__tests__/id.test.mjs; this proves the FS/git boundary.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -262,6 +263,52 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
 
     const res = numberPendingHashes(repo);
     expect(res.assigned).toEqual([{ hash: 'xhash02', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('rewrites a pending-hash citation in agent-memory-src/*.md, in the SAME land commit (#3100)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('agent-memory-src/some-note.md', '---\nname: some-note\n---\n\nFiled #xhash01, 2026-08-14.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'agent-memory-src', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+    // The memory note's citation is rewritten to the landed number, in the SAME commit as the numbering —
+    // proving the #3100 widening reaches agent-memory-src/ the same way #2428 reached docs/agent/.
+    expect(readFileSync(join(repo, 'agent-memory-src/some-note.md'), 'utf8')).toContain('Filed #2201, 2026-08-14.');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('protects a bornAs: line in agent-memory-src/*.md from the blind rewrite — explicitly asserted, not assumed (#3100)', () => {
+    // agent-memory-src/*.md files don't carry a `bornAs:` frontmatter field in practice (that convention is
+    // backlog-item-only), but the guard in applyLedger is a per-LINE regex with no file-type awareness — this
+    // proves it holds regardless of which directory fed the file in, per finding 2 of #3100's own grounding.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('agent-memory-src/some-note.md', '---\nname: some-note\nbornAs: xhash01\n---\n\nFiled #xhash01, 2026-08-14.\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'agent-memory-src', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    numberPendingHashes(repo);
+    const note = readFileSync(join(repo, 'agent-memory-src/some-note.md'), 'utf8');
+    // The `bornAs:` frontmatter line is preserved verbatim (the hash it names must survive the rewrite)…
+    expect(note).toContain('bornAs: xhash01');
+    // …while the OTHER citation on a different line is still rewritten.
+    expect(note).toContain('Filed #2201, 2026-08-14.');
+  });
+
+  it('leaves an untracked/absent agent-memory-src/*.md alone — never fatal when the dir has no match (#3100)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash03-gamma.md', '---\nkind: story\nstatus: resolved\n---\n# Gamma\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+    // No agent-memory-src/ directory exists at all in this throwaway repo.
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash03', nnn: '2201' }]);
     expect(res.committed).toBe(true);
   });
 

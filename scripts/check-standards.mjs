@@ -70,10 +70,12 @@ import {
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
+  findDanglingMemoryHashSlugs,
   countSourceLines, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
+import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -1108,7 +1110,7 @@ try {
 
 // ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────
 // "A reference asserted without resolving it against the source it points at" (#2821, the #957 root
-// class). Three deterministic checks, each reproducing a real #957 review-bounce instance the pure core
+// class). Four deterministic checks, each reproducing a real review-bounce instance the pure core
 // (scripts/lib/citation-check.mjs) resolves against the source:
 //   • anchor-authority (#2821 gate 10, the 11-vs-1 core): a platform-decisions `#anchor` attributed to an
 //     `#NNN` that is NOT its codifiedIn owner — the `#2439`-vs-`#2398` class 6 review rounds missed.
@@ -1116,6 +1118,9 @@ try {
 //     cross-repo loci are recognised and skipped — not in this checkout).
 //   • gate 3: a `xNNNNNN` hash-slug cited outside the at-land rewrite scope (reports/, the two research
 //     dirs), which never self-heals → dead link post-land.
+//   • gate 3b (#3100): a `xNNNNNN` hash-slug cited INSIDE the rewrite scope but specifically in
+//     `agent-memory-src/` that does not resolve to anything live (see findDanglingMemoryHashSlugs's header
+//     for why this dir needs a resolution check, not gate 3's membership check).
 // WARN-level for now (CITATION_GATES_ENFORCED=false) — the historical corpus carries many pre-gate hits;
 // see the flag's TODO. The fs reads live here; all resolution logic is the pure core.
 {
@@ -1123,8 +1128,15 @@ try {
   const emit = CITATION_GATES_ENFORCED ? err : warn;
   const relExists = (p) => existsSync(join(ROOT, p));
   const relLineCount = (p) => { try { return countSourceLines(readFileSync(join(ROOT, p), 'utf8')); } catch { return null; } };
-  // Scan the same widened scope as gate 2/3 (#957 round 7): backlog + docs/agent + reports + the two
-  // src/ research dirs (the latter render on the public /research/ page).
+  // #3100 — gate 3b's resolution inputs, derived from the ALREADY-LOADED `backlog` array (no extra fs
+  // pass): a hash-named item still on disk is PENDING (in-flight, self-heals at its own land); a landed
+  // item's `bornAs` frontmatter names the hash it was born under (already landed — a citation still
+  // carrying that hash is stale, not merely mid-flight).
+  const pendingHashes = new Set(backlog.filter((b) => isHash(b.num)).map((b) => b.num));
+  const bornAsHashes = new Set(backlog.filter((b) => isHash(b.bornAs)).map((b) => b.bornAs));
+  // Scan the same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog +
+  // docs/agent + agent-memory-src + reports + the two src/ research dirs (the latter render on the public
+  // /research/ page).
   const scanFiles = [];
   const pushDir = (dir, exts) => {
     const abs = join(ROOT, dir);
@@ -1134,6 +1146,7 @@ try {
   };
   pushDir('backlog/', ['.md']);
   pushDir('docs/agent/', ['.md']);
+  pushDir('agent-memory-src/', ['.md']);
   pushDir('reports/', ['.md']);
   pushDir('src/_data/researchTopics/', ['.json']);
   pushDir('src/_includes/research-descriptions/', ['.njk']);
@@ -1156,10 +1169,23 @@ try {
     }
     for (const f of findOutOfScopeHashSlugs(content, rel)) {
       emit(`${rel}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
-        `outside the at-land rewrite scope (backlog/ + docs/agent/ only) — numberPendingHashes never ` +
-        `rewrites it, so it dangles permanently once the item lands with a real NNN (#2821 gate 3). Name ` +
-        `the epic/item in prose, or cite its resolved #NNN.`,
+        `outside the at-land rewrite scope (backlog/, docs/agent/, agent-memory-src/) — ` +
+        `numberPendingHashes never rewrites it, so it dangles permanently once the item lands with a real ` +
+        `NNN (#2821 gate 3). Name the epic/item in prose, or cite its resolved #NNN.`,
         { kind: 'citation-hash-slug-scope', file: rel });
+    }
+    if (rel.startsWith('agent-memory-src/')) {
+      for (const f of findDanglingMemoryHashSlugs(content, { pendingHashes, bornAsHashes })) {
+        const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`;
+        const why = f.reason === 'dead-landed'
+          ? 'the item it names has already LANDED under a real number, so this citation should already ' +
+            'read `#NNN` and does not'
+          : 'it does not resolve to any pending or landed backlog item on this tree (typo, or an ' +
+            'abandoned lane\'s throwaway id)';
+        emit(`${rel}: hash-slug \`${slugText}\` ${why} (#3100 gate 3b). Replace it with the item's ` +
+          `resolved #NNN (or drop the reference if the id never landed).`,
+          { kind: 'citation-memory-hash-dangling', file: rel });
+      }
     }
   }
 }
