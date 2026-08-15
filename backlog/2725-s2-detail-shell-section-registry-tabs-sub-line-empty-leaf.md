@@ -158,26 +158,59 @@ v3 look (colors/spacing/underline), not the element's own bare default styling (
 "differentiated solely by a custom theme" principle). The `#dag-cnt` badge (blocker + blocked-by count) is plain
 text content this module sets, same as the v3 baseline's own `dag-cnt` handling.
 
-**2. One uniform section registry, four slots, not three-plus-a-special-case.** The card names "velocity/burnup/
-rollup" as the self-registering set and separately asks to "pre-build the dependencies-tab content slot" for S7 —
-but a single, uniform mechanism for all four is simpler than a bespoke one-off for the fourth. Decided:
+**2. One uniform section registry, four slots, not three-plus-a-special-case — AMENDED per #3132's ruling (below).**
+The card names "velocity/burnup/rollup" as the self-registering set and separately asks to "pre-build the
+dependencies-tab content slot" for S7 — but a single, uniform mechanism for all four is simpler than a bespoke
+one-off for the fourth. **Correction (this addendum):** the shape below originally described **three** independent
+per-`SectionId` containers (one each for velocity/burnup/rollup), silent on whether velocity's and burnup's
+containers were the same DOM node — `we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md`
+(prepared the same day as this card, independently, then cross-referenced back here) rules that ambiguity: velocity
+and burnup **share ONE registry-owned container** (a `group` key), because both must land inside the ratified
+mock's single `.velocity` 3-column CSS grid row, not two independent blocks. Decided (superseding the earlier
+three-container draft):
 ```ts
 export type SectionId = 'velocity' | 'burnup' | 'rollup' | 'dag';
 export interface SectionDef {
   readonly id: SectionId;
+  /** Optional shared-row co-tenancy key (#3132). Registrants sharing the same `group` render into sibling
+   *  wrapper nodes inside ONE registry-owned container (in registration order), instead of each getting its
+   *  own top-level container. Absent = the section keeps its own standalone container (rollup, dag). */
+  readonly group?: string;
   /** Render (or update) this section's content into `container`. Called every time the owning tab becomes
-   *  visible or the selected feature changes. Must be idempotent (safe to call repeatedly on the same container). */
+   *  visible or the selected feature changes. Must be idempotent over the nodes THIS registrant owns — for a
+   *  `group` registrant that means its own wrapper node, never the shared row container a co-tenant also
+   *  writes to (#3132's idempotency-clobber finding). */
   render(container: HTMLElement, feature: FeatureDetailRecord): void;
 }
 const SECTIONS = new Map<SectionId, SectionDef>();
+const GROUP_ROWS = new Map<string, HTMLElement>();
 /** Idempotent — a section may re-register (e.g. HMR); the latest registration wins. Mirrors the
  *  `registerTabs`-style "safe to call again" shape already used across this codebase. */
 export function registerSection(def: SectionDef): void { SECTIONS.set(def.id, def); }
+/** Resolve the container to pass to `def.render()` (#3132). Registry-owned — neither registrant creates or
+ *  reaches into a co-tenant's container; each gets only the wrapper node IT owns. */
+function containerFor(def: SectionDef, overview: HTMLElement): HTMLElement {
+  if (!def.group) return overview.querySelector(`[data-section="${def.id}"]`)!;
+  let row = GROUP_ROWS.get(def.group);
+  if (!row) {
+    row = document.createElement('div');
+    row.className = def.group; // 'velocity' — reuses the baseline's own CSS class/grid rule verbatim
+    overview.querySelector('[data-overview]')!.appendChild(row);
+    GROUP_ROWS.set(def.group, row);
+  }
+  const wrapper = document.createElement('div');
+  wrapper.dataset.section = def.id;
+  row.appendChild(wrapper); // DOM order = registration order = the baseline's own append order
+  return wrapper;
+}
+// S3 (#2727): registerSection({ id: 'velocity', group: 'velocity', render: renderVelocity });
+// S4 (#2732): registerSection({ id: 'burnup',   group: 'velocity', render: renderBurnup   });
 ```
-`velocity`/`burnup`/`rollup` render into three containers inside the `overview` tab panel, laid out in the exact
-order and wrapping structure the v3 baseline's own overview render function uses (a 3-column grid → milestones →
-section head → a rollup container → a legend) so the pixels a later slice fills in land into an already-correct
-frame. `dag` renders into the `dag` tab panel — the "pre-built content slot" IS `SECTIONS.get('dag')`'s
+`velocity`/`burnup` (both `group: 'velocity'`) render into sibling wrapper nodes inside ONE `.velocity` row
+container this shell builds; `rollup` keeps its own standalone container, laid out in the exact order and wrapping
+structure the v3 baseline's own overview render function uses (the `.velocity` grid row → milestones → section
+head → a rollup container → a legend) so the pixels a later slice fills in land into an already-correct frame.
+`dag` renders into the `dag` tab panel — the "pre-built content slot" IS `SECTIONS.get('dag')`'s
 container; #2729 (S7) registers into it exactly the way #2727/#2732/#2726 (S3/S4/S5) register into the other
 three. **At this card's own ship time no section has registered anything.** #2727 (S3), #2726 (S5), and #2729
 (S7) each list `2725` directly in their own `blockedBy`; #2732 (S4) is blocked by `2727` (S3) rather than `2725`
