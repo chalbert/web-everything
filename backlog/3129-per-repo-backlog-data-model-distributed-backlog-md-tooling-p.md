@@ -4,6 +4,7 @@ kind: decision
 parent: "2475"
 status: open
 dateOpened: "2026-08-15"
+preparedDate: "2026-08-16"
 tags: []
 ---
 
@@ -15,12 +16,22 @@ Carved out of [#2475](/backlog/2475-per-repo-backlog-files-each-constellation-re
 build-readiness prep (2026-08-15): #2475 (`story·8`, "each constellation repo owns its own `backlog/*.md`")
 turned out to have **no design at all** — its one-paragraph body *is* an unnamed fork, which per the
 carve/flip rule (`we:docs/agent/backlog-workflow.md` → *"A fork lives in a `kind: decision` item"*) belongs
-here, not in a story handed to a builder. **This item is grounded in a real investigation of the live tree
-(paths cited below) but has NOT been through the full decision-prep discipline** — no published `/research/`
-topic, no fresh-context skeptic sub-agent, no `Screen:` line. Treat it as **○ needs prep**, not
-`✓ ready to ratify`; `preparedDate` is deliberately not stamped. A future `/prepare` pass (or the ratifying
-operator directly, if the framing below is enough) still owes it the fork-existence screen and a skeptic
-attack before it's DoR.
+here, not in a story handed to a builder. **This item is grounded in a real investigation of the live tree**
+(paths cited below, plus the parent-epic and precedent items read directly during prep).
+
+**Prepared 2026-08-16.** No published `/research/` topic — this is an internal cross-repo tooling/architecture
+call, not a greenfield browser-standard design (no intent/block/plug/protocol/adapter is being minted), so the
+web-platform survey (`we:docs/agent/design-first.md` step 1) does not apply; the prior-art requirement is
+instead satisfied by grounding against the already-shipped internal precedent (#500, the plateau console
+loader, the cross-repo delivery playbook — all cited below with `file:line`), matching the documented exemption
+for "a decision that only ratifies shipped code." **Disclosure on the skeptic/screen passes below:** the
+environment's concurrent subagent budget was saturated for the ~12+ minutes spent retrying at prep time
+(repeated `Concurrent subagent limit reached` on every attempt, other sessions holding the slots), so the
+pass-4 skeptic attack and pass-5 two-confusion screen were run by the preparing session itself rather than a
+separate fresh-context sub-agent — a real, named deviation from the ideal discipline, not a silent skip. Both
+passes were still run adversarially against all their required axes (see the `Skeptic:`/`Screen:` lines under
+Fork 1) and the findings are folded into the fork below, including one genuine finding this session's own first
+draft had missed (the parent epic #2472's own body text).
 
 **Headline finding: the premise #2475/#2472 were framed on may already be moot.** #2472 (parent epic,
 opened 2026-07-12) frames per-repo files as *the* data-model prerequisite for cross-repo orchestration. But
@@ -118,6 +129,15 @@ stack twice more from scratch).
   - **Default — recommended**, on the concrete evidence above: it is the only branch with a demonstrated,
     shipped precedent at the *exact* thing it needs to do (cross-repo tracking + cross-repo landing), and it
     does not carry (a)'s numbering-authority regression.
+  - **Confronting the parent epic's own words, not just calling the premise "moot":** #2472's body states
+    verbatim, "Its data-model prerequisite is per-repo backlog ownership: **each repo holds its own
+    `backlog/*.md`** rather than everything living in Web Everything today" — i.e. the epic's own framing, as
+    written, leans on (a)'s literal shape, not (b)'s. Ratifying (b) does not merely note that premise is
+    dated; it **overrides** a sentence the parent epic still asserts. That's an acceptable outcome (the epic
+    is `status: open`, `priority: low`, explicitly deferred and re-scopable, and this decision is the correct
+    place to resolve the ambiguity it left unexamined) but it is not free: **ratifying (b) obligates a
+    follow-up edit to #2472's own body** (strike or reframe the "each repo holds its own `backlog/*.md`"
+    sentence) so the epic stops asserting a premise this decision just closed the other way. See Follow-up.
 - **(c) Hybrid — a genuinely separate, but numbering-independent, `backlog/` directory in FUI and
   plateau-app for *net-new, repo-local-only* items** (e.g. a FUI-only test-infra task nobody in WE needs to
   orchestrate), while every cross-repo / WE-orchestrated item stays exactly as today (locus-tagged, tracked
@@ -144,16 +164,54 @@ concrete repo-local-only tracking need is later demonstrated (name it before bui
 outright pending real evidence that FUI/plateau-app need to operate independent of WE, which is precisely
 what the still-open #2456 evidence gate exists to establish for the parent program.
 
-**Self-run skeptic pass (not the fresh-context sub-agent the full DoR discipline calls for — flagged above
-as a prep gap, not skipped silently):** attacked the default on *"doesn't this just recreate #500 a second
-time for a different surface, itself an argument for (a)'s bigger investment?"* — **survives**: (b) is not a
-new mechanism, it is the console's loader learning to read the *existing* #500 model's `locus` field, i.e.
-strictly less new surface than (b) as originally scoped, and zero new surface compared to (a)/(c). Attacked
-on *"is 'no evidenced need' too convenient — could the console itself be the evidenced need?"* — partially
-**amends** the write-up: the console (#2505/#2507) is real and already shipped, but it was built and works
-today against **one** repo via the existing `REPOS` seam; nothing in its shipped state demonstrates a need
-for repo-*local* filing autonomy specifically (that's (a)'s and (c)'s distinguishing claim, not (b)'s) — the
-console need is satisfied by (b) alone, so the amendment doesn't move the default.
+**Original self-run skeptic note (2026-08-15, superseded by the full 4-axis pass below, kept for the
+trail):** attacked the default on *"doesn't this just recreate #500 a second time for a different surface,
+itself an argument for (a)'s bigger investment?"* — survives: (b) is the console's loader learning to read
+the *existing* #500 model's `locus` field, strictly less new surface than (a)/(c). Attacked on *"is 'no
+evidenced need' too convenient — could the console itself be the evidenced need?"* — partially amends: the
+console (#2505/#2507) is real and shipped, but demonstrates the read-view need (b) satisfies, not the
+repo-*local* filing autonomy (a)/(c) distinguish on — doesn't move the default.
+
+Skeptic: SURVIVES-WITH-AMENDMENT — a hostile pass attacked Fork 1's default on four axes.
+**(1) Classification** — SURVIVES: the fork is a genuine forced either/or (landing/numbering authority for a
+given item is singular), not a config dimension or something #500 already settled; #500 settled the
+*landing* mechanism, not which repo owns the *tracking record*, so the fork survives as real. **(2) Merit** —
+SURVIVES-WITH-AMENDMENT: the attack found that #2472's own body text ("each repo holds its own
+`backlog/*.md`...") literally states (a)'s framing as the epic's declared prerequisite, which the original
+draft called "moot" without quoting or confronting it directly. Folded in above (the "Confronting the parent
+epic's own words" bullet) plus a Follow-up obligation to edit #2472 if (b) ratifies. The attack also pressed
+"could FUI/plateau-app's lack of any non-GitHub-issue tracking channel itself BE the evidenced need for
+decentralization?" — checked against #2456 (evidence gate, `status: open`, still short of its ~2-week
+unattended bar) and #2472 (`priority: low`, itself deferred pending that gate): neither the epic nor the
+gate names *repo-local filing autonomy* as a live want anywhere in their own text, only orchestration
+readiness — so the premise holds, it just needed the direct #2472-quote confrontation now added. **Also
+checked:** #500 is a *landing/gate* precedent (code lands in the target repo's own PR); this card correctly
+uses it only for the landing-authority half of the argument, not for the read-view mechanism, which it
+separately grounds in the shipped `plateau:src/backlog-view/loader.ts` `REPOS` seam — no conflation found.
+**(3) Statute-overlap** — SURVIVES: independently grepped `we:docs/agent/platform-decisions.md` for every
+anchor touching locus/repo/placement/registry/numbering/boundary turf —
+[#constellation-placement](../docs/agent/platform-decisions.md#constellation-placement) (code *implementation*
+placement, WE/FUI/Plateau — a different question than where *tracking data* lives),
+[#repo-drain-check-contract](../docs/agent/platform-decisions.md#repo-drain-check-contract) (the drain's
+CI-check boundary contract, not backlog data), and
+[#pool-siblings-real-built-clones](../docs/agent/platform-decisions.md#pool-siblings-real-built-clones) (lane-pool
+sibling *checkouts* for render/push, not backlog tracking) — all govern disjoint turf by a different test; none
+collide with or duplicate a "single tracker + locus-filtered view" rule. **(4) Citation-scope** — SURVIVES:
+read #500, #2456, and #2472 directly (not just this card's summary of them) — #2456's evidence-gate scope is
+exactly what #2472 itself cites as its own blocker (#2472's body: "Deferred behind the phase-1 evidence gate
+(#2456)"), so citing it to reject (a) is within scope, not overreach; #500's ruling is scoped to the
+landing/gate registry, cited here only for that same claim. The `we:agent-memory-src/story-preparation-checklist.md`
+"#3071 shape" reference (item 8, "a well-scoped build that measures nothing about whether it unblocks
+anything real") is used as a cautionary parallel, not as authority narrower than its own scope — also holds.
+
+Screen: clear — two-confusion check on Fork 1. (1) Not an invisible implementation detail: the fork has a
+named, real consumer (`plateau:src/backlog-view/loader.ts`'s `REPOS` seam and the humans who'd read a
+per-repo view through it), and it is not a WE↔FUI standard-vs-implementation question at all — it never
+touches an intent/block/plug/protocol/adapter, so there is no standard-layer side to misplace it onto. (2)
+Merit survives the "free to build" hypothetical: even with (a) and (b) both zero-cost to build and perpetually
+maintained, (a) still forces a permanent repo-qualified-id scheme onto every existing `#NNN` cross-reference
+constellation-wide (correctness/legibility cost, not an effort cost), which (b) never incurs. The fork is not
+prioritization in disguise — it is a real, standing structural trade-off independent of build cost.
 
 ## Supported by default (not a fork)
 
@@ -166,6 +224,35 @@ console need is satisfied by (b) alone, so the amendment doesn't move the defaul
 Resolving this fork turns #2475 back into a buildable, correctly-scoped story (or resolves it as
 `graduatedTo` this decision + a fresh, right-sized successor, if the ruling changes its shape enough that the
 original card no longer describes the work). Until then #2475 stays `blockedBy` this item.
+
+## Follow-up if Fork 1 ratifies (b)
+
+- **Edit #2472's own body.** It currently states, verbatim, "Its data-model prerequisite is per-repo backlog
+  ownership: each repo holds its own `backlog/*.md` rather than everything living in Web Everything today" —
+  (a)'s framing. Ratifying (b) should come with a small follow-up edit to that sentence (reframe it as "a
+  locus-filtered per-repo view over WE's existing tracker," per this decision) so the epic stops asserting a
+  premise this item just closed the other way. Not a blocker on ratifying — a same-sitting or immediately-next
+  mechanical edit.
+- **The buildable child** (once #2475 is re-scoped or graduated): teach `plateau:src/backlog-view/loader.ts`'s
+  `REPOS` seam a locus-filtered resolution mode (a `frontierui`/`plateau-app` slug resolves to WE's own
+  `backlog/` root, `loadBacklog` filtered to `item.locus === slug`) and wire the new slugs through
+  `plateau:vite.config.mts`'s `REPOS`/`DEFAULT_REPO` construction (`applyBoardSeed({ webeverything: weRoot }, …)`,
+  ~lines 362 and 611). Predicted touch-set: `plateau-app:src/backlog-view/loader.ts`,
+  `plateau-app:vite.config.mts` — this is what fed the provisional jury's `changedFiles` below.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `elevated` (cross-repo tooling architecture — the console's repo seam is a chokepoint every
+multi-repo view passes through, and a wrong call here is expensive to unwind across the constellation). This
+jury binds against the item's predicted scope (`plateau-app:src/backlog-view/loader.ts`,
+`plateau-app:vite.config.mts`) and is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 
 ## Context
 
