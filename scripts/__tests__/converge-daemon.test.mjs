@@ -172,11 +172,25 @@ describe('buildPassRecord', () => {
       startedAt: '2026-08-08T18:00:00.000Z',
       cfg,
       exitCode: 0,
-      summary: { ranPass: true, discovered: 4, clearable: 3, wouldClear: 1, wouldKeepParked: 2, mutations: 0 },
+      summary: {
+        ranPass: true, discovered: 4, clearable: 3, wouldClear: 1, wouldKeepParked: 2, mutations: 0,
+        records: [
+          {
+            subject: 'we#42', pr: 42, repo: 'we', wouldClear: false, reason: 'self-clear-refused: …',
+            panelVerdict: 'accept', outstandingFindings: 0, // extra fields buildShadowRecord emits — must be TRIMMED, not passed through
+          },
+        ],
+      },
       error: null,
     });
     expect(rec).toMatchObject({ ranPass: true, discovered: 4, wouldClear: 1, wouldKeepParked: 2, mutations: 0 });
     expect(rec.error).toBeNull();
+    // #3008 Problem 1 — the per-PR detail (which PR, and why) must survive into the persisted record, not just
+    // the pass-level aggregate counts.
+    expect(rec.records).toHaveLength(1);
+    expect(rec.records[0]).toEqual({
+      subject: 'we#42', pr: 42, repo: 'we', wouldClear: false, reason: 'self-clear-refused: …',
+    });
   });
 
   it('RECORDS a pass that could not run — a gap the readiness predicate cannot see is one it cannot account for', () => {
@@ -189,12 +203,28 @@ describe('buildPassRecord', () => {
     });
     expect(rec.ranPass).toBe(false);
     expect(rec.reason).toBe('lease-held');
+    // The lease-held fixture's own `records: []` must survive to the output, not just `ranPass`/`reason` (#3008).
+    expect(rec.records).toEqual([]);
   });
 
   it('carries a hard failure rather than dropping it', () => {
     const rec = buildPassRecord({ startedAt: 'x', cfg, exitCode: 2, summary: null, error: 'gh exploded' });
     expect(rec.error).toBe('gh exploded');
     expect(rec.ranPass).toBe(false);
+    // `summary` is null (no parseable JSON) — `records` defaults to `[]`, never `undefined`/`null` (#3008).
+    expect(rec.records).toEqual([]);
+  });
+
+  it('defaults records to [] for a refuse()-shaped summary with no records key at all', () => {
+    // The daemon's own pre-flight `refuse()` path never calls review-runner, so its `summary` carries no
+    // `records` key (unlike the lease-held fixture above, which review-runner itself emits WITH `records: []`).
+    const rec = buildPassRecord({
+      startedAt: 'x', cfg, exitCode: 2,
+      summary: { ranPass: false, reason: 'refused' },
+      error: 'converge-daemon: refusing to run from the PRIMARY checkout',
+    });
+    expect(rec.ranPass).toBe(false);
+    expect(rec.records).toEqual([]);
   });
 
   it('records which ledger the pass actually read — the soak is uninterpretable without it', () => {
