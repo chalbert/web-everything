@@ -3,8 +3,10 @@ bornAs: xzdi27a
 kind: story
 size: 5
 parent: "3099"
-status: open
+status: resolved
 dateOpened: "2026-08-14"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [plateau-loop, operations, engine, review, preparation, delivery]
 scope:
   - we:scripts/operations/review-prep.mjs
@@ -189,3 +191,36 @@ decision (separate operation, not a target-type branch in `we:scripts/operations
 **Residual risks:** **consumer** (low — the operation's one consumer, checklist item 9's flow, is the same
 flow that ran ten times tonight); **unmeasured-impact** (low — Task 5's hand-rolled-comparison requirement is
 the measurement, and it is correctly gated in Done-when 2).
+
+## Resolution note — 2026-08-16
+
+`we:backlog/3112-*.md` is a byte-identical duplicate of this card (both carry `bornAs: xzdi27a` — two
+backlog numbers filed off the same origin slug). The build that satisfies this card's own scope (`we:scripts/operations/review-prep.mjs`,
+`we:scripts/operations/review-prep-io.mjs`, and both test files) already landed on `main` — commit `2f8b11ba`
+via PR #1271, JIT-numbered `xzdi27a→#3112` at land time (`we:scripts/backlog.mjs`'s numbering assigned the
+duplicate's number to the landed lane, not this one). Re-verified against every `## Done when` item today,
+against LIVE code, not assumed:
+
+- `review-prep` is registered in `we:scripts/operations/run.mjs`'s `OPERATIONS` table (derived CLI, #3035's
+  mechanism, no hand-written second CLI) — confirmed by reading the table directly.
+- Task 5's live-fire proof is real: card #1637 was driven through the operation end to end and produced
+  PR #1270 (`chalbert/web-everything#1270`, open, `review:pending`), whose body carries a genuine, well-cited
+  review — a `decorative-guard` finding with a mutation probe against `deriveTier`/the readiness engine, and a
+  `legibility` finding about silent badge behavior — output at least as good as the ten hand-rolled reviews
+  this operation mechanizes.
+- The `judge` step is built on `buildSubjectMandate` (`we:scripts/lib/jury-core.mjs`), never `buildPanelMandate`;
+  `we:scripts/operations/__tests__/review-prep.test.mjs` asserts `MUTATION_PROBE_RULE` and `FENCED_DATA_RULE`
+  verbatim via `toContain` on the import (lines documented in the operation's own file header).
+- `recordPrepVerdict`'s appended section (`renderPrepReviewSection`) renders the exact post-#3103 markers:
+  `## Independent review — <date>`, a `Confidence:` level, named `we:backlog/3103-*.md` risks, and a
+  corrections list.
+- No `confirm` step exists on the declaration (`read`/`judge`/`reduce`/`record` only) — the mid-review race is
+  instead a deterministic content-hash guard inside `recordPrepVerdict`, per the card's own "Watch for".
+
+Gate re-run today: `npx vitest run we:scripts/operations/__tests__/review-prep.test.mjs
+we:scripts/operations/__tests__/review-prep-io.test.mjs` — 50/50 passing. `npm run check:standards` — 0 errors
+(pre-existing warning count only).
+
+Resolving as delivered rather than re-implementing — the scope is provably shipped and re-building it would
+produce the exact second, subtly-different path the card's own "Watch for" warns against. `we:backlog/3112-*.md`
+is being closed separately as the duplicate.
