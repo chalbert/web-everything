@@ -3,7 +3,7 @@ bornAs: xzewkfa
 kind: story
 size: 5
 parent: "1650"
-status: open
+status: resolved
 locus: plateau-app
 scope:
   - plateau-app:packages/dev-browser/src/safe-edit/types.ts
@@ -11,6 +11,9 @@ scope:
   - plateau-app:packages/dev-browser/src/safe-edit/buffer.test.ts
   - plateau-app:packages/dev-browser/src/safe-edit/index.ts
 dateOpened: "2026-08-15"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [dev-browser, safe-edit, sandbox, epic-1650]
 ---
 
