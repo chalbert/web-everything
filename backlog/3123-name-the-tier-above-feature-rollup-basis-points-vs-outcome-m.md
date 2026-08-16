@@ -224,6 +224,66 @@ existing unit system end-to-end, while outcome-metric rollup is a structurally d
 honestly-incomparable-to-points measure — this is not prioritization in fork costume, it is an actual
 data-shape fork.
 
+**Skeptic (fresh-context, 2026-08-16):** Independent four-axis re-run by a throwaway agent with no role
+in authoring these forks (per `we:docs/agent/backlog-workflow.md:421` — the original pass above was run
+inline by the authoring session because subagent dispatch was saturated; this is the compensating
+fresh-context run). **CONFIRMS SURVIVES on all four axes.** Verification, not re-assertion:
+- **Classification** — re-ran the composability probe by hand: the fork-existence-justification's "can't
+  expose both simultaneously" claim is an **intra-node** forced choice (one number can't be both a
+  point-sum and a weighted-contribution at once), which is genuinely forced and distinct from the
+  **inter-instance** "could different nodes carry different bases" question the Classification note
+  correctly defers (no current consumer, mirrors #2691's flat-now/nested-later precedent). The two were
+  not conflated. **Holds.**
+- **Merit** — cross-checked against real code rather than trusting the prose: `we:scripts/readiness/velocity-metrics.mjs:122-149,235`
+  (`throughput()`/`rollUp()`) does sum `size` over resolved items in a trailing window exactly as
+  described; grepped `plateau-app:src/` for any OKR/outcome-metric/objective infrastructure — **none
+  exists**, confirming (c) needs a genuinely new primitive; grepped
+  `plateau-app:src/feature-tracker/feature-tracking.webcases.ts` and confirmed it already talks in
+  "velocity-based projection WINDOW" and "gated points" — the points/velocity-native framing of the
+  console is grounded in shipped code, not asserted. **Holds.**
+- **Statute-overlap (the axis flagged for special scrutiny)** — traced every citation to source: `#program-definition`
+  (`we:docs/agent/backlog-workflow.md:169-190`), its `codifiedIn` anchor (`we:docs/agent/platform-decisions.md:3502-3505`),
+  the #2691 nesting-extension citation (`:163`), and the informal epic-table usage (`:142`) all quote and
+  cite accurately — **not overstated**. Also grepped every other `we:docs/agent/*.md` file
+  (`we:docs/agent/build-ui.md`, `we:docs/agent/exercise-app-workflow.md`, `we:docs/agent/vision-tiers.md`,
+  and `we:docs/agent/platform-decisions.md`'s other 12 "program" hits) for a *third* conflicting
+  definition the item might have missed — found none; every other use is the same
+  ratified program concept (#2606/#314-style) or a plain-English "the program" (= the codebase, `:1591`)
+  sense, not a taxonomy collision. **One gap the self-run pass left implicit, non-blocking:** the proposed
+  one-time disambiguating clause targets `#program-definition` only. It doesn't also flag that the epic
+  row's own parenthetical at `:142` ("An umbrella spanning multiple items (a program/initiative/vision)")
+  will read as stale once `kind: program` exists as its own value — an epic could no longer informally
+  *be* "a program" once the word is a distinct sibling `kind`. Worth folding into the eventual
+  ratification's implementation note alongside the `#program-definition` clause; **not** a reason to
+  withhold ratification. **Holds, with this addendum.**
+- **Citation-scope** — the SAFe Program/ART citation is correctly narrowed to "established points-tracked
+  vocabulary," never stretched to claim full ART semantics transfer. **Holds.**
+
+No attack in this independent pass overturns the recommended default. One structural nitpick, cosmetic
+only: **Fork 1(d) is substantively a sub-fork under (a)** — a secondary "how to handle the label
+collision" choice, conditional on points-rollup already winning the basis question on merit — rather
+than an independent 4th top-level branch; the Recommendation section already walks that two-step logic
+correctly in prose, so nothing is hidden from the decider. A future edit could relabel it "Fork 1(a)
+sub-fork" per the repo's own fork-labeling convention, but this doesn't affect readiness.
+
+**Screen (fresh-context, 2026-08-16):** Two-confusion pass re-run independently, same throwaway-agent
+constraint as above. **(1) Standard-vs-implementation — clear.** This is WE's own backlog `kind`
+vocabulary, not a classic WE↔FUI intent/block boundary case, but the underlying test still applies and is
+answered correctly: the choice is directly observable — the word that appears in ratified statute prose,
+the data shape a future rollup renderer exposes, and the vocabulary Plateau Loop's natural-language intake
+dogfoods from WE's own backlog (per #2505) — not a detail hidden behind any implementation boundary.
+**(2) Merit-vs-prioritization — clear.** Re-ran the "both branches free and instantly maintained" test:
+a genuine merit difference survives — points-rollup and outcome-metrics-rollup produce different numbers
+with different honesty properties (a velocity-derived forecast vs. a hand-authored contribution weight),
+not merely a different build cost. This is a real data-shape fork, not prioritization in fork's clothing.
+
+**Conclusion: readiness confirmed — the `✓ ready to ratify` stamp stands.** Neither pass overturns the
+recommended default (points-rollup basis, defaulting to Fork 1(a) PROGRAM + a one-time disambiguating
+clause on `#program-definition`, with Fork 1(d) as the documented collision-free fallback). The two items
+noted above (the `:142` epic-row parenthetical, and the Fork 1(d) sub-fork labeling) are non-blocking
+polish — implementation footnotes to fold in whenever this item is ratified, or in a later edit, not
+grounds to hold the decision.
+
 ## Blocks
 
 #2690 cannot be prepared past this fork — its rollup/velocity/forecast interface for the new tier
