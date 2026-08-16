@@ -98,5 +98,10 @@ export function renderItem(spec) {
   if (scopeEntries.length) fm.push(`scope: [${scopeEntries.map((p) => `"${p}"`).join(', ')}]`);
   fm.push(`dateOpened: "${today}"`, 'tags: []', '---', '');
   const lead = digest || 'TODO digest — one ≤100-word paragraph: what this item does and why (replace this line).';
-  return `${fm.join('\n')}\n# ${title}\n\n${lead}\n`;
+  // `## Done when` skeleton (#2949) — acceptance criteria are authored at file time, not left to the
+  // implementing lane to invent at review time (docs/agent/backlog-workflow.md → the determinism
+  // ladder). Emits one `**Executable**` TODO line; the author fills in a real tier-1 command, or drops
+  // to tier-2/3 (or an explicit "why not" line) when no command applies.
+  const doneWhen = '## Done when\n\n1. **Executable** — TODO: a command that fails before this item lands and passes after.\n';
+  return `${fm.join('\n')}\n# ${title}\n\n${lead}\n\n${doneWhen}`;
 }
