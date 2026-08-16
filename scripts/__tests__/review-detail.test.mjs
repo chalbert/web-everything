@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { assembleReviewDetail, parseEscalationReason } from '../review-detail.mjs';
 import { buildEscalationReasonBlock } from '../lib/review-escalation.mjs';
+import { careLevelFromReasons } from '../lib/review-core.mjs';
 
 // #3101 — a REAL PR body, captured via `gh pr view 1177 --json body` (2026-08-14), not hit over the network in
 // this test. PR #1177 was parked with two escalation reasons AND the drain's trailing policy-stamp comment
@@ -35,9 +36,9 @@ const parkedHumanView = {
   ].join('\n'),
   labels: [{ name: 'review:human' }, { name: 'ready-to-merge' }],
   comments: [
-    { body: 'some unrelated chatter' },
-    { body: '🤖 advisory AI review\n\nThe panel found a correctness issue in the retry path.' },
-    { body: '🔁 human review — bounced: please add a test for the retry path.' },
+    { body: 'some unrelated chatter', createdAt: '2026-08-01T10:00:00Z' },
+    { body: '🤖 advisory AI review\n\nThe panel found a correctness issue in the retry path.', createdAt: '2026-08-01T11:00:00Z' },
+    { body: '🔁 human review — bounced: please add a test for the retry path.', createdAt: '2026-08-01T12:00:00Z' },
   ],
   files: [
     { path: 'docs/agent/platform-decisions.md', additions: 12, deletions: 3 },
@@ -81,6 +82,18 @@ describe('assembleReviewDetail — a review:human parked PR', () => {
     expect(d.humanComment).toContain('🔁 human review');
   });
 
+  // #2818 — careLevel must match a DIRECT careLevelFromReasons(escalationReason) call on the same fixture, not
+  // by inspection — proves the field is reused, never re-derived.
+  it('carries careLevel equal to a direct careLevelFromReasons(escalationReason) call', () => {
+    expect(d.careLevel).toBe(careLevelFromReasons(d.escalationReason));
+  });
+
+  // #2818 — the matched comment's createdAt, sourced (not fabricated) from the fixture's comment timestamps.
+  it('carries advisoryCommentAt/humanCommentAt from the matched comment\'s createdAt', () => {
+    expect(d.advisoryCommentAt).toBe('2026-08-01T11:00:00Z');
+    expect(d.humanCommentAt).toBe('2026-08-01T12:00:00Z');
+  });
+
   it('carries the labels, diff stat, and file count', () => {
     expect(d.labels).toEqual(['review:human', 'ready-to-merge']);
     expect(d.filesChanged).toBe(2);
@@ -109,6 +122,16 @@ describe('assembleReviewDetail — an unparked PR', () => {
     expect(d.advisoryComment).toBeNull();
     expect(d.humanComment).toBeNull();
   });
+
+  // #2818 — the empty-escalation, no-matching-comment case: careLevel degrades to 'none' (via the same bridge,
+  // never a special-cased default), and both new *At fields are null exactly when their comment is absent —
+  // the pre-existing fields above stay byte-identical to today's output.
+  it('careLevel is "none" and both *At fields are null when there is nothing to match', () => {
+    expect(d.careLevel).toBe('none');
+    expect(d.careLevel).toBe(careLevelFromReasons(d.escalationReason));
+    expect(d.advisoryCommentAt).toBeNull();
+    expect(d.humanCommentAt).toBeNull();
+  });
 });
 
 describe('assembleReviewDetail — tolerance of missing fields', () => {
@@ -121,6 +144,9 @@ describe('assembleReviewDetail — tolerance of missing fields', () => {
     expect(d.reviewClass).toBe('none');
     expect(d.diffStat).toEqual([]);
     expect(d.filesChanged).toBe(0);
+    expect(d.careLevel).toBe('none');
+    expect(d.advisoryCommentAt).toBeNull();
+    expect(d.humanCommentAt).toBeNull();
   });
 
   it('a missing arg object does not throw', () => {
