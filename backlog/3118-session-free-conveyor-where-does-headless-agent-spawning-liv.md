@@ -169,6 +169,20 @@ maintained): a difference still remains — (b) still couples the conveyor's liv
 being up and still can't address a lane-clone dev server on an unknown port, which is an architectural
 property, not a cost. Merit survives free-build; this is a real fork, not prioritization in fork costume.
 
+`Skeptic (fresh-context, 2026-08-16): independently corroborated.` A separate, genuinely independent
+fresh-context agent (not this item's author) subsequently re-ran the 4-axis skeptic attack above, including
+a steelmanned merit check on the rejected (b) cross-process HTTP-call option, and confirmed the recommended
+default (a, the WE-native runner) survives. Every citation was checked against live files and checked out
+exactly, with no fabrications found: `plateau-app:src/build-runner/build-action.ts` lines 236/244/307,
+`plateau-app:src/build-runner/runner.ts` lines 55-232, `we:skills-src/conveyor/runner.mjs` lines 81-95,
+`we:skills-src/conveyor/SKILL.md:29-41`, and
+`we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated` lines 3108-3110.
+
+`Screen (fresh-context, 2026-08-16): clear.` The same independent pass re-ran the two-confusion screen
+(impl-vs-standard, merit-vs-prioritization) and it came back clear, matching the self-run screen above. This
+is independent corroboration of the original self-run skeptic/screen pass's conclusions above — not a
+supersession of them.
+
 **Duplication sub-call (folded into the default, not left open).** (a) does mean the CLI-spawn logic exists
 in two repos (`plateau-app:src/build-runner/`, and the new `we:scripts/conveyor/agent-runner.mjs`) rather
 than one shared module. No shared-package/monorepo-workspace tooling exists between WE and `plateau-app`
