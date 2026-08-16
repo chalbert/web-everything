@@ -3,9 +3,11 @@ bornAs: x9ylkp7
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 blockedBy: ["3037"]
 dateOpened: "2026-08-13"
+dateResolved: "2026-08-16"
+graduatedTo: none
 scope:
   - we:scripts/operations/dispatch-lane-io.mjs
   - we:scripts/operations/wake.mjs
@@ -246,3 +248,26 @@ Under approach 2's `pr-land` form this is NOT a 3: it adds a persisted field, a 
   indistinguishable from "no PR yet," so a query that matches nothing looks exactly like a fleet with no PRs
   open. Nothing reddens, the waker keeps escalating at 6h, and the item reads as delivered. This is why the
   argv is pinned by a test and not merely exercised through a fixture.
+
+## Verified & resolved 2026-08-16 — shipped via merged PR #1263, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted):
+
+- **PR [#1263](../../pull/1263)** ("WE #3095: give the dispatch observer a real completion signal — its PR",
+  head `lane/build-3095`) is `state: MERGED`, merge commit `6c81e73f`, which is an ancestor of `origin/main`
+  HEAD.
+- [we:scripts/operations/dispatch-lane-io.mjs](../scripts/operations/dispatch-lane-io.mjs) imports
+  `laneRefItemNum` (from `we:scripts/conveyor/lease-reaper.mjs`) and `classifyPr` (from
+  `we:scripts/conveyor/pr-watch.mjs`), and wires the PR-classification / stale-predecessor logic this card
+  specified (`:37-38`, `:670-843`).
+- [we:scripts/conveyor/lease-reaper.mjs](../scripts/conveyor/lease-reaper.mjs)'s `laneRefItemNum` grammar was
+  widened per Task 4 (`bornAs`-hash refs) — confirmed reachable and tested.
+- The argv-pin test ("asks for `--state all`…") exists at
+  [we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs](../scripts/operations/__tests__/dispatch-lane-defaults.test.mjs)`:132`,
+  and the stale-predecessor case exists at
+  [we:scripts/operations/__tests__/dispatch-lane.test.mjs](../scripts/operations/__tests__/dispatch-lane.test.mjs)`:885-994`.
+- Full operations + lease-reaper suite — 630 tests across 18 files, all green (`npx vitest run`).
+- `npm run check:standards` — 0 errors on the current tree.
+
+All Done-when items are satisfied by code already on `main`; nothing further to build.

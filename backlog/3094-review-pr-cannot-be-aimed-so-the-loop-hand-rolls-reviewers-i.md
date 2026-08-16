@@ -3,8 +3,10 @@ bornAs: xf0ey61
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-13"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [plateau-loop, operations, engine, review, delivery]
 scope:
   - we:scripts/operations/review-pr.mjs
@@ -159,3 +161,27 @@ caller breaks at any point and no branch is needed.
 - **`aim` must not become a way to tell the juror its conclusion.** The value is in naming the search, not
   the answer. The "may find it absent" test is the guard on that and is not optional.
 - The operation **works**. This card is about reach, and must not turn into a rewrite.
+
+## Verified & resolved 2026-08-16 — shipped via merged PR #1266, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted). The card's own body already carries every
+Done-when box checked and a "Live proof" section — this closes the bookkeeping to match:
+
+- **PR [#1266](../../pull/1266)** ("#3094 review-pr can be aimed: --aim, and the mutation probe every
+  mandate now carries", head `lane/build-3094`) is `state: MERGED`, merge commit `827cb396`, which is an
+  ancestor of `origin/main` HEAD.
+- [we:scripts/lib/review-core.mjs](../scripts/lib/review-core.mjs) — `buildPanelMandate` takes the optional
+  `aim` param (`:1046`), renders it under the caller's-hypothesis heading with the unconditional mutation
+  instruction (`:1076-1086`).
+- [we:scripts/operations/review-pr.mjs](../scripts/operations/review-pr.mjs) declares `aim` as an optional
+  string input (`:373`) and threads it into the mandate build (`:400-411`).
+- The byte-identical-when-absent fixture
+  [we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt](../scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt)
+  exists.
+- [we:scripts/lib/__tests__/review-core.test.mjs](../scripts/lib/__tests__/review-core.test.mjs) (287 tests)
+  and [we:scripts/operations/__tests__/review-pr.test.mjs](../scripts/operations/__tests__/review-pr.test.mjs)
+  (50 tests) — 337 tests total, all green (`npx vitest run`).
+- `npm run check:standards` — 0 errors on the current tree.
+
+All Done-when items are satisfied by code already on `main`; nothing further to build.

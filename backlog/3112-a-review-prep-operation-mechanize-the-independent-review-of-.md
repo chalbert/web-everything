@@ -3,8 +3,10 @@ bornAs: xzdi27a
 kind: story
 size: 5
 parent: "3099"
-status: open
+status: resolved
 dateOpened: "2026-08-14"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [plateau-loop, operations, engine, review, preparation, delivery]
 scope:
   - we:scripts/operations/review-prep.mjs
@@ -189,3 +191,20 @@ decision (separate operation, not a target-type branch in `we:scripts/operations
 **Residual risks:** **consumer** (low — the operation's one consumer, checklist item 9's flow, is the same
 flow that ran ten times tonight); **unmeasured-impact** (low — Task 5's hand-rolled-comparison requirement is
 the measurement, and it is correctly gated in Done-when 2).
+
+## Resolved 2026-08-16 — duplicate of #3111
+
+Closing as superseded, not as delivered work: `we:backlog/3112-*.md` and
+`we:backlog/3111-a-review-prep-operation-mechanize-the-independent-review-of-.md` are byte-identical files
+(`diff` between them returns nothing — same title, same `bornAs: xzdi27a`, same body including the
+"Independent review — 2026-08-14" section). Both cards trace to the same content landing twice under two
+different `NNN` numbers:
+
+- `we:backlog/3111-*.md` was JIT-numbered `#3111` at commit `36b0425b` (2026-08-14 19:23:12).
+- `we:backlog/3112-*.md` (this card) was JIT-numbered `#3112` at commit `488df16b` (2026-08-14 20:38:02) —
+  **75 minutes later**, same `bornAs` hash, same content.
+
+`#3111` landed first and is the survivor (lower number, first claim on the content). Nothing in this card's
+own text differs from #3111's, so nothing further needs building under this number — the review-prep
+operation's build tracks under **#3111**. `graduatedTo: none`; no independent delivery under this card's own
+authorship.

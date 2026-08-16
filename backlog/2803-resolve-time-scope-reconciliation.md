@@ -3,9 +3,11 @@ bornAs: xbgtqkm
 kind: story
 size: 5
 parent: "2804"
-status: open
+status: resolved
 dateOpened: "2026-08-01"
 blockedBy: ["2802"]
+dateResolved: "2026-08-16"
+graduatedTo: none
 scope:
   - "we:scripts/readiness/scope-reconcile.mjs"
   - "we:scripts/backlog.mjs"
@@ -306,3 +308,22 @@ atomic.
   question for #2812's record rather than an assumed win. If it is still at 0 firings when #2812 lands, the
   honest move is to fold it into the gate-side floor and delete the resolve-time branch, not to keep a hard
   error on the resolve path that has never caught anything.
+
+## Verified & resolved 2026-08-16 — shipped via merged PR #1258, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted):
+
+- **PR [#1258](../../pull/1258)** ("#2803 resolve-time scope reconciliation — refuse a resolve that touched
+  undeclared presentation surfaces", head `lane/build-2803`) is `state: MERGED`, merge commit `4c9507c6`,
+  which is an ancestor of `origin/main` HEAD.
+- [we:scripts/readiness/scope-reconcile.mjs](../scripts/readiness/scope-reconcile.mjs) exists and exports the
+  pure `reconcileScope({declared, observed, routeGraph})` this card specified.
+- [we:scripts/backlog.mjs](../scripts/backlog.mjs) imports `reconcileScope` (`:48`) and wires
+  `readScopeList`/`observedFilesForResolve`/the resolve-time guard block exactly as the card's interface
+  section describes (`:263`, `:284`, `:387-394`).
+- [we:scripts/readiness/__tests__/scope-reconcile.test.mjs](../scripts/readiness/__tests__/scope-reconcile.test.mjs)
+  exists — 11 tests, all green (`npx vitest run` on this file).
+- `npm run check:standards` — 0 errors on the current tree.
+
+All Done-when items are satisfied by code already on `main`; nothing further to build.
