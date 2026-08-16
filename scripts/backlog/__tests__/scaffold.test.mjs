@@ -67,3 +67,14 @@ describe('renderItem — predicted scope: frontmatter (#2619)', () => {
     expect(renderItem({ ...base, scope: ['  '] })).not.toContain('scope:');
   });
 });
+
+describe('renderItem — `## Done when` skeleton (#2949)', () => {
+  const base = { kind: 'story', size: 3, slug: 'x', title: 'X', today: '2026-07-27' };
+  it('appends a `## Done when` heading with an `**Executable**` TODO line after the digest', () => {
+    const out = renderItem(base);
+    expect(out).toContain('## Done when');
+    expect(out).toMatch(/\*\*Executable\*\*/);
+    // digest paragraph comes before the heading, not after
+    expect(out.indexOf('TODO digest')).toBeLessThan(out.indexOf('## Done when'));
+  });
+});

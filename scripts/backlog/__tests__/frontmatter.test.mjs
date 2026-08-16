@@ -217,7 +217,8 @@ describe('scaffold helpers', () => {
     expect(out).toContain('status: open');
     expect(out).toContain('blockedBy: ["254"]');
     expect(out).toContain('# Do the thing');
-    expect(out).toMatch(/\n[^\n#-].*\n$/); // a non-empty digest paragraph at the end
+    expect(out).toContain('## Done when'); // #2949 skeleton, appended after the digest
+    expect(out).toMatch(/\n[^\n#-].*\n$/); // non-empty trailing content (the `## Done when` skeleton, not the digest — #2949)
   });
 
   it('a task carries no size', () => {
