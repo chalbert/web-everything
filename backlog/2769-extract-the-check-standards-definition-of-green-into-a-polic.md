@@ -3,8 +3,10 @@ bornAs: xty5asq
 kind: story
 size: 3
 parent: "2625"
-status: open
+status: resolved
 dateOpened: "2026-07-28"
+dateResolved: "2026-08-16"
+graduatedTo: none
 scope: ["we:scripts/check-standards.contract.json", "we:scripts/lib/gate-config.mjs", "we:scripts/lib/__tests__/check-standards.conformance.test.mjs"]
 tags: [plateau-loop, governance, gate, trust-chain]
 ---
@@ -45,3 +47,23 @@ Ratified approach + full grounding: #2625. Precedent: the
 [we:scripts/lib/review-policy.contract.json](../scripts/lib/review-policy.contract.json) / loader split
 (#2566/#2564). Statute:
 [we:docs/agent/platform-decisions.md#contract-split-for-tier-ownership](../docs/agent/platform-decisions.md#contract-split-for-tier-ownership).
+
+## Verified & resolved 2026-08-16 — already shipped on `main`, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted):
+
+- **Commit `6a8f1228`** ("WE #2769: extract check:standards definition-of-green to a policy-tier contract")
+  is an ancestor of `origin/main` HEAD (`git merge-base --is-ancestor 6a8f1228 HEAD` → true).
+- [we:scripts/check-standards.contract.json](../scripts/check-standards.contract.json) exists on `main`
+  (8.7KB, the policy-tier definition-of-green).
+- [we:scripts/lib/gate-config.mjs](../scripts/lib/gate-config.mjs) registers all four roster entries this
+  card specified (`:265-292`): [we:scripts/check-standards.contract.json](../scripts/check-standards.contract.json)
+  and [we:scripts/lib/__tests__/check-standards.conformance.test.mjs](../scripts/lib/__tests__/check-standards.conformance.test.mjs)
+  as `tier: 'policy'`; [we:scripts/check-standards.mjs](../scripts/check-standards.mjs) and
+  [we:scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs) both as `tier: 'engine'`.
+- [we:scripts/lib/__tests__/check-standards.conformance.test.mjs](../scripts/lib/__tests__/check-standards.conformance.test.mjs)
+  exists and pins impl↔contract.
+- `npm run check:standards` — 0 errors on the current tree.
+
+All three Done-when items are satisfied by code already on `main`; nothing further to build.

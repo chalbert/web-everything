@@ -3,8 +3,10 @@ bornAs: x09pzox
 kind: story
 size: 3
 parent: "2822"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-16"
+graduatedTo: none
 scope:
   - we:scripts/lib/validate-rules-anchors.cjs
   - we:scripts/__tests__/rules-anchors.test.mjs
@@ -293,3 +295,23 @@ said enforcement "belongs on the open conveyor-mechanization line (#2840 / #2785
 resolved`, and neither ever held reviewer-id scope. Enforcement is filed under epic #2822 as this item and its
 siblings, which is the same repoint #2853 makes for the anchor prose. This item does not reopen the resolved
 decision.
+
+## Verified & resolved 2026-08-16 — already shipped on `main`, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted):
+
+- **Commit `417de91a`** ("#2842 statute-lint: a status claim about a cited #NNN must match that item's real
+  status") is an ancestor of `origin/main` HEAD.
+- [we:scripts/lib/validate-rules-anchors.cjs](../scripts/lib/validate-rules-anchors.cjs) exports both
+  `collectItemStatuses` (`:310`) and `validateCitedItemStatusClaims` (`:444`), wired into `runStatuteCheck`
+  (`:547-557`), matching this card's interfaces section.
+- [we:docs/agent/platform-decisions.md](../docs/agent/platform-decisions.md) no longer asserts #2785 or #2840
+  is `status: open` at `:3420`/`:3422`/`:3426`/`:3446` (re-read live: all now read `status: resolved` / cite
+  the items as resolved) — the Done-when-12 hand-check items (`:3440`, `:3462`) are also clear on re-read.
+- `node we:scripts/check-statute.mjs` → `0 error(s), 0 warning(s)`.
+- [we:scripts/__tests__/rules-anchors.test.mjs](../scripts/__tests__/rules-anchors.test.mjs) — 39 tests, all
+  green (`npx vitest run`).
+- `npm run check:standards` — 0 errors on the current tree.
+
+All Done-when items are satisfied by code already on `main`; nothing further to build.

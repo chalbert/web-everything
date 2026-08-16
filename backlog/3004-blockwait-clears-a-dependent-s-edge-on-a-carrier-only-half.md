@@ -2,8 +2,10 @@
 bornAs: xl5dnuc
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateResolved: "2026-08-16"
+graduatedTo: none
 preparedDate: "2026-08-14"
 relatedTo: ["2832"]
 tags: [conveyor, merge-ordering, review-integrity]
@@ -297,3 +299,24 @@ the cascade ships a parameter nothing ever sets to a non-empty value. Slicing wo
 half-state the first preparation would have shipped: the defect still live, the tests green, and the code
 reading as if it were fixed. The one genuine seam — the `provenOnMain` arm — is carved out above as a separate
 future item, not a slice of this one.
+
+## Verified & resolved 2026-08-16 — shipped via merged PR #1261, status was stale
+
+Re-verified against the live tree before resolving (a queue-generation scan flagged this card's `status: open`
+as lagging reality; checked independently rather than trusted):
+
+- **PR [#1261](../../pull/1261)** ("#3004 blockWait: a half-landed couple no longer clears a dependent's
+  edge", head `lane/build-3004`) is `state: MERGED`, merge commit `dbf807dd`, which is an ancestor of
+  `origin/main` HEAD.
+- [we:scripts/merge-ai-prs.mjs](../scripts/merge-ai-prs.mjs) carries the exported `coupleImplOpen` predicate
+  (`:664`), the `deriveCoupleIncomplete`/`liveOpenHeadRefs` cascade derivation (`:689-746`), and both
+  subtractions this card specified: `stackProven` proof (1) at `:1398`
+  (`landedThisPass.has(id) → !coupleIncomplete.has(id)`) and `provenLanded` at `:1415`
+  (`(landedThisPass.has(id) || provenOnMain.has(id)) && !coupleIncomplete.has(id)`). The in-cascade `replan`
+  closure threads a per-iteration `coupleIncomplete` (`:3564-3634`), matching the "derive it in the cascade,
+  not at plan time" design this card ruled.
+- [we:scripts/__tests__/merge-ai-prs.test.mjs](../scripts/__tests__/merge-ai-prs.test.mjs) — 387 tests, all
+  green (`npx vitest run`).
+- `npm run check:standards` — 0 errors on the current tree.
+
+All Done-when items are satisfied by code already on `main`; nothing further to build.
