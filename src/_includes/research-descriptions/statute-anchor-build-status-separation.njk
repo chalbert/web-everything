@@ -1,0 +1,104 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  PR #982's round-2 <code>/review</code> raised two findings against a new statute anchor
+  (<code>#fix-review-convergence-independent-root-cause</code>): it granted the loop clearing authority while
+  conceding a precondition was absent, and left a related narrowing unbuilt and undisclosed. The reviewer asked
+  for honesty about what is unbuilt. The author read that as "disclose in the anchor" and wrote the disclosure
+  directly into the rule text — producing a <strong>655-word anchor</strong> (corpus median 324, p90 633) whose
+  invariant 1 is a single <strong>277-word</strong> paragraph carrying build-status tokens ("today", "not yet",
+  "build-pending", "still parks"). Round 3's simplicity lens then read the result as a layering violation: a
+  ratified rule is supposed to be timeless, and this one goes false the moment the mechanization it describes
+  ships. Decision <a href="/backlog/2854-does-point-in-time-build-status-belong-in-a-statute-anchor-o/">#2854</a>
+  asks where point-in-time build status belongs — inside the anchor, or on the decision item / open guards that
+  track it. Is there prior art for keeping a durable rule's text separate from its changing implementation
+  status, and what does each shape of separation actually cost?
+</p>
+
+<h2>Recommendation — status lives on the item, not in the rule's sentences (Fork 1 option a)</h2>
+<p>
+  Three mature rule-documentation systems face this identical tension, and all three keep the rule and its status
+  apart — the only variable is <em>how</em> they're kept apart, and that variable tracks implementation cost, not
+  disagreement on the principle:
+</p>
+<ol>
+  <li><strong>ADR status field</strong> — status is a distinct structured field, never interleaved into the
+  decision narrative.</li>
+  <li><strong>IETF RFC + errata</strong> — the rule text is immutable; status and corrections live entirely in a
+  separate, cross-linked system.</li>
+  <li><strong>MDN / web-features Baseline badges</strong> — status is inlined, but only as an auto-generated
+  render of a separate machine-readable dataset, never hand-authored prose.</li>
+</ol>
+<p>
+  <strong>None of the three systems' core rule text carries hand-maintained "not yet built" prose inside the
+  ruling itself.</strong> That is the shape PR #982 produced, and its absence from three independent, long-running
+  systems is evidence against it, not a coincidence of scope.
+</p>
+
+<h2>Where status lives, across three systems</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Rule/spec text</th><th>Where status lives</th><th>Status ever inline in the rule's own prose?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>ADR (Nygard / MADR)</td><td>Decision + Consequences narrative, written once</td><td>A distinct <code>Status</code> field on the same record (proposed/accepted/deprecated/superseded)</td><td>No — status is a field, never merged into the narrative sentences</td></tr>
+    <tr><td>IETF RFC + errata</td><td>Published RFC — immutable, never edited in place</td><td>Separate errata registry, cross-linked by RFC + section</td><td>No — the RFC text carries no "this is not yet implemented" caveat</td></tr>
+    <tr><td>MDN / web-features Baseline</td><td>The feature/spec page</td><td>A badge auto-rendered from the <code>browser-compat-data</code> dataset</td><td>Visually yes, but the text is machine-generated from a separate source, not hand-authored</td></tr>
+  </tbody>
+</table>
+
+<h2>Applying the three shapes to #2854's Fork 1</h2>
+<p>
+  The three systems map directly onto Fork 1's three options, and the mapping is what makes the recommendation
+  concrete rather than a vibe:
+</p>
+<ul>
+  <li><strong>Option (a)</strong> — item/guards track status, anchor states only the rule — is the
+  <strong>RFC/errata</strong> pattern. The backlog is already the separate tracked system (memory rule #106,
+  "Backlog Is The Tracker"), so this costs nothing new to adopt.</li>
+  <li><strong>Option (b)</strong> — status inside the anchor, as PR #982 shipped — has <strong>no supporting
+  precedent</strong> in any of the three systems, and produced the exact single-paragraph bloat the corpus
+  measurement flagged.</li>
+  <li><strong>Option (c)</strong> — a dedicated machine-readable field the gate parses and renders — is the
+  <strong>MDN/Baseline</strong> pattern: the best reader experience, but only sound because a data pipeline (not
+  prose) keeps the badge truthful. It needs the <code>/rules/</code> renderer to grow a parsed field, which
+  #2854 already prices as highest-cost.</li>
+</ul>
+<p>
+  Read together, (a) and (c) are not rivals so much as adjacent points on one upgrade path: (a)'s
+  anchor-links-to-item shape is exactly the structured pointer a later (c) renderer would parse <em>from</em>.
+  Choosing (a) now does not foreclose (c) later — it is the cheap version of the same idea, not a different one.
+</p>
+
+<h2>Web-standards / platform alignment</h2>
+<p>
+  There is no W3C/WHATWG surface for statute-anchor authoring (it is internal governance process, not a browser
+  standard), so this is a documentation-discipline question rather than a Web Everything standard design. The
+  nearest platform-native analogue is the RFC/errata split itself — a citable spec text kept stable, with
+  corrections layered on top rather than edited in — which is the same instinct behind treating
+  <code>docs/agent/platform-decisions.md</code> as citable authority.
+</p>
+
+<h2>Confirmed in the wild, during this very prep</h2>
+<p>
+  The skeptic pass run against Fork 1's default surfaced a live instance of the predicted decay inside the very
+  anchor under discussion: its invariant 1 still says the reviewer-id enforcement is "build-pending… still owed",
+  while <code>scripts/lib/invariant-catalogue.json</code> has recorded that exact mechanism as
+  <code>"status": "enforced"</code> (with real shipped code) since PR #1100 — the anchor's own prose is now false
+  against ground truth the repo already tracks elsewhere. Separately, the anchor already needed a first round of
+  stale-status correction (#2842, resolved) with a second still owed (#2853, open) within two weeks of being
+  written. The pass also found a working, narrower version of option (c) already shipping —
+  <code>invariant-catalogue.json</code>'s <code>status</code>/<code>owedTo</code>/<code>anchor</code> schema,
+  gated by <code>validateInvariantEnforcers</code> (#2844) — for catalogued operational invariants specifically,
+  not yet for the free-text tokens #2849 targets on uncatalogued prose. Full detail in the report.
+</p>
+
+<h2>How the research reshaped the fork</h2>
+<p>
+  Going in, Fork 1 was framed as three roughly-equal-weight options differentiated by cost alone. The survey
+  sharpens that: (b) is not merely more expensive than (a), it is the one shape with <strong>no supporting
+  precedent</strong> among systems that have run this exact tension at scale for decades, while (a) and (c) turn
+  out to be the <em>same</em> shape at two different investment levels rather than competing designs — which is
+  what lets (a) be recommended now without discarding (c) as a real future upgrade.
+</p>
+{% endraw %}
