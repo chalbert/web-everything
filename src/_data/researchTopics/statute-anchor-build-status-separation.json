@@ -1,0 +1,21 @@
+{
+  "id": "statute-anchor-build-status-separation",
+  "title": "Statute anchor vs decision item — where does point-in-time build status live?",
+  "status": "open",
+  "summary": "Prep research for decision #2854 — PR #982's round-2 review asked for honesty about what an anchor's invariant claims but does not yet enforce; the author wrote the disclosure into the anchor itself, producing a 655-word rule (corpus median 324) with a 277-word single-paragraph invariant carrying build-status tokens ('today', 'not yet', 'build-pending'). Round 3 read that as a layering violation. Surveys three mature rule-documentation systems facing the identical timeless-rule-vs-changing-status tension: (1) ADR status field (Nygard/MADR) — status is a distinct structured field, never interleaved into the Decision/Consequences narrative, establishing that even adjacent-status systems refuse to merge status into the rule's own sentences; (2) IETF RFC + errata — the strongest analogue: RFC text is immutable, corrections/status live entirely in a separate cross-linked errata registry, structurally identical to keeping build status on the linked backlog item; (3) MDN/web-features Baseline badges — the one system that inlines status, but only as an auto-generated render from a separate machine-readable dataset (browser-compat-data), never hand-authored prose. None of the three systems' core rule text carries hand-maintained 'not yet built' prose inside the ruling itself — that absence is evidence against the PR #982 shape, not silence. Recommendation: grounds #2854 Fork 1's default at (a) (status on the item, anchor states only the rule) as the RFC/errata pattern at the lowest implementation cost; (c) (MDN/Baseline's machine-readable field) is a legitimate future upgrade FROM (a), not a competing default now, since it needs the /rules/ renderer to grow a parsed field. Full grounding in reports/2026-08-16-2854-statute-anchor-build-status-separation.md.",
+  "dateOpened": "2026-08-16",
+  "lastReviewed": "2026-08-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "decision-prep",
+    "governance",
+    "statute",
+    "conveyor",
+    "authoring",
+    "anchor-shape"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-08-16-2854-statute-anchor-build-status-separation.md",
+  "relatedProject": "webdocs"
+}
