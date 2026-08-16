@@ -1,11 +1,11 @@
 ---
 kind: epic
 parent: "1391"
-status: open
+status: active
 locus: plateau-app
 humanGate: { kind: setup, short: "Boot-verify the Electron shell window from a session with a real display; everything else in this slice is headless-authorable and vitest-testable.", what: "Narrowed during prep (2026-08-15) — the prior humanGate's two blockers are both stale. (1) 'Electron is NOT a plateau-app dependency (~100MB native add)' is FALSE now: #2342 (resolved 2026-07-09) added Electron ^38.8.6 as a dependency of plateau:packages/dev-browser/package.json ONLY, exactly to dissolve this objection. The Electron.app binary is already fetched into that package's node_modules on this machine. (2) 'The pure conformance-probe parsing could be carved as a headless-testable sub-slice' — ALREADY DONE: #2211 (resolved 2026-07-03, child of this item) built and fully unit-tested the plateau:packages/core/src/probe/detect.ts function (`detect(doc, win) -> ProbeResult`, 9 vitest cases, zero Electron dependency), explicitly 'for the dev-browser shell to import' (per plateau:packages/core/src/probe/index.ts's own header comment). What remains for #1753 is wiring only — a BrowserWindow + two WebContentsViews, a preload that calls the already-built detect() and IPCs the result, and a status-bar UI — and per the design below, the layout math, the IPC contract, and the status-render function are all pure and headless-testable (mirroring the precedent at plateau:packages/extensions/src/chrome-extension/panel-detect.test.ts and plateau:vitest.config.ts's own note on tests/fidelity/: 'the BROWSER run ... is the self-proving CLI acceptance, not a vitest spec'). Only the final step — actually launching the shell and confirming a native window appears with the right status text for a conformant vs non-conformant target — needs a session with a display. A build session should write and vitest-green everything else first, then hand off (or self-verify if it has a display) for that one step." }
 dateOpened: "2026-06-24"
-dateStarted: "2026-06-26"
+dateStarted: "2026-08-16"
 tags: []
 ---
 
@@ -74,12 +74,20 @@ All new files live under plateau:packages/dev-browser/src/shell/ unless noted. F
 
 ## Done when
 
-- [ ] The full plateau-app test suite is green, including the three new suites from tasks 3–5 above.
-- [ ] The build script from task 7 completes with no errors and produces a runnable Electron main entry.
+- [x] The full plateau-app test suite is green, including the three new suites from tasks 3–5 above.
+- [x] The build script from task 7 completes with no errors and produces a runnable Electron main entry.
 - [ ] The launch script (from a session with a display) boots a native window with no crash.
 - [ ] Loading a known-conformant target shows a status string containing "detected" (never "conformant") at the correct level; loading a known-non-conformant target shows "No Web Everything detected".
-- [ ] Resizing the window keeps the status pane pinned at its configured height and the content pane filling the remainder (no gap/overlap) — verified either visually or via a layout-module test case at a couple of window sizes.
+- [x] Resizing the window keeps the status pane pinned at its configured height and the content pane filling the remainder (no gap/overlap) — verified either visually or via a layout-module test case at a couple of window sizes.
 
 ## Delivery shape
 
 Single PR, lands directly on `main` — no flag needed. Everything under the new shell directory and the new launch script is net-new and additive: nothing in the existing app imports or auto-runs it, so there is no risk surface to gate behind a flag. It only becomes reachable by a developer explicitly running the new launch script.
+
+## Progress
+
+**2026-08-16 — build session.** Wrote everything under `plateau:packages/dev-browser/src/shell/` per the decided design: `plateau:packages/dev-browser/src/shell/layout.ts`, `plateau:packages/dev-browser/src/shell/ipc.ts`, `plateau:packages/dev-browser/src/shell/probe-preload.ts`, `plateau:packages/dev-browser/src/shell/chrome/chrome-preload.ts`, `plateau:packages/dev-browser/src/shell/chrome/chrome.ts`, `plateau:packages/dev-browser/src/shell/chrome/status.html`, `plateau:packages/dev-browser/src/shell/main.ts`, plus `plateau:packages/dev-browser/scripts/build-shell.mjs` (esbuild, no new toolchain) and the `dev-browser:shell` launch script in `plateau:package.json`. Resolved task 1 (CJS vs ESM): the built `plateau:packages/dev-browser/dist/shell/main.js` is ESM (package `"type": "module"` + Electron main-process ESM support since v28), both preloads build to explicit `.cjs` (Electron's own docs: sandboxed preload scripts don't support ESM at all), the status page's script builds IIFE (plain browser `<script>`, not a preload). Along the way found and fixed a pre-existing gap in `plateau:vitest.config.ts` — it was missing 4 `@webeverything/conformance-vectors/*` + 3 `@frontierui/*` aliases that `plateau:vite.config.mts` already had (same class of gap its own existing intl-alias comment already flagged), which blocked the card's own explicit design instruction (a bare `@plateau/core` import) from resolving under vitest; backported them.
+
+Full plateau-app vitest suite green (128 files / 1771 tests, including the 3 new headless suites — 17 tests) and `check:render-conformance` green. Opened self-approved PR [plateau-app#142](https://github.com/chalbert/plateau-app/pull/142); required CI checks passed, parked `review:pending` by the drain per plateau-app's own size-escalation convention (553 ≥ 400 changed lines) — awaiting an independent review pass before it lands.
+
+**Left for the humanGate** (per this card's own narrowed gate — unchanged): boot-verify the launch script from a session with a real display, and eyeball the status text against a known-conformant vs known-non-conformant target. Everything else is done and vitest-green.
