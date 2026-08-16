@@ -51,14 +51,6 @@
  *     exemption in as many words, so the audit trail reads "a human ceremony cleared it", never "an
  *     established-independent agent cleared it". `--to=accepted` — the AGENT verdict path — stays refused.
  *
- * NOT YET TRUST-CHAIN REGISTERED, AND THAT IS AN OWED FOLLOW-UP, NOT A CHOICE. This module DECIDES what may
- * clear the gate, which is the textbook `policy` tier in `we:scripts/lib/gate-config.mjs`'s own words — an edit
- * here should force `review:human`, exactly as it does for the seam that calls it. It is absent from `TRUST_CHAIN`
- * only because #2844 landed while a concurrent change (PR #1098) held the roster, and editing the leash
- * classification from two lanes at once is the merge hazard the roster exists to prevent. Today an edit here still
- * ESCALATES (the `^scripts/` blast-radius rule) but does not force a human. Register it as
- * `{ role: 'clearer-identity', file: 'review-independence.mjs', tier: 'policy' }` in the next roster edit.
- *
  * PURE except `currentActorId`, which reads one env var (and takes an injectable `env` so it is testable).
  * Deliberately a LEAF module: it imports nothing from the seams, so `review-set-label.mjs` can use it
  * without the import cycle a home inside `auto-land-seam.mjs` would create.

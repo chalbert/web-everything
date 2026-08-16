@@ -117,6 +117,13 @@ describe('TRUST_CHAIN — the declarative-leash / derivation-code split (#2771/#
       expect(entry.leash).toBeUndefined();
     }
   });
+  it('the clearer-identity module joins the leash by its own argument, not #2771\'s original table (#2844/#3045)', () => {
+    const entry = TRUST_CHAIN.find((m) => m.file === 'review-independence.mjs');
+    expect(entry, 'TRUST_CHAIN entry for review-independence.mjs').toBeTruthy();
+    expect(entry.tier).toBe('policy');
+    expect(entry.leash).toBe(POLICY_LEASH.SPEC);
+    expect(isPolicySpecPath('scripts/lib/review-independence.mjs')).toBe(true);
+  });
   it('an unregistered basename is neither half (the split never invents membership)', () => {
     for (const p of ['scripts/pr-land.mjs', 'demos/spa.html', 'scripts/lib/rebase-drop-manifest.mjs']) {
       expect(isPolicySpecPath(p)).toBe(false);

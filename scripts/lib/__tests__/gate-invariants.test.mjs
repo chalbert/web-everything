@@ -83,6 +83,7 @@ const DECLARATIVE_LEASH_FILES = [
   'scripts/lib/__tests__/check-standards.conformance.test.mjs', // #2769 — its conformance bridge
   'scripts/lib/review-runner-core.mjs',       // #2830 — the forced-SHADOW zero-mutation guarantee (leash `spec` pending a #2840-trigger-2 ruling)
   'scripts/review-runner.mjs',                // #2830 — the `--enforce` refusal, the other half of that guarantee
+  'scripts/lib/review-independence.mjs', // #2844/#3045 — WHO may clear a verdict; no conformance backstop
 ];
 const DERIVATION_CODE_FILES = [
   'scripts/lib/review-escalation.mjs',        // the escalation rubric — derives the gate from the contract
