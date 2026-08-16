@@ -1,4 +1,5 @@
 ---
+bornAs: xzewkfa
 kind: story
 size: 5
 parent: "1650"
@@ -34,10 +35,10 @@ shape as `we:scripts/autofix/engine.mjs`, so the later slices can inject it with
 
 **Consumers (both are the two *other* slices of this epic — checked, not assumed, by reading their
 scaffolded bodies before this was written):**
-- Slice 2 — [#xv0j8db](/backlog/xv0j8db-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/)
+- Slice 2 — [#3140](/backlog/3140-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/)
   imports `SafeEditBuffer`'s `read`/`write`/`revert` to inject as the `read`/`write` callbacks of
   `we:scripts/autofix/engine.mjs`'s `autofix()`.
-- Slice 3 — [#x00bvy0](/backlog/x00bvy0-safe-edit-sandbox-discard-or-emit-pr-orchestration/) imports
+- Slice 3 — [#3141](/backlog/3141-safe-edit-sandbox-discard-or-emit-pr-orchestration/) imports
   `SafeEditBuffer.revert()` for "discard" and reads the buffer's current content for "emit".
 - **No subprocess/CLI consumer** — this is a browser-runtime module (imported by the dev-browser panel
   UI, not shelled), so the "check subprocess callers too" rule (story-preparation-checklist item 1)
@@ -76,7 +77,7 @@ decision ratified "session-only, single pending state," not a multi-step history
   slice has no reason to take on.
 
 > **Review fix (2026-08-15, PR #1355, round 7) — structural, not another point-patch.** Rounds 4 and 6
-> both found the same shape of bug one level up the call chain (`x00bvy0`'s `emitEdit()` trusting a value
+> both found the same shape of bug one level up the call chain (`3141`'s `emitEdit()` trusting a value
 > it captured before an `await` instead of the true current state) and fixed it by narrowing what gets
 > captured — round 4 pinned the *content*, round 6's bounce showed that still isn't enough because
 > `discardEdit()` (`buffer.revert()`) can delete the whole entry out from under an in-flight `emitEdit()`
@@ -103,10 +104,10 @@ decision ratified "session-only, single pending state," not a multi-step history
 >   cleanly separate from "has the *engine* touched the content as part of gating it" (write), which is
 >   exactly the same `read`-vs-`verify` separation round 1's fix already established for a different pair of
 >   concerns.
-> - This closes `x00bvy0`'s BLOCKER structurally: `emitEdit()` can now capture a `{ content, token }` pair
+> - This closes `3141`'s BLOCKER structurally: `emitEdit()` can now capture a `{ content, token }` pair
 >   once, do all its `await`ing, and then ask the buffer a factual question — "is `token` still current for
 >   `key`?" — synchronously, right before each irrevocable step, rather than trusting that nothing happened
->   in between. See `x00bvy0`'s round-7 fix for how the token is consumed.
+>   in between. See `3141`'s round-7 fix for how the token is consumed.
 
 ## Interfaces and protocol
 

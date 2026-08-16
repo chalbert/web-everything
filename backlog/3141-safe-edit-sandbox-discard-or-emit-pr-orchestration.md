@@ -1,10 +1,11 @@
 ---
+bornAs: x00bvy0
 kind: story
 size: 3
 parent: "1650"
 status: open
 locus: plateau-app
-blockedBy: ["xzewkfa", "xv0j8db"]
+blockedBy: ["3139", "3140"]
 scope:
   - plateau-app:packages/dev-browser/src/safe-edit/emit.ts
   - plateau-app:packages/dev-browser/src/safe-edit/emit.test.ts
@@ -15,8 +16,8 @@ tags: [dev-browser, safe-edit, sandbox, epic-1650]
 # Safe-edit sandbox: discard-or-emit-PR orchestration
 
 Slice 3 of 3 under epic [#1650](/backlog/1650-safe-edit-sandbox-emitting-a-pr/). Blocked on both prior
-slices — [#xzewkfa](/backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/) (the
-buffer) and [#xv0j8db](/backlog/xv0j8db-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/) (the
+slices — [#3139](/backlog/3139-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/) (the
+buffer) and [#3140](/backlog/3140-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/) (the
 gate). Takes a verify-gate-passed edit and wires it to the **already-shipped** dev-browser
 ide-bridge/forge/pr-body/credential-source packages: **discard** reverts the buffer, **emit** writes the
 real file, opens a branch + PR with a rendered conformance-evidence body. This slice is almost entirely
@@ -73,7 +74,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > never called `runVerifyGate()` itself. The prose said "this function re-checks rather than trusting the
   > caller," but the actual `Interfaces` block just re-read a value the caller computed and handed in, with
   > no independent verification. That is the identical failure mode rounds 1 and 2 already had to fix
-  > inside `xv0j8db` (a failing edit reported/treated as passing), just relocated to this sibling card: if a
+  > inside `3140` (a failing edit reported/treated as passing), just relocated to this sibling card: if a
   > future implementer builds this exactly to spec and the caller's `gatePassed` is ever stale, cached, or
   > wrong (a race, a bug, a bypassed UI check), `emitEdit()` writes the real file and opens a real PR for
   > content that never actually passed the declared-rules gate. Fixed by having `emitEdit()` call
@@ -84,7 +85,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > (`gatePassed`) but left a *content* channel open: step 2 below still wrote the caller-supplied
   > `opts.edit.after` snapshot, not `buffer.get(key)?.after` — the buffer's live content that
   > `runVerifyGate()` (step 1) had just gated. Nothing tied the verify call's subject to the write call's
-  > subject; they were two independently-sourced reads that merely happened to usually agree. `xzewkfa`'s
+  > subject; they were two independently-sourced reads that merely happened to usually agree. `3139`'s
   > buffer is a plain, unlocked, in-memory `Map` (see its "Decided design" — no lock is described anywhere
   > in the sandbox), and this is a **local, single-user, live-editing** tool: the same user can keep typing
   > (re-`propose()`-ing to the same key) while `emitEdit()`'s several awaited steps (`runVerifyGate()`, the
@@ -98,7 +99,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > `opts.edit.after` for the write.** Concretely, `emitEdit()`'s first statement (synchronous, before any
   > `await`) is `const content = buffer.get(key)?.after;`. This same `content` local is what step 1 passes
   > to `runVerifyGate()` (via `edit: { ...opts.edit, after: content }`, so the gate's own `verify` callback —
-  > which, per `xv0j8db`'s corrected design, reads `buffer.get(key)?.after` live on its first call,
+  > which, per `3140`'s corrected design, reads `buffer.get(key)?.after` live on its first call,
   > essentially synchronously after this capture with no intervening `await` in between — is checking this
   > exact value) and what step 2 passes to `IdeBridgeRegistry.patch({ contents: content })`. `opts.edit.after`
   > (the argument the caller originally passed in, possibly captured well before `emitEdit()` was even
@@ -116,7 +117,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > was gated is an *external* mutation racing the async window, and capturing once + never re-reading is
   > exactly what makes that impossible for an already-in-flight emit (a concurrent edit isn't picked up
   > until the *next* propose/emit cycle — correct, since it wasn't gated yet). **(PR #1355 round 9 — see
-  > `xv0j8db`'s round-9 review-fix callout for the authoritative, cross-linked statement of exactly when the
+  > `3140`'s round-9 review-fix callout for the authoritative, cross-linked statement of exactly when the
   > engine's loop does and does not invoke a fixer or call `write()`, reconciling this paragraph with that
   > card's own `write` bullet; this paragraph now cites that section rather than independently restating the
   > engine's internals, per the round-8 finding that the two cards' independent restatements had drifted
@@ -137,7 +138,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > is structural: nothing `emitEdit()` captures lets it later ask "is this still the live edit?" — `content`
   > is just a string, indistinguishable from a coincidentally-identical string proposed fresh after a revert.
   >
-  > **Fixed by consuming `xzewkfa`'s new generation token (see that card's round-7 fix) instead of adding
+  > **Fixed by consuming `3139`'s new generation token (see that card's round-7 fix) instead of adding
   > another re-read.** `emitEdit()`'s step 0 now captures `{ after: content, token }` together, atomically,
   > via `buffer.snapshot(key)` — still exactly one buffer read, still the function's first statement, still
   > before any `await` — and then re-validates that token, synchronously, immediately before each of the two
@@ -151,7 +152,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > **Two checkpoints, not one, because there are two irrevocable actions:**
   > - **Checkpoint A** — after `runVerifyGate()` resolves `{ ok: true }`, before `IdeBridgeRegistry.patch()`.
   >   Closes the exact repro in the BLOCKER finding: discard lands during the gate's own (now-confirmed-async,
-  >   see `xv0j8db`'s round-7 fix) verify work, and the write never happens.
+  >   see `3140`'s round-7 fix) verify work, and the write never happens.
   > - **Checkpoint B** — after the ide-bridge patch succeeds, before the forge PR-open. **(Round 8 found this
   >   round's original placement — before the credential-resolution call that step 3 also bundled — was not
   >   actually immediately before the PR-open; fixed round 9 by moving checkpoint B to after credential
@@ -174,7 +175,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > *re-propose* on the same key during an in-flight emit.** Round 4 chose to ignore a concurrent re-propose
   > and proceed with the originally-captured content, reasoning "a concurrent edit isn't picked up until the
   > next propose/emit cycle." A re-propose bumps the same generation token a revert invalidates (see
-  > `xzewkfa`'s round-7 fix — both are "the key's identity changed" from the token's point of view, by
+  > `3139`'s round-7 fix — both are "the key's identity changed" from the token's point of view, by
   > design, since distinguishing "reverted" from "re-proposed with different content" would need the buffer
   > to track *why* a generation changed, not just *that* it did, for no real benefit here), so under this
   > round's mechanism the two cases are structurally identical and **both now abort** with `{ ok: false,
@@ -243,10 +244,10 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > has no revoke path (disclosed, not fixed).** See the new "Disclosed residual" bullet below, just above
   > "Emit, in order," for the disclosed residual this callout names.
 
-  > **Review fix (2026-08-15, PR #1355, round 11) — BLOCKER, fixed in `xv0j8db`, threaded through here.** A
+  > **Review fix (2026-08-15, PR #1355, round 11) — BLOCKER, fixed in `3140`, threaded through here.** A
   > concurrent `discardEdit()` landing while `runVerifyGate()`'s own internal engine loop is mid-fail-branch
-  > used to reach `SafeEditBuffer.write(key, undefined)` and throw uncaught (see `xv0j8db`'s round-11
-  > callout for the full trace — `we:scripts/autofix/engine.mjs` lines 291-330). `xv0j8db` fixes this at the
+  > used to reach `SafeEditBuffer.write(key, undefined)` and throw uncaught (see `3140`'s round-11
+  > callout for the full trace — `we:scripts/autofix/engine.mjs` lines 291-330). `3140` fixes this at the
   > source and reports it back via a new `VerifyGateResult.aborted?: 'edit-vanished'` field. `emitEdit()`'s
   > step 1 (below) now checks that field FIRST, before its ordinary `ok`-branch: `aborted === 'edit-vanished'`
   > maps to `{ ok: false, reason: 'stale-edit' }`, never `'not-gate-passed'` — the edit was withdrawn out
@@ -262,7 +263,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > already deleted the entry), or any caller invoking `emitEdit()` on a `key` that was never `propose()`d.
   > Step 0's `buffer.snapshot(key) ?? {}` defensively avoids a destructuring crash on this input — `content`
   > and `token` both come out `undefined` — but nothing stopped step 1 from then unconditionally calling
-  > `runVerifyGate()` with that `undefined` content. Per `xv0j8db`'s own stated contract ("throws only on a
+  > `runVerifyGate()` with that `undefined` content. Per `3140`'s own stated contract ("throws only on a
   > programming error, e.g. `edit.target.key` has no entry in `buffer`"), `runVerifyGate()` throws
   > synchronously, at entry, for exactly this input — by design, as a genuine-caller-bug signal for call
   > sites that are supposed to already know a pending edit exists. `emitEdit()` is not such a call site: its
@@ -270,7 +271,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > straight into a function documented to throw on one contradicts `emitEdit()`'s own guarantee. No test in
   > Task 2's list constructed this input, so nothing caught it.
   >
-  > **Fixed on the `emitEdit()` side, not by weakening `runVerifyGate()`'s contract.** `xv0j8db`'s at-entry
+  > **Fixed on the `emitEdit()` side, not by weakening `runVerifyGate()`'s contract.** `3140`'s at-entry
   > throw is a deliberate, already-reviewed design choice (see that card's round-11 callout, "why this
   > doesn't need to touch the at-entry programmer-error throw") — it is what lets every OTHER caller of
   > `runVerifyGate()` rely on a hard invariant ("never called on an absent key") without a defensive check of
@@ -285,11 +286,11 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > `emitEdit()` call to act on — so this is a **fourth** trigger point for the same existing reason,
   > alongside checkpoints A, B, and the round-11 `aborted: 'edit-vanished'` mapping, not a fifth failure mode.
   > This is deliberately NOT unified with the round-11 mid-run fix into one mechanism: round 11's fix lives
-  > inside `xv0j8db`'s `runVerifyGate()` (the entry vanishes partway through *its* internal loop, which only
-  > it can observe), while this fix lives in `x00bvy0`'s `emitEdit()`, strictly before `runVerifyGate()` is
+  > inside `3140`'s `runVerifyGate()` (the entry vanishes partway through *its* internal loop, which only
+  > it can observe), while this fix lives in `3141`'s `emitEdit()`, strictly before `runVerifyGate()` is
   > ever invoked (the entry is already gone before the call even starts, which `emitEdit()` itself can and
   > must observe at its own step 0). The two guard genuinely disjoint windows — "absent at entry" vs.
-  > "vanishes mid-loop" — the same way `xv0j8db`'s own round-11 callout distinguishes its at-entry throw from
+  > "vanishes mid-loop" — the same way `3140`'s own round-11 callout distinguishes its at-entry throw from
   > its mid-loop degrade.
 
 - **Disclosed residual (PR #1355, round 10) — a resolved-but-discarded credential is left to expire, not
@@ -324,7 +325,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      `buffer.snapshot(key)` returned `undefined` outright: nothing was pending for `key` at all when
      `emitEdit()` was invoked (a stray double-click on "emit" immediately after "discard" already resolved,
      or any caller invoking `emitEdit()` on a key that was never `propose()`d). Without this check, step 1
-     would call `runVerifyGate()` with `content: undefined`, which `xv0j8db`'s own contract documents as a
+     would call `runVerifyGate()` with `content: undefined`, which `3140`'s own contract documents as a
      synchronous, at-entry throw (a deliberate genuine-caller-bug signal for call sites that are supposed to
      already know a pending edit exists) — uncaught here, that throw would escape `emitEdit()` as a bare
      exception, violating this function's own "never a bare thrown exception" contract (Done-when #5). See
@@ -362,7 +363,7 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      before checkpoint B, not "any time before the manifest is assembled").** Build the manifest from
      `edit.before` and the captured `content`: `before.passed` computed by `await
      checkContentAgainstVectors({ ruleKind: edit.target.ruleKind, appId, content: edit.before, registry,
-     index })` (the helper `xv0j8db` exports, PR #1355 round 7 — the same check the gate itself runs,
+     index })` (the helper `3140` exports, PR #1355 round 7 — the same check the gate itself runs,
      applied to the pre-edit baseline instead of the proposed content), setting `before.passed = result.length
      === 0`; `after.passed: true` since emit only runs post-gate, and `after`'s content is `content`, the
      same captured value that was gated and written — not `opts.edit.after`; the `autonomy: 'open-pr'` level
@@ -459,7 +460,7 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
  * token)` and aborts with `{ ok: false, reason: 'stale-edit' }` if the buffer's pending edit for `key` was
  * reverted OR re-proposed since the snapshot was taken (PR #1355 round 7 — closes the BLOCKER where a
  * `discardEdit()` landing while this function's `await`s are still in flight left the write and the
- * PR-open to proceed anyway; see `xzewkfa`'s generation-token addition and this card's round-7 callout for
+ * PR-open to proceed anyway; see `3139`'s generation-token addition and this card's round-7 callout for
  * the full mechanism and its one disclosed residual limitation).
  */
 export async function emitEdit(opts: {
@@ -551,7 +552,7 @@ export async function emitEdit(opts: {
      immediately before step 4) rather than the two racing arbitrarily.
    - **The vanished-edit mapping case (new, round 11):** a fake `runVerifyGate` that resolves to `{ ok:
      false, findings: [...], aborted: 'edit-vanished' }` (standing in for a concurrent `discardEdit()` having
-     raced `runVerifyGate()`'s own internal engine loop — the scenario `xv0j8db`'s own Task 4c exercises
+     raced `runVerifyGate()`'s own internal engine loop — the scenario `3140`'s own Task 4c exercises
      against the real engine). Assert `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }`, NOT `{ ok:
      false, reason: 'not-gate-passed' }`, and that zero downstream calls (ide-bridge/forge/credential-source)
      happened — proving `emitEdit()` checks `aborted` before falling through to the ordinary
@@ -616,12 +617,12 @@ export async function emitEdit(opts: {
   immediately after it with nothing else awaited in between, per the round-11 fix to the numbered steps
   above — a design that left manifest assembly "any time before the manifest is assembled" could let this
   land after checkpoint B and still reach `openPullRequest()`.
-- **(PR #1355 round 11, finding 1 — closes the BLOCKER `xv0j8db`'s own internal engine loop could otherwise
+- **(PR #1355 round 11, finding 1 — closes the BLOCKER `3140`'s own internal engine loop could otherwise
   throw uncaught) `emitEdit()` returns `{ ok: false, reason: 'stale-edit' }`, never `'not-gate-passed'` and
   never a rejected promise, whenever `runVerifyGate()` reports `aborted: 'edit-vanished'`** — the
   vanished-edit mapping test asserts this against a fake `runVerifyGate()` returning that shape, with zero
   downstream calls; the real end-to-end trigger (a `discardEdit()` racing the gate's own internal engine
-  loop) is exercised directly against the real engine by `xv0j8db`'s own Task 4c, so this card's test covers
+  loop) is exercised directly against the real engine by `3140`'s own Task 4c, so this card's test covers
   the mapping, not a re-simulation of the internal race.
 - **(PR #1355 round 13, finding 1 — the BLOCKER) `emitEdit()` never throws, and never calls
   `runVerifyGate()`, when the buffer has no pending edit for `key` at all at call time** — distinct from
@@ -630,11 +631,11 @@ export async function emitEdit(opts: {
   immediately after "discard" already resolved). The absent-at-entry test asserts `emitEdit()` resolves
   normally (not a rejected promise) to exactly `{ ok: false, reason: 'stale-edit' }`, with zero calls to
   `runVerifyGate()` or any of the four downstream registries — proving the new step 0a check stops the call
-  before `runVerifyGate()`'s own at-entry throw contract (per `xv0j8db`) is ever reached, rather than relying
+  before `runVerifyGate()`'s own at-entry throw contract (per `3140`) is ever reached, rather than relying
   on that throw propagating out uncaught.
 - **(PR #1355 round 7, finding 3 — the cosmetic spec-completeness gap) The
   `ConformanceEvidenceManifest`'s `before.passed` field is actually computed, not left for an implementer to
-  guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `xv0j8db`'s
+  guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `3140`'s
   `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`) against `edit.before` and sets
   `before.passed` to whether that check returned zero findings, asserted by a test that seeds a fixture
   where `edit.before` itself would fail the gate and confirms the assembled manifest's `before.passed` is

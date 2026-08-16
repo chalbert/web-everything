@@ -1,10 +1,11 @@
 ---
+bornAs: xv0j8db
 kind: story
 size: 5
 parent: "1650"
 status: open
 locus: plateau-app
-blockedBy: ["xzewkfa"]
+blockedBy: ["3139"]
 scope:
   - plateau-app:tsconfig.json
   - plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts
@@ -16,7 +17,7 @@ tags: [dev-browser, safe-edit, sandbox, epic-1650, autofix]
 # Safe-edit sandbox: verify-gate wiring over declared rules
 
 Slice 2 of 3 under epic [#1650](/backlog/1650-safe-edit-sandbox-emitting-a-pr/). Blocked on Slice 1 —
-[#xzewkfa](/backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/) — for the
+[#3139](/backlog/3139-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/) — for the
 `SafeEditBuffer` this wraps. Reuses `we:scripts/autofix/engine.mjs`'s pure, already-shipped
 propose->apply->verify->accept/revert loop (backlog #095, resolved) **directly, by cross-repo import**,
 against a live app instead of `check:standards`: a new `verify` callback runs the app's own
@@ -38,7 +39,7 @@ content, so a proposed edit is gated by the app's own declared rules before Slic
   fixture app registered in the declared-rules registry so the gate has something real to check against.
 
 **Consumers:**
-- Slice 3 — [#x00bvy0](/backlog/x00bvy0-safe-edit-sandbox-discard-or-emit-pr-orchestration/) calls
+- Slice 3 — [#3141](/backlog/3141-safe-edit-sandbox-discard-or-emit-pr-orchestration/) calls
   `runVerifyGate()` and only offers "emit" once its result reports the edit `applied` (gate-passed), never
   on a `gaveUp`/`skipped` result.
 - **No other consumer exists yet** — same reasoning as Slice 1: the directory is new, nothing shells it,
@@ -187,7 +188,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    checkContentAgainstVectors({ ruleKind, appId, content, registry, index });` — i.e. the buffer read is
 >    textually the callback's first statement and nothing before it can await, because nothing precedes it.
 >    (`checkContentAgainstVectors` is a new exported helper — see the Interfaces block below — factoring the
->    oracle call out of the closure so `x00bvy0` can reuse the same check for its `before.passed` field
+>    oracle call out of the closure so `3141` can reuse the same check for its `before.passed` field
 >    without going through the whole `autofix()` loop; see that card's round-7 fix.)
 > 2. **With a regression test that fails if a future implementation violates the invariant, not just one
 >    that happens to pass under the current single-threaded implementation.** The test fakes
@@ -214,23 +215,23 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >   4b does not).
 
 > **Review fix (2026-08-15, PR #1355, round 9) — the authoritative statement of what the real engine does on
-> a pass, reconciling this card's `write` bullet below with `x00bvy0`'s round-4 safety argument.** Round 8
+> a pass, reconciling this card's `write` bullet below with `3141`'s round-4 safety argument.** Round 8
 > found the two cards making what read as directly opposed claims about `we:scripts/autofix/engine.mjs`'s
 > pass-path behavior: this card's `write` bullet below says "on the pass path this writes `edit.after` back
-> over itself"; `x00bvy0`'s round-4 paragraph says the engine's loop "exits at its very first `verify()` call
+> over itself"; `3141`'s round-4 paragraph says the engine's loop "exits at its very first `verify()` call
 > with no fixer ever invoked" on a pass. **Both were independently-restated claims about the same external
-> symbol — this section is now the single authoritative statement; `x00bvy0`'s round-4 paragraph has been
+> symbol — this section is now the single authoritative statement; `3141`'s round-4 paragraph has been
 > edited to cite it rather than restate it (see that card).**
 >
 > Traced directly against the real, in-repo `we:scripts/autofix/engine.mjs` (lines 291–298 of `autofix()`):
 > every round starts with `const before = await verify();` immediately followed by `if (before.ok) break;`
 > — this check runs **before** the loop resolves a target, resolves a fixer, or calls `write()` at all. So
 > **the two claims describe two different, non-overlapping cases, not a contradiction**:
-> 1. **`x00bvy0` describes the case where `verify()`'s very first call, within a given `runVerifyGate()`
+> 1. **`3141` describes the case where `verify()`'s very first call, within a given `runVerifyGate()`
 >    invocation, already reports `{ ok: true }`** — i.e. the live buffer content already satisfies its
 >    linked vectors the moment the gate is asked to check it. In this case the loop breaks at line 294
 >    immediately: no target is picked, `registry.resolve()` is never called, the single-purpose fixer's
->    `fix()` is never invoked, and `write()` is never called. `x00bvy0`'s claim is correct, exactly as
+>    `fix()` is never invoked, and `write()` is never called. `3141`'s claim is correct, exactly as
 >    stated, for this case.
 > 2. **This card's `write` bullet describes the case where `verify()`'s first call reports `{ ok: false }`**
 >    (the synthetic `pending:${key}` `Failure` fires because the live content currently violates a linked
@@ -247,7 +248,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > If so: in case 2 above, `write()` lands whatever the fixer returns, and if that's a **stale**, earlier-
 > captured value rather than the buffer's *current* live content, it can silently overwrite a fresher write
 > that landed on the same key between the fixer's capture and this `write()` call — `isCurrent()` at
-> checkpoint A (in `x00bvy0`) only aborts `emitEdit()` itself; it does nothing to protect this internal
+> checkpoint A (in `3141`) only aborts `emitEdit()` itself; it does nothing to protect this internal
 > engine-driven write from using stale data. **Fixed by making the single-purpose fixer's `fix()` read the
 > buffer's CURRENT, live content fresh — synchronously, at `fix()`-call time — never a value captured
 > earlier.** See the corrected fixer bullet below. With that fix, whatever `write()` echoes back is always
@@ -271,13 +272,13 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > buffer entry is already gone. Previously specified, the fixer's fresh read returns `undefined`, and the
 > fixer returned `{ file: patch.file, newContent: undefined, summary: ... }` — a well-formed-looking
 > `Patch` object whose `newContent` is `undefined` — so the engine proceeded to `write(patch.file,
-> patch.newContent)` (line 330), i.e. `SafeEditBuffer.write(key, undefined)`, which hits `xzewkfa`'s own
+> patch.newContent)` (line 330), i.e. `SafeEditBuffer.write(key, undefined)`, which hits `3139`'s own
 > documented contract
-> (`we:backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer.md:192`, Interfaces block:
+> (`we:backlog/3139-safe-edit-sandbox-live-edit-propose-apply-revert-buffer.md:192`, Interfaces block:
 > "Throws if no edit is pending for `key`") — because `revert()` already deleted the entry, this is
 > indistinguishable, from `SafeEditBuffer`'s point of view, from a genuine caller bug. The throw is not
 > caught anywhere in this design — it propagates out of `autofix()`, out of `runVerifyGate()`,
-> and out of `emitEdit()`'s `await runVerifyGate(...)` call as a bare exception, contradicting `x00bvy0`'s
+> and out of `emitEdit()`'s `await runVerifyGate(...)` call as a bare exception, contradicting `3141`'s
 > own "never a bare thrown exception" contract (Done-when, step 5).
 >
 > **Fixed at both of the two places a vanished entry can be observed mid-loop, not just the one that
@@ -300,7 +301,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    different uncaught-exception path) or silently misreport. Fixed: immediately after that first-statement
 >    capture, `verify` checks `content === undefined` and, if so, returns `{ ok: true, failures: [] }`
 >    synchronously WITHOUT calling `checkContentAgainstVectors()` at all — a "nothing left to verify" degrade,
->    not a crash, matching the same "missing → clear degrade, never throw" convention `xzewkfa`'s own
+>    not a crash, matching the same "missing → clear degrade, never throw" convention `3139`'s own
 >    `read`/`get`/`token`/`isCurrent` methods already use for every case except `write`'s deliberate
 >    programmer-error throw.
 > 3. **Both sites latch a new closure flag, `editVanished`, on whichever of the two first observes the
@@ -309,7 +310,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 >    back to the `settledFindings`-derived result: if `editVanished` is `true`, it returns `{ ok: false,
 >    findings: settledFindings, aborted: 'edit-vanished' }` — a new, optional field on `VerifyGateResult`
 >    (see Interfaces below) — instead of a plain `{ ok, findings }`. `emitEdit()` maps this to its own typed
->    `stale-edit` reason (see `x00bvy0`'s corrected step 1) rather than the generic `not-gate-passed` a bare
+>    `stale-edit` reason (see `3141`'s corrected step 1) rather than the generic `not-gate-passed` a bare
 >    `settledFindings`-derived `ok: false` would otherwise produce — distinguishing "the edit was discarded
 >    out from under the gate" from "the edit's content genuinely failed the gate," which `settledFindings`
 >    alone cannot: call 1's findings are real and correctly captured either way.
@@ -326,7 +327,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
 > returns `null` (no write at all) and `verify`'s degrade short-circuits before any write is even reachable
 > from that round. The buffer's stored state for `key` is exactly what `revert()` already left it as (no
 > entry) — untouched by this fix — so a subsequent `propose()` on the same key allocates fresh off
-> `xzewkfa`'s permanent per-key "last generation issued" counter exactly as it would after any other
+> `3139`'s permanent per-key "last generation issued" counter exactly as it would after any other
 > `revert()`, with nothing left over from the aborted gate run to clean up. (A narrower variant — a
 > re-`propose()` on the same key landing, instead of nothing, in the same window the discard could have
 > landed in — is not "vanished": `buffer.get(key)?.after` reads the *new* proposal's content, not
@@ -404,7 +405,7 @@ in plateau-app would duplicate a loop that already exists and is already tested 
   - `write` = `SafeEditBuffer.write(key, content)` — the real, mutable side effect, unchanged from the
     original design. **(See the round-9 callout above for the authoritative statement of when this fires at
     all.)** On a round whose first `verify()` call already reports `{ ok: true }`, `write()` is never called
-    — nothing writes anything (this is `x00bvy0`'s round-4 case). On a round whose first `verify()` call
+    — nothing writes anything (this is `3141`'s round-4 case). On a round whose first `verify()` call
     reports `{ ok: false }`, the engine calls the fixer and `write()`s its (now always freshly-read, per the
     fixer bullet above) content back — a no-op in content terms since the fixer just re-read what's already
     there — and if that round's re-verify then reports clean, the accept branch keeps it (`write` "on the
@@ -476,7 +477,7 @@ export interface VerifyGateResult {
 /**
  * Run the app's declared-rules linkage + `ConformanceVectorOracle` check against one piece of already-
  * captured content — factored out of `verify`'s closure (PR #1355 round 7) so it (a) is the one place the
- * synchronous-read-then-async-check ordering has to be gotten right, and (b) is reusable by `x00bvy0`'s
+ * synchronous-read-then-async-check ordering has to be gotten right, and (b) is reusable by `3141`'s
  * `emitEdit()` to compute its `ConformanceEvidenceManifest.before.passed` field against `edit.before`
  * without engaging the whole `autofix()` loop for a value the loop itself never touches. Pure with respect
  * to the buffer — it takes `content` as a plain string, never reads the buffer itself, so it carries no

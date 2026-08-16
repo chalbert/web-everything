@@ -17,9 +17,9 @@ tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-meri
 
 > **Umbrella (2026-08-15) — converted `story` (size 13) → `epic`, sliced into 3 children.** Prepared per `we:agent-memory-src/story-preparation-checklist.md`: size 13 is a should-split candidate (the checklist's own rule — "> 8 is not a size, it is an instruction to slice"), and a live-code audit of `plateau-app:packages/dev-browser/` found most of the supporting infrastructure this card originally scoped for **already shipped** since it was opened (element-resolver #1690, ide-bridge #576/#577, forge #598, pr-body #601, credential-source #600, declared-rules registry #1689 — all `status: resolved`, verified by opening each package, not assumed from title). The **remaining, genuinely new** work is exactly what the three slices below cover — the original size-13 estimate re-derives as 5+5+3=13 across them, so this is a real decomposition, not a shrink-to-dodge-the-scan.
 >
-> - **Slice 1 — [#xzewkfa](/backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/)** (size 5): the in-memory propose/apply/revert buffer for one declared-form edit. No dependency — foundational.
-> - **Slice 2 — [#xv0j8db](/backlog/xv0j8db-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/)** (size 5, blocked by Slice 1): reuses `we:scripts/autofix/engine.mjs`'s pure `autofix()` loop **directly, by a new cross-repo tsconfig alias**, with a `verify` callback over the app's declared-rules registry + `ConformanceVectorOracle`, so a proposed edit is gated by the app's own declared rules.
-> - **Slice 3 — [#x00bvy0](/backlog/x00bvy0-safe-edit-sandbox-discard-or-emit-pr-orchestration/)** (size 3, blocked by Slices 1 and 2): wires a gate-passed edit to the already-shipped ide-bridge/forge/pr-body/credential-source packages — discard reverts, emit writes the file + opens the PR.
+> - **Slice 1 — [#3139](/backlog/3139-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/)** (size 5): the in-memory propose/apply/revert buffer for one declared-form edit. No dependency — foundational.
+> - **Slice 2 — [#3140](/backlog/3140-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/)** (size 5, blocked by Slice 1): reuses `we:scripts/autofix/engine.mjs`'s pure `autofix()` loop **directly, by a new cross-repo tsconfig alias**, with a `verify` callback over the app's declared-rules registry + `ConformanceVectorOracle`, so a proposed edit is gated by the app's own declared rules.
+> - **Slice 3 — [#3141](/backlog/3141-safe-edit-sandbox-discard-or-emit-pr-orchestration/)** (size 3, blocked by Slices 1 and 2): wires a gate-passed edit to the already-shipped ide-bridge/forge/pr-body/credential-source packages — discard reverts, emit writes the file + opens the PR.
 >
 > The three form a linear DAG (`1 → 2 → 3`), the split rubric's disfavored shape *unless* incremental delivery is genuinely valuable — it is here: each slice ships an independently testable, demoable capability (a working propose/revert buffer; then a working live conformance gate over a proposed edit; then a working discard-or-PR action), not a half-built registry with no consumer. **Out of scope for all three, named so it isn't silently assumed:** no dev-browser panel/UI exists yet to mount these behind clickable affordances — that is separate, unfiled work; these three slices ship the underlying *mechanism* library, not the panel.
 >
@@ -28,9 +28,9 @@ tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-meri
 > but none of the three slices ever applies the buffer's proposed content to a *running* instance (the
 > buffer is fs/DOM-free, the gate only checks conformance, emit only writes the real file post-gate). That
 > live-preview capability is real, separate, unscoped work, tracked at
-> [#x1l80ae](/backlog/x1l80ae-safe-edit-sandbox-live-preview-against-a-running-instance/) rather than left
+> [#3138](/backlog/3138-safe-edit-sandbox-live-preview-against-a-running-instance/) rather than left
 > implicit. **This epic resolving (once all 3 slices land) ships the propose→gate→emit mechanism, not
-> live preview** — don't read epic-resolved as "the full Digest shipped" without checking x1l80ae too.
+> live preview** — don't read epic-resolved as "the full Digest shipped" without checking 3138 too.
 
 ## Digest
 

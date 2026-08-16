@@ -62,7 +62,7 @@ item accounted for.
 
 ## Sibling-decision check — no duplicate exists (this prep's first task)
 
-`grep -rl xyjz84p backlog/` finds only this file's own frontmatter (`bornAs: xyjz84p`) — `xyjz84p` **is** this
+`grep -rl 3136 backlog/` finds only this file's own frontmatter (`bornAs: 3136`) — `3136` **is** this
 item's pre-JIT-numbering birth id, not a separate sibling. See #3132's own "Sibling-decision check" section
 (`we:backlog/3132-decide-the-section-registrys-shared-row-dom-contract-before-.md`) for the full trace of how
 that card, prepared the same day, initially misread this relationship and corrected it. No fully-duplicate
