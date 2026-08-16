@@ -94,7 +94,12 @@ This is additive to the existing four-spelling `.claude/skills|agent-memory` anc
 const DOCS_AGENT_ROUTER_PATHS = [
   /^AGENTS\.md$/,
   /^CLAUDE\.md$/,
-  /^docs\/agent\/index-[a-z-]+\.md$/,   // the Tier-1 sub-indexes AGENTS.md's own table links into (index-arch.md, index-std.md, …)
+  // the Tier-1 docs AGENTS.md's own "Where to look" table links into today (verified against
+  // we:AGENTS.md:49-67) — enumerated by name, not by a naming convention, because docs/agent/
+  // carries no shared prefix; block-standard.md, memory-management.md and
+  // plugs-testing-strategy.md are deliberately excluded — they exist under docs/agent/ but are
+  // not linked from the router table.
+  /^docs\/agent\/(platform-decisions|conventions|testing|architecture|design-first|research-workflow|backlog-workflow|delivery-loop|demo-workflow|build-ui|jury-refinement-method|exercise-app-workflow|reference-retirement|skill-authoring|vision-tiers)\.md$/,
 ];
 ```
 
