@@ -87,6 +87,7 @@ import {
   growOnlyRoster,
   floorGrowOnlyJurors,
   absentMandatoryLenses,
+  isDiffBasisDegraded,
 } from '../review-core.mjs';
 import { DECISION_PROSE_ADAPTER } from '../decision-prose-adapter.mjs';
 import { validateSubjectAdapter, resolveAdapterRoster, IMPACT_LEVELS } from '../jury-core.mjs';
@@ -723,6 +724,39 @@ describe('buildPanelMandate (#2310)', () => {
       const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
       expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
       expect(text).toContain(MUTATION_PROBE_RULE);
+    });
+  });
+
+  // ── #2914 — diffBasis disclosure: tell the juror when it is holding the degraded three-dot diff ───────────
+  describe('#2914 — diffBasis disclosure', () => {
+    it('a degraded diffBasis (three-dot) adds an explicit DEGRADED disclosure', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, diffBasis: 'three-dot' });
+      expect(text).toContain('DIFF BASIS: DEGRADED (three-dot)');
+      expect(text).toMatch(/SIBLING lane already landed on main/);
+      expect(text).toMatch(/scope creep/);
+    });
+
+    it('any non-"net" diffBasis (an invented value) also triggers the disclosure — fail-closed', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, diffBasis: 'made-up' });
+      expect(text).toContain('DIFF BASIS: DEGRADED');
+    });
+
+    it('diffBasis: "net" adds NO disclosure', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, diffBasis: 'net' });
+      expect(text).not.toContain('DIFF BASIS: DEGRADED');
+    });
+
+    it('omitting diffBasis is byte-identical to the current output (no disclosure, no regression)', () => {
+      const withoutParam = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+      expect(withoutParam).not.toContain('DIFF BASIS');
+      // The MUST-NOT-BREAK constraint: a null/undefined diffBasis is ALSO !== 'net' (degraded per
+      // isDiffBasisDegraded), but the guard is `diffBasis && isDiffBasisDegraded(diffBasis)` — truthy-AND-degraded
+      // — so an omitted/null/undefined diffBasis must never itself add the clause.
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, diffBasis: null })).toBe(withoutParam);
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, diffBasis: undefined })).toBe(withoutParam);
+      // …and the existing golden fixture assertion (line ~690) already pins this exact no-arg call — this just
+      // reasserts the invariant at this seam too.
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS })).toBe(withoutParam);
     });
   });
 });
@@ -1865,6 +1899,23 @@ describe('juror-invite loop guards — grow-only, gate-self hardening (#2640)', 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// isDiffBasisDegraded (#2914) — fail-closed: only the literal string 'net' reads as the good basis. An absent,
+// malformed, or invented value must never read as good — mirroring the field's own producer
+// (we:scripts/fetch-parked.mjs assembleParked) and the fetch prompt's own "default to three-dot" instruction.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('isDiffBasisDegraded (#2914)', () => {
+  it('is false for the literal string "net" — the only non-degraded value', () => {
+    expect(isDiffBasisDegraded('net')).toBe(false);
+  });
+
+  it('is true for every other input — omitted, empty, three-dot, or an invented value', () => {
+    for (const v of [undefined, null, '', 'three-dot', 'NET', 'Net', 'invented-basis', 0, false]) {
+      expect(isDiffBasisDegraded(v), JSON.stringify(v)).toBe(true);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SOURCE-REGRESSION — the sandbox review loop (review-parked-prs.mjs) is NOT importable (a harness body with a
 // top-level return + no exports), so its grow-only guards cannot be exercised directly. These assertions read the
 // source and prove the shrink-hole stays closed: the loop must MIRROR the tested guards, never regress to trusting
@@ -1920,6 +1971,30 @@ describe('review-parked-prs.mjs — the ledger it writes records WHICH TREE was 
 
   it('passes it to the ledger writer, and OMITS it rather than asserting a tree it does not know', () => {
     expect(src).toMatch(/\.\.\.\(headSha \? \{ reviewedSha: headSha \} : \{\}\)/);
+  });
+});
+
+// #2914 — `diffBasis` is PRODUCED (the fetch schema requires it, the fetch prompt copies it through verbatim)
+// but was never CONSUMED anywhere in this loop: the verdict never degraded on it, and no juror was ever told
+// which basis it was reading. Same source-regression technique as the #2640/#2864 blocks above, and for the same
+// reason: the harness body is a top-level-return script with no exports, so it cannot be imported and exercised
+// directly.
+describe('review-parked-prs.mjs — diffBasis is captured, degrades the verdict, and reaches the juror (source regression, #2914)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../workflows/review-parked-prs.mjs'), 'utf8');
+
+  it('captures diffBasis, fail-closed, at all three fetch sites (round 1, invite re-fetch, post-editor re-fetch)', () => {
+    expect(src).toMatch(/const basisOf = \(f\) => \(f && f\.diffBasis === 'net'\) \? 'net' : 'three-dot';/);
+    expect(src.match(/diffBasis = basisOf\(fetched\)/g) || []).toHaveLength(3);
+  });
+
+  it("the round's degrade computation includes the diffBasis condition — a degraded basis forces needs-human", () => {
+    expect(src).toMatch(/const basisDegraded = diffBasis !== 'net';/);
+    expect(src).toMatch(/const degrade = absentMandatory\.length > 0 \|\| !fetchOk \|\| basisDegraded;/);
+  });
+
+  it('the mandate CLI shell-out carries a --diffBasis flag on every panel round', () => {
+    expect(src).toMatch(/mandate --lens=\$\{lens\} --diffBasis=\$\{diffBasis\}/);
   });
 });
 
