@@ -70,3 +70,45 @@ but the scanner still reads raw diff text — a test file that ADDS a fixture li
 DATA still trips it (verified). So the underlying false-positive re-park is real; it is a nuisance (a legit
 accepted PR needs a hand-merge), NOT a reason to reopen a trust-chain hole. The nuisance waits for the
 diff-scoped fix above.
+
+## Observed again in production (PR #1366, 2026-08-15 / 2026-08-16) — [xnt5u0s](/backlog/xnt5u0s-review-human-silently-re-applied-minutes-after-a-clear-human/)
+
+This item's diagnosis is still exactly correct on live `main`, confirmed against the real GitHub timeline (`gh
+api repos/chalbert/web-everything/issues/1366/timeline`), and the loop it predicts fired twice within 26 hours:
+
+- **18:12:35Z 2026-08-15** — `review:human` applied, park comment: *"test-gaming suspected — CI-green may be
+  manufactured by tampering with tests: tests-removed: we:scripts/__tests__/citation-check.test.mjs (net 1 test
+  case(s) removed)"* — the exact `scanTestTampering` branch this item names.
+- **18:32:52Z** — human clears via `--to=clear-human` (`review:accepted` applied, `review:human` removed,
+  independent-review note recorded).
+- **18:33:52Z** — `ready-to-merge` re-applied (CI green + accepted).
+- **18:35:49Z, 2 minutes later, with NO intervening commit on this PR's own lane** — `review:human` re-applied,
+  `ready-to-merge` stripped again. **No new park comment was posted** — `postDrainReasonComment` deduped the
+  identical reason text against the 18:12:39Z comment, so the re-park is invisible on the PR itself; only the
+  label timeline shows it happened.
+- **20:18:59Z 2026-08-16 (next day)** — human clears a second time, this time noting in the clearance comment:
+  *"Re-clearing after a reconcile-pass race re-applied review:human post-clearance; original acceptance stands."*
+- **20:19:22Z** — `ready-to-merge` re-applied. **20:19:38Z, 16 seconds later** — `review:human` re-applied again,
+  `ready-to-merge` stripped again.
+
+Both re-applications land within a couple of drain passes of the clearance, with the diff unchanged both times
+— exactly the infinite park loop this item's title names ("an accepted PR trips it forever"), reproduced against
+a real gate-self-adjacent trigger (a net test-case removal), not a hypothetical.
+
+**Current code location has moved** (the file has grown since this item's 2026-07-27 filing): the
+`scanTestTampering` short-circuit now runs at
+[we:scripts/merge-ai-prs.mjs:3290-3291](scripts/merge-ai-prs.mjs) (`const gaming = scanTestTampering(...); if
+(netDiffText.scored && gaming.tampered) { ... }`), still unconditionally ahead of the `decideReviewGate` call
+further down the same loop, still with no read of `review:accepted` / `operatorClearance` anywhere in the
+branch. The sibling manifest-tamper short-circuit a few lines above it
+([we:scripts/merge-ai-prs.mjs:3256-3280](scripts/merge-ai-prs.mjs), the `tamper.tampered` branch) has the
+identical structural blind spot for the same reason and is exposed to the same loop, just gated on a different
+trigger (manifest-value drift vs. a diff-content heuristic).
+
+**Priority signal.** Of this item's two blockers, #2409 is `resolved`; #2416 and #2502 remain `open` — #2416
+predates the `--to=clear-human` ceremony (#2895) that since shipped a stronger, SHA-pinned provenance record
+(`reviewed-sha`/`reviewed-diff`/`reviewed-contribution` markers, `parseOperatorClearance`) than #2416 originally
+asked for, so it may already be substantially (or fully) satisfied — worth a fresh look before assuming #2416's
+original scope still stands as written. Given this has now caused a human to re-run the clearance ceremony
+twice on the same PR within one day, this item is a strong candidate to unblock and build next, not to leave on
+the board indefinitely behind two aging, possibly-superseded blockers.
