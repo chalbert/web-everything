@@ -44,6 +44,7 @@ import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
+import { CLAIM_OP } from '../claim.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -283,6 +284,9 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // tests below), so it needs no import-graph purity of its own; it is listed here only so THIS map keeps
     // covering every registered operation (the assertion immediately below).
     [REVIEW_PREP_OP]: 'review-prep.mjs',
+    // #3034 — `claim`'s `write` step is an `effect`, so it is NOT read-only either (same reasoning as
+    // `review-prep` above); listed here only for map coverage.
+    [CLAIM_OP]: 'claim.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {

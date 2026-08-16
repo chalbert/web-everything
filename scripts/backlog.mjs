@@ -51,15 +51,23 @@ import { repoKeyFromSlug } from './readiness/lane-manifest.mjs';
 import { ROUTE_ENTRIES } from './lib/route-import-graph.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
-import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
+import { parseHolds, emptyHoldState, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
-import { scanRepoLocusPrefixes, BACKLOG_KINDS } from './check-standards-rules.mjs';
+import { BACKLOG_KINDS } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 import { localToday } from './lib/local-date.mjs';
-import { scrubPublish } from './lib/secret-scrub.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
+import { writeBacklogMd as writeBacklogMdCore, writeBacklogMdUnguarded as writeBacklogMdUnguardedCore } from './backlog/guarded-write.mjs';
+// #3034 — `claim` runs through this declared operation, not a second hand-rolled implementation. See
+// `claimViaOperation` below (the `v === 'claim'` rewire of the old inline `transition()` guard block).
+import { createRegistry } from './operations/registry.mjs';
+import { driveRun } from './operations/cli-adapter.mjs';
+import { startRun } from './operations/engine.mjs';
+import { createMemoryRunStore, newRunId } from './operations/run-store.mjs';
+import { claimOperation } from './operations/claim.mjs';
+import { createClaimReader, createClaimSinks } from './operations/claim-io.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -96,69 +104,23 @@ function ok(payload, human) {
   process.exit(0);
 }
 
-// #1574 gap (1) — the CLI write path is the dominant locus-prefix leak: `scaffold`/`resolve`/`settle` write
-// digest + body + `## Progress` prose straight to `fs`, never through the `Edit`/`Write` tools, so the
-// load-bearing PreToolUse `--pre` hook never sees that content (#1364/#1454/#1455 all landed this way). Run
-// the SAME pure detector the gate + `--pre` hook use on the content about to hit disk, and refuse with the
-// same message — shift-left at the source (#883 "enforce at write-time"). Exempt cases (fenced code, md
-// links, `@scope/pkg`, globs) are handled inside `scanRepoLocusPrefixes`, so only a genuine bare ref blocks.
+// #3034 — the guard chain (lane-isolation #2302/#104/#2219/#2339, the #3015 secret scrub, the #883
+// locus-prefix scan) moved to `we:scripts/backlog/guarded-write.mjs` so `we:scripts/operations/claim-io.mjs`'s
+// sink can call the SAME writer instead of re-deriving it — a declared operation's effect that re-derives a
+// guard chain instead of calling it is the exact "re-declares, does not re-implement" defect #3034's epic
+// forbids. These two are now thin shims: they catch the extracted writer's thrown refusal and hand it to this
+// file's own `die()`, so every existing call site (scaffold/resolve/settle/retype/yield/prepare-stamp) and its
+// exact exit-1 text are unchanged. `recordCliTouch` stays here (it is `backlog.mjs`-specific session
+// bookkeeping — `CLAIMS_PATH`, `--session` — the extracted writer knows nothing about it).
 function writeBacklogMd(abs, rel, content) {
-  // Enforce the lane-isolation rule (#2302/#104/#2219/#2339) at the SOURCE, not only in the
-  // PreToolUse(Bash) hook (guard-bash). That hook fires ONLY for Bash-*tool* calls in a session that
-  // loads .claude/settings.json — a workflow/subagent/cron/headless caller that runs `backlog.mjs
-  // cost|resolve|…` bypasses it and stamps the card straight onto the primary tree (observed 2026-07-10:
-  // three `cost` stamps left uncommitted in primary). EVERY card-content mutation
-  // (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) funnels through this one
-  // writer; the drain's JIT-numbering + `number-stranded` use a SEPARATE writer (numberPendingHashes) and
-  // are intentionally unaffected — as is the drain-side on-land `resolve-parent` splice (#2752), which
-  // writes via writeBacklogMdUnguarded below for the SAME reason (a mechanized lander runs on primary, not
-  // a session). Reuse guard-lane's realpath classification so there is a single source of truth for "is
-  // this path a primary checkout"; ignore its message (that guard's LANE_GUARD_OFF escape does NOT apply
-  // here — #2219/#2339 ratified nothing ever splices to primary, so this denial has no override).
-  if (laneGuardDecision(resolveReal(abs), ROOT)) {
-    die(`backlog item-mutation BLOCKED — "${rel}" resolves under the shared PRIMARY checkout. Every card ` +
-        `mutation (cost/claim/resolve/release/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE ` +
-        `clone, never the primary tree — running it here stamps the item on primary and bypasses lane ` +
-        `isolation (#2302/#104/#2219/#2339). Enforced at the source so non-Bash-tool channels ` +
-        `(workflow/subagent/cron/headless) are covered too, not just the PreToolUse(Bash) hook. cd into a ` +
-        `lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. There is no override.`);
-  }
-  writeBacklogMdUnguarded(abs, rel, content);
+  try { writeBacklogMdCore(abs, rel, content, { root: ROOT }); }
+  catch (e) { die(String(e?.message ?? e)); }
+  recordCliTouch(rel);
 }
 
-/**
- * The card writer WITHOUT the primary-checkout lane guard — the sanctioned drain-side on-land splice path
- * (mirrors why `numberPendingHashes` uses its own writer). The lane guard exists to keep INTERACTIVE /
- * session card mutations out of the primary tree (#2302/#104); the mechanized LANDER is the deliberate
- * carve-out — it runs ON primary, post-land, syncs to origin/main, splices a deterministic frontmatter-only
- * change, and publishes via the same gated transport pr-land uses. So `resolve-parent` (#2752) writes
- * through here, exactly as JIT-numbering does. Still runs the locus-prefix content scan — that is
- * content-hygiene (#883), orthogonal to lane isolation, and a frontmatter-only splice never trips it, so it
- * is a cheap belt-and-braces check, never a blocker on the resolve path.
- */
 function writeBacklogMdUnguarded(abs, rel, content) {
-  // #3015 — the PUBLISH-SEAM secret gate, and the load-bearing one. A backlog card is committed and pushed;
-  // this writer is the ONE AUTHORING funnel every CLI card-mutation goes through (scaffold/resolve/settle/
-  // retype/yield/prepare-stamp), and a CLI writes straight to `fs`, so the PreToolUse(Edit|Write) hooks
-  // never see it — the same mechanism gap #1574 documented for locus prefixes, one line above.
-  // (`backlog-renumber-collisions.mjs` and `backlog/migrate-kind.mjs` write `backlog/*.md` directly via
-  // their own `writeFileSync` and bypass this funnel too — but both only rewrite EXISTING card content, so
-  // neither can introduce a NEW secret, and the `check:standards` corpus sweep covers them anyway.) Refuse
-  // BEFORE `writeFileSync`, mirroring the reject-before-persist shape the learnings append seam used to have.
-  // `scrubPublish` is deliberately narrower than the append-seam scrub — read its module header for what it
-  // does and does NOT catch.
-  const leaks = scrubPublish(content);
-  if (leaks.length) {
-    die(`secret-scrub: refusing to write ${rel} — the content carries ${leaks.join('; ')} (#3015). A backlog ` +
-        `card is COMMITTED and PUSHED, so a credential in it is a published credential. Remove the value (and ` +
-        `rotate it if it was ever real); describe it in words instead of pasting it.`);
-  }
-  const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
-  if (findings.length) {
-    const { count, sample } = findings[0];
-    die(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`);
-  }
-  writeFileSync(abs, content);
+  try { writeBacklogMdUnguardedCore(abs, rel, content, { root: ROOT }); }
+  catch (e) { die(String(e?.message ?? e)); }
   recordCliTouch(rel);
 }
 
@@ -312,48 +274,23 @@ function transition(v) {
   // only succeeds from `open`, so a second claimer hits an already-`active` item and the transition errors
   // (plus the `reserve` session soft-holds, #083). The tree's commit state at large is irrelevant to
   // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects the tree —
-  // EXCEPT the per-item cleanliness guard below, which inspects only the single file being claimed.
-  const as = flag('as');
-  if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  // EXCEPT the per-item cleanliness guard, which inspects only the single file being claimed.
+  //
+  // #3034 — `claim` no longer runs through this function at all. `we:scripts/backlog.mjs`'s bottom-level
+  // `switch (verb)` routes it to `claimViaOperation()` below, which drives the declared `claim` operation
+  // (`we:scripts/operations/claim.mjs`) — the SAME queued/prepare-hold/dirty-file guard order, now living in
+  // that operation's `planClaim`, not duplicated here. Only `resolve` and `release` still call this function.
+  //
   // Ready-to-merge (queued) guard (#2138 Fork 4): a queued item pushed a lane and is waiting for the
-  // drain. It is still `status: active` on main, so a naive read would re-offer it (claim) or reopen it
-  // as abandoned (release — the #2072 closeout reconcile's active→open flip). Read the LOCAL queued token
-  // OFFLINE (Rule #105 — no tree read, no ls-remote) and refuse both: a queued item is neither claimable
-  // nor abandoned. `--force` overrides for the rare deliberate case (e.g. abandoning a stuck queue entry).
-  if ((v === 'claim' || v === 'release') && !argv.includes('--force')) {
+  // drain. It is still `status: active` on main, so a naive read would reopen it as abandoned (release —
+  // the #2072 closeout reconcile's active→open flip). Read the LOCAL queued token OFFLINE (Rule #105 — no
+  // tree read, no ls-remote) and refuse: a queued item is not abandoned. `--force` overrides for the rare
+  // deliberate case (e.g. abandoning a stuck queue entry).
+  if (v === 'release' && !argv.includes('--force')) {
     const num = idFromName(file);
     if (isQueued(loadQueued(), num)) {
-      die(v === 'claim'
-        ? `#${num} is queued (ready-to-merge, #2138 Fork 4) — a lane is pushed and waiting for the drain; it is not claimable. The drain unqueues it at landing; pass --force only to deliberately steal a stuck queue entry.`
-        : `#${num} is queued (ready-to-merge, #2138 Fork 4) — it is waiting to be drained, NOT abandoned; releasing it to open would drop its ready-to-merge state and re-offer it. Let the drain land + unqueue it; pass --force only to deliberately abandon the queued lane.`);
+      die(`#${num} is queued (ready-to-merge, #2138 Fork 4) — it is waiting to be drained, NOT abandoned; releasing it to open would drop its ready-to-merge state and re-offer it. Let the drain land + unqueue it; pass --force only to deliberately abandon the queued lane.`);
     }
-  }
-  // Prepare-hold guard (#2219 (b) flow / #2264): while a session prepares a fork in a lane the item is still
-  // `status: open`, so a naive claim could steal it mid-prep. A LIVE prepare-hold (lease-valid) HARD-refuses a
-  // claim — the strengthened replacement for the soft `reserve` deprioritize. Read the LOCAL token OFFLINE
-  // (Rule #105). `--force` overrides to deliberately steal a stuck hold; the holder drops it with prepare-release.
-  if (v === 'claim' && !argv.includes('--force')) {
-    const num = idFromName(file); // two-form id (#2288): numeric NNN or an `xNNNNNN` hash — never a bare `^\d+`
-    const holds = loadHolds();
-    if (isHeld(holds, num, Date.now())) {
-      const by = heldBy(holds, num, Date.now());
-      die(`#${num} is prepare-held${by ? ` by ${by}` : ''} (#2219 (b) flow) — a session is preparing it in a lane; it is not claimable until the prepare-hold is released (\`backlog.mjs prepare-release ${num}\`). Pass --force only to deliberately steal a stuck hold.`);
-    }
-  }
-  // Claim-first guard: a claim must be the FIRST action on an item — grounding, editing, and presenting
-  // its substance all come AFTER the flip (next turn). The status transition alone can't catch a session
-  // that read + edited the body BEFORE claiming: claim would silently bundle those pre-claim edits into the
-  // claimed file (it doesn't break — it absorbs them, which is worse, since the two-go arc was skipped).
-  // So for `claim` we additionally refuse when THE ITEM'S OWN FILE is already dirty — scoped to this one
-  // file (via `-- <path>`) so a routinely-dirty tree or concurrent sessions on OTHER items never trip it.
-  // Best-effort: a git hiccup must never block a claim. `--force` overrides for the rare legit case (e.g.
-  // claiming a freshly-scaffolded, not-yet-committed item). NOTE: a pre-claim READ + chat presentation
-  // leaves no on-disk trace and so cannot be gated here — the skill's claim-first STOP covers that path.
-  if (v === 'claim' && !argv.includes('--force')) {
-    let dirty = '';
-    try { dirty = execFileSync('git', ['status', '--porcelain', '--', rel], { cwd: ROOT, encoding: 'utf8' }).trim(); }
-    catch { /* best-effort — never block a claim on a git/IO hiccup */ }
-    if (dirty) die(`#${idFromName(file)} — ${rel} has uncommitted edits; a claim must be the first action on an item (ground / edit / present AFTER claiming, next turn). Commit, stash, or revert those edits and re-claim — or pass --force if this is deliberate (e.g. a freshly-scaffolded item).`);
   }
   // No-open-slice guard (#658): an epic can't close while live work sits under it. Enumerate children by
   // the `parent:` EDGE (not the body's stale "N children" listing) and refuse BEFORE writing — so the
@@ -398,66 +335,10 @@ function transition(v) {
         console.error(`${YEL}warning:${RST} ${DIM}--force: resolving #${idFromName(file)} over ${offending.length} undeclared presentation surface(s): ${offending.join(', ')}${RST}`);
     }
   }
-  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
+  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to') });
   if (res.error) die(`#${idFromName(file)} — ${res.error}`);
   writeBacklogMd(abs, rel, res.content);
   const id = file.replace(/\.md$/, '');
-  const slug = id; // the rename slug is the full id (NNN-slug)
-  if (v === 'claim') {
-    // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item —
-    // drop it so the now-`active` item never lingers as a stale hold against another session. Read the
-    // reservation's session BEFORE dropping it, so the baseline below can recover it (#1723).
-    const num = idFromName(file);
-    const reservationsAtClaim = loadReservations();
-    saveReservations(removeNums(reservationsAtClaim, [num]));
-    // Gate-attribution baseline (#952, #949 Fork 2-A): snapshot the files ALREADY dirty (everyone else's
-    // in-flight + pre-existing) the first time this session claims, and stamp the owning id. Lets
-    // `check:standards --scope=<session>` later block only on files THIS session dirtied. Best-effort —
-    // a git/IO hiccup must never fail the claim (attribution is an opt-in convenience, not the lock).
-    //
-    // Session inference (#1723): the batch loop runs `claim <NNN>` WITHOUT `--session`, which used to skip
-    // baseline recording entirely — leaving `claims.json` empty so `--scope=<slug>` was silently inert.
-    // Prefer the explicit flag, else the session that `reserve`-d this item (recorded in reservations.json
-    // by the batch's reserve step), else the most-recent claim session. So the baseline records without a
-    // per-claim flag.
-    const session = flag('session') ?? sessionForNum(reservationsAtClaim, num) ?? mostRecentSession(loadClaims());
-    if (session) {
-      try {
-        const baselineFiles = [...porcelainFiles(execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }))];
-        saveClaims(recordClaim(loadClaims(), { session, id, baselineFiles, nowIso: new Date().toISOString() }));
-      } catch { /* attribution is best-effort — never block a claim on it */ }
-    }
-  }
-  if (v === 'claim') {
-    const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
-    const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
-    const head = `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}`;
-    // Background carve-out (#2621): a conveyor/background delivery agent claims non-interactively as its
-    // FIRST action and then does the readiness pre-check + build in the SAME turn — the two-turn "rename
-    // the chat, stop here" arc below is written for a human-driven /decision chat, and an agent obeying it
-    // literally would STALL waiting for a hand-off that never comes. Detect that context DETERMINISTICALLY
-    // (the conveyor's `conveyor-*` session-slug convention, or an explicit `--background` flag the agent
-    // passes) and, for the ACTIVE claim, replace the whole rename + stop block with a one-line "no stop"
-    // acknowledgement so the agent proceeds. Interactive human sessions — and the `preparing` claim, which
-    // already has no stop — are unchanged.
-    const background = claimedStatus === 'active'
-      && (argv.includes('--background') || (flag('session') ?? '').startsWith('conveyor-'));
-    let tailBlock;
-    if (background) {
-      tailBlock = `\n\n${DIM}claimed (background session — no stop); proceed with the readiness pre-check + build in the same turn.${RST}`;
-    } else {
-      // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
-      // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
-      // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling),
-      // so a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
-      // decision claim (#1397).
-      const tail = claimedStatus === 'preparing'
-        ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
-        : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
-      tailBlock = `\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`;
-    }
-    ok({ verb: v, id, file: rel, slug, status: claimedStatus, background }, `${head}${tailBlock}`);
-  }
   if (v === 'resolve') {
     const g = flag('graduated-to');
     const c = flag('codified-to');
@@ -465,6 +346,124 @@ function transition(v) {
       `${GRN}✓ resolved${RST} ${id} ${DIM}→ resolved (dateResolved ${today()}${g ? `, graduatedTo ${g}` : ''}${c ? `, codifiedIn ${c}` : ''})${RST}${g ? '' : `\n${YEL}note:${RST} ${DIM}no --graduated-to set; if a resolved idea spawned no entity, set graduatedTo=none by hand${RST}`}`);
   }
   ok({ verb: v, id, file: rel, status: 'open' }, `${GRN}✓ released${RST} ${id} ${DIM}→ open${RST}`);
+}
+
+/**
+ * `claim` — #3034's rewire. Drives the declared `claim` operation (`we:scripts/operations/claim.mjs`) to
+ * completion instead of running the old inline guard block. Everything the operation does NOT own —
+ * reservations-clearing, the `.claude/skills/batch-backlog-items/claims.json` attribution baseline, and the
+ * rename-slug/two-turn-stop/background messaging — stays here, now reading the operation's returned finding
+ * (`outcome.run.verdict`) instead of local variables computed inline.
+ *
+ * ASYNC, DELIBERATELY NARROW (see the card's "open implementation detail"): `we:scripts/backlog.mjs` is a
+ * synchronous, `process.exit()`-driven CLI end to end, and the operation engine's effect application
+ * (`applyPendingEffects`) is `async`. Rather than making the whole 500+-line CLI's top-level dispatch async to
+ * serve one verb, ONLY this one function is — mirroring how `we:scripts/operations/run.mjs`'s own `IS_CLI`
+ * block drives its single async entry with `.then()/.catch()`. This composed cleanly: `claim` never awaits a
+ * judge or a person (no `judge`/`confirm` step exists in its declaration), so the `await`s inside `driveRun`
+ * resolve on the same tick as the underlying (fully synchronous) `fs`/`git` calls — nothing here is genuinely
+ * asynchronous, only mechanically so. The run's store is an EPHEMERAL in-memory one
+ * (`we:scripts/operations/run-store.mjs#createMemoryRunStore`): this call always drives the run to completion
+ * or a refusal in one process, never suspends, and never needs a `--resume` — a crash mid-write is naturally
+ * covered by the item's own ownership invariant (a half-applied claim leaves `status: open`, so a retried
+ * `claim` just succeeds again; a fully-applied one leaves `status: active`, so a retried `claim` is refused by
+ * `applyTransition` exactly as it always was), not by resuming a persisted run record. `node
+ * scripts/operations/run.mjs claim --ref=<NNN>` (registered in `we:scripts/operations/run.mjs`) is the one that
+ * gets the real file-backed, resumable run record, for a caller that wants it directly.
+ */
+async function claimViaOperation() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const as = flag('as');
+  if (as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  const force = argv.includes('--force');
+
+  const declaration = claimOperation({ readClaimContext: createClaimReader({ root: ROOT }) });
+  const registry = createRegistry();
+  registry.register(declaration);
+  const store = createMemoryRunStore();
+  const sinks = createClaimSinks({ root: ROOT });
+  const run = startRun({
+    op: declaration.name,
+    id: newRunId('claim'),
+    input: { ref: file, as: as === 'preparing' ? 'preparing' : 'active', force },
+    registry,
+  });
+  store.write(run);
+
+  const outcome = await driveRun({
+    run, registry, store, sinks,
+    // No `judge` step is declared, so this is never called — present only because `driveRun`'s signature
+    // requires one. A call here would be this operation's own "the vocabulary grew a fifth kind" bug.
+    judge: async () => { throw new Error('claim: no `judge` step is declared — this should be unreachable'); },
+    attemptedBy: 'human',
+  });
+
+  if (outcome.stopped === 'step-refused' || outcome.stopped === 'effect-halted') {
+    // Every message `planClaim`/the guarded writer throws is verbatim what this file used to `die()` with
+    // directly — see `we:scripts/operations/claim.mjs` and `we:scripts/backlog/guarded-write.mjs`.
+    die(String(outcome.error?.message ?? outcome.error));
+    return;
+  }
+  if (outcome.stopped !== 'complete') {
+    die(`claim: the operation stopped unexpectedly (${outcome.stopped}) — ${String(outcome.error?.message ?? outcome.error ?? 'no further detail')}`);
+    return;
+  }
+
+  // The write landed — record the touch the same way every other CLI-driven splice does (the extracted
+  // guarded writer is bookkeeping-agnostic; this file owns `.claude/skills/batch-backlog-items/claims.json`).
+  recordCliTouch(rel);
+
+  const verdict = outcome.run.verdict || {};
+  const id = file.replace(/\.md$/, '');
+  const slug = id; // the rename slug is the full id (NNN-slug)
+
+  // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item — drop it
+  // so the now-`active` item never lingers as a stale hold against another session. Read the reservation's
+  // session BEFORE dropping it, so the baseline below can recover it (#1723).
+  const num = idFromName(file);
+  const reservationsAtClaim = loadReservations();
+  saveReservations(removeNums(reservationsAtClaim, [num]));
+  // Gate-attribution baseline (#952, #949 Fork 2-A): snapshot the files ALREADY dirty (everyone else's
+  // in-flight + pre-existing) the first time this session claims, and stamp the owning id. Lets
+  // `check:standards --scope=<session>` later block only on files THIS session dirtied. Best-effort — a
+  // git/IO hiccup must never fail the claim (attribution is an opt-in convenience, not the lock).
+  const session = flag('session') ?? sessionForNum(reservationsAtClaim, num) ?? mostRecentSession(loadClaims());
+  if (session) {
+    try {
+      const baselineFiles = [...porcelainFiles(execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }))];
+      saveClaims(recordClaim(loadClaims(), { session, id, baselineFiles, nowIso: new Date().toISOString() }));
+    } catch { /* attribution is best-effort — never block a claim on it */ }
+  }
+
+  const claimedStatus = verdict.claimedStatus === 'preparing' ? 'preparing' : 'active';
+  const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
+  const head = `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}`;
+  // Background carve-out (#2621): a conveyor/background delivery agent claims non-interactively as its FIRST
+  // action and then does the readiness pre-check + build in the SAME turn — the two-turn "rename the chat,
+  // stop here" arc below is written for a human-driven /decision chat, and an agent obeying it literally
+  // would STALL waiting for a hand-off that never comes. Detect that context DETERMINISTICALLY (the
+  // conveyor's `conveyor-*` session-slug convention, or an explicit `--background` flag the agent passes)
+  // and, for the ACTIVE claim, replace the whole rename + stop block with a one-line "no stop"
+  // acknowledgement so the agent proceeds. Interactive human sessions — and the `preparing` claim, which
+  // already has no stop — are unchanged.
+  const background = claimedStatus === 'active'
+    && (argv.includes('--background') || (flag('session') ?? '').startsWith('conveyor-'));
+  let tailBlock;
+  if (background) {
+    tailBlock = `\n\n${DIM}claimed (background session — no stop); proceed with the readiness pre-check + build in the same turn.${RST}`;
+  } else {
+    // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
+    // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
+    // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling), so
+    // a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
+    // decision claim (#1397).
+    const tail = claimedStatus === 'preparing'
+      ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
+      : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
+    tailBlock = `\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`;
+  }
+  ok({ verb: 'claim', id, file: rel, slug, status: claimedStatus, background }, `${head}${tailBlock}`);
 }
 
 /** Read the cross-session reservation registry (#083); a missing/unreadable file degrades to empty. */
@@ -1209,7 +1208,10 @@ function resolveParent() {
 }
 
 switch (verb) {
-  case 'claim': case 'resolve': case 'release': transition(verb); break;
+  // #3034 — `claim` routes through the declared operation (`we:scripts/operations/claim.mjs`); it is async, so
+  // it manages its own `ok()`/`die()` exit rather than returning to fall through this synchronous switch.
+  case 'claim': claimViaOperation().catch((e) => die(`claim: unexpected error — ${String(e?.message ?? e)}`)); break;
+  case 'resolve': case 'release': transition(verb); break;
   case 'resolve-parent': resolveParent(); break;
   case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
