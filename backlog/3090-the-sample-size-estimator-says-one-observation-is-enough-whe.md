@@ -65,7 +65,7 @@ fraction to ±5% needs about 153 observations, not 20.
 - [x] A test covers the boundary, not just the comfortable middle.
 - [x] Both callers handle the refusal. *(There is only one caller now — see below.)*
 - [x] Decide whether the estimator should also enforce this module's own ≥5-and-≥5 validity rule.
-      *(Spun out to [#xadzx6f](/backlog/xadzx6f-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/)
+      *(Spun out to [#3143](/backlog/3143-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/)
       — a genuine modelling call that changes shipped, test-pinned constants either way, so it gets its own
       `kind: decision` rather than a box ticked inside a bug-fix round. See "Round 5" below.)*
 
@@ -235,7 +235,7 @@ a named textbook function and breaks every test-pinned constant in the file; Opt
 it) accepts that a caller who reads only `requiredNPerGroup` and not its neighboring `testable` field can
 still be misled by the display. Ruling on that inside a bug-fix round is exactly what the "modelling call,
 not a bug fix" line above was refusing to do — so it is spun out to
-[#xadzx6f](/backlog/xadzx6f-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/), a proper
+[#3143](/backlog/3143-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/), a proper
 `kind: decision` carrying both options, the arithmetic above, and a provisional (not ratified) recommendation
 for Option B — the one live caller already gates its verdict on `testable`, not on `requiredNPerGroup`, so
 the status quo is not silently wrong today, only silently incomplete for a caller that doesn't exist yet.
