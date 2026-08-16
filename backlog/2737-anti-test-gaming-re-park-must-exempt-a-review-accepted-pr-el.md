@@ -71,7 +71,7 @@ DATA still trips it (verified). So the underlying false-positive re-park is real
 accepted PR needs a hand-merge), NOT a reason to reopen a trust-chain hole. The nuisance waits for the
 diff-scoped fix above.
 
-## Observed again in production (PR #1366, 2026-08-15 / 2026-08-16) — [xnt5u0s](/backlog/xnt5u0s-review-human-silently-re-applied-minutes-after-a-clear-human/)
+## Observed again in production (PR #1366, 2026-08-15 / 2026-08-16) — [3142](/backlog/3142-review-human-silently-re-applied-minutes-after-a-clear-human/)
 
 This item's diagnosis is still exactly correct on live `main`, confirmed against the real GitHub timeline (`gh
 api repos/chalbert/web-everything/issues/1366/timeline`), and the loop it predicts fired twice within 26 hours:
