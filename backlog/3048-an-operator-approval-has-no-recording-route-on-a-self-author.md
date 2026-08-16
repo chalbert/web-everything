@@ -263,6 +263,27 @@ engine/tooling-layer governance code, not a WE standard/intent/protocol with a W
 would still re-litigate a ratified statute regardless of engineering cost, so this is a real either/or, not
 prioritization dressed as a fork.
 
+**Skeptic (fresh-context, 2026-08-16):** An independent fresh-context agent (not the author) subsequently
+re-verified this pass. Every citation was re-checked exactly against live code —
+[we:scripts/lib/gate-config.mjs](../scripts/lib/gate-config.mjs)'s `TRUST_CHAIN` entries, the verbatim quote at
+[#review-human-declarative-leash-only](../docs/agent/platform-decisions.md#review-human-declarative-leash-only),
+[we:scripts/lib/review-escalation.mjs:574](../scripts/lib/review-escalation.mjs#L574), and
+[we:scripts/review-set-label.mjs](../scripts/review-set-label.mjs)'s `clear-human` branch and
+independence-check block — all checked out exactly as quoted above. All four skeptic axes survive re-attack,
+including a genuine attempted counter-exploit against the SELF_CLEAR gate on the recommended `clear-operator`
+mechanism: forging `CLAUDE_CODE_SESSION_ID` to a victim's public author id was tried directly and confirmed to
+grant no capability beyond what the pre-existing, unforged `--to=accepted` path already allows — no new
+residual was found. One strengthening note on the "no new residual" claim in (a)'s "Residual cost, accepted"
+paragraph above (correct, but under-argued): forging session identity toward `clear-operator` is strictly
+dominated by the pre-existing, unforged, zero-identity-gated `accepted` path, since that path already grants
+the same capability to anyone able to forge an id, with no forgery even required — worth stating explicitly
+rather than leaving implicit. The original self-run pass's conclusions are independently corroborated, not
+merely repeated.
+
+**Screen (fresh-context, 2026-08-16):** Re-run independently against the same two-confusion test. Both Q1
+(impl-detail-as-standard) and Q2 (merit vs. prioritization) came back clear, matching the self-run screen's
+findings above.
+
 ## Supported by default (not a fork) — the review-seam half (acceptance bullet 5)
 
 **Standing test:** can "the review seam checks reviewer ≠ author" and "the review seam stops claiming
