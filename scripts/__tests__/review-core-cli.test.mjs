@@ -251,6 +251,26 @@ describe('buildMandateText', () => {
   it('an unknown kind throws', () => {
     expect(() => buildMandateText({ kind: 'nope' })).toThrow(/unknown mandate kind/);
   });
+
+  // #2914 — diffBasis threads through ONLY on the 'lens' kind (the mandate subcommand's `--diffBasis` flag,
+  // parsed generically by `parseFlags` and forwarded by `runMandate`; `buildMandateText` is the pure entry point
+  // the CLI's `mandate --lens=<x> --diffBasis=<v>` path calls through to).
+  describe('#2914 — diffBasis (kind: lens only)', () => {
+    it('kind lens, diffBasis three-dot → the DEGRADED disclosure is present', () => {
+      const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0], diffBasis: 'three-dot' });
+      expect(text).toContain('DIFF BASIS: DEGRADED');
+    });
+
+    it('kind lens, diffBasis net → no disclosure', () => {
+      const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0], diffBasis: 'net' });
+      expect(text).not.toContain('DIFF BASIS');
+    });
+
+    it('kind lens, diffBasis omitted → no disclosure (unaffected callers)', () => {
+      const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0] });
+      expect(text).not.toContain('DIFF BASIS');
+    });
+  });
 });
 
 describe('buildComment — the comment subcommand glue (renders via renderPanelComment)', () => {
