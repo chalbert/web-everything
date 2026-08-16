@@ -2,8 +2,10 @@
 bornAs: xoj6gye
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-14"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-16"
 tags: [agent, model-routing, orchestration]
 scope:
   - we:docs/agent/delivery-loop.md
@@ -11,6 +13,16 @@ scope:
 ---
 
 # Agent launches should size reasoning effort to the work, not just the model
+
+> **Resolved 2026-08-16.** Landed by [329299b4](https://github.com/chalbert/web-everything/commit/329299b4)
+> (already on `main`): a new *Effort routing* section in
+> [we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md#effort-routing) states the convention —
+> same "don't omit it, don't default-cheap" discipline as model routing, routed on task SHAPE (mechanical/
+> pointer → `low`, execution-to-spec → `low`/`medium`, judgment → `high`/`xhigh`), grounded in this card's own
+> worked examples (#1236-round-2 mechanical fix, #1234's opt-in-and-unused judgment fork).
+> [we:docs/agent/delivery-loop.md](docs/agent/delivery-loop.md)'s reviewer-spawn command now sets
+> `--effort high` explicitly and links to that section. This item's own claim-through-resolve turn adds no
+> further doc changes; it verifies and closes the record.
 
 Operator observation, 2026-08-14: every agent launched this session (Agent tool, headless `claude -p`
 reviewers) had its **model** tier picked to match the task (Haiku for pointers, Sonnet for execution-to-spec,
@@ -41,11 +53,13 @@ the other axis.
 
 ## Done when
 
-- [ ] `we:docs/agent/delivery-loop.md` (or wherever agent-dispatch guidance lives) states the effort
+- [x] `we:docs/agent/delivery-loop.md` (or wherever agent-dispatch guidance lives) states the effort
       convention alongside the existing model-routing convention, with the same "don't omit it, don't
-      default-cheap" discipline the model-routing rule already carries.
-- [ ] At least one worked example of each tier (mechanical → low, judgment → high/xhigh) cited from real
-      session evidence, the same way the model-routing convention is grounded.
+      default-cheap" discipline the model-routing rule already carries. → the *Effort routing* section in
+      `we:docs/agent/backlog-workflow.md#effort-routing`, linked from `we:docs/agent/delivery-loop.md`.
+- [x] At least one worked example of each tier (mechanical → low, judgment → high/xhigh) cited from real
+      session evidence, the same way the model-routing convention is grounded. → #1236-round-2 (mechanical)
+      and #1234 (judgment), both cited inline in the *Effort routing* section.
 
 ## Watch for
 
