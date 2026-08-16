@@ -2,10 +2,12 @@
 bornAs: xsz0l4c
 kind: story
 size: 1
-status: open
+status: resolved
 scaffoldedBy: "loop-console"
 dateScaffolded: "2026-08-13"
 dateOpened: "2026-08-13"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [measurement, statistics, gate, review, footgun]
 scope:
   - we:scripts/lib/gate-health.mjs
@@ -62,7 +64,10 @@ fraction to ±5% needs about 153 observations, not 20.
 - [x] The estimator refuses instead of returning a small number it cannot justify.
 - [x] A test covers the boundary, not just the comfortable middle.
 - [x] Both callers handle the refusal. *(There is only one caller now — see below.)*
-- [ ] Decide whether the estimator should also enforce this module's own ≥5-and-≥5 validity rule.
+- [x] Decide whether the estimator should also enforce this module's own ≥5-and-≥5 validity rule.
+      *(Spun out to [#xadzx6f](/backlog/xadzx6f-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/)
+      — a genuine modelling call that changes shipped, test-pinned constants either way, so it gets its own
+      `kind: decision` rather than a box ticked inside a bug-fix round. See "Round 5" below.)*
 
 ## 2026-08-13 — the estimator is fixed; round 2 moved the boundary and the blocker's population
 
@@ -216,3 +221,24 @@ from one rate against a floor from the other and presented it as one comparison)
 | 0.20 | 42 | 234 | **floor** |
 
 So at #3071's default the floor does not bind and its 278 stands. At a larger requested effect it would.
+
+## Round 5 — the open box gets its own card, rather than a ruling made inside this one
+
+The three implemented boxes were re-verified against `we:scripts/lib/gate-health.mjs` and
+`we:scripts/operations/__tests__/gate-health.test.mjs` as they stand today: the boundary is `>=`, both
+clamps are gone, the blocker no longer speaks from the corpus, `perBand` carries `testable`/`shortBy`/
+`shortCells`, and the mutation-tested guards from rounds 3 and 4 are all present and green. Nothing there
+needed a fifth round.
+
+The fourth box is a genuine fork with a cost on both sides — Option A (fold the floor in) silently redefines
+a named textbook function and breaks every test-pinned constant in the file; Option B (leave it, document
+it) accepts that a caller who reads only `requiredNPerGroup` and not its neighboring `testable` field can
+still be misled by the display. Ruling on that inside a bug-fix round is exactly what the "modelling call,
+not a bug fix" line above was refusing to do — so it is spun out to
+[#xadzx6f](/backlog/xadzx6f-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/), a proper
+`kind: decision` carrying both options, the arithmetic above, and a provisional (not ratified) recommendation
+for Option B — the one live caller already gates its verdict on `testable`, not on `requiredNPerGroup`, so
+the status quo is not silently wrong today, only silently incomplete for a caller that doesn't exist yet.
+
+With that box accounted for by a real card rather than a deferred sentence, all four Done-when boxes are
+satisfied and this item resolves.
