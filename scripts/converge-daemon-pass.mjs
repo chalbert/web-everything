@@ -122,14 +122,26 @@ export function buildPassRecord({ startedAt, cfg, exitCode, summary, error }) {
     juryDir: cfg.juryDir,
     exitCode,
     ranPass: !!(summary && summary.ranPass),
-    // A pass that could not run (lease held, gh down) is recorded, not silently dropped — the enforce-flip
-    // readiness predicate reads this log, and a gap it cannot see is a gap it cannot account for.
+    // A pass that could not run (lease held, gh down) is recorded, not silently dropped — a gap this log cannot
+    // see is a gap it cannot account for. NOTE: this log is NOT yet the `reviewShadowLedger` #2838's
+    // `enforceFlipReady` reads, and does not feed `computeAgreementMetric` in its current shape (no `match`/
+    // `outcome` per record) — that durable ledger is #2893's job, not this file's (#3008).
     reason: summary && !summary.ranPass ? summary.reason || null : null,
     discovered: summary ? summary.discovered ?? null : null,
     clearable: summary ? summary.clearable ?? null : null,
     wouldClear: summary ? summary.wouldClear ?? null : null,
     wouldKeepParked: summary ? summary.wouldKeepParked ?? null : null,
     mutations: summary ? summary.mutations ?? null : null,
+    // The per-PR detail behind the pass-level aggregates above — WHICH PR(s) account for a `wouldClear` drop and
+    // WHY, trimmed to the minimum an operator needs (#3008 Problem 1). Projected from `summary.records`
+    // (`review-runner.mjs --json`'s per-PR array, `buildShadowRecord` in `review-runner-core.mjs`), which is
+    // absent when `summary` is null (no parseable JSON) or the daemon's own `refuse()` pre-flight fired (it never
+    // calls review-runner) — `[]` in both cases, never `undefined`/`null`.
+    records: Array.isArray(summary && summary.records)
+      ? summary.records.map((r) => ({
+        subject: r.subject, pr: r.pr, repo: r.repo, wouldClear: r.wouldClear, reason: r.reason,
+      }))
+      : [],
     error: error || (summary && summary.error) || null,
   };
 }
@@ -221,8 +233,9 @@ function main(argv) {
     return 0;
   }
 
-  // Every refusal below is RECORDED, not just printed. The enforce-flip readiness predicate reads the shadow log,
-  // and a daemon that has been refusing to start for a week must not look like a daemon that never fired.
+  // Every refusal below is RECORDED, not just printed. No `enforceFlipReady` predicate reads this log yet (see
+  // `buildPassRecord`'s comment), but a daemon that has been refusing to start for a week must not look like a
+  // daemon that never fired once one does.
   const refuse = (msg) => {
     process.stderr.write(`${msg}\n`);
     appendRecord(cfg, buildPassRecord({
