@@ -35,7 +35,9 @@ looked at.
    an artifact with the options in **side-by-side panes**, an **honest counter-argument** per option, and
    **one recommendation**. **Decide on built, rendered candidates — never on a prose description**; if you
    never rendered the losing option you guessed the fork, you didn't rule it. Rule it from a lane against that
-   artifact — never inline — and record the ruling in the design doc so it's cite-able.
+   artifact — never inline — and record the ruling in the design doc so it's cite-able. **An interaction-model
+   fork (expand-in-place vs master-detail vs breadcrumb-zoom) needs OPERABLE candidates over the SAME data, not
+   static panes** — *build-ui.md → 4*'s interaction-model rule.
 5. **Graduate to webcases** (*build-ui.md → Graduate to webcases*) — port each ruled state into durable
    **webcase** fixtures whose `assert:` line encodes the ruled grammar, hardened by a **conformance test**, so
    the build cites a state by case id and drift is caught. The line starts as the base attention grammar
