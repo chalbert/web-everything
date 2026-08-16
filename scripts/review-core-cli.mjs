@@ -219,13 +219,16 @@ export function reduceReview(input = {}) {
  * subcommand). Pure — the lib builders it calls are pure; this only routes to the right one. `lens` mandates
  * seed a panel reviewer or the independent validator; `editor` seeds the negotiation-round editor.
  * @param {{kind: 'lens'|'editor'|'validator', lens?: string, findings?: Array<object>, round?: number,
- *   roundCap?: number}} o
+ *   roundCap?: number, diffBasis?: string}} o
  * @returns {string}
  */
-export function buildMandateText({ kind, lens, findings, round, roundCap } = {}) {
+export function buildMandateText({ kind, lens, findings, round, roundCap, diffBasis } = {}) {
   switch (kind) {
     case 'lens':
-      return buildPanelMandate({ lens });
+      // #2914 — forwarded ONLY on the `lens` branch: the `editor`/`validator` mandate kinds have no diff-basis
+      // concept (the independent validator never sees peer context at all; the editor mandate is round-scoped
+      // findings prose, not a diff-provenance signal).
+      return buildPanelMandate({ lens, diffBasis });
     case 'validator':
       return buildValidatorMandate({ lens });
     case 'editor':
@@ -509,6 +512,7 @@ function runMandate(flags, asJson) {
       findings,
       round: flags.round,
       roundCap: flags.roundCap != null ? Number(flags.roundCap) : undefined,
+      diffBasis: typeof flags.diffBasis === 'string' ? flags.diffBasis : undefined,
     });
   } catch (e) {
     return fail(String(e && e.message || e), 1);
