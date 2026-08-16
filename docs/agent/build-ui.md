@@ -114,6 +114,18 @@ is ruled from a lane against the explainer, never ratified inline (*backlog-work
 unprepared decision*), and the ruling is recorded in the design doc so it is cite-able (the console's live at
 `plateau-app:docs/backlog-console-design.md`).
 
+**An interaction-model fork needs an operable candidate, not a static pane.** When the fork is about
+*behavior* — expand-in-place vs master-detail vs breadcrumb-zoom, or any choice that plays out across clicks
+and navigation rather than a single visual state — a side-by-side picture of one moment cannot show whether the
+model actually works: it cannot show that expand-in-place feels cramped once a row grows, that master-detail
+loses context on the third click, or that a breadcrumb chain gets unwieldy past two levels. Render each
+candidate as a REAL, OPERABLE embed in the explainer — self-contained interactive HTML the operator can
+actually click through, not a screenshot of it — driven by the SAME underlying data across every candidate, so
+the comparison is apples-to-apples and the operator picks the frame from having *operated* it, not from a
+description of how it would behave or a still frame of how it looks. Treat this as a first-class step for any
+interaction-model fork, not an ad-hoc thing to remember (proven by hand ruling the feature-tracking-screen's
+master-detail frame, #2708).
+
 **How you rule a high-leverage fork — the jury method.** The explainer artifact is the *channel*. For a fork
 that is long-lived and high-fan-out (a whole icon grammar, a colour system), the *technique* for ruling it is
 the **jury-refinement loop** (#2576, born on the §6e icon grammar). Run a panel of fresh single-lens jurors
@@ -148,8 +160,9 @@ components. Then run an **integration-only review**: fresh reviewers judge the *
 assembly — does the hierarchy still hold when every part is present at once, do the parts fight for the same
 attention, does the whole read as one product or as a bag of panels bolted together. Integration routinely
 surfaces **whole-page forks the part-level review could not see** — the frame itself (master-detail vs stacked
-vs split) is decided *here*, on the assembled page. Rule each such fork the phase-4 way (built candidates, honest
-counter-argument, one recommendation) and loop the new ruling back through the webcase port. A part that scored
+vs split) is decided *here*, on the assembled page. Rule each such fork the phase-4 way (built, OPERABLE
+candidates over the same data, honest counter-argument, one recommendation — phase 4's interaction-model rule)
+and loop the new ruling back through the webcase port. A part that scored
 well alone and fails in the assembled page is a failing part — the page is the unit that ships.
 
 ### 7. Converge — alternating-lens fresh reviewers, two clean rounds, every edit assert-verified
@@ -212,6 +225,10 @@ The build-UI work is edit-action work, so it obeys the standard delivery discipl
 - **A frame fork may be zoom levels, not rivals.** When the panel splits on the whole-page frame, test whether the
   options are *complementary zooms/modes of one surface* before ruling one out — often the answer is "both, linked"
   (a zoomed-out map and a zoomed-in cockpit sharing one shell), not "pick one."
+- **An interaction-model fork is ruled by clicking through it, not by looking at it.** A screenshot proves a
+  layout; it cannot prove whether expand-in-place, master-detail, or breadcrumb-zoom actually works once the
+  operator navigates it. Build each candidate as an operable page over the same data and click through before
+  ruling — never rule an interaction-model fork from static panes.
 - **Shared chrome is single-source.** A shell/header used by more than one surface changes in ONE place — a chrome
   change is a *cross-surface* change: update every surface and re-verify together, and freeze the shell as its own
   conformance webcase so a change that breaks a surface fails a check. Inline-copying the chrome per screen
