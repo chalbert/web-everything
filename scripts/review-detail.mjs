@@ -17,7 +17,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { ESCALATION_REASON_MARKER, REVIEW_LABELS, hasReviewLabel } from './lib/review-escalation.mjs';
-import { deriveReviewDisposition } from './lib/review-core.mjs';
+import { deriveReviewDisposition, careLevelFromReasons } from './lib/review-core.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /** The drain's advisory AI-review comment marker (the body the drain posts on an agent-review park). */
@@ -78,7 +78,8 @@ function labelNames(labels) {
  * @param {{view: object}} o - `view` is the parsed `gh pr view` JSON (number,title,url,body,labels,comments,files).
  * @returns {{pr:number, repo:string, title:string, url:string, labels:string[], humanRequired:boolean,
  *   reviewClass:('human'|'pending'|'none'), disposition:(object|null), escalationReason:string[],
- *   advisoryComment:(string|null), humanComment:(string|null),
+ *   careLevel:('none'|'low'|'elevated'|'high'), advisoryComment:(string|null), humanComment:(string|null),
+ *   advisoryCommentAt:(string|null), humanCommentAt:(string|null),
  *   diffStat:Array<{path:string, additions:number, deletions:number}>, filesChanged:number}}
  */
 export function assembleReviewDetail({ view } = {}) {
@@ -102,15 +103,24 @@ export function assembleReviewDetail({ view } = {}) {
 
   const comments = Array.isArray(v.comments) ? v.comments : [];
   const bodyOf = (c) => (c && typeof c.body === 'string' ? c.body : '');
-  const lastMatching = (pred) => {
+  // Returns the matched comment itself (not just its body) so the caller can pull `createdAt` alongside `body`
+  // without a second scan — `lastMatchingComment(pred).body`/`.createdAt`, `null` when nothing matches.
+  const lastMatchingComment = (pred) => {
     for (let i = comments.length - 1; i >= 0; i--) {
       const b = bodyOf(comments[i]);
-      if (pred(b)) return b;
+      if (pred(b)) return comments[i];
     }
     return null;
   };
-  const advisoryComment = lastMatching((b) => b.includes(ADVISORY_MARKER));
-  const humanComment = lastMatching((b) => HUMAN_MARKERS.some((m) => b.trimStart().startsWith(m)));
+  const advisoryMatch = lastMatchingComment((b) => b.includes(ADVISORY_MARKER));
+  const humanMatch = lastMatchingComment((b) => HUMAN_MARKERS.some((m) => b.trimStart().startsWith(m)));
+  const advisoryComment = advisoryMatch ? bodyOf(advisoryMatch) : null;
+  const humanComment = humanMatch ? bodyOf(humanMatch) : null;
+  // #2818 — the matched comment's `createdAt` (ISO 8601), so a per-item pipeline timeline can place the
+  // escalation/review-verdict comment in time. `null` exactly when the matching comment is absent (mirrors the
+  // `advisoryComment`/`humanComment` null case), never a fabricated "now".
+  const advisoryCommentAt = advisoryMatch && typeof advisoryMatch.createdAt === 'string' ? advisoryMatch.createdAt : null;
+  const humanCommentAt = humanMatch && typeof humanMatch.createdAt === 'string' ? humanMatch.createdAt : null;
 
   const diffStat = (Array.isArray(v.files) ? v.files : []).map((f) => ({
     path: String(f && f.path != null ? f.path : ''),
@@ -128,8 +138,13 @@ export function assembleReviewDetail({ view } = {}) {
     reviewClass,
     disposition,
     escalationReason,
+    // #2818 — `careLevelFromReasons` reused unchanged (#2567's bridge): computed here, never re-derived, so a
+    // consumer never re-implements the reasons→care-level mapping.
+    careLevel: careLevelFromReasons(escalationReason),
     advisoryComment,
     humanComment,
+    advisoryCommentAt,
+    humanCommentAt,
     diffStat,
     filesChanged: diffStat.length,
   };
