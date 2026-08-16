@@ -4,10 +4,13 @@ shortTitle: "Webcases viewer + review persistence"
 kind: story
 size: 3
 parent: "2505"
-status: open
+status: resolved
 blockedBy: ["2532"]
 tags: [plateau-loop, console, webcases, web-docs, viewer]
 dateOpened: "2026-07-18"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-16"
+graduatedTo: none
 ---
 
 # Webcases viewer: source registry + per-case review persistence
