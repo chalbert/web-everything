@@ -123,6 +123,10 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
+// leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
+// to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
+import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -134,8 +138,7 @@ export { remoteManifestApiArgs };
 const REVIEW_BASELINE_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-baseline-state.json');
 
 const argv = process.argv.slice(2);
-const flags = {};
-for (const a of argv) { const m = a.match(/^--([^=]+)(?:=(.*))?$/); if (m) flags[m[1]] = m[2] === undefined ? true : m[2]; }
+const flags = parseArgvFlags(argv); // #2859 — single source: scripts/lib/reconcile-predicate.mjs
 
 // ── PURE helpers (unit-tested in scripts/__tests__/merge-ai-prs.test.mjs) ──────────────────────────────
 
@@ -2462,7 +2465,7 @@ async function runCli() {
   // ci-lifecycle state is ever left to be inferred from a label's absence. ON by default for the label-scoped
   // drain (it IS the reconcile point); `--no-reconcile-labels` disables both. Under `--watch` this re-labels
   // each interval — self-healing, with no human step and no per-check-tick `pr-land` write.
-  const RECONCILE = label && !flags['no-reconcile-labels'];
+  const RECONCILE = reconcileWouldRunFor(argv); // #2859 — single source: scripts/lib/reconcile-predicate.mjs
   // #xc7p3q9 (R2) — the operator escape hatch (symmetric to --no-review-escalation): force the couple gate to
   // treat the open-PR context as COMPLETE, so a genuinely-stuck queue has a lever short of editing the script.
   const ASSUME_COMPLETE_CONTEXT = !!flags['assume-complete-context'];
