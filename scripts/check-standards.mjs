@@ -1678,6 +1678,21 @@ try {
   warn(`Agent-memory freshness audit failed: ${e.message}`);
 }
 
+// ── 9a′-ii. Agent-memory citation integrity (#2921) ──
+// Different in kind from 9a′ above: these three signals reproduce the three factual errors the /review
+// of PR #1045 found in one 7-line memory paragraph — a wrong impl arm, a quoted guard section that exists
+// in no cited document, and (not mechanizable) a gloss that inverted a ruling's direction — none of which
+// any existing gate caught. A leaf making a false claim about the repo is a wrong INSTRUCTION every future
+// session loads before acting, so these are ERRORS, not curation nudges. Standalone: none — folded
+// straight into check:standards since the whole point is gate-time visibility (#2921 Why-now).
+try {
+  const { runMemoryCitationLintCheck } = require('./lib/memory-freshness.cjs');
+  const { errors: ce } = runMemoryCitationLintCheck();
+  for (const e of ce) err(e.message, e.descriptor);
+} catch (e) {
+  err(`Agent-memory citation-integrity check failed: ${e.message}`);
+}
+
 // ── 9a″. Agent-memory index-tree shape (#2192) ──
 // The always-loaded MEMORY.md is injected into every session; the harness silently truncates it above
 // its budget, dropping load-bearing rules with no warning. This check enforces: (1) size ≤ budget,
