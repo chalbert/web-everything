@@ -3,8 +3,10 @@ bornAs: xw2amiv
 kind: story
 size: 3
 parent: "2676"
-status: open
+status: resolved
 dateOpened: "2026-07-27"
+dateStarted: "2026-08-15"
+dateResolved: "2026-08-15"
 scope:
   - we:docs/agent/build-ui.md
   - we:skills-src/build-ui/SKILL.md
@@ -176,15 +178,15 @@ and existing skill steps, no renumbering, no code, no test suite to add or updat
 
 ## Done when
 
-- [ ] we:docs/agent/build-ui.md phase 4 states that an interaction-model fork (expand-in-place vs master-detail
+- [x] we:docs/agent/build-ui.md phase 4 states that an interaction-model fork (expand-in-place vs master-detail
       vs breadcrumb-zoom, or any behavior-across-clicks fork) must be ruled on OPERABLE candidates over the SAME
       data, not static panes — and cites the feature-tracking-screen master-detail precedent (#2708).
-- [ ] we:docs/agent/build-ui.md phase 6's frame-fork sentence explicitly cross-references phase 4's
+- [x] we:docs/agent/build-ui.md phase 6's frame-fork sentence explicitly cross-references phase 4's
       interaction-model rule.
-- [ ] we:docs/agent/build-ui.md's Honesty clauses list carries the new "ruled by clicking through it, not by
+- [x] we:docs/agent/build-ui.md's Honesty clauses list carries the new "ruled by clicking through it, not by
       looking at it" clause.
-- [ ] we:skills-src/build-ui/SKILL.md step 4 cross-references the interaction-model rule (grep for
+- [x] we:skills-src/build-ui/SKILL.md step 4 cross-references the interaction-model rule (grep for
       "interaction-model" confirms it lands in step 4, not elsewhere).
-- [ ] we:skills-src/design-committee/SKILL.md step 6 states that an interaction-model fork's explainer channel
+- [x] we:skills-src/design-committee/SKILL.md step 6 states that an interaction-model fork's explainer channel
       needs the operable candidates, not just their PNGs.
-- [ ] `npm run check:standards` — 0 errors.
+- [x] `npm run check:standards` — 0 errors.
