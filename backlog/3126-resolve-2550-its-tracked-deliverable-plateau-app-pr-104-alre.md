@@ -2,8 +2,11 @@
 bornAs: x8ua0pa
 kind: task
 parent: "2505"
-status: open
+status: resolved
 dateOpened: "2026-08-15"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: [plateau-loop, webcases, backlog-hygiene, bookkeeping]
 ---
 
@@ -24,6 +27,6 @@ work is done, the frontmatter status just never flipped.
 
 ## Done when
 
-- [ ] `backlog/2550-*.md` frontmatter carries `status: resolved`, `dateResolved`, and `graduatedTo: none` /
+- [x] `backlog/2550-*.md` frontmatter carries `status: resolved`, `dateResolved`, and `graduatedTo: none` /
       `codifiedTo: one-off` per the CLI's resolve requirements.
-- [ ] `check:standards` passes.
+- [x] `check:standards` passes.
