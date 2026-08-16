@@ -12,6 +12,12 @@
 // exhaustively unit-tested in scripts/__tests__/guard-lane.test.mjs. This file pins the WIRING: that
 // writeBacklogMd applies that decision at the source, before it writes, and that the numbering-repair /
 // drain JIT-numbering path (a SEPARATE writer) is intentionally NOT routed through it.
+//
+// #3034 EXTRACTION: the guard + the two writers (writeBacklogMd / writeBacklogMdUnguarded) moved VERBATIM out
+// of backlog.mjs into scripts/backlog/guarded-write.mjs, so scripts/operations/claim-io.mjs's sink can call the
+// SAME chain instead of re-deriving it (see that file's header). backlog.mjs's own `writeBacklogMd` is now a
+// thin shim that delegates to the extracted one and re-throws via its local `die()` — so the guard-order
+// assertions below read guarded-write.mjs's source, not backlog.mjs's.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -21,20 +27,21 @@ import { laneGuardDecision, resolveReal } from '../../guard-lane.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(resolve(here, '../../backlog.mjs'), 'utf8');
+const GW_SRC = readFileSync(resolve(here, '../guarded-write.mjs'), 'utf8');
 
-// Isolate the writeBacklogMd body — the source guard must live in THIS choke point (not scattered per-verb,
-// not in a numbering path), so scope the assertions to it.
-const wStart = SRC.indexOf('function writeBacklogMd(');
-const wEnd = SRC.indexOf('\nfunction ', wStart + 1);
-const WRITE_SRC = SRC.slice(wStart, wEnd === -1 ? undefined : wEnd);
+// Isolate the (extracted) writeBacklogMd body — the source guard must live in THIS choke point (not scattered
+// per-verb, not in a numbering path), so scope the assertions to it.
+const wStart = GW_SRC.indexOf('export function writeBacklogMd(');
+const wEnd = GW_SRC.indexOf('\nexport function ', wStart + 1);
+const WRITE_SRC = GW_SRC.slice(wStart, wEnd === -1 ? undefined : wEnd);
 
 describe('writeBacklogMd enforces lane-isolation at the source (item x1vw9g7)', () => {
   it('reuses guard-lane\'s classification — single source of truth for "is this a primary checkout"', () => {
-    expect(SRC).toMatch(/import \{ laneGuardDecision, resolveReal \} from '\.\/guard-lane\.mjs'/);
+    expect(GW_SRC).toMatch(/import \{ laneGuardDecision, resolveReal \} from '\.\.\/guard-lane\.mjs'/);
   });
 
   it('applies the guard to the target file\'s realpath, keyed on the checkout ROOT', () => {
-    expect(WRITE_SRC).toMatch(/laneGuardDecision\(resolveReal\(abs\), ROOT\)/);
+    expect(WRITE_SRC).toMatch(/laneGuardDecision\(resolveReal\(abs\), root\)/);
   });
 
   it('DENIES (die) on a primary target, before it delegates to the writer', () => {
@@ -44,8 +51,9 @@ describe('writeBacklogMd enforces lane-isolation at the source (item x1vw9g7)', 
     const delegateAt = WRITE_SRC.indexOf('writeBacklogMdUnguarded(');
     expect(guardAt).toBeGreaterThanOrEqual(0);
     expect(delegateAt).toBeGreaterThan(guardAt); // guard runs BEFORE the (delegated) write
-    // the guard's truthy decision must feed a die(...) — a refusal, not a warning
-    expect(WRITE_SRC).toMatch(/if \(laneGuardDecision\(resolveReal\(abs\), ROOT\)\) \{[\s\S]*?die\(/);
+    // the guard's truthy decision must feed a throw (guarded-write.mjs THROWS — it cannot exit its caller's
+    // process; backlog.mjs's shim converts that throw into its own die() with the identical message).
+    expect(WRITE_SRC).toMatch(/if \(laneGuardDecision\(resolveReal\(abs\), root\)\) \{[\s\S]*?throw new Error\(/);
     expect(WRITE_SRC).toMatch(/There is no override/); // matches guard-bash's now-unconditional denial (#2339)
   });
 
