@@ -180,6 +180,67 @@ rewrite the operator's own tree with no gate" and "a machine may only do that be
 real trust/safety difference regardless of build cost, not a timing or effort question wearing a fork's
 clothes.
 
+**Skeptic (fresh-context, 2026-08-16):** `SURVIVES-WITH-AMENDMENT` — a second, independent four-axis pass
+(per `we:docs/agent/backlog-workflow.md:421`'s fresh-context requirement; the prior pass above was
+self-conducted and flagged as such). Every cited `file:line` was independently re-opened and confirmed to
+say what the item claims: `we:scripts/lib/converge-core.mjs:536-539`'s `continue`-branch `EDIT` return is
+unconditional, `editorPolicyForCareLevel` is absent from both the import list (`:49-61`) and the declared
+jury-core contract (`:27-33`); `we:scripts/converge-cli.mjs:424-430` builds the edit instruction with no care
+check in between, and `DEFAULT_CARE = CARE_LEVELS.ELEVATED` at `:76`, with the "editor could never run"
+rationale verified verbatim; `we:scripts/workflows/review-parked-prs.mjs:252-254`'s `editorMayPush` and
+`we:scripts/lib/jury-core.mjs:755/765/785`'s `EDITOR_ENABLED_CARE_LEVELS`/`EDITOR_MIN_ROUNDS`/
+`editorPolicyForCareLevel` all match as cited. **Classification, merit, citation-scope: SURVIVE independently**
+— re-confirmed by direct read of `we:backlog/2908-…`'s `scope:` frontmatter (`:14-18`, exactly the four files
+cited, none of which is `we:scripts/converge-cli.mjs`/`we:scripts/lib/converge-core.mjs`) and its Fork 1 crux
+(`:178-181`, framed throughout around "the author's branch" / "the author's own fix," never generalized).
+**Statute-overlap: the axis that lands.** The item's proposed codified anchor cross-references only
+`#converge-editor-enabled-at-low-only`. A broader grep of `we:docs/agent/platform-decisions.md` for the same
+subject — does a Layer-1 self-review pass ever clear a diff on its own — surfaces two directly on-point,
+already-ratified anchors the citation-scope check missed: **`#build-lane-self-review-non-zero-floor`** (#2828,
+ratified 2026-08-01) and **`#agent-convergence-independent-validation`** (#2398). #2828 rules that a build's
+Layer-1 self-review is "a non-clearing FIX pass… It never claims to be the safety net," bounded by an
+independent Layer-2 clearance (#2398: "a builder may not clear its own diff") **regardless of that Layer-1
+pass's rigor or depth** — and `/converge`'s own `we:skills-src/converge/SKILL.md` states it is the bounded
+successor to exactly this category of pass (it replaces the prose loop at
+`we:skills-src/conveyor/delivery-agent-brief.md`'s Step 6, "spawn one adversarial code-review subagent…
+address every finding to convergence," which today still runs unmigrated). This matters beyond being a
+stronger citation: `/converge`'s own frontmatter names a caller the (b) rationale's "operator… is present for
+the run" leg does not cover — *"or when a delivery agent needs its converge-before-PR pass"* — an unattended
+session with no live human watching each round. Under that caller, the "present, can `git reset` before
+anything reaches a PR" leg of (b)'s three-part argument does not hold, which could look like it reopens the
+merit gap. It does not, because the *load-bearing* leg was never presence — it is structural: independently
+confirmed no bypass exists anywhere in `we:scripts/pr-land.mjs` / `we:scripts/workflows/review-parked-prs.mjs`
+for a PR that already went through a `/converge` pass — every PR, however authored, still routes through the
+same `#2908`-gated `review:pending` loop. #2828/#2398 say this is true **by ratified statute**, independent of
+who or what triggered the Layer-1 pass, which is a strictly stronger and more durable ground than the
+`we:skills-src/converge/SKILL.md` prose the prior pass leaned on (a doc file, not a
+`we:docs/agent/platform-decisions.md` principle-surface — it carries none of
+`#human-is-principle-surface-not-path`'s edit-gating, so its "advisory only" promise could drift under a
+routine impl PR with no human-ratification step, unlike a statute anchor). **Amendment:** the eventual
+codified anchor should cross-reference `#build-lane-self-review-non-zero-floor` and
+`#agent-convergence-independent-validation` alongside `#converge-editor-enabled-at-low-only`, and the
+"operator is present" clause should read as reinforcing, not load-bearing. No conflict between the anchors —
+#2828/#2398 govern *whether Layer-1 self-review ever clears a diff on its own* (never), a layer above the
+narrower question `#3043` answers (*may the Layer-1 editor write a fix at all*) — so this is a missed
+reconciling citation, not a collision. **Secondary finding, non-differentiating:** the "advisory-only"
+invariant's specific "never `git commit`/`push`/`gh pr create`" clause
+(`we:scripts/lib/converge-transports.mjs:218`) is enforced by a **prompt-level instruction to the editor
+subagent**, not a code-level or tool-permission gate — no matching block exists in `we:scripts/guard-bash.mjs`,
+and the `we:skills-src/converge/SKILL.md` dispatch table (`edit` row) names no restricted agent/tool profile.
+Flagged for completeness but it does not discriminate between (b) and (c): the identical convention-only
+enforcement applies to whichever band's editor actually runs under either fork, and the statute-overlap
+finding above is what actually backstops it (a PR still can't land without clearing the independently gated
+Layer-2 loop, whatever the Layer-1 editor did or didn't obey).
+
+**Screen (fresh-context, 2026-08-16):** `clear`. Independently re-run against the same two fixed questions.
+Q1 (standard-vs-impl): confirmed clear — both call sites are internal delivery tooling under `scripts/`, no
+WE↔FUI boundary is implicated, and whether an editor writes to the operator's own lane vs. another author's
+branch is externally observable process behavior, not a hidden impl detail. Q2 (merit-vs-prioritization):
+confirmed clear — stripping cost from both branches, (b) leaves an unattended editor able to write at
+`elevated` by default with no override, while (c) restricts that to `low` and, as its own stated cost, couples
+panel rigor to editor-reachability; that is a real trust/safety-vs-rigor difference, not a timing or effort
+question wearing a fork's clothes.
+
 ### Review jury (provisional — pre-registered #2638)
 
 _Care band: **elevated** (system-machinery — whichever branch is ratified touches shared review/convergence
