@@ -250,6 +250,37 @@ Each item's **first paragraph is its digest** — the loader derives `item.summa
 - **Mechanical (`check:standards`):** the lead paragraph is a **required field** — a missing/empty one is an **error**. A paragraph over `DIGEST_MAX_WORDS` (100) **warns** — keep the digest to ~2-3 sentences ("what + why"), not the full body; the detail lives below it under `## Build` / `## Acceptance`.
 - **Human/agent (review-time) — the part tooling can't judge:** a derived digest can't drift as a *copy*, but its **content** drifts when you rewrite an item's scope and leave the opening paragraph describing the old plan. So **whenever you author, claim, work, close out, or review a story, re-read its lead paragraph and refresh it if it no longer matches the current item.** Authoring a new item (including a close-out spin-off) means *writing* a real digest, not letting the first sentence of detail stand in for one. Reviewing a candidate during selection means *glancing* at its digest and correcting it on the spot if it's stale — this is the cheapest moment, since you're already reading the item. Until this is second-nature across every skill, treat "review a story" as implicitly including "review its digest."
 
+## Acceptance criteria — written to be proven, not judged (#2949)
+
+Every item states how it will be proven done, on a **determinism ladder**. Write each criterion as high on
+the ladder as the item allows:
+
+| tier | form | who checks it |
+|---|---|---|
+| 1 · executable | a named command that fails before and passes after — a test, a `check:standards` rule, a webcase, a visual baseline diff | nobody. It is green or it is not |
+| 2 · observable | a named artifact or state: a file at a path, an endpoint returning X, a pattern present or absent | one cheap command, no judgment |
+| 3 · assertable | a prose claim plus the exact place to look (*`resolveRoster` returns an empty roster for care `none`*) | a juror must read — costly, so cap these |
+| — | anything vaguer ("improves clarity", "handles errors properly") | not a criterion. Rewrite it or drop it |
+
+**Every item carries at least one tier-1 criterion, or an explicit line saying why it cannot** (doc-only,
+pure design judgment). That single requirement forces the author to think about proof at file time, when
+it is cheap and convergent, rather than at review time, when it is a negotiation. **Cap the list at 3–5**
+so this does not become its own ceremony.
+
+**Author criteria at file time, in one pass — never let the implementing lane write its own.** The same
+anchoring problem the `dismissed-findings` signal exists to catch applies here: an author who sets the bar
+sets it where the work already is. Criteria live on the item, committed to git, so weakening them later is
+a visible diff, not a private judgment.
+
+**Title the section `## Done when`, not `## Acceptance`.** `## Done when` (alongside `## Design`) is
+already a standing provenance-lint escape zone (`scripts/lib/citation-check.mjs`, this doc's
+*Conventions* section) — an unbuilt item routinely cites paths that don't exist yet, and this heading
+needs no `(proposed)` marker for that. Existing items keep their `## Acceptance` heading (not migrated
+repo-wide); only the convention going forward changes name. `npm run check:health` reports an **`A1`**
+CANDIDATE flag (informational, never blocks a build) for an open item with neither heading, or one with no
+backticked, path/command-shaped token and no exemption phrase — a card to add proof to, or exempt, not a
+verdict.
+
 ## Selecting the next item to work on
 
 > Use when asked "what's next?", "pick the next backlog item", "what should I work on?" — or via the `next-backlog-item` skill. The goal is the item an **agent can implement now**, not just the most interesting one.
