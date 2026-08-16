@@ -1039,11 +1039,19 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * reviewer who finds it either way, which is the failure the aim would otherwise buy. It is FENCED (#2438) for
  * the same reason the goal is: it is caller-supplied prose, so it travels as labelled data and cannot become the
  * juror's conclusion. Omitting it (or passing blank) leaves the mandate BYTE-FOR-BYTE what it is without it.
+ * #2914 — the OPTIONAL `diffBasis` param. When it is present AND degraded (anything other than the literal
+ * string `'net'` — see `isDiffBasisDegraded`), the mandate gains a disclosure telling the juror it is holding
+ * the three-dot diff, not the net two-tree diff, so a sibling lane's already-landed file must not be reported
+ * as this PR's scope creep. Omitting it (or passing `'net'`) leaves the mandate BYTE-FOR-BYTE what it is
+ * without it — the golden fixture with no `diffBasis` passed is unaffected.
  * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string,
- *   round?: number, fenced?: boolean, aim?: string}} o
+ *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null}} o
  * @returns {string}
  */
-export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false, aim = '' } = {}) {
+export function buildPanelMandate({
+  lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false,
+  aim = '', diffBasis = null,
+} = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
@@ -1084,6 +1092,18 @@ export function buildPanelMandate({ lens, contextIsolation = 'diff-only', netCha
       'one. Never manufacture an instance of it to satisfy the hypothesis, and never let it narrow you: anything',
       'else your lens finds is still yours to report. The hypothesis, quoted verbatim:',
       fenceUntrusted('aim', aimText),
+    );
+  }
+  // #2914 — DIFF BASIS DISCLOSURE. Guarded on truthy-AND-degraded, never a bare `isDiffBasisDegraded(diffBasis)`
+  // (which is also true for null/undefined, since null !== 'net') — an omitted diffBasis must leave the mandate
+  // byte-identical to today's output, per the golden fixture.
+  if (diffBasis && isDiffBasisDegraded(diffBasis)) {
+    parts.push(
+      'DIFF BASIS: DEGRADED (three-dot). You are holding the three-dot output, not the net',
+      'two-tree diff -- it may list files a SIBLING lane already landed on main as though this PR added them.',
+      'Before reporting a file as scope creep, an undeclared payload, or an unrelated change, consider that it',
+      'may already be on main via another lane. This round will be escalated to a human regardless of your',
+      'verdict, so your findings are read as a report, not an acceptance signal.',
     );
   }
   // #3094 — THE MUTATION PROBE, UNCONDITIONAL (the fork ruled on the card, 2026-08-14). Every mandate that has
@@ -1775,6 +1795,14 @@ export function floorGrowOnlyJurors(current, proposed, ceiling) {
 export function absentMandatoryLenses(ranOkLenses = [], mandatory = MANDATORY_LENSES) {
   const ranSet = new Set(Array.isArray(ranOkLenses) ? ranOkLenses.filter((l) => typeof l === 'string' && l) : []);
   return (Array.isArray(mandatory) ? mandatory : []).filter((l) => !ranSet.has(l));
+}
+
+/** Fail-closed diffBasis degrade check (#2914). Mirrors the field's own producer
+ *  (we:scripts/fetch-parked.mjs assembleParked) and the fetch prompt's own instruction: anything other than
+ *  the literal string 'net' -- undefined, '', 'three-dot', or an invented value -- reads as degraded. An
+ *  unstated basis must never read as the good one. */
+export function isDiffBasisDegraded(diffBasis) {
+  return diffBasis !== 'net';
 }
 
 /**

@@ -656,8 +656,11 @@ function fetchPrompt(pr, repo, round = 1) {
 /** ONE lens reviewer's prompt — judges the SHARED diff snapshot (no fetch); gets its mandate from the CLI. When
  *  the care-level dialed a JURY (jurorsPerLens > 1), each juror is told it is one independent member judging the
  *  lens on its own — the diversity that a high-care change earns (#2567). In round > 1 it judges the editor's
- *  REVISED diff fresh — that is what makes the final accept a non-author sign-off (the loop's invariant). */
-function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, juror = 0, jurorsPerLens = 1) {
+ *  REVISED diff fresh — that is what makes the final accept a non-author sign-off (the loop's invariant).
+ *  `diffBasis` (#2914) — 'net' or 'three-dot' — is forwarded to the mandate CLI as `--diffBasis=<value>` so a
+ *  degraded round tells the juror not to report a sibling lane's already-landed files as scope creep; it is a
+ *  code-normalized two-value enum, never PR-controlled free text, so it is safe to inline on the command line. */
+function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, juror = 0, jurorsPerLens = 1, diffBasis = 'net') {
   const juryFraming = jurorsPerLens > 1
     ? `You are juror ${juror + 1} of ${jurorsPerLens} INDEPENDENT ${lens} reviewers on this high-care PR — judge the diff entirely on your own, do NOT try to agree with the other jurors; the panel keeps any concern ANY juror raises (diversity-selection, never a majority vote).`
     : '';
@@ -670,7 +673,7 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, ju
     `You are the ${lens} reviewer on the review panel for drain-parked PR #${pr} (repo ${repo})${title ? ` — ${title}` : ''}.`,
     juryFraming,
     roundFraming,
-    `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens}`,
+    `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens} --diffBasis=${diffBasis}`,
     escalationReason.length ? `The drain escalated this PR for: ${escalationReason.join('; ')}.` : 'No escalation reason block was present on the PR body.',
     'You review ONLY the diff below + the PR description + the escalation reason. NEVER `git checkout`/`switch`',
     'to the PR branch (#2336) — judge from this diff text alone.',
@@ -760,8 +763,9 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
     `Lenses that FAILED to run (their verdict is "unknown"): ${JSON.stringify(failedLenses)}`,
     `Escalation reasons (JSON): ${JSON.stringify(escalationReason || [])}`,
     `Round: ${round}   RoundCap (this care band's cap): ${roundCap}`,
-    `humanRequired: ${humanRequired ? 'true' : 'false'}  (true ⇒ a mandatory reviewer did not run, or the diff was`,
-    'unfetchable → the panel must NOT auto-accept; the reduce will return needs-human).',
+    `humanRequired: ${humanRequired ? 'true' : 'false'}  (true ⇒ a mandatory reviewer did not run, the diff was`,
+    'unfetchable, or the diff basis degraded to three-dot (#2914) → the panel must NOT auto-accept; the reduce',
+    'will return needs-human).',
     '',
     'Steps (write temp files under a temp dir, e.g. $(mktemp -d)):',
     `1. Build lensVerdicts: for EACH lens that RAN, write {"findings": <that lens's findings array>} to a temp`,
@@ -946,11 +950,11 @@ function pickGroundedInvite(invites) {
  *  juror-invite-on-discovery (#2640) a reviewer raised this round. The fetch/rigor happen ONCE per PR (in
  *  `convergePr`); this runs every round against the round's freshly-fetched diff and the CURRENT (possibly grown)
  *  roster. */
-async function runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens) {
+async function runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens, diffBasis) {
   const invites = [];
   const lensResults = await parallel(activeLenses.map((lens) => () =>
     parallel(Array.from({ length: jurorsPerLens }, (_unused, juror) => () =>
-      agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, round, juror, jurorsPerLens), { label: `panel:${repo}#${pr}:r${round}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Converge', schema: LENS_SCHEMA })
+      agent(lensPrompt(pr, repo, lens, diff, escalationReason, title, round, juror, jurorsPerLens, diffBasis), { label: `panel:${repo}#${pr}:r${round}:${lens}${jurorsPerLens > 1 ? `#${juror + 1}` : ''}`, phase: 'Converge', schema: LENS_SCHEMA })
         .then((r) => {
           // #2640 — collect a grounded invite (cite the finding, guardrail 1); the loop applies at most one per round.
           if (r && r.invite && typeof r.invite === 'object' && r.invite.lens && r.invite.citedFinding) {
@@ -1017,7 +1021,7 @@ async function applyJurorInvite(item, careLevel, seatedLenses, jurorsPerLens, in
  *  not run never reads as accept (enforced both in the reduce's `humanRequired` AND as a safety net below). Returns
  *  the round result the loop drives on: `outcome` (land | continue | escalate) + the flattened findings the editor
  *  round revises against. */
-async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap) {
+async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, diffBasis, round, roundCap) {
   const failedLenses = lensResults.filter((r) => !r.ok).map((r) => r.lens);
   // ABSENT, not just failed (gate-self fix, #2640): a mandatory lens degrades the round if it is not PRESENT-and-OK
   // in the results — whether it ran-and-errored OR was never scheduled at all (dropped from the roster). Keying the
@@ -1028,10 +1032,17 @@ async function reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk
   // @duplicate-of we:scripts/lib/converge-core.mjs (`deriveRoundObservations` → `panel.absentMandatory`) — migrate under #xyihiji.
   const okLensSet = new Set(lensResults.filter((r) => r.ok).map((r) => r.lens));
   const absentMandatory = MANDATORY_LENSES.filter((l) => !okLensSet.has(l));
-  const degrade = absentMandatory.length > 0 || !fetchOk;
+  // #2914 — MIRRORS the tested spec `isDiffBasisDegraded(diffBasis)` in review-core.mjs: anything but the literal
+  // string 'net' reads as degraded (a sandbox body cannot `import` the pure core; see the header).
+  const basisDegraded = diffBasis !== 'net';
+  const degrade = absentMandatory.length > 0 || !fetchOk || basisDegraded;
   if (degrade) {
-    const why = !fetchOk ? 'the diff could not be fetched' : `mandatory reviewer(s) absent (did not run/not scheduled): ${absentMandatory.join(', ')}`;
-    log(`  ${repo}#${pr}: round ${round} DEGRADING to needs-human — ${why} (a reviewer that did not run NEVER reads as accept).`);
+    const reasons = [];
+    if (!fetchOk) reasons.push('the diff could not be fetched');
+    if (absentMandatory.length > 0) reasons.push(`mandatory reviewer(s) absent (did not run/not scheduled): ${absentMandatory.join(', ')}`);
+    // Only meaningful when a diff really was fetched — an unfetchable diff already explains itself above.
+    if (fetchOk && basisDegraded) reasons.push('the diff basis degraded to three-dot — the net two-tree diff was unavailable, so a sibling lane\'s already-landed files may read as this PR\'s own (#2914)');
+    log(`  ${repo}#${pr}: round ${round} DEGRADING to needs-human — ${reasons.join('; ')} (a reviewer that did not run NEVER reads as accept).`);
   }
 
   const okLenses = lensResults.filter((r) => r.ok).map((r) => ({ lens: r.lens, findings: r.findings }));
@@ -1162,6 +1173,13 @@ async function convergePr(item) {
   };
   let headSha = shaOf(fetched);
 
+  // #2914 — WHICH DIFF this jury is judging. Fail-closed, MIRRORS assembleParked's own default
+  // (we:scripts/fetch-parked.mjs:212): anything but the literal string 'net' reads as the degraded 'three-dot'
+  // basis, including an absent/malformed field or a failed fetch — an unstated basis must never read as the
+  // good one. Re-read on every re-fetch (:1255, :1300) for the same reason `headSha` is.
+  const basisOf = (f) => (f && f.diffBasis === 'net') ? 'net' : 'three-dot';
+  let diffBasis = basisOf(fetched);
+
   // The roster is MUTABLE across rounds — a juror-invite-on-discovery (#2640) can grow it mid-loop (raise care →
   // recompute rigor → spawn the delta). It starts at the PR's care-dialed size and only ever grows, bounded by the
   // per-care-band ceiling. `roundCap` is FIXED at loop start (an invite spends rounds against it, never extends it).
@@ -1190,12 +1208,12 @@ async function convergePr(item) {
   let last = null;
 
   while (true) {
-    const { lensResults, invites } = await runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens);
+    const { lensResults, invites } = await runPanelRound(pr, repo, diff, escalationReason, title, round, activeLenses, jurorsPerLens, diffBasis);
     const ran = lensResults.filter((r) => r.ok).map((r) => `${r.lens}:${r.findings.length}`).join(', ');
     const failed = lensResults.filter((r) => !r.ok).map((r) => r.lens);
     log(`  ${prTag(item)}: round ${round} panel — ran [${ran || 'none'}]${failed.length ? `; FAILED [${failed.join(', ')}]` : ''}.`);
 
-    last = await reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, round, roundCap);
+    last = await reducePanelRound(pr, repo, lensResults, escalationReason, fetchOk, diffBasis, round, roundCap);
 
     // DEFENSE-IN-DEPTH backstop — the round-cap decision is single-sourced in the CLI (`deriveNegotiationOutcome`,
     // shelled via `reduce --round`), but this loop must be bounded by THIS body too, never solely by an outcome an
@@ -1253,6 +1271,7 @@ async function convergePr(item) {
         fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
         diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
         headSha = shaOf(fetched); // #2864 — the grown jury re-judges at whatever head this re-fetch read.
+        diffBasis = basisOf(fetched);
         fetchOk = !!(fetched && !fetched.error && diff.length > 0);
         if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
         continue;
@@ -1298,6 +1317,7 @@ async function convergePr(item) {
     fetched = await agent(fetchPrompt(pr, repo, round), { label: `fetch:${prTag(item)}:r${round}`, phase: 'Converge', schema: FETCH_SCHEMA }).catch(() => null);
     diff = (fetched && typeof fetched.diff === 'string') ? fetched.diff : diff;
     headSha = shaOf(fetched); // #2864 — the editor pushed, so the next round judges (and records) a NEW head.
+    diffBasis = basisOf(fetched);
     fetchOk = !!(fetched && !fetched.error && diff.length > 0);
     if (!fetchOk) log(`  ${prTag(item)}: round ${round} re-fetch failed — the round will degrade to needs-human.`);
   }
