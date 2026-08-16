@@ -31,7 +31,13 @@ pass-4 skeptic attack and pass-5 two-confusion screen were run by the preparing 
 separate fresh-context sub-agent — a real, named deviation from the ideal discipline, not a silent skip. Both
 passes were still run adversarially against all their required axes (see the `Skeptic:`/`Screen:` lines under
 Fork 1) and the findings are folded into the fork below, including one genuine finding this session's own first
-draft had missed (the parent epic #2472's own body text).
+draft had missed (the parent epic #2472's own body text). **Superseded 2026-08-16:** a genuine
+throwaway fresh-context agent (no prior involvement in this item, dispatched after the item had already
+merged as PR #1395) has now independently re-run both passes — see the dated `Skeptic (fresh-context,
+2026-08-16):` / `Screen (fresh-context, 2026-08-16):` notes under Fork 1. It reached the same
+ratification-readiness conclusion and found one real citation-location defect the self-run pass had left
+in (a "we:story-preparation-checklist.md item 8" mislabel), now corrected; `we:docs/agent/backlog-workflow.md:421`'s
+fresh-context requirement is satisfied as of that pass.
 
 **Headline finding: the premise #2475/#2472 were framed on may already be moot.** #2472 (parent epic,
 opened 2026-07-12) frames per-repo files as *the* data-model prerequisite for cross-repo orchestration. But
@@ -106,9 +112,10 @@ stack twice more from scratch).
     gate (#2456)**" — and #2456 (`status: open` as of this prep) explicitly says the ~2-week
     unattended-operation evidence bar is **not yet met** ("keep running", 2026-07-14 interim review). No one
     has yet demonstrated FUI/plateau-app need to operate a backlog independent of WE; building the
-    decentralization now is exactly the #3071 shape (`we:agent-memory-src/story-preparation-checklist.md`
-    item 8's counter-example) — a well-scoped build that measures nothing about whether it unblocks anything
-    real.
+    decentralization now is exactly the #3071 shape (`we:agent-memory-src/story-preparation-checklist.md`'s
+    own #3071 callout, in its "Why" rationale and closing note — not item 8, which is about de-risking
+    probes during preparation and never mentions #3071) — a well-scoped build that measures nothing about
+    whether it unblocks anything real.
 - **(b) A locus-filtered virtual per-repo view — no new files, no new authority.** WE's tracker stays the
   single record of truth (unchanged from today); the console's `REPOS` registry (the loader module above)
   gains a mode where a repo slug (`frontierui`, `plateau-app`) resolves to **WE's own `backlog/` directory,
@@ -201,8 +208,13 @@ read #500, #2456, and #2472 directly (not just this card's summary of them) — 
 exactly what #2472 itself cites as its own blocker (#2472's body: "Deferred behind the phase-1 evidence gate
 (#2456)"), so citing it to reject (a) is within scope, not overreach; #500's ruling is scoped to the
 landing/gate registry, cited here only for that same claim. The `we:agent-memory-src/story-preparation-checklist.md`
-"#3071 shape" reference (item 8, "a well-scoped build that measures nothing about whether it unblocks
-anything real") is used as a cautionary parallel, not as authority narrower than its own scope — also holds.
+"#3071 shape" reference ("a well-scoped build that measures nothing about whether it unblocks anything real")
+is used as a cautionary parallel, not as authority narrower than its own scope — holds, but the original
+citation mislabeled its location as "item 8"; the #3071 line actually lives in the checklist's "Why"
+rationale (preceding the numbered list) and its closing note after item 9 — item 8 itself is about
+de-risking risky probes during preparation and does not mention #3071. Corrected by the fresh-context
+citation check below; the substance of the citation (a real, on-point cautionary parallel) was never wrong,
+only its in-file location.
 
 Screen: clear — two-confusion check on Fork 1. (1) Not an invisible implementation detail: the fork has a
 named, real consumer (`plateau:src/backlog-view/loader.ts`'s `REPOS` seam and the humans who'd read a
@@ -212,6 +224,48 @@ Merit survives the "free to build" hypothetical: even with (a) and (b) both zero
 maintained, (a) still forces a permanent repo-qualified-id scheme onto every existing `#NNN` cross-reference
 constellation-wide (correctness/legibility cost, not an effort cost), which (b) never incurs. The fork is not
 prioritization in disguise — it is a real, standing structural trade-off independent of build cost.
+
+**Skeptic (fresh-context, 2026-08-16):** the pass-4 skeptic and pass-5 screen above were originally run by
+the preparing session itself (disclosed above) rather than a throwaway fresh-context agent, which
+`we:docs/agent/backlog-workflow.md:421` requires. This note is that required fresh-context pass, run by a
+session with no prior involvement in this item, after the item had already merged (PR #1395). Re-attacked
+all four axes independently rather than re-deriving the self-run pass: **(1) Classification** — SURVIVES;
+also pressed a sharper angle the self-run pass didn't raise: since neither named consumer needs the record
+relocated, is Fork 1 a manufactured fork around an obvious call rather than a genuine either/or? Rejected —
+obviousness of the default doesn't disqualify fork-ness under the stated test (a forced invariant where
+exactly one branch is correct); (a)/(c) remain live, buildable alternatives with real (if rejected) merit
+cases, not strawmen. **(2) Merit** — SURVIVES-WITH-AMENDMENT (as already folded into the fork above); no
+further merit gap found. **(3) Statute-overlap** — SURVIVES: independently re-grepped
+`we:docs/agent/platform-decisions.md` for every anchor heading touching backlog/locus/registry/repo/numbering/
+track turf and found no anchor beyond the three already cited that governs backlog-data placement; the one
+adjacent hit (`#registry-name-guard-namespace`) is about `CustomRegistry.define()` HTML-attribute-namespace
+collisions, unrelated. **(4) Citation-scope** — independently re-verified #500, #2456, #2472,
+`plateau:src/backlog-view/loader.ts` (its `REPOS` doc comment quoted verbatim matches),
+`plateau:docs/backlog-console-design.md` §6b (exists, quoted framing matches), the
+`we:scripts/check-standards-rules.mjs:74-83` `LOCI` registry (matches), `we:docs/agent/backlog-workflow.md`'s
+*Repo-locus* section (~line 745, matches "~749-768"), and
+`we:agent-memory-src/conveyor-main-drive-cross-repo-playbook.md` (its 8-item list —
+#2789/#2795/#2791/#2794/#2714/#2790/#2715/#2712 — confirms "8 plateau-app items landed cross-repo in one
+session"). **Found one real defect: the "item 8" attribution for the #3071 checklist reference was wrong**
+(the #3071 line lives in the checklist's pre-list "Why" rationale and its post-item-9 closing note, not
+inside item 8's own text, which is about de-risking probes and never mentions #3071) — fixed in both
+places above (Fork 1's option (a) bullet and the Citation-scope paragraph). The underlying claim was never
+substantively wrong, only its in-file pointer. The `393 + 211` locus-hit count is now `394 + 217` (re-grepped
+live) — normal corpus drift in an active repo over one day, not a citation defect, left as an approximate
+figure. **Net: no new problem found beyond the one the self-run pass's own citations already had latent
+(now fixed); ratification-readiness holds on a genuine independent pass.**
+
+**Screen (fresh-context, 2026-08-16):** independently re-ran both confusion checks rather than re-deriving
+the self-run screen. **(1) Implementation-vs-standard** — clear: Fork 1 is a backlog/project-tracking
+infrastructure decision (where agent-operations tracking data lives), not a WE↔FUI runtime-implementation
+question; it never touches an intent/block/plug/protocol/adapter, so `constellation-placement`
+(implementation-code placement) is a different axis entirely and nothing here misfiles onto it. **(2)
+Merit-vs-prioritization** — clear: stress-tested the "free to build" hypothetical independently — even with
+(a) built and maintained at zero cost, a repo-qualified-id scheme becomes structurally necessary the moment
+two repos both mint a bare `#NNN`, which is a correctness/legibility cost intrinsic to the shape, not a
+timing or effort artifact; and (a)'s "true local autonomy" merit case is a structural property (no WE
+checkout required) independent of build cost too, so neither side of the fork is prioritization wearing
+merit's clothes. **Net: screen holds on independent re-derivation; no confusion found.**
 
 ## Supported by default (not a fork)
 
