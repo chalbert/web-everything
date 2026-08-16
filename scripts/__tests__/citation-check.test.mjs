@@ -104,33 +104,66 @@ describe('findAnchorRulingMismatches — gate 10 (the 11-vs-1 core)', () => {
     expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
   });
 
-  it('does NOT fire on a bare cross-reference with no attributing number (a trailing PROSE paren)', () => {
-    // Line 3186 of the real platform-decisions.md — anchor followed by a prose parenthetical, no #NNN.
-    const text = 'Extends [#agent-convergence-independent-validation](#agent-convergence-independent-validation) ' +
-      '(independence rests on a distinct validator, never peer/self agreement).';
-    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
+  it('#2861 — the reproduced shape-A false positive: a separate ADJACENT paren whose leading number is ' +
+    'PROSE, not an attribution', () => {
+    // The exact repro from the card: the wrapper class steps over the markdown link's own closing `)`, and
+    // a loose tail let `#9999`'s unrelated prose paren read as `#foo-anchor`'s attribution.
+    const text = 'see [foo](#foo-anchor) (#9999 tracks the build slice).';
+    expect(findAnchorRulingMismatches(text, buildAnchorOwners([
+      { num: '100', codifiedIn: 'docs/agent/platform-decisions.md#foo-anchor' },
+    ]))).toHaveLength(0);
   });
 
-  it('does NOT fire when a number belongs to a DIFFERENT paren than the anchor', () => {
-    // Real line-2839 shape: a preceding `(#2563)` ratified-marker, then the anchor mentioned in prose.
-    const text = '**Ratified 2026-07-18 (#2563).** Composes with — does not alter — ' +
-      '[#agent-convergence-independent-validation](#agent-convergence-independent-validation): a care signal.';
-    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
+  it('#2861 — the SAME-paren comma form of that number still fires (shape B, unaffected by the shape-A fix)', () => {
+    const text = 'compose (`#foo-anchor`, #9999).';
+    const hits = findAnchorRulingMismatches(text, buildAnchorOwners([
+      { num: '100', codifiedIn: 'docs/agent/platform-decisions.md#foo-anchor' },
+    ]));
+    expect(hits).toHaveLength(1);
+    expect(hits[0].shape).toBe('B');
+    expect(hits[0].citedNum).toBe('9999');
   });
 
-  it('does NOT fire on an INCIDENTAL number sharing the SAME paren as the anchor (no comma attribution)', () => {
-    // Shape-B precision: `#2439` here is a build-slice mention, not a ruling attribution — there is no
-    // `anchor, #NNN` (or `#NNN, anchor`) comma-adjacency, so co-residence in one paren must NOT fire.
-    const text = 'the convergence gate (#2439 introduced the check enforced by ' +
-      '`#agent-convergence-independent-validation`) holds.';
-    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
-  });
+  // ── Shared must-NOT-fire table (#2861 "Approach"): each row states one non-attribution scenario TWICE —
+  // once phrased so only shape A's regex could plausibly match (`phraseA`), once phrased so only shape B's
+  // could (`phraseB`) — and both phrasings cite a DELIBERATELY WRONG (non-owner) number. That second part is
+  // load-bearing: a fixture that cites the anchor's real owner would pass even if a precision guard were
+  // deleted, because `record()` short-circuits on ownership before the shape claim is ever exercised (the
+  // exact vacuity #2861 found in the old `{#anchor}` test, below). Citing a wrong number means the ONLY way
+  // either row can assert 0 findings is the shape stage rejecting the match — so a guard regression on
+  // either branch is caught by its own row, and one guard can never silently cover for the other's absence.
+  const fooOwners = buildAnchorOwners([{ num: '2398', codifiedIn: 'docs/agent/platform-decisions.md#foo-anchor' }]);
+  const MUST_NOT_FIRE_TABLE = [
+    {
+      name: 'a trailing/co-resident number followed by PROSE, not a comma or immediate close',
+      phraseA: 'see [foo](#foo-anchor) (#9999 tracks the build slice).',
+      phraseB: 'the note (#9999 introduces the check enforced by `#foo-anchor`) holds.',
+    },
+    {
+      name: 'a bare cross-reference paren with no attributing number at all',
+      phraseA: 'Extends [foo](#foo-anchor) (independence rests on a distinct validator, never peer/self agreement).',
+      phraseB: '(independence rests on a distinct validator that never numbers `#foo-anchor` at all).',
+    },
+    {
+      name: 'a number that belongs to a DIFFERENT, preceding paren than the anchor',
+      phraseA: '**Ratified 2026-07-18 (#9999).** Composes with — does not alter — [foo](#foo-anchor): a care signal.',
+      phraseB: 'first (#9999) is ratified; a second, unrelated group (`#foo-anchor` alone) follows.',
+    },
+    {
+      name: 'the heading-definition form `{#anchor}` is never a citation, adjacent number or not',
+      // Non-owner #9999 (was #2398, the real owner, in the pre-#2861 test — the fix this table exists for).
+      phraseA: '### Heading {#foo-anchor}\n\n**Ratified 2026-07-10 (#9999, graduated to epic #2410).**',
+      phraseB: 'a stray same-paren form embedding the heading token directly: (`{#foo-anchor}`, #9999) ' +
+        'should not read as an attribution either.',
+    },
+  ];
 
-  it('does NOT fire on the heading-definition form `{#anchor}` followed by its `**Ratified (#NNN)**` line', () => {
-    const text = '### Agent fix/convergence {#agent-convergence-independent-validation}\n\n' +
-      '**Ratified 2026-07-10 (#2398, graduated to epic #2410).**';
-    expect(findAnchorRulingMismatches(text, owners)).toHaveLength(0);
-  });
+  for (const { name, phraseA, phraseB } of MUST_NOT_FIRE_TABLE) {
+    it(`does NOT fire (either phrasing) — ${name}`, () => {
+      expect(findAnchorRulingMismatches(phraseA, fooOwners)).toHaveLength(0);
+      expect(findAnchorRulingMismatches(phraseB, fooOwners)).toHaveLength(0);
+    });
+  }
 });
 
 describe('findAnchorRulingMismatches — MULTI-OWNER authority (32+ anchors have 2+ owners on the corpus)', () => {
