@@ -1,0 +1,90 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #2690 ("generalize the rollup tree to N levels + a program/portfolio zoom above feature") needs a tier
+  above the ratified <code>kind: feature</code> (#2691) in Plateau Loop's feature-tracking rollup tree,
+  and names the fork itself as an open question in its own body: <em>"name the tier above feature &mdash;
+  a PROGRAM (a delivery grouping of features, rolls up points) vs an INITIATIVE (a time-boxed bet) vs an
+  OKR OBJECTIVE (an outcome the features serve, rolls up outcome-metrics not points)."</em> Decision
+  #3123 splits this out per the story-preparation checklist's rule that a real fork must be named as its
+  own open decision, never buried in a story. The choice is not cosmetic: it fixes the DATA CONTRACT the
+  rollup/velocity/forecast interface exposes for the tier, not just a label.
+</p>
+
+<h2>Prior art &mdash; name and rollup basis travel together, in every surveyed system</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Tier above feature-equivalent</th><th>Rollup basis</th><th>Mechanism</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>SAFe (Scaled Agile)</td><td><strong>Program</strong> (Agile Release Train / Program Increment)</td><td>Points/velocity &mdash; PI predictability is committed vs delivered story points</td><td>Fixed cadence, org-level grouping of Features</td></tr>
+    <tr><td>Jira Advanced Roadmaps</td><td><strong>Initiative</strong> (Theme above that)</td><td>No native basis shipped; teams bolt on a point sum or percent-complete</td><td>A level in the one issue-type hierarchy</td></tr>
+    <tr><td>Linear</td><td><strong>Initiative</strong> (first-class entity)</td><td>Percent-complete by child status</td><td>Explicit membership</td></tr>
+    <tr><td>Microsoft Viva Goals / Asana Goals (OKR tools)</td><td><strong>Objective</strong>, rolling up Key Results</td><td>Weighted % contribution &mdash; weights sum to 100%, no point relationship</td><td>Explicitly not a point sum, hand-authored per objective</td></tr>
+  </tbody>
+</table>
+<p>
+  Two load-bearing facts: (1) "program" already has an established points/velocity-rollup meaning in
+  agile practice (SAFe) &mdash; real prior art for a PROGRAM + points-rollup default, though SAFe's
+  Program is an organizational/cadence concept (an Agile Release Train), not merely "sums points" &mdash;
+  the citation authorizes the narrower claim that "program" is established vocabulary for a
+  points-tracked grouping, not that SAFe's full ART semantics transfer. (2) OKR tooling never reuses a
+  point-sum for Objective progress &mdash; confirming #2690/#3123's existing claim that an OKR-style
+  rollup is a genuinely different aggregation, not a relabeling of points.
+</p>
+
+<h2>Statute-overlap &mdash; "program" is not a free word in this repo</h2>
+<p>
+  <code>docs/agent/backlog-workflow.md#program-definition</code> already ratifies "program" as a
+  specific, unrelated term: a perpetual <code>ongoing: true</code> epic passing a four-part Program Test
+  (standing goal &middot; conformance front &middot; currency front &middot; cadence),
+  <code>codifiedIn</code>-cited from <code>docs/agent/platform-decisions.md:3502-3505</code> as a
+  load-bearing statute anchor.
+</p>
+<p>
+  This decision's answer is not insulated product vocabulary &mdash; it is very likely to become the
+  literal next <code>kind</code> enum value on WE's own backlog axis, in the <em>same</em> governing
+  file. #2691's own ratified rule (<code>docs/agent/backlog-workflow.md:163</code>) already names the
+  extension #3123 fills in: <em>"Nesting (a <code>feature &rarr; feature</code> &lsquo;initiative&rsquo;/
+  program tier) is a non-breaking future extension&hellip; Program-level containment that the root rule
+  drops is what that extension is for."</em> And Plateau Loop (the console that renders this tier) is
+  explicitly built to dogfood WE's own backlog model and vocabulary &mdash; <em>"Web Everything's backlog
+  setup is the reference for the model and vocabulary&hellip; not code to copy"</em> &mdash; starting with
+  WE's own repo before generalizing to multi-repo.
+</p>
+<p>
+  If <code>PROGRAM</code> is picked, <code>backlog-workflow.md</code> would carry two independently
+  load-bearing, incompatible definitions of the bare word "program." The collision is <strong>lexical, not
+  mechanical</strong> (different fields, different enum &mdash; an <code>ongoing: true</code> flag on
+  <code>kind: epic</code> vs a new <code>kind: program</code> value never occupy the same field or badge),
+  and it is <strong>bounded to WE's own dogfooded repo/backlog</strong> &mdash; a third-party Plateau
+  customer's backlog would not carry WE's governance-specific "Program Test" concept unless they
+  separately adopted it. Within that bounded scope, a one-time reconciliation clause on
+  <code>#program-definition</code> resolves it. <code>INITIATIVE</code> carries no such collision &mdash;
+  grepping both governing docs finds "initiative" used only as an informal gloss, never a ratified,
+  <code>codifiedIn</code>-cited term.
+</p>
+
+<h2>What this grounds (fed into #3123's Fork 1)</h2>
+<ul>
+  <li>The points-rollup basis (PROGRAM, or a collision-free label carrying the same semantics) is the
+    strongest default on <strong>merit</strong>, not just engineering cost: the Plateau Loop console this
+    tier renders inside is points/velocity-native end to end (every tier below already measures
+    <code>size</code>; the honest-forecast story, #2718, is velocity-derived), so a tier that switches
+    units at the top is the outlier needing justification.</li>
+  <li>The label and the rollup basis are separable &mdash; nothing requires "initiative" to mean
+    "bet-progress measure." #3123's fork adds a fourth option (a collision-free label carrying PROGRAM's
+    points-rollup semantics) that the original three-way framing did not consider &mdash; research
+    reshaping the fork set, as expected of a real prior-art pass.</li>
+  <li>Existing code the default reuses verbatim: <code>throughput()</code>/<code>rollUp()</code> in
+    <code>scripts/readiness/velocity-metrics.mjs</code> already sum <code>size</code> over a trailing
+    window into <code>{ points, pointsPerWeek, … }</code> &mdash; the exact shape a points-rollup tier
+    needs, with zero new fields.</li>
+</ul>
+<p>
+  Full fork write-up (options, tradeoffs, code examples, skeptic + two-confusion screen verdicts) lives in
+  the item itself: <a href="/backlog/3123-name-the-tier-above-feature-rollup-basis-points-vs-outcome-m/">#3123</a>.
+  Related: <a href="/research/feature-tier-above-epic/">feature-tier-above-epic</a> (the sibling prior-art
+  survey for the tier directly below this one, #2691).
+</p>
+{% endraw %}

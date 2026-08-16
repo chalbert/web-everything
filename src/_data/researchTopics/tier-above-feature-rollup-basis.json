@@ -1,0 +1,22 @@
+{
+  "id": "tier-above-feature-rollup-basis",
+  "title": "Naming the tier above feature — rollup basis: points (PROGRAM) vs bet-progress (INITIATIVE) vs outcome-metrics (OKR OBJECTIVE)",
+  "status": "open",
+  "summary": "Prep research for decision #3123, split off #2690's own body ('name the tier above feature — a PROGRAM (a delivery grouping of features, rolls up points) vs an INITIATIVE (a time-boxed bet) vs an OKR OBJECTIVE (an outcome the features serve, rolls up outcome-metrics not points)'). SURVEY: no mature tracker treats the name as free of its aggregation mechanism. SAFe's Program (Agile Release Train / Program Increment) is tracked by points/velocity, real prior art for PROGRAM+points, though SAFe's Program is an organizational/cadence concept so the citation authorizes only the narrower claim that 'program' is established points-tracked-grouping vocabulary, not SAFe's full ART semantics. Jira Advanced Roadmaps and Linear both use Initiative above Epic/Project with no native point-sum basis (percent-complete instead). Microsoft Viva Goals and Asana Goals (OKR tools) roll up Objective progress via a WEIGHTED % CONTRIBUTION model (weights summing to 100%), explicitly not a point sum — concrete confirmation that an OKR-OBJECTIVE rollup is a genuinely different aggregation with no existing WE code. STATUTE-OVERLAP FINDING (new, not in the parent item): we:docs/agent/backlog-workflow.md#program-definition already ratifies 'program' as an unrelated, incompatible term (a perpetual ongoing:true epic passing a four-part Program Test), codifiedIn-cited from we:docs/agent/platform-decisions.md:3502-3505. #3123's answer is very likely to become the literal next kind enum value on WE's OWN backlog axis in the SAME governing file — #2691's ratified rule (we:docs/agent/backlog-workflow.md:163) already anticipates 'a feature -> feature \"initiative\"/program tier' as the non-breaking future extension #3123 fills in, and Plateau Loop (the console rendering this tier) is explicitly built to dogfood WE's own backlog model/vocabulary starting with WE's own repo. Picking PROGRAM as the kind-value name would put two independently load-bearing, incompatible definitions of the bare word 'program' in one statute document; the collision is lexical (not mechanical — different fields, an ongoing:true flag vs a new kind value never share a badge) and bounded to WE's own dogfooded repo (a third-party Plateau customer's backlog would not carry WE's governance-specific Program Test concept). INITIATIVE carries no such collision (used only as an informal gloss in both governing docs, never ratified). GROUNDS: fed a fourth, prep-surfaced fork option into #3123 that decouples the LABEL from the ROLLUP BASIS — a collision-free name (e.g. kind:initiative) carrying PROGRAM's points-rollup semantics, preserving the reuse-of-existing-velocity-primitives engineering win (scripts/readiness/velocity-metrics.mjs throughput()/rollUp(), already ships points-sum-over-trailing-window) while sidestepping the statute collision. Merit case for points-rollup strengthened beyond 'cheapest to build': the Plateau Loop console this tier renders inside is points/velocity-native end to end (every tier below already measures size; the honest-forecast story #2718 is velocity-derived), so a tier that switches units at the top is the outlier needing justification, not the default. Recommendation (not ratified): points-rollup basis via (a) PROGRAM with a one-time disambiguating clause on #program-definition, or (d) a collision-free label carrying the same semantics if the lexical collision is weighted heavily.",
+  "dateOpened": "2026-08-16",
+  "lastReviewed": "2026-08-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "backlog",
+    "taxonomy",
+    "tooling",
+    "convention",
+    "hierarchy",
+    "rollup",
+    "okr",
+    "safe",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
