@@ -106,7 +106,9 @@ With no item named, run the full selection flow below.
    items in prose.
 2. **Bias to Tier A — agent-ready first.** Prefer `issue`/`idea` items with a concrete, bounded build
    against proven infra and no open design fork. De-prioritize `decision`/`review` items; surface them
-   for discussion rather than picking them.
+   for discussion rather than picking them. **Tie-break toward proof (#2949):** between otherwise-similar
+   candidates, prefer the one already carrying a `## Done when`/`## Acceptance` section with a tier-1/2
+   entry (*backlog-workflow.md → Acceptance criteria*) — less review-cost ambiguity to resolve later.
 3. **Present, then offer clickable options.** Output a short ranked shortlist (top 3–5, grouped by tier,
    one-line rationale each) plus the recommended item with its reasoning — the discussion context. **Use
    each candidate's digest** (lead paragraph / `summary`) as that one-line rationale; if a shortlisted
