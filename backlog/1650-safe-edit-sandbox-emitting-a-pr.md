@@ -1,20 +1,36 @@
 ---
-kind: story
-size: 13
+kind: epic
 parent: "142"
 status: open
 priority: low
 relatedTo: ["2095"]
 locus: plateau-app
 dateOpened: "2026-06-23"
-preparedDate: "2026-06-23"
+preparedDate: "2026-08-15"
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-merit, dissolved]
+tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-merit, dissolved, epic]
 ---
 
 # Safe-edit sandbox emitting a PR
 
-> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the standard-based emit angle is genuinely differentiating — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** the #095 standard-gated emit path is settled (already resolved → `we:scripts/autofix/engine.mjs` + `npm run autofix`); this is the heaviest build in the family, so it is ordered by normal burndown priority. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the standard-based emit angle is genuinely differentiating — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger — settled:** #2095's own analysis (2026-07-06) already confirmed the #095 standard-gated emit path is resolved (`we:scripts/autofix/engine.mjs` + `npm run autofix`), so the un-gate condition is met and this is ordered by normal burndown priority. Everything through "Recommendation" below is retained as the **settled** merit rationale (the concession), not an open question.
+
+> **Umbrella (2026-08-15) — converted `story` (size 13) → `epic`, sliced into 3 children.** Prepared per `we:agent-memory-src/story-preparation-checklist.md`: size 13 is a should-split candidate (the checklist's own rule — "> 8 is not a size, it is an instruction to slice"), and a live-code audit of `plateau-app:packages/dev-browser/` found most of the supporting infrastructure this card originally scoped for **already shipped** since it was opened (element-resolver #1690, ide-bridge #576/#577, forge #598, pr-body #601, credential-source #600, declared-rules registry #1689 — all `status: resolved`, verified by opening each package, not assumed from title). The **remaining, genuinely new** work is exactly what the three slices below cover — the original size-13 estimate re-derives as 5+5+3=13 across them, so this is a real decomposition, not a shrink-to-dodge-the-scan.
+>
+> - **Slice 1 — [#xzewkfa](/backlog/xzewkfa-safe-edit-sandbox-live-edit-propose-apply-revert-buffer/)** (size 5): the in-memory propose/apply/revert buffer for one declared-form edit. No dependency — foundational.
+> - **Slice 2 — [#xv0j8db](/backlog/xv0j8db-safe-edit-sandbox-verify-gate-wiring-over-declared-rules/)** (size 5, blocked by Slice 1): reuses `we:scripts/autofix/engine.mjs`'s pure `autofix()` loop **directly, by a new cross-repo tsconfig alias**, with a `verify` callback over the app's declared-rules registry + `ConformanceVectorOracle`, so a proposed edit is gated by the app's own declared rules.
+> - **Slice 3 — [#x00bvy0](/backlog/x00bvy0-safe-edit-sandbox-discard-or-emit-pr-orchestration/)** (size 3, blocked by Slices 1 and 2): wires a gate-passed edit to the already-shipped ide-bridge/forge/pr-body/credential-source packages — discard reverts, emit writes the file + opens the PR.
+>
+> The three form a linear DAG (`1 → 2 → 3`), the split rubric's disfavored shape *unless* incremental delivery is genuinely valuable — it is here: each slice ships an independently testable, demoable capability (a working propose/revert buffer; then a working live conformance gate over a proposed edit; then a working discard-or-PR action), not a half-built registry with no consumer. **Out of scope for all three, named so it isn't silently assumed:** no dev-browser panel/UI exists yet to mount these behind clickable affordances — that is separate, unfiled work; these three slices ship the underlying *mechanism* library, not the panel.
+>
+> **Follow-up filed, not silently dropped (2026-08-15, #1355 review):** this Digest's own scope bullet
+> promises the developer can "see the effect immediately" in the sandbox before choosing discard/emit —
+> but none of the three slices ever applies the buffer's proposed content to a *running* instance (the
+> buffer is fs/DOM-free, the gate only checks conformance, emit only writes the real file post-gate). That
+> live-preview capability is real, separate, unscoped work, tracked at
+> [#x1l80ae](/backlog/x1l80ae-safe-edit-sandbox-live-preview-against-a-running-instance/) rather than left
+> implicit. **This epic resolving (once all 3 slices land) ships the propose→gate→emit mechanism, not
+> live preview** — don't read epic-resolved as "the full Digest shipped" without checking x1l80ae too.
 
 ## Digest
 
@@ -51,7 +67,7 @@ The moat (per #142): a WE app is **self-describing**, so the edit and its emitte
 
 ## Dependencies & lineage
 
-- **Leans on already-homed PR / auto-fix work.** The #142 triage flagged this candidate as resting on [#095 conformance auto-fix agent](/backlog/095-conformance-auto-fix-agent/) (the "gated by the standard" emit path) and the designer-to-PR thread. Decide/cite #095's shape before building a second PR-emit surface.
+- **Leans on already-homed PR / auto-fix work.** The #142 triage flagged this candidate as resting on [#095 conformance auto-fix agent](/backlog/095-conformance-auto-fix-agent/) (the "gated by the standard" emit path) and the designer-to-PR thread. Decide/cite #095's shape before building a second PR-emit surface. **Resolved — #095 shipped 2026-06-08** (see the umbrella note above); the three slices reuse it directly rather than citing it as still-open.
 - **Standard-gated emit.** The verify-gated check ("AI proposes, the standard verifies") is the same shared moat mechanism the verify/review children ride; the sandbox is one consumer of it.
 - **Authoring rule.** Edits must be in the standard's own form (write the declared CSS/rule), never via a lowering engine — per the authoring-SoT-is-the-standard-form rule.
 - **Home:** `locus: plateau-app` — a dev-browser feature ([#141](/backlog/141-dev-browser-vision/)), local-first / zero-server per the cost-flat rule (sandbox runs locally; PR emit is a git operation, no hosted editor backend).
@@ -59,7 +75,7 @@ The moat (per #142): a WE app is **self-describing**, so the edit and its emitte
 ## Recommendation
 
 - **Verdict: not-yet (accept-and-gate), Confidence Low–Medium.** The candidate is real and its standard-based angle is genuinely differentiating, so don't drop it — but it's the heaviest build in the family and depends on the standard-gated emit path (#095) that isn't settled.
-- **Un-gate trigger (concrete):** promote to a build story when **(1)** #095's standard-gated emit/verify path has shipped a usable form, AND **(2)** a flagship exercise-app workflow shows a real "tweak live → PR" loop that the framework-specific editors cannot serve because the app is multi-stack or relies on declared rules — evidence the stack-agnostic angle pays off.
+- **Un-gate trigger (concrete):** promote to a build story when **(1)** #095's standard-gated emit/verify path has shipped a usable form, AND **(2)** a flagship exercise-app workflow shows a real "tweak live → PR" loop that the framework-specific editors cannot serve because the app is multi-stack or relies on declared rules — evidence the stack-agnostic angle pays off. *(Superseded for burndown ordering by #2095's own trigger simplification — see the DISSOLVED note at top; part (2) here is the original decision's prior-art framing, not a live blocker.)*
 - **Skeptic:** "Onlook and Builder.io already do live-edit-to-PR — this is a me-too." *Refuted on the delta, not novelty:* those tools emit *framework-specific generated code* with no conformance gate; the WE sandbox edits in the **standard's declared form**, is **gated by the standard**, and emits a **stack-agnostic** PR — which a React/Tailwind code generator structurally cannot do without the declared model. The residual the skeptic is right about is **cost/scope and prerequisite** — hence not-yet, and the lowest confidence in the set.
 
 *~~If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*
