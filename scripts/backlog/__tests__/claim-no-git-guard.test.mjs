@@ -19,6 +19,14 @@
 //
 // So this test pins the reconciled INVARIANT, not a proxy: the tree may be READ (best-effort) but the only
 // refusal is the path-scoped claim-first guard on the item's own file — never a whole-tree precondition.
+//
+// #3034 REWIRE: `claim` no longer runs through backlog.mjs's `transition()` at all — it is routed to the
+// declared `claim` operation (scripts/operations/claim.mjs, IO in scripts/operations/claim-io.mjs) via
+// backlog.mjs's own `claimViaOperation()`. The two git reads this test pins therefore now live in two
+// different files: the path-scoped claim-first guard moved into claim-io.mjs's `createClaimReader` (the
+// operation's injected reader), while the opt-in whole-tree attribution snapshot — pure CLI bookkeeping the
+// operation itself doesn't own — stayed behind in claimViaOperation(). Both still honour the SAME invariant;
+// this file re-scopes to where each one now lives instead of re-deriving the invariant.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -27,47 +35,55 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(resolve(here, '../../backlog.mjs'), 'utf8');
+const IO_SRC = readFileSync(resolve(here, '../../operations/claim-io.mjs'), 'utf8');
 
-// The invariant is about the CLAIM path specifically, so scope the git-read counts to the `transition`
-// function body — other verbs (e.g. `yield`'s `git ls-files` immutability guard) legitimately read git
-// and must not inflate the claim-path count.
-const txStart = SRC.indexOf('function transition(');
-const txEnd = SRC.indexOf('\nfunction ', txStart + 1);
-const CLAIM_SRC = SRC.slice(txStart, txEnd === -1 ? undefined : txEnd);
+// Isolate claimViaOperation()'s body — the attribution-snapshot half of the invariant lives here now. Bound on
+// the next TOP-LEVEL function declaration, `async` or not (a bare `\nfunction ` search misses `async function`
+// and silently runs on into the FOLLOWING plain function, which is what let this drift unnoticed).
+const txStart = SRC.indexOf('async function claimViaOperation(');
+const txRestSearch = SRC.slice(txStart + 1).search(/\n(?:async )?function /);
+const CLAIM_SRC = txRestSearch === -1 ? SRC.slice(txStart) : SRC.slice(txStart, txStart + 1 + txRestSearch);
 
-describe('backlog.mjs claim never refuses on the whole working tree (#510, reconciled #952/#1256)', () => {
+describe('backlog.mjs claim never refuses on the whole working tree (#510, reconciled #952/#1256/#3034)', () => {
   it('contains no whole-tree dirty/untracked refusal guard', () => {
     expect(SRC).not.toMatch(/\bisDirty\b/);
-    // The only `die(...)` that mentions the tree is the claim-first guard, and it is scoped to the item's
-    // OWN file. Assert there is no UNSCOPED whole-tree porcelain read feeding a refusal: every porcelain
-    // read used as a precondition must carry the `'--', rel` path scope.
+    expect(IO_SRC).not.toMatch(/\bisDirty\b/);
+    // The only refusal that mentions the tree is the claim-first guard, and it is scoped to the item's OWN
+    // file (in claim-io.mjs now). Assert there is no UNSCOPED whole-tree porcelain read feeding a refusal:
+    // every porcelain read used as a precondition must carry the `'--', rel` path scope.
     const unscoped = SRC.match(/execFileSync\('git', \['status', '--porcelain'\]\)/g) || [];
     // (the bare-tree read is allowed ONLY as the post-write attribution snapshot — see the ordering test)
     expect(unscoped.length).toBeLessThanOrEqual(1);
+    expect(IO_SRC).not.toMatch(/exec\('git', \['status', '--porcelain'\]\)/); // no unscoped read in the IO reader
   });
 
-  it('makes exactly two git reads: a path-scoped claim-first guard + the opt-in attribution snapshot (#952/#1256)', () => {
+  it('the path-scoped claim-first guard (claim-io.mjs) reads ONLY the single item file being claimed, best-effort', () => {
+    // scoped via `-- rel` — never the whole tree — mirroring what backlog.mjs used to do inline pre-#3034.
+    expect(IO_SRC).toMatch(/exec\('git', \['status', '--porcelain', '--', rel\]/);
+    // best-effort: a git/IO hiccup reads as clean, never blocks a claim.
+    const tryCatches = IO_SRC.match(/try \{[\s\S]*?exec\('git'[\s\S]*?\}\s*catch/g) || [];
+    expect(tryCatches.length).toBe(1);
+    // `--force` overrides the REFUSAL (in planClaim, scripts/operations/claim.mjs), not the read itself —
+    // pin that the skip-on-force still exists somewhere in the claim path.
+    const PLAN_SRC = readFileSync(resolve(here, '../../operations/claim.mjs'), 'utf8');
+    expect(PLAN_SRC).toMatch(/if \(!force\)/);
+  });
+
+  it('the opt-in attribution snapshot (claimViaOperation) is the ONLY git read there, gated on session, wrapped in try/catch (#952/#1256)', () => {
     const gitCalls = CLAIM_SRC.match(/execFileSync\('git'/g) || [];
-    expect(gitCalls.length).toBe(2);
-    // (1) the claim-first guard reads ONLY the single item file being claimed (path-scoped via `-- rel`)…
-    expect(SRC).toMatch(/execFileSync\('git', \['status', '--porcelain', '--', rel\]/);
-    // …and refuses (best-effort) only on that file's own pre-claim edits, overridable with --force.
-    expect(SRC).toMatch(/!argv\.includes\('--force'\)/);
-    // (2) the attribution snapshot reads the whole tree, gated on a session derived from the `--session`
-    //     flag (with the #1723 inference fallbacks: else the reserving session, else the most-recent claim)…
-    expect(SRC).toMatch(/execFileSync\('git', \['status', '--porcelain'\]/);
-    expect(SRC).toMatch(/const session = flag\('session'\)[^\n]*;\s*\n\s*if \(session\) \{/);
-  });
-
-  it('wraps each git read in a try/catch so a git/IO hiccup can never block a claim', () => {
-    // both reads are best-effort: a failure is swallowed, never propagated into a refusal.
+    expect(gitCalls.length).toBe(1);
+    // reads the whole tree, gated on a session derived from the `--session` flag (with the #1723 inference
+    // fallbacks: else the reserving session, else the most-recent claim)…
+    expect(CLAIM_SRC).toMatch(/execFileSync\('git', \['status', '--porcelain'\]/);
+    expect(CLAIM_SRC).toMatch(/const session = flag\('session'\)[^\n]*;\s*\n\s*if \(session\) \{/);
+    // …and is wrapped in a try/catch so a git/IO hiccup can never block a claim (attribution is best-effort).
     const tryCatches = CLAIM_SRC.match(/try \{[\s\S]*?execFileSync\('git'[\s\S]*?\}\s*catch/g) || [];
-    expect(tryCatches.length).toBe(2);
+    expect(tryCatches.length).toBe(1);
   });
 
-  it('snapshots AFTER the status write, so the whole-tree read is attribution, not a pre-claim gate', () => {
-    // the attribution snapshot is the LAST git read, and it must come after applyTransition (by then the
-    // claim has already succeeded). The earlier (first) git read is the path-scoped claim-first guard.
-    expect(CLAIM_SRC.lastIndexOf("execFileSync('git'")).toBeGreaterThan(CLAIM_SRC.indexOf('applyTransition(before, v'));
+  it('snapshots AFTER the operation\'s write completes, so the whole-tree read is attribution, not a pre-claim gate', () => {
+    // the write happens inside `driveRun` (the operation's declared effect is applied there); the attribution
+    // snapshot must run strictly after that await resolves, never before.
+    expect(CLAIM_SRC.indexOf("execFileSync('git'")).toBeGreaterThan(CLAIM_SRC.indexOf('await driveRun('));
   });
 });

@@ -3,9 +3,12 @@ bornAs: x65hozr
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 blockedBy: ["3032"]
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-16"
+graduatedTo: scripts/operations/claim.mjs
 preparedDate: "2026-08-15"
 scope:
   - we:scripts/operations/
@@ -292,3 +295,50 @@ already built for exactly this pattern — is the mechanized way to run that pas
 `we:scripts/pr-land.mjs` on a clean verdict, which would self-land this card without the human-in-the-loop review
 this task's own instructions call for. Run it (or an equivalent independent read) before a build starts against
 this card.
+
+## How it landed (2026-08-16) — the required probe verdict
+
+Built per the decided design: `we:scripts/operations/claim.mjs` (`shapeClaimRead`/`planClaim`/`claimOperation`,
+`compute` → `compute` → `effect`, no judge, no confirm), `we:scripts/operations/claim-io.mjs` (the injected
+reader + the one sink), `we:scripts/backlog/guarded-write.mjs` (the extracted `writeBacklogMd`/
+`writeBacklogMdUnguarded`, now throwing instead of exiting), a registration in
+`we:scripts/operations/run.mjs`, and the rewire of `we:scripts/backlog.mjs`'s `claim` verb onto
+`claimViaOperation()`. All Done-when items verified live (see the smoke test transcript in this build's
+session): the queued/prepare-held/dirty-file guards refuse through both callers with identical text,
+`--force` overrides each, `we:scripts/__tests__/backlog-cli-snapshot.test.mjs`'s existing `claim` suite and
+both `backlog-mutation-primary-cwd*` golden-corpus fixtures pass with zero assertion changes, a simulated
+crash-then-replay of the `write` effect reproduces byte-identical output without a structural double-apply
+(`we:scripts/operations/__tests__/claim.test.mjs`), and `check:standards` is green (0 errors).
+
+**The ownership invariant itself was never the heavy part.** `applyTransition`'s `status !== 'open'` refusal
+was already pure and already existed; `planClaim` calls it unchanged. The three real IO-backed guards
+(queued / prepare-held / dirty-file) also mapped onto `compute` cleanly — replaying `we:scripts/backlog.mjs`'s
+own guard order and having `plan` THROW on a refusal (mirroring `dispatch-lane`/`review-pr`'s precedent) read
+as a natural fit, not ceremony. If the card had stopped at "declare the guard chain + splice," the answer
+would be a clean "no, it wasn't too heavy."
+
+**Where it WAS heavy: the async/sync seam named in the card's "open implementation detail" (Task 5), and it
+is heavy in a way that is structural to the engine, not to `claim`'s own logic.** `we:scripts/backlog.mjs` is
+a synchronous, `process.exit()`-driven CLI; the engine's effect application (`applyPendingEffects`) is `async`
+by construction, because it is sized for an operation that may genuinely suspend (a `judge` spawn, a
+cross-process `dispatch: true` in-flight park). `claim` never does either, but it still had to pay for the
+whole apparatus that exists to serve operations that do: a `driveRun` call that takes an (unusable, unreached)
+`judge` parameter because the adapter's signature has no "this operation can never suspend on one" shortcut;
+an in-flight run record with effect keys, idempotency flags and applied/pending/failed status tracking, for a
+write whose real crash-safety was ALREADY provided for free by the frontmatter's own `status` field (a
+half-applied claim just leaves `status: open`, and a retried claim naturally either succeeds or is refused by
+the SAME invariant — no replay-from-a-persisted-run-record was ever actually needed for the CLI's own call
+site, only for `node we:scripts/operations/run.mjs claim`'s independent, resumable entry point); and a genuinely awkward "wrap one
+verb in an async function and `.catch()` it at the switch" seam bolted onto an otherwise fully synchronous
+500+-line file, which option (a) — making the whole CLI async — would have made worse, not better; (b) (the
+one built) contains the damage to one function but is still visibly a graft. **Net: the guard-chain-plus-write
+part of `claim` is a good fit for `compute`/`compute`/`effect`; the fixed cost every declared operation pays
+for suspend/resume, cross-process replay and run-record bookkeeping is sized for `review-pr`/`dispatch-lane`,
+and `claim` paid the same fixed cost for none of the benefit.** The concrete number: the old inline
+implementation was ~90 lines in one file; the new one is ~450 lines across four files to do the identical job
+with identical output, and roughly half of that growth is the suspend/replay/async-adapter scaffolding rather
+than the guard logic itself. That is the finding the probe exists to surface — not a reason to have skipped
+declaring `claim`, but real evidence that a THIRD, lighter-weight step vocabulary — or a `compute`-plus-
+single-effect fast path that skips the suspend/resume ceremony entirely for an operation that never suspends —
+is worth considering before a fourth small, judge-less, confirm-less operation is declared onto this same
+machinery.
