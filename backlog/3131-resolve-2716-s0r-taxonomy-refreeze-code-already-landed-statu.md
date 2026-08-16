@@ -3,9 +3,11 @@ bornAs: xv8qb99
 kind: story
 size: 1
 parent: "2705"
-status: open
+status: resolved
 scope: ["we:backlog/2716-s0r-taxonomy-reconcile-spec-allow-list-refreeze-r1.md"]
 dateOpened: "2026-08-15"
+dateResolved: "2026-08-16"
+graduatedTo: none
 tags: []
 ---
 
@@ -35,3 +37,22 @@ No design decision here — this is a verification + bookkeeping fix, not new co
 ## Delivery shape
 
 Single small doc-only change to `we:backlog/2716-*.md` frontmatter (plus this card's own resolve) — lands as one piece, no branch/flag needed.
+
+## Resolved 2026-08-16 — superseded, #2716 already resolved independently
+
+Closing as superseded, not as delivered work: a queue-generation scan flagged this card's ask ("flip #2716 to
+resolved") as still open, but `we:backlog/2716-*.md` already reads `status: resolved` —
+
+- **Commit `87823064`** — "resolve #2716: FT taxonomy reconcile + SPEC allow-list refreeze R1 -- code already
+  landed, status was stale" — set `status: resolved`, `dateResolved: "2026-08-15"`,
+  `graduatedTo: "plateau-app:src/feature-tracker/feature-tracking.webcases.ts"` on `we:backlog/2716-*.md`,
+  and is an ancestor of `origin/main` HEAD. That commit is not from this card's own line of work; it landed
+  independently of #3131/#3133 the day before this sweep.
+- This card's own downstream check now also passes: `node we:scripts/check-readiness.mjs --select --json`
+  lists `#2717` in `tierA` (verified live on the current tree) — the consequence #3131 named (#2717 stuck
+  Tier C behind a stale `blockedBy`) is already gone.
+
+**Nothing in this card's own Tasks was executed to produce that result** — the ask was independently
+fulfilled before this card could be picked up. Marking it `resolved` with a build credit would misstate
+what happened, so this closes as **moot**: `graduatedTo: none`, no code/doc delivered under this card's own
+authorship. See #3133 for the sibling ask, closed the same way and citing the same commit.
