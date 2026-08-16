@@ -196,7 +196,7 @@ the measurement, and it is correctly gated in Done-when 2).
 
 Closing as superseded, not as delivered work: `we:backlog/3112-*.md` and
 `we:backlog/3111-a-review-prep-operation-mechanize-the-independent-review-of-.md` are byte-identical files
-(`diff` between them returns nothing — same title, same `bornAs: xzdi27a`, same body including the
+(`diff` between them returns nothing — same title, same `bornAs: 3112`, same body including the
 "Independent review — 2026-08-14" section). Both cards trace to the same content landing twice under two
 different `NNN` numbers:
 

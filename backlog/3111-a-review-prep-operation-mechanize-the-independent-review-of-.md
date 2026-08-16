@@ -194,10 +194,10 @@ the measurement, and it is correctly gated in Done-when 2).
 
 ## Resolution note — 2026-08-16
 
-`we:backlog/3112-*.md` is a byte-identical duplicate of this card (both carry `bornAs: xzdi27a` — two
+`we:backlog/3112-*.md` is a byte-identical duplicate of this card (both carry `bornAs: 3112` — two
 backlog numbers filed off the same origin slug). The build that satisfies this card's own scope (`we:scripts/operations/review-prep.mjs`,
 `we:scripts/operations/review-prep-io.mjs`, and both test files) already landed on `main` — commit `2f8b11ba`
-via PR #1271, JIT-numbered `xzdi27a→#3112` at land time (`we:scripts/backlog.mjs`'s numbering assigned the
+via PR #1271, JIT-numbered `3112→#3112` at land time (`we:scripts/backlog.mjs`'s numbering assigned the
 duplicate's number to the landed lane, not this one). Re-verified against every `## Done when` item today,
 against LIVE code, not assumed:
 
