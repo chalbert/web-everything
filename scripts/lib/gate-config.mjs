@@ -291,6 +291,26 @@ export const TRUST_CHAIN = [
     desc: 'the check:standards rules impl — the pure rule functions and the enforcement/threshold constants the contract mirrors. Engine tier for the same reason as the entry impl: an edit escalates + runs the panel and a behaviour-preserving refactor is agent-clearable, but changing a *_ENFORCED flag or a threshold diverges from the contract (conformance red) and forces the matching policy-tier edit → review:human',
     homes: ['scripts/check-standards-rules.mjs'],
   },
+  // ── the clearer-identity module (WE #2844/#3045) ────────────────────────────────────────────────────────────
+  // decideClearerIndependence decides WHO may clear a review verdict — refuses a clear whose reviewer id equals
+  // the PR author's id. It is the textbook policy tier by this file's own definition, but no conformance suite
+  // backstops its behaviour the way review-policy.conformance.test.mjs backstops the escalation rubric — its
+  // own unit suite is an ordinary, non-gate-self test file an editor could weaken alongside it — so the #2771
+  // backstop does not hold and the fail-closed leash is `spec`, the same reasoning that keeps
+  // review-runner-core.mjs/review-runner.mjs on `spec` (#2830).
+  {
+    role: 'clearer-identity',
+    file: 'review-independence.mjs',
+    tier: 'policy',
+    leash: 'spec',
+    desc: 'decides WHO may clear a verdict (decideClearerIndependence) — refuses a clear whose reviewer id '
+      + 'equals the PR author\'s id (#2844). It decides what may clear the gate, the textbook policy-tier '
+      + 'reason, but no conformance suite backstops its behaviour the way review-policy.conformance.test.mjs '
+      + 'backstops the escalation rubric — its own unit suite is an ordinary, non-gate-self test file an '
+      + 'editor could weaken alongside it — so the #2771 backstop does not hold and the fail-closed leash is '
+      + '`spec`, the same reasoning that keeps review-runner-core.mjs/review-runner.mjs on `spec` (#2830)',
+    homes: ['scripts/lib/review-independence.mjs'],
+  },
   {
     role: 'roster-config',
     file: 'gate-config.mjs',
