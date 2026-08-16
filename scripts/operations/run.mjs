@@ -34,6 +34,8 @@ import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-he
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
+import { claimOperation, CLAIM_OP } from './claim.mjs';
+import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -83,6 +85,14 @@ export const OPERATIONS = Object.freeze({
     // reach is not a knob. Unset → no extra flags, which is the deliberate non-default (a baked-in
     // `--dangerously-skip-permissions` would widen every agent this ever launches).
     sinks: createDispatchSinks({ extraArgs: agentArgsFromEnv() }),
+  }),
+  // #3034 — the is-the-engine-too-heavy probe: `compute` → `compute` → `effect`, no judge, no confirm.
+  // Registering here is what makes `node run.mjs claim --ref=<NNN>` work; `we:scripts/backlog.mjs claim`
+  // (the real command-line caller) routes through the SAME declaration (`we:scripts/backlog.mjs`'s
+  // `claimViaOperation`), not a second implementation.
+  [CLAIM_OP]: () => ({
+    declaration: claimOperation({ readClaimContext: createClaimReader() }),
+    sinks: createClaimSinks(),
   }),
 });
 
