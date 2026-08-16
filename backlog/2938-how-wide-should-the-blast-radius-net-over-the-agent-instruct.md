@@ -3,6 +3,7 @@ bornAs: xzsnnta
 kind: decision
 status: open
 dateOpened: "2026-08-05"
+preparedDate: "2026-08-16"
 tags: []
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/review-policy.contract.json"]
 ---
@@ -33,6 +34,55 @@ The recurrence pattern is the actual evidence: this class was closed **one surfa
 
 **Bold default: (b)** — it is the only branch whose correctness does not depend on a future editor remembering this item exists, and the recurrence record is that they do not.
 
+**Concrete shape.** Today (`we:scripts/lib/review-escalation.mjs:245-254`), the `.claude/` coverage is two narrow anchors inside the flat `BLAST_RADIUS` list:
+
+```js
+const BLAST_RADIUS = [
+  /^scripts\//,
+  /(^|\/)\.claude\/(skills|agent-memory)(\/|$)/,   // only these two trees
+  /(^|\/)(skills|agent-memory)-src(\/|$)/,
+  /(^|\/)\.githooks\//,
+  /(^|\/)\.github\//,
+  ...STATUTE_PATHS,
+  /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/,
+  ...CONFORMANCE_GRADING_PATHS,
+];
+```
+
+Fork 1(b) replaces the narrower `.claude/(skills|agent-memory)` tree anchor with a whole-directory anchor plus a short, commented exemption list checked *before* the wide match returns true. The `(skills|agent-memory)-src` anchor is **kept, unchanged** — it is the one anchor a `.claude/`-prefix test structurally cannot subsume, because WE's real diffs for those two trees carry the `skills-src/…` / `agent-memory-src/…` spelling and never contain a literal `.claude/` substring at all (git tracks `.claude/skills` and `.claude/agent-memory` as symlink leaf blobs and never descends them — see the file's own comment, `we:scripts/lib/review-escalation.mjs:97-123`). Dropping that anchor would silently reopen the exact PR #1040 hole this file's comments warn against, so it is not folded into the new `.claude/` branch — it stays a sibling entry in the array:
+
+```js
+// Genuinely inert entries under .claude/ — each line names why it is safe to exempt.
+const CLAUDE_DIR_EXEMPT = [
+  /(^|\/)\.claude\/settings\.local\.json$/,   // personal override, gitignored in practice
+];
+const BLAST_RADIUS = [
+  /^scripts\//,
+  // KEPT, not folded: the SOURCE-tree spelling carries no `.claude/` substring, so the whole-tree
+  // anchor below cannot catch it. Covers both `…-src/…` and the bare `…-src` leaf (dir→link swap).
+  /(^|\/)(skills|agent-memory)-src(\/|$)/,
+  // whole-tree default-deny anchor replaces the narrower `.claude/(skills|agent-memory)` anchor —
+  // `(^|\/)\.claude\/` only requires the `.claude/` substring, so it also matches the bare symlink
+  // leaf (`.claude/skills`, no trailing slash) as well as anything nested under the tree.
+  /(^|\/)\.githooks\//,
+  /(^|\/)\.github\//,
+  ...STATUTE_PATHS,
+  /^src\/_data\/(blocks|plugs|intents|protocols|semantics)\.json$/,
+  ...CONFORMANCE_GRADING_PATHS,
+];
+export function isBlastRadiusPath(path) {
+  const p = String(path || '');
+  if (/(^|\/)\.claude\//.test(p)) return !CLAUDE_DIR_EXEMPT.some((re) => re.test(p));
+  return BLAST_RADIUS.some((re) => re.test(p)) || BLAST_RADIUS_ENGINE_BASENAMES.has(basenameOf(p));
+}
+```
+
+This is additive to the existing four-spelling `.claude/skills|agent-memory` anchors: the two `.claude/`-prefixed spellings (tree and bare symlink leaf) are **folded into** the new whole-directory branch, and the two `-src` spellings (tree and bare leaf) are **kept verbatim** as their own array entry — both kinds are traced against real paths below, not just asserted. The code also correctly starts catching `we:.claude/settings.json` and `we:.claude/commands/`, the two live gaps #2939's table names as actually behaviour-defining (the hook registry and the command router), not merely as a hypothetical widening.
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT. Classification holds — a given unmatched path must land on exactly one side, so this is a real either/or, not a config dimension or a support-both. Merit holds and is *stronger* than the item's first pass showed: the file's own comment (`we:scripts/lib/review-escalation.mjs:118-123`) already names `we:.claude/settings.json` / `we:.claude/commands/` as real, open gaps deliberately left out of the narrow two-tree anchor — so (b) does not invent new coverage, it closes gaps the code author already flagged. No statute collision: [`#blast-radius-advisory-care-not-a-gate`](docs/agent/platform-decisions.md#blast-radius-advisory-care-not-a-gate) (#2563) governs a different question (what an escalation *does* — dial AI-panel rigor, never park for a human by itself) and composes cleanly with this one (which paths *count*). Citation-scope fix: the item's "the safe direction, by policy" line was a paraphrase of a different in-file comment (the `BLAST_RADIUS_ENGINE` basename-match note) rather than a direct cite of #2563 — now cited by anchor above, and scoped correctly as *supporting context that bounds the cost of failing closed*, not as authority for which paths belong in the net (that authority is this decision's own). One second-order interaction worth ruling out rather than re-litigating: `isBlastRadiusPath` is also read by `isSensitivePath` in `we:scripts/readiness/test-selection.mjs`, but that predicate's own `EXTRA_DENY` list already carries the byte-identical `/(^|\/)\.claude\//` regex — added independently under #2681 (`we:scripts/readiness/test-selection.mjs:93`), and pinned by a named test (`we:scripts/readiness/__tests__/test-selection.test.mjs:53`, `isSensitivePath('we:.claude/settings.json') === true`). So `isSensitivePath` already covers the full `.claude/` tree regardless of what `isBlastRadiusPath` matches, and Fork 1(b)'s widening has ZERO marginal effect on it — not merely an inert one. (This is a different claim from the CONFORMANCE_GRADING_PATHS second-order effect documented at `we:scripts/lib/review-escalation.mjs:205-234`, which genuinely does flip newly-sensitive paths for that unrelated widening; that in-file comment says nothing about the `.claude/` anchor.)
+
+**Screen:** clear. (1) Not an implementation-detail-vs-standard confusion — there is no WE↔FUI/consumer boundary in play; this is WE's own internal delivery/review governance, correctly framed as a policy call within that layer. (2) A real merit difference survives the free-to-build counterfactual: given the identical unregistered path, (a) and (b) produce opposite outcomes (merge unreviewed vs. escalate) regardless of how cheaply either rule is built or kept current — that is an outcome divergence, not a disguised maintenance-cost argument.
+
 ## Fork 2 — the volume-sensitive half: non-statute `we:docs/agent/`
 
 **Fork-existence justification:** case (b) — registering the whole tree and registering a router subset produce different scores for the same file, and a file cannot hold both.
@@ -43,6 +93,25 @@ The recurrence pattern is the actual evidence: this class was closed **one surfa
 
 **Bold default: (b)** — the volume objection is real and specific to this tree, and a named router set answers it without giving up coverage of the files that actually change routing.
 
+**Concrete shape.**
+
+```js
+const DOCS_AGENT_ROUTER_PATHS = [
+  /^AGENTS\.md$/,
+  /^CLAUDE\.md$/,
+  // the Tier-1 docs AGENTS.md's own "Where to look" table links into today (verified against
+  // we:AGENTS.md:49-67) — enumerated by name, not by a naming convention, because docs/agent/
+  // carries no shared prefix; block-standard.md, memory-management.md and
+  // plugs-testing-strategy.md are deliberately excluded — they exist under docs/agent/ but are
+  // not linked from the router table.
+  /^docs\/agent\/(platform-decisions|conventions|testing|architecture|design-first|research-workflow|backlog-workflow|delivery-loop|demo-workflow|build-ui|jury-refinement-method|exercise-app-workflow|reference-retirement|skill-authoring|vision-tiers)\.md$/,
+];
+```
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT, and the amendment is the load-bearing one. As first drafted, "register a narrower predicate — the router files only" is itself a *named list* (`we:AGENTS.md`, `we:CLAUDE.md`, "the named Tier-1 docs that route behaviour") — the same enumeration shape Fork 1(a) is rejected for, so on its face it re-inherits the fail-open weakness this whole item exists to close: a brand-new router doc, added without anyone remembering to register it, scores nothing. Two things resolve rather than merely acknowledge this, verified against the real router (`we:AGENTS.md`): (1) `we:AGENTS.md` itself is in the recommended set, and `we:AGENTS.md`'s own body *is* the routing table — every Tier-1 doc it routes to appears as a row in the table at `we:AGENTS.md:49-67` (confirmed: `we:docs/agent/conventions.md`, `we:docs/agent/testing.md`, `we:docs/agent/architecture.md`, `we:docs/agent/backlog-workflow.md`, … are all linked there). Adding a new router doc is, in practice, never a bare new file — it is a new file *plus* the same-PR edit that adds its row to `we:AGENTS.md`'s table (an unlinked router doc is not yet functioning as a router). Because `we:AGENTS.md` is already a registered path, that same-PR edit trips escalation on its own, even before the new doc's own path is separately added to `DOCS_AGENT_ROUTER_PATHS` — closing the PR #1040-shaped gap for the *addition event* specifically, which is the case the recurrence record is actually worried about. (2) The residual that remains is narrower and should be named rather than hidden: a Tier-1 doc that is *renamed* or *split* without its `we:AGENTS.md` row being touched in the same diff would still slip through undetected until the next audit — worth a `we:scripts/lib/__tests__/review-escalation.test.mjs` case per #2939's Done-when ("a case for a surface that does not exist yet"), not a reason to change the default. No statute collision found beyond the one already resolved under Fork 1 (`#blast-radius-advisory-care-not-a-gate`, which applies identically here — escalating a docs/agent touch dials AI-panel rigor, it does not by itself park for a human). Citation-scope: the item's Fork 2(a) downside ("every escalation parks a PR awaiting a review") is accurate as written, though the specific label cited needs a correction — `producerReviewLabel` returns `review:human` when `humanRequired` is true and `review:pending` only in the escalate-but-not-human-required branch (`we:scripts/lib/review-escalation.mjs:658-662`), not `review:pending` on every escalate. Either way every escalation still lands under one `review:*` label or the other and parks the PR, so the underlying volume-cost argument is unaffected by the correction — it is a real, recurring reviewer/panel round-trip, not merely a hypothetical.
+
+**Screen:** clear, after deliberately testing the "prioritization in fork costume" angle and rejecting it. (1) Same as Fork 1 — no standard-vs-impl boundary confusion; this is WE's own governance layer. (2) The harder case: with build/maintenance cost hypothetically zero, does the case for (b) over (a) evaporate? No — because the real cost this fork trades against is not build/maintenance effort but a *recurring operational* cost (each escalated PR consumes real reviewer/AI-panel attention at the moment it lands), which the "free to build, perfectly self-maintaining" counterfactual does not remove. Registering the whole tree at zero build cost still produces a materially higher escalation *volume* on every prose touch-up, a real ongoing outcome difference from registering the router subset — so the fork survives as a genuine coverage-vs-volume merit tradeoff, not a disguised effort question.
+
 ## A lint gap this item is on record about
 
 The buried-fork lint (`findBuriedForkSections` in [`we:scripts/check-standards-rules.mjs`](scripts/check-standards-rules.mjs)) matches a **fixed phrase list**, `FORK_HEADING_TERMS` — `open design`, `open decision`, `open question`, `open fork`, `design tension`, and the `… to settle` forms. This fork originally lived inside #2939 under the heading *"The open call — enumerate wider, or invert to default-deny"*, which contains none of those phrases, so the lint did **not** fire on a `kind: task` item carrying a live unresolved fork with three options and a preferred candidate. Round 4 of PR #1048's review caught it by reading, not by gate. Widening the phrase list (or replacing it with a shape test — a section whose body is an option list with a bold default) is a real follow-up; it is deliberately **not** bundled into PR #1048, whose scope was frozen. Recorded here so the weakness is on the record rather than in a review transcript.
@@ -52,3 +121,20 @@ The buried-fork lint (`findBuriedForkSections` in [`we:scripts/check-standards-r
 - Both forks are ruled and the ruling codified (statute or `we:docs/agent/*.md`, per the resolve gate for a `kind: decision`).
 - The ruling states, in one line, what happens to a surface **nobody has enumerated** — that sentence is the whole point of the call, and a ruling that only lists paths has not answered it.
 - #2939 can then be built: its `blockedBy` edge to this item clears, and its Done-when bullets become mechanical.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `high`. This jury binds against the item's predicted scope and is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+
+Care is `high` because the predicted touch-set includes `we:scripts/lib/review-policy.contract.json` (the declarative-leash contract — any diff there forces `review:human` on its own) alongside `we:scripts/lib/review-escalation.mjs` (registered gate-derivation code) and its test file — the same three paths already named in this item's own `scope:` frontmatter, which double as the buildable child's (#2939) predicted scope at carve-off.
