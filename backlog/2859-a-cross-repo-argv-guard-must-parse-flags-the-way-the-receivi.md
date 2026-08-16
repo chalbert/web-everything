@@ -5,6 +5,7 @@ size: 2
 parent: "2612"
 status: open
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-15"
 tags: [drain, conveyor, gate, cross-repo, argv, tech-debt]
 scope:
   - we:scripts/lib/reconcile-predicate.mjs
@@ -360,3 +361,28 @@ cross-repo ORDER, not either repo's internal diff, that must not be collapsed.
 - `npm run check:standards` is 0 errors in `we:` on the live repo with the wiring in place.
 - `plateau-app`'s `npm run test` (vitest) is green with the new alias, the rewritten guard, and the new
   cross-repo describe block.
+
+## Progress
+
+- **Status:** active — WE half (tasks 1-3 of the card's Delivery shape) built and landing; plateau-app half
+  (tasks 5-8) NOT started — out of scope for a `we:`-only lane.
+- **Branch:** `lane/build-2859` (web-everything), landed via `we:scripts/pr-land.mjs --no-wait`.
+- **Done:**
+  - `we:scripts/lib/reconcile-predicate.mjs` created — `parseArgvFlags`, `reconcileWouldRunFor`, zero imports,
+    byte-identical to the card's decided design.
+  - `we:scripts/lib/__tests__/reconcile-predicate.test.mjs` created — parse (bare/valued/empty/non-flag/repeat)
+    + `reconcileWouldRunFor` true/false matrix (absent/empty label × no-negation/bare/`=1`/`=true`/`=false`).
+  - `we:scripts/merge-ai-prs.mjs` wired: import added; the module-scope inline reduction (was line 137-138)
+    now calls `parseArgvFlags(argv)`; the `RECONCILE` line (was line 2465, now 2468 after the import lines)
+    now calls `reconcileWouldRunFor(argv)`. No behaviour change confirmed — all 4 `RECONCILE` usage sites are
+    boolean positions.
+  - Gate green: `npm run check:standards` 0 errors (unchanged warning set, none touching the new file);
+    `npx vitest run we:scripts/lib/__tests__/reconcile-predicate.test.mjs we:scripts/__tests__/merge-ai-prs.test.mjs`
+    — 401 passed (14 new + 387 existing, all unchanged).
+- **Next:** open a `plateau-app` lane and do tasks 5-8 — `buildPassArgs` label validation,
+  `childPassEnforcesHoldInvariant` rewrite to the mirrored reduction+predicate, the
+  `@webeverything/reconcile-predicate` vitest alias, and the cross-repo contract `describe()` block in
+  `plateau-app:tools/drain-daemon/lib.test.mjs` — only startable once this WE PR is merged to `main` (the
+  card's own sequencing: `plateau-app` CI resolves the WE sibling at its default branch, no `ref:` override).
+- **Notes:** this item's own "Verification against the live tree" section already re-confirmed both line
+  refs and the two named divergences live as of 2026-08-15 — no re-grounding needed before resuming.
