@@ -590,19 +590,36 @@ own `write`-on-absent-key throw contract).
    call with a broken argument. This test fails (throws, uncaught) against the pre-round-11 design and
    passes only against the corrected one.
 4d. **Write the fresh-fixer-read regression test (PR #1355 round 11, finding 3 — the round-9 fix was
-   prose-only).** Fake `checkContentAgainstVectors` so that its FIRST invocation resolves with genuine
-   failing findings (fail-branch runs) and, as a side effect immediately before resolving, calls
-   `buffer.write(key, 'mutated-still-failing')` on the same key (a normal `write`, not a `revert` — the
-   entry stays present, just with different content) — simulating a fresh edit landing on the same key while
-   the gate's own first oracle check for THIS run is still in flight. Spy on `SafeEditBuffer.write` and
-   assert that the write call the engine makes immediately after invoking the fixer (i.e. the call the
-   fixer's returned patch triggers, before any revert-driven write) carries `'mutated-still-failing'` — the
-   POST-mutation content — not the original pre-mutation content. This test can only pass against a fixer
-   that reads `buffer.get(key)?.after` fresh, live, at `fix()`-call time, per the round-9 fix; it fails
-   against a hypothetical implementation that reused a `content` value captured earlier (e.g. closed over
-   from `verify`'s own already-captured local), which is exactly the regression round 8 warned about and
-   round 9 fixed only in prose — this test is what makes that fix mechanically enforced rather than merely
-   stated, mirroring how Task 4a/4b enforce `verify`'s own synchronous-read invariant.
+   prose-only; round 13 — the naive assertion this task originally specified is itself vacuous, fixed by
+   pinning a concrete call index).** Fake `checkContentAgainstVectors` so that its FIRST invocation resolves
+   with genuine failing findings (fail-branch runs) and, as a side effect immediately before resolving,
+   calls `buffer.write(key, 'mutated-still-failing')` on the same key (a normal `write`, not a `revert` —
+   the entry stays present, just with different content) — simulating a fresh edit landing on the same key
+   while the gate's own first oracle check for THIS run is still in flight. Spy on `SafeEditBuffer.write`.
+   **(PR #1355 round 13 — the concrete assertion mechanism, not left for the implementer to infer.)**
+   Mutation-tested by hand against the real `we:scripts/autofix/engine.mjs` (round 12's own method,
+   re-verified round 13): a naturally-written `expect(writeSpy).toHaveBeenCalledWith(key,
+   'mutated-still-failing')`, with no call-index pinning, **passes identically whether the fixer is correct
+   or reverted to the pre-round-9 stale-read bug** — call `[0]` is always the fake's own injected mutation
+   (fires during `verify()`'s oracle check, before the fixer ever runs, regardless of what the fixer does),
+   so it alone satisfies a plain `toHaveBeenCalledWith`, no matter what the fixer returns. Only call `[1]` —
+   the write the engine makes immediately after invoking the fixer, carrying whatever content the fixer's
+   patch specified, before any revert-driven write — actually differs between the correct and buggy fixer.
+   **The test must therefore assert on `writeSpy.mock.calls[1]` specifically, and pin
+   `writeSpy.mock.calls.length` too** (so a future refactor that changes how many times `write` fires
+   doesn't silently shift which index is "the fixer's write" out from under the assertion): assert
+   `writeSpy.mock.calls[1][1] === 'mutated-still-failing'` (index `1`, not "called with, anywhere") **and**
+   assert the total call count (3, for this exact scenario — the fake's injection, the fixer's write, and
+   the engine's own revert-write once the always-failing fixture fails the re-verify). This test can only
+   pass against a fixer that reads `buffer.get(key)?.after` fresh, live, at `fix()`-call time, per the
+   round-9 fix; it fails (call `[1]` carries the stale, pre-mutation content instead) against a hypothetical
+   implementation that reused a `content` value captured earlier (e.g. closed over from `verify`'s own
+   already-captured local), which is exactly the regression round 8 warned about and round 9 fixed only in
+   prose — this test is what makes that fix mechanically enforced rather than merely stated, mirroring how
+   Task 4a/4b enforce `verify`'s own synchronous-read invariant. **Verify this yourself, the same way round
+   12 did:** build a standalone harness with both fixer variants, run each through the real,
+   unmodified engine, and confirm the plain `toHaveBeenCalledWith` assertion passes on both while the
+   index-pinned assertion passes only on the correct one — do not trust the prose alone.
 5. **Enforce the single-fixer scope boundary (PR #1355 round 3) — do not leave it as prose.** In
    `plateau-app:packages/dev-browser/src/safe-edit/verify-gate.ts`: (a) inside `runVerifyGate()`, before
    calling `autofix()`, assert the fixer registry resolves to exactly one fixer for the synthetic
@@ -659,13 +676,20 @@ own `write`-on-absent-key throw contract).
   'edit-vanished' }`, and `SafeEditBuffer.write` is never called with `undefined` content anywhere in the
   run — proving the fixer's `null`-return path (not the engine's `write()` call) is what handles a vanished
   entry.
-- **(PR #1355 round 11, finding 3) The round-9 "fixer reads live content fresh at `fix()`-call time" fix is
-  mechanically enforced, not just stated:** the Task 4d test — where a fake `checkContentAgainstVectors`
-  mutates the buffer's content (not deletes it) as a side effect of its first call, before resolving —
-  passes only if the write the engine makes immediately after invoking the fixer carries the POST-mutation
-  content; it fails against a fixer implementation that instead echoes a value captured earlier (e.g. from
-  `verify`'s own closure), the exact regression round 8 warned about and round 9's prose alone could not
-  prevent a future refactor from reintroducing.
+- **(PR #1355 round 11, finding 3; round 13 — the assertion mechanism itself pinned so the test is not
+  vacuous) The round-9 "fixer reads live content fresh at `fix()`-call time" fix is mechanically enforced,
+  not just stated, by an assertion that genuinely distinguishes correct from buggy:** the Task 4d test —
+  where a fake `checkContentAgainstVectors` mutates the buffer's content (not deletes it) as a side effect
+  of its first call, before resolving — asserts specifically on `writeSpy.mock.calls[1]` (the write the
+  engine makes immediately after invoking the fixer, NOT "was `write` ever called with X") plus
+  `writeSpy.mock.calls.length`, and passes only if that indexed call carries the POST-mutation content; it
+  fails against a fixer implementation that instead echoes a value captured earlier (e.g. from `verify`'s
+  own closure), the exact regression round 8 warned about and round 9's prose alone could not prevent a
+  future refactor from reintroducing. **Mutation-tested (round 13):** a plain, unindexed
+  `toHaveBeenCalledWith(key, 'mutated-still-failing')` — the natural way to write this assertion — passes
+  identically against both the correct and the reverted-to-buggy fixer when run through the real engine
+  (call `[0]`, the fake's own injected mutation, satisfies it regardless of the fixer), so Task 4d's test
+  is written this way specifically to avoid that trap, not by coincidence.
 - `plateau-app:` `npm test` is green with the new files included.
 
 ## Delivery shape

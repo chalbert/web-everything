@@ -255,6 +255,43 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
   > failure reason and no new checkpoint — it is a third way the SAME `'stale-edit'` reason can be reached,
   > alongside checkpoints A and B, all three driven by the buffer changing under an in-flight `emitEdit()`.
 
+  > **Review fix (2026-08-15, PR #1355, round 13) — BLOCKER, distinct from round 11's mid-run case.** Round
+  > 11 fixed the buffer entry vanishing *during* `runVerifyGate()`'s own internal engine loop. It left one
+  > case unguarded: the entry already being absent *before* `emitEdit()` even starts — e.g. a stray
+  > double-click on "emit" landing immediately after a "discard" click has already resolved (`revert()`
+  > already deleted the entry), or any caller invoking `emitEdit()` on a `key` that was never `propose()`d.
+  > Step 0's `buffer.snapshot(key) ?? {}` defensively avoids a destructuring crash on this input — `content`
+  > and `token` both come out `undefined` — but nothing stopped step 1 from then unconditionally calling
+  > `runVerifyGate()` with that `undefined` content. Per `xv0j8db`'s own stated contract ("throws only on a
+  > programming error, e.g. `edit.target.key` has no entry in `buffer`"), `runVerifyGate()` throws
+  > synchronously, at entry, for exactly this input — by design, as a genuine-caller-bug signal for call
+  > sites that are supposed to already know a pending edit exists. `emitEdit()` is not such a call site: its
+  > whole contract (Done-when #5) is "never a bare thrown exception," so passing an absent-entry snapshot
+  > straight into a function documented to throw on one contradicts `emitEdit()`'s own guarantee. No test in
+  > Task 2's list constructed this input, so nothing caught it.
+  >
+  > **Fixed on the `emitEdit()` side, not by weakening `runVerifyGate()`'s contract.** `xv0j8db`'s at-entry
+  > throw is a deliberate, already-reviewed design choice (see that card's round-11 callout, "why this
+  > doesn't need to touch the at-entry programmer-error throw") — it is what lets every OTHER caller of
+  > `runVerifyGate()` rely on a hard invariant ("never called on an absent key") without a defensive check of
+  > its own. Weakening that contract to accommodate `emitEdit()`'s one legitimate stray-input case would blur
+  > "genuine caller bug, fail loud" back into "just another outcome," for every future caller, not just this
+  > one. Instead, `emitEdit()` gets a new precondition check — **step 0a**, below — immediately after step 0
+  > and strictly before step 1's `runVerifyGate()` call: if `token === undefined` (equivalently, no entry was
+  > returned at all by `buffer.snapshot(key)`), return `{ ok: false, reason: 'stale-edit' }` immediately,
+  > without ever calling `runVerifyGate()`. `'stale-edit'` is the right reason, not a new one: from the
+  > caller's point of view "nothing was pending for this key" and "what was pending got invalidated after I
+  > captured it" are the same user-facing story — the buffer doesn't currently hold a live edit for this
+  > `emitEdit()` call to act on — so this is a **fourth** trigger point for the same existing reason,
+  > alongside checkpoints A, B, and the round-11 `aborted: 'edit-vanished'` mapping, not a fifth failure mode.
+  > This is deliberately NOT unified with the round-11 mid-run fix into one mechanism: round 11's fix lives
+  > inside `xv0j8db`'s `runVerifyGate()` (the entry vanishes partway through *its* internal loop, which only
+  > it can observe), while this fix lives in `x00bvy0`'s `emitEdit()`, strictly before `runVerifyGate()` is
+  > ever invoked (the entry is already gone before the call even starts, which `emitEdit()` itself can and
+  > must observe at its own step 0). The two guard genuinely disjoint windows — "absent at entry" vs.
+  > "vanishes mid-loop" — the same way `xv0j8db`'s own round-11 callout distinguishes its at-entry throw from
+  > its mid-loop degrade.
+
 - **Disclosed residual (PR #1355, round 10) — a resolved-but-discarded credential is left to expire, not
   revoked.** Step 3 (below) resolves a `ForgeCredential` via the credential-source registry before
   checkpoint B runs. Checked `plateau-app:packages/dev-browser/src/credential-source/` directly: the
@@ -278,10 +315,22 @@ already settled and shipped specifically so later consumers wouldn't re-invent t
      `snapshot()` returns `content` and its generation `token` together so they can never be captured on
      either side of a future refactor's `await`). This is the ONLY read of the buffer's content `emitEdit()`
      ever performs; every later step reuses this same `content` local, never `opts.edit.after` and never a
-     fresh `buffer.get(key)` call. `token` is used only for the recheck in steps 1a/2a below — it never
+     fresh `buffer.get(key)` call. `token` is used only for the recheck in steps 1a/3b below — it never
      appears in the write or the PR body. (`opts.edit` is still used for `edit.before`, `edit.target`, and
      other non-content fields — only `.after`, the field the write and the gate must agree on, is banned
      from re-use post-capture.)
+  0a. **(PR #1355 round 13.)** Immediately after step 0, before step 1: `if (token === undefined) return {
+     ok: false, reason: 'stale-edit' };` — synchronous, no `await` in between. `token === undefined` means
+     `buffer.snapshot(key)` returned `undefined` outright: nothing was pending for `key` at all when
+     `emitEdit()` was invoked (a stray double-click on "emit" immediately after "discard" already resolved,
+     or any caller invoking `emitEdit()` on a key that was never `propose()`d). Without this check, step 1
+     would call `runVerifyGate()` with `content: undefined`, which `xv0j8db`'s own contract documents as a
+     synchronous, at-entry throw (a deliberate genuine-caller-bug signal for call sites that are supposed to
+     already know a pending edit exists) — uncaught here, that throw would escape `emitEdit()` as a bare
+     exception, violating this function's own "never a bare thrown exception" contract (Done-when #5). See
+     the round-13 callout above for why this is fixed here, on the caller side, rather than by weakening
+     `runVerifyGate()`'s at-entry throw — and for why it is a distinct fix from round 11's mid-run
+     `aborted: 'edit-vanished'` handling in step 1 below, not a reuse of that same mechanism.
   1. Call `runVerifyGate({ buffer, edit: { ...opts.edit, after: content }, appId, registry, index })`
      (Slice 2's gate — `emitEdit()` calls it directly, itself; it does not accept a caller-supplied
      `gatePassed` boolean and does not trust one — see the round-3 fix above — and it checks the SAME
@@ -359,8 +408,10 @@ import { renderPrBody } from '../pr-body/renderer';
 export type EmitFailureReason =
   | 'not-gate-passed'
   | 'stale-edit' // buffer.isCurrent(key, token) failed at checkpoint A or B (PR #1355 round 7), OR
-                 // runVerifyGate() reported `aborted: 'edit-vanished'` (PR #1355 round 11) — three
-                 // distinct trigger points, one reason, all meaning "the buffer moved under you"
+                 // runVerifyGate() reported `aborted: 'edit-vanished'` (PR #1355 round 11), OR
+                 // buffer.snapshot(key) was already undefined at step 0 (PR #1355 round 13) — four
+                 // distinct trigger points, one reason, all meaning "the buffer has no live edit for
+                 // this call to act on" (never had one, or no longer does)
   | 'patch-unavailable'
   | 'auth-unavailable'
   | 'forge-unavailable'
@@ -385,8 +436,14 @@ export function discardEdit(buffer: SafeEditBuffer, key: string): void;
  * get wrong; if that call reports `aborted: 'edit-vanished'` (a concurrent `discardEdit()` raced its own
  * internal engine loop — PR #1355 round 11), that maps to `{ ok: false, reason: 'stale-edit' }` immediately,
  * ahead of the ordinary `ok`/`not-gate-passed` check.
- * Reads the buffer exactly ONCE, as its first (synchronous, pre-`await`) statement, via `buffer.snapshot(key)`,
- * into a local `content` + `token` pair — `content` is the SAME value that gets gated (`runVerifyGate()`)
+ * Reads the buffer exactly ONCE, as its first (synchronous, pre-`await`) statement, via `buffer.snapshot(key)`.
+ * If that snapshot is `undefined` (nothing was pending for `key` at all — e.g. a stray double-click on
+ * "emit" after "discard" already resolved, PR #1355 round 13), returns `{ ok: false, reason: 'stale-edit' }`
+ * immediately, before `runVerifyGate()` is ever called — `runVerifyGate()`'s own contract throws
+ * synchronously on exactly this input, by design, as a genuine-caller-bug signal for callers that are
+ * supposed to already know a pending edit exists; this check is what keeps `emitEdit()`'s own "never a bare
+ * thrown exception" guarantee intact rather than relying on `runVerifyGate()` to be forgiving. Otherwise,
+ * destructures the snapshot into a local `content` + `token` pair — `content` is the SAME value that gets gated (`runVerifyGate()`)
  * and written (`IdeBridgeRegistry.patch()` and the PR-body evidence); `opts.edit.after` and any later
  * `buffer.get(key)` read are never used for content past that point (PR #1355 round 4 — the buffer has no
  * lock and a live user can keep editing while this function's several `await`s are in flight, so a second
@@ -425,6 +482,11 @@ export async function emitEdit(opts: {
    the small `ConformanceEvidenceManifest` assembly helper described above. `emitEdit()` must call
    `runVerifyGate()` (imported from `./verify-gate`, Slice 2) itself as its first step — it must not accept
    or trust a caller-supplied `gatePassed` boolean; there is no such parameter in the corrected interface.
+   **(PR #1355 round 13 — BLOCKER)** Before calling `runVerifyGate()` at all, `emitEdit()` must check whether
+   `buffer.snapshot(key)` returned `undefined` (nothing pending for `key`) and, if so, return `{ ok: false,
+   reason: 'stale-edit' }` immediately (step 0a) — `runVerifyGate()` must never be invoked with an absent
+   buffer entry, since its own contract documents that as a synchronous, at-entry throw; `emitEdit()` is
+   responsible for never presenting it with that input, not the other way around.
    **(PR #1355 round 11)** If that call's result has `aborted === 'edit-vanished'`, `emitEdit()` must return
    `{ ok: false, reason: 'stale-edit' }` immediately, checked BEFORE the ordinary `ok`/`not-gate-passed`
    branch.
@@ -494,6 +556,16 @@ export async function emitEdit(opts: {
      false, reason: 'not-gate-passed' }`, and that zero downstream calls (ide-bridge/forge/credential-source)
      happened — proving `emitEdit()` checks `aborted` before falling through to the ordinary
      `not-gate-passed` branch.
+   - **The absent-at-entry case (new, round 13, the BLOCKER regression test):** call `emitEdit()` on a `key`
+     for which the buffer has no pending edit at all — e.g. construct a fresh `SafeEditBuffer` and never call
+     `propose()` for that key, or `propose()` then `revert()` it immediately before calling `emitEdit()` (the
+     "stray double-click on emit right after discard already resolved" scenario). Assert three things: (1)
+     `emitEdit()` does not throw and its returned promise resolves normally (wrap the call so a rejected
+     promise fails the test loudly, not silently — this is what proves the fix, since the pre-fix behavior is
+     an uncaught throw propagating out of `runVerifyGate()`); (2) the result is exactly `{ ok: false, reason:
+     'stale-edit' }`; (3) zero calls happened on `runVerifyGate`/ide-bridge/forge/credential-source (spy on a
+     fake `runVerifyGate` too, not just the four downstream registries) — proving the check at step 0a fired
+     before `runVerifyGate()` was ever invoked, not merely that some later guard happened to catch it.
    - **A true green-path case, unchanged:** no buffer mutation during the `await`s — `emitEdit()` succeeds
      normally, both checkpoints pass, and the write/PR-open both carry the originally captured `content`.
 3. Confirm the pr-body renderer's `ConformanceEvidenceManifest` input shape (defined at
@@ -551,6 +623,15 @@ export async function emitEdit(opts: {
   downstream calls; the real end-to-end trigger (a `discardEdit()` racing the gate's own internal engine
   loop) is exercised directly against the real engine by `xv0j8db`'s own Task 4c, so this card's test covers
   the mapping, not a re-simulation of the internal race.
+- **(PR #1355 round 13, finding 1 — the BLOCKER) `emitEdit()` never throws, and never calls
+  `runVerifyGate()`, when the buffer has no pending edit for `key` at all at call time** — distinct from
+  round 11's mid-run `aborted: 'edit-vanished'` case: this covers the key never having had a pending edit,
+  or having been discarded before `emitEdit()` was even invoked (e.g. a stray double-click on "emit"
+  immediately after "discard" already resolved). The absent-at-entry test asserts `emitEdit()` resolves
+  normally (not a rejected promise) to exactly `{ ok: false, reason: 'stale-edit' }`, with zero calls to
+  `runVerifyGate()` or any of the four downstream registries — proving the new step 0a check stops the call
+  before `runVerifyGate()`'s own at-entry throw contract (per `xv0j8db`) is ever reached, rather than relying
+  on that throw propagating out uncaught.
 - **(PR #1355 round 7, finding 3 — the cosmetic spec-completeness gap) The
   `ConformanceEvidenceManifest`'s `before.passed` field is actually computed, not left for an implementer to
   guess:** `emitEdit()` calls `checkContentAgainstVectors()` (exported from `xv0j8db`'s
