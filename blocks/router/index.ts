@@ -1,18 +1,17 @@
 /**
  * @file blocks/router/index.ts
- * @description Public API for the Router block.
+ * @description The WE-side **webrouting spec surface** — the serializable schemas, the emitter contract +
+ * its concrete emitters, and their conformance vectors. Pure data: every export here reads or projects a
+ * {@link ./route-map RouteMap}; none of it touches the DOM.
+ *
+ * There is deliberately **no router runtime here**. Per the #1246 ruling (*WE holds zero implementation*,
+ * codified `docs/agent/platform-decisions.md#constellation-placement`) the browser runtime — the
+ * `we-route-view` / `we-route-outlet` elements, the `route:link` / `route:prefetch` behaviors, the
+ * `<template route>` parse + URLPattern match helpers, and the `registerRouter` entry point — is homed
+ * solely in Frontier UI (`@frontierui/blocks/router`, the `implementedBy` this block declares in
+ * `we:src/_data/blocks/router.json`). The duplicate WE copy this file used to re-export was sliced out in
+ * #3154, closing the #1245 drift surface: with one home there is nothing left to desync.
  */
-
-// Elements
-export { default as RouteViewElement } from './elements/RouteViewElement';
-export { default as RouteOutletElement } from './elements/RouteOutletElement';
-
-// Behaviors
-export { default as RouteLinkBehavior } from './behaviors/RouteLinkBehavior';
-export { default as RoutePrefetchBehavior } from './behaviors/RoutePrefetchBehavior';
-
-// Registration
-export { registerRouter } from './registerRouter';
 
 // Serializable route-map projection (the #1685 derived schema — types + validator + the #1736 builder)
 export type { RouteMapEntry, RouteMap } from './route-map';
@@ -29,29 +28,6 @@ export type {
   UrlStateSlice,
   UrlStateCoordinator,
 } from './url-state';
-
-// Types
-export type {
-  RouteContext,
-  RouteNavigationTarget,
-  RouteGuardFn,
-  RouteGuardResult,
-  RouteLoaderFn,
-  RouteLoaderParams,
-  RouteDefinition,
-  MatchedRoute,
-  NavigationResult,
-} from './types';
-
-// Helpers (for advanced use)
-export {
-  parseRouteDefinitions,
-  matchRoute,
-  matchAllRoutes,
-  findErrorBoundary,
-  buildNavigationTarget,
-  buildRouteContext,
-} from './types';
 
 // Sitemap.xml emitter — a concrete RouteMapEmitter over the route-map projection (#1737)
 export { createSitemapEmitter, isParametricPath } from './sitemap-emitter';
