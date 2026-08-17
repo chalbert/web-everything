@@ -1,0 +1,182 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  The <code>/consolidate</code> pass can prove that two open backlog items are genuinely one job — one item's
+  scope sits entirely inside another's. When it does, the backlog has <strong>no honest way to retire the
+  absorbed one</strong>. <code>resolve</code> means <em>delivered</em> and feeds the burndown, so closing a
+  never-built duplicate books points nobody earned. A park must reduce to a real structural gate
+  (<code>blockedBy</code>, <code>humanGate</code>, <code>platform-gated</code>, <code>maturityGated</code>) and
+  "another item already covers this" is none of those. And <code>supersededBy</code> exists, but its pointer
+  space is research-topic ids, not backlog ids. So the fold outcome is <strong>reported and never
+  executed</strong>.
+</p>
+<p>
+  Decision <a href="/backlog/2982-how-a-folded-duplicate-backlog-item-retires-foldedinto-point/">#2982</a> asks
+  two things. Does a proven-contained duplicate get a retirement state at all, or does it stay open and
+  cross-referenced? And if it retires, is the marker a new <code>status</code> value or a field on an item that
+  stays <code>open</code>?
+</p>
+
+<h2>Prior art — five trackers, one convergent answer</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Tracker</th>
+      <th>Terminal state for a duplicate</th>
+      <th>Pointer to the survivor</th>
+      <th>Counted as delivered?</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Bugzilla</strong></td>
+      <td><code>RESOLVED</code> + resolution <code>DUPLICATE</code></td>
+      <td><code>dupe_of</code> — a first-class bug-id field on the bug, not a comment</td>
+      <td>No — <code>DUPLICATE</code> is a distinct resolution from <code>FIXED</code></td>
+    </tr>
+    <tr>
+      <td><strong>Jira</strong></td>
+      <td>Closed + Resolution <code>Duplicate</code></td>
+      <td>a separate <code>duplicates</code> issue-link type — a second, independent step; Jira attaches no
+      behaviour to the link's name</td>
+      <td>No — the standard practice is to filter <code>resolution != Duplicate</code> out of reports and epic
+      progress</td>
+    </tr>
+    <tr>
+      <td><strong>GitHub Issues</strong></td>
+      <td>closed with <code>state_reason: duplicate</code> — a <em>third</em> close reason added Dec 2024,
+      alongside <code>completed</code> and <code>not_planned</code></td>
+      <td>a "marked as a duplicate" timeline event plus a note rendered at the top of the issue explaining why
+      it closed</td>
+      <td>No — deliberately distinct from <code>completed</code></td>
+    </tr>
+    <tr>
+      <td><strong>GitLab</strong></td>
+      <td>closed via the <code>/duplicate #id</code> quick action</td>
+      <td>a duplicate-of relation plus a related-issue link</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td><strong>Linear</strong></td>
+      <td>moved into the reserved <code>Duplicate</code> status, whose <em>type</em> is <strong>Canceled</strong>
+      — not Done</td>
+      <td>a duplicate relation to the canonical issue; attachments and customer requests migrate to the
+      survivor</td>
+      <td>No — the Canceled type is separate from Done everywhere Done is counted</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Finding 1 — the non-delivered close is universal (5/5); "stay open and cross-ref" is 0/5</h3>
+<p>
+  No surveyed tracker models a proven duplicate by leaving it in the working set with a "see also" link. All
+  five move it out of the active set and mark <em>why</em>. The consistency carries weight precisely because
+  the five disagree about almost everything else in their lifecycle models — resolutions versus close-reasons
+  versus status types — yet converge here.
+</p>
+<p>
+  This also corrects the framing that this repo's standing <em>Review before adding (dedup)</em> rule points
+  the other way. Read literally, that rule says <strong>"if an item already covers the idea, <em>extend</em>
+  it rather than adding a near-duplicate sibling"</strong>, and reserves <em>cross-reference instead of
+  merging</em> for <strong>parallel tracks that look similar but are distinct</strong>. It governs the
+  <em>adjacent</em> case, not the <em>contained</em> one — so it is not a counterweight to a fold.
+</p>
+
+<h3>Finding 2 — the close reason is a positive enum marker, not an inference (4/5)</h3>
+<p>
+  Bugzilla's <code>DUPLICATE</code> resolution, Jira's <code>Duplicate</code> resolution, GitHub's
+  <code>state_reason: duplicate</code> and Linear's reserved <code>Duplicate</code> status each carry an
+  explicit marker of <em>why</em> the item left, paired with a <em>separate</em> pointer to the survivor.
+  Nobody encodes the survivor inside the enum, and nobody relies on the pointer alone to mean "closed as
+  duplicate." Only GitLab infers duplicate-ness purely from the presence of a relation — and GitLab is also
+  the one tracker with a long-running complaint about the resulting state.
+</p>
+
+<h3>Finding 3 — the fold must be reversible; this is where prior art records a real defect</h3>
+<p>
+  GitLab's <code>/duplicate</code> has no inverse. The issue "Allow removal of issues marked as duplicate"
+  (<code>gitlab-org/gitlab#233050</code>) has been open for years: once marked, the relation cannot be
+  unlinked, so an accidental fold is permanent and the issue is thereafter always displayed as <em>Closed
+  (duplicated)</em>. This is the concrete, observed form of the "an over-eager fold silently removes work"
+  risk — and it argues for shipping the <strong>unfold</strong> path in the same slice as the fold path,
+  rather than as a follow-up.
+</p>
+
+<h3>Finding 4 — supersession-as-a-pointer is already ratified here, for a different home</h3>
+<p>
+  This repo's existing retirement convention (the reference-retirement doc, #584) explicitly rejects an enum:
+  death and supersession are "distinct, independently-optional facts … two markers, not one <code>status</code>
+  enum — an enum is mutually exclusive and so can't represent the 'dead and superseded' case." Its scope is
+  this repo's <em>reference data</em>, and its stated ambition is uniformity — "the homes differ in
+  <em>container</em>, not in the retirement <em>concept</em>" — so it has to be reconciled rather than ignored.
+</p>
+<p>
+  The reconciliation is that the objection is <strong>scope-bound</strong>. It exists because a reference can
+  be <em>both</em> dead <em>and</em> superseded, so one enum slot cannot hold both facts. A backlog item cannot
+  be both <em>delivered</em> and <em>folded</em> — those are genuinely exclusive — so the objection does not
+  reach this case. What does carry over is the <em>field-set shape</em>: a death triplet
+  (<code>retired</code> + <code>retiredDate</code> + <code>retiredReason</code>) alongside a supersession
+  pointer.
+</p>
+
+<h2>Scoring the shape against this repo's own machinery</h2>
+<p>
+  The status-versus-field sub-call is not a free choice; the loader and the gate already price it.
+</p>
+<ul>
+  <li><strong>A distinct status drops out of every selection surface for free.</strong> The tier derivation
+  returns <code>undefined</code> for any non-<code>open</code> item, and the readiness engine filters its whole
+  selection to <code>status === 'open'</code> — so tier, batchable, sliceable, splittable and the open leverage
+  graph all exclude a folded item with zero new code.</li>
+  <li><strong>A field on an item that stays <code>open</code> must be excluded by hand at each of those
+  sites</strong>, and it also trips the call-to-action invariant: every open item with no next-action pill is a
+  hard gate error.</li>
+  <li><strong>The burndown needs one change either way.</strong> Its "done" key is
+  <code>status === 'resolved' &amp;&amp; dateResolved</code>, while a sized item enters <em>scope</em> purely
+  from its opened date — so a folded item must be excluded from the sized set, or its points sit in remaining
+  scope forever. Excluding rather than fabricating a delivered date is the repo's own
+  <em>exclude, never fabricate, at a lossy boundary</em> rule.</li>
+  <li><strong>There is precedent for minting a status value</strong>: <code>preparing</code> was added for
+  exactly this reason — non-open and in-flight, dropping from selection like <code>active</code> but distinct
+  on the board.</li>
+  <li><strong>There is no frontmatter-key whitelist for backlog items</strong>; an unknown key is silently
+  spread onto the item. That is a risk rather than a convenience — <code>relatedTo</code> (232 items),
+  <code>relatedItems</code> and <code>blocks</code> already exist on disk as inter-item pointers with zero
+  validation and zero rendering. A bare <code>foldedInto:</code> with no gate and no pill would become the
+  fourth invisible pointer.</li>
+</ul>
+
+<h2>Statute-overlap check</h2>
+<p>
+  An anchor-by-anchor pass over the platform-decisions statute found <strong>no anchor governing backlog item
+  retirement</strong> — backlog lifecycle is explicitly delegated out to the backlog-workflow doc. Four
+  anchors are adjacent and <em>compose</em> rather than collide: the <strong>backlog hold model</strong>
+  pointer (which governs holds, not exits, and is the codified form of the "a park can't carry it" argument);
+  <strong>ci-lifecycle-total-label-function</strong> (self-scoped to PR labels, but its principle — state is a
+  positively-applied marker, never inferred from an absence — is the precedent for Finding 2);
+  <strong>faithful-derivation-exclude-not-fabricate</strong> (supports excluding a folded item from the
+  burndown rather than fabricating a delivered date); and
+  <strong>state-lives-where-its-nature-dictates</strong> (a fold is durable shared repo truth, not session
+  intent, so it belongs in committed frontmatter — which also explains why the retreat from a
+  <code>preparing</code> status to a local uncommitted hold is not a precedent against a folded status: that
+  hold is transient, a fold is permanent).
+</p>
+
+<h2>Recommendation</h2>
+<ul>
+  <li><strong>Retire the folded duplicate.</strong> 5/5 prior art, and the "stay open" branch's own stated
+  mechanism — whoever claims the survivor resolves the sibling in the same pass as delivered work — commits
+  the exact burndown falsification the question was opened to avoid.</li>
+  <li><strong>Carry it as a new <code>folded</code> status</strong> plus a required pointer to the survivor and
+  a fold date — the reference-retirement triplet shape, adapted. It is near-free in the loader, it carries a
+  positive marker per Finding 2, and the enum objection is scope-bound.</li>
+  <li><strong>Ship the unfold path in the same slice.</strong> An irreversible fold is the one failure mode
+  prior art actually recorded.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/2982-how-a-folded-duplicate-backlog-item-retires-foldedinto-point/">#2982 — how a folded-duplicate backlog item retires</a></li>
+  <li>Project: <a href="/projects/webdocs/">webdocs</a></li>
+</ul>
+{% endraw %}
