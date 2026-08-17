@@ -5,6 +5,7 @@ size: 5
 status: open
 parent: "3029"
 relatedTo: ["3037", "3036"]
+scope: ["we:scripts/operations/run.mjs", "we:scripts/operations/explore.mjs", "we:scripts/operations/explore-io.mjs"]
 dateOpened: "2026-08-17"
 tags: [operations, epic-3029, committee, research, mcp]
 ---
