@@ -25,9 +25,20 @@ weighed:
 **The premise is stale, and the item's own recommended option 2 has already shipped.** What remains is a
 narrower, genuinely open call: the gate also runs on machines that are *not* the operator's (CI), and those
 machines compute a different calendar day from the same instant. The fix belongs at the **frame**, never at the
-**threshold** — pin the ageing clock to the frame the stamps were written in (the `BACKLOG_TZ` knob #2747
-already shipped for exactly the "host clock is already wrong / UTC container" case), and leave the pinned
-boundary test alone.
+**threshold** — and the frame has to be fixed where *every* reader sees it, not one class of reader at a time.
+
+**Recommended: the repo declares one project day in-tree** — a tracked IANA zone name that
+`we:scripts/lib/local-date.mjs` reads as a rung *below* the existing `BACKLOG_TZ` knob, so every reader **and**
+writer of this checkout shares one frame by construction. The main alternative — setting `BACKLOG_TZ` inline in
+the three workflows that run a clock-dependent gate — is three lines and no new mechanism, but its reach is
+**GitHub Actions only**: a devcontainer, a fresh clone in a UTC image, a second machine or a bot stays unframed,
+and a fourth workflow silently inherits today's wrong behaviour. Three copies of one value is itself a drift
+vector, which is an awkward remedy for a drift bug. Either way the pinned boundary test is left alone.
+
+*An earlier draft of this report recommended the per-workflow `BACKLOG_TZ` enrollment instead. An independent
+skeptic pass flipped it, on the finding that the rejection of an in-tree declaration leaned on #2747's
+POSIX-`TZ` evidence beyond that evidence's scope — see §5. The recommendation here now matches #2985's Fork 1
+default, (b).*
 
 ## Key findings
 
@@ -101,28 +112,42 @@ Two corrections the survey forced on the framing I went in with:
 
 ### 4. Why a threshold bump is the broken branch
 
-Three independent reasons, all grounded rather than aesthetic:
+An unconditional grace day is recorded in #2985 as a **finding (F1), not a fork** — a binary with one dead
+branch is not a choice. Two reasons stand, both grounded rather than aesthetic:
 
 1. **It does not make the clocks agree** — it makes the check tolerate *any* one-day disagreement, including the
    real second-day staleness the TTL exists to catch. The signal it removes is exactly the signal it was
    protecting.
-2. **It is not even sufficient in general.** Two calendar frames can differ by **two** days, not one: at UTC+14
-   it can be 2026-01-02 while at UTC−12 it is 2025-12-31. A one-day pad is a guess at the maximum skew; a frame
-   pin is exact.
-3. **It pays globally for a local artifact.** The laxity lands on every born-active item on every machine —
+2. **It pays globally for a local artifact.** The laxity lands on every born-active item on every machine —
    including the operator's own, where the frames already agree and the warning is the one actually read.
+
+**One reason was considered and withdrawn, and is kept here so the rejection is not read as resting on it.** An
+earlier draft argued the pad "is not even sufficient in general," because two calendar frames can differ by
+**two** days rather than one — at UTC+14 it can be 2026-01-02 while at UTC−12 it is 2025-12-31. That is true of
+the general case and **inadmissible for this population**: the machines that actually compare these stamps are
+one operator's host in `America/Toronto` plus UTC-hosted runners, a maximum skew of one day. It is withdrawn as
+grounding. *(A second withdrawn reason — that the pad would trip `we:scripts/lib/utc-day-slice-scan.mjs` — was
+an artifact of the snippet the draft chose, not a property of the branch.)*
 
 It also flips a deliberately-pinned boundary: `we:scripts/__tests__/workflow-invariants.test.mjs:68-77` pins
 born `2026-07-01` + today `2026-07-02` ⇒ exactly one warning, and the sibling case is labelled *"grace: its
 creating day."*
 
-### 5. The knob already exists
+### 5. The knob exists — and the declaration belongs one rung below it
 
 `we:scripts/lib/local-date.mjs:27` documents `BACKLOG_TZ` as *"an explicit IANA pin … for the operator whose
-HOST clock is already wrong, typically a UTC container."* A GitHub-hosted runner **is** that host. So pinning
-CI is the use the knob was designed for, not a new mechanism — and #2747 deliberately reduced the ladder to this
-**one** knob on review evidence (`TZ` is POSIX, not IANA; `TZ=GMT+5` resolves to the zone `"+05:00"`, ten hours
-off). Any fix that adds a second rung re-opens what #2747 closed.
+HOST clock is already wrong, typically a UTC container."* A GitHub-hosted runner **is** that host, so pinning a
+reader is the use the knob was designed for rather than a new mechanism. But the knob frames one reader at a
+time: it covers the hosts someone remembers to enroll, and no others.
+
+#2747 did deliberately reduce the ladder to this **one** knob on review evidence — read at its actual scope,
+that evidence is that **`TZ` is POSIX, not IANA** (`TZ=GMT+5` resolves to the zone `"+05:00"`, ten hours off),
+so a `TZ` rung would let a non-IANA value frame a calendar day. **That finding does not reach a tracked in-tree
+IANA declaration**, which is validated against `Intl` and throws on a name `Intl` rejects — the same guarantee
+the finding was protecting. An earlier draft of this report asserted that *any* fix adding a second rung
+re-opens what #2747 closed; that was an over-reach beyond the evidence's scope, and the independent skeptic pass
+on #2985 corrected it. The recommended declaration adds its rung **below** `BACKLOG_TZ`, leaving the per-host
+escape hatch's precedence and meaning unchanged.
 
 ## Files created/modified
 
