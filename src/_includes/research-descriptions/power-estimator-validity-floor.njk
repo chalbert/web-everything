@@ -1,0 +1,169 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/3143-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/">#3143</a> —
+  <em>should <code>requiredNPerGroup</code> fold in this module's own 5-and-5 validity floor?</em> The
+  module (<code>we:scripts/lib/gate-health.mjs</code>) carries two independent criteria that can disagree,
+  and the card asks whether they should be collapsed into one number.
+</p>
+<ul>
+  <li>
+    <strong>The power criterion.</strong> <code>requiredNPerGroup(baseRate, mdd)</code> is the textbook
+    two-proportion sample-size formula &mdash; 80% power, &alpha;&nbsp;=&nbsp;0.05, two-sided,
+    <code>n = ceil((1.96 + 0.84)&sup2; &middot; 2 &middot; p&#772; &middot; (1 - p&#772;) / d&sup2;)</code>
+    with <code>p&#772; = p + d/2</code>. Pure power, no validity term.
+  </li>
+  <li>
+    <strong>The validity criterion.</strong> <code>compareProportions(a, b)</code> refuses to report
+    <code>separated</code> unless both groups clear &ge;5 successes <em>and</em> &ge;5 failures, because the
+    normal approximation the module rests on is invalid below that.
+  </li>
+</ul>
+<p>
+  At <code>p&nbsp;=&nbsp;0.94</code>, <code>mdd&nbsp;=&nbsp;0.05</code> the estimator answers
+  <strong>212</strong> while the comparison arm at 0.99 expects only 2.12 failures at that n &mdash; so the
+  same module says &ldquo;collect 212&rdquo; and then refuses at 212. The proposed fold is
+  <code>max(powerN, ceil(5 / min(p, 1-p, p+d, 1-(p+d))))</code>.
+</p>
+
+<h2>Finding — no, on three independent grounds</h2>
+
+<h3>1. No established toolkit folds a validity floor into the returned n</h3>
+<table>
+  <thead>
+    <tr><th>Toolkit</th><th>Floors n?</th><th>Warns at an invalid n?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="https://stat.ethz.ch/R-manual/R-devel/library/stats/html/power.prop.test.html">R <code>stats::power.prop.test</code></a></td><td>no</td><td>no &mdash; warns only when no <code>p2</code> exists at all</td></tr>
+    <tr><td><a href="https://cran.r-project.org/web/packages/pwr/pwr.pdf">R <code>pwr::pwr.2p.test</code> / <code>pwr.2p2n.test</code> (1.3-0)</a></td><td>no</td><td>no &mdash; the only note is about <code>uniroot</code> bracketing</td></tr>
+    <tr><td><a href="https://www.statsmodels.org/stable/_modules/statsmodels/stats/proportion.html">statsmodels <code>samplesize_proportions_2indep_onetail</code> (0.14.6)</a></td><td>no &mdash; returns <code>nobs</code> straight from <code>normal_sample_size_one_tail</code></td><td>no</td></tr>
+    <tr><td><a href="https://www.statsmodels.org/stable/generated/statsmodels.stats.power.NormalIndPower.html">statsmodels <code>NormalIndPower</code> (0.14.6)</a></td><td>no</td><td>no</td></tr>
+    <tr><td><a href="http://support.sas.com/documentation/cdl/en/statug/63347/HTML/default/statug_power_a0000000997.htm">SAS <code>PROC POWER TWOSAMPLEFREQ</code></a></td><td>no &mdash; inverts Fleiss&ndash;Tytun&ndash;Ury eq. (4)</td><td>no</td></tr>
+    <tr><td><a href="https://www.stata.com/manuals/pss-2powertwoproportions.pdf">Stata <code>power twoproportions</code></a></td><td>no &mdash; the optional <code>continuity</code> option is a different adjustment</td><td>no</td></tr>
+    <tr><td><a href="https://www.ncss.com/wp-content/themes/ncss/pdf/Procedures/PASS/Tests_for_Two_Proportions.pdf">PASS &ldquo;Tests for Two Proportions&rdquo;</a></td><td>no &mdash; offers binomial enumeration instead</td><td>no</td></tr>
+    <tr><td><a href="https://www.psychologie.hhu.de/fileadmin/redaktion/Fakultaeten/Mathematisch-Naturwissenschaftliche_Fakultaet/Psychologie/AAP/gpower/GPowerManual.pdf">G*Power 3.1</a></td><td>n/a &mdash; its documented proportions procedure is exact Fisher</td><td>no</td></tr>
+  </tbody>
+</table>
+<p>
+  The only documented upward adjustment on offer anywhere is the <strong>continuity correction</strong>
+  (Fleiss / Casagrande&ndash;Pike&ndash;Smith). It is opt-in, it is not a validity floor, and PASS says of
+  it that &ldquo;in practice, this adjustment is not recommended because it reduces the power and the actual
+  alpha of the test procedure.&rdquo;
+</p>
+
+<h3>2. The floor does not deliver the guarantee that justifies it</h3>
+<p>
+  <code>5 / min(p, 1-p, p+d, 1-(p+d))</code> is an <strong>expected-count</strong> floor. At exactly that n
+  the expected minimum cell is exactly 5 &mdash; so the <strong>observed</strong> count, which is what
+  <code>compareProportions</code> actually gates on, lands below 5 roughly half the time. The whole
+  argument for folding is &ldquo;collect the number it names and the module will accept it&rdquo;; the
+  arithmetic says it would still refuse about half the time it fired.
+</p>
+<p>
+  The expected-vs-observed split is real in the literature too. Cochran/Fisher and R state the rule on
+  <em>expected</em> counts; the two-proportion z-test literature commonly states it on <em>observed</em>
+  counts and adds that below 5 you should prefer an exact test
+  (<a href="https://en.wikipedia.org/wiki/Two-proportion_Z-test">two-proportion z-test</a>). The
+  expected-count shape is the only one a <em>planning</em> function can compute, so the expression itself is
+  defensible &mdash; calling it a guarantee is not.
+</p>
+
+<h3>3. Measured blast radius in this repo</h3>
+<p>
+  The fold was patched into <code>we:scripts/lib/gate-health.mjs</code>, the suite re-run, and the patch
+  reverted. Result: <strong>8 of 53 tests fail</strong>, and only three are re-derivable constants.
+</p>
+<table>
+  <thead><tr><th>Failure</th><th>Kind</th></tr></thead>
+  <tbody>
+    <tr><td><code>requiredNPerGroup(0.044, 0.2)</code> 49 &rarr; 114</td><td>re-derivable constant</td></tr>
+    <tr><td><code>requiredNPerGroup(0.94, 0.05)</code> 212 &rarr; 500</td><td>re-derivable constant</td></tr>
+    <tr><td><code>requiredNPerGroup(0, 0.05)</code> 153 &rarr; null</td><td><strong>live defect</strong> &mdash; at <code>p = 0</code> the floor is <code>5/0 = &infin;</code></td></tr>
+    <tr><td>&ldquo;an unsizeable <code>mdd</code> is its OWN blocker&rdquo;</td><td>cascade</td></tr>
+    <tr><td>&ldquo;a band with one arm reports a null rate&hellip;&rdquo;</td><td>cascade</td></tr>
+    <tr><td>&ldquo;concludes only when a band separates AND nothing is blocking&rdquo;</td><td>cascade &mdash; <code>conclusive</code> can never be true</td></tr>
+    <tr><td>&ldquo;reports WHICH group is worse&rdquo;</td><td>cascade</td></tr>
+    <tr><td>declaration: &ldquo;an ABSENT field still gets the schema default&rdquo;</td><td>cascade</td></tr>
+  </tbody>
+</table>
+<p>
+  <code>p = 0</code> is not a corner case here. It is the module's own <code>sizeableMdd</code> probe input
+  (<code>requiredNPerGroup(0, mdd) !== null</code>), and it is the ordinary per-band clean-arm rate whenever
+  a band has recorded no defects &mdash; the common case on a corpus with a ~3% defect rate. Under the fold,
+  the probe returns null, a spurious &ldquo;unsizeable effect&rdquo; blocker fires on every assessment, and
+  the verdict can never be conclusive again.
+</p>
+
+<h2>The reframe the survey supplies</h2>
+<p>
+  The stronger finding is that &ldquo;collect more&rdquo; is not the documented remedy at all. When the
+  normal approximation fails, the literature switches the <em>test</em>:
+</p>
+<ul>
+  <li>
+    Stata's small-sample answer is <code>test(fisher)</code>, and it states that sample size for Fisher's
+    exact test is &ldquo;difficult to compute directly because of the discrete nature of the sampling
+    distribution&rdquo; &mdash; the exact route does not even produce an n.
+  </li>
+  <li>
+    Exact treatment generally needs <em>fewer</em> observations. PASS example 2: the normal approximation
+    asks 524 per group, binomial enumeration asks <strong>521</strong>, at an actual &alpha; of 0.0493.
+  </li>
+  <li>
+    statsmodels puts the remedy in the test API, not the planning API:
+    <a href="https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.test_proportions_2indep.html"><code>test_proportions_2indep</code></a>
+    defaults to <code>method='agresti-caffo'</code> for the risk difference &mdash; an adjusted estimator,
+    not a data-collection demand (Agresti &amp; Caffo 2000, <em>Amer. Statistician</em> 54:280&ndash;288).
+  </li>
+  <li>
+    The &ge;5 threshold is itself acknowledged as arbitrary. Campbell 2007
+    (<a href="https://onlinelibrary.wiley.com/doi/10.1002/sim.2832"><em>Stat. Med.</em> 26:3661&ndash;3675</a>)
+    recommends the N&minus;1 chi-squared when the minimum expected count is at least 1, Fisher&ndash;Irwin
+    below that, and records that Cochran's 5 &ldquo;was chosen arbitrarily.&rdquo; Agresti 2001
+    (<a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.738"><em>Stat. Med.</em> 20:2709&ndash;2722</a>)
+    argues for mid-<em>p</em> adjustments over more data. <em>(Both read via abstract, not full text.)</em>
+  </li>
+  <li>
+    R places the &ge;5 warning on the <strong>test</strong>, never on the planner, and on expected counts:
+    <code>if (any(E &lt; 5) &amp;&amp; is.finite(PARAMETER)) warning("Chi-squared approximation may be incorrect")</code>
+    (<a href="https://raw.githubusercontent.com/wch/r-source/trunk/src/library/stats/R/chisq.test.R">R source</a>).
+  </li>
+</ul>
+
+<h2>API-design half — changing a named formula's output</h2>
+<p>
+  <a href="https://numpy.org/neps/nep-0023-backwards-compatibility.html">NumPy's NEP 23</a> states the
+  governing principle for this exact class of change: <em>&ldquo;The possibility of an incorrect result is
+  worse than an error or even crash.&rdquo;</em> It also requires a deprecation cycle of at least two
+  releases for any behaviour change, and never in a bugfix release. A function named after a formula that
+  silently returns a different number ranks as the most harmful category in that scheme &mdash; which is
+  precisely what folding the floor into <code>requiredNPerGroup</code> would be.
+</p>
+
+<h2>What this survey did not settle</h2>
+<ul>
+  <li>
+    No toolkit <em>warns</em> on the planning side either, so &ldquo;return the textbook n and publish the
+    floor beside it&rdquo; has no direct prior art. It is a defensible invention, not a documented
+    convention &mdash; which is why #3143 keeps it as a separate fork rather than folding it into the first.
+  </li>
+  <li>
+    G*Power's z-test proportions procedure could not be verified; the current manual documents only the
+    exact Fisher variant and is explicitly incomplete.
+  </li>
+  <li>Campbell 2007 and Agresti 2001 were read via abstract/PubMed record, not full text.</li>
+  <li>
+    The literature does not speak to the product question &mdash; whether a tool should refuse to
+    <em>plan</em> a measurement it knows it will refuse to <em>read out</em>. That is the design call #3143
+    rules.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/3143-should-requirednpergroup-fold-in-this-module-s-own-5-and-5-v/">#3143</a> &mdash; the decision this grounds.</li>
+  <li><a href="/backlog/3090-the-sample-size-estimator-says-one-observation-is-enough-whe/">#3090</a> &mdash; the bug-fix card this fork was spun out of.</li>
+  <li><a href="/backlog/3083-choose-the-retry-policy-for-a-dispatch-that-did-not-take/">#3083</a> &mdash; the prospective second consumer whose arrival is the named forcing function.</li>
+</ul>
+{% endraw %}
