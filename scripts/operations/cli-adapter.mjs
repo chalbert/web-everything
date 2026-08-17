@@ -45,7 +45,84 @@ import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
-export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id']);
+export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model']);
+
+/**
+ * The control flags that mean something ONLY to a declaration with a `judge` step — the JUROR flags.
+ *
+ * THE GAP THEY CLOSE (#3151). `--cwd` is the juror's own lane, and a TOOL-BEARING juror cannot spawn without
+ * one: `assertLaneCwd` (`we:scripts/lib/judge-spawn.mjs`) REFUSES the spawn rather than inheriting the driver's
+ * directory, which is the isolation property, not a bug. But until this flag existed the only way to supply
+ * that lane was `JUDGE_LANE_CWD` in the environment — a side channel no `--help` output mentioned, which
+ * dispatch prompts threaded by hand and which at least three independent reviewers on 2026-08-17 each
+ * rediscovered by reading those prompts instead of the tool. Every one of them fell back to a fully manual
+ * review. A derived caller that silently requires an undocumented env var is precisely the hand-wiring gap
+ * epic #3029 exists to eliminate, so the lane is now a FLAG: derived, documented in the usage text the
+ * declaration generates, and validated before a run record exists.
+ *
+ * `--model` is the same divergence one field over: a dispatch prompt written with `--model=sonnet` failed
+ * outright, because the juror's model was reachable from nowhere on the command line. It is a CONTROL flag and
+ * deliberately NOT an input field — which is what keeps #3028's property exactly as strong as it was. Nothing
+ * in the run's INPUT can reach the juror's argv (see `JUDGE_MODEL` in `we:scripts/operations/review-pr.mjs`);
+ * an operator override arrives on a different path and is checked by {@link assertSafeJudgeRequest}, the same
+ * guard every declaration-built request passes, before it can become a flag position.
+ *
+ * ADVERTISED AND ACCEPTED ONLY WHERE A JUROR EXISTS ({@link declaresJudgeStep}) — derived from the step kinds
+ * exactly as the resume line already is. An operation whose every step is `compute` has no juror to point at a
+ * lane and no model to pick, so accepting the flag there would be a silent no-op: the same "the flag did
+ * nothing and nothing said so" failure this card is about, in the opposite direction.
+ *
+ * THE NAME IS `--cwd`, DELIBERATELY, AND #3137 MUST NOT REUSE IT. `--cwd` is the spelling the reviewers who hit
+ * the refusal reached for from memory, and the card asked for it by name, so it is the one that closes the
+ * discovery loop. But it is a GENERIC name for a JUROR-ONLY meaning, and the open #3137 wants a second cwd —
+ * one for the `read` step, so a cross-repo review stops silently degrading to an empty diff. That flag must be
+ * named for what it points at (`--read-cwd` / `--subject-cwd`), never as a rename or a widening of this one:
+ * the two mean different directories and conflating them would hand a juror the repo under review. The help
+ * text says which this is, in the negative, for the operator who types it from memory anyway.
+ *
+ * WHAT MAKES THE SHARED SPELLING SAFE, rather than merely documented: the two are RUNTIME-DISTINGUISHABLE in
+ * opposite directions. `assertLaneCwd` → `laneRootOf` refuses any path that is not `<ws>/.lanes/<pool>/lane-N`,
+ * so an operator who points THIS flag at a clone of the repo under review gets an explicit "not a lane clone"
+ * refusal — never a silent pass on the wrong tree. #3137's flag will have the mirror-image requirement (a real
+ * checkout, which is not a lane). A misdirected value therefore fails loudly on either side, which is why the
+ * ambiguity stays a documentation matter and not a correctness one (PR review r2 withdrew the rename on this).
+ */
+export const JUROR_FLAGS = Object.freeze(['cwd', 'model']);
+
+/**
+ * The control flags that only mean something to a declaration that can SUSPEND — a run that cannot stop cannot
+ * be resumed, and has no question to answer. Listed for the same reason {@link JUROR_FLAGS} is: the
+ * unknown-flag message must name the flags that actually apply here, and no others.
+ */
+export const RESUME_FLAGS = Object.freeze(['resume', 'answer', 'run-id']);
+
+/** Does this declaration declare a `judge` step? PURE — reads the step KINDS, never the operation's name. */
+export function declaresJudgeStep(declaration) {
+  return (declaration?.steps ?? []).some((s) => s?.step?.kind === 'judge');
+}
+
+/**
+ * What `--help` says about the juror flags, for a declaration that has a `judge` step.
+ *
+ * IT NAMES THE REFUSAL IT PREVENTS, verbatim enough to be searchable: an operator who has already hit
+ * `refusing to spawn a TOOL-BEARING juror` must be able to find the answer by running `--help` and matching the
+ * words. That round trip — error text to flag — is the whole fix; a help line that only said "the juror's
+ * working directory" would have left every reviewer exactly where #3151 found them.
+ */
+export const JUROR_FLAG_HELP = Object.freeze([
+  'juror flags (this operation has a `judge` step):',
+  '  --cwd=<lane>      the lane clone the juror runs in. REQUIRED when the declaration asks for a TOOL-BEARING',
+  '                    juror, which refuses to spawn without one ("refusing to spawn a TOOL-BEARING juror —',
+  '                    no `cwd` was supplied"). It must be a lane clone of its OWN — not the primary checkout,',
+  '                    and not the lane you are driving from; acquire one with `scripts/lane-pool.mjs acquire`.',
+  '                    Falls back to $JUDGE_LANE_CWD when the flag is omitted.',
+  '                    NOT the checkout the subject is read FROM: the `read` step still runs against this',
+  '                    repo, so pointing this at a clone of another repo does not make a cross-repo review',
+  '                    work (that gap is its own open item, #3137). This flag only says where the juror runs.',
+  '  --model=<alias>   override the juror model the declaration asks for (e.g. `sonnet`, `opus`). Omit to use',
+  '                    the declared one. This is a control flag, not run input: it is never recorded as input',
+  '                    and never reaches the mandate.',
+]);
 
 /**
  * DERIVE the command line from a declaration. PURE.
@@ -77,14 +154,20 @@ export function buildCliSpec(declaration) {
   // no run to resume and no question to answer — printing the line anyway documents a flag combination the
   // adapter would refuse. `isReadOnlyOperation` reads the step kinds; nothing here knows which operation it is.
   const resumable = !isReadOnlyOperation(declaration);
+  // THE JUROR FLAGS ARE DERIVED THE SAME WAY (#3151). A declaration with no `judge` step has no juror, so
+  // printing `--cwd` for it would document a flag the adapter refuses; a declaration WITH one requires the lane
+  // whenever its request is tool-bearing, and that requirement was previously stated NOWHERE in this output —
+  // the whole defect. `judged` decides both the usage line and `parseOperationArgv`'s refusal, from one fact.
+  const judged = declaresJudgeStep(declaration);
   return {
     name: declaration.name,
     fields,
     usage: [
-      `usage: run.mjs ${declaration.name} ${flagText} [--json]`,
-      ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]`] : []),
+      `usage: run.mjs ${declaration.name} ${flagText} [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`,
+      ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`] : []),
       '',
       `steps: ${steps}`,
+      ...(judged ? ['', ...JUROR_FLAG_HELP] : []),
       ...(resumable ? [] : ['', 'read-only: every step is `compute` — this operation completes in one call, suspends at nothing and records no run.']),
     ].join('\n'),
   };
@@ -122,9 +205,10 @@ export function coerceInputValue(type, raw) {
 export function parseOperationArgv(declaration, argv = []) {
   const spec = buildCliSpec(declaration);
   const known = new Set(spec.fields.map((f) => f.name));
+  const judged = declaresJudgeStep(declaration);
   const errors = [];
   const raw = {};
-  const control = { help: false, json: false, resume: '', answer: null, runId: '' };
+  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '' };
 
   for (const token of argv) {
     if (!token.startsWith('--')) { errors.push(`unexpected positional argument ${JSON.stringify(token)} — every input is a --flag`); continue; }
@@ -136,7 +220,51 @@ export function parseOperationArgv(declaration, argv = []) {
     if (name === 'resume') { control.resume = value; continue; }
     if (name === 'answer') { control.answer = value; continue; }
     if (name === 'run-id') { control.runId = value; continue; }
-    if (!known.has(name)) { errors.push(`unknown flag --${name} — \`${declaration.name}\` accepts ${[...known].map((k) => `--${k}`).join(', ')}`); continue; }
+    // ── THE JUROR FLAGS (#3151) ────────────────────────────────────────────────────────────────────────────
+    // Refused where there is no juror, because a flag that silently does nothing is the failure this card is
+    // about; an empty value is refused here rather than downstream, where `assertLaneCwd`'s "no `cwd` was
+    // supplied" would name a cause the operator can see they DID supply.
+    if (JUROR_FLAGS.includes(name)) {
+      if (!judged) {
+        errors.push(
+          `--${name} needs a \`judge\` step, and \`${declaration.name}\` declares none `
+          + `(${declaration.steps.map((s) => s.step.kind).join(' → ')}) — there is no juror to `
+          + `${name === 'cwd' ? 'point at a lane' : 'pick a model for'}.`,
+        );
+        continue;
+      }
+      // GIVEN TWICE IS A REFUSAL, not last-wins (PR review, finding G). Every other flag here silently takes
+      // the last spelling, which is a fine default for a value that only shapes output — but `--cwd` decides
+      // WHERE A TOOL-BEARING AGENT MAY WRITE, and a shell loop or a copy-paste that emits it twice should not
+      // resolve that quietly in favour of whichever came last.
+      if (control[name]) { errors.push(`--${name} was given more than once — pass it once, or the wrong one wins silently`); continue; }
+      if (!value.trim()) { errors.push(`--${name} must not be empty — pass a value or omit the flag`); continue; }
+      // A VALUE SHAPED LIKE A FLAG IS REFUSED BEFORE IT IS A VALUE (#3028's footgun, at the parse seam). The
+      // juror's argv builder guards this too, but a refusal that arrives before a run record exists names the
+      // TOKEN the operator typed instead of a request the adapter assembled.
+      if (value.trim().startsWith('-')) {
+        errors.push(`--${name}=${JSON.stringify(value)} looks like a flag, not a value — refusing it before it reaches the juror's argv (#3028)`);
+        continue;
+      }
+      control[name] = value.trim();
+      continue;
+    }
+    if (!known.has(name)) {
+      // THE ACCEPTED LIST NAMES THE CONTROL FLAGS TOO. Listing only the declared inputs is what made
+      // `unknown flag --cwd` a dead end: the message enumerated five fields, none of which was the answer, so a
+      // reader concluded the operation could not take one. The list is the whole surface or it is a trap.
+      // EVERY HALF OF THIS LIST IS DERIVED, not just the juror half. Naming `--resume`/`--answer`/`--run-id` on
+      // a `compute`-only operation would advertise flags the usage text three lines below says cannot apply —
+      // the same "listed as accepted, refused in practice" trap the juror flags are filtered for.
+      const resumable = !isReadOnlyOperation(declaration);
+      const accepted = [...known, ...CONTROL_FLAGS.filter((f) => {
+        if (JUROR_FLAGS.includes(f)) return judged;
+        if (RESUME_FLAGS.includes(f)) return resumable;
+        return true;
+      })];
+      errors.push(`unknown flag --${name} — \`${declaration.name}\` accepts ${accepted.map((k) => `--${k}`).join(', ')}`);
+      continue;
+    }
     const field = spec.fields.find((f) => f.name === name);
     const coerced = coerceInputValue(field.type, value);
     if (coerced === undefined) { errors.push(`--${name} must be a ${field.type}, got ${JSON.stringify(value)}`); continue; }
@@ -240,20 +368,33 @@ export function unwrapJudgeOutcome(returned) {
  * of one expression and were dropped. The juror also runs `--no-session-persistence` (a #3028 isolation
  * property, deliberately unchanged here), so there is no transcript to reconstruct them from either. They ride
  * back through {@link judgeOutcome} onto the run record, which is where a completed run and `--json` read them.
+ *
+ * @param {object} [o]
+ * @param {Function} [o.spawn] - the spawner, injected for tests.
+ * @param {string|null} [o.cwd] - the lane the juror runs in. Passed only when set, so a tool-free juror is
+ *   unaffected and a tool-bearing one hits `assertLaneCwd`'s refusal when nobody supplied a lane (#3151).
+ * @param {string|null} [o.model] - an operator override for the model the DECLARATION asked for. Absent by
+ *   default: the declared literal is the norm, and an override is a deliberate command-line act.
  */
-export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
+export function createDefaultJudge({ spawn = judgeSpawn, cwd, model } = {}) {
   return async (request) => {
-    assertSafeJudgeRequest(request);
+    // THE OVERRIDE IS MERGED BEFORE THE GUARD RUNS, NEVER AFTER (#3151). `assertSafeJudgeRequest` is what stops
+    // a flag-shaped `model` reaching argv, so asserting the declaration's request and then substituting the
+    // operator's value would check one string and spawn another — the guard would be decorative. The CLI
+    // adapter's parse refuses a `-`-leading value too; this is the seam that binds every caller of this
+    // factory, including one that builds it by hand.
+    const effective = model ? { ...request, model } : request;
+    assertSafeJudgeRequest(effective);
     const outcome = await spawn({
-      mandate: request.mandate,
-      input: request.input,
-      shape: request.shape,
-      model: request.model,
-      effort: request.effort,
-      budget: request.budget,
-      runId: request.runId,
-      lens: request.lens,
-      ...(request.allowedTools ? { allowedTools: request.allowedTools } : {}),
+      mandate: effective.mandate,
+      input: effective.input,
+      shape: effective.shape,
+      model: effective.model,
+      effort: effective.effort,
+      budget: effective.budget,
+      runId: effective.runId,
+      lens: effective.lens,
+      ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
       ...(cwd ? { cwd } : {}),
     });
     // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
@@ -267,6 +408,14 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd } = {}) {
       sessionId: outcome.sessionId,
       loadedContextTokens: outcome.loadedContextTokens,
       usage: outcome.usage,
+      // WHICH MODEL JUDGED, not only what it cost (#3151). Nothing filled this slot before — merely incomplete
+      // while the model was a declared LITERAL, since the declaration answered "which model" for anyone who
+      // read it. `--model` makes it operator-controllable, and a verdict recorded without the model that
+      // produced it is a record that implies the declared one. `effective`, so an override is what gets
+      // recorded rather than what was asked for. ONLY the model: the engine takes `lens` and `effort` from the
+      // suspended request and would ignore them here, and reporting a value that is silently discarded reads
+      // as a contract this side does not have.
+      model: effective.model,
     });
   };
 }
@@ -414,11 +563,15 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
  * @param {object} o.registry
  * @param {object} o.store
  * @param {Record<string, Function>} o.sinks
- * @param {Function} o.judge
+ * @param {Function} [o.judge] - a ready-made judge. Used as-is; the juror flags cannot reach it.
+ * @param {(o: {cwd: (string|null), model: (string|null)}) => Function} [o.makeJudge] - a judge FACTORY, taking
+ *   the parsed juror flags. Preferred over `judge` for a real command line: `--cwd`/`--model` are parsed HERE,
+ *   so a caller that pre-builds its judge has no way to honour them (#3151). Falls back to `judge` when absent,
+ *   which is why every existing test that injects a canned judge is untouched.
  * @param {() => string} o.newRunId
  * @returns {Promise<{code: number, lines: string[], run: (object|null), stopped: string}>}
  */
-export async function runOperationCli({ declaration, argv, registry, store, sinks, judge, newRunId } = {}) {
+export async function runOperationCli({ declaration, argv, registry, store, sinks, judge, makeJudge, newRunId } = {}) {
   const spec = buildCliSpec(declaration);
   const parsed = parseOperationArgv(declaration, argv);
 
@@ -426,6 +579,13 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
   if (!parsed.ok) {
     return { code: 2, lines: [...parsed.errors.map((e) => `error: ${e}`), '', spec.usage], run: null, stopped: 'refused' };
   }
+
+  // THE JUDGE IS BUILT AFTER THE PARSE, from the flags the parse produced. Building it before (which `run.mjs`
+  // used to do) is what made the juror's lane an environment-only input: there was no later seam at which a
+  // `--cwd` could have been honoured, so the flag could not have existed (#3151).
+  const activeJudge = typeof makeJudge === 'function'
+    ? makeJudge({ cwd: parsed.control.cwd || null, model: parsed.control.model || null })
+    : judge;
 
   let run;
   if (parsed.control.resume) {
@@ -457,7 +617,7 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
   }
 
   // The command line genuinely is a person at a terminal.
-  const outcome = await driveRun({ run, registry, store, sinks, judge, resume, attemptedBy: 'human' });
+  const outcome = await driveRun({ run, registry, store, sinks, judge: activeJudge, resume, attemptedBy: 'human' });
   return { ...renderOutcome({ outcome, json: parsed.control.json }), run: outcome.run, stopped: outcome.stopped };
 }
 
