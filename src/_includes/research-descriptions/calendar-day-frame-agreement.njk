@@ -1,0 +1,148 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>
+  A backlog item is stamped with a calendar day (<code>dateScaffolded: "2026-08-08"</code>). A staleness check
+  later asks whether that day is <em>before today</em>. Both values are naked <code>YYYY-MM-DD</code> strings
+  with no time and no zone. When the stamp and the comparison are produced on machines in different time zones,
+  the same instant yields two different "todays" and the check is wrong by a day.
+</p>
+
+<p>
+  This topic grounds decision
+  <a href="/backlog/2985-does-the-born-active-ttl-need-a-grace-day-for-operator-timez/">#2985</a> — does the
+  <a href="/backlog/670-scaffold-new-items-as-active-until-settled-close-the-born-pu/">#670</a> born-active TTL
+  need a grace day to absorb that skew? The general question behind it is reusable: <strong>where does the fix
+  for a day-frame disagreement belong — in the datum, in the reader, or in the threshold?</strong>
+</p>
+
+<h2>Finding — the premise was already fixed</h2>
+
+<p>
+  The first result of the survey was a correction, not a design. Decision #2985 states that the ageing side
+  reads UTC while the stamping side reads the operator's day. That was true of the tree <em>before</em> PR
+  #1018 and is not true now: every clock read that feeds the TTL moved onto the operator-local helper in
+  <a href="/backlog/2747-stamp-backlog-dates-in-the-operator-s-local-timezone-not-the/">#2747</a>'s own resolve
+  commit.
+</p>
+
+<table>
+  <thead><tr><th>Site</th><th>Clock it reads</th></tr></thead>
+  <tbody>
+    <tr><td><code>scripts/check-standards.mjs</code></td><td><code>localToday()</code></td></tr>
+    <tr><td><code>scripts/check-backlog-workflow.mjs</code></td><td><code>localToday()</code></td></tr>
+    <tr><td><code>scripts/audit-backlog-health.mjs</code> (the O1 flag)</td><td><code>localToday()</code></td></tr>
+    <tr><td><code>scripts/backlog.mjs</code> → <code>scripts/backlog/scaffold.mjs</code> (the stamp)</td><td><code>localToday()</code></td></tr>
+  </tbody>
+</table>
+
+<p>
+  On any <em>single</em> machine the two frames are therefore identical and the skew is exactly zero. A second
+  premise fell with it: the card assumed a fix needs "a shared operator-day helper reachable from the CJS
+  invariants file." It does not. <code>scripts/lib/workflow-invariants.cjs</code> takes <code>today</code> as an
+  <strong>injected</strong> argument and never reads a clock — deliberately, so the rule stays pure and
+  fixture-testable. The frame is a property of the <em>caller</em>, and every caller is already an ES module.
+</p>
+
+<h2>Finding — what survives is a cross-<em>machine</em> gap</h2>
+
+<p>
+  "The operator's day" is defined by whichever host runs the check, and the repo health gate also runs in CI.
+  Three GitHub Actions workflows invoke <code>npm run check:standards</code>; none of them sets
+  <code>TZ</code> or <code>BACKLOG_TZ</code>, and GitHub-hosted runners are UTC. So in CI the check computes a
+  UTC "today" and compares it against stamps written in the operator's day.
+</p>
+
+<p>
+  The severity is low for a sharper reason than "it is only a warning": the false warning appears
+  <em>only where nobody reads it</em>. The gate's exit code is driven by errors alone, the invariant pushes a
+  warning, and the operator's own local run of the same gate is correct.
+</p>
+
+<h2>Prior art — how established systems frame a day</h2>
+
+<table>
+  <thead><tr><th>System</th><th>Model</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>TC39 <strong>Temporal</strong> (Stage 4, ES2026)</td>
+      <td><code>PlainDate</code> is zone-independent by design; <code>Temporal.Now.plainDateISO(timeZone)</code>
+        takes the zone as an argument. MDN's worked example shows one instant reading as
+        <code>2021-10-01</code> with no argument and <code>2021-09-30</code> for <code>America/New_York</code>.</td>
+      <td>There is no zone-free "today". The zone binds at the moment you ask.</td>
+    </tr>
+    <tr>
+      <td><strong>RFC 3339 / RFC 9557</strong></td>
+      <td>3339 §4.3 spells "offset unknown" as <code>-00:00</code>; 9557 re-spells it <code>Z</code> and adds a
+        bracketed IANA suffix — <code>2022-07-08T00:14:07+01:00[Europe/Paris]</code>.</td>
+      <td>An offset is not a zone. Offsets move (DST, political redefinition), so calendar reasoning needs the
+        <em>name</em>.</td>
+    </tr>
+    <tr>
+      <td><strong>Git</strong></td>
+      <td>A commit stores <code>&lt;epoch seconds&gt; &lt;offset&gt;</code>. <code>--date=local</code> changes
+        the rendered zone and never the stored seconds.</td>
+      <td>Store the instant; carry the offset as a rendering hint only.</td>
+    </tr>
+    <tr>
+      <td><strong>Noda Time</strong></td>
+      <td><code>Instant</code> → <code>LocalDate</code> is always unambiguous;
+        <code>LocalDate</code> → <code>Instant</code> is not.</td>
+      <td>Comparing two naked local dates from different clocks sits on the ambiguous side of that asymmetry.</td>
+    </tr>
+    <tr>
+      <td><strong>Staleness thresholds</strong> (dbt <code>warn_after</code>/<code>error_after</code> and
+        neighbours)</td>
+      <td>Buffers exist for <em>pipeline latency</em>, not for day framing.</td>
+      <td>No citable source recommends padding a threshold to absorb timezone skew. Absence of evidence, not a
+        prohibition — but a genuinely one-sided literature.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Two corrections the sources forced</h3>
+
+<ul>
+  <li>Temporal's documentation does <strong>not</strong> say a bare calendar date is meaningless without a zone.
+    <code>PlainDate</code> is a deliberate concept for things that are correctly zone-independent — birthdays,
+    recurring alarms. The zone becomes mandatory only when asking "what is today" or crossing to and from an
+    instant. That is a narrower and more defensible claim than the one this survey started with.</li>
+  <li>The GitHub contributions-graph story should <strong>not</strong> be cited as settled. GitHub's current
+    docs state contributions are timestamped in UTC; GitHub's own 2014 announcement describes per-commit
+    offset-aware bucketing. Two first-party sources, unreconciled — so it is not usable as precedent either
+    way.</li>
+</ul>
+
+<h2>The rule this supports</h2>
+
+<p><strong>Fix the frame, never the threshold.</strong> Three grounded reasons a grace day is the broken branch:</p>
+
+<ol>
+  <li><strong>It does not make the clocks agree.</strong> It makes the check tolerate <em>any</em> one-day
+    disagreement — including the genuine second-day staleness the TTL exists to catch. The signal it removes is
+    the one it was protecting.</li>
+  <li><strong>It is not even sufficient.</strong> Two calendar frames can differ by <em>two</em> days: at UTC+14
+    it can be 2026-01-02 while at UTC−12 it is 2025-12-31. A one-day pad is a guess at the maximum skew; a frame
+    pin is exact.</li>
+  <li><strong>It pays globally for a local artifact.</strong> The laxity lands on every item on every machine,
+    including the operator's own — where the frames already agree and where the warning is actually read.</li>
+</ol>
+
+<p>
+  The corollary for this repo: the pin already exists. <code>scripts/lib/local-date.mjs</code> documents
+  <code>BACKLOG_TZ</code> as "an explicit IANA pin … for the operator whose HOST clock is already wrong,
+  typically a UTC container" — which is precisely what a GitHub-hosted runner is. #2747 deliberately reduced
+  that ladder to <strong>one</strong> knob on review evidence (<code>TZ</code> is a POSIX variable, not an IANA
+  name: <code>TZ=GMT+5</code> resolves to the zone <code>"+05:00"</code>, ten hours from the truth). Any remedy
+  that adds a second rung re-opens what #2747 closed.
+</p>
+
+<h2>Cross-references</h2>
+
+<ul>
+  <li>Decision: <a href="/backlog/2985-does-the-born-active-ttl-need-a-grace-day-for-operator-timez/">#2985 — does the born-active TTL need a grace day for operator timezone skew</a></li>
+  <li>Shipped fix this corrects the reading of: <a href="/backlog/2747-stamp-backlog-dates-in-the-operator-s-local-timezone-not-the/">#2747 — stamp backlog dates in the operator's local timezone</a></li>
+  <li>Sibling day-frame item: <a href="/backlog/2987-burndown-data-reads-utc-while-its-inputs-are-operator-local/">#2987 — burndown data reads UTC while its inputs are operator-local</a></li>
+  <li>The rule being aged: <a href="/backlog/670-scaffold-new-items-as-active-until-settled-close-the-born-pu/">#670 — scaffold new items as active until settled</a></li>
+</ul>
+{% endraw %}
