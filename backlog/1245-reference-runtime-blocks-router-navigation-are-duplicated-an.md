@@ -111,7 +111,6 @@ The `#701 fuiDemo` iframe vs mode-C URL-bundle choice is a **settled per-demo me
 constellation-placement inventory (#1770) found that all four carved children are `resolved` while step 4's
 declared *first, load-bearing* target — `we:blocks/router/`, **2,843 tracked lines across 19 files**, including
 a 619-line `we:blocks/router/elements/RouteViewElement.ts` — is still fully present in WE. That specific gap is
-filed and owned as
-`we:backlog/xyp34m5-blocks-router-2843-lines-was-1245-s-declared-first-target-an.md`, which lands via PR #1431
-(`lane/filing-pass`) rather than with this note. This epic's own
+filed and owned as **#3154**
+(*"Blocks/router (2,843 lines) was #1245's declared first target and was never sliced"*). This epic's own
 `blockedBy: [1353]` is also stale (#1353 resolved 2026-06-27) and should be dropped at the next re-slice.

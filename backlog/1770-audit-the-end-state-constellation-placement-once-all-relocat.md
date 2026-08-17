@@ -293,7 +293,7 @@ child of this card; both are filed elsewhere, so neither graduates to nobody:
 
 | Finding | Owner (filed) |
 | --- | --- |
-| All four of #1245's filed children are `resolved` while its declared *first, load-bearing* target `we:blocks/router/` (2,843 lines, 19 files) is untouched; its own `blockedBy: [1353]` is stale (#1353 resolved 2026-06-27) | **`we:backlog/xyp34m5-blocks-router-2843-lines-was-1245-s-declared-first-target-an.md`** — filed 2026-08-17, `relatedTo: ["1245","1770"]`, `scope: ["we:blocks/router/"]`. A `## Re-slice note` pointing at it is added to `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` in this same change. **Merge-order caveat:** that item is not in this PR — it lands via the separate open PR **#1431** (`lane/filing-pass`). If #1431 is abandoned the citation goes dead and this finding graduates to nobody again, so #1431 must land (or the item be re-filed here) for the routing to hold. Filing it as a child of *this* card would be circular — #1245 is one of this card's own blockers. |
+| All four of #1245's filed children are `resolved` while its declared *first, load-bearing* target `we:blocks/router/` (2,843 lines, 19 files) is untouched; its own `blockedBy: [1353]` is stale (#1353 resolved 2026-06-27) | **#3154** (*"Blocks/router (2,843 lines) was #1245's declared first target and was never sliced"*) — filed 2026-08-17, `relatedTo: ["1245","1770"]`, `scope: ["we:blocks/router/"]`, landed on `main` separately. A `## Re-slice note` pointing at it is added to `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` in this same change. Filing it as a child of *this* card would be circular — #1245 is one of this card's own blockers. |
 | 91 same-path WE↔FUI file pairs, 61 drifted, no reconciliation gate in either repo — part 1's hand-authored pair list targets the *different*-path generators and does not cover this set | **`we:backlog/xq9zmea-gate-the-61-drifted-same-path-we-fui-file-pairs-nothing-reco.md`** — filed 2026-08-17, `relatedTo: ["1770","872"]`. Deliberately kept out of part 1: widening the pair list to all 91 would re-import the breadth this card rejects, so it gets its own triage-then-gate item instead. |
 
 **Skeptic:** REFUTED-AND-REBUILT — the verdict survives, the original proposal did not. An independent
@@ -342,7 +342,7 @@ breakdown — recomputed from `git ls-files` to ≈6,263 lines, with family tota
 figures that deliberately do not partition it; (2) the card read as both blocked and buildable — the `blockedBy`
 consequence is now stated as a consequence *of the verdict*, un-enacted by prep, so the card correctly reads
 blocked until the confirm; (3) a listed child re-sliced #1245, one of this card's own blockers — circular, so it
-is now a graduated finding filed as its own item (`we:backlog/xyp34m5-…`) rather than a child; (4) "the six subsystem roots" was never
+is now a graduated finding filed as its own item (#3154) rather than a child; (4) "the six subsystem roots" was never
 enumerated and the inventory named five — measured and corrected to **nine**, listed explicitly; (5) part 3 was
 ranked least-evidenced while the four-instance failure-mode table *is* its evidence — promoted, the carve-off
 offer withdrawn, and its strongest argument surfaced (part 1's own subject is retired by #872, so only part 3
