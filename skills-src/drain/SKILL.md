@@ -222,13 +222,13 @@ drain," the mutex enforces "sole serial writer to `main`" (no two lands race to 
 
 The #2171/#2262 review-escalation gate **parks** a blast-radius PR (`review:pending`) and waits for an
 independent reviewer to apply `review:accepted`/`review:changes` — otherwise every escalated PR stalls the
-queue until a human gets to it. **v1 makes the drain run that independent review itself, via a subagent** — for
-the PRs where an agent reviewer is genuinely independent of the *producer*. **v2 (#2311) replaces v1's
-author-bounce with a bounded editor↔reviewer negotiation loop** (below). The one invariant BOTH preserve:
-**a landed PR was accepted by an agent that did not author it.**
+queue until a human gets to it. **v1 makes the drain run that independent review itself, in a spawned
+reviewer** — for the PRs where an agent reviewer is genuinely independent of the *producer*. **v2 (#2311)
+replaces v1's author-bounce with a bounded editor↔reviewer negotiation loop** (below). The one invariant BOTH
+preserve: **a landed PR was accepted by an agent that did not author it.**
 
 > **One engine (#2326).** The `{findings, verdict}` contract is single-sourced in `we:scripts/lib/review-core.mjs`
-> (#2325): `buildMandate()` renders the judge-only instruction the review subagent is seeded with (it bakes in
+> (#2325): `buildMandate()` renders the judge-only instruction each juror is seeded with (it bakes in
 > the #2336 diff-only, **no-checkout** clause), `normalizeFindings()` shapes what it returns, and
 > `deriveVerdict()` maps findings → `accept`/`changes`/`needs-human`. The drain review below and the
 > [`/review`](../review/SKILL.md) human-verdict skill BOTH render through it — no hand-rolled reviewer prose.
@@ -323,14 +323,54 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      <repo> --json title,body,files`, and take the NET changed-file list from **`computeNetDiffPaths(...)`** —
      plain paths off the same basis. NOT `computeNetDiffChangedFiles`, which is the scoring path and emits git's
      display encoding (`a.txt => b.txt` for a rename, C-quoted non-ASCII), so intersecting it with `gh`'s plain
-     paths drops those entries and a rename-only PR reads as zero files. Spawn ONE **fresh-context adversarial review subagent per
-     lens** (the `Agent` tool, fanned out in parallel via the Workflow orchestrator), each seeded with
-     `buildPanelMandate({ lens, netChangedFiles })` — the net changed-file list is passed as GROUND TRUTH so a
-     reviewer will NOT flag a diff-side file outside that set as scope creep (#2450) — same diff-only,
-     no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the other lenses'
-     reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
-     `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via
-     `buildPanelFindings()`, one lens-tagged findings list.
+     paths drops those entries and a rename-only PR reads as zero files. **Fan the panel out through
+     `judgePanel`, NOT the `Agent` tool** (#3145) — a subagent inherits this session's
+     `CLAUDE_CODE_SESSION_ID`, the identity `we:scripts/lib/review-independence.mjs` keys independence on, so
+     a panel of subagents is ONE ACTOR WEARING N HATS and the independent reviewer this whole section claims
+     does not exist. Build ONE payload — one juror per lens, each carrying `buildPanelMandate({ lens,
+     netChangedFiles, goal, round })` verbatim (the net changed-file list is passed as GROUND TRUTH so a
+     reviewer will NOT flag a diff-side file outside that set as scope creep, #2450; same diff-only,
+     no-checkout isolation as v2 (#2336), each juror judging only its own lens and blind to the others) —
+     then shell the panel shim, which spawns one **tool-free headless `claude -p` per seat with its own
+     derived `--session-id`** and refuses a roster whose ids are not pairwise distinct before anything runs:
+
+     ```bash
+     # $DIFF ← computeNetDiffText's TEXT on disk; $NET ← computeNetDiffPaths as a JSON array on disk.
+     # Write the payload with node, NEVER by interpolating the diff into a shell string — a diff routinely
+     # contains `$(…)` and backticks, which the shell would evaluate before Node ever saw the JSON.
+     node --input-type=module -e '
+       import { writeFileSync, readFileSync } from "node:fs";
+       import { PANEL_LENSES, buildPanelMandate } from "./scripts/lib/review-core.mjs";
+       const round = Number(process.env.ROUND);
+       writeFileSync(process.env.PAYLOAD, JSON.stringify({
+         subject: "pr-diff", subjectNoun: "diff", round,
+         materialFile: process.env.DIFF,
+         jurors: PANEL_LENSES.map((lens) => ({
+           id: `${lens}#1`, lens,
+           mandate: buildPanelMandate({
+             lens, round, goal: process.env.GOAL ?? "",
+             netChangedFiles: JSON.parse(readFileSync(process.env.NET, "utf8")),
+           }),
+         })),
+       }));'
+     node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+       --depth=0 --max-depth=2 --max-total-budget-usd=8 --run-id="drain-<pr>-r<round>"
+     ```
+
+     Each seat comes back as `{ id, lens, sessionId, ok, findings, notes, error, costUsd }`. A seat with
+     `ok: false` is a lens that **DID NOT RUN** — it never reads as accept, and a mandatory lens that did not
+     run degrades the round (same rule as everywhere else). Shape each seat's findings with
+     `normalizeFindings()`, reduce each to its own verdict with `deriveVerdict()` — you now have one
+     `{ lens: verdict }` map (`lensVerdicts`) and, via `buildPanelFindings()`, one lens-tagged findings list.
+
+     > **What a tool-free juror cannot do — stated, not buried.** `judgePanel` seats are always `--tools ''`
+     > (it has no `allowedTools` to forward), so `MUTATION_PROBE_RULE`'s *"break the line and see if a NAMED
+     > test reddens"* and the mandate's throwaway-`git clone` escape are both unrunnable. `panel-fanout` tells
+     > each juror it has no tools and must not claim to have opened anything, so it reports honestly rather
+     > than fabricating — it fails safe. But the panel IS weaker at exactly the class of finding the probe
+     > exists to catch, and that is a trade this change makes deliberately in exchange for jurors that are
+     > actually distinct actors. Tracked as
+     > [#x27e4xs](../../backlog/x27e4xs-tool-free-panel-jurors-cannot-run-the-mutation-probe-their-m.md).
   2. **Reduce the panel to one verdict** — `derivePanelVerdict({ lensVerdicts, humanRequired, conflict,
      mandatoryLenses, findings: buildPanelFindings(lensFindings) })`. **Pass `findings` — the whole panel's list
      from step 1 — always** (#2823 round-3 finding 1): the prevention scan is derived from the FINDINGS (immune to
@@ -348,10 +388,18 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      verdict from step 2 (pure; the round-cap decision is deterministic, not a judgment call):
      - **`land`** (verdict `accept` — every mandatory lens unanimously accepted) → **gate on the disposition's
        `autoLand`.** `autoLand: true` (a plain sensitivity park, incl. the engine-tier lander) → **run the
-       INDEPENDENT HARDENED VALIDATOR (#2439) before landing.** Spawn a fresh-context validator JURY — one
-       subagent per `PANEL_LENSES` lens seeded with `buildValidatorMandate({ lens })`. The jury took NO part in
-       the negotiation and is NEVER shown the peers' findings, dismissals, or reasoning — only the FINAL diff and
-       the tests it touches. Reduce its per-lens verdicts with `derivePanelVerdict({ lensVerdicts: validatorVerdicts,
+       INDEPENDENT HARDENED VALIDATOR (#2439) before landing.** Run the validator JURY through the SAME
+       `judgePanel` shim as step 1 — **never the `Agent` tool** (#3145). This is the site where the subagent
+       fan-out was most wrong: the jury's entire claim is that it *"took NO part in the negotiation"*, and a
+       subagent jury shares the negotiating session's `CLAUDE_CODE_SESSION_ID`, so by this repo's own
+       independence test it took part in all of it. Same payload shape, one juror per `PANEL_LENSES` lens,
+       each seeded with `buildValidatorMandate({ lens })` instead of `buildPanelMandate(...)`, and
+       `materialFile` pointed at the FINAL diff. **Give it a DIFFERENT `--run-id` from every negotiation
+       round** (e.g. `drain-<pr>-validator`): a seat's session id is derived from `runId` + `lens#slot`, so
+       reusing the round's run id would mint the validator the very same actor id as the panel juror it is
+       supposed to be independent of. The jury is NEVER shown the peers' findings, dismissals, or reasoning —
+       only the FINAL diff and the tests it touches, which is exactly what a fresh payload carrying only
+       `buildValidatorMandate` + the diff gives it. Reduce its per-lens verdicts with `derivePanelVerdict({ lensVerdicts: validatorVerdicts,
        mandatoryLenses, findings: buildPanelFindings(validatorFindings) })` → `validatorVerdict` — again passing the
        validator jury's OWN `findings` (required, same reason as step 2: the validator can re-report a resolved finding
        that still names an uncaptured guard, which only the findings scan sees) — then
@@ -415,8 +463,20 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      PR branch** (the PR updates in place; no new PR opens). It must fix each finding or explicitly dismiss it
      with a stated reason (never drop one silently) — a dismissal of a MANDATORY lens's finding is exactly what
      the next round's reviewer for that lens re-checks.
-  5. **Next round.** Re-fetch the now-updated diff and re-spawn the full panel (fresh-context, one subagent per
-     lens, same `buildPanelMandate()` seed — no memory of the prior round) → back to step 2 with `round + 1`.
+
+     > **The editor is the ONE spawn here that stays a subagent, and that is deliberate** (#3145). It
+     > *authors*; independence is a property of the **judge**, and `judgePanel` has no editor to be — its
+     > seats are tool-free and answer a forced findings schema. What the invariant needs is that the editor is
+     > not one of the actors that judged it, and after this change that holds by construction: every juror is
+     > a headless process with its own session id, and the editor carries the drain's. Giving the editor its
+     > own tool-bearing headless spawn is a real but separate change —
+     > [#xl5jroq](../../backlog/xl5jroq-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
+  5. **Next round.** Re-fetch the now-updated diff and re-run the panel shim with the round's new
+     `buildPanelMandate()` payload — **and a `--run-id` carrying the new round number** (`drain-<pr>-r<round>`),
+     so round N+1's seats are different actors from round N's rather than the same derived ids re-judging their
+     own prior verdicts. No memory of the prior round travels: a headless juror has none to begin with, which
+     is the fresh-context property the old wording asked a subagent for and could not get. → back to step 2
+     with `round + 1`.
 
   The pushed revision re-runs the PR's required `test` check — a round's editor commit is a normal PR update,
   not a merge, so a red check simply blocks that round's land/continue decision until it goes green, same as
