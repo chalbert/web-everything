@@ -72,9 +72,9 @@ happened — **stamped with the `round` the CLI just printed**.
 | action | what you do | what you feed back |
 |---|---|---|
 | `read` | run the printed `read.command` | `{"round": N, "readResult": {"material": "<the diff>"}}` |
-| `panel` | spawn ONE fresh subagent per printed lens (× `jurors`), each seeded with that lens's `mandate` **verbatim** (the diff is already fenced inside it) | `{"round": N, "lensResults": [{"lens": …, "ok": true, "findings": […]}], "invites": […]}` |
-| `edit` | spawn ONE editor subagent with the printed `edit.prompt` | `{"round": N, "lensResults": …, "editResult": {"advanced": true, "dismissed": […]}}` |
-| `red-team` | spawn one fresh adversary per entry in `redTeam.jury`, each with its `prompt`; union their findings | `{"round": N, "lensResults": …, "redTeamResult": {"ran": true, "findings": […]}}` |
+| `panel` | seat ONE juror per printed lens (× `jurors`) **through `judgePanel`, never the `Agent` tool** (see *Seating a juror* below), each carrying that lens's `mandate` **verbatim** | `{"round": N, "lensResults": [{"lens": …, "ok": true, "findings": […]}], "invites": […]}` |
+| `edit` | spawn ONE editor subagent with the printed `edit.prompt` — the one spawn here that stays a subagent (see *Seating a juror* below) | `{"round": N, "lensResults": …, "editResult": {"advanced": true, "dismissed": […]}}` |
+| `red-team` | seat one adversary per entry in `redTeam.jury` the same way as `panel`, each with its `prompt` as the mandate; union their findings | `{"round": N, "lensResults": …, "redTeamResult": {"ran": true, "findings": […]}}` |
 | `invite` | shell `review-core-cli invite` for the growth delta | `{"round": N, "invite": …, "inviteEcho": <what it returned, `null` if it crashed>}` |
 | `land` | done — report the verdict | — |
 | `escalate` | done — report the escalation packet | — |
@@ -102,6 +102,52 @@ advances — so a step whose read genuinely failed still reports a failed read.
 **Report `inviteEcho: null` if the invite agent crashed** — the field's PRESENCE (not its truthiness) is what
 selects the invite branch, and a rejected/crashed invite falls through to an editor round on the same round.
 
+### 2b. Seating a juror — `judgePanel`, never the `Agent` tool (#3145)
+
+The `panel` and `red-team` actions are **judgments**, and the whole point of the invariants below is that the
+actor judging is not the actor that authored. A subagent cannot give you that: it inherits this session's
+`CLAUDE_CODE_SESSION_ID`, the identity `we:scripts/lib/review-independence.mjs` keys independence on, so a
+panel of subagents is one actor wearing N hats — the exact defect `/jury` shipped with and #3057 removed.
+Seat them through `judgePanel` instead, via the shim (payload shape and honest limits in
+[delivery-loop.md](../../docs/agent/delivery-loop.md#independent-judgment-spawn)):
+
+```bash
+# $MATERIAL ← the diff you already have in readResult.material, written to a file (never a shell variable).
+# $PAYLOAD  ← { subject: "pr-diff", subjectNoun: "diff", round: N, materialFile: "$MATERIAL",
+#               jurors: [ { id: "<lens>#<slot>", lens: "<printed lens>",
+#                           mandate: "<that lens's printed `mandate`, VERBATIM>" },
+#                         … one entry per lens per juror slot … ] }
+node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+  --depth=0 --max-depth=2 --max-total-budget-usd=8 --run-id="converge-<lane>-r<N>"
+```
+
+Three things to get right, each of which is a real property and not a formality:
+
+- **A new `--run-id` for every round, and a distinct one for the red-team** (`…-r<N>` / `…-r<N>-redteam`). A
+  seat's session id is derived from `runId` + `lens#slot`, so reusing a run id across rounds mints the same
+  actor to re-judge material it already judged — and gives the red-team the identity of the panel juror it is
+  supposed to be able to contradict.
+- **Give every juror an explicit `id` and map seats back by it, not by position.** Write `<lens>#<slot>` —
+  the same convention `materializeRoster` uses — so two seats on ONE lens (care `high` gives `jurors: 2`)
+  stay distinct actors rather than collapsing onto one derived session id. Omitting `id` is not fatal (the
+  shim slots by lens order and mints the same string), but the red-team's jury comes from `redTeam.jury`
+  rather than the lens list, so writing the id yourself is the only way its seats line up with what you fed
+  back. Each seat returns `{ id, lens, sessionId, ok, findings, … }`; build `lensResults` from those. A seat
+  with `ok: false` is a lens that **did not run** — report it as `ok: false` and let the core degrade the
+  round. Never fill a crashed seat's findings with `[]`, which reads as a clean lens.
+- **Pass the printed `mandate` verbatim.** The diff is fenced inside it *and* travels on the juror's stdin as
+  `materialFile`; that redundancy is fine and is not a licence to trim the mandate.
+
+**The `edit` action is the one spawn that stays a subagent, deliberately.** An editor *authors*, and
+independence is a property of the judge — `judgePanel` seats are tool-free and answer a forced findings
+schema, so there is no editor for them to be. More concretely, `judgeSpawn` grants tools only against a lane
+clone that is **not the driver's own** (`assertLaneCwd`), and this loop's editor exists to edit precisely the
+driver's lane, so it structurally cannot be a tool-bearing juror. What the *"the panel never authors what it
+judges"* invariant needs is that the editor is not one of the actors that judged — and once the jurors are
+headless with their own ids, that holds by construction. Giving the editor its own headless spawn is tracked
+separately as
+[#xl5jroq](../../backlog/xl5jroq-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
+
 ### 3. Report
 
 On `land`: the verdict, the per-lens table, how many rounds it took, the red-team result, and every dismissed
@@ -124,7 +170,9 @@ you report, either.
 - **An editor that could not advance the work escalates.** Re-judging identical material just replays the verdict.
 - **Every finding is fixed or dismissed with a stated reason.** Silence is a stall, not an acceptance.
 - **The panel never authors what it judges.** The editor writes; the NEXT round's fresh reviewers judge, and a
-  red-team that never saw their reasoning ratifies. Never let one agent do both.
+  red-team that never saw their reasoning ratifies. Never let one agent do both. Since #3145 this is backed by
+  identity rather than by prose: jurors are headless processes with pairwise-distinct session ids, so a juror
+  is provably not the editor and provably not its own sibling — see *Seating a juror* above.
 - **The loop never touches git state.** The read is `git diff` + `git diff --no-index` only — nothing is staged,
   stashed, committed or checked out, in the lane or anywhere else.
 

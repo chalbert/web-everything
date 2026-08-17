@@ -25,8 +25,52 @@ independence check (`we:scripts/lib/review-independence.mjs`) sees the author cl
 (`judge-spawn.mjs:38` — three spawns carrying the parent's id in their environment each reported a
 different one). That, on its own, is what makes it independent.
 
-The three lines below are three SEPARATE properties, and it is worth not fusing them — an earlier
-version of this page wrote them as one requirement and was wrong about two:
+<a id="independent-judgment-spawn"></a>
+
+### If the spawn is a JUDGMENT, shell the panel — never the `Agent` tool (#3145)
+
+Everything below this heading is about a reviewer that **acts**: it checks the branch out in a lane, runs
+commands, edits. Most independence-claiming spawns are not that. A panel reviewer, a validator jury, a
+red-team, a skeptic-per-candidate — each reads material and returns findings. For those there is nothing to
+hand-roll and no lane to acquire, because the fan-out already exists as a function,
+[`judgePanel`](../../scripts/lib/judge-panel.mjs) (#3050) over
+[`judgeSpawn`](../../scripts/lib/judge-spawn.mjs) (#3028), and a CLI that calls it:
+
+```bash
+# One JSON payload in, one seat-answer record out. Every juror is a tool-free headless `claude -p` with
+# its OWN derived --session-id; `panelSeats` refuses a roster whose ids are not pairwise distinct BEFORE
+# anything spawns. The three ceilings are REQUIRED and fail closed — never default one.
+node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+  --depth=0 --max-depth=2 --max-total-budget-usd=8 --run-id="$RUN_ID"
+```
+
+`$PAYLOAD` is `{ subject, subjectNoun?, round?, jurors: [{ id, lens, mandate }], material | materialFile }`.
+Write it with a file tool or `node -e` + `JSON.stringify` — **never** by interpolating material into a shell
+string, for the same reason `/converge` refuses observations through a variable: a diff routinely contains
+`$(…)` and backticks. Point `materialFile` at the material on disk when it is large; the shim reads it and
+puts the bytes on each juror's **stdin**, so there is no prompt fence for a payload to break out of.
+
+Each seat comes back as `{ id, lens, sessionId, ok, findings, notes, error, costUsd }`. The shim **derives no
+verdict** — reduce with `review-core-cli reduce` / `jury-core.mjs` exactly as before. A seat with `ok: false`
+is a juror that DID NOT RUN, and a lens that did not run never reads as accept.
+
+**Why this and not the `Agent` tool.** A subagent inherits its parent's `CLAUDE_CODE_SESSION_ID` (measured
+#3006, re-measured #3048), which is the identity `review-independence.mjs` keys on — so a panel of N
+subagents is **one actor wearing N hats** by this repo's own test, however the prompt describes them. Not
+hypothetical: `/jury` shipped with exactly this defect and #3057 removed it. Read the limit honestly (#2895)
+— a distinct session id is not an *unforgeable* actor signal. What it removes is the failure a subagent
+juror has by construction and cannot argue its way out of.
+
+**The editor is not a juror, and must not be routed here.** A revision round *authors*; independence is a
+property of the judge. `judgeSpawn` grants tools only against a lane clone that is **not the driver's own**
+(`assertLaneCwd`), which the in-lane editor of `/converge` can never satisfy — it exists to edit precisely
+that tree. So an editor stays a spawned agent; what must hold is that it is a **different actor from every
+juror that judged it**, which is true by construction once the jurors are headless. Giving the editor its
+own headless, tool-bearing spawn is a real but separate change —
+[#3159](../../backlog/3159-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
+
+The three lines below are the ACTING case — three SEPARATE properties, and it is worth not fusing them; an
+earlier version of this page wrote them as one requirement and was wrong about two:
 
 ```bash
 # 1. a lane of its OWN — never the driver's, and never the primary checkout.

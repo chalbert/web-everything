@@ -3,9 +3,11 @@ bornAs: x3kt7op
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 relatedTo: ["2439", "2821", "3050"]
 dateOpened: "2026-08-16"
+dateStarted: "2026-08-17"
+dateResolved: "2026-08-17"
 scope:
   - we:skills-src/drain/SKILL.md
   - we:skills-src/harvest-learnings/SKILL.md
@@ -90,13 +92,90 @@ fixes for the same step.
 
 ## Done when
 
+> **Ruling recorded on land (2026-08-17).** Criteria 1 and 5 name the **editor** spawns alongside the judging
+> ones. They were NOT routed through `judgeSpawn`/`judgePanel`, on purpose and for reasons in the code rather
+> than preference — an editor authors rather than judges, `judgePanel` has no `allowedTools` to forward, and
+> `assertLaneCwd` structurally refuses a tool-bearing juror pointed at the driver's own lane, which is exactly
+> the tree converge's editor exists to edit. The residual is filed as [#3159] and the capability a
+> tool-free panel loses is filed as [#3158]. Read 1 and 5 below as met **for the judging spawns**; see
+> *Deviation* in Progress for the full argument. Nothing here was silently dropped.
+
 1. Drain's three spawn sites (panel reviewer, validator jury, editor) call `judgeSpawn`/`judgePanel` instead of
    the `Agent` tool, or route through a declared operation's `judge` step if one exists by the time this lands.
-2. Harvest-learnings' skeptic-per-candidate step does the same.
+   -> **panel reviewer + validator jury: done. Editor: ruled out with reason, [#3159].**
+2. Harvest-learnings' skeptic-per-candidate step does the same. -> **done.**
 3. Brand-mark-loop's step 5 no longer offers "role-play" as an accepted substitute for a real independent spawn.
+   -> **done.**
 4. Next-backlog-item's decision red-team step is fixed here OR is confirmed superseded by the ratify
    mechanization (#3033 / the prepare sibling story) — not both independently, and not silently dropped if
-   neither lands.
+   neither lands. -> **fixed here** ([#3033] still `open` at build time), with an in-skill coordination note so
+   the two fixes do not diverge.
 5. Converge's panel, edit, and red-team steps call `judgeSpawn`/`judgePanel` instead of instructing the driving
-   agent to spawn via the plain `Agent` tool.
-6. `npm run check:standards` — 0 new errors.
+   agent to spawn via the plain `Agent` tool. -> **panel + red-team: done. `edit`: ruled out with reason (see
+   above), [#3159].**
+6. `npm run check:standards` — 0 new errors. -> **green.**
+
+## Progress
+
+**2026-08-17 — all five sites routed off the `Agent` tool.** Every independence-claiming **judgment** spawn in
+the five skills now shells `we:skills-src/jury/panel-fanout.mjs`, the shim `/jury` already uses, which calls
+`judgePanel` (`we:scripts/lib/judge-panel.mjs`) and seats one tool-free headless `claude -p` per juror with its
+own derived `--session-id`. No new spawn mechanism was built, exactly as this item argued.
+
+- **The recipe is written once**, in `we:docs/agent/delivery-loop.md#independent-judgment-spawn` — the page
+  that already owned *"spawning a reviewer that is actually independent"*, whose existing recipe covers only
+  the **acting** reviewer (its own lane, tools, `bypassPermissions`). The five skills cite that anchor rather
+  than each carrying a copy.
+- **Drain (done-when 1)** — the round-1 panel and the [#2439] validator jury both fan out through the shim.
+  Two details that are properties, not formalities, are now stated in the skill: the validator **must** use a
+  `--run-id` distinct from every negotiation round (a seat's id derives from `runId` + `lens#slot`, so reusing
+  it would mint the validator the same actor id as the panel juror it must be independent of), and each round
+  gets its own run id so round N+1 is not round N re-judging itself.
+- **Harvest-learnings (2)** — one seat per candidate, mandate = kill it. Called out honestly: the Grounding
+  filter asks the skeptic to open a corroborating in-repo artifact and a tool-free seat cannot, so the driver
+  now does that lookup and puts what it found — **including "nothing"** — into the material. Same filter, the
+  search moved to the only actor that can run it. Also corrected a claim this change falsified: the red-team
+  seats no longer emit into the learnings pool while they run (they have no tools); the pool still grows from
+  *other* sessions, which is what the `--archive` bound is really for.
+- **Brand-mark-loop (3)** — "or role-play" is gone, with the reason stated: you authored the mark and wrote
+  the step-4 critique, so a self-played refutation is the author grading the author. The seat is tool-free and
+  cannot see the PNG, so it red-teams your rendering notes and critique — you are the eyes, it is the doubt.
+- **Next-backlog-item (4)** — fixed here, because [#3033] is still `open` (checked at build time). The block
+  carries an explicit coordination note: if [#3033] mechanizes ratify as a declared operation with a `judge`
+  step, that fix is structural and this block becomes the operation's `judge` step — do not leave both
+  standing.
+- **Converge (5)** — the `panel` and `red-team` actions now seat jurors through the shim.
+  `we:scripts/converge-cli.mjs` is unchanged: it still only *prints* the mandates, so the fix is in how the
+  driving agent acts on them, which is where the `Agent`-tool call lived.
+
+### Deviation: the two EDITOR spawns stay subagents, on purpose
+
+Done-when 1 names drain's editor and done-when 5 names converge's `edit` step. Neither was routed through
+`judgeSpawn`/`judgePanel`, for two reasons found in the code rather than assumed:
+
+1. **An editor authors; it does not judge.** `judgePanel` has no `allowedTools` to forward — every seat is
+   `--tools ''` and answers a forced findings schema. There is no editor for a juror to be.
+2. **`assertLaneCwd` structurally forbids the converge case.** A tool-bearing `judgeSpawn` juror is admitted
+   only against a lane clone that is **not the driver's own**; converge's editor exists to edit precisely the
+   driver's lane.
+
+What the *"the panel never authors what it judges"* invariant actually needs is that the editor is not one of
+the actors that judged it — and that now holds by construction, because every juror is headless with its own
+id while the editor carries the driver's. Giving the editor its own tool-bearing headless spawn is filed as
+[#3159]; the capability a tool-free panel loses (`MUTATION_PROBE_RULE`'s break-the-line probe, and the
+mandate's throwaway-`git clone` escape) is filed as [#3158]. Both are stated in the skills at the point of
+use, not only here.
+
+### The documented recipe was RUN, not merely written
+
+The commands added to the five skills were executed once against this lane's own diff before the PR opened
+(`--run-id=we-3145-selfreview-r1`, two seats, `$0.96`): both seats returned `ok: true` with **different**
+reported session ids (`55b5906d-…` / `0435e850-…`) and five findings between them, three of which were real
+and are fixed in this same diff — a garbled sentence a hand-edit left in the drain skill, a converge payload
+example missing the `id` its own instructions told you to map by, and this ruling block. The fourth
+(`buildPanelMandate` supposedly not accepting `goal`/`round`) was **dismissed with reason**: both are
+declared parameters of its signature in `we:scripts/lib/review-core.mjs`, checked in source. The fifth is a
+juror's own note that the diff is documentation-only, which is true and not a defect.
+
+That run is the evidence for the one claim a documentation change like this could otherwise not make: the
+payload shape and flag list in these skills are runnable as written, rather than plausible.

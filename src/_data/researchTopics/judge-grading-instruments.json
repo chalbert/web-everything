@@ -1,0 +1,23 @@
+{
+  "id": "judge-grading-instruments",
+  "title": "Judge grading instruments — numeric ratings vs categorical verdicts, and how a candidate set gets ranked",
+  "status": "open",
+  "summary": "Grounds decision #3128 (reconcile #2576's ratified \"per-option RATINGS 1-5\" guardrail against the shipped jury-core VERDICTS model). The survey corrects the card's premise: the two are not rival answers to one question, they grade different objects — a verdict answers \"does this one subject pass my lens?\", a rating answers \"how does candidate A compare to candidate B?\" — and jury-core has no candidate axis at all (grep candidate returns zero; option appears only inside 'optional'), so the gap is dimensional, not lexical. Three findings settle most of the card: (1) the evidence-correct form of \"rate, don't just pick\" already ships on the FINDING axis as IMPACT_LEVELS (a closed four-step ordinal grade with written per-level descriptors in IMPACT_GLOSS) tested against the configurable PREVENTION_IMPACT_BAR; (2) aggregation is already codified as the frozen single-member AGGREGATION enum (diversity-selection, 'never a vote'), derived from #blast-radius-advisory-care-not-a-gate clause 3; (3) WE already ratified a 1-5 scale in #1034's design-critique rubric, which composes because those scores are advisory + training signal, never a reducer. On the instrument question the literature is clear that LLM judges rank better than they score (MT-Bench's own authors on absolute-score instability; the ranking-scoring decoupling result with conformal intervals 68% of the scale wide; G-Eval's digit-clustering; 30-50% range usage), while honestly contested in the other direction (pointwise is more distractor-robust than pairwise; Prometheus 2 reaches r=0.897 when conditioned on written level descriptors). Every system that ships code or standards at scale reduces by max-with-block or a veto and never by an average — Gerrit's -2..+2 is a categorical ordinal ballot with numeric names whose MaxWithBlock function never sums, GitHub is three states, W3C has no numeric scale, RFC 7282 names counting as the failure mode, and NIH explicitly forbids averaging its criterion scores. The best-corroborated element of #2576 turns out to be its LEAST implemented: the below-bar rule (top candidate under the bar → go generate more candidates, keep the old) is independently reinvented by Pugh Controlled Convergence, the Nobel reserve clause, EFQM/AIA/IDSA, Myerson's optimal reserve price, and Simon's satisficing threshold. Evidence is thin exactly where a prescription would bite (no study covers a small LLM panel ranking design candidates for a spec; small-N median behaviour is unstudied; the statistical median at even panel sizes is itself a mean, which is why Majority Judgment specifies the lower middlemost grade) — which argues for pinning the surface and leaving the comparison instrument swappable. Full grounding in reports/2026-08-17-judge-grading-instruments.md.",
+  "dateOpened": "2026-08-17",
+  "lastReviewed": "2026-08-17",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "jury",
+    "review",
+    "llm-as-judge",
+    "verdict",
+    "rating-scale",
+    "aggregation",
+    "decision-method",
+    "measurement-theory",
+    "prior-art",
+    "agent-orchestration"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
