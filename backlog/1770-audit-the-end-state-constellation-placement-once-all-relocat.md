@@ -9,9 +9,9 @@ preparedDate: "2026-08-17"
 scope:
   - we:scripts/check-standards-rules.mjs
   - we:scripts/check-standards.mjs
-  - we:scripts/__tests__/
+  - we:scripts/__tests__/check-standards-rules.test.mjs
+  - we:scripts/__tests__/check-standards.test.mjs
   - we:docs/agent/platform-decisions.md
-scopeRationale: "The test entry is dir-level on purpose: this card carves THREE children (a re-pointed byte-parity gate, a new-path debt-root check, a coverage tripwire), and each adds NEW spec files under we:scripts/__tests__/ whose filenames do not exist yet, so they cannot be named at prep time. The three non-test entries are file-level, and each child takes its own narrower slice of this set at carve time (#2609) rather than inheriting the whole thing."
 tags: [placement, constellation, zero-implementation, devtools-placement, review-gate]
 ---
 
@@ -293,7 +293,7 @@ child of this card; both are filed elsewhere, so neither graduates to nobody:
 
 | Finding | Owner (filed) |
 | --- | --- |
-| All four of #1245's filed children are `resolved` while its declared *first, load-bearing* target `we:blocks/router/` (2,843 lines, 19 files) is untouched; its own `blockedBy: [1353]` is stale (#1353 resolved 2026-06-27) | **`we:backlog/xyp34m5-blocks-router-2843-lines-was-1245-s-declared-first-target-an.md`** — filed 2026-08-17, `relatedTo: ["1245","1770"]`, `scope: ["we:blocks/router/"]`. A `## Done when` note pointing at it is added to `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` in this same change. Filing it as a child of *this* card would be circular — #1245 is one of this card's own blockers. |
+| All four of #1245's filed children are `resolved` while its declared *first, load-bearing* target `we:blocks/router/` (2,843 lines, 19 files) is untouched; its own `blockedBy: [1353]` is stale (#1353 resolved 2026-06-27) | **`we:backlog/xyp34m5-blocks-router-2843-lines-was-1245-s-declared-first-target-an.md`** — filed 2026-08-17, `relatedTo: ["1245","1770"]`, `scope: ["we:blocks/router/"]`. A `## Re-slice note` pointing at it is added to `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` in this same change. **Merge-order caveat:** that item is not in this PR — it lands via the separate open PR **#1431** (`lane/filing-pass`). If #1431 is abandoned the citation goes dead and this finding graduates to nobody again, so #1431 must land (or the item be re-filed here) for the routing to hold. Filing it as a child of *this* card would be circular — #1245 is one of this card's own blockers. |
 | 91 same-path WE↔FUI file pairs, 61 drifted, no reconciliation gate in either repo — part 1's hand-authored pair list targets the *different*-path generators and does not cover this set | **`we:backlog/xq9zmea-gate-the-61-drifted-same-path-we-fui-file-pairs-nothing-reco.md`** — filed 2026-08-17, `relatedTo: ["1770","872"]`. Deliberately kept out of part 1: widening the pair list to all 91 would re-import the breadth this card rejects, so it gets its own triage-then-gate item instead. |
 
 **Skeptic:** REFUTED-AND-REBUILT — the verdict survives, the original proposal did not. An independent

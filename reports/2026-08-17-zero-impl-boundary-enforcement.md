@@ -1,7 +1,7 @@
 # Enforcing the zero-implementation boundary — audit-once versus a standing fitness function
 
 **Date**: 2026-08-17
-**Point**: The zero-impl rule has no carrier at all, the repo already built the right cross-repo gate and then deleted its subject, and the recurring defect is not stale prose but instruments that silently stop covering anything. Prepared as the grounding for decision #1770.
+**Point**: The zero-impl rule's *residency* clause has no carrier at all (the one enforcing hook that cites the rule polices a different clause, at a scope that excludes the whole subtree where the residual runtime lives), the repo already built the right cross-repo gate and then deleted its subject, and the recurring defect is not stale prose but instruments that silently stop covering anything. Prepared as the grounding for decision #1770.
 **Research page**: `/research/zero-impl-boundary-enforcement/`
 
 ---
@@ -43,7 +43,7 @@ concession is not the human validation.
 
 ## Key findings
 
-### 1. The zero-impl rule has no enforcement whatsoever
+### 1. The zero-impl **residency clause** has no enforcement
 
 There is no `check:no-impl` and no path classifier over `we:blocks/`. The clause *"no **new** WE-resident
 delivery runtime may be added"* is enforced by model judgment alone.
@@ -65,8 +65,11 @@ clause — it denies a static `@frontierui` import (the backward module edge) �
 is WE's own `src/**`. Ten non-test files under `we:blocks/` already carry that import and every one sits
 **outside** that scope. So **none of the 7 hits enforces the residency clause**: five cannot (they are prose)
 and two do not (wrong clause, and a scope that excludes the entire subtree where the residual runtime lives).
-Two further hits in the data file `we:scripts/lib/output-mix-paths.json` (`:9`, `:348`) are classification prose
-in a JSON corpus, not code, and are excluded from the 7 for that reason.
+Ten further hits land in JSON **data** files rather than code, and are excluded from the 7 for that reason: two
+lines of classification prose in `we:scripts/lib/output-mix-paths.json` (`:9`, `:348`), and eight inside
+`we:scripts/golden-corpus/` snapshot fixtures — `we:scripts/golden-corpus/memory/b3c702c5-MEMORY.json` (`:7`,
+`:8`) and the three `we:scripts/golden-corpus/backlog-claim/9c576af7-192{3,4,5}-*.json` before/after pairs
+(`:9`, `:10` each), all of which merely embed backlog text that mentions #1282.
 
 ### 2. The repo already built the right instrument, then deleted its subject
 
@@ -180,7 +183,9 @@ one.
 
 | File | Action |
 | --- | --- |
-| `we:backlog/1770-audit-the-end-state-constellation-placement-once-all-relocat.md` | Rewritten to the validation-gate shape; `preparedDate` stamped |
+| `we:backlog/1770-audit-the-end-state-constellation-placement-once-all-relocat.md` | Rewritten to the validation-gate shape; `preparedDate` stamped; `scope:` authored (#2619) |
+| A new `we:backlog/` task — *"Gate the 61 drifted same-path WE↔FUI file pairs"* | Created — the graduated owner for finding 4's drifted-pair set (numbered at land) |
+| `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` | Re-slice note added, cross-referencing the separately-filed `we:blocks/router/` gap item (lands via its own PR) |
 | `we:src/_data/researchTopics/zero-impl-boundary-enforcement.json` | Created — research topic registry entry |
 | `we:src/_includes/research-descriptions/zero-impl-boundary-enforcement.njk` | Created — research write-up |
 | `we:reports/2026-08-17-zero-impl-boundary-enforcement.md` | This report |

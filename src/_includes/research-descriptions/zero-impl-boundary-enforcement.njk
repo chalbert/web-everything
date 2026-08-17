@@ -19,8 +19,9 @@ aggregate result: <em>is the line tight (A), or are there residuals (B)?</em></p
 <h2>Finding — the fork dissolves, and the answer is a NARROW instrument</h2>
 
 <p><strong>The survey's conclusion, up front, so the rest reads in its light: the recommended instrument is
-narrow and coverage-reporting — a new-path check over nine named debt roots, a re-pointed byte-parity gate on a
-hand-authored pair list, and a tripwire that errors when a check's subject has vanished.</strong> It is
+narrow and coverage-reporting — a new-path check over <code>blocks/</code> plus the nine named subsystem debt
+roots, a re-pointed byte-parity gate on a hand-authored pair list, and a tripwire that errors when a check's
+subject has vanished.</strong> It is
 explicitly <em>not</em> a whole-tree classifier and <em>not</em> a regenerated canonical map. That broad shape was
 drafted, run against the real repo, and <strong>rejected on measurement</strong> — see
 <a href="#the-correction">the correction</a> below, which is a finding of this survey, not a caveat on it.</p>
@@ -31,7 +32,7 @@ analogues — <a href="https://github.com/open-feature/spec">OpenFeature's speci
 <a href="https://github.com/tc39/test262">TC39's test262</a> — do it like this:</p>
 
 <ol>
-  <li>a script walks the classified surface and classifies each path against a declared ignore list;</li>
+  <li>a script walks <strong>every tracked path</strong> and classifies each against a declared ignore list;</li>
   <li>it <strong>regenerates a canonical map artifact</strong> from that classification;</li>
   <li>CI fails if the committed artifact differs from the regenerated one.</li>
 </ol>
