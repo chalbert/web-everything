@@ -1,0 +1,234 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/3128-reconcile-2576-per-option-1-5-ratings-text-against-jury-core/">#3128</a> —
+  <em>reconcile #2576's ratified &ldquo;per-option RATINGS 1-5&rdquo; guardrail against the shipped
+  <code>jury-core</code> verdict model</em>. The short answer the survey establishes: <strong>the two were
+  never rival answers to one question</strong>. A verdict answers <em>&ldquo;does this one subject pass my
+  lens?&rdquo;</em>; a rating answers <em>&ldquo;how does candidate A compare to candidate B?&rdquo;</em>
+  The deliberation that remains is far narrower than the card's framing.
+</p>
+
+<h2>The card's premise is a false dichotomy</h2>
+<p>
+  The card asks us to choose between (a) treating the categorical verdict as the intentional superseding
+  shape and (b) adding a numeric per-option rating dimension to the engine. Neither is right, because the
+  engine has <strong>no candidate axis at all</strong>: a grep for <code>candidate</code> over
+  <code>scripts/lib/jury-core.mjs</code> returns zero hits, and <code>option</code> appears only inside the
+  word <code>optional</code>. A jury run judges <strong>one subject through N lenses</strong>; the method's
+  move 3 describes <strong>N options through M lenses</strong>. Swapping
+  <code>accept</code>/<code>changes</code>/&hellip; for <code>1..5</code> would still not implement move 3.
+  The gap is <strong>dimensional, not lexical</strong>.
+</p>
+
+<h2>Three findings that settle most of the question</h2>
+<ol>
+  <li>
+    <strong>The evidence-correct form of &ldquo;rate, don't just pick&rdquo; already ships</strong> &mdash;
+    on the <em>finding</em> axis rather than the option axis. <code>IMPACT_LEVELS</code> is a closed
+    four-step ordinal grade (<code>cosmetic</code> &rarr; <code>degraded</code> &rarr; <code>broken</code>
+    &rarr; <code>unrecoverable</code>), each step carrying a written descriptor in <code>IMPACT_GLOSS</code>,
+    tested against a configurable bar <code>PREVENTION_IMPACT_BAR</code>. Closed labelled grades reduced by a
+    bar is exactly what the prior art below prescribes.
+  </li>
+  <li>
+    <strong>Aggregation is already codified.</strong> <code>AGGREGATION</code> is a frozen single-member enum
+    (<code>diversity-selection</code>) returned on every care-level rigor dial, docblocked
+    &ldquo;<em>Aggregation is ALWAYS diversity-selection, never a vote</em>&rdquo;, and derived from the
+    ratified <code>#blast-radius-advisory-care-not-a-gate</code> clause 3. A mean was never on the table.
+  </li>
+  <li>
+    <strong>This repo already ratified a 1&ndash;5 scale</strong> &mdash;
+    <a href="/backlog/1034-vision-design-critique-service/">#1034</a>'s design-critique rubric, a closed set
+    of scored axes plus open findings. It composes with the verdict model because those scores are
+    <strong>advisory and training signal, never a reducer</strong>: &ldquo;Output is advisory, not a gate. A
+    low score is a finding to discuss, never a build failure.&rdquo;
+  </li>
+</ol>
+
+<h2>LLM judges rank better than they score</h2>
+<table>
+  <thead>
+    <tr><th>Source</th><th>Finding</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MT-Bench / &ldquo;Judging LLM-as-a-Judge&rdquo; (Zheng et al., NeurIPS 2023, arXiv:2306.05685)</td>
+      <td>Single-answer grading &ldquo;may be unable to discern subtle differences&hellip; absolute scores
+        are likely to fluctuate more than relative pairwise results if the judge model changes.&rdquo;
+        Position-bias consistency 23.8%&ndash;65.0% across judges.</td>
+    </tr>
+    <tr>
+      <td>&ldquo;VLM Judges Can Rank but Cannot Score&rdquo; (arXiv:2604.25235, preprint)</td>
+      <td>Names the <em>ranking&ndash;scoring decoupling</em>: Pearson 0.507 on ordering, with a conformal
+        interval <strong>3.08 points wide on a 5-point scale</strong> &mdash; 68% of the scale.</td>
+    </tr>
+    <tr>
+      <td>G-Eval (Liu et al., EMNLP 2023)</td>
+      <td>Motivates probability-weighted scoring because &ldquo;one digit usually dominates the distribution
+        of the scores (such as 3 for a 1-5 scale)&rdquo;. The raw emitted integer was not good enough.</td>
+    </tr>
+    <tr>
+      <td>Range-compression / geometry work (arXiv:2606.03043, preprint)</td>
+      <td>Judges use only <strong>30&ndash;50% of the human score range</strong>; inter-LLM agreement (0.35)
+        exceeds LLM&harr;human agreement (0.27&ndash;0.32) &mdash; consensus inside a collapsed subspace.</td>
+    </tr>
+    <tr>
+      <td>Score-range bias (Fujinuma 2025; Li et al. 2025)</td>
+      <td>The emitted number shifts with the <em>labelling</em> of the scale (0&ndash;4 vs 1&ndash;5 vs
+        2&ndash;6), independent of content.</td>
+    </tr>
+    <tr>
+      <td>Kiritchenko &amp; Mohammad, ACL 2017</td>
+      <td>Best-Worst Scaling is significantly more reliable than rating scales at equal annotation budget.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>The honest counter-evidence</h3>
+<p>
+  This is <strong>not</strong> a settled literature, and a survey that claimed otherwise would be
+  overclaiming. Tripathi et al. (COLM 2025, arXiv:2504.14716) find pairwise <em>more</em> vulnerable to
+  &ldquo;distracted evaluation&rdquo; than pointwise &mdash; injecting a spurious attribute flips ~35% of
+  pairwise preferences against ~9% of absolute scores. And <strong>Prometheus 2</strong> (Kim et al., ICLR
+  2024 / EMNLP 2024) reaches Pearson <strong>0.897</strong> with humans using pointwise absolute scoring
+  <em>conditioned on a per-instance rubric with written level descriptors</em>. The rubric is the instrument
+  there; the integer merely serializes it &mdash; which is the same shape as
+  <code>IMPACT_LEVELS</code> + <code>IMPACT_GLOSS</code>.
+</p>
+
+<h2>Nobody who ships code or standards at scale grades with an averaged rating</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Instrument</th><th>Aggregator</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Gerrit <code>Code-Review</code></td>
+      <td><code>&minus;2 &hellip; +2</code> with written label text per value</td>
+      <td><code>MaxWithBlock</code> &mdash; one <code>&minus;2</code> blocks regardless of how many
+        <code>+2</code>s exist; two <code>+1</code>s do <strong>not</strong> equal a <code>+2</code>. Never
+        summed or averaged.</td>
+    </tr>
+    <tr>
+      <td>GitHub pull-request reviews</td>
+      <td>three states (approved / changes-requested / commented)</td>
+      <td>any changes-requested blocks; <code>commented</code> is an explicit &ldquo;I looked and I'm not
+        ruling&rdquo;</td>
+    </tr>
+    <tr>
+      <td>W3C Process</td>
+      <td>consensus / dissent / Formal Objection</td>
+      <td>no numeric scale anywhere; a Formal Objection escalates to Council and must carry technical
+        argument</td>
+    </tr>
+    <tr>
+      <td>IETF (RFC 7282)</td>
+      <td>rough consensus, expressed by humming</td>
+      <td>counting is the <em>named failure mode</em>: &ldquo;more and more IETF actions are now
+        indistinguishable from voting&rdquo;</td>
+    </tr>
+    <tr>
+      <td>NIH study section</td>
+      <td>1&ndash;9 criterion scores</td>
+      <td>the overall impact score is explicitly <strong>not</strong> an average of the criterion scores</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Gerrit is the decisive case</strong>, because it looks like the counter-example and is not: its
+  values are a <em>categorical ordinal ballot with numeric names</em>. The numbers are sort keys and
+  permission tiers, never a quantity to combine &mdash; which is precisely what
+  <code>VERDICT_STRICTNESS</code> and <code>IMPACT_STRICTNESS</code> already are. A veto is a <em>type</em>,
+  not a <em>quantity</em>.
+</p>
+
+<h2>Measurement theory — why averaging ordinal grades is the wrong operation</h2>
+<ul>
+  <li>
+    <strong>Stevens (1946)</strong> &mdash; for an ordinal scale the permissible statistics are median and
+    percentiles, not the mean. The robustness results that soften this in practice (Norman 2010) concern
+    <em>many</em> raters; a jury of 3&ndash;7 correlated LLM jurors is the worst corner of that literature,
+    not the safe one.
+  </li>
+  <li>
+    <strong>Balinski &amp; Laraki, <em>Majority Judgment</em></strong> (MIT Press, 2011) &mdash; escapes
+    Arrow's impossibility precisely by having judges assign an ordered grade from a <em>shared common
+    language of words</em>, aggregated by the middlemost grade rather than the mean.
+  </li>
+  <li>
+    <strong>Delphi</strong> reports median + interquartile range and makes outliers justify themselves,
+    rather than smoothing dissent away.
+  </li>
+  <li>
+    A caution against a naive &ldquo;just use the median&rdquo; prescription: at <em>even</em> panel sizes
+    the statistical median is itself an average of the two middle values, which is why Majority Judgment
+    specifies the <strong>lower middlemost</strong> grade. WE's own <code>panelRigorForCareLevel</code> tops
+    out at two jurors per lens.
+  </li>
+</ul>
+
+<h2>The below-bar rule is the best-corroborated idea in #2576 — and the least implemented</h2>
+<p>
+  &ldquo;If the top candidate is below the bar, go find more candidates rather than settling&rdquo; is
+  independently reinvented across a century of practice:
+</p>
+<table>
+  <thead><tr><th>Domain</th><th>Mechanism</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Engineering design</td>
+      <td><strong>Pugh Controlled Convergence</strong> &mdash; concepts scored <code>+/0/&minus;</code>
+        against a datum; the documented main payoff is <em>ideation between matrix runs</em>. The matrix
+        exists to send you back to generate better concepts, not to crown a winner.</td>
+    </tr>
+    <tr>
+      <td>Prizes</td>
+      <td><strong>Nobel</strong> reserve clause (withheld 49 times since 1901); <strong>AIA</strong>
+        Twenty-five Year Award 2018 (no winner); <strong>EFQM</strong>; <strong>IDSA IDEA</strong></td>
+    </tr>
+    <tr>
+      <td>Auctions</td>
+      <td><strong>Myerson (1981)</strong> &mdash; the revenue-optimal reserve price is independent of the
+        number of bidders; you refuse to sell below the bar even in a thin field</td>
+    </tr>
+    <tr>
+      <td>Judgment under bounded rationality</td>
+      <td><strong>Simon</strong>'s satisficing aspiration threshold; <strong>Trust-or-Escalate</strong>
+        (ICLR 2025) &mdash; the judge abstains below its confidence bar rather than ruling</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Where the evidence is thin</h2>
+<p>
+  No study covers exactly this setup &mdash; a small panel of LLM jurors rating a handful of <em>design
+  candidates</em> for a <em>specification</em>. Several load-bearing 2026 citations are unreviewed
+  preprints. Small-N median behaviour for LLM jurors is unstudied. This thinness is itself a finding: it
+  argues for pinning the <em>surface</em> of any comparison instrument and leaving the instrument swappable,
+  rather than mandating pointwise-versus-pairwise now.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>
+    Decision:
+    <a href="/backlog/3128-reconcile-2576-per-option-1-5-ratings-text-against-jury-core/">#3128</a>
+  </li>
+  <li>
+    The ratified method:
+    <a href="/backlog/2576-jury-refinement-method-reusable-template-for-high-leverage-u/">#2576</a>
+    &middot; the shipped engine:
+    <a href="/backlog/2649-jury-core-subject-agnostic-jury-engine-thin-skill-ratified-f/">#2649</a>
+  </li>
+  <li>
+    The ratified 1&ndash;5 design-critique rubric it must compose with:
+    <a href="/backlog/1034-vision-design-critique-service/">#1034</a>
+  </li>
+  <li>
+    The consuming schema:
+    <a href="/backlog/2575-decision-record-schema-persist-rationale-so-decisions-are-ex/">#2575</a>
+  </li>
+</ul>
+{% endraw %}
