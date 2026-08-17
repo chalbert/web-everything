@@ -241,7 +241,14 @@ export function describeOperation(declaration, { basePath = DEFAULT_BASE_PATH } 
     }]))),
     verdictFrom: declaration.verdictFrom,
     steps: declaration.steps.map((s) => ({ name: s.name, kind: s.step.kind, reads: [...s.step.reads] })),
-    routes: planRoutes(declaration, { basePath }).map((r) => ({ method: r.method, path: r.path, safe: r.safe, summary: r.summary })),
+    // `kind` RIDES ALONG, and it is the field a programmatic consumer actually needs. `method`/`path`/`safe`/
+    // `summary` describe a route to a READER; `kind` ({@link ROUTE_KINDS}) names it to a CALLER, which is what
+    // lets a consumer look a route UP instead of retyping its path. Without it, a browser console mounting
+    // this surface has to hand-write `…/runs`, `…/runs/:runId` and `…/runs/:runId/advance` — three
+    // per-operation route shapes, in a caller whose whole point is that it has none, free to drift silently
+    // into 404s the moment `planRoutes` changes a segment. `plateau:tools/dev-panel/drain-daemon.html` (#3036)
+    // is the first such consumer and keys off exactly this.
+    routes: planRoutes(declaration, { basePath }).map((r) => ({ method: r.method, path: r.path, kind: r.kind, safe: r.safe, summary: r.summary })),
     // Byte-for-byte the command line's own `--help`. One declaration, one description.
     usage: buildCliSpec(declaration).usage,
   };
