@@ -1,4 +1,5 @@
 ---
+bornAs: xc99yfx
 kind: story
 size: 5
 status: open
@@ -18,18 +19,18 @@ fix it by hand).
 **States to diagnose and their fixes**, each done by hand tonight:
 
 1. **BEHIND-on-generated-file only** (we:scripts/merge-ai-prs.mjs already auto-rebase-drops BEHIND PRs per
-   xj800x9's correction, but can't resolve a real we:AGENTS.md inventory conflict) — fetch, merge/rebase
+   3166's correction, but can't resolve a real we:AGENTS.md inventory conflict) — fetch, merge/rebase
    origin/main, regenerate the inventory, commit, push. Done by hand ~5 times across #1437/#1436/#1426/#1443/#1447.
 2. **Stale-review-park** (#2409's `staleAcceptance` re-park — we:scripts/merge-ai-prs.mjs:209-213 — fires
    whenever the head advances past the reviewed commit, even for a purely mechanical rebase with no real
    content change, and is deliberately never waivable by the pending-relief valve) — fresh-session-id
    `we:scripts/review-set-label.mjs --to=accepted`. Same 5 PRs, same night.
-3. **Infra-blocked with an unusable resumeHandle** (x6hczic's bug: descriptively-named lane refs silently lose
+3. **Infra-blocked with an unusable resumeHandle** (3169's bug: descriptively-named lane refs silently lose
    their infra-block record, so there is often NO PR yet to address by number — we:lane/resolve-3015-stale-status
    sat unresumed for exactly this reason tonight) — checkout the pushed lane ref directly, write a fresh body,
    re-run we:scripts/pr-land.mjs. Done by hand 3 times (#1443, #1446, #1450). Addressed by **ref name**, not PR
    number — resume from the ref alone, never assuming a trustworthy resumeHandle exists (that assumption is
-   exactly x6hczic's bug).
+   exactly 3169's bug).
 4. **Stuck background build behind a never-opened PR** (the dispatch-lane session itself is dead, per
    #3149/#3162's detection — no PR exists to address by number here either) — kill, release the lane,
    redispatch. Done by hand ~3 times (#3151, #3154, and twice for #3150/#3151 again tonight). Addressed by
@@ -44,7 +45,7 @@ correctly leaves a human-parked review alone rather than touching its label).
 
 1. **Executable — three addressing modes, not one.** A `recover-pr` operation (registered in
    we:scripts/operations/run.mjs) accepts `--pr=<n>` (states 1–2, a PR already exists), `--ref=<lane-ref>`
-   (state 3, resumes from the ref name alone — never assumes a resumeHandle exists, per x6hczic), and
+   (state 3, resumes from the ref name alone — never assumes a resumeHandle exists, per 3169), and
    `--num=<item>` (state 4, matching `dispatch-lane --num=<item>`'s own addressing) — a single `--pr=<n>`-only
    interface cannot reach states 3 or 4, both of which have no PR yet by definition. A test per addressing mode
    asserts the operation reads the right input and classifies correctly.
