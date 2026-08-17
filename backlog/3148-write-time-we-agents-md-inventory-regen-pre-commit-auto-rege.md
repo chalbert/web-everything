@@ -1,4 +1,5 @@
 ---
+bornAs: xqw2iho
 kind: story
 size: 2
 status: resolved
