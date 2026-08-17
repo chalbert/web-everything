@@ -1,13 +1,16 @@
 ---
 name: avoid-writing-under-git-for-scratch-files
-description: .git/ is a Claude Code hardcoded protected path — writes there always prompt regardless of tool, mode, or allow-list; use os.tmpdir() for scratch files instead
+description: .git/ is a Claude Code hardcoded protected path — writes there are never auto-approved by an allow rule; use Node's os.tmpdir() (NOT the literal path /tmp) for scratch files instead
 metadata:
   type: feedback
 ---
 
 Never write scratch files (PR-body text, temp content, etc.) under a repo's `.git/` directory —
-with any tool, not just Bash. Use the system temp dir (`os.tmpdir()`, plain `/tmp` on macOS/Linux)
-instead.
+with any tool, not just Bash. Use Node's `os.tmpdir()` instead — call the function, don't hardcode
+`/tmp`: on macOS `os.tmpdir()` resolves to a per-user path under `/var/folders/.../T`, not `/tmp`
+itself, and the literal path `/tmp` fails `we:scripts/review-set-label.mjs:1059`'s own allow-list
+check on this platform (confirmed live: `resolve('/tmp')` is not in `[cwd, resolve(tmpdir())]` on
+macOS). Always resolve the path at runtime; never write the string `/tmp` into a script or command.
 
 **Why:** `.git` is one of Claude Code's hardcoded "protected paths"
 (https://code.claude.com/docs/en/permission-modes#protected-paths) — writes there are never
