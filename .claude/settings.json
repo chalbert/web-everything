@@ -5,6 +5,8 @@
       "Bash(node scripts/check-readiness.mjs:*)",
       "Bash(npm run check:readiness:*)",
       "Bash(npm run check:standards:*)",
+      "Edit(/.claude/commands/**)",
+      "Edit(/skills-src/**)",
       "Edit(/.claude/skills/batch-backlog-items/**)",
       "Edit(~/.claude/skills/closing-session/**)",
       "Edit(/.claude/skills/next-backlog-item/**)",
