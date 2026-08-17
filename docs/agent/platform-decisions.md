@@ -3165,6 +3165,26 @@ with
 [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment): scope *prediction* is the judgment
 half authored once upstream; dispatch is the deterministic half that only consumes it.
 
+**Extended 2026-08-17 (Nicolas, operator; #2626)** — a third home this clause's two-home taxonomy never
+contemplated: a **shared durable store at product**, for operational state a session-local sidecar can no
+longer serve once a session-free/multi-actor product surface exists. Per-artifact by nature, not
+lift-and-shift: shared-truth sidecars (the cleared-for-build queue #2613, the jury ledger #2641, infra-blocked
+recovery #2659) migrate; machine-local artifacts (advisory locks, `we:.claude/lane-ports.json`, the learnings
+drop-box #2614) never do. The migration is accepted on merit, gated on a tracked trigger — it fires when the
+first session-free product surface must read/write conveyor operational state with no main session present
+(concretely, #2703 retiring the main-session loop) — not by an open-ended "later." The runner lease (#2702) —
+today one indivisible machine-local lock fusing a process singleton with cross-actor write arbitration —
+**splits**: the process guard stays local forever (a remote store cannot see whether a process is alive on
+this machine); the arbitration half becomes a single-writer Durable Object lease, but only conditionally, if
+runners ever run multi-host. **Vendor abstraction is a hard requirement of this migration, not an
+implementation nicety**: every shared-truth sidecar already sits behind a pure-core store module
+(`we:scripts/conveyor/queue-store.mjs`, `we:scripts/lib/jury-ledger.mjs`, `we:scripts/conveyor/infra-blocked.mjs`)
+— the migration must keep Cloudflare-specific SDK/API calls confined entirely to each module's io-shell, never
+leaking into the pure core or into any consuming code path, so a future substrate swap away from Cloudflare
+(should one ever be needed) touches one shell per artifact, not a rewrite. This generalizes: the same seam
+discipline applies to any future vendor-specific infrastructure integration, not only this store. Store choice
+(Durable Objects + D1 over MongoDB) is a settled lean, not itself a ratified fork.
+
 ---
 
 ### Event-driven land is WAKE-only — one polling drain stays the sole writer; a webhook may wake it, never add a second writer; the merge-queue build defers behind measured saturation {#event-driven-land-is-wake-only}
