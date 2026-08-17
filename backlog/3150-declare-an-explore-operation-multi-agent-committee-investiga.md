@@ -42,6 +42,15 @@ hand-carrying findings between two run records, exactly the seam-friction #3029 
 "file stories from any findings" needs to be reusable beyond committee output, that argues for a shared effect
 *function* both this operation and others call, not two independent top-level operations.
 
+**A second mode, not a second operation (2026-08-17):** a prior-art/precedent research survey — the step
+`prepare-decision-item` already does by hand for every decision it preps — is this same shape at panel size 1:
+one investigator, a `research` lens instead of an `architecture-audit` lens, and a different last effect
+(publish a `/research/` topic, the existing pattern already used throughout `we:docs/agent/backlog-workflow.md`)
+instead of filing a story. The `plan` step's "per-panelist lens" should be designed as a genuinely open set from
+the start (architecture-audit, prior-art-survey, whatever a future caller needs), not hardcoded to the one lens
+this item's own motivating example used — and the "file stories" last effect should be one of several
+pluggable terminal effects (publish-research-topic is another), not the only one.
+
 ## Why now
 
 `suggest-next`/leverage scoring aside, this is a natural fifth slice under #3029 — same declare-once-generate-
