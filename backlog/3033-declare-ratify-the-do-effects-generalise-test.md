@@ -89,18 +89,21 @@ writes both, every time, so a mechanized ratification is never the reason a futu
 
 ## Reconciliation with #2821 (2026-08-16 update)
 
-[#2821] gate 1b (*"same-day multi-fork resolve — escalate, never hard-block"*) is a `check:standards` hook that
-already fires when a same-day, live-fork decision resolves with **no ratify marker present** — reading exactly
-the `ratifiedBy` frontmatter field / `## Ruling` body shape this story's acceptance now names. The two are
-complementary, not overlapping: #2821 gate 1b is the **deterministic backstop** for a ratification that still
-happens by hand (or through a not-yet-converted path) — it escalates a hand-resolved decision that forgot the
-marker. This story is the **structural producer** — a ratification that runs through the declared operation
-writes the marker every time, by construction, so gate 1b should never fire on a `ratify`-operation-recorded
-resolve. Landing this story does not retire gate 1b (hand-resolves may still happen for a long time, and the
-gate's own real instances — #2801, #2828's pre-correction form — reproduce on hand-authored history this
-operation cannot retroactively fix) but it should make gate 1b fire asymptotically less often on new decisions.
-Neither item should re-derive the marker shape independently — both cite `ratifiedBy`/`## Ruling` as the one
-shape, sourced from [#2575]'s grounding.
+[#2821] gate 1b (*"same-day multi-fork resolve — escalate, never hard-block"*) is a **proposed, not yet built**
+`check:standards` hook: #2821 is still `status: open`, and neither gate 1b nor the `ratifiedBy` field it would
+read exists anywhere in `we:scripts/check-standards-rules.mjs` or elsewhere today (a repo-wide grep for
+`ratifiedBy` in `scripts/`/`docs/` returns zero hits). As designed, it would fire when a same-day, live-fork
+decision resolves with **no ratify marker present** — reading exactly the `ratifiedBy` frontmatter field /
+`## Ruling` body shape this story's acceptance now names. Once both exist, the two are complementary, not
+overlapping: #2821 gate 1b would be the **deterministic backstop** for a ratification that still happens by
+hand (or through a not-yet-converted path) — it would escalate a hand-resolved decision that forgot the marker.
+This story is the **structural producer** — a ratification that runs through the declared operation writes the
+marker every time, by construction, so a future gate 1b should never fire on a `ratify`-operation-recorded
+resolve. Landing this story does not retire gate 1b's design (hand-resolves may still happen for a long time,
+and the gate's own real instances — #2801, #2828's pre-correction form — reproduce on hand-authored history
+this operation cannot retroactively fix) but, once gate 1b is built, this story's marker-writing should make it
+fire asymptotically less often on new decisions. Neither item should re-derive the marker shape independently —
+both cite `ratifiedBy`/`## Ruling` as the one shape, sourced from [#2575]'s grounding.
 
 Note also [#2575]'s own explicit out-of-scope line — *"no new hard-gated frontmatter field or `check:standards`
 rule enforcing this shape on decision items… retroactively gating would be an unmeasured, repo-wide blast-radius

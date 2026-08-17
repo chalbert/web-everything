@@ -11,16 +11,17 @@ scope:
   - we:skills-src/harvest-learnings/SKILL.md
   - we:skills-src/next-backlog-item/SKILL.md
   - we:skills-src/brand-mark-loop/SKILL.md
+  - we:skills-src/converge/SKILL.md
 tags: [plateau-loop, delivery, operations, review, independence]
 ---
 
 # Subagent "independent" reviewers aren't independent — route judgment through judgeSpawn/judgePanel, not the Agent tool
 
-Four skills spawn a "fresh-context" / "independent" agent via the plain `Agent` tool for a judgment their own
+Five skills spawn a "fresh-context" / "independent" agent via the plain `Agent` tool for a judgment their own
 text calls independent — but a subagent inherits its parent's `CLAUDE_CODE_SESSION_ID`, the identity
 `we:scripts/lib/review-independence.mjs` keys independence on, so every one is the same actor wearing another
 hat. Not speculative: `/jury` had this exact bug — *"one actor wearing N hats by this repo's own test"* —
-before [#3050]'s `judgePanel` fixed it with distinct-session-id processes. The fix is shipped; these four sites
+before [#3050]'s `judgePanel` fixed it with distinct-session-id processes. The fix is shipped; these five sites
 haven't moved onto it.
 
 ## The fix already shipped, elsewhere
@@ -29,7 +30,7 @@ haven't moved onto it.
 #3050), which spawns headless, tool-free `claude -p` processes each with its own derived `--session-id`, and
 refuses to seat a panel whose derived ids are not pairwise distinct.
 
-## The four sites
+## The five sites
 
 1. **`we:skills-src/drain/SKILL.md`, the auto-review v3 negotiation loop** — three separate spawns, all via the
    plain `Agent` tool:
@@ -50,19 +51,33 @@ refuses to seat a panel whose derived ids are not pairwise distinct.
 4. **`we:skills-src/brand-mark-loop/SKILL.md`, step 5** — *"Red-team — spawn (**or role-play**) a skeptic
    prompted only to REFUTE"* — weaker still: it explicitly sanctions no spawn at all, self-role-play accepted
    as an equivalent.
+5. **`we:skills-src/converge/SKILL.md`, the panel/editor/red-team loop** — the same shape a third time, driven
+   by `we:scripts/converge-cli.mjs` / `we:scripts/lib/converge-core.mjs`, neither of which calls `judgeSpawn` or
+   `judgePanel` (confirmed: zero hits for either name in `we:scripts/lib/converge-core.mjs`,
+   `we:scripts/converge-cli.mjs`, or `we:scripts/lib/converge-transports.mjs`) — the CLI only prints an
+   instruction for the driving agent to act on:
+   - *"spawn ONE fresh subagent per printed lens (× `jurors`)"* — the panel step.
+   - *"spawn ONE editor subagent"* — the edit step.
+   - *"spawn one fresh adversary per entry in `redTeam.jury`"* — the red-team step, whose whole point (per the
+     skill's own invariants) is that "an unrun red-team never ratifies" and "the panel never authors what it
+     judges" — the same independence claim the other four sites make and cannot keep with a plain `Agent`
+     spawn. Contrast with `we:skills-src/jury/SKILL.md`, which states plainly that its CLI "calls `judgePanel`
+     ... which spawns" the distinct-session-id processes itself — converge's CLI does not do this, so the
+     independence claim rests entirely on the driving agent's own `Agent`-tool spawn, same as sites 1–4.
 
 ## Why this is a fix, not a new mechanism
 
 `judgeSpawn` (`we:scripts/lib/judge-spawn.mjs`, the single-juror case `review-pr`'s `judge` step uses) and
 `judgePanel` (`we:scripts/lib/judge-panel.mjs`, #3050, the N-juror fan-out `/jury` uses) already exist and are
-proven in production. None of the four sites above need a NEW spawn mechanism — they need to stop calling the
+proven in production. None of the five sites above need a NEW spawn mechanism — they need to stop calling the
 `Agent` tool for a judgment they call independent and start calling one of these two, exactly as `/jury` and
 `review-pr`/`review-prep` already do. Where a site already runs inside a declared operation's `judge` step
-(none of these four do yet — drain and harvest-learnings are pure skills, next-backlog-item's ratify step has
-no operation at all today), the fix is free: a `judge` step structurally cannot be satisfied by a self-spawn,
-because the engine suspends and the caller must do a real `judgeSpawn`/`judgePanel` call between two `advance`
-calls. Where a site stays a plain skill (drain, harvest-learnings), the fix is calling `judgeSpawn`/`judgePanel`
-directly in place of the `Agent` tool — a smaller, still-real improvement even without an operation wrapping it.
+(none of these five do yet — drain, harvest-learnings, and converge are pure skills, next-backlog-item's ratify
+step has no operation at all today), the fix is free: a `judge` step structurally cannot be satisfied by a
+self-spawn, because the engine suspends and the caller must do a real `judgeSpawn`/`judgePanel` call between two
+`advance` calls. Where a site stays a plain skill (drain, harvest-learnings, converge), the fix is calling
+`judgeSpawn`/`judgePanel` directly in place of the `Agent` tool — a smaller, still-real improvement even without
+an operation wrapping it.
 
 ## Relationship to the prepare/ratify work
 
@@ -82,4 +97,6 @@ fixes for the same step.
 4. Next-backlog-item's decision red-team step is fixed here OR is confirmed superseded by the ratify
    mechanization (#3033 / the prepare sibling story) — not both independently, and not silently dropped if
    neither lands.
-5. `npm run check:standards` — 0 new errors.
+5. Converge's panel, edit, and red-team steps call `judgeSpawn`/`judgePanel` instead of instructing the driving
+   agent to spawn via the plain `Agent` tool.
+6. `npm run check:standards` — 0 new errors.
