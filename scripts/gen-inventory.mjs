@@ -10,6 +10,7 @@
  * Run: `npm run gen:inventory`  (writes AGENTS.md)
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadBlocks } from './lib/blocks-loader.cjs';
@@ -65,14 +66,54 @@ export function spliceInventory(fileContents, body) {
 }
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// ── Run as a script: write AGENTS.md ──────────────────────────────────────────
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Files whose staged presence can move a count `renderInventory()` reports (the six per-entry
+// registries it assembles, one dir per kind — #882/#1145/#1146/#1157) or the marked block itself.
+// Mirrors CORPUS_RE in lint-locus-prefix.mjs: a scoping regex kept next to the check it scopes,
+// not centralised, so each write-time gate stays independently auditable.
+const INVENTORY_AFFECTING_RE = /^src\/_data\/(blocks|plugs|intents|semantics|researchTopics|projects)\/[^/]+\.json$|^AGENTS\.md$/;
+
+/** Git-staged (added/copied/modified/renamed/deleted) files, relative to repo root. */
+function stagedFiles() {
+  const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Regenerate AGENTS.md's inventory block from disk and write it if changed. Returns true if written. */
+function regenerate() {
   const before = readFileSync(AGENTS, 'utf8');
   const after = spliceInventory(before, renderInventory());
-  if (after === before) {
-    console.log('AGENTS.md inventory already up to date.');
+  if (after === before) return false;
+  writeFileSync(AGENTS, after);
+  return true;
+}
+
+// ── Run as a script ─────────────────────────────────────────────────────────
+if (import.meta.url === `file://${process.argv[1]}`) {
+  if (process.argv.includes('--staged')) {
+    // Pre-commit write-time regen (#1404 incident — a PR added a research topic without regenerating
+    // AGENTS.md, and CI didn't catch it until an already-`review:accepted` PR, costing a round-trip).
+    // Scoped to when the commit actually touches inventory-affecting content, so an unrelated commit
+    // never re-stages AGENTS.md (which could otherwise sweep in an unrelated unstaged edit to the file —
+    // gen-inventory reads/writes the whole file, not just the staged diff). `npm run gen:inventory` (no
+    // flag) stays available for a manual/full regen; this is the SAME regenerate(), just gated + re-added
+    // to the index. `check:standards`'s inventory check (kind:'inventory') remains as a CI backstop for
+    // any commit path that bypasses this hook (e.g. `--no-verify`).
+    if (!stagedFiles().some((f) => INVENTORY_AFFECTING_RE.test(f))) {
+      process.exit(0); // nothing staged could move the counts — no-op, don't touch AGENTS.md
+    }
+    if (regenerate()) {
+      execFileSync('git', ['add', 'AGENTS.md'], { cwd: ROOT });
+      console.log('AGENTS.md inventory regenerated and staged (pre-commit).');
+    }
+    // else: already up to date — silent, matches lint:locus's quiet-pass convention
   } else {
-    writeFileSync(AGENTS, after);
-    console.log('AGENTS.md inventory regenerated.');
+    if (regenerate()) {
+      console.log('AGENTS.md inventory regenerated.');
+    } else {
+      console.log('AGENTS.md inventory already up to date.');
+    }
   }
 }
