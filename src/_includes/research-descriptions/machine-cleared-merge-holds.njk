@@ -1,0 +1,153 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2910-amend-2563-a-machine-park-is-the-only-available-spelling-of-/">#2910</a> — the
+  proposed amendment to
+  <a href="/docs/agent/platform-decisions/#blast-radius-advisory-care-not-a-gate">the blast-radius
+  advisory-care rule</a> (#2563). Point 1 of that anchor says scored signals "do <strong>not</strong> block
+  the land on a review verdict … the review still happens (via the loop), just not a human park." The shipped
+  system contradicts that letter, and two attempts to reconcile the two by re-reading the anchor's text were
+  struck. So the open question is a <strong>mechanism</strong> question, in three parts:
+</p>
+<ol>
+  <li>Is a <strong>label an automated reviewer sets and clears</strong> a legitimate way to express a merge
+      hold, or is a label inherently the "human park" the anchor bars?</li>
+  <li>Should such a hold be <strong>time-bounded</strong> — and what does the bound <em>do</em> when it
+      fires?</li>
+  <li>Is there a <strong>non-label</strong> alternative — a merge decision consulting an out-of-band store of
+      review results — and is it better?</li>
+</ol>
+<p>
+  This is new ground for this repo. The three existing reports
+  (<code>2026-07-18-blast-radius-advisory-review-gating</code>,
+  <code>2026-07-18-human-vs-ai-review-cognitive-science</code>,
+  <code>2026-07-10-ai-code-review-best-practices</code>) settle <em>whether</em> to gate and <em>who</em>
+  should judge; none of them surveys how a hold is spelled, who clears it, or whether it is bounded. The one
+  bound our corpus already holds counts <strong>rounds, not elapsed time</strong>.
+</p>
+
+<h2>Finding 1 — a bot-set, bot-cleared blocking label is ordinary</h2>
+<p>
+  The load-bearing datum: <strong>Prow/tide's <code>needs-rebase</code> is applied <em>and removed</em> by a
+  plugin with no human in the loop</strong> — a blocking label whose entire lifecycle is machine-owned. Prow
+  additionally posts a status <em>context</em> purely to explain the hold: the label is the state, the status
+  is the message. Kodiak keys auto-merge on a label; Palantir Bulldozer uses <code>WIP</code> /
+  <code>Update Me</code> as blocker and trigger; Gerrit lets CI <em>service users</em> cast the
+  <code>Verified</code> vote that submit requirements evaluate. The label is not the weak part of the design.
+</p>
+
+<table>
+  <thead>
+    <tr><th>System</th><th>What the hold is</th><th>Who sets / clears</th><th>Time-bounded?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>GitHub commit statuses + required checks</td><td>commit status on a <code>context</code></td><td>any app/bot via REST</td><td><strong>No</strong> — a never-reported context blocks indefinitely</td></tr>
+    <tr><td>GitHub merge queue</td><td>queue position + checks on the <code>merge_group</code> ref</td><td>CI/bot reports; queue clears</td><td><strong>Yes</strong> — status-check timeout; "timed out awaiting a successful CI result" is a documented removal reason</td></tr>
+    <tr><td>GitHub code-scanning merge protection</td><td>a <strong>ruleset rule</strong>, explicitly not a status check; read from the alert store</td><td>GitHub queries the store; the tool populates it out of band</td><td><strong>No</strong> — blocks while analysis "is still in progress"</td></tr>
+    <tr><td>Prow / tide</td><td><strong>labels</strong> (<code>lgtm</code>, <code>approved</code>, <code>do-not-merge/hold</code>, <code>needs-rebase</code>) + an explanatory status</td><td><code>needs-rebase</code> is fully plugin-owned</td><td>No timeout; tide re-queries on a loop</td></tr>
+    <tr><td>Mergify</td><td>queue position, with <code>queue_conditions</code> naming labels/checks/approvals</td><td>bot or human sets; Mergify clears the slot</td><td><strong>Yes</strong> — <code>checks_timeout</code>, default <code>auto</code> since 2026-06-29</td></tr>
+    <tr><td>GitLab merge trains</td><td>train position + pipeline result</td><td>GitLab CI</td><td>No timer, but <strong>failure-driven eviction</strong></td></tr>
+    <tr><td>Kodiak</td><td>an <code>automerge</code> <strong>label</strong>, then defers to branch protection</td><td>label may be bot-set</td><td>No</td></tr>
+    <tr><td>Palantir Bulldozer</td><td><strong>labels</strong> as trigger/blocker</td><td>human or bot</td><td>No</td></tr>
+    <tr><td>Gerrit</td><td><strong>label votes</strong> under submit requirements</td><td>humans <em>and</em> CI service users</td><td>No</td></tr>
+    <tr><td>Zuul</td><td>gate-pipeline queue position entered on a Gerrit vote</td><td>bot votes; dequeues on failure</td><td>Speculative abort upstream; no wall clock found</td></tr>
+    <tr><td>Atlantis</td><td>a directory/workspace <strong>lock</strong> from <code>plan</code> until merge</td><td>bot holds; human unlocks</td><td>No</td></tr>
+    <tr><td>SonarQube</td><td>quality <strong>gate</strong> → a required status check; individual issues → comments</td><td>Sonar bot posts Pass/Fail</td><td>No</td></tr>
+  </tbody>
+</table>
+
+<h2>Finding 2 — the non-label alternative exists in production, and it is worse</h2>
+<p>
+  <strong>GitHub code-scanning merge protection</strong> is the one real instance of "the merge decision
+  consults an external store of review results rather than a label on the PR." It is a ruleset rule,
+  <em>explicitly not</em> a status check, evaluated against the code-scanning alert database, and it blocks
+  both on findings above a severity threshold and on the analysis simply not being done yet. It has
+  <strong>no timeout</strong>, and its best-documented failure mode is a permanent block waiting on a result
+  that never posts (CodeQL default setup does not run on <code>merge_group</code>, so queued pull requests
+  block forever — <code>github/codeql-action#1537</code>).
+</p>
+<p>
+  <strong>Gerrit cuts the other way, and is the instructive case.</strong> Its strength is not that the record
+  is a database rather than a label — it is that the review record and the merge decision live in
+  <em>one</em> store (NoteDb), with submit requirements evaluated there. Prow/tide is the counter-example: it
+  splits decider from store (tide decides; GitHub labels are the record), and its own documentation warns
+  that GitHub's configured merge requirements must be kept in sync with tide's. That warning <em>is</em> the
+  cost of splitting them. Going non-label therefore buys nothing and spends the single-source-of-truth
+  property.
+</p>
+
+<h2>Finding 3 — the bound is real prior art, and its action is never "merge anyway"</h2>
+<ul>
+  <li>Plain GitHub required checks have <strong>no timeout</strong>. The documented seven-day rule expires a
+      <em>success</em>; it does not bound a <em>pending</em>.</li>
+  <li>Every system that <em>owns</em> a merge queue has added a wall clock: GitHub merge queue's status-check
+      timeout, and Mergify's <code>checks_timeout</code>.</li>
+  <li>Mergify's 2026-06-29 change is the most transferable design point: the default moved from off to
+      <strong>auto</strong> — the p95 of recent successful CI runs plus a margin. <em>Derive the bound from
+      what the clearer actually takes; don't guess a constant.</em></li>
+  <li>In every surveyed case the fired timeout <strong>ejects and reports</strong>. GitLab drops a failed
+      merge request off the train and re-pipelines behind it; Mergify dequeues; GitHub removes from queue.
+      <strong>No surveyed system converts a timed-out hold into a merge.</strong></li>
+</ul>
+<p>
+  This reconciles cleanly with Web Everything's own ratified removal of the merge-anyway timer (#2425): what
+  was struck there was a clock <em>whose action was to land</em> — "landing unreviewed code on a clock is
+  never the right failure mode," pinned by a named invariant test. A clock whose action is to <em>escalate
+  loudly</em> is a different mechanism, and is not what #2425 removed.
+</p>
+
+<h2>Cross-cutting — the advisory/blocking line is drawn on false-positive rate</h2>
+<p>
+  Google is the sharpest statement. Tricorder findings are <strong>advisory</strong> — grey comment boxes in
+  Critique a developer may ignore — behind a numeric inclusion bar: an analyzer must produce
+  <strong>fewer than 10% effective false positives</strong>, be understandable, be actionable, and have
+  significant impact; the "Not useful" button is the measurement instrument, and analyzers that do not improve
+  are put on probation and disabled. Blocking lives in a stricter tier: presubmits block a pending change, and
+  the highest-confidence checks are promoted all the way to <strong>compiler errors</strong>, which require
+  <em>no</em> effective false positives and must report correctness issues only. SonarQube draws the same
+  line (a deterministic quality gate blocks; individual issues comment), as does GitHub's code-scanning
+  severity threshold.
+</p>
+<p>
+  <strong>The implication for #2563:</strong> the anchor's advisory-vs-gate split is about <em>which signals
+  may summon a reviewer</em> — the same axis the industry draws. Nothing in the prior art treats "a machine
+  reviewer's verdict is a merge precondition" as the gated-risk-score side of that line. A bot-cleared hold is
+  how the review is <em>delivered</em>, not a score being gated on.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>Keep the label; bound the wait; make the bound escalate, never merge.</strong> The forks this
+  supports, and the corrections it forces to the item's own premises, are stated on
+  <a href="/backlog/2910-amend-2563-a-machine-park-is-the-only-available-spelling-of-/">#2910</a>.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/research/blast-radius-advisory-review-gating/">Risk/blast-radius as advisory care-level vs a
+      park-gate in an AI merge queue</a> — the #2563 survey this one extends rather than refreshes (it
+      settles <em>whether</em> to gate; this settles <em>how the wait is spelled</em>).</li>
+  <li><a href="/research/human-vs-ai-review-cognitive-science/">Human vs AI review — cognitive science</a>.</li>
+  <li><a href="/docs/agent/platform-decisions/#enforce-flip-triple-gated">The review-seam enforce flip</a>
+      (#2838) — the ratified gate on <em>when</em> a machine may clear the hold this topic argues for.</li>
+  <li><a href="/docs/agent/platform-decisions/#human-required-is-judgment-only">Human-required means
+      judgment, not convergent review</a> (#2851) — why a standing human clearer on convergent review is a
+      defect to close, not a steady state.</li>
+</ul>
+
+<h2>Limits — what this survey could not verify</h2>
+<ul>
+  <li>GitHub merge queue's <em>default</em> status-check timeout is not stated in the official documentation;
+      a third-party figure of 60 minutes exists and is treated as unconfirmed.</li>
+  <li>Mergify's exact behaviour when <code>checks_timeout</code> fires is inferred from the queue-rules page
+      rather than restated in the changelog.</li>
+  <li>No GitLab merge-train wall clock was found — absence of evidence, not evidence of absence.</li>
+  <li>Prow/tide <code>lgtm</code> staleness on new commits is per-repository configurable and was not
+      confirmed.</li>
+  <li>The Tricorder ICSE'15 paper would not extract; its criteria are quoted via the
+      <em>Software Engineering at Google</em> chapter-20 rendering of the same system.</li>
+  <li>Zuul and Atlantis were surveyed more thinly than the rest; no per-change timeout was found for either,
+      but their configuration references were not read exhaustively.</li>
+</ul>
+{% endraw %}
