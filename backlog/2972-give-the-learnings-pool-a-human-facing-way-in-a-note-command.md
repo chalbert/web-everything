@@ -2,10 +2,13 @@
 bornAs: x6v3qq6
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2614", "2610", "2774"]
 scope: ["we:.claude/commands/", "we:skills-src/"]
 dateOpened: "2026-08-07"
+dateStarted: "2026-08-16"
+dateResolved: "2026-08-17"
+graduatedTo: none
 tags: [skill, learnings, discoverability]
 ---
 
