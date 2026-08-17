@@ -104,3 +104,13 @@ counts) split the work into *deliverable-in-WE-now* vs *gated-on-FUI-build*. Ful
 
 The `#701 fuiDemo` iframe vs mode-C URL-bundle choice is a **settled per-demo menu**
 (`#we-fui-embed-boundary` rule 6), not an open fork — no decision card.
+
+## Re-slice note (2026-08-17, from the #1770 prep inventory)
+
+**This epic needs a re-slice against the measured residual set, router first.** The 2026-08-17
+constellation-placement inventory (#1770) found that all four carved children are `resolved` while step 4's
+declared *first, load-bearing* target — `we:blocks/router/`, **2,843 tracked lines across 19 files**, including
+a 619-line `we:blocks/router/elements/RouteViewElement.ts` — is still fully present in WE. That specific gap is
+filed and owned as **#3154**
+(*"Blocks/router (2,843 lines) was #1245's declared first target and was never sliced"*). This epic's own
+`blockedBy: [1353]` is also stale (#1353 resolved 2026-06-27) and should be dropped at the next re-slice.
