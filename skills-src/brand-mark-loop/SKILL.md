@@ -46,8 +46,30 @@ is in the sighted refinement loop the main loop drives itself.**
    its intended form? swap test (cover it — generic?); adversarial second-read (rotate/mirror/say-aloud —
    sailboat? placeholder? pause icon?); 16px legibility (does negative space close? do strokes blur?);
    on-dark; family fit vs the mesa (grammar + hue-span). Name concrete flaws, not vibes.
-5. **Red-team** — spawn (or role-play) a skeptic prompted only to REFUTE: "this mark is generic / illegible /
-   off-family — prove it." Fold surviving attacks into the flaw list.
+5. **Red-team** — spawn a **real** skeptic prompted only to REFUTE: "this mark is generic / illegible /
+   off-family — prove it." Fold surviving attacks into the flaw list. **Role-playing the skeptic yourself is
+   not a substitute and is no longer offered** (#3145): you just authored the mark and wrote the step-4
+   critique, so a self-played refutation is the author grading the author. Nor is the `Agent` tool — a
+   subagent inherits this session's `CLAUDE_CODE_SESSION_ID`, the identity
+   `we:scripts/lib/review-independence.mjs` keys independence on, so it is the same actor in a different hat.
+   Seat the skeptic through `judgePanel`, which spawns a tool-free headless `claude -p` with its own derived
+   session id (payload shape and limits:
+   [delivery-loop.md](../../docs/agent/delivery-loop.md#independent-judgment-spawn)):
+
+   ```bash
+   # $PAYLOAD: { subject: "design-pixels", subjectNoun: "mark", materialFile: "<your step-3/4 write-up>",
+   #             jurors: [{ id: "skeptic#1", lens: "skeptic", mandate: "REFUTE this mark: prove it is
+   #                        generic, illegible at 16px, or off-family. Default REJECT." }] }
+   node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+     --depth=0 --max-depth=2 --max-total-budget-usd=2 --run-id="mark-<name>-r<round>"
+   ```
+
+   **The seat is tool-free, so it cannot see the PNG — you are the eyes, it is the doubt.** Feed it your
+   step-3 rendering notes and the step-4 critique as `materialFile` (what the glyph reads as, what happens at
+   16 px, the on-dark result, the hue/grammar comparison against the mesa), and let it attack *those claims*.
+   That keeps the one thing a self-played skeptic can never give you — an actor with no stake in the mark —
+   and is honest about the one thing it cannot give you: a second pair of eyes on the pixels. A seat that
+   comes back `ok: false` did not run, and an unrun red-team does not clear the round.
 6. **Edit the SVG** to fix the top 1–2 flaws. Small, surgical changes.
 7. **Re-render, re-look.** Repeat 3–6 until the mark holds (no surviving critique) or you hit a real wall.
    **Stop honestly** — if 3–4 iterations don't converge, say so; the raw concept may be unsalvageable

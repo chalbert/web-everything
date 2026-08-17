@@ -88,8 +88,30 @@ highest-leverage blocker* directly, even if Tier-A items exist:
 - **Before you resolve, red-team the default** (*backlog-workflow.md → Red-team the default*): argue
   the strongest case for the main alternative and try to name the principle the chosen branch violates
   (impl-is-not-a-standard, npm-scope-mirrors-layer, the A–E catalog). Attack fails → ratify; attack
-  lands → amend and re-attack. Inline for every call; spin up a throwaway **skeptic sub-agent** (prompted
-  only to refute) for high-leverage / high-`gates` forks.
+  lands → amend and re-attack. Inline for every call. For a high-leverage / high-`gates` fork, add a
+  **real independent skeptic — through `judgePanel`, never the `Agent` tool** (#3145): a subagent
+  inherits this session's `CLAUDE_CODE_SESSION_ID`, so a "throwaway skeptic sub-agent" refuting your
+  own default is you refuting yourself by the test `we:scripts/lib/review-independence.mjs` applies.
+  One tool-free headless seat, judging the fork as prose:
+
+  ```bash
+  # $PAYLOAD: { subject: "decision-prose", subjectNoun: "decision", materialFile: "<the fork's prose>",
+  #             jurors: [{ id: "skeptic#1", lens: "skeptic",
+  #                        mandate: "Refute this default. Default REJECT; reject on any uncertainty.
+  #                                  Name the principle it violates or state plainly that you found none." }] }
+  node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+    --depth=0 --max-depth=2 --max-total-budget-usd=2 --run-id="ratify-<NNN>"
+  ```
+
+  Write the fork's prose to a file and point `materialFile` at it — the seat is tool-free and reads only
+  its stdin, so it never opens the item itself. `ok: false` is a skeptic that **did not run**, and an
+  unrun red-team never ratifies: re-run it or say plainly that the call was made without one.
+
+  > **Coordinate with #3033 before calling this settled.** The prepare-side skeptic pass hit the identical
+  > bug, and the design discussion there is to mechanize ratify as a declared operation with a `judge`
+  > step — which would fix this site structurally (the engine suspends and the caller must make a real
+  > `judgeSpawn`/`judgePanel` call between two `advance` calls). If #3033 ships that, this block becomes
+  > the operation's `judge` step rather than a second, divergent fix — do not leave both standing.
 - **Once the call is made, close out the decision item itself** per step 7 (`active → resolved` +
   `dateResolved` + record the ruling, `graduatedTo` if it became an entity). The gated work then turns
   agent-ready — continue the arc or re-run selection. If the open-decision pool is empty, say so plainly
