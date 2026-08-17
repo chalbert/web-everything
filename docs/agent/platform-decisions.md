@@ -3499,6 +3499,39 @@ footgun, option (a) guideline-only rejected as too weak). Enabler for finer scop
 
 ---
 
+### A statute anchor states only the timeless rule; point-in-time build status lives on the decision item and open guards, never in the anchor's prose {#statute-anchor-states-rule-not-status}
+
+**Ratified 2026-08-17 by the operator (Nicolas Gilbert) (#2854).** A ratified rule is timeless; what is built
+so far is not, so the two do not share a home. An anchor states the rule and remains cite-able authority that
+should read the same in a year; build status — what is enforced today, what is still owed, which item retires
+a gap — belongs on the backlog item and the open guards that already track it, linked by id, never narrated in
+the anchor body. This is not a hypothetical risk: `#fix-review-convergence-independent-root-cause` grew
+427 → 655 → 714 words (corpus median 324) in successive rounds asked to CUT duplication, specifically because
+point-in-time status prose kept needing correction in place, and its own claims have already gone stale twice
+in two weeks — at one point stating an enforcement gap the invariant catalogue had already recorded as closed.
+Three mature rule-documentation systems (ADR, IETF RFC+errata, MDN/web-features Baseline) independently arrived
+at the same separation; none hand-maintains "not yet built" prose inside citable rule text.
+
+**What this does not settle.** A narrower, already-shipped mechanism — `we:scripts/lib/invariant-catalogue.json`
+recording `status`/`owedTo`/an optional `anchor` back-link per catalogued invariant — could in principle
+generalize from a curated catalogue to arbitrary anchor prose, closing the in-place-warning gap this ruling
+otherwise leaves open. That generalization is **not ruled here**: it is a conditional follow-on, gated on
+whether heuristically classifying free-text claims is reliable enough to trust (the anchor-validator already
+measured that class of classifier at 5 false positives over ~117 clusters on a first pass) — a correctness
+question for whoever picks it up, not assumed away by this ruling.
+
+**Lineage:** ratified 2026-08-17 (operator; #2854), resolving Fork 1 of that item as (a) over (b) — inside the
+anchor, as an earlier PR (#982) did, is the rejected branch. Fixes the shape of #2849 (a statute anchor-shape
+lint) as a fully-derived consequence: for a catalogued operational invariant, #2849 needs no new mechanism
+(`validateInvariantEnforcers`/#2844 already requires a real enforcer or an open `owedTo`); for uncatalogued
+anchor prose, #2849 should error on point-in-time tokens (`today`, `not yet`, `build-pending`, `still parks`)
+and direct the author to the item instead, with a transition exemption list for the ~15 pre-existing uses on
+`main`. Composes with [#memory-admission-verified-grounding](#memory-admission-verified-grounding)'s own
+practice of separating a ratified rule from its point-in-time enforcement mechanisms list, which this statute
+now applies as an explicit, general rule rather than an implicit per-anchor habit.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
