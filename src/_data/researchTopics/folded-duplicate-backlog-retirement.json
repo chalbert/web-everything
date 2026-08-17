@@ -1,0 +1,21 @@
+{
+  "id": "folded-duplicate-backlog-retirement",
+  "title": "How a folded duplicate retires — non-delivered close vs cross-ref only, across five trackers",
+  "status": "open",
+  "summary": "Prep research for decision #2982 — /consolidate can prove two open backlog items are one job, but the backlog has no honest way to retire the absorbed one: `resolve` means delivered and books points into the burndown, a park must reduce to a real structural gate, and `supersededBy`'s pointer space is research-topic ids. Surveys how five mature trackers retire a duplicate: Bugzilla (RESOLVED + resolution DUPLICATE + the first-class `dupe_of` bug-id field), Jira (Closed + Resolution Duplicate + a separate `duplicates` link type, routinely filtered out of reports and epic progress), GitHub Issues (`state_reason: duplicate` — a third close reason added Dec 2024 alongside `completed`/`not_planned` — plus a timeline event and a note at the top of the issue), GitLab (`/duplicate #id` quick action → closed + a duplicate-of relation), and Linear (a reserved `Duplicate` status whose type is Canceled, not Done, plus a relation that migrates attachments to the survivor). Three findings: (1) the non-delivered close is universal — 5/5 move the duplicate out of the working set, 0/5 leave it open with a cross-reference, which refutes the framing that this repo's dedup rule points the other way (that rule governs the *adjacent* case and says extend, not cross-ref, for the contained one); (2) 4/5 carry the reason as a positive enum marker paired with a separate pointer, never inferring duplicate-ness from a relation's presence; (3) GitLab is the one system that recorded a real defect — `/duplicate` has no inverse (gitlab-org/gitlab#233050, open for years), so an accidental fold is permanent, which argues for shipping `unfold` in the same slice. Scores the shape sub-call against WE's own machinery: a distinct status drops out of every selection surface for free (deriveTier returns undefined for non-open, the readiness engine filters to status === 'open'), whereas a field on an item that stays open needs hand-written exclusions at ~8 sites and trips the CTA invariant. Reconciles docs/agent/reference-retirement.md's ratified 'two markers, not one status enum' objection as scope-bound: a reference can be both dead and superseded, but an item cannot be both delivered and folded. Full grounding in reports/2026-08-17-2982-folded-duplicate-retirement.md.",
+  "dateOpened": "2026-08-17",
+  "lastReviewed": "2026-08-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "decision-prep",
+    "backlog",
+    "schema",
+    "burndown",
+    "governance",
+    "lifecycle"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-08-17-2982-folded-duplicate-retirement.md",
+  "relatedProject": "webdocs"
+}
