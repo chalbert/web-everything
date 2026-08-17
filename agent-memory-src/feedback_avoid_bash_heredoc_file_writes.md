@@ -1,26 +1,31 @@
 ---
-name: avoid-bash-heredoc-file-writes
-description: Write scratch/PR-body files with the Write tool, not a Bash heredoc — heredoc writes bypass Edit/Write hooks and likely trigger extra permission prompts
+name: avoid-writing-under-git-for-scratch-files
+description: .git/ is a Claude Code hardcoded protected path — writes there always prompt regardless of tool, mode, or allow-list; use os.tmpdir() for scratch files instead
 metadata:
   type: feedback
 ---
 
-Write files (PR-body scratch files, temp content, etc.) with the `Write` tool, never a Bash
-heredoc (`cat > file << 'EOF' ... EOF`) or shell redirect — even when `Bash` is bare-allowed in
-`.claude/settings.json`.
+Never write scratch files (PR-body text, temp content, etc.) under a repo's `.git/` directory —
+with any tool, not just Bash. Use the system temp dir (`os.tmpdir()`, plain `/tmp` on macOS/Linux)
+instead.
 
-**Why:** A Bash-based file write bypasses the `Edit`/`Write` tool's own PreToolUse hooks (e.g.
-`guard-lane.mjs`, `lint-locus-prefix.mjs` in the web-everything repo) since those only fire on the
-`Edit`/`Write` tool, not on raw shell redirects. Claude Code likely flags that shape for an extra
-interactive permission prompt as its own anti-footgun measure, regardless of a bare `Bash` allow.
-Traced and confirmed live on 2026-08-17 via a direct isolation test: a bare `cd` (no redirect) went
-through silently, while an otherwise-identical `cat > file << 'EOF' ... EOF` heredoc write in the
-next command prompted for permission. Repeatedly using `cat > .git/tmp-review-bodies/<name>.md <<
-'EOF'` as a workaround for `pr-land.mjs`'s `--body-file` path restriction (needs a path under the
-repo root, not the scratchpad) is what generated the noticeable, user-flagged increase in permission
-prompts tonight — confirmed, not just a plausible theory.
+**Why:** `.git` is one of Claude Code's hardcoded "protected paths"
+(https://code.claude.com/docs/en/permission-modes#protected-paths) — writes there are never
+auto-approved by any `permissions.allow` rule, in any mode except `bypassPermissions`: "the safety
+check runs before Claude Code evaluates allow rules from settings." This applies to the `Write` and
+`Edit` tools too, not just Bash — the mechanism is the target path, not the tool or command shape.
+An earlier version of this note wrongly attributed the prompt to "Bash heredocs bypass Edit/Write
+hooks" and recommended switching to the `Write` tool while still targeting `.git/tmp-review-bodies/`
+— that recommendation reproduces the exact prompt it was meant to prevent, since the `Write` tool
+hits the identical protected-path check. Caught by independent review before landing (2026-08-17).
+
+The original motivating case: `we:scripts/review-set-label.mjs`'s `--body-file` validation (not
+`pr-land.mjs`, which has no such restriction) allows `resolve(process.cwd())` or `resolve(tmpdir())`
+only (`scripts/review-set-label.mjs:1059`) — `os.tmpdir()` was a valid, protected-path-free location
+the whole time; `.git/tmp-review-bodies/` was an unnecessary self-inflicted detour into a guarded
+directory.
 
 **How to apply:** Whenever a script needs a `--body-file`/`--content-file`-style scratch file, write
-it with the `Write` tool to an allowed path (e.g. `.git/tmp-review-bodies/<name>.md` inside a repo,
-or the session scratchpad), then pass that path to the CLI — never `cat > ... << EOF`. This applies
-generally, not just to this one repo or this one script.
+it (with either the `Write` tool or a Bash redirect — both work identically once the target path
+isn't protected) to `os.tmpdir()` or an equivalent temp location, never under `.git/`, `.claude/`, or
+any other Claude Code protected path. This applies generally, not just to this one repo or script.
