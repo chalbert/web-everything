@@ -44,6 +44,17 @@ false-positive on a legitimately slow tool call, short enough to catch this well
 silent stall) as an actionable finding, surfaced the same way aged-out dispatch records already are
 today.
 
+**Refinement (2026-08-17, from the same day's discussion on push vs. poll):** the `claude` daemon has no
+native subscribe/event API (confirmed via `claude daemon --help` — only `logs` tails a file, and it
+doesn't carry this signal today). So the true source stays poll-only regardless. But the *consumer* of
+this check doesn't have to poll: a thin watcher service — polling `claude agents --json` tightly on the
+server side (or watching `.operations/runs/*.json` on disk) — can re-emit changes over SSE/WebSocket to
+any connected client (a future UI, another operation). That gets near-instant detection instead of a
+5-10 minute periodic-check window, and it's the same piece of infrastructure a live UI would want anyway,
+not a separate build. Whoever builds this should default to the watcher shape over a bare periodic
+`gate-health` poll if the two are comparable effort — the periodic-poll version above is the acceptable
+fallback, not the target.
+
 ## Done when
 
 1. **Executable** — a test that spawns (or fakes) a `claude agents --json` entry in `blocked`/`waiting:
