@@ -1,0 +1,21 @@
+{
+  "id": "power-estimator-validity-floor",
+  "title": "Sample-size estimator vs. normal-approximation validity floor — no toolkit folds them, and folding them does not work",
+  "status": "open",
+  "summary": "Prep research for decision #3143: should `requiredNPerGroup` (we:scripts/lib/gate-health.mjs:245, the textbook two-proportion power formula at 80% power / alpha 0.05 two-sided) fold in the same module's own >=5-successes-AND->=5-failures validity floor, which `compareProportions` (we:scripts/lib/gate-health.mjs:143) separately enforces? FINDING — no, on three independent grounds. (1) NO PRIOR ART: R `stats::power.prop.test`, R `pwr::pwr.2p.test` 1.3-0, statsmodels 0.14.6 (`samplesize_proportions_2indep_onetail`, `NormalIndPower`), SAS `PROC POWER TWOSAMPLEFREQ`, Stata `power twoproportions`, PASS 'Tests for Two Proportions' and G*Power 3.1 all return a pure inversion of the power equation; none floors the n and none even warns when the returned n leaves an expected cell under 5. The only documented upward adjustment anywhere is the opt-in continuity correction (Fleiss / Casagrande-Pike-Smith), which PASS explicitly does not recommend. (2) THE FLOOR DOES NOT DELIVER ITS OWN PROMISE: `5 / min(p, 1-p, p+d, 1-(p+d))` is an EXPECTED-count floor, so at exactly that n the expected minimum cell is exactly 5 and the OBSERVED count `compareProportions` actually gates on (we:scripts/lib/gate-health.mjs:153) lands below 5 roughly half the time — the fold would still be refused about half the time it fired. (3) MEASURED BLAST RADIUS: patching the fold in and running we:scripts/operations/__tests__/gate-health.test.mjs fails 8 of 53 tests, and only three are re-derivable constants (49->114, 212->500, 153->null); the other five all cascade from one live defect — `requiredNPerGroup(0, mdd)` is the module's own `sizeableMdd` probe (we:scripts/lib/gate-health.mjs:329) and the floor is 5/0 = Infinity at p=0, so a spurious 'unsizeable effect' blocker fires on every assessment and `verdict.conclusive` can never be true again. THE DEEPER REFRAME the survey supplies: the documented remedy for a failed normal approximation is a DIFFERENT TEST (Fisher exact, N-1 chi-squared per Campbell 2007, mid-p per Agresti 2001, Agresti-Caffo as statsmodels' own `test_proportions_2indep` default), not more observations — and exact methods generally need FEWER observations, not more (PASS: 521 vs 524). R places the >=5 warning on `chisq.test`, the TEST side, never on `power.prop.test`. NumPy's NEP 23 supplies the API-design half: 'the possibility of an incorrect result is worse than an error or even crash', and a behaviour change needs deprecation, never a silent value swap — which is exactly what folding a floor into a function named after a formula would be. What the survey did NOT settle: no toolkit warns on the planning side either, so publishing the floor as its own named number is a defensible invention rather than a documented convention. Full grounding in we:reports/2026-08-17-power-estimator-validity-floor.md.",
+  "dateOpened": "2026-08-17",
+  "lastReviewed": "2026-08-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "measurement",
+    "statistics",
+    "gate",
+    "power-analysis",
+    "sample-size",
+    "normal-approximation",
+    "api-design",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
