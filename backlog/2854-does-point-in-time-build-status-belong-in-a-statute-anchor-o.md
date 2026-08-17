@@ -2,14 +2,30 @@
 bornAs: xzadt1m
 kind: decision
 parent: "2822"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
+dateStarted: "2026-08-17"
+dateResolved: "2026-08-17"
+codifiedIn: "docs/agent/platform-decisions.md#statute-anchor-states-rule-not-status"
 preparedDate: "2026-08-16"
+ratifiedBy: "Nicolas Gilbert (operator)"
 relatedReport: reports/2026-08-16-2854-statute-anchor-build-status-separation.md
 tags: [conveyor, statute, governance, authoring, anchor-shape, decision-prep]
 ---
 
 # Does point-in-time build status belong in a statute anchor, or on the decision item?
+
+## Ruling (2026-08-17) — Fork 1 = (a)
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-08-17** — Fork 1 = **(a)**: build status lives on the
+decision item and the open guards; the statute anchor states only the timeless rule. Option (b) — status
+narrated inside the anchor, as PR #982 did — is rejected. The corrected Fork 1 (after the 2026-08-17
+fresh-context re-screen dissolved the mis-shelved option (c) into a conditional follow-on — see `Screen:`
+below) presented exactly this two-branch choice; nothing about that fix was re-opened by this ruling.
+
+Codified as [`#statute-anchor-states-rule-not-status`](../docs/agent/platform-decisions.md#statute-anchor-states-rule-not-status),
+a new statute. Settles #2849's shape as a fully-derived consequence (see the table below) — no separate ruling
+needed there.
 
 A ratified rule is timeless; what is built so far is not. PR #982 put both in the same anchor, and the result is a
 714-word rule (doc median 324) whose sentences go false when #2785 lands. Decide where build status lives: inside the
