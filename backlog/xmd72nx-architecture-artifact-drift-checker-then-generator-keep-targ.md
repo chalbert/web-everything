@@ -30,9 +30,10 @@ and diffs them against what a given artifact/doc currently claims. Triggerable o
 dependent on anyone remembering to ask.
 
 **Target (the actual goal):** generate the factual tables/diagrams directly from the operations registry and
-backlog data, the same way `we:AGENTS.md`'s inventory count and `npm run gen:branding` already do elsewhere in
-this repo. If the artifact's operation catalog and step-composition tables are generated rather than
-hand-typed, drift becomes structurally impossible rather than merely checked less-badly. The "four step kinds
+backlog data, the same way `we:AGENTS.md`'s inventory count already does in this repo (`npm run gen:branding`
+is the same pattern, one repo over, in `plateau:package.json`). If the artifact's operation catalog and
+step-composition tables are generated rather than hand-typed, drift becomes structurally impossible rather
+than merely checked less-badly. The "four step kinds
 are exhaustive" design intention could become a real lint (error if any operation declares a step kind outside
 compute/judge/confirm/effect) rather than a stated intention nobody enforces.
 
