@@ -39,7 +39,7 @@ Three further findings settle almost everything the card frames as open:
 2. **The aggregation question is already codified** — `AGGREGATION` is a frozen single-member enum
    (`diversity-selection`) returned on every care-level rigor dial, derived from
    `#blast-radius-advisory-care-not-a-gate` clause 3. A mean was never on the table in the engine.
-3. **WE has already ratified a 1–5 scale**, in [#1034](/backlog/1034-vision-design-critique-service/)'s
+3. **WE has already ratified a 1–5 scale**, in [#1034](/backlog/1034-design-critique-rubric-what-a-page-review-measures-and-how-w/)'s
    design-critique rubric — and it composes, because those scores are *advisory and training signal, never a
    reducer*.
 
