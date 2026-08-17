@@ -127,7 +127,7 @@ and proposes the review-escalation extension. #3144 is re-scoped in this pass to
 
 The prep skeptic ran a grep for `2771|2785|2840|principle-surface|declarative-leash` over both `#3144` and
 `#2568` and got **zero hits**. That is the entire 2026-07-28 → 2026-08-02 governance re-ratification, and it
-governs exactly the turf all four forks rule on:
+governs exactly the turf all three forks rule on (four, in the draft it was found against):
 
 - **#2771** (`we:docs/agent/platform-decisions.md:3408`) **split the policy tier.** The declarative leash —
   `we:scripts/lib/review-policy.contract.json`, `we:scripts/lib/gate-config.mjs`, the invariant/conformance

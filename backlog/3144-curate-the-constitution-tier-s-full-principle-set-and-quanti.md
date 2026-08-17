@@ -86,7 +86,7 @@ analogue does. #2771 clause 1 ratified `we:scripts/lib/review-escalation.mjs` **
 emptied by a committee-cleared PR with no human in the loop. A new file outside the roster is worse: it
 matches nothing in `we:scripts/lib/gate-config.mjs`'s `POLICY_SPEC_BASENAMES`
 (`we:scripts/lib/gate-config.mjs:355-374`) and nothing in `we:scripts/lib/review-escalation.mjs`'s
-`STATUTE_PATHS` (`:70-73`) or blast-radius set (`:237-252`), so it is an ordinary agent-clearable file. A
+`STATUTE_PATHS` (`:70-73`) or blast-radius set (`:245-254`), so it is an ordinary agent-clearable file. A
 declaration the gated path can rewrite is a **lower**-order instrument than the floor it claims to stack on —
 precisely the failure `Thoburn v Sunderland CC` describes, where a rule does not become immune by declaring
 itself so. Exactly one class of surface can be authoritative, so the choice is a real either/or.*
