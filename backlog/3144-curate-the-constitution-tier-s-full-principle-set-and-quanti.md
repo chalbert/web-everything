@@ -1,6 +1,7 @@
 ---
 bornAs: xgcpi2v
 kind: decision
+tier: pinned
 status: open
 dateOpened: "2026-08-16"
 tags: [constitution, spec, governance, reconciliation]

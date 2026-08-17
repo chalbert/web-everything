@@ -3,6 +3,7 @@ bornAs: xh56pz3
 shortTitle: "Constitution curation + form"
 kind: decision
 size: 3
+tier: pinned
 parent: "2527"
 status: open
 dateOpened: "2026-07-19"
