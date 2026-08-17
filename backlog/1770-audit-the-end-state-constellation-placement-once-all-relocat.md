@@ -6,6 +6,12 @@ relatedProject: webcomponents
 relatedReport: reports/2026-08-17-zero-impl-boundary-enforcement.md
 dateOpened: "2026-06-24"
 preparedDate: "2026-08-17"
+scope:
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/__tests__/
+  - we:docs/agent/platform-decisions.md
+scopeRationale: "The test entry is dir-level on purpose: this card carves THREE children (a re-pointed byte-parity gate, a new-path debt-root check, a coverage tripwire), and each adds NEW spec files under we:scripts/__tests__/ whose filenames do not exist yet, so they cannot be named at prep time. The three non-test entries are file-level, and each child takes its own narrower slice of this set at carve time (#2609) rather than inheriting the whole thing."
 tags: [placement, constellation, zero-implementation, devtools-placement, review-gate]
 ---
 
@@ -13,13 +19,15 @@ tags: [placement, constellation, zero-implementation, devtools-placement, review
 
 ## Digest
 
-**Verdict: ACCEPTED ON MERIT — pending a one-glance batch-confirm, not a ratify turn. Confidence: high.**
+This is a **go** — build the instrument — pending a one-glance batch-confirm rather than a ratify turn, at high
+confidence. Nothing here is a not-yet: the work is buildable the moment the nod lands.
 
 This card asked *"is the line tight (A), or are there residuals (B)?"* That is a **measurement, not a fork** —
 which branch obtains is a fact about the tree, settled by counting, and nobody chooses it. So prep did the
 counting. **The line is not tight**: ≈6,263 lines of delivery runtime remain under `we:blocks/` and a further
-5,883 across nine subsystem roots, one vendored generator has silently drifted 189 lines behind its canonical
-twin, and — the finding that matters — **nothing anywhere would have reported any of it**.
+5,883 across nine subsystem roots, one vendored generator has silently drifted behind its canonical twin
+(`we:scripts/gen-wrapper/genWrapper.mjs` 228 lines vs `fui:tools/gen-wrapper/genWrapper.mjs` 417; whole-directory
+437 vs 1,270), and — the finding that matters — **nothing anywhere would have reported any of it**.
 
 What is left for a human is one-sided: commit to building the instrument that reports it, or not. That is a
 **validation gate**, not a fork. And per #2092 the merit half is **flatly conceded, not conditional** — the rule
@@ -36,7 +44,7 @@ Commit to a **three-part instrument**, each part scoped deliberately narrowly:
 
 1. **Re-point the dormant byte-parity gate at the real duplicate set.**
    `validatePlugWeFuiDrift` + `PLUG_SHARED_CORE_FILES` (`we:scripts/check-standards-rules.mjs:1857`, wired at
-   `we:scripts/check-standards.mjs:1588` §8f) is a **built, unit-tested, `PLUG_DRIFT_ENFORCED = true`
+   `we:scripts/check-standards.mjs:1586` §8f) is a **built, unit-tested, `PLUG_DRIFT_ENFORCED = true`
    cross-repo byte-identity gate**. It is currently **vacuous**: its subject `we:plugs/` was deleted by #1047,
    so its `existsSync` guard is false and it checks nothing. This is the *only* mechanism that catches the
    gen-wrapper and ingest-adapter defects, and it already exists.
@@ -90,7 +98,7 @@ then ran it. **It fails on four independent counts, all measured:**
   paths yields 712 site / 1,114 standard / 124 impl / 4,256 neutral and **774 hard errors** — including 41 under
   `we:contracts/`, 26 under `we:conformance-vectors/`, 12 under `we:capability-manifest/` and 11 under
   `we:webcases/`, i.e. exactly the set the inventory below certifies as correctly placed.
-- **It misclassifies the contracts it promises to protect.** All 12 contract and types modules under
+- **It misclassifies the contracts it promises to protect.** All 13 contract and types modules under
   `we:blocks/` classify as errors, because the standard-surface matchers only reach `we:src/_data/`.
 - **It is green on both defects that motivate it.** `we:scripts/gen-wrapper/` would be allow-listed as known
   debt, and the observed drift is **FUI growing while WE stands still** — the WE-side count never moves, so the
@@ -106,7 +114,7 @@ disappears without anyone noticing**. Four instances, all verified:
 | Instance | How it lost its subject |
 | --- | --- |
 | `validatePlugWeFuiDrift` (#1304/#1350) | A real cross-repo byte-parity gate, `PLUG_DRIFT_ENFORCED = true` — went **vacuous** when #1047 deleted `we:plugs/`. Guarded by `existsSync`, so it reports success while checking nothing. |
-| §9c codegen-placement invariants (#964) | `we:scripts/check-standards.mjs:1786` reads a MaaS module under `we:blocks/renderers/module-service/` that #1730 deleted. `existsSync`-guarded — arm (2) silently went dead. |
+| §9c codegen-placement invariants (#964) | `we:scripts/check-standards.mjs:1787` reads a MaaS module under `we:blocks/renderers/module-service/` that #1730 deleted. `existsSync`-guarded — arm (2) silently went dead. |
 | The gen-wrapper reference fixture | Sanctioned as a "reference fixture" by #892 on **2026-06-18**; #1282 withdrew the reference-implementation tier *wholesale* on **2026-06-20**. It **survived its own repeal by two days**, because a ruling changes a rule but enumerates nothing. |
 | #1245's slice coverage | Its plan named 16 block families; four were carved into items. All four resolved, so the epic reads done while its declared *first, load-bearing* target is untouched. |
 
@@ -124,9 +132,9 @@ build debris is excluded (a working-tree sweep produced three phantom "orphaned 
 
 | Soft spot | Status 2026-08-17 |
 | --- | --- |
-| `we:tools/maas/vite-plugin.ts` | ✅ **Gone.** `we:tools/` holds only `we:tools/trait-enforcer/traitManifestContract.ts`. Canonical is `fui:tools/maas/vite-plugin.mjs`. Deleted by #1730. |
+| `we:tools/maas/vite-plugin.ts` | ✅ **Gone.** `we:tools/` holds only `we:tools/trait-enforcer/traitManifestContract.ts` (plus its `__tests__/` companion). Canonical is `fui:tools/maas/vite-plugin.mjs`. Deleted by #1730. |
 | `we:scripts/ingest-adapter/ingestComponent.mjs` vs `fui:tools/ingest-adapter/ingestComponent.mjs` | ⚠️ **Byte-identical today** (md5 `fc13d68d…`, 208 lines each) — but **ungated**, and identical only by luck; both have been frozen since June. |
-| `we:scripts/gen-wrapper/` vs `fui:tools/gen-wrapper/` | ❌ **Drifted.** WE 228 lines vs FUI 417 (263 diff lines); FUI gained the whole #1518 live-mount variant system, absent from WE. WE's copy last touched 2026-06-17, FUI's 2026-06-22. Its header self-declares `⚠ REFERENCE FIXTURE, NOT A STANDARD` — the tier #1282 withdrew. |
+| `we:scripts/gen-wrapper/` vs `fui:tools/gen-wrapper/` | ❌ **Drifted, at both scales.** *Per file:* `we:scripts/gen-wrapper/genWrapper.mjs` is **228 lines** against `fui:tools/gen-wrapper/genWrapper.mjs`'s **417** (263 diff lines) — FUI gained the whole #1518 live-mount variant system, absent from WE. *Per directory:* WE holds **437 tracked lines across 3 files**, FUI **1,270 across 11** — FUI additionally carries `fui:tools/gen-wrapper/surfaceContract.mjs`, `fui:tools/gen-wrapper/wrapperFormCatalog.mjs`, a `fui:tools/gen-wrapper/templates/` emitter, `fui:tools/gen-wrapper/ADDING-A-TARGET.md` and three `.d.ts` files that WE has no counterpart for. WE's copy last touched 2026-06-17, FUI's 2026-06-22. Its header self-declares `⚠ REFERENCE FIXTURE, NOT A STANDARD` — the tier #1282 withdrew. |
 | `we:blocks/renderers/module-service/` | ✅ **Contract-only** — a 204-line pure data-and-types IR module ("no imports"), a 126-line OpenAPI projection, and the OpenAPI/golden JSON. Its reference fetch handler went with #1730. |
 
 **The residual mass** (tracked, non-test, TypeScript). Under `we:blocks/` the total is **8,960** lines; deducting
@@ -154,7 +162,7 @@ goes to FUI.
 outside it.
 
 **Cross-repo duplication:** counting tracked files at the **same relative path** in both repos across the
-TypeScript, JavaScript, JSON, CSS and HTML extensions — **92 pairs, 30 byte-identical, 62 drifted**. (A wider
+TypeScript, JavaScript, JSON, CSS and HTML extensions — **91 pairs, 30 byte-identical, 61 drifted**. (A wider
 file-set definition yields 109/30/79; the count is definition-sensitive, so the method is stated rather than the
 number asserted. Either way the drifted set is large and ungated.) Note this excludes the two headline
 generators, which sit at *different* relative paths — `we:scripts/` versus `fui:tools/` — which is precisely why
@@ -220,6 +228,20 @@ enforce. The split gives the arrow; only a within-repo instrument gives the empt
 - **Ownership of the debt roots:** [constellation-placement](../docs/agent/platform-decisions.md) `:172`–`:174`
   assigns the non-engine subsystems to the deferred conformance-model decision **#1784**, not to #1294/#1245. Any
   seeded debt list must carry #1784 as owner where the anchor does.
+- **Deliberately excluded from this card's scope — carried forward verbatim in substance from the pre-prep
+  body, so the record of what this audit does *not* cover is not lost to the rewrite:**
+  - **The WE-docs dogfooding migrations** (#777, #866, #1599–#1613, #1208). Those move the docs *site* onto FUI
+    components — a **consumer-dogfooding axis**, not a question of where a tool or runtime is homed. They would
+    be folded in only if this audit were widened to cover docs-surface consumption, which it is not.
+  - **#1743** (re-home the geometry core into a shared region-select module). Listed here at filing, then
+    **removed on 2026-06-24 with reasons**: it is a FUI-internal marquee-select refactor (parent #1734), not a
+    cross-constellation tool/runtime relocation, so it does not bear on the zero-impl / standard·impl·product
+    line this gate audits. The removal stands — it is recorded, not re-opened.
+  - **The 2026-06-29 prep note.** An earlier `/prepare all` pass assessed this card *"not preppable ahead —
+    deliberately deferred, not skipped"*, on the premise that the A/B answer **is** the constellation-wide
+    inventory and so could not be run until the relocations landed. That premise is now **superseded, not
+    contradicted**: prep ran the inventory anyway (2026-08-17) and found the answer is B, which is exactly what
+    reveals that the ratifiable question was never A-vs-B but *what instrument reports it*.
 - **Surfaced** 2026-06-24 during a constellation-wide WE-vs-FUI tool-placement review — the inventory that
   *cleared* gen-wrapper, ingest-adapter and MaaS as "on the right side of the line". Grounds:
   `we:docs/agent/platform-decisions.md` (#1246/#1282 zero-impl; #1565/#1566/#1771 the carve-out bounds), #1747.
@@ -239,12 +261,17 @@ against the case where part 1's own subject is retired by #872.
 
 **Un-gate trigger — and the `blockedBy` consequence, stated precisely so the card is not both blocked and
 buildable.** As filed, this card's deliverable was an *audit of the relocations*, which genuinely had to wait for
-them; that is why the three edges exist. Under this verdict the deliverable changes to *an instrument that
-reports on the relocations*, which does not. **So on a GO the three `blockedBy` edges drop as a direct
-consequence of the verdict** — the epics become what the instrument reports on, not what gates it. Prep has
-**not** enacted that: the frontmatter still carries `blockedBy: ["1294","1245","872"]`, because dropping the
-edges is the verdict's consequence, not prep's to apply. (Prep pruned only the three *already-resolved* edges,
-which is mechanical normalization.) Until the batch-confirm, the card reads blocked, and that is correct.
+them; that is why the edges exist. Under this verdict the deliverable changes to *an instrument that reports on
+the relocations*, which does not. **So on a GO, two of the three `blockedBy` edges drop as a direct consequence
+of the verdict — #1294 and #1245 — while #872 stays.** #1294 and #1245 are relocation epics: they become what
+the instrument *reports on*, not what gates it. **#872 does not drop**, for the reason recorded in *Dependencies
+& lineage* above: [constellation-placement](../docs/agent/platform-decisions.md) `:175`–`:179` gates a residence
+end-state on #872 explicitly, and rule 3 at `:194`–`:196` holds that *"byte-replication is the interim"* — #872
+is precisely what retires the byte-replication that produced the vendored generator pair part 1 gates. Dropping
+it would contradict the anchor this card exists to enforce. Prep has **not** enacted any of this: the frontmatter
+still carries `blockedBy: ["1294","1245","872"]`, because dropping edges is the verdict's consequence, not prep's
+to apply. (Prep pruned only the three *already-resolved* edges, which is mechanical normalization.) Until the
+batch-confirm, the card reads blocked, and that is correct.
 
 **The original resolve-status trigger is withdrawn as unsound, which needs no ratification** — it is a finding.
 #1245's four filed children are all `resolved` while `we:blocks/router/` stands untouched, so "all `blockedBy`
@@ -261,11 +288,13 @@ its **own** slice of the touch-set, never the whole set, per #2609):
 | Coverage tripwire for subject-less guarded checks | `we:scripts/check-standards.mjs` |
 | Amend the constellation-placement anchor to name the carrier | `we:docs/agent/platform-decisions.md` |
 
-**Graduated findings — routed to their owners, not children of this card.** Re-slicing #1245 against the measured
-residual set (router first) and dropping its own stale `blockedBy: [1353]` belongs to **#1245**, which is one of
-this card's blockers — filing it as a child here would be circular. Likewise the 62 drifted same-path WE↔FUI pairs
-are a cross-repo drift concern that part 1's pair list only partly covers; they route to their own follow-up
-rather than widening this instrument.
+**Graduated findings — routed to a named owner each, and the routing is enacted, not promised.** Neither is a
+child of this card; both are filed elsewhere, so neither graduates to nobody:
+
+| Finding | Owner (filed) |
+| --- | --- |
+| All four of #1245's filed children are `resolved` while its declared *first, load-bearing* target `we:blocks/router/` (2,843 lines, 19 files) is untouched; its own `blockedBy: [1353]` is stale (#1353 resolved 2026-06-27) | **`we:backlog/xyp34m5-blocks-router-2843-lines-was-1245-s-declared-first-target-an.md`** — filed 2026-08-17, `relatedTo: ["1245","1770"]`, `scope: ["we:blocks/router/"]`. A `## Done when` note pointing at it is added to `we:backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an.md` in this same change. Filing it as a child of *this* card would be circular — #1245 is one of this card's own blockers. |
+| 91 same-path WE↔FUI file pairs, 61 drifted, no reconciliation gate in either repo — part 1's hand-authored pair list targets the *different*-path generators and does not cover this set | **`we:backlog/xq9zmea-gate-the-61-drifted-same-path-we-fui-file-pairs-nothing-reco.md`** — filed 2026-08-17, `relatedTo: ["1770","872"]`. Deliberately kept out of part 1: widening the pair list to all 91 would re-import the breadth this card rejects, so it gets its own triage-then-gate item instead. |
 
 **Skeptic:** REFUTED-AND-REBUILT — the verdict survives, the original proposal did not. An independent
 attack-only pass verified the grounding against both trees and broke the first draft on four counts, all folded
@@ -290,7 +319,7 @@ concerns two *physical carriers* and does not reach description-vs-enforcement, 
 and a claimed precedent at `we:scripts/check-standards-rules.mjs:2109` was **false** (that line is the #2180
 untracked-artifact guard, which names its *watched* set — the opposite pattern) and has been removed rather than
 re-cited. Two of the attack's own numbers did not reproduce and are handled honestly above: the cross-repo pair
-count is definition-sensitive (92/30/62 at same-relative-path, stated with its method), and the ratchet's seeded
+count is definition-sensitive (91/30/61 at same-relative-path, stated with its method), and the ratchet's seeded
 line budgets were dropped entirely in favour of a **path-set** ratchet, which removes the class of error the
 attack found (9 of 14 budgets wrong, and a line budget perversely fails the build for adding a unit test).
 
@@ -313,7 +342,7 @@ breakdown — recomputed from `git ls-files` to ≈6,263 lines, with family tota
 figures that deliberately do not partition it; (2) the card read as both blocked and buildable — the `blockedBy`
 consequence is now stated as a consequence *of the verdict*, un-enacted by prep, so the card correctly reads
 blocked until the confirm; (3) a listed child re-sliced #1245, one of this card's own blockers — circular, so it
-is now a graduated finding routed to #1245 rather than a child; (4) "the six subsystem roots" was never
+is now a graduated finding filed as its own item (`we:backlog/xyp34m5-…`) rather than a child; (4) "the six subsystem roots" was never
 enumerated and the inventory named five — measured and corrected to **nine**, listed explicitly; (5) part 3 was
 ranked least-evidenced while the four-instance failure-mode table *is* its evidence — promoted, the carve-off
 offer withdrawn, and its strongest argument surfaced (part 1's own subject is retired by #872, so only part 3

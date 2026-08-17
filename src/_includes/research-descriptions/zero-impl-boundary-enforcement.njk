@@ -16,29 +16,44 @@ aggregate result: <em>is the line tight (A), or are there residuals (B)?</em></p
   month later — a codified placement map written into the statute, or a standing machine check?</p>
 </blockquote>
 
-<h2>Finding — the fork dissolves, and the prior art says how</h2>
+<h2>Finding — the fork dissolves, and the answer is a NARROW instrument</h2>
 
-<p><strong>The doc-versus-check framing is a false either/or.</strong> The two strongest analogues to this repo's
-situation — <a href="https://github.com/open-feature/spec">OpenFeature's specification repo</a> and
-<a href="https://github.com/tc39/test262">TC39's test262</a> — resolve it with a single mechanism:</p>
+<p><strong>The survey's conclusion, up front, so the rest reads in its light: the recommended instrument is
+narrow and coverage-reporting — a new-path check over nine named debt roots, a re-pointed byte-parity gate on a
+hand-authored pair list, and a tripwire that errors when a check's subject has vanished.</strong> It is
+explicitly <em>not</em> a whole-tree classifier and <em>not</em> a regenerated canonical map. That broad shape was
+drafted, run against the real repo, and <strong>rejected on measurement</strong> — see
+<a href="#the-correction">the correction</a> below, which is a finding of this survey, not a caveat on it.</p>
+
+<p>Two separate things dissolved. <strong>First, the doc-versus-check framing is a false either/or</strong> — the
+prior art shows a map and a check can be one mechanism, which is why nobody has to choose. The two strongest
+analogues — <a href="https://github.com/open-feature/spec">OpenFeature's specification repo</a> and
+<a href="https://github.com/tc39/test262">TC39's test262</a> — do it like this:</p>
 
 <ol>
-  <li>a script walks <strong>every tracked path</strong> and classifies each against a declared ignore list;</li>
+  <li>a script walks the classified surface and classifies each path against a declared ignore list;</li>
   <li>it <strong>regenerates a canonical map artifact</strong> from that classification;</li>
   <li>CI fails if the committed artifact differs from the regenerated one.</li>
 </ol>
 
 <p>OpenFeature's is <code>.specignore</code> + a markdown parser → <code>specification.json</code>, gated by
 <code>git diff --name-only</code> in <code>pr-checks.yaml</code>. test262's is <code>./make.py</code> plus an
-untracked-changes check. You get the ratified, reviewable inventory <em>and</em> the standing fail-closed guard from
-one piece of code — and the map cannot go stale, because the only way to change it is to change what the classifier
-sees.</p>
+untracked-changes check. The transferable lesson is the <em>relationship</em> — the map is a projection of the
+classifier, so it cannot go stale — <strong>not the scope</strong>. Both of those repos are homogeneous corpora
+of spec text and test files; this repo is not, which is exactly what the measurement below shows.</p>
 
-<p>This is <a href="https://www.cs.ubc.ca/~murphy/papers/rm/fse95.html">Murphy, Notkin &amp; Sullivan's Software
-Reflexion Models</a> (FSE-3, 1995; ACM SIGSOFT Retrospective Impact Paper Award), thirty years early. Their opening
-claim is the whole argument: high-level models <em>"are almost always inaccurate with respect to the system's source
-code."</em> Their fix is not a better document — it is to keep the map but <strong>demote it from truth to
-hypothesis</strong> and let a tool compute where map and code diverge.</p>
+<p><strong>Second, "walk every tracked path" does not transfer.</strong> Run over this repo it red-gates the very
+directories the inventory certifies as correctly placed, and it is green on both defects that motivate it. So the
+mechanism carries over and the breadth does not: keep the projection relationship, shrink the subject to the
+named debt roots.</p>
+
+<p>The underlying principle is <a href="https://www.cs.ubc.ca/~murphy/papers/rm/fse95.html">Murphy, Notkin &amp;
+Sullivan's Software Reflexion Models</a> (FSE-3, 1995; ACM SIGSOFT Retrospective Impact Paper Award), thirty years
+early. Their opening claim is the whole argument: high-level models <em>"are almost always inaccurate with respect
+to the system's source code."</em> Their fix is not a better document — it is to keep the map but <strong>demote
+it from truth to hypothesis</strong> and let a tool compute where map and code diverge. Notably, a Reflexion Model
+is scoped to a <em>declared subsystem map</em>, not to every file in the tree — the narrow reading is the faithful
+one.</p>
 
 <h2>Enforcement tooling — who actually fails on an unclassified file</h2>
 
@@ -248,17 +263,29 @@ hard error. Its fork-existence justification was <em>"a glob manifest and a dire
 mechanics for the same classification — maintaining both is redundant drift."</em></p>
 
 <p><strong>The impl axis has no such carrier.</strong> Grepping the repo's scripts, git hooks and CI workflows for the
-zero-implementation ruling's own lineage returns two prose comments and no check. The rule's operative clause —
-<em>"no <strong>new</strong> WE-resident delivery runtime may be added"</em> — is held by model judgment alone.</p>
+zero-implementation ruling's own lineage (<code>1282</code>, <code>1246</code>, <code>zero-impl</code>, "delivery
+runtime", "WE-resident") over non-test <code>.mjs</code> sources returns <strong>7 hits</strong>: five are prose
+comments that assert the rule without testing anything, and two belong to <code>guard-backward-edge.mjs</code> — its
+file header and a live deny-message string in an <em>enforcing</em> hook. So the honest claim is not "no code
+mentions the rule". It is that <strong>none of the seven enforces the residency clause</strong>: the five cannot,
+and the hook enforces a <em>different</em> clause (it denies a static <code>@frontierui</code> import) at a scope
+documented as WE's own <code>src/**</code> — which excludes the entire <code>blocks/</code> subtree where the
+residual runtime actually lives, including the ten files there that already carry that very import. The operative
+clause — <em>"no <strong>new</strong> WE-resident delivery runtime may be added"</em> — is held by model judgment
+alone.</p>
 
 <p>And the cost of that is already measurable. The decision card's own lineage records a constellation-wide hand
-inventory on 2026-06-24 that explicitly <em>cleared</em> the gen-wrapper fixture. Eight weeks later the WE copy stands
-at 228 lines against Frontier UI's 417, missing an entire feature system. Sharper still: that fixture was sanctioned
-as a "reference fixture" on 2026-06-18, and the ruling that withdrew the reference-implementation tier
-<em>wholesale</em> landed two days later, on 2026-06-20. <strong>It survived its own repeal</strong> — because a
-ruling changes a rule but enumerates nothing.</p>
+inventory on 2026-06-24 that explicitly <em>cleared</em> the gen-wrapper fixture. Eight weeks later
+<code>we:scripts/gen-wrapper/genWrapper.mjs</code> stands at <strong>228 lines</strong> against
+<code>fui:tools/gen-wrapper/genWrapper.mjs</code>'s <strong>417</strong>, missing an entire feature system — and at
+directory scale the gap is wider still: <strong>437 tracked lines across 3 files</strong> in WE against
+<strong>1,270 across 11</strong> in Frontier UI, which additionally carries a surface-contract module, a wrapper
+form catalog, a template emitter and three type-declaration files that WE has no counterpart for. Sharper still:
+that fixture was sanctioned as a "reference fixture" on 2026-06-18, and the ruling that withdrew the
+reference-implementation tier <em>wholesale</em> landed two days later, on 2026-06-20. <strong>It survived its own
+repeal</strong> — because a ruling changes a rule but enumerates nothing.</p>
 
-<h2>The correction — why the broad instrument is the wrong lesson</h2>
+<h2 id="the-correction">The correction — why the broad instrument is the wrong lesson</h2>
 
 <p>The obvious reading of everything above is "so widen the classifier to the whole tree". That reading was drafted,
 executed against the real repo, and <strong>fails</strong>. Run over all 6,980 tracked paths it produces

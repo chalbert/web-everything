@@ -45,25 +45,39 @@ concession is not the human validation.
 
 ### 1. The zero-impl rule has no enforcement whatsoever
 
-Grepping `we:scripts/`, `.githooks/` and `.github/workflows/` for the rule's own lineage (`1282`, `1246`,
-`zero-impl`, "delivery runtime", "WE-resident") returns **two hits, both prose comments**, both belonging to the
-#2052 standard-vs-site classifier. There is no `check:no-impl` and no path classifier over `we:blocks/`. The
-clause *"no **new** WE-resident delivery runtime may be added"* is enforced by model judgment alone.
+There is no `check:no-impl` and no path classifier over `we:blocks/`. The clause *"no **new** WE-resident
+delivery runtime may be added"* is enforced by model judgment alone.
 
-The nearest guard, `we:scripts/guard-backward-edge.mjs`, denies a static `@frontierui` import — but its
-documented scope (`:13`) is WE's own `src/**`. Ten non-test files under `we:blocks/` already carry that import
-and every one sits outside the scope.
+**What the grep actually returns, stated precisely.** Searching `we:scripts/`, `.githooks/` and
+`.github/workflows/` for the rule's own lineage (`1282`, `1246`, `zero-impl`, "delivery runtime", "WE-resident")
+over non-test `.mjs` sources yields **7 hits**:
+
+- **5 are prose** — explanatory comments that assert the rule without testing anything:
+  `we:scripts/grammar-scorecard.mjs:26`, `we:scripts/parity-conformance.mjs:22`,
+  `we:scripts/lib/component-tokens.mjs:16`, and the two belonging to the #2052 standard-vs-site classifier,
+  `we:scripts/check-standards-rules.mjs:2039` and `we:scripts/check-standards.mjs:1880`.
+- **2 belong to an enforcing hook** — `we:scripts/guard-backward-edge.mjs:4` (its file header) and
+  `we:scripts/guard-backward-edge.mjs:121` (a live deny-message string, not a comment). That hook is real
+  enforcement, so the honest claim is *not* "nothing cites the rule in executable code."
+
+**The finding rests on scope, not on the count.** `we:scripts/guard-backward-edge.mjs` enforces a *different*
+clause — it denies a static `@frontierui` import (the backward module edge) — and its documented scope (`:13`)
+is WE's own `src/**`. Ten non-test files under `we:blocks/` already carry that import and every one sits
+**outside** that scope. So **none of the 7 hits enforces the residency clause**: five cannot (they are prose)
+and two do not (wrong clause, and a scope that excludes the entire subtree where the residual runtime lives).
+Two further hits in the data file `we:scripts/lib/output-mix-paths.json` (`:9`, `:348`) are classification prose
+in a JSON corpus, not code, and are excluded from the 7 for that reason.
 
 ### 2. The repo already built the right instrument, then deleted its subject
 
-`validatePlugWeFuiDrift` (`we:scripts/check-standards-rules.mjs`, wired at `we:scripts/check-standards.mjs:1588`
+`validatePlugWeFuiDrift` (`we:scripts/check-standards-rules.mjs`, wired at `we:scripts/check-standards.mjs:1586`
 §8f) is a **cross-repo byte-identity gate** with a curated `PLUG_SHARED_CORE_FILES` list and
 `PLUG_DRIFT_ENFORCED = true`. It is exactly the shape needed for the two vendored-generator defects. It is
 **vacuous**: `we:plugs/` was deleted by #1047, its `existsSync` guard is false, and it reports success while
 checking nothing.
 
 The same pattern killed a second check. §9c *codegen-placement invariants* (#964) at
-`we:scripts/check-standards.mjs:1786` reads a MaaS module that #1730 deleted; `existsSync`-guarded, arm (2)
+`we:scripts/check-standards.mjs:1787` reads a MaaS module that #1730 deleted; `existsSync`-guarded, arm (2)
 silently went dead.
 
 ### 3. The real failure mode is silent scope-loss, not stale documentation
@@ -109,7 +123,7 @@ Against that: the relocations that ran, ran cleanly. `we:tools/maas/vite-plugin.
 moves — it is that nothing holds the line between them.
 
 **Cross-repo duplication:** at the **same relative path**, across TypeScript/JavaScript/JSON/CSS/HTML —
-**92 pairs, 30 byte-identical, 62 drifted**, no reconciliation gate live. A wider file-set definition gives
+**91 pairs, 30 byte-identical, 61 drifted**, no reconciliation gate live. A wider file-set definition gives
 109/30/79; the number is definition-sensitive, so the method is stated. Notably this measure **misses** the two
 headline generators, which sit at different relative paths (`we:scripts/` vs `fui:tools/`) — which is why the
 re-pointed gate needs a declared pair list rather than a path-equality sweep.
@@ -120,7 +134,7 @@ Widening #2052's `classifySurfacePaths` from its `src/` zone to the whole tracke
 Running the drafted matcher set verbatim over all 6,980 tracked paths: 712 site / 1,114 standard / 124 impl /
 4,256 neutral / **774 hard errors** — including 41 under `we:contracts/`, 26 under `we:conformance-vectors/`, 12
 under `we:capability-manifest/`, 11 under `we:webcases/`: precisely the set finding 4 certifies as correctly
-placed. All 12 contract and types modules under `we:blocks/` also error, because the standard-surface matchers
+placed. All 13 contract and types modules under `we:blocks/` also error, because the standard-surface matchers
 only reach `we:src/_data/`.
 
 Worse, it is **green on both motivating defects**. gen-wrapper would be allow-listed as known debt, and the
