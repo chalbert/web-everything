@@ -97,3 +97,47 @@ describe('regenerateStaged — #1414 review bounce reproduction (unstaged AGENTS
     expect(git('diff', '--cached', '--name-only')).toBe('');
   });
 });
+
+describe('regenerateStaged — #1414 review round 2 (real default body must count the git INDEX, not the working tree)', () => {
+  // Every test above passes an explicit `body`, which never exercises regenerateStaged()'s REAL
+  // default (`body = renderInventory(loadIndexRegistries(root))`). This suite calls it with NO body
+  // override, so the real renderInventory()-sourced count runs end-to-end — reproducing the
+  // reviewer's exact repro: a staged registry file plus an UNTRACKED sibling file in the SAME
+  // registry dir. The old default called renderInventory() with no args, which reads the six
+  // registry dirs via readdirSync over the working tree — so the untracked sibling inflated the
+  // committed count even though `git ls-tree` shows it never landed.
+  it('staged registry file + untracked sibling in the same dir: committed count matches only tracked/staged files', () => {
+    mkdirSync(join(dir, 'src/_data/researchTopics'), { recursive: true });
+    // One file already committed in the initial commit's tree (so the baseline research count is 1).
+    writeFileSync(join(dir, 'src/_data/researchTopics/a.json'), '{"id":"a","status":"open"}\n');
+    git('add', 'src/_data/researchTopics/a.json');
+    commit('seed one research topic');
+
+    // Stage a SECOND, real research topic — this is what should move the count to 2.
+    writeFileSync(join(dir, 'src/_data/researchTopics/b.json'), '{"id":"b","status":"open"}\n');
+    git('add', 'src/_data/researchTopics/b.json');
+
+    // An UNTRACKED sibling sitting in the exact same dir — never `git add`ed. Must NOT count.
+    writeFileSync(join(dir, 'src/_data/researchTopics/wip.json'), '{"id":"wip","status":"open"}\n');
+
+    // No `body` override — exercises the REAL default (renderInventory() over the git INDEX).
+    const wrote = regenerateStaged({ root: dir });
+    expect(wrote).toBe(true);
+
+    commit('stage a second research topic, leave an untracked sibling');
+
+    const committedAgents = git('show', 'HEAD:AGENTS.md');
+    expect(committedAgents).toContain('**Research topics** 2'); // tracked+staged count only
+    expect(committedAgents).not.toContain('**Research topics** 3'); // NOT the untracked sibling's inflated count
+
+    // Ground truth: what actually landed in the commit.
+    const landed = git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src/_data/researchTopics')
+      .trim().split('\n').filter(Boolean);
+    expect(landed.sort()).toEqual(['src/_data/researchTopics/a.json', 'src/_data/researchTopics/b.json']);
+    expect(landed).not.toContain('src/_data/researchTopics/wip.json');
+
+    // And the untracked file is still sitting there, untouched, still not part of git's state.
+    const status = git('status', '--porcelain', 'src/_data/researchTopics/wip.json');
+    expect(status.trim()).toBe('?? src/_data/researchTopics/wip.json');
+  });
+});

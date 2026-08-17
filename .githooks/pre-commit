@@ -16,9 +16,13 @@ npm run --silent lint:locus || exit $?
 # `review:accepted` PR, costing a full round-trip). `gen:inventory --staged` is a self-contained AUTO-FIX,
 # not a blocking gate: it no-ops unless the commit stages an inventory-affecting file (a per-entry
 # registry under src/_data/{blocks,plugs,intents,semantics,researchTopics,projects}/ or AGENTS.md
-# itself), and when it regenerates it `git add`s AGENTS.md back into the SAME commit — so a normal
-# `git commit` that touches inventory-affecting content simply can't produce a stale AGENTS.md. Costs
-# under half a second (measured) since it only reads the small per-entry JSON registries, so it runs
+# itself), and when it regenerates it writes the new AGENTS.md blob directly into the INDEX (git
+# update-index — never a working-tree `git add`, which would risk sweeping an unrelated unstaged
+# AGENTS.md edit into the commit, #1414 review) — so a normal `git commit` that touches
+# inventory-affecting content simply can't produce a stale AGENTS.md. Counts are read from the git
+# INDEX too (not readdirSync over the working tree, #1414 review round 2), so an untracked sibling
+# file dropped in a registry dir can't inflate the committed count either. Costs under a fraction of
+# a second (measured) since it only reads the small per-entry JSON registries, so it runs
 # unconditionally rather than trying to be cleverer about scoping. `check:standards`'s `kind: 'inventory'`
 # check stays as a CI backstop for any commit path that bypasses this hook (e.g. `--no-verify`).
 npm run --silent gen:inventory:staged || exit $?
