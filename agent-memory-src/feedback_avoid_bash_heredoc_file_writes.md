@@ -29,9 +29,12 @@ rather than assuming a Bash redirect behaves identically.
 **Why not `os.tmpdir()`:** an earlier version of this note recommended `os.tmpdir()` as the fix.
 It resolves OUTSIDE the repo's working directory (confirmed live: `os.tmpdir()` is
 `/var/folders/.../T` on macOS, not the literal path `/tmp` — never hardcode `/tmp`, always call the
-function), so `acceptEdits`/`auto` mode's working-directory auto-approval scope does not cover it.
-A path inside the repo's working directory is the one location that is simultaneously outside every
-protected directory AND inside the auto-approval scope both modes give file edits directly.
+function), so `acceptEdits`/`auto` mode's working-directory auto-approval scope does not cover it. A plain,
+non-protected path inside the repo's working directory (i.e. inside it but NOT under `.git/`,
+`.claude/`, or another protected directory — those are protected regardless of being in-scope) is
+simultaneously outside every protected directory AND inside the auto-approval scope both modes give
+file edits directly. (`additionalDirectories` extends this same scope to other configured paths too,
+if the working directory itself isn't the right place.)
 
 **The original motivating case:** `we:scripts/review-set-label.mjs`'s `--body-file` validation (not
 `pr-land.mjs`, which has no such restriction) allows `resolve(process.cwd())` or
@@ -41,9 +44,12 @@ path satisfies it. `.git/tmp-review-bodies/` was an unnecessary detour into a gu
 a plain path under the invoking directory would have worked from the start.
 
 **One more thing to watch:** an untracked scratch file inside the repo's working directory will show
-up in `git status` and could be swept into a commit by a broad `git add -A`/`git add .` — this repo's
-own `guard-git-branch.mjs` hook already denies exactly that pattern for this reason, but don't rely
-on that existing elsewhere; clean up scratch files explicitly when done with them.
+up in `git status` and could be swept into a commit by a broad `git add -A`/`git add .` — a
+**user-global** `~/.claude/hooks/guard-git-branch.mjs` hook (registered in `~/.claude/settings.json`,
+not this repo's own `.claude/settings.json`, which registers a different Bash hook with no such
+denial) happens to deny exactly that pattern for this operator, in every repo on this machine — but
+that is a personal, machine-local safeguard, not something this or any other repo ships. Don't rely
+on it existing; clean up scratch files explicitly when done with them.
 
 This applies generally, not just to this one repo or script. This note went through several rounds
 of independent review before landing, each catching a genuine error (wrong mechanism, a remediation
