@@ -36,6 +36,8 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+import { exploreOperation, EXPLORE_OP } from './explore.mjs';
+import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -93,6 +95,19 @@ export const OPERATIONS = Object.freeze({
   [CLAIM_OP]: () => ({
     declaration: claimOperation({ readClaimContext: createClaimReader() }),
     sinks: createClaimSinks(),
+  }),
+  // #3150 — the multi-agent committee. The SECOND operation whose effects start work instead of finishing it,
+  // and the proof that #3037's long-running-effect machinery generalises: it reuses `dispatch: true` +
+  // `inFlight(handle)` + the observer contract whole and adds no mechanism of its own. Its declaration takes NO
+  // injected reader — every input is a declared field and the panel's reports arrive on the run record as the
+  // `investigate` step's own finding — so this entry binds sinks only. The matching OBSERVER is registered by
+  // the waker (`we:scripts/operations/wake.mjs`), which is the process that polls it.
+  [EXPLORE_OP]: () => ({
+    declaration: exploreOperation(),
+    // The SAME `WE_DISPATCH_AGENT_ARGS` a dispatched delivery agent runs under, and deliberately not a second
+    // knob: a committee panelist and a delivery agent are the same kind of spawned background session, so an
+    // operator who set the permission mode for one meant it for both. Unset → no extra flags.
+    sinks: createExploreSinks({ extraArgs: exploreAgentArgsFromEnv() }),
   }),
 });
 
