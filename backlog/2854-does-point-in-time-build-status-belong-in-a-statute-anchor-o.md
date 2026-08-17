@@ -12,7 +12,7 @@ tags: [conveyor, statute, governance, authoring, anchor-shape, decision-prep]
 # Does point-in-time build status belong in a statute anchor, or on the decision item?
 
 A ratified rule is timeless; what is built so far is not. PR #982 put both in the same anchor, and the result is a
-655-word rule (doc median 324) whose sentences go false when #2785 lands. Decide where build status lives: inside the
+714-word rule (doc median 324) whose sentences go false when #2785 lands. Decide where build status lives: inside the
 anchor that states the rule, or on the decision item and the open guards. The call also fixes the shape of #2849,
 which currently *requires* such prose to name a retiring item — institutionalising it rather than resolving it.
 
@@ -28,8 +28,9 @@ violation. Both are right about their half, so this is a genuine fork, not an au
 
 Measured against `we:docs/agent/platform-decisions.md` on `main` @ `a6ac95e9`:
 
-- `#fix-review-convergence-independent-root-cause` is **655 words** (corpus median 324, p90 633 — top ~8% of 108
-  anchors) and grew 427 → 655 (**+53%**) in the round asked to CUT duplication.
+- `#fix-review-convergence-independent-root-cause` is **714 words** as of this refresh (2026-08-17; corpus median
+  324, p90 633 — top ~8% of 125 anchors, rank 116/125) and grew 427 → 655 → 714 in the rounds asked to CUT
+  duplication. It is still growing, not stabilizing.
 - Its invariant 1 is a single **277-word** paragraph. The longest paragraph in each anchor it cites:
   `#review-human-declarative-leash-only` 149, `#agent-convergence-independent-validation` 149,
   `#contract-split-for-tier-ownership` 126, `#small-file-preference` 179.
@@ -78,20 +79,30 @@ that holds up, (b) is the flawed branch.
 - **(a) On the decision item and the open guards; the anchor states only the rule.** *(bold default)* The anchor is
   cite-able authority and should read the same in a year. Build status is exactly what the backlog already tracks,
   and every reader who needs it has the item id. Cost: an anchor can state a rule that is not yet enforced with no
-  in-place warning — mitigated by requiring a link to the enforcing item. **Scope note:** #2844 clause 3 already
-  requires this link, but only for *catalogued* operational invariants (`we:scripts/lib/invariant-catalogue.json`,
-  gated by `validateInvariantEnforcers`) — this decision extends the same discipline (state the rule, link the
-  status) to *every* point-in-time claim an anchor makes, catalogued or not.
+  in-place warning — this is currently **unmitigated**, not mitigated: the corrected scope note below explains why.
 - **(b) Inside the anchor, as PR #982 does.** A reader citing the rule sees immediately that it is not in force.
   Cost: the anchor goes stale silently, and this is what produced the 277-word paragraph — and, per *The evidence*
   above, already produced two rounds of drift inside two weeks.
-- **(c) A dedicated machine-readable field.** **Not hypothetical — a narrower version already ships:**
-  `we:scripts/lib/invariant-catalogue.json` records `status: "enforced"|"judgment-only"`, an `owedTo` open-item
-  pointer, and an `anchor` back-link for each *catalogued* operational invariant, gated by `validateInvariantEnforcers`
-  (#2844) to require every entry name a real enforcer or an open `owedTo`. This proves the field-per-claim shape
-  works. What's missing — and genuinely highest-cost — is generalizing it from a curated catalogue to *arbitrary*
-  anchor prose (the free-text tokens `today`/`not yet`/`build-pending` #2849 targets), which needs the `/rules/`
-  renderer to parse and render an unbounded set of claims rather than a fixed catalogue.
+
+**Corrected scope note (fresh-context screen, 2026-08-17):** the original prep claimed (a)'s in-place-warning cost
+was "mitigated by requiring a link to the enforcing item" via #2844 clause 3. That's overstated —
+`we:scripts/lib/validate-rules-anchors.cjs` treats the catalogue entry's `anchor` field as **optional**, and only
+**1 of 44** existing catalogue entries actually carries one (the very entry this item cites). The link runs
+catalogue→anchor, never anchor→status, so nothing today gates an anchor into naming its own status. Ratifying (a)
+does not by itself close this; it would need its own follow-on to actually wire the link both ways.
+
+**Follow-on, not a rival branch — the machine-readable field (formerly listed as option (c)):** a narrower version
+already ships (`we:scripts/lib/invariant-catalogue.json` — `status: "enforced"|"judgment-only"`, an `owedTo`
+open-item pointer, gated by `validateInvariantEnforcers` (#2844) to require every entry name a real enforcer or an
+open `owedTo`). A fresh-context screen (2026-08-17) found this was mis-shelved as a Fork 1 rival: stripped of cost,
+it delivers everything (a) delivers plus (a)'s one conceded weakness (an in-place staleness warning), and (a)'s own
+illustrative rewrite already points at this exact mechanism — so it is (a) plus more build, not a competing design,
+disqualified in the original prep on cost language alone ("genuinely highest-cost"). Filed here as a **conditional
+follow-on to (a)**, not ruled now: generalizing the catalogue from a curated set to arbitrary anchor prose needs the
+`/rules/` renderer to *parse* free-text claims, and `we:scripts/lib/validate-rules-anchors.cjs` already measured
+that kind of heuristic classification as unreliable (5 false positives on a first pass over ~117 clusters) — a real
+correctness risk for whoever picks this up next, not merely a cost one, and worth resolving before that follow-on is
+built rather than assumed away.
 
 **Code example — the real shape, before/after:**
 
@@ -130,12 +141,16 @@ found the anchor's own prose is *currently false* against the catalogue's ground
 (corrected above), and (3) found the #2844-clause-3 citation over-extends past catalogued invariants specifically
 (scope note added above). No axis flipped the default.
 
-**Screen:** clear — run inline by the preparer (the second concurrent sub-agent slot was unavailable; see
-*Provenance*). (1) Impl-vs-standard: this is a governance/documentation-authoring-layer call with no WE↔FUI
-consumer boundary in play, so it isn't an impl-detail-dressed-as-standard confusion. (2) Merit-vs-prioritization: at
-zero maintenance cost a merit difference survives — embedding status prose inside the citable rule text still
-muddies what is authoritative rule text vs. incidental status commentary for a reader citing the rule from memory
-(the exact failure the *Prevention* section below names), independent of any maintenance-cost argument.
+**Screen:** flagged(prio) → fixed (fresh-context re-screen, 2026-08-17, replacing the original inline self-run
+screen — see *Prep methodology note*). (1) Impl-vs-standard: clear — this is a governance/documentation-authoring-
+layer call with no WE↔FUI consumer boundary in play. (2) Merit-vs-prioritization: **(a) vs (b) survives** — at zero
+maintenance cost a merit difference remains (embedding status prose inside citable rule text still muddies what is
+authoritative rule text vs. incidental status commentary, plus the ADR/RFC-errata/Baseline precedent-consistency
+evidence). **(a) vs (c) did not survive** — under free-and-instantly-maintained, (c) weakly dominates (a) (it
+delivers (a)'s benefit plus the in-place warning (a) concedes as a cost), and (a)'s own text already points at (c)'s
+mechanism, so they aren't mutually exclusive branches. That is prioritization wearing a fork's clothes: fixed above
+by dissolving (c) out of Fork 1 into a conditional follow-on, correcting the mitigation claim it depended on, and
+flagging the parse-soundness risk that follow-on would need to resolve.
 
 ## Consequence for #2849 (derived from Fork 1 — not an independent fork)
 
@@ -147,9 +162,8 @@ is not a live choice.
 
 | If Fork 1 rules… | #2849 becomes… |
 | --- | --- |
-| **(a)** | **Split by catalogue membership**, per the skeptic's refinement: (i) for a *catalogued* operational invariant, #2849 does nothing new — `we:scripts/lib/invariant-catalogue.json` + `validateInvariantEnforcers` (#2844) already require a real enforcer or an open `owedTo`; (ii) for *uncatalogued* anchor prose, the lint **errors** on point-in-time tokens (`today`, `not yet`, `build-pending`, `still parks`) and directs the author to either add a catalogue entry or move the prose to the item — keeping the retiring-item pointer only for the narrow "until #NNNN" case. #2849's current token list would hard-error the ~15 pre-existing uses on `main` unless it ships an exemption list for the transition. |
+| **(a)** | **Split by catalogue membership**, per the skeptic's refinement: (i) for a *catalogued* operational invariant, #2849 does nothing new — `we:scripts/lib/invariant-catalogue.json` + `validateInvariantEnforcers` (#2844) already require a real enforcer or an open `owedTo`; (ii) for *uncatalogued* anchor prose, the lint **errors** on point-in-time tokens (`today`, `not yet`, `build-pending`, `still parks`) and directs the author to either add a catalogue entry or move the prose to the item — keeping the retiring-item pointer only for the narrow "until #NNNN" case. #2849's current token list would hard-error the ~15 pre-existing uses on `main` unless it ships an exemption list for the transition. **If the follow-on above (formerly option (c)) is later built**, #2849 would then be superseded by generalizing the catalogue-driven check to arbitrary anchor prose — but that's a second, separately-ruled step, not part of ratifying (a) now. |
 | **(b)** | #2849 stays close to as-filed: an anchor's point-in-time claim must name the open item that retires it (the norm PR #982 already assumes). |
-| **(c)** | #2849 is superseded by generalizing the catalogue-driven check to arbitrary anchor prose, rather than a standalone token lint. |
 
 ## Prevention (whichever fork wins)
 
@@ -188,7 +202,11 @@ owns part of the pressure that created it. Related: #2849, #2850, `2852` (the du
 
 **Prep methodology note:** the skeptic pass (four required axes) was run by a spawned throwaway sub-agent given only
 this item + the linked report and told to refute the default; its findings are folded in above and its full run is
-recorded in the linked report. The two-confusion screen was run inline by the preparer, not a second spawned
-sub-agent — the concurrent-subagent pool was saturated at prep time and a second concurrent spawn was unavailable —
-applying the same two fixed questions cold to each section. Disclosed per standing governance guidance that prep
-must not silently skip or fake a required pass.
+recorded in the linked report. The two-confusion screen was **originally** run inline by the preparer, not a second
+spawned sub-agent — the concurrent-subagent pool was saturated at prep time and a second concurrent spawn was
+unavailable — which this repo's own rule treats as an invalid substitution, not merely a weaker one (the preparer is
+structurally blind to exactly the confusions the screen exists to catch). **A genuine fresh-context screen was run
+2026-08-17**, found `flagged(prio)` on the original (c) branch, and the fixes above (dissolving (c) into a
+conditional follow-on, correcting the (a) mitigation claim, refreshing the word count) replace the original inline
+`Screen: clear` verdict. Disclosed per standing governance guidance that prep must not silently skip or fake a
+required pass.
