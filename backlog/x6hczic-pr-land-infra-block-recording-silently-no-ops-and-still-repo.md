@@ -1,0 +1,14 @@
+---
+kind: task
+status: open
+dateOpened: "2026-08-17"
+tags: []
+---
+
+# pr-land infra-block recording silently no-ops and still reports recorded:true
+
+Confirmed live tonight (2026-08-17), twice independently: we:scripts/pr-land.mjs's onCreateFailed handler (around line 620-628) calls recordInfraBlockIO and sets its own local recorded=true unconditionally as long as the call did not throw -- it never inspects recordInfraBlockIO's actual {recorded:boolean} return value. we:scripts/conveyor/infra-blocked.mjs's recordInfraBlock (line 217-220) silently no-ops (returns the store unchanged, next===store) whenever normNum(num)==='' -- which happens whenever the item number cannot be extracted from the ref name via the item-number regex pr-land uses to derive itemNum (matches a bare number or an x-prefixed hash only). Any lane/* ref that does not start with a bare number or x-hash -- for example lane/file-3128-followups or lane/resolve-3015-stale-status, both plain descriptive names, an ordinary and previously-used naming style -- silently loses its infra-block record entirely: no exception, no store entry, pr-land --json still reports recorded:true and a resumeHandle that nothing will ever consume, because the conveyor tick's retry pass reads a store that was never written to. Live evidence: lane/file-3128-followups hit this -- no we:.conveyor/infra-blocked.json entry was ever created despite two separate blocked-on-infra reports claiming recorded:true; it had to be resumed by hand (checkout the pushed ref plus re-run pr-land with a body-file once the outage cleared, opening PR #1443 directly instead of via the auto-retry path). lane/resolve-3015-stale-status hit the identical failure moments later while GitHub's graphql endpoint (used by gh pr create) was confirmed genuinely returning HTTP 503 (verified directly, not misclassified) -- it is still stuck as of this filing, unresumed, because the outage has not cleared yet. Fix: either (a) recordInfraBlockIO should return {recorded:false, reason:'no-item-number'} distinctly from a genuine write, and pr-land's onCreateFailed should surface that reason rather than blindly reporting recorded:true, or (b) itemNum extraction should fall back to a stable identifier (the ref name itself, or its sha) when no numeric or hash prefix is present, so descriptively-named lane refs are never silently unrecoverable. Either fix removes a real, now twice-confirmed silent-data-loss path in the one mechanism (#2659) that exists specifically to make GitHub outages non-stranding.
+
+## Done when
+
+1. **Executable** — TODO: a command that fails before this item lands and passes after.
