@@ -3,8 +3,10 @@ bornAs: xtfu40d
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-08"
+dateStarted: "2026-08-17"
+dateResolved: "2026-08-17"
 scope:
   - we:scripts/operations/
   - plateau:tools/dev-panel/vite-plugin.ts
@@ -96,6 +98,11 @@ What is now claimed, and checked:
 The describe route now ships `readOnlyCaveat` alongside `readOnly`, so a consumer mounting this on a public
 surface is told in the payload that `readOnly` is derived from declared kinds and is not a write guarantee.
 
+**One field was added when the plateau half landed:** each described route now carries its `kind` (`describe` ·
+`start` · `read-run` · `advance` · `read-run-once`). `method`/`path`/`safe`/`summary` describe a route to a
+READER; `kind` names it to a CALLER, which is what lets a consumer look a route UP rather than retyping its
+path. The console is the first consumer and keys off exactly that — see the plateau half's point 5.
+
 **"One route per operation" was not achievable and is corrected here.** A declaration that suspends needs four
 (describe · start · read record · resume), because a `confirm` stop is by construction two requests. Only a
 read-only declaration collapses to one executing route. The card predates the engine's suspend model.
@@ -104,26 +111,100 @@ First declared operation: `we:scripts/operations/suggest-next.mjs` (+ its io she
 `computeSelection` (`we:scripts/readiness/engine.mjs`) and the two boundary exclusions
 `we:scripts/check-readiness.mjs` applies. It re-declares the ranking; it does not re-implement it.
 
-## Still needed — the plateau half (the second PR of the couple)
+## Landed — the plateau half (the second PR of the couple)
 
-Nothing in this repo can do it, so it is written down rather than guessed at:
+`plateau:tools/dev-panel/operations-bridge.mjs` — the MOUNT, and nothing else. It hands WE's
+`createNodeRequestListener` its four dependencies and gets out of the way: no route logic, no validation, no
+envelope shaping, and no `review-pr` knowledge. Declaring a third operation in
+`we:scripts/operations/run.mjs`'s table buys its console surface with no edit to this repo at all. The five
+things the card asked for, and what each turned out to be:
 
-1. **Mount the listener.** `createNodeRequestListener({ resolve, names, store, judge, newRunId, basePath })`
-   from `we:scripts/operations/http-adapter.mjs` takes duck-typed `req`/`res` — exactly what
-   `plateau:tools/dev-panel/vite-plugin.ts` already receives from Vite's `configureServer` middleware. `resolve`
-   and `names` come straight from `we:scripts/operations/run.mjs` (`resolveOperation` / `Object.keys(OPERATIONS)`),
-   so the console and the terminal serve the identical operation table.
-2. **Share the run store, or the "finish it in the browser" claim is false.** `createFileRunStore()`
-   (`we:scripts/operations/run-store.mjs`) resolves `we:.operations/runs/` by SCRIPT location, so a plateau
-   process importing it lands on the same sidecar the terminal writes — provided it imports WE's module rather
-   than re-deriving the path. If the console runs from a different checkout, set `OPERATION_RUNS_DIR`.
-3. **Supply a judge.** `createDefaultJudge()` spawns a real juror. The console must decide whether a browser
-   click may spend one, and surface `spend` from the response (the envelope already carries it).
-4. **Delete, do not wrap.** `daemonReviewDetailJson` and the `review-detail` hop through
-   `plateau:tools/drain-daemon/cli.mjs` are what the mounted route replaces; leaving both is two implementations
-   of one read, which is the defect this epic exists to remove.
-5. **Point the review surface at `POST …/review-pr/runs`** and render the `confirm` suspend from `pending`
-   (`asks`, `of`, `options`), answering with `POST …/runs/<id>/advance` `{ "value": … }`.
+1. **The listener is mounted** at `/__dev-panel/operations` on the dev-panel middleware
+   (`plateau:tools/dev-panel/vite-plugin.ts`), whose `configureServer` hands over exactly the duck-typed
+   `req`/`res` the adapter is written against. `resolve`/`names` come straight from `we:scripts/operations/run.mjs`
+   (`resolveOperation` / `Object.keys(OPERATIONS)`), so the console and the terminal serve the identical
+   operation table — verified live: the index lists all six declared operations, `review-pr` reports its four
+   routes, `suggest-next` is refused a `POST …/runs` by its own derived route table, and a bad `--pr`/`lens`
+   comes back as the command line's byte-identical validation message.
+2. **The run store is shared** because the bridge IMPORTS WE's module rather than shelling a CLI —
+   `createFileRunStore()` resolves by WE's script location, so the console lands on the same
+   `we:.operations/runs/` sidecar the terminal writes (asserted live). Which WE checkout is
+   `resolveWeRoot()`: the operator PRIMARY, taken from the drain daemon's own `resolveConfig().wePrimary` so
+   "where is WE" keeps ONE derivation in the repo. `DEV_PANEL_WE_ROOT` overrides it; `OPERATION_RUNS_DIR`
+   overrides the sidecar alone. Deliberately NOT the daemon's `weClone` — a headless drain worktree nobody
+   runs `we:scripts/operations/run.mjs` from would split the sidecar in two and make the resume claim false.
+3. **The judge is byte-identical to `we:scripts/operations/run.mjs`'s**, `cwd` included: `createDefaultJudge({ cwd:
+   process.env.JUDGE_LANE_CWD || null })`, and the suite pins it (a mutation to `process.cwd()` reddens).
+   Unset ⇒ `assertLaneCwd` refuses the spawn and the console shows WE's own refusal, which is the correct
+   outcome of a browser click with no lane behind it — a console must not hand a tool-bearing juror the dev
+   server's working tree. The cost is surfaced from `spend.costUsd` and `spend.jurors` — `spend` is
+   `totalJudgeSpend`'s OBJECT, not a scalar, and reading it as a number prints `$0.00` on every run — and the
+   one click that costs money is its own explicit **Run the review** button rather than a side effect of
+   expanding a row.
+4. **Deleted, not wrapped.** `daemonReviewDetailJson`, its `/__dev-panel/drain-daemon/review-detail` route,
+   `plateau:tools/drain-daemon/cli.mjs`'s `review-detail` command and its
+   `buildReviewDetailArgs` are all gone, with their tests. `daemonReviewLedgerJson`
+   is untouched, exactly as this card said it should be — it reads the #2437 artifact and is not an operation.
+5. **The review surface points at the operation.** `plateau:tools/dev-panel/drain-daemon.html` renders the
+   context from the run's own `findings.read`, the findings and verdict from its `verdict`, and the buttons
+   from `pending.options` — answering the `advance` route with `{ "value": … }`. Accept is disabled when
+   `pending.of === 'human'` (INVARIANT 2 as UX; `decideSetLabel` is still the guarantee). Started run ids are
+   remembered per PR so re-expanding RE-READS rather than paying for a second run, and a run started in the
+   terminal is finished here by pasting its id into the resume box (refused, with the mismatch named, if that
+   run is a review of a different PR than the row it was pasted into).
+
+   **And it retypes NO route.** The console resolves its start / read / resume URLs by looking each one up by
+   route **`kind`** in the operation's own describe payload. That took a one-word WE change —
+   `describeOperation` now carries `kind` alongside `method`/`path`/`safe`/`summary` — and it is the
+   difference between a caller that is generated and a caller that merely calls something generated: without
+   it the console hand-writes three per-operation route shapes in a file whose whole claim is that it has
+   none, free to drift into silent 404s the moment `planRoutes` renames a segment. It now fails loudly, by
+   name, instead.
+
+**What importing rather than shelling actually costs, and the two things it changed that are not free.**
+Two adversarial review rounds are folded into the section above; three of their findings are not fixes but
+consequences worth carrying:
+
+1. **The dev server's thread now runs the operation.** WE's io shells are synchronous (`review-pr`'s `read`
+   step runs `gh pr view` plus a `git fetch` and three more `git` calls through `execFileSync`), so a **Run the
+   review** click blocks the dev server for as long as they take — routinely 5–20s, during which nothing loads
+   and HMR does not fire. The deleted `review-detail` route never did this, because it spawned a child with
+   ASYNC `execFile`. That is the price of the shared run store, and for an operator-initiated review it is
+   worth paying — but it is disclosed in the bridge's header rather than left to be discovered, and the same
+   property makes the ungated safe-method routes a liveness risk rather than the harmless recompute they first
+   looked like. Filed as its own item under this epic rather than half-done here.
+2. **The console's quick-verdict gate lost a state.** The old Accept / Request-changes controls read a review
+   class fetched LIVE at expand time and had a third outcome — `none`, not parked for review, which rendered no
+   buttons. They now read `humanRequired` off the `parkedNow` snapshot, which a no-op drain pass carries forward
+   unchanged. INVARIANT 2 is intact (and re-enforced live at write time by `we:scripts/review-set-label.mjs`);
+   what is weaker is the staleness of the UI narrowing, in exactly the way the row's own badge is already stale.
+3. **A remembered run can outlive the tree it judged.** The console remembers a started run per PR so
+   re-expanding re-reads instead of paying for a second one — but if the lane pushes a fix and the daemon
+   re-parks the PR, that re-read renders the OLD juror's findings with a live Accept, and nothing on the page
+   can tell (the identity check compares which PR, never which commit, and the console never fetches the live
+   head). Two things bound it, neither of them the console: the reviewed commit is stated in the basis row AND
+   in the record-verdict confirm, so the operator sees what they are vouching for; and #2409's reviewed-commit
+   gate in `we:scripts/merge-ai-prs.mjs` reads the accepted SHA back against the live head and refuses to merge
+   a stale acceptance. A stale accept from here costs a comment and a label swap, not a bad merge.
+4. **The couple lands impl-first, so there is a skew window.** The console's route lookup needs the `kind` field
+   this item added to `describeOperation`, and `resolveWeRoot()` points at the operator's PRIMARY checkout — not
+   at a lane. Between the plateau merge and the WE merge (or simply before the operator pulls), the review panel
+   names the skew and says what to do rather than reporting a missing route that plainly exists. Verified live
+   against a checkout that predates the field.
+
+**One thing the card implied and this half did NOT do: the direct verdict endpoint stays.**
+`daemonReviewSetLabel` (`POST /__dev-panel/drain-daemon/review-set-label`) and the console's quick
+Accept / Request-changes controls are kept. They are not a second implementation of the operation — the
+operation READS and JUDGES (one paid juror) before it can reach `confirm`, and these record a verdict the
+operator already reached elsewhere, for free. Both end at the one home, `we:scripts/review-set-label.mjs`, so
+there is a single writer either way. Their INVARIANT-2 gate no longer needs `review-detail`: it reads
+`humanRequired` off the parked entry the status poll already carries.
+
+**Also in this half, both small and both load-bearing.** A mutating request on the operation surface (anything
+but `GET`/`HEAD`, unknown verbs included — fail-closed) clears the SAME `rejectCrossSiteControl` guard as
+`control` and `review-set-label`, because a `POST` here can spend a juror and comment on a real PR. And the WE
+import is LAZY: a missing or broken checkout degrades to a 503 naming the path and the fix, never a dev-server
+boot crash, and the failure is not cached.
 
 ## Not in scope
 

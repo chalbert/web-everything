@@ -331,6 +331,20 @@ describe('describe — one declaration, one description', () => {
     expect(res.body.usage).toBe(buildCliSpec(SUGGEST_DECL()).usage);
   });
 
+  it('every described route names its KIND, so a consumer looks a route up instead of retyping its path', () => {
+    // #3036 — the field a PROGRAMMATIC consumer keys off. `plateau:tools/dev-panel/drain-daemon.html` builds
+    // its start / read / resume URLs from this table by kind; without it a console has to hand-write three
+    // per-operation route shapes and drifts into silent 404s the moment `planRoutes` renames a segment.
+    const described = describeOperation(REVIEW_PR_DECL());
+    expect(described.routes.map((r) => r.kind)).toEqual(['describe', 'start', 'read-run', 'advance']);
+    // The kind is what a caller resolves a path THROUGH — a lookup, never a second copy of the path.
+    const byKind = Object.fromEntries(described.routes.map((r) => [r.kind, r]));
+    expect(byKind.advance).toMatchObject({ method: 'POST', path: '/operations/review-pr/runs/:runId/advance' });
+    expect(byKind['read-run']).toMatchObject({ method: 'GET', path: '/operations/review-pr/runs/:runId' });
+    // A read-only declaration's table is a different SET of kinds, which is the point of keying on them.
+    expect(describeOperation(SUGGEST_DECL()).routes.map((r) => r.kind)).toEqual(['describe', 'read-run-once']);
+  });
+
   it('lists the declared value set, the defaults and the step kinds', () => {
     const described = describeOperation(SUGGEST_DECL());
     expect(described.input.tier).toEqual({ type: 'string', required: false, default: 'A', enum: ['A', 'B'] });
