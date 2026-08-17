@@ -11,4 +11,7 @@ Confirmed live tonight (2026-08-17), twice independently: we:scripts/pr-land.mjs
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — a test asserting `recordInfraBlockIO({num: null, ref: 'lane/descriptive-name', ...})` returns a `recorded:false` result whose reason distinguishes "no item number" from "already tracked" (three states — `written` / `already-tracked` / `no-item-number` — not a bare boolean, since the existing idempotent-dedup path at we:scripts/conveyor/infra-blocked.mjs:220 also returns `next===store`); currently it collapses both to `recorded:false` with no way to tell them apart, and we:scripts/pr-land.mjs's `onCreateFailed` doesn't check the value at all — fails today, passes once wired.
+2. we:scripts/pr-land.mjs's `onCreateFailed` reports pr-land's own `recorded:true`/`resumeHandle` **only** when `recordInfraBlockIO` actually wrote an entry (reason `written` or `already-tracked`) — a `no-item-number` reason surfaces as a distinct, honest failure (e.g. `recorded:false, reason:'no-item-number'`) in the emitted JSON, so an orchestrating session is never told a resumable record exists when it doesn't.
+3. Item-number extraction gains a fallback for descriptively-named `lane/*` refs (no numeric/hash prefix) — either derive a stable key from the ref name itself or the commit sha — so `recordInfraBlock` no longer silently drops the entry for that ref shape; a test covers a non-numeric, non-x-hash ref name (e.g. `lane/file-3128-followups`) round-tripping through record → read → resume.
+4. `npm run check:standards` and the relevant `scripts/conveyor/__tests__/infra-blocked*.test.mjs` / `scripts/__tests__/pr-land*.test.mjs` suites are green.
