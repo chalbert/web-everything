@@ -1,0 +1,22 @@
+{
+  "id": "constitutional-amendment-gate-quantification",
+  "title": "Quantifying a constitutional-amendment gate — cooling periods, entrenchment, and the committed record",
+  "status": "open",
+  "summary": "Grounds decision #3144, which turns #2564 Fork 5's three qualitative entrenchment clauses (exempt from #911 supersede-with-lineage · a cooling period 'in days, not sessions' · a committed external artifact) into buildable quantities. Surveys mandated waiting periods across software governance (Rust's 10-day Final Comment Period — the only number whose author shows its arithmetic, 'ten calendar days, so that it is open for at least 5 business days'; IETF Last Call at 2 weeks and 4 for individual submissions that had no prior deliberating body; W3C's 28-day Advisory Committee review; Apache's 72-hour minimum, justified by timezone coverage rather than deliberation; Debian's bounded 2-3 week General Resolution window) and finds two contradictions worth recording: TC39 has NO waiting period at all (its gate is unanimity), and Node.js's widely-cited 72 hours is actually a flat 48. Surveys constitutional entrenchment and finds that no system entrenches by duration alone — Denmark, Norway, the Netherlands, Belgium, Finland, Sweden and nine US states all require an intervening election, i.e. a change in who is deciding. The decisive finding for the #911 exemption is the common-law analogue: under Thoburn v Sunderland CC a statute does not become immune to implied repeal by declaring itself so — the exemption is a category conferred from OUTSIDE — and Trethowan's self-referential entrenchment bound only because a higher-order instrument authorised it, so a self-declaring constitution clause is decorative and the carve-out must be written into the ordinary supersede path itself and enforced by a gate. The empirical case for cooling periods is honestly weak: Utah's 72-hour waiting period changed ~2% of already-certain decisions, delay does not debias anchoring, the unconscious-thought advantage failed a 399-subject replication, and the one solid positive (Buçinca et al., CSCW 2021) used a 30-second pause — so the delay's defensible job is a window for new information plus a structural non-authoring-ratifier condition, not better deliberation. On the record format, ADR/MADR/PEP conventions and this repo's own research-topic chain converge on an immutable dated artifact plus a pointer, never a mutable log — though bidirectional supersede pointers turn out NOT to be settled (Ethereum removed its superseded-by header and declined to restore it; Kubernetes' KEP metadata has only a backward pointer). Full grounding in reports/2026-08-17-constitutional-amendment-gate-quantification.md.",
+  "dateOpened": "2026-08-17",
+  "lastReviewed": "2026-08-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constitution",
+    "governance",
+    "spec-based-programming",
+    "entrenchment",
+    "cooling-period",
+    "amendment",
+    "prior-art",
+    "decision-records",
+    "self-driven-project"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

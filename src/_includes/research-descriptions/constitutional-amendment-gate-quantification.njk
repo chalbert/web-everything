@@ -1,0 +1,246 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/3144-curate-the-constitution-tier-s-full-principle-set-and-quanti/">#3144</a>, which turns
+  <a href="/backlog/2564-adopt-spec-based-programming-across-the-constellation-schema/">#2564</a>&rsquo;s Fork 5
+  &mdash; a <em>substantively entrenched</em> constitutional-amendment gate &mdash; from three qualitative
+  clauses into buildable quantities. The three clauses are: <strong>(i)</strong> exempt from the ordinary
+  supersede-with-lineage path (#911), <strong>(ii)</strong> a cooling period &ldquo;measured in days, not
+  sessions,&rdquo; and <strong>(iii)</strong> a committed external artifact carrying the amendment diff and its
+  red-team transcript. None of the three carried a number, a format, or a mechanism.
+</p>
+<p>
+  The survey covers three families: mandated waiting periods in software governance, entrenchment devices in
+  constitutional law, and durable-record conventions. It also checks the empirical literature on whether a
+  cooling period does anything &mdash; because a default resting on &ldquo;reflection improves the call&rdquo;
+  would not survive its own evidence base.
+</p>
+
+<h2>Mandated waiting periods in software governance</h2>
+<p>
+  The attested band is narrow, and almost nobody explains their number.
+</p>
+<table>
+  <thead>
+    <tr><th>Process</th><th>Interval</th><th>Stated rationale</th><th>Restart behaviour</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rust RFC &mdash; Final Comment Period</td>
+      <td><strong>10 calendar days</strong></td>
+      <td><em>&ldquo;so that it is open for at least 5 business days&rdquo;</em> &mdash; the only stated
+        arithmetic in the whole survey</td>
+      <td><strong>Cancels</strong>, does not restart: a substantive new argument returns the RFC to
+        development mode</td>
+    </tr>
+    <tr>
+      <td>IETF Last Call (working-group product)</td>
+      <td>&ge; 2 weeks (RFC 2026 &sect;6.1.2)</td>
+      <td>Community review</td>
+      <td>IESG may lengthen; no automatic restart</td>
+    </tr>
+    <tr>
+      <td>IETF Last Call (individual submission)</td>
+      <td>&ge; <strong>4 weeks</strong></td>
+      <td><strong>Doubled precisely because no prior deliberating body scrutinised it</strong></td>
+      <td>Same</td>
+    </tr>
+    <tr>
+      <td>W3C Advisory Committee review</td>
+      <td>&ge; 28 days</td>
+      <td>Member review; a &ldquo;disposition of comments&rdquo; is a mandatory artifact</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td>Apache Software Foundation vote</td>
+      <td>&ge; 72 hours</td>
+      <td><strong>Timezone coverage</strong> &mdash; &ldquo;regardless of their geographic location.&rdquo;
+        Explicitly not deliberation</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td>Debian General Resolution</td>
+      <td>2&ndash;3 weeks (hard floor and ceiling)</td>
+      <td>&mdash;</td>
+      <td><strong>Bounded restart</strong>: a new ballot option resets the clock to one week out, but never
+        past the ceiling &mdash; so drip-fed objections cannot filibuster</td>
+    </tr>
+    <tr>
+      <td>TC39 stage advancement</td>
+      <td><strong>None at all</strong></td>
+      <td>The gate is unanimity, not time</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td>Node.js pull-request landing</td>
+      <td>48 hours (flat)</td>
+      <td>Collaborator input window</td>
+      <td>&mdash;</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Three widely-assumed facts that are wrong</h3>
+<ul>
+  <li><strong>TC39 has no waiting period whatsoever.</strong> One of the most consequential standards bodies
+    in software governs a language on billions of devices with zero time gate. &ldquo;Of course a serious
+    process has a cooling period&rdquo; is not supported.</li>
+  <li><strong>Node.js is 48 hours, not 72.</strong> The 72-hour figure that does exist applies to TSC charter
+    votes, a different process.</li>
+  <li><strong>Rust&rsquo;s FCP cancels rather than restarts.</strong> The widely-repeated &ldquo;resolving a
+    concern restarts the 10-day countdown&rdquo; claim could not be traced to any primary source; the
+    verified primary behaviour is cancellation. Cancellation is strictly stronger against the attack that
+    matters &mdash; landing a placeholder, letting the clock run, and swapping in the real text at the end.</li>
+</ul>
+
+<h2>Constitutional entrenchment &mdash; the time and record devices</h2>
+<p>
+  The single most transferable finding: <strong>no constitutional system entrenches by duration alone.</strong>
+  Denmark, the Netherlands, Belgium, Finland, Sweden, Norway and nine US states all require an
+  <strong>intervening election</strong> &mdash; a change in the composition of the deciding body. Sweden&rsquo;s
+  nine-month rule is measured <em>backwards from the election</em>, not forwards from the proposal; Vermont
+  restricts even when a proposal may be <em>made</em> (a window every fourth year). Time is treated as
+  insufficient because it does not change who is deciding.
+</p>
+
+<h3>The decisive finding for clause (i): self-declared entrenchment does not work</h3>
+<p>
+  In <em>Thoburn v Sunderland CC</em> [2002], Laws LJ recognised a category of &ldquo;constitutional
+  statutes&rdquo; not subject to implied repeal. The load-bearing detail is <em>who assigns the
+  category</em>: the court does, <strong>from outside the statute</strong>. A statute does not become immune
+  by saying it is. The one case where self-referential entrenchment genuinely bound future legislatures,
+  <em>AG for NSW v Trethowan</em> [1932], worked only because a <strong>higher-order instrument</strong> (the
+  Colonial Laws Validity Act 1865, s.5) authorised manner-and-form entrenchment.
+</p>
+<p>
+  Translated to a repository: an amendment that declares itself un-supersedable is decorative. The exemption
+  has to be <strong>conferred by the enclosing rule</strong> &mdash; the ordinary supersede path must itself
+  carry the carve-out &mdash; and enforced by something outside the amendment, i.e. a gate or a check. Roznai&rsquo;s
+  <em>double amendment</em> problem is the residual: whatever confers the exemption must also protect itself,
+  or it can simply be amended away first.
+</p>
+<p>
+  Two further shapes worth recording. <strong>Germany&rsquo;s Article 79(3)</strong> and
+  <strong>Brazil&rsquo;s <em>cl&aacute;usulas p&eacute;treas</em></strong> are textual eternity clauses &mdash;
+  Brazil&rsquo;s bars even <em>deliberation</em>, which is stronger than barring adoption &mdash; and both are
+  enforced by a constitutional court, again from outside. <strong>Finland&rsquo;s &sect;73</strong> takes the
+  opposite tack and <em>prices</em> the override rather than barring it: the waiting period may be skipped by a
+  5/6 vote where 2/3 suffices to pass. That is the cleanest known answer to the double-amendment hole, because
+  the override is explicit and expensive rather than pretended away &mdash; but pricing needs a headcount to
+  price with.
+</p>
+
+<h2>Does a cooling period actually do anything? The honest answer</h2>
+<p>
+  The empirical record is weak to negative, and the survey reports it rather than burying it:
+</p>
+<ul>
+  <li><strong>Utah&rsquo;s 72-hour waiting period</strong> (ANSIRH): only ~2% of respondents who arrived
+    certain later decided against. Those who changed their minds were mostly still deciding at the first
+    visit. A mandatory delay overwhelmingly <em>postpones the same decision</em>.</li>
+  <li><strong>Anchoring is not debiased by delay.</strong> Studies inserting a time gap between anchor
+    exposure and estimate found no significant difference across delay conditions.</li>
+  <li><strong>The unconscious-thought advantage failed replication</strong> (Nieuwenstein et al. 2015, n=399,
+    ~10&times; prior studies). Do not cite it.</li>
+  <li><strong>The one solid positive</strong> is Bu&ccedil;inca, Malaya &amp; Gajos (CSCW 2021): cognitive
+    forcing functions &mdash; including a forced wait &mdash; significantly reduced over-reliance on AI. The
+    effective wait was <strong>30 seconds</strong>. The mechanism is interrupting the automatic accept, not
+    elapsed time. The authors also report the cost: people over-relied less exactly under the conditions they
+    liked and trusted least.</li>
+  <li><strong>Wagner et al. (Nature, 2004)</strong> remains the cleanest evidence for a discontinuity at
+    <em>one night&rsquo;s sleep</em> &mdash; more than twice the insight rate &mdash; but on lab rule-discovery,
+    not on reversing a considered decision.</li>
+</ul>
+<p>
+  So the defensible claim for clause (ii) is <strong>not</strong> &ldquo;days of reflection produce a better
+  judgment.&rdquo; It is that the interval creates a <strong>window in which new information can arrive</strong>,
+  and &mdash; paired with a structural condition &mdash; guarantees the ratifying act is performed from a
+  different state than the authoring one.
+</p>
+
+<h2>Durable-record conventions</h2>
+<ul>
+  <li><strong>ADR (Nygard, 2011)</strong>: Title / Status / Context / Decision / Consequences, and explicitly
+    &ldquo;if a decision is reversed, we will keep the old one around, but mark it as superseded.&rdquo;
+    <code>adr-tools</code> writes the pointer in <em>both</em> directions.</li>
+  <li><strong>MADR 4.0.0</strong> encodes it in frontmatter: <code>status: … superseded by ADR-0123</code>.
+    <strong>PEP 1</strong> uses paired <code>Replaces:</code> / <code>Superseded-By:</code> headers.</li>
+  <li><strong>IETF</strong>: a published RFC is never edited; supersession lives entirely in the <em>new</em>
+    document&rsquo;s <code>Obsoletes:</code> header, with the forward pointer materialised by the index.</li>
+  <li><strong>OpenAI&rsquo;s Model Spec</strong> keeps a real changelog plus a dated archive of every released
+    version. <strong>Anthropic&rsquo;s usage policy</strong>, by contrast, exposes an effective date and a
+    single &ldquo;Previous Version&rdquo; link &mdash; lineage depth one, no diff. If you were going to cite
+    &ldquo;Anthropic does it this way&rdquo; as precedent for a record format, the precedent points the other
+    way.</li>
+  <li><strong>Anthropic&rsquo;s red-team work</strong> published 38,961 attack transcripts as a separate
+    linked dataset rather than inlining summaries &mdash; the precedent for treating a transcript as its own
+    artifact beside the decision.</li>
+  <li><strong>Counter-signal:</strong> bidirectional supersede pointers are <em>not</em> settled. Ethereum
+    removed its <code>superseded-by</code> header and closed the proposal to restore it as not planned;
+    Kubernetes&rsquo; KEP metadata carries only a backward <code>replaces:</code> with no forward pointer.</li>
+</ul>
+
+<h2>What this repo already has, and what it lacks</h2>
+<ul>
+  <li><strong>No cooling period anywhere.</strong> <code>preparedDate</code> and <code>dateResolved</code> are
+    both written and <em>never compared</em>; readiness reads &ldquo;prepared&rdquo; as a boolean. The only
+    calendar arithmetic in the repo is research freshness (<code>addIsoDuration</code>), which is the
+    primitive to reuse.</li>
+  <li><strong>No supersede mechanism to be exempt from.</strong> #911&rsquo;s supersede-with-lineage is
+    documented prose only &mdash; no CLI verb, no frontmatter field, no validator. The one genuinely
+    mechanized supersede-with-lineage in the repo is the <em>research-topic</em> chain, whose entrenchment
+    property comes from the immutability of the dated artifact rather than from a permission check.</li>
+  <li><strong>One whole-file statute gate.</strong> Every diff to the statute file routes to the same human
+    gate; nothing distinguishes a constitution-tier anchor from an ordinary one. That identification
+    mechanism is what
+    <a href="/backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an/">#2568</a>&rsquo;s
+    Fork 1 produces.</li>
+  <li><strong>Actor identity exists and is honest about its limits.</strong> The review-independence module
+    compares the PR author&rsquo;s harness session id against the clearer&rsquo;s, and says plainly in its own
+    docblock that the id is forgeable by an agent with shell access &mdash; what it buys is that self-clearing
+    takes a deliberate forge and leaves a named record.</li>
+  <li><strong>The jury ledger cannot serve as a committed record</strong> &mdash; it writes to gitignored
+    operational state. The <code>reports/</code> channel is the only committed, gate-validated artifact home:
+    an orphaned report is a hard gate error, and an authored-but-uncommitted one is flagged before push.</li>
+  <li><strong>A per-project constitution already exists in the wild</strong> &mdash; plateau-app publishes one
+    at a public route, rendered from the repo-root file so it cannot drift. It is a <em>product north-star</em>
+    that explicitly disclaims build decisions, and #2564&rsquo;s &ldquo;project&rdquo; means a <em>WE standards
+    project</em> (the owner of intents and protocols), not a repository &mdash; so the overlap is a vocabulary
+    collision, and it is exactly why tier membership should turn on a declared index rather than a filename.</li>
+</ul>
+
+<h2>What the evidence supports</h2>
+<p>
+  <strong>On the day-count.</strong> Four defensible candidates, each with its strongest precedent: 3 days
+  (Apache&rsquo;s floor, but its rationale is timezone coverage of a voting body and degenerates solo);
+  <strong>10 days</strong> (Rust &mdash; the only derivation that transfers, &ldquo;ten calendar days so that
+  it is open for at least 5 business days&rdquo;); 14 days (the modal, convergent answer &mdash; but no source
+  says why); 28 days (W3C&rsquo;s minimum, and IETF&rsquo;s doubling for submissions with <em>no prior
+  deliberating body</em>, which is structurally always the solo case). The honest headline is that
+  <strong>no source derived its number from evidence</strong> &mdash; every stated rationale is operational or
+  rhetorical &mdash; so the number should be the one whose derivation can be restated in a sentence, and it
+  should be <em>paired with a structural condition</em>, because every constitutional system refuses to rely on
+  time alone.
+</p>
+<p>
+  <strong>On the record format.</strong> A per-amendment dated file for the record (the ADR/MADR/PEP
+  convention), with the red-team transcript as a committed sibling artifact rather than a pull-request thread
+  &mdash; comments are editable and deletable, commits are not. One deliberate divergence from the ADR
+  convention follows from clause (i): an amendment record carries no <code>superseded-by</code> field, because
+  removing the supersede path <em>is</em> the entrenchment. That makes the IETF immutable-document model the
+  closer analogue.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/3144-curate-the-constitution-tier-s-full-principle-set-and-quanti/">#3144</a> &mdash;
+    the decision this survey grounds.</li>
+  <li><a href="/backlog/2564-adopt-spec-based-programming-across-the-constellation-schema/">#2564</a> &mdash;
+    Fork 5, the source of the three clauses.</li>
+  <li><a href="/backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an/">#2568</a> &mdash;
+    the form and membership call the entrenchment gate attaches to.</li>
+  <li><a href="/research/spec-based-programming-constellation/">Spec-based programming across the
+    constellation</a> &mdash; the prior survey behind #2564 itself.</li>
+</ul>
+{% endraw %}
