@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash",
       "Bash(node scripts/backlog.mjs:*)",
       "Bash(node scripts/check-readiness.mjs:*)",
       "Bash(npm run check:readiness:*)",
