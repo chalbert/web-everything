@@ -1,0 +1,332 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>Web Everything holds an absolute rule: <strong>WE holds zero implementation</strong> — contract, protocol and
+interface only, never delivery runtime, <em>"not even as a reference implementation"</em>
+(<code>docs/agent/platform-decisions.md</code>, the <em>constellation-placement</em> anchor, rulings #1246/#1282).
+Individual relocations have moved subsystem after subsystem out to Frontier UI. Decision
+<a href="/backlog/1770-audit-the-end-state-constellation-placement-once-all-relocat/">#1770</a> was filed to confirm the
+aggregate result: <em>is the line tight (A), or are there residuals (B)?</em></p>
+
+<p>That is not a decidable question. Which branch obtains is a fact about the tree, settled by counting — nobody
+<em>chooses</em> it. The real question sits one level up:</p>
+
+<blockquote>
+  <p>What <strong>instrument</strong> confirms a zero-implementation boundary, and what keeps that confirmation true a
+  month later — a codified placement map written into the statute, or a standing machine check?</p>
+</blockquote>
+
+<h2>Finding — the fork dissolves, and the answer is a NARROW instrument</h2>
+
+<p><strong>The survey's conclusion, up front, so the rest reads in its light: the recommended instrument is
+narrow and coverage-reporting — a new-path check over <code>blocks/</code> plus the nine named subsystem debt
+roots, a re-pointed byte-parity gate on a hand-authored pair list, and a tripwire that errors when a check's
+subject has vanished.</strong> It is
+explicitly <em>not</em> a whole-tree classifier and <em>not</em> a regenerated canonical map. That broad shape was
+drafted, run against the real repo, and <strong>rejected on measurement</strong> — see
+<a href="#the-correction">the correction</a> below, which is a finding of this survey, not a caveat on it.</p>
+
+<p>Two separate things dissolved. <strong>First, the doc-versus-check framing is a false either/or</strong> — the
+prior art shows a map and a check can be one mechanism, which is why nobody has to choose. The two strongest
+analogues — <a href="https://github.com/open-feature/spec">OpenFeature's specification repo</a> and
+<a href="https://github.com/tc39/test262">TC39's test262</a> — do it like this:</p>
+
+<ol>
+  <li>a script walks <strong>every tracked path</strong> and classifies each against a declared ignore list;</li>
+  <li>it <strong>regenerates a canonical map artifact</strong> from that classification;</li>
+  <li>CI fails if the committed artifact differs from the regenerated one.</li>
+</ol>
+
+<p>OpenFeature's is <code>.specignore</code> + a markdown parser → <code>specification.json</code>, gated by
+<code>git diff --name-only</code> in <code>pr-checks.yaml</code>. test262's is <code>./make.py</code> plus an
+untracked-changes check. The transferable lesson is the <em>relationship</em> — the map is a projection of the
+classifier, so it cannot go stale — <strong>not the scope</strong>. Both of those repos are homogeneous corpora
+of spec text and test files; this repo is not, which is exactly what the measurement below shows.</p>
+
+<p><strong>Second, "walk every tracked path" does not transfer.</strong> Run over this repo it red-gates the very
+directories the inventory certifies as correctly placed, and it is green on both defects that motivate it. So the
+mechanism carries over and the breadth does not: keep the projection relationship, shrink the subject to the
+named debt roots.</p>
+
+<p>The underlying principle is <a href="https://www.cs.ubc.ca/~murphy/papers/rm/fse95.html">Murphy, Notkin &amp;
+Sullivan's Software Reflexion Models</a> (FSE-3, 1995; ACM SIGSOFT Retrospective Impact Paper Award), thirty years
+early. Their opening claim is the whole argument: high-level models <em>"are almost always inaccurate with respect
+to the system's source code."</em> Their fix is not a better document — it is to keep the map but <strong>demote
+it from truth to hypothesis</strong> and let a tool compute where map and code diverge. Notably, a Reflexion Model
+is scoped to a <em>declared subsystem map</em>, not to every file in the tree — the narrow reading is the faithful
+one.</p>
+
+<h2>Enforcement tooling — who actually fails on an unclassified file</h2>
+
+<p>Most boundary tools are deny-lists: they ban known-bad edges. Only five surveyed ship a true
+<strong>exhaustiveness</strong> mode, where a file or module matching nothing is itself an error.</p>
+
+<table>
+  <thead>
+    <tr><th>Tool</th><th>Ecosystem</th><th>Fail-closed?</th><th>What it checks</th><th>Failure mode</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://import-linter.readthedocs.io/en/v2.9/contract_types/layers/">import-linter</a></td>
+      <td>Python</td><td><strong>Yes</strong> — <code>exhaustive = true</code></td>
+      <td>Layers / forbidden / independence contracts over the import graph</td>
+      <td><code>exhaustive</code> is off by default; <code>exhaustive_ignores</code> is the hole</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.jsboundaries.dev/docs/rules/no-unknown-files/">eslint-plugin-boundaries</a></td>
+      <td>JS/TS</td><td><strong>Yes</strong> — <code>no-unknown-files</code></td>
+      <td>Every <em>file</em> must classify into an element, then element→element import rules</td>
+      <td>Anything under <code>boundaries/ignore</code> is never analysed</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.archunit.org/userguide/html/000_Index.html">ArchUnit</a></td>
+      <td>Java</td><td><strong>Yes</strong> — <code>ensureAllClassesAreContainedInArchitecture()</code></td>
+      <td>Class/package deps, layers, slices, cycles</td>
+      <td>Only sees classes in the test's scope; the same PR can edit the rule</td>
+    </tr>
+    <tr>
+      <td><a href="https://nx.dev/docs/features/enforce-module-boundaries">Nx enforce-module-boundaries</a></td>
+      <td>JS/TS monorepo</td><td><strong>Yes by construction</strong> — an untagged project may depend on nothing</td>
+      <td>Tag→tag dependency constraints</td>
+      <td>Defeated by the documented <code>sourceTag: '*'</code> "brute way"</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/sverweij/dependency-cruiser">dependency-cruiser</a></td>
+      <td>JS/TS</td><td>Optional — <code>allowed</code> + <code>not-in-allowed</code></td>
+      <td>Module dependency graph edges; orphans; required</td>
+      <td><code>allowedSeverity</code> defaults to <code>warn</code>, so the allow-list passes CI silently</td>
+    </tr>
+    <tr>
+      <td>Go internal packages</td><td>Go</td><td><strong>Yes</strong> — compiler-enforced, zero config</td>
+      <td>Import graph</td><td>One positional axis only; no tags or layers</td>
+    </tr>
+    <tr>
+      <td><a href="https://bazel.build/concepts/visibility">Bazel visibility</a></td>
+      <td>Polyglot</td><td><strong>Yes</strong> — default <code>//visibility:private</code></td>
+      <td>Target-level access across packages</td>
+      <td>Load visibility defaults <em>public</em>; a package <code>default_visibility</code> reopens everything</td>
+    </tr>
+    <tr>
+      <td>JPMS · Rust visibility · .NET <code>InternalsVisibleTo</code></td>
+      <td>Java / Rust / .NET</td><td><strong>Yes</strong> — language-level default-deny</td>
+      <td>Module / item / assembly visibility</td>
+      <td>Reflection and classpath escape hatches; single structural axis</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/import-js/eslint-plugin-import/blob/main/docs/rules/no-restricted-paths.md">import/no-restricted-paths</a></td>
+      <td>JS/TS</td><td><strong>No</strong> — deny-list of zones</td>
+      <td>Directory→directory import bans</td>
+      <td>New directories unconstrained; misconfigured zones fail silently</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The pattern worth naming: <strong>default-deny is the language norm and the lint exception.</strong> Where a
+compiler owns the boundary (Rust, Go, Bazel, JPMS, .NET) fail-closed is free and unarguable. Where a config file owns
+it, fail-closed is opt-in — and every such tool ships a catch-all that turns it off.</p>
+
+<h2>Allow-list versus deny-list</h2>
+
+<p>The principle is not in dispute. OWASP's positive security model holds that deny-lists are
+<em>"easy to bypass"</em> because badness is easier to vary than goodness is to define. For a boundary rule the
+argument is sharper than for input validation: <strong>a deny-list of known-bad paths cannot cover a file that does
+not exist yet</strong>, and the file that does not exist yet is the entire point of a standing check.</p>
+
+<p>The adoption cost is real and has a known answer: <strong>a ratchet</strong>. ArchUnit's
+<code>FreezingArchRule</code> baselines existing violations to a store and <em>"will automatically reduce the known
+stored violations to prevent any regression"</em>; dependency-cruiser has <code>--output-type baseline</code>;
+<a href="https://eslint.org/docs/latest/use/suppressions">ESLint bulk suppressions</a> is the best-designed of the
+family because it errors on <em>stale</em> suppressions too, so a baseline cannot quietly outlive the violations it
+excused.</p>
+
+<p>Every failure in the survey traces to one design detail — <strong>the escape hatch</strong>. Nx's
+<code>sourceTag: '*'</code>, Sheriff's <code>root: ['*']</code> default, <code>exhaustive_ignores</code>,
+codeowners-validator's <code>ALLOW_UNOWNED_PATTERNS=true</code> default, dependency-cruiser's <code>warn</code>
+severity. Dan Abramov's <a href="https://overreacted.io/suppressions-of-suppressions/">Suppressions of
+Suppressions</a> names the social mechanism: mass-injected ignores <em>"normalize the practice of suppressing lint
+rules, and if people get used to seeing them everywhere, nobody will notice when humans suppress the rules for new
+code."</em> An exact-match, monotonically-shrinking exceptions file survives; a wildcard does not.</p>
+
+<p>That "every tracked file must classify" scales is settled by <a href="https://reuse.software/spec-3.3/">REUSE</a>,
+which requires copyright and licence metadata on every file and is CI-linted at Linux-kernel scale. The kernel case is
+directly on point: they ran the one-off inventory (the mass SPDX conversion) <em>and then</em> added the standing
+per-file check — <strong>the check is what stops the inventory from being undone.</strong></p>
+
+<h2>How standards bodies keep a spec repo free of implementation</h2>
+
+<p><strong>No standards body has a written "this repo holds no implementation" policy.</strong> Searched across WPT,
+WHATWG, W3C, OpenFeature, OpenAPI, JSON Schema and test262 — it does not exist as prose anywhere. What exists is
+structure and, in two cases, a machine check.</p>
+
+<table>
+  <thead><tr><th>Body</th><th>Explicit "no impl" text</th><th>Machine check</th><th>Fail-closed?</th></tr></thead>
+  <tbody>
+    <tr><td>web-platform-tests</td><td>No — but carries the only <em>named</em> prohibition found anywhere: a
+      <code>MojomJSFile</code> rule, <em>"Don't check *.mojom.js files into WPT"</em></td>
+      <td><code>wpt lint --all</code>, 8 blocklist rules</td><td>Whole tree visited, deny-list semantics</td></tr>
+    <tr><td>WHATWG</td><td>No — its stated principle runs the other way (<em>"don't write fiction"</em>: ensure
+      implementations follow the standard and vice versa)</td><td>None</td><td>Open</td></tr>
+    <tr><td><strong>OpenFeature</strong></td><td>Implied, normative — the SDK <em>"does not itself handle the flag
+      evaluation logic"</em></td><td><strong><code>.specignore</code> + parser + <code>git diff</code>
+      gate</strong></td><td><strong>Closed on <code>.md</code></strong></td></tr>
+    <tr><td>OpenAPI</td><td>Closest written sentence: npm scripts are <em>"intentionally thin wrappers"</em>; tooling
+      moved out to a separate repo</td><td>markdownlint, schema tests</td><td>Open</td></tr>
+    <tr><td><strong>test262</strong></td><td>No (implied)</td><td><strong>13-check per-file classifier + mandatory
+      YAML frontmatter + an exact-match <code>--exceptions</code> file</strong></td>
+      <td><strong>Closed on changed <code>.js</code>/<code>.json</code></strong></td></tr>
+  </tbody>
+</table>
+
+<p>OpenFeature is the closest analogue to the Web Everything constellation: a spec repo that declares the boundary
+normatively, requires conforming SDKs to track a spec version <em>"not less than 2 minor versions behind the
+latest"</em>, and is consumed as a git submodule by every SDK. Its honest carve-out is instructive — the spec repo
+<em>does</em> contain Python and JavaScript under <code>tools/</code>. It holds zero <em>runtime</em> implementation,
+not zero code. <strong>"Zero implementation" only becomes enforceable once you write down what the exceptions
+are.</strong></p>
+
+<h2>Why a placement map does not belong in a decision record</h2>
+
+<p>Codifying a current-state inventory into a ratified document is not merely fragile — it is a <strong>named
+anti-pattern</strong>.</p>
+
+<ul>
+  <li><strong>Nygard's original ADR post</strong> (2011): <em>"Large documents are never kept up to date… Nobody ever
+  reads large documents, either."</em> An ADR is <em>designed to survive becoming false</em> — superseded, not
+  edited. An inventory is not.</li>
+  <li><strong>Microsoft Well-Architected</strong>: <em>"The ADR serves as an append-only log. Don't go back and edit
+  accepted records."</em> And directly: <em>"Avoid making decision records design guides."</em></li>
+  <li><strong>Olaf Zimmermann</strong> (adr.github.io) names two anti-patterns that describe a placement map exactly:
+  <strong>"Mega-ADR"</strong> — detailed architecture information stuffed into multi-page records serving as
+  documentation monster — and <strong>"Blueprint or Policy in Disguise"</strong>.</li>
+  <li><strong>C4</strong>: Simon Brown grades artifacts by decay rate. Context and container diagrams change slowly
+  and can be hand-maintained; code-level diagrams <em>"will potentially become outdated very quickly."</em> His remedy
+  for the fast-decaying levels is <em>generation</em> — because generating them <em>"will ensure they are kept up to
+  date and reflect reality at all times."</em></li>
+</ul>
+
+<p>The empirical evidence is Lethbridge, Singer &amp; Forward, <em>How Software Engineers Use Documentation</em> (IEEE
+Software 20(6), 2003). 68% agreed documentation is always outdated relative to the system; engineers consulted
+documentation in only 3% of observed events. But the decisive detail is their correlation table: <strong>the closer a
+document sits to the code, the more its accuracy governs whether anyone uses it</strong> (testing 0.67, low-level
+design 0.58, architectural 0.41, specifications 0.03). A per-path placement map is the closest-to-code architecture
+document there is — the worst possible position on that curve.</p>
+
+<p>On human review as the alternative: Li, Liang, Soliman &amp; Avgeriou's
+<a href="https://arxiv.org/abs/2201.01184">OpenStack code-review study</a> found that across <strong>21,274</strong>
+review comments in Nova and Neutron, only <strong>502</strong> discussed architecture-erosion symptoms. Their
+<a href="https://arxiv.org/abs/2103.11392">practitioner study</a> (ICPC 2021) concludes that dedicated erosion
+detection tools are lacking.</p>
+
+<h2>Fitness functions — what the literature actually supports</h2>
+
+<p>Ford, Parsons &amp; Kua define an architectural fitness function as <em>"any mechanism that provides an objective
+integrity assessment of some architectural characteristic(s)"</em>; the second edition's subtitle changed to
+<em>Automated Software Governance</em>. Rebecca Parsons' precision test is the useful one here: <em>"cyclomatic
+complexity of less than five can be a fitness function"</em> — as opposed to a directive like "be maintainable".
+<strong>A rule that can only be judged is not a fitness function.</strong> "The standards repo holds zero runtime
+implementation" passes that test only if you can write the classifier.</p>
+
+<p><strong>Three corrections to the folk version of this argument</strong>, worth stating because they are commonly
+mis-cited:</p>
+
+<ul>
+  <li><strong>"Continual beats triggered" misreads the taxonomy.</strong> In the book, <em>triggered</em> means
+  event-driven (a test on commit/merge/deploy) and <em>continual</em> means always-on production monitoring. A CI
+  classifier is <em>triggered</em>. The axis that carries the argument is <strong>automated versus manual</strong>,
+  not continual versus triggered.</li>
+  <li><strong>The technique never reached "Adopt" on the ThoughtWorks Radar.</strong> "Architectural fitness function"
+  entered at Trial (Nov 2017), stayed Trial (May 2018), and dropped off. The two that reached Adopt are narrow and
+  concrete: <em>dependency drift fitness function</em> and <em>run cost as architecture fitness function</em>.
+  ArchUnit itself went Assess → Trial. The pattern is that specific instantiations were adopted, not the general
+  idea.</li>
+  <li><strong>The book does not say "start manual, automate later."</strong> It is in fact more moderate than its
+  reputation: <em>"Don't mistake the function part of our definition as implying that architects must express all
+  fitness functions in code."</em></li>
+</ul>
+
+<p>The fair critique, from Ben Morris: <em>"you tend to get what you measure. Fitness functions based on metrics can
+very quickly become perceived as targets."</em> A green check becomes evidence of health it cannot actually
+provide.</p>
+
+<p>The bridge between the two artifacts already exists in the literature. Richards &amp; Ford
+(<em>Fundamentals of Software Architecture</em>, ch. 19) add a <strong>Compliance</strong> section to the ADR
+template, stating whether a decision can be verified by an automated fitness function and how. That makes the
+document <em>a specification of how the decision will be enforced</em> — not a competing description of state.</p>
+
+<h2>What this means for Web Everything</h2>
+
+<p><strong>The in-repo precedent already ruled the identical question on the sibling axis.</strong> Decision
+<a href="/backlog/2006-differentiate-we-the-standard-from-we-the-website-app-make-t/">#2006</a> found the WE-website a
+mis-homed product under the same placement rule, and
+<a href="/backlog/2052-lift-the-we-website-render-under-a-site-boundary-add-the-fai/">#2052</a> shipped its carrier:
+a fail-closed classifier in <code>check:standards</code> where a path in the zone matching neither surface set is a
+hard error. Its fork-existence justification was <em>"a glob manifest and a directory boundary are mutually exclusive
+mechanics for the same classification — maintaining both is redundant drift."</em></p>
+
+<p><strong>The impl axis has no such carrier.</strong> Grepping the repo's scripts, git hooks and CI workflows for the
+zero-implementation ruling's own lineage (<code>1282</code>, <code>1246</code>, <code>zero-impl</code>, "delivery
+runtime", "WE-resident") over non-test <code>.mjs</code> sources returns <strong>7 hits</strong>: five are prose
+comments that assert the rule without testing anything, and two belong to <code>guard-backward-edge.mjs</code> — its
+file header and a live deny-message string in an <em>enforcing</em> hook. So the honest claim is not "no code
+mentions the rule". It is that <strong>none of the seven enforces the residency clause</strong>: the five cannot,
+and the hook enforces a <em>different</em> clause (it denies a static <code>@frontierui</code> import) at a scope
+documented as WE's own <code>src/**</code> — which excludes the entire <code>blocks/</code> subtree where the
+residual runtime actually lives, including the ten files there that already carry that very import. The operative
+clause — <em>"no <strong>new</strong> WE-resident delivery runtime may be added"</em> — is held by model judgment
+alone.</p>
+
+<p>And the cost of that is already measurable. The decision card's own lineage records a constellation-wide hand
+inventory on 2026-06-24 that explicitly <em>cleared</em> the gen-wrapper fixture. Eight weeks later
+<code>we:scripts/gen-wrapper/genWrapper.mjs</code> stands at <strong>228 lines</strong> against
+<code>fui:tools/gen-wrapper/genWrapper.mjs</code>'s <strong>417</strong>, missing an entire feature system — and at
+directory scale the gap is wider still: <strong>437 tracked lines across 3 files</strong> in WE against
+<strong>1,270 across 11</strong> in Frontier UI, which additionally carries a surface-contract module, a wrapper
+form catalog, a template emitter and three type-declaration files that WE has no counterpart for. Sharper still:
+that fixture was sanctioned as a "reference fixture" on 2026-06-18, and the ruling that withdrew the
+reference-implementation tier <em>wholesale</em> landed two days later, on 2026-06-20. <strong>It survived its own
+repeal</strong> — because a ruling changes a rule but enumerates nothing.</p>
+
+<h2 id="the-correction">The correction — why the broad instrument is the wrong lesson</h2>
+
+<p>The obvious reading of everything above is "so widen the classifier to the whole tree". That reading was drafted,
+executed against the real repo, and <strong>fails</strong>. Run over all 6,980 tracked paths it produces
+<strong>774 hard errors</strong> — including the contracts, conformance-vector, capability-manifest and webcases
+directories that the same inventory certifies as correctly placed — and it is <strong>green on both defects that
+motivate it</strong>, because a path classifier cannot see file <em>content</em> and cannot see the sibling repo.
+The gen-wrapper divergence is FUI growing while WE stands still; no path-based rule will ever notice it. #2052's own
+source comment, in the file usually cited as the precedent, records the whole-tree widening as considered and
+rejected: classifying every tracked path <em>"would be noise and would red-gate the whole repo."</em></p>
+
+<p><strong>And the deeper correction: the recurring defect is not stale prose.</strong> The tempting inference —
+<em>prose rots, code stays true</em> — is false in this repo, which contains <strong>two machine checks that have
+already rotted into no-ops</strong>. A cross-repo byte-parity gate went vacuous when its subject directory was
+deleted; a codegen-placement invariant went dead when its subject file was deleted. Both are guarded by an
+existence check, so both report success while covering nothing. Together with the fixture that outlived its repeal
+and an epic whose four filed slices covered four of sixteen named targets, that is <strong>four instances of one
+failure mode: an instrument that silently stops covering anything.</strong></p>
+
+<p>The lesson is therefore the opposite of "make the check broader". It is <strong>make the check narrow, and make
+it report its own coverage</strong> — a check that cannot say <em>"I currently cover N paths, down from M"</em> is
+one deletion away from decorative. That, plus re-pointing the byte-parity gate that already exists at the duplicate
+set that actually drifted, is what the prior art's generator-plus-diff-gate shape buys here.</p>
+
+<p><strong>One structural caveat.</strong> A path classifier can only classify paths in the repo it runs in. In a
+multi-repo constellation, the <em>direction</em> of dependency is enforced structurally by package publishing — that
+is free. But "this repo contains zero runtime implementation" is a <strong>within-repo</strong> property, and nothing
+about the repo split enforces it. The split gives you the arrow; only a within-repo classifier gives you the
+emptiness. That asymmetry is the concrete reason a standing check is not redundant with the architecture.</p>
+
+<h2>Cross-references</h2>
+
+<ul>
+  <li>Decision: <a href="/backlog/1770-audit-the-end-state-constellation-placement-once-all-relocat/">#1770</a> — the
+  end-state constellation-placement gate this research grounds.</li>
+  <li>Sibling-axis precedent:
+  <a href="/backlog/2006-differentiate-we-the-standard-from-we-the-website-app-make-t/">#2006</a> →
+  <a href="/backlog/2052-lift-the-we-website-render-under-a-site-boundary-add-the-fai/">#2052</a>.</li>
+  <li>Related placement research:
+  <a href="/research/we-standard-vs-website-app-boundary/">WE-standard vs WE-website boundary</a> ·
+  <a href="/research/devtool-placement-constellation/">Devtool placement across the constellation</a> ·
+  <a href="/research/cross-repo-tool-engine-product-boundary/">Cross-repo tool/engine/product boundary</a>.</li>
+</ul>
+{% endraw %}
