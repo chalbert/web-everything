@@ -60,8 +60,32 @@ and its near-duplicate list is the dedup filter's starting point.
 
 ## Step 2 — red-team each candidate (the judgment half)
 
-One skeptic sub-agent per candidate, **mandate = kill it, default REJECT**, reject on any uncertainty.
-Sonnet is fine — it's bounded. A candidate must clear all five:
+One skeptic per candidate, **mandate = kill it, default REJECT**, reject on any uncertainty. Sonnet is fine
+— it's bounded.
+
+**Spawn them through `judgePanel`, not the `Agent` tool** (#3145). A subagent inherits this session's
+`CLAUDE_CODE_SESSION_ID` — the identity `we:scripts/lib/review-independence.mjs` keys independence on — so a
+row of "independent" skeptic subagents is the harvest session grading its own shortlist. One shim call seats
+them all as tool-free headless `claude -p` processes with pairwise-distinct derived ids
+(see [delivery-loop.md](../../docs/agent/delivery-loop.md#independent-judgment-spawn) for the payload shape
+and the honest limits):
+
+```bash
+# One seat per candidate: lens `skeptic`, an explicit distinct id, and a mandate naming WHICH candidate
+# that seat must kill. materialFile carries the whole candidate set plus the corroboration bundle below.
+node skills-src/jury/panel-fanout.mjs --payload-file="$PAYLOAD" \
+  --depth=0 --max-depth=2 --max-total-budget-usd=6 --run-id="harvest-<yyyy-mm-dd>"
+```
+
+> **A tool-free skeptic cannot go looking — so YOU fetch the evidence first.** The Grounding filter below
+> asks the skeptic to open a corroborating in-repo artifact, and `judgePanel` seats are `--tools ''`. Before
+> writing the payload, do that lookup yourself for each candidate (grep the area, open the file/item/PR the
+> claim implies) and put **what you actually found — including "nothing"** — into the material next to the
+> candidate. The skeptic then judges whether that text corroborates the claim, which is the same filter with
+> the search moved to the one actor that can run it. Do **not** let a seat infer corroboration it could not
+> read; `panel-fanout` already tells it that it has no tools and must not claim to have opened anything.
+
+A candidate must clear all five:
 
 - **Grounding** — is the lesson *true*, or just asserted? The pool carries no transcript and no evidence
   field, so the harvest cannot re-ask "quote the turn that established this" the way the old in-session
@@ -121,7 +145,9 @@ actually routed and the PR is open. Files move to `<pool>/harvested/<stamp>/`, s
 re-processes them and the trail stays inspectable.
 
 **Archive only what step 1 actually read — the bound is required, not a nicety.** Steps 2–3 take minutes,
-and the red-team subagents *themselves* emit into the pool while they run. Anything appended after step 1
+and other sessions keep emitting into the shared pool while they do (the red-team seats no longer do — a
+tool-free juror cannot append anything — but the drop-box is cross-session, so it still grows underneath you).
+Anything appended after step 1
 was never adjudicated, and an archived entry is invisible to every future harvest. So `--archive` refuses to
 run unbounded: pass `--files=` (preferred), or `--before=<the ISO time of the step-1 read>` as the mtime-cutoff
 alternative. It also **exits non-zero if the pool directory does not exist** — that means you resolved the
