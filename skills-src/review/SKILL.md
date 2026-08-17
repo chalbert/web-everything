@@ -18,8 +18,23 @@ label swap by hand: each is a step, and a hand-rolled one drifts from the consol
 ## Run it
 
 ```
-node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> --json
+JUROR_LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-juror)
+node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> --cwd="$JUROR_LANE" --json
+# …and when the review is done, hand the lane back (the slug is on acquire's stderr):
+node scripts/lane-pool.mjs release --lane="${JUROR_LANE##*lane-}" --session=<the holder slug acquire printed>
 ```
+
+**`--cwd` is REQUIRED, and it is a lane of the JUROR's own** (#3151). `review-pr`'s juror is tool-bearing — it
+runs gates, reproduces defects and mutates source to test a claim — so `assertLaneCwd` refuses to spawn it
+without a lane, rather than letting it inherit whatever tree you are standing in. `acquire` prints the lane's
+path on stdout and its holder slug on stderr; the lane must not be the primary checkout and must not be the
+lane you are driving from (`assertLaneCwd` refuses both, by inode identity rather than by spelling). It is the
+juror's WORKING directory, **not** the checkout the PR is read from — `read` still runs against this repo, so
+pointing it at another repo's clone does not make a cross-repo review work (#3137).
+
+`--model=<alias>` overrides the juror's model, and `--help` lists both. (`JUDGE_LANE_CWD` in the environment
+still works as a fallback — it was the ONLY way until #3151, which is why older dispatch prompts thread it by
+hand.)
 
 It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
 invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
