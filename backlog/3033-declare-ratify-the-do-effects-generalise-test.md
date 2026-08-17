@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3029"
 status: open
-relatedTo: ["2821", "2575", "2577", "xf5sjrx"]
+relatedTo: ["2821", "2575", "2577", "3146"]
 dateOpened: "2026-08-08"
 scope:
   - we:scripts/operations/
@@ -45,7 +45,7 @@ the fact; this story and the Ruler are the same layer, not adjacent ones.
    ratify's** — but `next-backlog-item`'s decision red-team step (the ratify-turn skeptic pass) has the
    identical shape ("spin up a throwaway skeptic sub-agent," pure prose, no structural backing), so whatever
    `ratify` ships for its own skeptic/red-team pass should close that site too. See the coordination note below
-   and the sibling story "Declare prepare's skeptic + two-confusion screen as judge steps" ([xf5sjrx]), which
+   and the sibling story "Declare prepare's skeptic + two-confusion screen as judge steps" ([3146]), which
    owns the prepare-side design in full — this story does not restate it.
 
 ## What it probes
@@ -139,7 +139,7 @@ that stays two operations sharing a mandate-building seam (`buildSubjectMandate`
 constants without merging.
 
 **Recommended default, stated for whoever ratifies this fork, not ratified here:** two operations —
-`prepare-decision` (owned by [xf5sjrx]) and `ratify-decision` (this story) — coordinated as one delivery effort
+`prepare-decision` (owned by [3146]) and `ratify-decision` (this story) — coordinated as one delivery effort
 per the operator's direction, sharing the judge-spawn/mandate seam, cross-linking their run records via the
 item id, but declared separately. This is a default, not a ruling; a reviewer who disagrees should say so
 against the two precedent cases above, not against a bare preference.
@@ -155,6 +155,6 @@ actor.
 ## Not in scope
 
 The `/prepare` research flow and its skeptic/screen judge-step mechanization are owned by the sibling story
-[xf5sjrx] ("Declare prepare's skeptic + two-confusion screen as judge steps"), coordinated with this one per the
+[3146] ("Declare prepare's skeptic + two-confusion screen as judge steps"), coordinated with this one per the
 operator's direction, not restated here. This slice moves the **recording** of a ruling onto the engine; how a
 ruling is reached is untouched.
