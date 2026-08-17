@@ -2,9 +2,11 @@
 bornAs: xby3o0h
 kind: story
 size: 5
-status: active
+status: resolved
 dateOpened: "2026-08-08"
 dateStarted: "2026-08-14"
+dateResolved: "2026-08-17"
+codifiedIn: "we:scripts/lib/secret-scrub.mjs"
 tags: [conveyor, learnings, security]
 scope: [
   "we:scripts/lib/secret-scrub.mjs",
