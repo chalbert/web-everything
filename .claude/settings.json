@@ -3,6 +3,7 @@
     "bgIsolation": "none"
   },
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash",
       "Edit",
