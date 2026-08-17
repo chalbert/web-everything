@@ -1,0 +1,22 @@
+{
+  "id": "calendar-day-frame-agreement",
+  "title": "Calendar-day frame agreement — pin the frame, never pad the threshold",
+  "status": "open",
+  "summary": "Grounds decision #2985 (does the #670 born-active TTL need a grace day for operator timezone skew?). The survey corrects the card's premise: option 2 — compare in the operator's day rather than UTC — ALREADY SHIPPED in #2747's own resolve commit, and all four clock reads (check-standards.mjs, check-backlog-workflow.mjs, audit-backlog-health.mjs, and the dateScaffolded stamp itself) go through localToday(); on any single machine the skew is exactly zero. The card's cost claim is false for the same reason — workflow-invariants.cjs takes `today` as an injected argument and never reads a clock, so no CJS date helper is needed. What survives is a cross-MACHINE frame gap: the repo health gate also runs in CI, where GitHub-hosted runners are UTC and no workflow sets TZ or BACKLOG_TZ, so CI's 'today' and the operator's dateScaffolded are two different frames. Prior art is one-sided on the remedy. Temporal makes the zone an explicit argument (Temporal.Now.plainDateISO(timeZone) — one instant reads as two different 'todays'), RFC 9557 exists because a bare offset is not a zone, git stores an instant plus an offset used only for rendering, and Noda Time formalises that Instant->LocalDate is unambiguous while LocalDate->Instant is not. All four are authority about representing and comparing civil time, and none was authored about whether a staleness check may carry slack — so they ground the FRAME argument only, never a threshold question. No citable source was found endorsing threshold padding to absorb timezone skew; that is absence of evidence, not a prohibition. Two corrections the sources forced: Temporal does NOT call a zone-free calendar date meaningless (PlainDate is a deliberate concept for birthdays and alarms; the zone binds only at 'what is today' and at instant crossings), and GitHub's contributions-graph timezone story is unsettled between two first-party sources and should not be cited. A threshold bump is the broken branch on two grounded counts: it tolerates the real second-day staleness it was protecting, and it pays globally for an artifact that is local to the machines where nobody reads the warning. (A third count — that two calendar frames can differ by TWO days, UTC+14 vs UTC-12 — was considered and WITHDRAWN: true in general, inadmissible for a population of one America/Toronto operator plus UTC runners, so it is no longer offered as grounding.) On WHERE the frame is declared, the recommendation is the repo-wide one: a tracked in-tree IANA zone read as a rung BELOW the existing per-host BACKLOG_TZ knob, so every reader and writer of the checkout shares one frame — #2985's Fork 1 default (b). Per-workflow BACKLOG_TZ enrollment is the main alternative and reaches GitHub Actions only. #2747's one-knob finding is about TZ being POSIX rather than IANA and does not reach a tracked IANA declaration that is validated against Intl; an earlier draft's claim that any second rung re-opens #2747 was an over-reach the independent skeptic pass corrected. Full grounding in reports/2026-08-17-calendar-day-frame-agreement.md.",
+  "dateOpened": "2026-08-17",
+  "lastReviewed": "2026-08-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "dates",
+    "timezone",
+    "operator-day",
+    "temporal",
+    "rfc-9557",
+    "ci",
+    "backlog-workflow",
+    "native-first",
+    "self-driven-project"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
