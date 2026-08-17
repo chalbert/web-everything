@@ -85,7 +85,10 @@ literal file path holding the pointer index is not.*
   scope).** **DEFAULT.** A new small file (e.g. `we:docs/agent/constitution-index.json`) holds **only anchor-id
   pointers** into `we:docs/agent/platform-decisions.md` — never copied rule text, exactly the shape F4 already
   ratified for a per-item `constitution:` field (`we:backlog/2561-console-substrate-and-contract-forks.md:306-311`:
-  "pointers into the statute layer — never copied rule text"). The prose for every tagged principle stays
+  "pointers into the statute layer — never copied rule text"). **Read that file name as illustrative, not
+  ruled — *where* the index lives is [#3144] Fork 1's call (note added 2026-08-17: a cross-reference only, no
+  new argument and no change to this fork's ruling, which holds whichever surface #3144 picks).** The prose
+  for every tagged principle stays
   exactly where it already lives; nothing moves. **This resolves the entrenchment question directly:** Fork 5's
   three clauses are process properties, not storage properties — (i) *exempt from #911* is enforced by
   `we:scripts/lib/review-escalation.mjs` reading the index to recognize a diff hunk under a tagged anchor's
