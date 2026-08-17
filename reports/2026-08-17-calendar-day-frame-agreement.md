@@ -2,8 +2,10 @@
 
 **Date**: 2026-08-17
 **Point**: The born-active TTL's UTC-vs-operator skew (#2985) was already fixed by #2747 — every ageing site
-reads `localToday()`. What survives is a *cross-machine* frame gap (CI runs the gate in UTC), and prior art is
-uniform: make the two clocks agree, never pad the staleness threshold.
+reads `localToday()`. What survives is a *cross-machine* frame gap (CI runs the gate in UTC). Prior art is
+uniform on how to *name* a frame — and is authority for the frame only, never over a threshold question: no
+source was found endorsing threshold padding, which is absence of evidence, not a prohibition. The recommended
+remedy is that the repo declare one project day in-tree, read by every host.
 **Research page**: `/research/calendar-day-frame-agreement/`
 
 ---
@@ -136,9 +138,12 @@ creating day."*
 ### 5. The knob exists — and the declaration belongs one rung below it
 
 `we:scripts/lib/local-date.mjs:27` documents `BACKLOG_TZ` as *"an explicit IANA pin … for the operator whose
-HOST clock is already wrong, typically a UTC container."* A GitHub-hosted runner **is** that host, so pinning a
-reader is the use the knob was designed for rather than a new mechanism. But the knob frames one reader at a
-time: it covers the hosts someone remembers to enroll, and no others.
+HOST clock is already wrong, typically a UTC container."* A GitHub-hosted runner is that container case, so no
+new mechanism is needed — **though the knob was authored for an *operator* recovering their own zone on their
+own bad host, not for unattended readers that have no operator at all.** Reaching those is a deliberate
+extension of a documented contract, which is why #2985 names it in the ruling rather than slipping it into a
+docblock. And either way the knob frames one reader at a time: it covers the hosts someone remembers to enroll,
+and no others.
 
 #2747 did deliberately reduce the ladder to this **one** knob on review evidence — read at its actual scope,
 that evidence is that **`TZ` is POSIX, not IANA** (`TZ=GMT+5` resolves to the zone `"+05:00"`, ten hours off),

@@ -139,10 +139,13 @@
 
 <p>
   A per-reader pin already exists. <code>scripts/lib/local-date.mjs</code> documents <code>BACKLOG_TZ</code> as
-  "an explicit IANA pin … for the operator whose HOST clock is already wrong, typically a UTC container" — which
-  is precisely what a GitHub-hosted runner is. But it frames one reader at a time: it covers the hosts someone
-  remembers to enroll, and no others. A devcontainer, a fresh clone in a UTC image, a second machine or a bot
-  stays unframed, and each new workflow silently inherits today's wrong behaviour.
+  "an explicit IANA pin … for the operator whose HOST clock is already wrong, typically a UTC container" — the
+  container case a GitHub-hosted runner falls in. Note the knob was authored for an <em>operator</em> recovering
+  their own zone on their own bad host, not for unattended readers with no operator at all; reaching those is a
+  deliberate extension of that contract rather than a use it already covers. And it frames one reader at a time
+  regardless: it covers the hosts someone remembers to enroll, and no others. A devcontainer, a fresh clone in a
+  UTC image, a second machine or a bot stays unframed, and each new workflow silently inherits today's wrong
+  behaviour.
 </p>
 
 <p>
