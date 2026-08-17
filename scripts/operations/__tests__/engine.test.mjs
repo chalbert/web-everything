@@ -192,12 +192,39 @@ describe('a judge resume carries what the spawn cost', () => {
     expect(run.telemetry).toHaveLength(1);
     expect(run.telemetry[0]).toEqual({
       step: 'panel', stepIndex: 1, costUsd: 0.02, wallMs: 1500, sessionId: 'abc',
-      // From the SUSPENDED REQUEST, not from the caller's report — the row is attributable either way.
+      // `lens`/`effort` from the SUSPENDED REQUEST, never the caller's report — the row stays attributable to
+      // the declared call. `model` falls back to the request here because this spend row reports none; a
+      // reported one WINS, which is #3151's `--model` override (pinned in the next test).
       lens: 'panel', model: 'sonnet', effort: 'medium',
       usage: { input_tokens: 10 },
     });
     // The answer itself is untouched: a declaration must not be able to compute over what it cost.
     expect(run.findings.panel).toEqual(FIXTURE_JUDGE_ANSWER);
+  });
+
+  it('takes a REPORTED model over the declared one, and refuses the caller `lens`/`effort` (#3151)', () => {
+    // THE ASYMMETRY IS THE TEST. `--model` is the one thing that can legitimately make the spawn differ from
+    // the declaration, so a reported model must win or the row lies about which juror judged. Nothing can make
+    // `lens` or `effort` diverge, so a caller reporting them is either confused or hostile — and the row must
+    // stay attributable to the declared call. A fixture that reported the SAME values the declaration asks for
+    // could not tell the two paths apart, so every field here is deliberately different.
+    const run = advance(atJudge(), {
+      registry,
+      resume: {
+        value: FIXTURE_JUDGE_ANSWER,
+        telemetry: { ...SPEND, model: 'opus', effort: 'max', lens: 'a-lens-nobody-declared' },
+      },
+    });
+    expect(run.telemetry[0].model).toBe('opus');
+    expect(run.telemetry[0].effort).toBe('medium');
+    expect(run.telemetry[0].lens).toBe('panel');
+  });
+
+  it('falls back to the declared model when the caller reports an EMPTY one, rather than recording none', () => {
+    // `||`, not `??`: an empty string is not a model. Shadowing the declared value with one would leave
+    // `normalizeJudgeTelemetry`'s string filter to drop the key entirely — a row worse than either input.
+    const run = advance(atJudge(), { registry, resume: { value: FIXTURE_JUDGE_ANSWER, telemetry: { ...SPEND, model: '' } } });
+    expect(run.telemetry[0].model).toBe('sonnet');
   });
 
   it('is optional — a resume without it records nothing and changes nothing', () => {
