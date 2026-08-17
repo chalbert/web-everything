@@ -11,4 +11,6 @@ we:.claude/settings.json's bgIsolation:none fix (#1448) only covers this repo. T
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — a settings file for Claude exists at the plateau-app repo root (and/or frontierui, once its own convention is confirmed) carrying the same worktree opt-out this repo's we:.claude/settings.json now has; a lane clone of that repo can complete an Edit/Write on its first background-session action without the EnterWorktree tool_use_error, where today it fails.
+2. Confirmed (not assumed) whether plateau-app and frontierui use the same exclusive lane-clone leasing convention this repo does before applying a blanket opt-out — if either repo's isolation model differs, the fix is scoped to match that repo's actual guarantees, not copy-pasted from we:.claude/settings.json.
+3. frontierui checked directly (this filing only confirmed plateau-app hit the stall live; frontierui's dotfile config path is empty, so it has no settings file blocking anything today, but also none preventing the same failure once it dispatches background work).

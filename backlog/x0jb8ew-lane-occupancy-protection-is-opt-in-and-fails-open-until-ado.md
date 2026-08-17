@@ -11,4 +11,7 @@ Surfaced by the independent reviewer of #1448 while assessing whether lane-pool 
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — a test asserting that a freshly-`acquire`d, not-yet-`adopt`ed lane's `isForeignOccupancy` (we:scripts/lib/lane-lease.mjs:195-199) returns `true` (foreign, i.e. protected) for a session that isn't the acquirer, instead of today's `false` (allowed) — fails today (an unadopted lease has no `workerSession`, so the check short-circuits to not-foreign), passes once occupancy is enforced immediately on acquire rather than deferred to `adopt`.
+2. If immediate enforcement isn't the chosen fix, an alternative: `node we:scripts/lane-pool.mjs acquire`'s fail-open window is surfaced as a visible warning from the build-dispatch operation itself (we:scripts/operations/dispatch-lane.mjs), not only in the acquire command's own stdout — a test asserts the dispatch-lane run record or its printed output names the fail-open state when it applies.
+3. we:scripts/guard-lane.mjs's `KNOWN RESIDUALS` header is updated to reflect whichever of the two is chosen, so the doc comment stops describing a gap the code no longer has (or, if left open by design, states why).
+4. `npm run check:standards` and the relevant we:scripts/__tests__/guard-lane*.test.mjs / we:scripts/lib/__tests__/lane-lease*.test.mjs suites are green.
