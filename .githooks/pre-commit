@@ -11,6 +11,22 @@
 # `|| exit $?` after each gate so the first failure stops the hook and propagates the right exit code.
 npm run --silent lint:locus || exit $?
 
+# Inventory write-time regen (#3071-adjacent incident, PR #1404 — a research topic was added without
+# `gen:inventory`, and the stale AGENTS.md count wasn't caught until CI failed on an already-
+# `review:accepted` PR, costing a full round-trip). `gen:inventory --staged` is a self-contained AUTO-FIX,
+# not a blocking gate: it no-ops unless the commit stages an inventory-affecting file (a per-entry
+# registry under src/_data/{blocks,plugs,intents,semantics,researchTopics,projects}/ or AGENTS.md
+# itself), and when it regenerates it writes the new AGENTS.md blob directly into the INDEX (git
+# update-index — never a working-tree `git add`, which would risk sweeping an unrelated unstaged
+# AGENTS.md edit into the commit, #1414 review) — so a normal `git commit` that touches
+# inventory-affecting content simply can't produce a stale AGENTS.md. Counts are read from the git
+# INDEX too (not readdirSync over the working tree, #1414 review round 2), so an untracked sibling
+# file dropped in a registry dir can't inflate the committed count either. Costs under a fraction of
+# a second (measured) since it only reads the small per-entry JSON registries, so it runs
+# unconditionally rather than trying to be cleverer about scoping. `check:standards`'s `kind: 'inventory'`
+# check stays as a CI backstop for any commit path that bypasses this hook (e.g. `--no-verify`).
+npm run --silent gen:inventory:staged || exit $?
+
 # #2179's pre-commit verdict/mtime gate (scripts/check-visual-baseline-update.mjs) is RETIRED (#2238):
 # it deadlocked the CI baseline-refresh workflow, which can never author a verdict that postdates its
 # own regenerated PNG. Baseline review now happens in the PR that carries the changed snapshot(s) — the

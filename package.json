@@ -34,6 +34,7 @@
     "test:coverage:shard": "vitest run --coverage --coverage.reporter=json --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0",
     "coverage:merge": "node scripts/merge-coverage.mjs",
     "gen:inventory": "node scripts/gen-inventory.mjs",
+    "gen:inventory:staged": "node scripts/gen-inventory.mjs --staged",
     "gen:reference-index": "node scripts/gen-reference-index.mjs",
     "sweep:references": "node scripts/sweep-reference-liveness.mjs",
     "route:references": "node scripts/route-reference-remediation.mjs",
