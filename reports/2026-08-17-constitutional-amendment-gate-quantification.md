@@ -61,7 +61,8 @@ the working precedent to copy, and it is notable that its entrenchment property 
 the dated artifact*, not from a permission check.
 
 Consequence: clause (i) cannot be built as a carve-out from an existing gate. It has to be re-expressed as
-something that binds on a surface that *does* have code — which is what Fork 3 does.
+something that binds on a surface that *does* have code — which is what **Fork 1** does (the conferring
+surface class). Fork 3 is a different question: project **scope**.
 
 ### Finding 2 — the only statute gate that exists is whole-file, and it is the floor, not the ceiling
 
@@ -69,7 +70,7 @@ something that binds on a surface that *does* have code — which is what Fork 3
 diff to that file to `review:human` (`we:scripts/lib/review-escalation.mjs:41`, `:574`, `:580`). It cannot
 distinguish a constitution-tier anchor from an ordinary one — the identification mechanism #2568 Fork 1
 produces is the missing input. #2568's skeptic already folded the **stacking, not replacing** amendment
-(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:102-107`): the entrenched
+(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:106-111`): the entrenched
 path escalates *past* the existing floor rather than substituting for it. #3144 inherits that and does not
 re-decide it.
 
@@ -94,7 +95,7 @@ committed, gate-validated artifact channel that exists today.
 
 The trust question — a report the amending agent writes is *emitter-controlled*, so it can assert a red-team
 that never ran — has a ratified answer already: #2978's admission rule
-(`we:docs/agent/platform-decisions.md:3476`) requires a **quoted grounding turn plus a transcript pointer**,
+(`we:docs/agent/platform-decisions.md:3496`) requires a **quoted grounding turn plus a transcript pointer**,
 verified "against a file the *harness* writes, not one the emitter controls." That verification is itself
 **ratified but unbuilt** (no `transcriptPointer` code exists under `we:scripts/`), so #3144's default inherits
 a build, not a shipped check — stated honestly rather than papered over.
@@ -111,8 +112,8 @@ But it is **not** what #2564 means by a project constitution. #2564's "project" 
 the `ownedByProject` owner of intents/protocols (`we:backlog/2564-adopt-spec-based-programming-across-the-constellation-schema.md:126-131`,
 e.g. `webrealtime`; 46 such projects live under `we:src/_data/projects/`). `plateau-app:constitution.md` is a
 product north-star that explicitly disclaims build decisions ("It does **not** decide how we build anything").
-So the discovery is a **vocabulary collision**, not a governance breach — and it is exactly why Fork 4's
-default makes tier membership turn on a *declared index entry* rather than on an artifact's name.
+So the discovery is a **vocabulary collision**, not a governance breach — and it is exactly why **Fork 3**'s
+default makes tier membership turn on a *declared* platform-scope entry rather than on an artifact's name.
 
 ### Finding 6 — #3144's own premise about #2568 went stale during the gap
 
@@ -128,15 +129,15 @@ The prep skeptic ran a grep for `2771|2785|2840|principle-surface|declarative-le
 `#2568` and got **zero hits**. That is the entire 2026-07-28 → 2026-08-02 governance re-ratification, and it
 governs exactly the turf all four forks rule on:
 
-- **#2771** (`we:docs/agent/platform-decisions.md:3388`) **split the policy tier.** The declarative leash —
+- **#2771** (`we:docs/agent/platform-decisions.md:3408`) **split the policy tier.** The declarative leash —
   `we:scripts/lib/review-policy.contract.json`, `we:scripts/lib/gate-config.mjs`, the invariant/conformance
   suites — stays `review:human`. The **derivation code**, naming `we:scripts/lib/review-escalation.mjs`
   explicitly, is **ratified agent-clearable**.
-- **#2840** (`:3458`) made `review:human` fire on a **principle surface**, and is "the canonical definition of
+- **#2840** (`:3478`) made `review:human` fire on a **principle surface**, and is "the canonical definition of
   that term for the whole governance cluster". Trigger 1 is already **per-anchor** inside the statute
   document; trigger 3 pins every `POLICY_SPEC` file human-gated whole-file, **permanently**.
-- **#2839** (`:3450`) — a principle change and its implementation may never travel in one diff.
-- **#2851** (`:3410`) — the human step is authoring or weakening a principle, never enforcing one.
+- **#2839** (`:3470`) — a principle change and its implementation may never travel in one diff.
+- **#2851** (`:3430`) — the human step is authoring or weakening a principle, never enforcing one.
 
 Consequences folded into the item: the first draft had put the constitution's only real protection **inside
 the file #2771 made agent-clearable**, so an AI panel could have emptied it; and it had rejected the contract
@@ -159,7 +160,9 @@ precedent supports, in four lines:
 
 1. **On the day-count — nobody derived their number from evidence.** The attested band is 72 hours (Apache,
    justified by *timezone coverage*, not deliberation) → 10 days (Rust's Final Comment Period, the only one
-   that shows its arithmetic: "ten calendar days, so that it is open for at least 5 business days") → 14 days
+   that states *any* rationale: "ten calendar days, so that it is open for at least 5 business days" — a
+   stated minimum with margin, **not** arithmetic that yields 10; the shortest span guaranteed to contain
+   five working days is 7) → 14 days
    (the modal but underived answer: IETF working-group Last Call, Debian, EIP, the EU withdrawal right) → 28
    days (W3C's Advisory Committee minimum, and IETF's *doubling* for individual submissions that had no prior
    deliberating body — structurally always the solo case). Three widely-assumed facts are wrong and worth not
@@ -176,15 +179,17 @@ precedent supports, in four lines:
    exemption must also protect itself.
 4. **The empirical case for cooling periods is weak to negative** — Utah's 72-hour waiting period changed
    ~2% of already-certain decisions; delay does not debias anchoring; the unconscious-thought advantage
-   failed a 399-subject replication; the one solid positive (Buçinca et al., CSCW 2021) used a **30-second**
-   pause and attributes the effect to interrupting the automatic accept. So the interval's defensible job is
+   failed a large multi-lab replication; the one solid positive (Buçinca et al., CSCW 2021) used a pause on
+   the order of seconds and attributes the effect to interrupting the automatic accept. **These are
+   secondary-source figures gathered in the survey and not re-verified against the source papers** — the
+   direction is what the recommendation uses, never an exact subject count or duration. So the interval's defensible job is
    *a window for new information plus a structural condition*, never "reflection improves the call".
 
 ## Files created/modified
 
 | File | Action |
 |---|---|
-| `we:backlog/3144-curate-the-constitution-tier-s-full-principle-set-and-quanti.md` | Re-scoped to the four quantification forks, prepared to DoR, `preparedDate` stamped |
+| `we:backlog/3144-curate-the-constitution-tier-s-full-principle-set-and-quanti.md` | Re-scoped to the three quantification forks, prepared to DoR, `preparedDate` stamped |
 | `we:reports/2026-08-17-constitutional-amendment-gate-quantification.md` | Created (this report) |
 | `we:src/_data/researchTopics/constitutional-amendment-gate-quantification.json` | Created |
 | `we:src/_includes/research-descriptions/constitutional-amendment-gate-quantification.njk` | Created |

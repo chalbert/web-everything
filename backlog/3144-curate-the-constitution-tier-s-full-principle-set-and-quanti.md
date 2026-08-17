@@ -28,14 +28,14 @@ was unprepared.
 
 **That is no longer true, and the conflict is resolved.** #2568 was prepared 2026-08-16 and now carries #2564
 Fork 5 as an explicit hard constraint on its form call
-(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:44-61`). Its Fork 1 default
+(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:45-62`). Its Fork 1 default
 answers the conflict structurally: Fork 5's three clauses are **process properties, not storage properties**,
 so entrenchment attaches to *editing a tagged anchor* rather than to a document boundary, and no standalone
 body is forced. Its skeptic folded two amendments this item inherits and does **not** re-decide —
 **self-referential closure** (an edit to the tag index is itself constitution-tier, else membership can be
 laundered) and **stacking, not replacing** (the entrenched path escalates *past* the existing `review:human`
 floor, never in place of it),
-`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:97-107`.
+`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:101-111`.
 
 So nothing about *form* is live here. **Recommended ratification order: #2568 first, then this item.** No
 `blockedBy` edge is asserted, and that is deliberate rather than an omission: no fork below names a specific
@@ -48,20 +48,20 @@ statute file routes to one `review:human` floor, and derivation code enforces it
 gate.** A four-decision governance cluster re-ratified it and neither item cites any of them. The prep
 skeptic found this, and it inverted two of the four first-draft defaults:
 
-- **#2771 (`we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`, :3388).** The policy
+- **#2771 (`we:docs/agent/platform-decisions.md#review-human-declarative-leash-only`, :3408).** The policy
   tier is **split**. The **declarative leash** — the machine-diffable contract
   (`we:scripts/lib/review-policy.contract.json`), the roster (`we:scripts/lib/gate-config.mjs`), and the
   invariant/conformance suites — stays `review:human`. The **derivation code**, explicitly including
   `we:scripts/lib/review-escalation.mjs`, is **ratified agent-clearable** by an independent committee.
-- **#2840 (`#human-is-principle-surface-not-path`, :3458).** `review:human` fires on a **principle surface**,
+- **#2840 (`#human-is-principle-surface-not-path`, :3478).** `review:human` fires on a **principle surface**,
   and this anchor is "the canonical definition of that term for the whole governance cluster". Trigger 1 is
   already **per-anchor**: "a statute-anchor edit that adds, removes, or alters a `### … {#anchor}` rule
   heading or its ruling body." Trigger 3 pins every `POLICY_SPEC` file human-gated **as a whole file,
   permanently**, "because those files *are* the encoded principle and have no behaviour-preserving edit."
-- **#2839 (`#principle-and-impl-two-pr`, :3450).** A principle change and its implementation may **never**
+- **#2839 (`#principle-and-impl-two-pr`, :3470).** A principle change and its implementation may **never**
   travel in one diff: the statute clause lands first in a decisions-only `review:human` PR, the enforcement
   second in a committee-cleared impl PR citing a `codifiedIn` anchor already resolved on `main`.
-- **#2851 (`#human-required-is-judgment-only`, :3410).** The human step is *authoring or weakening* a
+- **#2851 (`#human-required-is-judgment-only`, :3430).** The human step is *authoring or weakening* a
   principle, never mechanically enforcing one — so a gate must not be widened past genuine judgment.
 
 Read together these answer #2564 Fork 5(i)'s hardest question — *what higher-order instrument can confer an
@@ -82,7 +82,7 @@ ratified construction.
 *Fork exists (forced invariant): the excluded branch — **declare the exemption on a surface outside the
 declarative leash** — is **broken**, and the repo's own ratifications say so more sharply than the legal
 analogue does. #2771 clause 1 ratified `we:scripts/lib/review-escalation.mjs` **agent-clearable**
-(`we:docs/agent/platform-decisions.md:3394`), so an entrenchment declaration living in the rubric can be
+(`we:docs/agent/platform-decisions.md:3412`), so an entrenchment declaration living in the rubric can be
 emptied by a committee-cleared PR with no human in the loop. A new file outside the roster is worse: it
 matches nothing in `we:scripts/lib/gate-config.mjs`'s `POLICY_SPEC_BASENAMES`
 (`we:scripts/lib/gate-config.mjs:355-374`) and nothing in `we:scripts/lib/review-escalation.mjs`'s
@@ -105,11 +105,11 @@ fresh-context re-screen flagged that as implementation altitude and it was corre
   suite is the backstop.** **DEFAULT.** This is the only class that satisfies the higher-order test on the
   repo's own ratified terms: #2840 trigger 3 pins every `POLICY_SPEC` file human-gated **as a whole file,
   permanently**, "because those files *are* the encoded principle and have no behaviour-preserving edit"
-  (`we:docs/agent/platform-decisions.md:3460`), and the contract's own charter is that policy **values** live
+  (`we:docs/agent/platform-decisions.md:3480`), and the contract's own charter is that policy **values** live
   there and nowhere else. **Self-referential closure comes free** rather than needing invention: the surface
   declaring the ceremony is itself inside the pinned leash, so amending the thing that protects the
   constitution is already human-only — #2568's laundering fix
-  (`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:97-102`) generalized one
+  (`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:102-106`) generalized one
   level up, and Roznai's double-amendment residual answered by an existing mechanism rather than a promise.
   **This inverts this item's first draft**, which rejected the contract as "not entrenched"; that rejection
   was written against the pre-#2840 gate and is wrong.
@@ -181,7 +181,7 @@ authority and correctness, not effort.
 
 *Fork exists (forced invariant): the excluded branch — **a clock whose input the gated actor can set** — is
 **broken**, and the item's own cited authority is what breaks it. #2978 rules that an emitter-written value
-"authenticates nothing" (`we:docs/agent/platform-decisions.md:3476`). A git committer date is emitter-written
+"authenticates nothing" (`we:docs/agent/platform-decisions.md:3496`). A git committer date is emitter-written
 (`GIT_COMMITTER_DATE=… git commit` sets it to anything), a start date recorded in the record is self-reported
 by definition, and `Date.now()` is wall clock. Support-both is unavailable here in a way worth stating: two
 accepted clock inputs means the gated actor picks the weaker one, which *is* the vulnerability. Exactly one
@@ -283,7 +283,7 @@ covers only `src/_data/{blocks,plugs,intents,protocols,semantics}.json`,
 `we:scripts/lib/review-escalation.mjs:252`), so a project could opt **into or out of** the constitution tier
 via an ordinary agent-clearable PR — reproducing verbatim, at project scope, the membership laundering
 #2568's skeptic closed at platform scope
-(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:97-102`). A tier you can
+(`we:backlog/2568-constitution-curation-form-which-core-principles-vs-specs-an.md:102-106`). A tier you can
 join and leave by an unwatched edit is not a tier. Membership by **artifact name or repository location** is
 broken for the same family of reason plus one more — it would make membership depend on a filename in repos
 WE does not gate, so any repo could unilaterally entrench arbitrary prose, and could evade the ceremony with
@@ -323,7 +323,7 @@ tier by construction — a vocabulary collision worth disambiguating, not a gove
   invariant above — an ungated surface today. It could be rescued by adding `we:src/_data/projects/` to the
   `POLICY_SPEC` leash, and that variant is rejected on merit rather than cost: pinning 46 ordinary metadata
   files as human-gated whole files widens the human gate far past genuine judgment, which
-  `#human-required-is-judgment-only` (`we:docs/agent/platform-decisions.md:3410`) reserves it for. (a)
+  `#human-required-is-judgment-only` (`we:docs/agent/platform-decisions.md:3430`) reserves it for. (a)
   achieves the same protection with one already-pinned block.
 - (c) Membership by **name or location** — any repo-root constitution document in a constellation repo.
   *Rejected* on the forced invariant above; it would also pull `plateau-app:constitution.md` into a ceremony
@@ -383,8 +383,14 @@ via `#human-required-is-judgment-only`.
   rationale had been drift-and-reuse framed, which does not survive a zero-cost strip. **One deliberate
   divergence from the ADR/MADR/PEP convention** the survey found: the record carries **no** `superseded-by`
   field, because clause (i) is exactly the removal of the supersede path for this tier; the closer analogue
-  is the IETF model, where a published document is never edited and lineage lives only in the successor —
-  which is how this repo's research chain already works (`we:docs/agent/research-workflow.md:51-72`).
+  is the IETF model, where a **published document is never edited in place** — a revision is a new dated
+  document, and the old one stays frozen. **Only that immutability half of the analogy transfers, and only
+  that half is claimed here:** this repo's research chain already works that way
+  (`we:docs/agent/research-workflow.md:51-57`, refresh-as-new-dated-report, never in place). Its *lineage* is
+  explicitly **bidirectional**, not one-way — step 3 requires the `supersededBy` back-pointer on the retired
+  entry and `we:scripts/check-standards.mjs:273-286` warns when a pointer is one-way
+  (`we:docs/agent/research-workflow.md:58-63`) — so the repo is **not** precedent for one-way lineage and is
+  not cited as such. What drops the `superseded-by` field from an amendment record is clause (i) alone.
 - **What the record may be trusted for — stated plainly, because the gate does not depend on it.**
   `validateReportsNotHidden` (`we:scripts/check-standards-rules.mjs:1406-1417`) checks **reachability only**,
   never content, and is satisfied by *either* a `/research/` topic or a backlog `relatedReport`; `reports/`
@@ -395,18 +401,23 @@ via `#human-required-is-judgment-only`.
   merge timestamp of the PR that landed it.
 - **The cooling period's day-count is a config value, not a ratifiable pick.** Both the first screen and the
   skeptic classed "10 vs 28 vs 14 vs 3" as **two values of one knob**, which
-  `we:docs/agent/backlog-workflow.md:424` treats as dispositive, and routed it to
+  `we:docs/agent/backlog-workflow.md:423` treats as dispositive, and routed it to
   `#config-extends-platform-default` (`we:docs/agent/platform-decisions.md:1630-1638`). **The platform-default
-  flavor is `P10D`**, declared on the leash surface per Fork 1(a). Its derivation is the only one in the
-  survey whose author shows the arithmetic — Rust's Final Comment Period is "ten calendar days, so that it is
-  open for at least 5 business days" — which transfers to an operator working day-long sessions as *the
-  shortest span that reliably contains five working days*. The **bound** on that value (it must exceed one
-  continuous working stretch) is ruled in Fork 2(a), not configured. **Stated honestly, because the value
-  rests on it:** the empirical case for cooling periods is weak — Utah's 72-hour waiting period changed ~2%
-  of already-certain decisions, delay does not debias anchoring, the unconscious-thought advantage failed a
-  399-subject replication, and the one solid positive (Buçinca et al., CSCW 2021) used a **30-second** pause
-  and attributes the effect to interrupting the automatic accept. The interval buys *a window in which new
-  information can arrive*, not better deliberation.
+  flavor is `P10D`**, declared on the leash surface per Fork 1(a). **It is the best-attested convention the
+  survey found that states a rationale at all — it is not derived, and no arithmetic here produces 10.** Rust's
+  Final Comment Period is ten calendar days, and the reason its author gives is that this keeps the window
+  "open for at least 5 business days" — a **stated minimum with margin**, not a computation. (The shortest
+  calendar span *guaranteed* to contain five working days is **7** days, not 10; the extra three days are
+  Rust's chosen slack, and nothing in this survey derives that slack either.) So `P10D` rests on precedent
+  plus the ruled bound below — which is precisely why it is **configuration** and not a ratifiable pick. The
+  **bound** on the value (it must exceed one continuous working stretch) is ruled in Fork 2(a), not
+  configured. **Stated honestly, because the value rests on it:** the empirical case for cooling periods is
+  weak — Utah's 72-hour waiting period changed ~2% of already-certain decisions, delay does not debias
+  anchoring, the unconscious-thought advantage failed a large multi-lab replication, and the one solid
+  positive (Buçinca et al., CSCW 2021) used a pause on the order of seconds, attributing the effect to
+  interrupting the automatic accept. **Those last three are secondary-source figures carried from the survey
+  and not re-verified against the papers here**, so no ruling below leans on their exact numbers. The interval
+  buys *a window in which new information can arrive*, not better deliberation.
 - **A generated single-file rendering of the constitution-tier anchors** (for a human, or for #2571's review
   UI) is supported and not a fork — #2568 Fork 1 already establishes that a *generated* rendering is a
   projection, not an authoring home.
@@ -424,39 +435,55 @@ stated here rather than discovered at resolve time:
 
 - **`#review-human-declarative-leash-only` (#2771) clause 2** routes *codification of an already-ruled
   decision* to the committee, not `review:human`, detected script-decidably from the resolve+codify diff
-  shape (`we:docs/agent/platform-decisions.md:3394`). That would otherwise collide with the entrenched route
+  shape (`we:docs/agent/platform-decisions.md:3414`). That would otherwise collide with the entrenched route
   every time a resolved decision extends a constitution-tier anchor. **They compose on the ceremony's
   completion, not on the diff shape:** a constitution-tier anchor's rule text can only have been *authored*
   through this item's ceremony, so once that ceremony completed, mechanically codifying the ruling is exactly
   the case #2771 clause 2 hands to the committee. The entrenched path gates **authoring or weakening** a tier
-  anchor; #2771 clause 2 keeps governing the codification that follows — #2851's judgment-only line (`:3410`)
+  anchor; #2771 clause 2 keeps governing the codification that follows — #2851's judgment-only line (`:3430`)
   applied unchanged.
 - **`#human-is-principle-surface-not-path` (#2840)** already owns per-anchor recognition inside the statute
   document (trigger 1) and names `isPrincipleSurface(changedFile, diffHunks)` plus its producer-side plumbing
-  as an owed follow-on. **This item must not mint a second hunk-to-anchor attributor** — that is the "second,
-  weaker copy of the same rule" `we:scripts/lib/converge-core.mjs:419` warns against. The constitution-tier
+  as an owed follow-on. **This item must not mint a second hunk-to-anchor attributor** — that is the drift
+  `we:scripts/lib/converge-core.mjs:419` warns against: "A second unreachable copy of a rule is not defence in
+  depth, it is drift waiting to happen." The constitution-tier
   test is a **predicate consumed by** `isPrincipleSurface`, raising its verdict from *human* to *entrenched*
   for a listed anchor; never a parallel function.
 - **`#principle-and-impl-two-pr` (#2839)** means this item's ruling cannot land as one change: the statute
-  clause conferring the exemption lands **first**, in a decisions-only `review:human` PR; the leash
-  declaration and the rubric's read of it land **second**, in a committee-cleared impl PR citing the resolved
-  `codifiedIn` anchor. The touch-set below is split accordingly.
+  clause conferring the exemption lands **first**, in a decisions-only `review:human` PR; the enforcement
+  follows in impl PRs citing the resolved `codifiedIn` anchor. Those impl PRs are **two, not one**: the leash
+  declaration is itself human-gated by #2840 trigger 3, while the rubric's read of it is ratified
+  agent-clearable by #2771 clause 1, so bundling them would drag committee work behind a human gate. The
+  touch-set below is split accordingly.
 - **`#blast-radius-advisory-care-not-a-gate`** supplies the park-not-block rule folded into Fork 2(a).
 
 ## Predicted touch-set (#2619)
 
-Split by the two-PR rule (#2839), because these cannot travel in one diff:
+Split by the two-PR rule (#2839), because these cannot travel in one diff — and split **three** ways, not two,
+because Fork 1(a)'s own ruling makes the leash touch human-gated. The implementation half cannot be one
+committee-cleared PR: `we:scripts/lib/review-policy.contract.json` and `we:scripts/lib/gate-config.mjs` are
+`POLICY_SPEC` leash members, and `humanRequired = leashFiles.length > 0 || statuteFiles.length > 0`
+(`we:scripts/lib/review-escalation.mjs:574`) forces `review:human` on any diff that touches them. Putting the
+derivation-code change in that same PR would drag ratified-agent-clearable work (#2771 clause 1) behind a human
+gate for no reason, so it gets its own PR:
 
 - **PR 1 — principle (decisions-only, `review:human`):** `we:docs/agent/platform-decisions.md` (the
   conferring clause in the promotion-discipline preamble plus the quantified clauses on
   `#spec-is-schema-human-gates-spec`) and `we:docs/agent/backlog-workflow.md` (the ceremony as process).
-- **PR 2 — implementation (committee-cleared, cites PR 1's resolved anchor):**
-  `we:scripts/lib/review-policy.contract.json` and `we:scripts/lib/gate-config.mjs` (the leash declaration
-  and its roster entry), plus `we:scripts/lib/review-escalation.mjs` (reading it, as a predicate into
-  `isPrincipleSurface`).
+- **PR 2 — the leash declaration (implementation, but `review:human` — forced, not chosen; cites PR 1's
+  resolved anchor):** `we:scripts/lib/review-policy.contract.json` and `we:scripts/lib/gate-config.mjs` (the
+  `constitution` block and its roster entry), plus the `POLICY_SPEC` conformance/invariant assertions that
+  cover them. Human-gated by #2840 trigger 3's whole-file pin — which is the *point* of Fork 1(a), so this is
+  the ruling working as intended, not friction. It is still **implementation** at #2839's split-gate grain
+  (that gate evaluates the edit-of-a-pre-existing-guarantee, explicitly *not* the `POLICY_SPEC` whole-file
+  floor), so it does not trip `assertNotPrincipleAndImpl`.
+- **PR 3 — the derivation code (committee-cleared; cites PR 1's resolved anchor):**
+  `we:scripts/lib/review-escalation.mjs` only — *reading* the declaration as a predicate consumed by
+  `isPrincipleSurface`, never defining it. Agent-clearable on ratified authority (#2771 clause 1), which is
+  exactly why it must not ride in PR 2.
 
 No `scope:` is stamped on this item — a decision is ratified, never dispatched to build; each buildable child
-carved at resolution takes its own slice, and the two bullets above are the two slices.
+carved at resolution takes its own slice, and the three bullets above are the three slices.
 
 ### Review jury (provisional — pre-registered #2638)
 
