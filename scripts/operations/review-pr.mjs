@@ -103,10 +103,17 @@ export const DEFAULT_LENS = MANDATORY_LENSES[0];
  * The juror's model / effort / budget. LITERALS, deliberately — never sourced from an input field.
  *
  * THE FOOTGUN THIS CLOSES (#3028, just fixed there): an option *value* shaped like a flag (`model: '--bare'`)
- * reaches `buildJudgeArgv`'s argv guard. Nothing in the run's input can reach these three, so a hostile or
- * fat-fingered `--model=--bare` on the command line has no path to the juror's argv at all. The one input field
+ * reaches `buildJudgeArgv`'s argv guard. Nothing in the run's INPUT can reach these three: the one input field
  * that DOES reach the judge request is `lens`, and `buildPanelMandate` refuses anything outside `PANEL_LENSES`
  * before it can become argv (it lands in the mandate TEXT, never in a flag position, either way).
+ *
+ * WHAT CHANGED, AND WHAT DID NOT (#3151). This comment used to add that a fat-fingered `--model=--bare` on the
+ * command line "has no path to the juror's argv at all". That is no longer true as written: `--model` is now a
+ * real CONTROL flag of the derived command line, so the value has a path — it is refused ON it, twice, rather
+ * than having none. The parse rejects a `-`-leading value before a run record exists, and
+ * `assertSafeJudgeRequest` rejects it again on the merged request the spawn will actually use. The property
+ * that survives untouched is the one this file is responsible for: a run's INPUT still cannot reach argv, and
+ * these three stay LITERALS for exactly that reason.
  */
 /** What a reviewing juror may do. Read and search, plus Bash for gates, reproduction and mutation probes. */
 export const REVIEW_JUROR_TOOLS = Object.freeze(['Bash', 'Read', 'Grep', 'Glob']);
