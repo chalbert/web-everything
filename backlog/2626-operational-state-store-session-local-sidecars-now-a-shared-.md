@@ -2,16 +2,45 @@
 bornAs: xn2zs79
 kind: decision
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-07-23"
+dateStarted: "2026-08-17"
+dateResolved: "2026-08-17"
+codifiedIn: "docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates"
 preparedDate: "2026-07-27"
+ratifiedBy: "Nicolas Gilbert (operator)"
 tags: [plateau-loop, conveyor, architecture, storage]
 relatedReport: reports/2026-07-27-operational-state-store-sidecars-vs-durable.md
 ---
 
 # Operational state store: session-local sidecars now, a shared store (DO/D1) at product
 
-Do we stand up a real shared durable store now for the conveyor's operational state — the cleared-for-build queue plus the other non-repo Plateau state — or keep today's session-local sidecar files until the *product* is session-free and multi-actor? **Recommended: the shared store IS coming (DO/D1 at the product), that half is accepted on merit — so the only genuine call left is one sub-fork: how the runner lease splits.** Prepared ahead of the call so ratification is fast; nothing below is ruled.
+## Ruling (2026-08-17) — Fork 1 = (b) split, plus a vendor-abstraction amendment
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-08-17** — Fork 1 = **(b) split**: the runner lease's
+process-singleton guard stays machine-local forever; its cross-actor arbitration half becomes a single-writer
+Durable Object lease, conditional on runners ever going multi-host. The accepted-on-merit shared-store
+migration (queue, jury ledger, infra-blocked recovery → DO/D1 at product) is confirmed, gated on the tracked
+trigger already named below (#2703 retiring the main-session loop) — nothing about that timing was reopened.
+
+**Amendment — vendor abstraction is a hard requirement, not an implementation nicety.** The operator's
+explicit condition on ratifying: any Cloudflare-specific integration (Durable Objects, D1, or their SDK/API)
+must sit fully behind an abstraction seam. Every shared-truth sidecar already routes through a pure-core store
+module ([`we:scripts/conveyor/queue-store.mjs`](/scripts/conveyor/queue-store.mjs),
+[`we:scripts/lib/jury-ledger.mjs`](/scripts/lib/jury-ledger.mjs),
+[`we:scripts/conveyor/infra-blocked.mjs`](/scripts/conveyor/infra-blocked.mjs)) — the migration (#2742) must
+keep Cloudflare-specific calls confined entirely to each module's io-shell, never leaking into the pure core or
+into any consuming code path, so a future substrate swap away from Cloudflare (should one ever be needed)
+touches one shell per artifact, never a rewrite. This generalizes beyond this one decision: the same seam
+discipline applies to any future vendor-specific infrastructure integration, not just this store.
+
+Codified as [`#state-lives-where-its-nature-dictates`](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
+(a third-home corollary + the vendor-abstraction amendment), composing with — not altering — rule-105's
+existing two-home taxonomy.
+
+## Digest — what was decided
+
+Do we stand up a real shared durable store now for the conveyor's operational state — the cleared-for-build queue plus the other non-repo Plateau state — or keep today's session-local sidecar files until the *product* is session-free and multi-actor? **Recommended: the shared store IS coming (DO/D1 at the product), that half is accepted on merit — so the only genuine call left is one sub-fork: how the runner lease splits.** Ruled above; the reasoning below is preserved as the record.
 
 ## Digest — what's actually being decided
 
