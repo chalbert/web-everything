@@ -29,6 +29,23 @@ the whole time; `.git/tmp-review-bodies/` was an unnecessary self-inflicted deto
 directory.
 
 **How to apply:** Whenever a script needs a `--body-file`/`--content-file`-style scratch file, write
-it (with either the `Write` tool or a Bash redirect — both work identically once the target path
-isn't protected) to `os.tmpdir()` or an equivalent temp location, never under `.git/`, `.claude/`, or
-any other Claude Code protected path. This applies generally, not just to this one repo or script.
+it with the `Write` tool to a plain path under the repo's working directory that is NOT `.git/`,
+`.claude/`, or another protected directory (e.g. a scratch file directly at the repo root, or a
+non-dotfile subdirectory there) — never under `.git/`. Two things this note previously got wrong,
+now corrected:
+
+- **The `Write` tool and a Bash heredoc/redirect are NOT interchangeable in general** — only the
+  protected-path check treats them identically. In `acceptEdits` and `auto` modes (`auto` is the
+  built-in starting mode on Pro/Max/Team plans), a file edit in the working directory auto-approves
+  silently, but "all other Bash commands except the built-in read-only set still prompt" — so a
+  `cat > file` still prompts on a perfectly safe, unprotected path where a `Write` call would not.
+  Prefer the `Write` tool structurally; don't rely on a Bash redirect being equally silent.
+- **`os.tmpdir()` is not actually the safer default** — it resolves OUTSIDE the repo's working
+  directory, and `acceptEdits`/`auto` mode auto-approval is scoped to the working directory (and any
+  `additionalDirectories`). A path there can still prompt or route to the classifier even though it
+  passes `we:scripts/review-set-label.mjs:1059`'s own cwd-or-tmpdir check. A plain, non-protected path
+  *inside* the repo root satisfies the protected-path check, the working-directory auto-approval
+  scope, AND `review-set-label.mjs`'s `cwd` branch all at once — it is the actually-safe default, not
+  `os.tmpdir()`.
+
+This applies generally, not just to this one repo or script.
