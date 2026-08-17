@@ -283,9 +283,9 @@ its **own** slice of the touch-set, never the whole set, per #2609):
 
 | child | scope |
 | --- | --- |
-| Re-point the byte-parity gate at a hand-authored WE↔FUI duplicate pair list | `we:scripts/check-standards-rules.mjs`, `we:scripts/check-standards.mjs`, `we:scripts/__tests__/` |
-| New-path check over the named debt roots + path-set ratchet | `we:scripts/check-standards-rules.mjs`, `we:scripts/__tests__/` |
-| Coverage tripwire for subject-less guarded checks | `we:scripts/check-standards.mjs` |
+| Re-point the byte-parity gate at a hand-authored WE↔FUI duplicate pair list | `we:scripts/check-standards-rules.mjs`, `we:scripts/check-standards.mjs`, `we:scripts/__tests__/check-standards-rules.test.mjs` |
+| New-path check over the named debt roots + path-set ratchet | `we:scripts/check-standards-rules.mjs`, `we:scripts/__tests__/check-standards-rules.test.mjs` |
+| Coverage tripwire for subject-less guarded checks | `we:scripts/check-standards.mjs`, `we:scripts/__tests__/check-standards.test.mjs` |
 | Amend the constellation-placement anchor to name the carrier | `we:docs/agent/platform-decisions.md` |
 
 **Graduated findings — routed to a named owner each, and the routing is enacted, not promised.** Neither is a
@@ -367,5 +367,8 @@ predicted scope and is re-checked against the real diff at PR open.
 | standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 | standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 
-**Predicted touch-set (#2619):** `we:scripts/check-standards-rules.mjs` · `we:scripts/check-standards.mjs` ·
-`we:scripts/__tests__/` · `we:docs/agent/platform-decisions.md`.
+**Predicted touch-set (#2619)** — mirrored exactly by this item's `scope:` frontmatter, file-level throughout:
+`we:scripts/check-standards-rules.mjs` · `we:scripts/check-standards.mjs` ·
+`we:scripts/__tests__/check-standards-rules.test.mjs` · `we:scripts/__tests__/check-standards.test.mjs` ·
+`we:docs/agent/platform-decisions.md`. All three parts extend existing rules in the two `check-standards*`
+modules, so their specs land in those two existing test files — no new spec file is predicted.
