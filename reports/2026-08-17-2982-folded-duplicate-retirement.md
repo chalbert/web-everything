@@ -110,12 +110,14 @@ The shape sub-call is not a free choice; the loader and the gate already price i
 The rule #2982 would codify is roughly: *"an item leaves the backlog by exactly one of two doors — delivered
 (`resolved`) or withdrawn-into-a-survivor (`folded` + pointer); a non-delivered exit never books points."*
 An anchor-by-anchor pass over `we:docs/agent/platform-decisions.md` found **no anchor governing backlog item
-retirement** — backlog lifecycle is explicitly delegated out to `we:docs/agent/backlog-workflow.md`
-(`we:docs/agent/platform-decisions.md:3495-3497`). Four anchors are adjacent and compose rather than collide:
+retirement** — backlog lifecycle is explicitly delegated out to `we:docs/agent/backlog-workflow.md` by the
+*"Backlog & decision workflow"* bullet in the statute file's delegation block. (Cited by bullet name rather
+than line number: that block sits below every ratified anchor, so each newly-appended anchor shifts it — a
+line ref there is stale almost immediately.) Four anchors are adjacent and compose rather than collide:
 
 | Anchor in `we:docs/agent/platform-decisions.md` | Relation |
 | --- | --- |
-| the backlog **hold model** pointer (`:3498-3501`) | Governs **holds** (`priority: low` / `maturityGated`), not **exits**. It is the codified form of #2982's own "a park can't carry it" argument, so it supports the fold rather than colliding with it. |
+| the backlog **hold model** pointer (the delegation-block bullet naming #1620/#1392) | Governs **holds** (`priority: low` / `maturityGated`), not **exits**. It is the codified form of #2982's own "a park can't carry it" argument, so it supports the fold rather than colliding with it. |
 | `#ci-lifecycle-total-label-function` | Self-scoped to PR labels, but its principle — *state is a positively-applied marker, never inferred from an absence* — is the precedent for Finding 2 (a positive `folded` marker, not "open with a relation"). |
 | `#faithful-derivation-exclude-not-fabricate` | Directly supports excluding a folded item from the burndown rather than fabricating a delivered date. |
 | `#state-lives-where-its-nature-dictates` | A fold is durable shared repo truth, not session intent → **committed frontmatter**, which is where both options put it. Also explains why the `preparing`-status retreat (#2219/#2264 replaced `claim --as=preparing` with a local, uncommitted hold) is *not* a precedent against a `folded` status: that hold is transient session state; a fold is permanent. |
