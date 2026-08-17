@@ -67,7 +67,7 @@ property of the judge. `judgeSpawn` grants tools only against a lane clone that 
 that tree. So an editor stays a spawned agent; what must hold is that it is a **different actor from every
 juror that judged it**, which is true by construction once the jurors are headless. Giving the editor its
 own headless, tool-bearing spawn is a real but separate change —
-[#xl5jroq](../../backlog/xl5jroq-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
+[#3159](../../backlog/3159-give-the-revision-round-editor-its-own-tool-bearing-headless.md).
 
 The three lines below are the ACTING case — three SEPARATE properties, and it is worth not fusing them; an
 earlier version of this page wrote them as one requirement and was wrong about two:

@@ -96,13 +96,13 @@ fixes for the same step.
 > ones. They were NOT routed through `judgeSpawn`/`judgePanel`, on purpose and for reasons in the code rather
 > than preference — an editor authors rather than judges, `judgePanel` has no `allowedTools` to forward, and
 > `assertLaneCwd` structurally refuses a tool-bearing juror pointed at the driver's own lane, which is exactly
-> the tree converge's editor exists to edit. The residual is filed as [#xl5jroq] and the capability a
-> tool-free panel loses is filed as [#x27e4xs]. Read 1 and 5 below as met **for the judging spawns**; see
+> the tree converge's editor exists to edit. The residual is filed as [#3159] and the capability a
+> tool-free panel loses is filed as [#3158]. Read 1 and 5 below as met **for the judging spawns**; see
 > *Deviation* in Progress for the full argument. Nothing here was silently dropped.
 
 1. Drain's three spawn sites (panel reviewer, validator jury, editor) call `judgeSpawn`/`judgePanel` instead of
    the `Agent` tool, or route through a declared operation's `judge` step if one exists by the time this lands.
-   -> **panel reviewer + validator jury: done. Editor: ruled out with reason, [#xl5jroq].**
+   -> **panel reviewer + validator jury: done. Editor: ruled out with reason, [#3159].**
 2. Harvest-learnings' skeptic-per-candidate step does the same. -> **done.**
 3. Brand-mark-loop's step 5 no longer offers "role-play" as an accepted substitute for a real independent spawn.
    -> **done.**
@@ -112,7 +112,7 @@ fixes for the same step.
    the two fixes do not diverge.
 5. Converge's panel, edit, and red-team steps call `judgeSpawn`/`judgePanel` instead of instructing the driving
    agent to spawn via the plain `Agent` tool. -> **panel + red-team: done. `edit`: ruled out with reason (see
-   above), [#xl5jroq].**
+   above), [#3159].**
 6. `npm run check:standards` — 0 new errors. -> **green.**
 
 ## Progress
@@ -162,8 +162,8 @@ Done-when 1 names drain's editor and done-when 5 names converge's `edit` step. N
 What the *"the panel never authors what it judges"* invariant actually needs is that the editor is not one of
 the actors that judged it — and that now holds by construction, because every juror is headless with its own
 id while the editor carries the driver's. Giving the editor its own tool-bearing headless spawn is filed as
-[#xl5jroq]; the capability a tool-free panel loses (`MUTATION_PROBE_RULE`'s break-the-line probe, and the
-mandate's throwaway-`git clone` escape) is filed as [#x27e4xs]. Both are stated in the skills at the point of
+[#3159]; the capability a tool-free panel loses (`MUTATION_PROBE_RULE`'s break-the-line probe, and the
+mandate's throwaway-`git clone` escape) is filed as [#3158]. Both are stated in the skills at the point of
 use, not only here.
 
 ### The documented recipe was RUN, not merely written
