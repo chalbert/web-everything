@@ -64,6 +64,7 @@ import {
   composeInvestigationPrompt,
   createExploreObservers,
   createExploreSinks,
+  escapeHtml,
   inheritedTopicDates,
   isReportComplete,
   panelistReportPath,
@@ -686,6 +687,33 @@ describe('the io shell — refusals that keep a malformed run out of the world',
     }, '2026-08-17');
     expect(description).toContain('&lt;script&gt;');
     expect(description).not.toContain('<script>');
+  });
+
+  it('#1457 review finding 1 — a finding carrying a literal `{% endraw %}` cannot smuggle live Nunjucks past the raw block', () => {
+    // Before the fix, escapeHtml left `%`/`{`/`}` untouched, so this exact string closed the {% raw %} block
+    // early and let anything after it be parsed as a live Nunjucks tag on the next Eleventy build.
+    const injected = 'safe text {% endraw %}{% set pwned = 1 %}';
+    const { description } = renderResearchTopic({
+      topicId: 'a-topic', title: 'Q', summary: 's', lenses: [],
+      findings: [{ title: injected, detail: 'd', kind: 'gap', confidence: 'low' }],
+    }, '2026-08-17');
+    // Exactly one real {% endraw %} — the block's own closer — survives; the injected one is defused.
+    const endrawCount = description.split('{% endraw %}').length - 1;
+    expect(endrawCount).toBe(1);
+    expect(description).not.toContain('{% set pwned');
+    // The whole finding renders between the raw markers, unbroken — everything the attacker tried to smuggle
+    // stays literal, inert text.
+    const rawStart = description.indexOf('{% raw %}');
+    const rawEnd = description.indexOf('{% endraw %}');
+    expect(description.slice(rawStart, rawEnd)).toContain('&#123;% endraw %');
+  });
+
+  it('escapeHtml neutralizes all three Nunjucks delimiter openers, not just the one shape #1457 was found with', () => {
+    expect(escapeHtml('{% tag %}')).toBe('&#123;% tag %}');
+    expect(escapeHtml('{{ expr }}')).toBe('&#123;&#123; expr }}');
+    expect(escapeHtml('{# comment #}')).toBe('&#123;# comment #}');
+    // A literal { with nothing Nunjucks-shaped after it still encodes — simple and total, not pattern-matched.
+    expect(escapeHtml('just a { brace')).toBe('just a &#123; brace');
   });
 
   it('refuses to overwrite an EXISTING topic whose bytes differ — that research is not this run\'s to replace', () => {

@@ -505,11 +505,22 @@ export const ABANDON_HINT =
   'If you would rather drop the run than fix this, delete its record (`.operations/runs/<runId>.json`) — the '
   + 'engine has no abandon verb, and a refusal that landed nothing leaves no half-applied effect to strand.';
 
-/** Escape text for the HTML body of a research description. Pure. */
+/**
+ * Escape text for the HTML body of a research description. Pure.
+ *
+ * SECURITY (PR #1457 review, finding 1) — `renderResearchTopic` wraps every field this escapes inside a
+ * Nunjucks `{% raw %}...{% endraw %}` block, so HTML-escaping alone is not enough: `%` and `{`/`}` used to pass
+ * through untouched, and a juror-authored finding whose title/detail/evidence carries the literal text
+ * `{% endraw %}` (verbatim or paraphrased from attacker-influenceable material — a fetched page, a repo file,
+ * an issue body) would prematurely close the raw block once `publishResearchTopic` writes it to disk, letting
+ * whatever followed be parsed as live Nunjucks by the next Eleventy build. Encoding `{` (as `&#123;`) defuses
+ * ALL THREE Nunjucks delimiter openers at once (`{%`, `{{`, `{#`), not just the one shape this was found with —
+ * a literal `{` has no other meaning in this rendered HTML, so the encoded form is visually identical.
+ */
 export function escapeHtml(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\{/g, '&#123;');
 }
 
 /**
