@@ -190,8 +190,9 @@ export function assertLaneCwd(cwd, allowedTools, selfCwd = process.cwd(), realpa
     throw new Error(
       `judge-spawn: refusing to spawn a TOOL-BEARING juror — ${why}. A juror with tools can write, and `
       + '`--safe-mode` disables the hooks that would otherwise stop it, so a lane of its OWN is the isolation. '
-      + 'Acquire one (`lane-pool.mjs acquire`) and pass its path as `cwd`, or omit `allowedTools` for a '
-      + 'tool-free juror.',
+      + 'Acquire one (`node scripts/lane-pool.mjs acquire`) and pass its path as `cwd`. On the operation '
+      + 'command line that is `--cwd=<lane>`, which `run.mjs <operation> --help` documents (#3151) — three '
+      + 'reviewers hit THIS message with no way to find that out. Or omit `allowedTools` for a tool-free juror.',
     );
   };
   if (cwd === null || cwd === undefined || String(cwd).trim() === '') {

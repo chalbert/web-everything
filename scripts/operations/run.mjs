@@ -10,12 +10,17 @@
  * [#operations-declared-once-callers-generated](../../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)
  * in the smallest form it can take.
  *
- *   node scripts/operations/run.mjs review-pr --pr=1234 --repo=chalbert/web-everything
+ *   node scripts/operations/run.mjs review-pr --pr=1234 --repo=chalbert/web-everything --cwd=<a lane>
  *   node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=accept
  *   node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=abstain   # writes nothing
  *
  * The first invocation reads, judges, reduces and then STOPS at the `confirm` suspend. The second records. An
  * `--answer` on the first is refused — see the adapter's header.
+ *
+ * `--cwd=<a lane clone>` is the juror's own lane, and `review-pr`'s juror is TOOL-BEARING, so it is REQUIRED
+ * there (`assertLaneCwd` refuses the spawn without one). It was `$JUDGE_LANE_CWD` and nothing else until #3151;
+ * the env var still works as the fallback. `--cwd`, `--model` and the rest are listed by `--help`, which is
+ * derived from the declaration — including which operations have a juror to point at a lane at all.
  */
 
 import { resolve } from 'node:path';
@@ -111,6 +116,29 @@ export const OPERATIONS = Object.freeze({
   }),
 });
 
+/**
+ * THE COMMAND LINE'S JUDGE FACTORY — the one place `--cwd`/`--model` become a juror's spawn options (#3151).
+ *
+ * EXPORTED SO THE TEST DRIVES THIS FUNCTION AND NOT A COPY OF IT. The first cut inlined the arrow below and the
+ * suite re-created the same expression, so the precedence was ASSERTED, never EXERCISED: deleting the flags
+ * from this file entirely left 14 of 15 tests green (PR review, finding A). A later edit flipping the order to
+ * `env || cwd` would silently make `--cwd` lose to a stale environment variable and reopen #3151 with the gate
+ * still green. One copy, imported by both.
+ *
+ * @param {object} [o]
+ * @param {Record<string, (string|undefined)>} [o.env] - the environment to read `JUDGE_LANE_CWD` from.
+ * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
+ * @returns {(flags: {cwd: (string|null), model: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
+ */
+export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
+  // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
+  // never a fallback to this process's directory: see the `makeJudge` note at the call site.
+  return ({ cwd, model } = {}) => factory({
+    cwd: cwd || env.JUDGE_LANE_CWD || null,
+    model: model || null,
+  });
+}
+
 /** Build an isolated registry plus the bindings for ONE named operation. Throws on an unknown name. */
 export function resolveOperation(name) {
   // `Object.hasOwn`, never a bare bracket read: `OPERATIONS['toString']` on a normal-prototype object returns an
@@ -165,16 +193,26 @@ if (IS_CLI) {
     registry,
     store: createFileRunStore(),
     sinks,
-    // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. The
-    // lane comes from the environment rather than being acquired here: this entry point must not lease a
-    // resource whose release it cannot guarantee, and a caller that has not leased one should get the refusal.
+    // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
+    // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot
+    // guarantee, and a caller that has leased none should get the refusal.
     //
-    // `?? null`, NEVER a fallback to this process's directory (PR #1178 review, blocking 1). An omitted cwd
-    // used to reach `judgeSpawn`'s `process.cwd()` default, and since a review normally runs INSIDE a lane
-    // that silently handed the juror the driver's own working tree — the very tree the parent was mid-review
-    // of, and one the juror's mandate tells it to mutate. Passing `null` makes the refusal fire, which is what
-    // the caller wanted all along. A tool-free juror ignores `cwd`, so every existing operation is unaffected.
-    judge: createDefaultJudge({ cwd: process.env.JUDGE_LANE_CWD || null }),
+    // WHERE THE LANE COMES FROM (#3151): `--cwd` first, `$JUDGE_LANE_CWD` second. The env var was the ONLY
+    // source until this card, which made a documented flag out of a side channel no `--help` mentioned — three
+    // independent reviewers hit the refusal on 2026-08-17 and each fell back to a manual review. The env var is
+    // KEPT as the fallback rather than replaced: dispatch prompts and shell wrappers already thread it, and
+    // breaking them to make a point would trade one paper cut for another. The flag WINS when both are set —
+    // the explicit act beats the ambient one.
+    //
+    // A FACTORY, NOT A JUDGE. The flags are parsed inside `runOperationCli`, so a judge built out here could
+    // not see them; `makeJudge` is called with the parsed values ({@link createCliJudgeFactory}, which the
+    // suite drives directly rather than re-deriving). `|| null` still holds, and still matters (PR #1178
+    // review, blocking 1): an omitted cwd must reach `judgeSpawn` as `null`, never as this process's
+    // directory. A review normally runs INSIDE a lane, so the old `process.cwd()` default silently handed the
+    // juror the driver's own working tree — the very tree the parent was mid-review of, and one the juror's
+    // mandate tells it to mutate. `null` makes the refusal fire, which is what the caller wanted all along. A
+    // tool-free juror ignores `cwd`, so every existing operation is unaffected.
+    makeJudge: createCliJudgeFactory(),
     newRunId: () => newRunId(declaration.name),
   })
     .then(({ code, lines }) => {
