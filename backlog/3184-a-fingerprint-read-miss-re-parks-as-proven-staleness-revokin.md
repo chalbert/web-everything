@@ -1,4 +1,5 @@
 ---
+bornAs: x6jb3zu
 kind: story
 size: 3
 status: open
@@ -63,7 +64,7 @@ things that are not merge-safety:
 
 1. **The reason string asserts a fact.** *"head advanced past the reviewed commit"* is stated as
    observed. On a read miss it is a guess, and on PR #1445 it was a wrong one.
-2. **`applyLabel: review:human` destroys a human decision.** #3039 (`xmnl36p`) already ruled that a
+2. **`applyLabel: review:human` destroys a human decision.** #3039 (`3039`) already ruled that a
    re-hold overriding an operator clearance must SAY SO durably, and shipped the notice — but it
    explicitly left the verdict alone. The notice makes the revocation visible; it does not make it
    *earned*. A revocation on unverified staleness is not earned.
