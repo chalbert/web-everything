@@ -154,6 +154,27 @@ describe('primaryCheckout', () => {
   });
 });
 
+// The fix for the revoked-grant bug depends on this enumerating every path the script could have written.
+// Mutation probe (converge finding, 2026-08-18): the earlier suite imported `knownGitDirs` but only ever
+// passed hand-built `known` arrays to withPrimaryGitDir — so returning [] from here reddened nothing.
+describe('knownGitDirs', () => {
+  it('enumerates the .git of every constellation checkout beside this one, under each name it answers to', () => {
+    const got = knownGitDirs('/ws/webeverything');
+    expect(got).toContain('/ws/webeverything/.git');
+    expect(got).toContain('/ws/web-everything/.git');
+    expect(got).toContain('/ws/frontierui/.git');
+    expect(got).toContain('/ws/plateau-app/.git');
+  });
+
+  it('resolves from the PRIMARY when called inside a lane, not from the pool directory', () => {
+    expect(knownGitDirs('/ws/.lanes/web-everything/lane-4')).toContain('/ws/frontierui/.git');
+  });
+
+  it('never returns empty — an empty set silently disables the repair it gates', () => {
+    expect(knownGitDirs('/ws/webeverything').length).toBeGreaterThan(0);
+  });
+});
+
 describe('withPrimaryGitDir', () => {
   it('grants the derived .git directory', () => {
     const out = withPrimaryGitDir({}, '/ws/webeverything/.git');

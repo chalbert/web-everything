@@ -6,6 +6,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "bootstrap": "node scripts/bootstrap-session.mjs",
+    "bootstrap:install": "node scripts/bootstrap-session.mjs install",
+    "bootstrap:uninstall": "node scripts/bootstrap-session.mjs uninstall",
     "bootstrap:check": "node scripts/bootstrap-session.mjs --check",
     "skills:sync": "node scripts/sync-skills-deploy.mjs",
     "skills:sync:check": "node scripts/sync-skills-deploy.mjs --check",

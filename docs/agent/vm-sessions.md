@@ -5,8 +5,9 @@ Anthropic-managed container**, not on the workstation. The instruction layer tra
 `AGENTS.md` is committed, so the rules load — but almost everything the laptop setup assumes about the
 *machine* is false. This page is the delta. Read it when `bootstrap-session` reports `host: ephemeral`.
 
-**One command sets the machine up:** `node scripts/bootstrap-session.mjs`. It is idempotent, host-aware,
-and registers itself as a `SessionStart` hook so the next session in the same container does it unasked.
+**One command sets the machine up:** `node scripts/bootstrap-session.mjs`. It is idempotent and host-aware.
+On an ephemeral VM it applies and registers itself as a `SessionStart` hook, so the next session in the same
+container does it unasked; on a workstation it only reports (see *Installing on a workstation*).
 `--dry-run` shows the plan, `--check` reports drift without writing.
 
 ## What is different, and why
@@ -53,9 +54,11 @@ memory written in a VM lands in `agent-memory-src`, where a commit makes it dura
 The bootstrap lives in WE today because that is where the lane and delivery machinery is dogfooded, not
 because WE is the constellation's hub. It is not: WE is a **public peer**, and the machinery is Plateau's
 product, so it moves there eventually. Nothing here is written to assume otherwise —
-`bootstrap-session.mjs` derives which checkout it is in rather than declaring it, takes the constellation
-from `scripts/lib/constellation-repos.mjs` rather than a local list, and looks up the skills CLI
-self-then-siblings so the two halves can move in either order. Its `locus:` line reports what it decided.
+`bootstrap-session.mjs` derives which checkout it is in rather than declaring it, and takes the
+constellation from `scripts/lib/constellation-repos.mjs` rather than a local list. Its `locus:` line reports
+what it decided. It does NOT look up the skills CLI in siblings — an earlier cut did, and that was a
+cross-repo code-execution path a `/converge` panel rejected; the relocation ordering it bought belongs to
+the multi-project registry (#2472), not to a search-and-execute.
 
 Two WE-as-hub assumptions do remain, both in that shared table and both flagged there: `we: { path: '' }`
 ("the WE primary's own cwd") and `DEFAULT_REPO_KEY = 'we'`. They are the seam the move pulls on, and they
@@ -63,13 +66,13 @@ belong to `review-runner.mjs`, not to this bootstrap.
 
 ## Installing on a workstation
 
-`npm run bootstrap` **reports** on a workstation; `npm run bootstrap install` applies. That asymmetry is
+`npm run bootstrap` **reports** on a workstation; `npm run bootstrap:install` applies. That asymmetry is
 deliberate and is the one thing to understand here.
 
 The committed project `SessionStart` hook means the bootstrap runs the moment anyone opens this repo — so
 a default run must not reach outside the repository. On a durable host it prints what it would do and
 stops: nothing under `$HOME/.claude` is touched, no directory is granted, and no user-level hook is
-installed. `install` is the explicit opt-in and `uninstall` reverses it.
+installed. `npm run bootstrap:install` is the explicit opt-in and `npm run bootstrap:uninstall` reverses it. (Both exist as their own scripts because `npm run bootstrap install` does NOT forward the bare argument — npm swallows it without a `--` separator, leaving the reader silently in report-only mode.)
 
 An **ephemeral** cloud VM writes freely, because its `$HOME` belongs to a container reclaimed on idle —
 there is no durable state to consent about, and a session that configures itself is the whole point.
