@@ -9,6 +9,7 @@
       "Write",
       "WebFetch",
       "WebSearch",
+      "Artifact",
       "Bash(node scripts/backlog.mjs:*)",
       "Bash(node scripts/check-readiness.mjs:*)",
       "Bash(npm run check:readiness:*)",
