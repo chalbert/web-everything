@@ -1,4 +1,5 @@
 ---
+bornAs: x39x752
 kind: story
 size: 5
 status: open
