@@ -1257,6 +1257,65 @@ export function parseOperatorClearance(comments) {
   return latest;
 }
 
+/**
+ * #xuboo0q — did the LATEST accept-shaped comment (whichever comment stamped the most recent `reviewed-sha`
+ * marker) ALSO carry the `clear-human` ceremony marker IN THAT SAME COMMENT? Pure.
+ *
+ * Deliberately does NOT combine `parseReviewedSha` and `parseOperatorClearance` independently — each scans for
+ * its OWN marker's latest occurrence across ALL comments, so an OLDER `clear-human` followed by a NEWER plain
+ * `review:accepted` would otherwise report both "latest sha = the new one" (from the plain accept) AND "an
+ * operator clearance exists" (from the old clear-human) — even though no human ever looked at the new tree.
+ * That combination would let a plain agent accept, which the anti-test-gaming gate exists specifically to
+ * distrust (#2440 — an agent panel can be fooled by tampering that a human catches), silently inherit a stale
+ * human clearance it never earned. Binding both markers to the SAME comment closes that gap: only a
+ * `review-set-label.mjs --to=clear-human` comment stamps `reviewed-sha` and `cleared-human` together, so a
+ * later plain accept (which stamps `reviewed-sha` alone) correctly reports no human coverage for its head.
+ *
+ * @returns {string|null} the reviewed SHA, lowercased, ONLY when the latest accept-shaped comment was a
+ *   `clear-human` ceremony; `null` when it was a plain accept, or no accept-shaped comment exists at all.
+ */
+export function parseLatestHumanClearedSha(comments) {
+  let latestSha = null;
+  let latestWasHumanCleared = false;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    REVIEWED_SHA_RE.lastIndex = 0;
+    let m;
+    let bodySha = null;
+    while ((m = REVIEWED_SHA_RE.exec(body)) !== null) bodySha = m[1].toLowerCase();
+    if (bodySha === null) continue; // not an accept-shaped comment — carries no reviewed-sha at all
+    CLEARED_HUMAN_RE.lastIndex = 0;
+    let bodyHumanCleared = CLEARED_HUMAN_RE.exec(body) !== null;
+    if (!bodyHumanCleared) {
+      CLEARED_HUMAN_PROSE_RE.lastIndex = 0;
+      bodyHumanCleared = CLEARED_HUMAN_PROSE_RE.exec(body) !== null;
+    }
+    latestSha = bodySha;
+    latestWasHumanCleared = bodyHumanCleared;
+  }
+  return latestWasHumanCleared ? latestSha : null;
+}
+
+/**
+ * #xuboo0q — should the anti-test-gaming gate re-park `review:human` on THIS pass? Pure. Extracted from the
+ * inline call site in `we:scripts/merge-ai-prs.mjs` (an `execFileSync`-heavy loop with no independently
+ * testable seam) so the actual decision — not just the marker parsing `parseLatestHumanClearedSha` does — has
+ * its own unit tests, rather than relying on end-to-end drain fixtures that don't exist for this gate.
+ *
+ * Re-parks (`true`) UNLESS every one of: a tampering hit was found on a SCORED diff (an unscored diff — no
+ * local/sibling clone available — is a fail-open no-op the caller already handles before this is reached), AND
+ * the PR's `humanClearedSha` (from `parseLatestHumanClearedSha`) is non-null and matches the LIVE head SHA. A
+ * `humanClearedSha` from an older head, or one that's `null` because the latest accept-shaped comment was a
+ * plain agent accept (see `parseLatestHumanClearedSha`'s own note on why that must not count), still re-parks —
+ * this is the fail-CLOSED direction: a fetch miss or an ordering edge case must never suppress the gate.
+ * @returns {boolean}
+ */
+export function shouldReparkForTestTampering({ tampered, netDiffScored, humanClearedSha = null, headSha = null } = {}) {
+  if (!tampered || !netDiffScored) return false;
+  return !(humanClearedSha && headSha && humanClearedSha === headSha);
+}
+
 /** The marker carrying the #x9xqexm CONTRIBUTION fingerprint, stamped beside `reviewed-sha` / `reviewed-diff`. */
 export const REVIEWED_CONTRIBUTION_MARKER = 'reviewed-contribution';
 const REVIEWED_CONTRIBUTION_RE = new RegExp(`<!--\\s*${REVIEWED_CONTRIBUTION_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');
