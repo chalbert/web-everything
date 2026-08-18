@@ -115,11 +115,11 @@ tool-bearing jurors arrived (#3072, 2026-08-12), so a tool-bearing seat is kille
 $0.596 — surfacing as `is_error, stop_reason: "tool_use"`, which reads like a crash. Re-running the
 identical seat at `budget: 3.0` succeeded at **$0.69** and produced the two round-3 findings. The declared
 operations are unaffected (`we:review-pr` / `we:review-prep` set `JUDGE_BUDGET_USD = 1.5`); only the converge
-path inherits the old default, because nothing declares a budget for it. Filed as `#xvkjndx`.
+path inherits the old default, because nothing declares a budget for it. Filed as `#3187`.
 
 *Correction (2026-08-18): this paragraph previously said "Filed separately against #3072". That was
 not true — neither #3072 nor #3151 mentions a budget, so nothing was filed and the defect sat
-unowned. `#xvkjndx` is the real item, carrying four measured tool-bearing juror spends that all
+unowned. `#3187` is the real item, carrying four measured tool-bearing juror spends that all
 exceed the 0.5 default.*
 
 ## Preparation risk assessment
