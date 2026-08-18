@@ -63,10 +63,20 @@ belong to `review-runner.mjs`, not to this bootstrap.
 
 ## Installing on a workstation
 
-The same command, and it is the whole install: `node scripts/bootstrap-session.mjs` (`npm run bootstrap`).
-On a laptop it takes the non-ephemeral plan — scoped skills sync, commands deployed, the primary
-checkout's `.git` granted, the lane pool and guard left to their own installers — and registers the same
-user-level `SessionStart` hook, so every later session in any repo maintains itself.
+`npm run bootstrap` **reports** on a workstation; `npm run bootstrap install` applies. That asymmetry is
+deliberate and is the one thing to understand here.
+
+The committed project `SessionStart` hook means the bootstrap runs the moment anyone opens this repo — so
+a default run must not reach outside the repository. On a durable host it prints what it would do and
+stops: nothing under `$HOME/.claude` is touched, no directory is granted, and no user-level hook is
+installed. `install` is the explicit opt-in and `uninstall` reverses it.
+
+An **ephemeral** cloud VM writes freely, because its `$HOME` belongs to a container reclaimed on idle —
+there is no durable state to consent about, and a session that configures itself is the whole point.
+
+This was not the first design. The first one always wrote, which meant opening the repo on a workstation
+silently granted a directory and installed a user-level hook that then fired in **every unrelated repo on
+that machine**. A `/converge` panel caught it before it landed (2026-08-18).
 
 Two things it deliberately does not own: the lane pool (`lane-pool.mjs provision`) and the branch guard
 (`guard-lane-install.mjs install`). Both are laptop-only, both have their own installer with its own

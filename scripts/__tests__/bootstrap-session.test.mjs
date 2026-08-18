@@ -13,6 +13,8 @@ import {
   primaryCheckout,
   withPrimaryGitDir,
   skillsDeployScript,
+  mayWriteUserTree,
+  knownGitDirs,
   withBootstrapHook,
   withoutBootstrapHook,
   bootstrapStatus,
@@ -160,9 +162,19 @@ describe('withPrimaryGitDir', () => {
 
   // REPAIR, not append — a moved checkout must not leave a dead grant beside the live one.
   it('replaces a stale .git grant rather than accumulating', () => {
+    const known = ['/Users/someone/workspace/webeverything/.git'];
     let s = withPrimaryGitDir({}, '/Users/someone/workspace/webeverything/.git');
-    s = withPrimaryGitDir(s, '/ws/webeverything/.git');
+    s = withPrimaryGitDir(s, '/ws/webeverything/.git', known);
     expect(s.permissions.additionalDirectories).toEqual(['/ws/webeverything/.git']);
+  });
+
+  // Converge finding, 2026-08-18: the first cut dropped ANY entry ending in `/.git`, so a re-run silently
+  // REVOKED an operator's hand-added grant for an unrelated repo. Only grants we can prove are ours may go.
+  it("never revokes an operator's .git grant for a repo this script does not own", () => {
+    const before = { permissions: { additionalDirectories: ['/elsewhere/other-repo/.git'] } };
+    const out = withPrimaryGitDir(before, '/ws/webeverything/.git', ['/ws/webeverything/.git']);
+    expect(out.permissions.additionalDirectories).toContain('/elsewhere/other-repo/.git');
+    expect(out.permissions.additionalDirectories).toContain('/ws/webeverything/.git');
   });
 
   it('leaves the operator’s non-.git directories alone', () => {
@@ -179,19 +191,37 @@ describe('withPrimaryGitDir', () => {
 });
 
 describe('skillsDeployScript', () => {
-  it('prefers this checkout when it carries the CLI', () => {
+  it('uses this checkout when it carries the CLI', () => {
     const exists = (p) => p === '/ws/webeverything/scripts/sync-skills-deploy.mjs';
     expect(skillsDeployScript('/ws/webeverything', exists)).toBe('/ws/webeverything/scripts/sync-skills-deploy.mjs');
   });
 
-  // The two halves can move in either order — a bootstrap in plateau-app must still find the skills SoT in WE.
-  it('falls back to a present sibling that carries it', () => {
-    const exists = (p) => p === '/ws/web-everything' || p === '/ws/web-everything/scripts/sync-skills-deploy.mjs';
-    expect(skillsDeployScript('/ws/plateau-app', exists)).toBe('/ws/web-everything/scripts/sync-skills-deploy.mjs');
+  // Converge finding, 2026-08-18: searching siblings and execFileSync-ing whatever was found is a cross-repo
+  // code-execution path. Siblings arrive unvetted via the harness on a VM, and the search ran on every
+  // automatic SessionStart. A sibling's copy must NEVER be selected, however convenient.
+  it('never selects a sibling checkout, even when this one lacks the CLI', () => {
+    const exists = (p) => p.startsWith('/ws/web-everything');
+    expect(skillsDeployScript('/ws/plateau-app', exists)).toBeNull();
   });
 
   it('reports absence rather than returning a path that resolves nowhere', () => {
     expect(skillsDeployScript('/ws/plateau-app', () => false)).toBeNull();
+  });
+});
+
+// The committed project SessionStart hook makes a default run automatic on first open of the repo, so what a
+// default run may touch is a consent question — and a workstation is where it bites.
+describe('mayWriteUserTree', () => {
+  it('does not write on a durable host without an explicit install', () => {
+    expect(mayWriteUserTree({ ephemeral: false })).toBe(false);
+  });
+
+  it('writes on an ephemeral host, whose $HOME is a container reclaimed on idle', () => {
+    expect(mayWriteUserTree({ ephemeral: true })).toBe(true);
+  });
+
+  it('writes on a durable host when install was asked for explicitly', () => {
+    expect(mayWriteUserTree({ ephemeral: false, explicitInstall: true })).toBe(true);
   });
 });
 

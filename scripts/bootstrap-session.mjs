@@ -29,13 +29,20 @@
  * machine-global memory symlink — that is #2350's supervised, human-gated half, and a script that moved
  * it silently would be the wipe that decision exists to prevent.
  *
+ * CONSENT: A DURABLE HOST IS REPORTED ON, NEVER MUTATED IMPLICITLY. The committed project SessionStart hook
+ * means this runs the moment anyone opens the repo, so a default run must not reach outside the repository.
+ * On a workstation it reports what it would do and stops; `install` is the explicit opt-in, `uninstall` the
+ * reverse. An ephemeral cloud VM writes freely — its `$HOME` is a container reclaimed on idle, so there is
+ * no durable state to consent about, and the value of a session that configures itself is the whole point.
+ *
  * Usage:
- *   node scripts/bootstrap-session.mjs             # do it (idempotent; safe to re-run)
+ *   node scripts/bootstrap-session.mjs             # report; applies only on an ephemeral host
  *   node scripts/bootstrap-session.mjs --check     # report drift only, write nothing; exit 1 if any
  *   node scripts/bootstrap-session.mjs --dry-run   # print the plan, write nothing; exit 0
  *   node scripts/bootstrap-session.mjs --json      # machine-readable summary on stdout
  *   node scripts/bootstrap-session.mjs --laptop    # force the non-ephemeral plan (override detection)
  *   node scripts/bootstrap-session.mjs --ephemeral # force the ephemeral plan (override detection)
+ *   node scripts/bootstrap-session.mjs install     # apply on ANY host (the explicit opt-in)
  *   node scripts/bootstrap-session.mjs uninstall   # drop the SessionStart registration
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
@@ -201,15 +208,28 @@ export function primaryCheckout(root = REPO_ROOT, exists = existsSync) {
  * everyone else and dead in every cloud VM. It is machine state, so it belongs in machine-level settings,
  * computed from where the checkout actually is. PURE.
  */
-export function withPrimaryGitDir(settings, gitDir) {
+export function withPrimaryGitDir(settings, gitDir, known = []) {
   const next = JSON.parse(JSON.stringify(settings ?? {}));
   next.permissions = next.permissions ?? {};
   const dirs = Array.isArray(next.permissions.additionalDirectories) ? next.permissions.additionalDirectories : [];
-  // Drop any prior grant for a `.git` of a constellation checkout — re-running after the checkout moves
-  // REPAIRS the path rather than accumulating a dead one beside it.
-  const stale = (d) => typeof d === 'string' && d.endsWith(`${sep}.git`);
-  next.permissions.additionalDirectories = [...dirs.filter((d) => !stale(d)), gitDir];
+  // Repair, not accumulate: a moved checkout must not leave a dead grant beside the live one. But the set we
+  // may drop is ONLY the ones this script could itself have written — the `.git` of a constellation checkout
+  // at a path we can name. The first cut matched any string ending in `/.git`, which silently REVOKED an
+  // operator's hand-added grant for an unrelated repo on the next run (converge finding, 2026-08-18). A
+  // grant we cannot prove is ours is the operator's, and is left alone.
+  const ours = new Set([gitDir, ...known]);
+  next.permissions.additionalDirectories = [...dirs.filter((d) => !ours.has(d)), gitDir];
   return next;
+}
+
+/**
+ * Every `.git` path this script could have written on this machine — the constellation checkouts it knows
+ * about, in both of the directory names each answers to. Used as the "is this grant ours?" set above, so
+ * repair stays exact instead of matching by suffix.
+ */
+export function knownGitDirs(root = REPO_ROOT) {
+  const parent = dirname(primaryCheckout(root));
+  return Object.values(CONSTELLATION_REPOS).flatMap((m) => m.dirs.map((d) => join(parent, d, '.git')));
 }
 
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
@@ -284,15 +304,19 @@ function uninstallHook() {
 }
 
 /**
- * Where the skills deploy CLI lives — this checkout, else a sibling. PURE over a probe.
+ * Where the skills deploy CLI lives — THIS checkout only. PURE over a probe.
  *
- * The skills source of truth and this bootstrap are separable: when the delivery machinery moves to Plateau,
- * `skills-src/` and its deploy script may not move with it, or may move first. Searching self-then-siblings
- * means neither half has to land in the same commit as the other.
+ * An earlier cut searched sibling constellation checkouts too, so the two halves could move to Plateau
+ * independently. That was a cross-repo CODE EXECUTION path: siblings arrive on a cloud VM through the
+ * harness's `add_repo`, are not vetted by this repo, and whatever `sync-skills-deploy.mjs` was found got
+ * `execFileSync`'d with full privileges on every run — including the automatic SessionStart one, with no
+ * provenance check (converge finding, 2026-08-18). The convenience it bought was one commit's worth of
+ * ordering freedom during a relocation that has not happened yet and is properly handled by the
+ * multi-project registry (#2472). Deleted rather than defended: a missing CLI now reports and skips.
  */
 export function skillsDeployScript(root = REPO_ROOT, exists = existsSync, cli = 'sync-skills-deploy.mjs') {
-  const candidates = [root, ...siblingsFor(root, exists).filter((s) => s.present).map((s) => s.path)];
-  return candidates.map((r) => join(r, 'scripts', cli)).find((p) => exists(p)) ?? null;
+  const here = join(root, 'scripts', cli);
+  return exists(here) ? here : null;
 }
 
 /** Shell the existing skills CLI — never reimplement its deploy, prune or tracked-file rules. */
@@ -316,14 +340,31 @@ function describe(step) {
     .join(', ');
 }
 
+/**
+ * May this run write OUTSIDE the repository — into the machine-global `$HOME/.claude` tree? PURE.
+ *
+ * The first cut always could, and the committed project SessionStart hook made that automatic: opening this
+ * repo in Claude Code silently granted a directory and installed a USER-level hook that then fired in every
+ * unrelated repo on that machine (converge finding, 2026-08-18). Consent is the issue, and it is a
+ * WORKSTATION issue — on an ephemeral cloud VM `$HOME` belongs to a container that is reclaimed on idle, so
+ * there is no durable state to mutate and nothing to consent to. Hence: ephemeral writes freely, a durable
+ * host reports and requires the explicit `install` subcommand.
+ */
+export function mayWriteUserTree({ ephemeral, explicitInstall = false } = {}) {
+  return Boolean(ephemeral || explicitInstall);
+}
+
 function main(argv) {
   const has = (f) => argv.includes(f);
   if (argv[0] === 'uninstall') { writeLineSync(1, `bootstrap-session: ${uninstallHook()}`); return 0; }
-  const write = !has('--check') && !has('--dry-run');
+  const explicitInstall = argv[0] === 'install';
+  const readOnlyFlag = has('--check') || has('--dry-run');
   const detected = detectHost();
   const ephemeral = has('--ephemeral') ? true : has('--laptop') ? false : detected.ephemeral;
+  // `write` now means "may touch $HOME/.claude", not merely "was --check absent".
+  const write = !readOnlyFlag && mayWriteUserTree({ ephemeral, explicitInstall });
   const locus = selfKey();
-  const report = { host: ephemeral ? 'ephemeral' : 'laptop', locus, signals: detected.signals, steps: [] };
+  const report = { host: ephemeral ? 'ephemeral' : 'laptop', locus, signals: detected.signals, writes: write, steps: [] };
 
   for (const step of planSteps({ ephemeral })) {
     if (step.skip) { report.steps.push({ id: step.id, status: 'skipped', detail: step.skip }); continue; }
@@ -332,7 +373,7 @@ function main(argv) {
       if (!write) { report.steps.push({ id: step.id, status: 'planned', detail: step.gitDir }); continue; }
       const before = readSettings();
       const already = (before.permissions?.additionalDirectories ?? []).includes(step.gitDir);
-      if (!already) writeSettings(withPrimaryGitDir(before, step.gitDir));
+      if (!already) writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
       report.steps.push({ id: step.id, status: 'ok', detail: `${step.gitDir}${already ? ' (already granted)' : ' (granted)'}` });
       continue;
     }
@@ -340,7 +381,7 @@ function main(argv) {
       const cli = step.cli ?? 'sync-skills-deploy.mjs';
       const script = skillsDeployScript(REPO_ROOT, existsSync, cli);
       if (!script) {
-        report.steps.push({ id: step.id, status: 'skipped', detail: `no ${cli} in this checkout or any present sibling — that source of truth is not on this machine` });
+        report.steps.push({ id: step.id, status: 'skipped', detail: `no ${cli} in this checkout — that source of truth is not here` });
         continue;
       }
       if (has('--dry-run')) { report.steps.push({ id: step.id, status: 'planned', detail: `${step.title} via ${script}` }); continue; }
@@ -353,6 +394,8 @@ function main(argv) {
     report.steps.push({ id: step.id, status: ok ? 'ok' : step.id === 'siblings' ? 'missing' : 'drift', detail: v });
   }
 
+  // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
+  // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
   if (write) report.hook = installHook();
 
   if (has('--json')) {
@@ -361,6 +404,10 @@ function main(argv) {
     writeLineSync(1, `bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
     for (const s of report.steps) writeLineSync(1, `  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
     if (report.hook) writeLineSync(1, `  hook     SessionStart ${report.hook}`);
+    if (!write && !readOnlyFlag) {
+      writeLineSync(1, '  — reported only. This host is durable, so nothing under $HOME/.claude was touched;');
+      writeLineSync(1, '    run `npm run bootstrap install` to apply, `… uninstall` to undo.');
+    }
   }
 
   return has('--check') && report.steps.some((s) => s.status === 'drift') ? 1 : 0;
