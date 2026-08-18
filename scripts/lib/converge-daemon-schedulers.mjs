@@ -41,6 +41,21 @@ export function systemdUnitNames(label) {
  * @param {object} cfg - the same object `resolveInstallConfig` returns
  * @returns {{service: string, timer: string}}
  */
+/**
+ * Escape a value for the inside of a systemd double-quoted string. PURE.
+ *
+ * ONE helper, used by EVERY path-bearing directive, because the first cut quoted only `Environment=` — while
+ * its own comment said "quote every value" — and left `ExecStart=` and `WorkingDirectory=` bare. systemd
+ * word-splits an unquoted `ExecStart=`, so a clone path with a space installed a unit whose ExecStart never
+ * ran the intended script: a silent no-op daemon that looks installed (review-pr correctness juror on #1465).
+ *
+ * `StandardOutput=append:PATH` is deliberately NOT wrapped: it is not an argv and systemd does not word-split
+ * it, so quoting there would make the quotes part of the filename.
+ */
+export function sdQuote(v) {
+  return String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 export function renderSystemdUnits(cfg) {
   const env = [
     ['CONVERGE_DAEMON_CLONE', cfg.clone],
@@ -55,7 +70,7 @@ export function renderSystemdUnits(cfg) {
   // systemd splits on whitespace unless the value is quoted, and these are paths a user may well put a space
   // in. Quote every value and escape the quote and backslash that would end it early.
   const envLines = env
-    .map(([k, v]) => `Environment="${k}=${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`)
+    .map(([k, v]) => `Environment="${k}=${sdQuote(v)}"`)
     .join('\n');
 
   const service = `[Unit]
@@ -64,8 +79,8 @@ Documentation=https://github.com/chalbert/web-everything/blob/main/scripts/conve
 
 [Service]
 Type=oneshot
-WorkingDirectory=${cfg.clone}
-ExecStart=${cfg.node} ${cfg.script}
+WorkingDirectory="${sdQuote(cfg.clone)}"
+ExecStart="${sdQuote(cfg.node)}" "${sdQuote(cfg.script)}"
 ${envLines}
 # The pass appends to its own shadow log; journald keeps stdout/stderr as well, so a failed fire is
 # recoverable with \`journalctl --user -u ${cfg.label}.service\` even if the log write itself is what broke.

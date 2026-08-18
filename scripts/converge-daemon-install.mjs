@@ -172,6 +172,27 @@ function systemctl(...args) {
   return spawnSync('systemctl', ['--user', ...args], { encoding: 'utf8' });
 }
 
+/**
+ * The ordered `systemctl --user` calls an install makes, once the unit files are on disk. PURE.
+ *
+ * SEPARATE AND EXPORTED because the ORDER is the correctness property, and it had no test: `enable --now` is
+ * a NO-OP on a timer that is already active, so a second `install` carrying a changed interval or clone wrote
+ * new unit files and left the RUNNING timer on the old ones — silently diverging from the config the operator
+ * believes is installed (review-pr correctness juror on #1465). The launchd path never had this bug: it
+ * `bootout`s first, "so a re-install picks up the new plist". This path claimed to mirror it and did not.
+ *
+ * `decides` marks the ONE call whose exit code decides the command's own. `daemon-reload` and `stop` are
+ * deliberately unchecked: on a first install there is nothing to stop, and that benign no-op must not be
+ * reported as a failed install.
+ */
+export function systemdInstallSteps(timerUnit) {
+  return [
+    { args: ['daemon-reload'], decides: false },
+    { args: ['stop', timerUnit], decides: false },
+    { args: ['enable', '--now', timerUnit], decides: true },
+  ];
+}
+
 /** `~/.config/systemd/user/<unit>` for each unit this label owns. */
 function unitPaths(label, home = homedir()) {
   const dir = join(home, '.config', 'systemd', 'user');
@@ -244,8 +265,11 @@ function systemdMain(cmd, cfg, argv) {
   writeFileSync(u.service, units.service);
   writeFileSync(u.timer, units.timer);
 
-  systemctl('daemon-reload');
-  const on = systemctl('enable', '--now', u.timerUnit);
+  let on;
+  for (const s of systemdInstallSteps(u.timerUnit)) {
+    const r = systemctl(...s.args);
+    if (s.decides) on = r;
+  }
   if (on.status !== 0) {
     process.stderr.write(`converge-daemon: wrote the unit files but \`systemctl --user enable --now ${u.timerUnit}\` `
       + `failed — ${(on.stderr || '').trim()}\n`

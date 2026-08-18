@@ -3,7 +3,8 @@
  *   and refuses honestly where neither applies. Pure over injected cfg / platform / probes; no io.
  */
 import { describe, it, expect } from 'vitest';
-import { renderSystemdUnits, systemdUnitNames, detectScheduler } from '../lib/converge-daemon-schedulers.mjs';
+import { renderSystemdUnits, sdQuote, systemdUnitNames, detectScheduler } from '../lib/converge-daemon-schedulers.mjs';
+import { systemdInstallSteps } from '../converge-daemon-install.mjs';
 
 const cfg = {
   label: 'com.webeverything.converge-daemon',
@@ -30,8 +31,10 @@ describe('systemdUnitNames', () => {
 describe('renderSystemdUnits', () => {
   it('runs the pass from the daemon clone, never the primary checkout', () => {
     const { service } = renderSystemdUnits(cfg);
-    expect(service).toContain(`WorkingDirectory=${cfg.clone}`);
-    expect(service).toContain(`ExecStart=${cfg.node} ${cfg.script}`);
+    // Quoted — see the space-in-path suite below. This assertion originally pinned the UNQUOTED form, which
+    // is part of how the word-splitting bug survived: the test encoded the defect as the contract.
+    expect(service).toContain(`WorkingDirectory="${cfg.clone}"`);
+    expect(service).toContain(`ExecStart="${cfg.node}" "${cfg.script}"`);
     expect(service).not.toContain(cfg.primary.concat('\n'));
   });
 
@@ -96,5 +99,78 @@ describe('detectScheduler', () => {
 
   it('refuses an unsupported platform by name', () => {
     expect(detectScheduler('win32', () => true).reason).toMatch(/win32/);
+  });
+});
+
+/**
+ * A path with a space must survive EVERY directive, not just `Environment=`.
+ *
+ * The first cut quoted only `Environment=` while its own comment said "quote every value", leaving
+ * `ExecStart=` and `WorkingDirectory=` bare. systemd word-splits an unquoted `ExecStart=`, so a clone path
+ * containing a space installed a unit whose ExecStart never ran the intended script — a daemon that reports
+ * installed and silently does nothing, which is the worst available failure mode.
+ */
+describe('systemd units survive a path with a space', () => {
+  const cfg = {
+    label: 'com.we.converge', clone: '/srv/we daemon', primary: '/srv/we primary',
+    node: '/usr/local/my node/bin/node', script: '/srv/we daemon/scripts/converge-daemon-pass.mjs',
+    stateRoot: '/srv/we state', juryDir: '/srv/we jury', intervalSec: 900,
+    stdoutPath: '/srv/we daemon/out.log', logPath: '/srv/we daemon/shadow.log',
+  };
+
+  it('quotes ExecStart so systemd does not word-split the command', () => {
+    const { service } = renderSystemdUnits(cfg);
+    const line = service.split('\n').find((l) => l.startsWith('ExecStart='));
+    expect(line).toBe('ExecStart="/usr/local/my node/bin/node" "/srv/we daemon/scripts/converge-daemon-pass.mjs"');
+  });
+
+  it('quotes WorkingDirectory', () => {
+    const { service } = renderSystemdUnits(cfg);
+    expect(service).toContain('WorkingDirectory="/srv/we daemon"');
+  });
+
+  it('still quotes every Environment value', () => {
+    const { service } = renderSystemdUnits(cfg);
+    expect(service).toContain('Environment="CONVERGE_DAEMON_CLONE=/srv/we daemon"');
+    expect(service).toContain('Environment="CONVERGE_DAEMON_JURY_DIR=/srv/we jury"');
+  });
+
+  it('escapes an embedded quote and backslash rather than ending the string early', () => {
+    expect(sdQuote('a"b')).toBe('a\\"b');
+    expect(sdQuote('a\\b')).toBe('a\\\\b');
+    const { service } = renderSystemdUnits({ ...cfg, clone: '/srv/we "odd"' });
+    expect(service).toContain('WorkingDirectory="/srv/we \\"odd\\""');
+  });
+
+  it('leaves the append: log paths unwrapped — they are not argv and quotes would join the filename', () => {
+    const { service } = renderSystemdUnits(cfg);
+    expect(service).toContain('StandardOutput=append:/srv/we daemon/out.log');
+    expect(service).not.toContain('StandardOutput=append:"');
+  });
+});
+
+/**
+ * The install sequence must STOP before it enables.
+ *
+ * `enable --now` is a no-op on an already-active timer, so a second `install` with a changed interval left
+ * the running timer on the old config while reporting success. The launchd path never had this — it
+ * `bootout`s first. The ORDER is the property, so the order is what is asserted.
+ */
+describe('the systemd install sequence', () => {
+  const steps = systemdInstallSteps('com.we.converge.timer');
+  const verbs = steps.map((s) => s.args[0]);
+
+  it('stops the timer BEFORE enabling it, after reloading units', () => {
+    expect(verbs).toEqual(['daemon-reload', 'stop', 'enable']);
+    expect(verbs.indexOf('stop')).toBeLessThan(verbs.indexOf('enable'));
+  });
+
+  it('targets the timer unit it was given, and enables with --now', () => {
+    expect(steps[1].args).toEqual(['stop', 'com.we.converge.timer']);
+    expect(steps[2].args).toEqual(['enable', '--now', 'com.we.converge.timer']);
+  });
+
+  it('lets ONLY the enable decide the exit code — a benign first-install stop must not fail it', () => {
+    expect(steps.filter((s) => s.decides).map((s) => s.args[0])).toEqual(['enable']);
   });
 });
