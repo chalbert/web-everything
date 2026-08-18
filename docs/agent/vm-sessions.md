@@ -61,9 +61,20 @@ Two WE-as-hub assumptions do remain, both in that shared table and both flagged 
 ("the WE primary's own cwd") and `DEFAULT_REPO_KEY = 'we'`. They are the seam the move pulls on, and they
 belong to `review-runner.mjs`, not to this bootstrap.
 
-## Known rough edge
+## Installing on a workstation
 
-`.claude/settings.json` is committed and still carries workstation-absolute paths (an
-`additionalDirectories` entry and one allow-rule under `/Users/…`). They are inert rather than harmful on
-a VM — they simply name nothing — but they are dead weight in every cloud session and want the same
-user-level treatment `guard-lane-install.mjs` gave the guard in #3074.
+The same command, and it is the whole install: `node scripts/bootstrap-session.mjs` (`npm run bootstrap`).
+On a laptop it takes the non-ephemeral plan — scoped skills sync, commands deployed, the primary
+checkout's `.git` granted, the lane pool and guard left to their own installers — and registers the same
+user-level `SessionStart` hook, so every later session in any repo maintains itself.
+
+Two things it deliberately does not own: the lane pool (`lane-pool.mjs provision`) and the branch guard
+(`guard-lane-install.mjs install`). Both are laptop-only, both have their own installer with its own
+safety rules, and wrapping them here would put a second source of truth in front of them.
+
+**Nothing about the machine is hand-maintained any more.** The one absolute path that used to be typed by
+hand — the primary checkout's `.git`, granted so a `--reference`d lane can read the objects it shares — is
+now derived from where the checkout actually is and written to `~/.claude/settings.json`. It was a
+`/Users/<name>/…` literal in the COMMITTED `.claude/settings.json`, which made it wrong for anyone else and
+dead in every cloud VM; the stale one-off `Bash(cd /Users/…)` allow-rule beside it is simply gone. Machine
+state lives at machine level, computed — the same conclusion #3074 reached for the guard.

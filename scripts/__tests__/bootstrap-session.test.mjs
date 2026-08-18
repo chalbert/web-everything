@@ -10,6 +10,8 @@ import {
   planSteps,
   selfKey,
   siblingsFor,
+  primaryCheckout,
+  withPrimaryGitDir,
   skillsDeployScript,
   withBootstrapHook,
   withoutBootstrapHook,
@@ -124,6 +126,55 @@ describe('relocation', () => {
   it('resolves a sibling at whichever directory name it actually occupies', () => {
     const exists = (p) => p === '/ws/webeverything';
     expect(siblingsFor('/ws/plateau-app', exists).find((s) => s.name === 'we')).toMatchObject({ path: '/ws/webeverything', present: true });
+  });
+});
+
+// The grant that used to be an absolute `/Users/<name>/…` literal in the COMMITTED settings file: wrong for
+// everyone else, dead in every VM. It is machine state, so it is derived and written at machine level.
+describe('primaryCheckout', () => {
+  it('is the checkout itself when that is not a lane', () => {
+    expect(primaryCheckout('/ws/webeverything')).toBe('/ws/webeverything');
+  });
+
+  it('resolves a lane clone back to the primary it was cloned from', () => {
+    expect(primaryCheckout('/ws/.lanes/plateau-app/lane-3', () => true)).toBe('/ws/plateau-app');
+  });
+
+  // The POOL directory is named from the origin slug (`web-everything`) while the laptop's primary checkout
+  // is `webeverything`. Deriving the primary's name from the pool's produced a path resolving nowhere.
+  it('probes for the primary directory rather than assuming it matches the pool name', () => {
+    const exists = (p) => p === '/ws/webeverything';
+    expect(primaryCheckout('/ws/.lanes/web-everything/lane-9', exists)).toBe('/ws/webeverything');
+  });
+
+  it('falls back to the workspace when the lane names no known repo', () => {
+    expect(primaryCheckout('/ws/.lanes/mystery/lane-1', () => true)).toBe('/ws');
+  });
+});
+
+describe('withPrimaryGitDir', () => {
+  it('grants the derived .git directory', () => {
+    const out = withPrimaryGitDir({}, '/ws/webeverything/.git');
+    expect(out.permissions.additionalDirectories).toEqual(['/ws/webeverything/.git']);
+  });
+
+  // REPAIR, not append — a moved checkout must not leave a dead grant beside the live one.
+  it('replaces a stale .git grant rather than accumulating', () => {
+    let s = withPrimaryGitDir({}, '/Users/someone/workspace/webeverything/.git');
+    s = withPrimaryGitDir(s, '/ws/webeverything/.git');
+    expect(s.permissions.additionalDirectories).toEqual(['/ws/webeverything/.git']);
+  });
+
+  it('leaves the operator’s non-.git directories alone', () => {
+    const before = { permissions: { additionalDirectories: ['/ws/notes'] } };
+    const out = withPrimaryGitDir(before, '/ws/webeverything/.git');
+    expect(out.permissions.additionalDirectories).toEqual(['/ws/notes', '/ws/webeverything/.git']);
+  });
+
+  it('does not mutate the settings it was given', () => {
+    const before = { permissions: { additionalDirectories: [] } };
+    withPrimaryGitDir(before, '/ws/webeverything/.git');
+    expect(before.permissions.additionalDirectories).toHaveLength(0);
   });
 });
 

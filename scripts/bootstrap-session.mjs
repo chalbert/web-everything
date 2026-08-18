@@ -41,7 +41,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 import { CONSTELLATION_REPOS, repoKeyForDir, siblingKeys } from './lib/constellation-repos.mjs';
@@ -121,6 +121,12 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
     argv: ephemeral ? ['--all'] : [],
   });
 
+  // Commands are the half that had no deploy path at all: `.claude/commands/*.md` are live only in a session
+  // whose PRIMARY directory is this repo, so from a sibling, a lane, or any VM the twenty slash commands
+  // silently did not exist. `--all` on both hosts: unlike a skill, a command is inert until invoked by name,
+  // so deploying one the operator never types costs nothing, while NOT deploying it is the whole bug.
+  steps.push({ id: 'commands', title: 'deploy .claude/commands to ~/.claude/commands (--all)', argv: ['--all'], cli: 'sync-commands-deploy.mjs' });
+
   // Memory. Nothing to INSTALL: check-memory.mjs and memory-resolve.mjs both fall back to the in-repo
   // `.claude/agent-memory` symlink, which git carries into any clone. The user-level dir is the LAPTOP's
   // reserved-lane arrangement (#2350) and is never created or repointed from here.
@@ -158,7 +164,52 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
       : { id: 'guard', title: 'lane guard', info: 'check with `node scripts/guard-lane-install.mjs status`' },
   );
 
+  // Laptop only: a lane clone reads objects from the primary's `.git` via `--reference`, so that directory
+  // needs an explicit grant. No lanes on an ephemeral host, so nothing to grant there.
+  if (!ephemeral) steps.push({ id: 'gitdir', title: 'grant the primary checkout .git', gitDir: join(primaryCheckout(root), '.git') });
+
   return steps;
+}
+
+/**
+ * The PRIMARY checkout, given any checkout — a lane clone resolves to the checkout it was cloned from.
+ *
+ * Same derivation `guard-lane-install.mjs` makes for the guard path, and for the same reason: a lane is
+ * reset and recycled, so anything registered from inside one silently stops resolving. PURE.
+ */
+export function primaryCheckout(root = REPO_ROOT, exists = existsSync) {
+  const marker = `${sep}.lanes${sep}`;
+  const i = root.indexOf(marker);
+  if (i < 0) return root;
+  const workspace = root.slice(0, i);
+  // `<workspace>/.lanes/<pool>/lane-N`. The POOL name is derived by lane-pool.mjs from the origin URL
+  // basename (`web-everything`), which is NOT necessarily the directory the primary checkout occupies (the
+  // laptop's is `webeverything` — the same divergence guard-lane-install.mjs hard-codes around). So the pool
+  // name identifies the REPO, and the primary's directory is then PROBED among that repo's known basenames.
+  // Deriving it instead of probing produced a path that resolves nowhere, silently.
+  const dirs = CONSTELLATION_REPOS[repoKeyForDir(root.split(sep).at(-2) ?? '') ?? '']?.dirs;
+  if (!dirs) return workspace;
+  return dirs.map((d) => join(workspace, d)).find((p) => exists(p)) ?? join(workspace, dirs[0]);
+}
+
+/**
+ * Grant the primary checkout's `.git` to the agent, at USER level, derived rather than typed.
+ *
+ * A lane is cloned with `--reference <primary>`, so git in a lane reads objects out of the primary's
+ * `.git` — which sits outside the lane and needs an explicit grant. That grant lived as an absolute
+ * `/Users/<name>/...` literal inside the COMMITTED `.claude/settings.json`, which made it wrong for
+ * everyone else and dead in every cloud VM. It is machine state, so it belongs in machine-level settings,
+ * computed from where the checkout actually is. PURE.
+ */
+export function withPrimaryGitDir(settings, gitDir) {
+  const next = JSON.parse(JSON.stringify(settings ?? {}));
+  next.permissions = next.permissions ?? {};
+  const dirs = Array.isArray(next.permissions.additionalDirectories) ? next.permissions.additionalDirectories : [];
+  // Drop any prior grant for a `.git` of a constellation checkout — re-running after the checkout moves
+  // REPAIRS the path rather than accumulating a dead one beside it.
+  const stale = (d) => typeof d === 'string' && d.endsWith(`${sep}.git`);
+  next.permissions.additionalDirectories = [...dirs.filter((d) => !stale(d)), gitDir];
+  return next;
 }
 
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
@@ -239,9 +290,9 @@ function uninstallHook() {
  * `skills-src/` and its deploy script may not move with it, or may move first. Searching self-then-siblings
  * means neither half has to land in the same commit as the other.
  */
-export function skillsDeployScript(root = REPO_ROOT, exists = existsSync) {
+export function skillsDeployScript(root = REPO_ROOT, exists = existsSync, cli = 'sync-skills-deploy.mjs') {
   const candidates = [root, ...siblingsFor(root, exists).filter((s) => s.present).map((s) => s.path)];
-  return candidates.map((r) => join(r, 'scripts', 'sync-skills-deploy.mjs')).find((p) => exists(p)) ?? null;
+  return candidates.map((r) => join(r, 'scripts', cli)).find((p) => exists(p)) ?? null;
 }
 
 /** Shell the existing skills CLI — never reimplement its deploy, prune or tracked-file rules. */
@@ -277,10 +328,19 @@ function main(argv) {
   for (const step of planSteps({ ephemeral })) {
     if (step.skip) { report.steps.push({ id: step.id, status: 'skipped', detail: step.skip }); continue; }
     if (step.info) { report.steps.push({ id: step.id, status: 'info', detail: step.info }); continue; }
-    if (step.id === 'skills') {
-      const script = skillsDeployScript();
+    if (step.gitDir) {
+      if (!write) { report.steps.push({ id: step.id, status: 'planned', detail: step.gitDir }); continue; }
+      const before = readSettings();
+      const already = (before.permissions?.additionalDirectories ?? []).includes(step.gitDir);
+      if (!already) writeSettings(withPrimaryGitDir(before, step.gitDir));
+      report.steps.push({ id: step.id, status: 'ok', detail: `${step.gitDir}${already ? ' (already granted)' : ' (granted)'}` });
+      continue;
+    }
+    if (step.id === 'skills' || step.id === 'commands') {
+      const cli = step.cli ?? 'sync-skills-deploy.mjs';
+      const script = skillsDeployScript(REPO_ROOT, existsSync, cli);
       if (!script) {
-        report.steps.push({ id: step.id, status: 'skipped', detail: 'no sync-skills-deploy.mjs in this checkout or any present sibling — the skills source of truth is not on this machine' });
+        report.steps.push({ id: step.id, status: 'skipped', detail: `no ${cli} in this checkout or any present sibling — that source of truth is not on this machine` });
         continue;
       }
       if (has('--dry-run')) { report.steps.push({ id: step.id, status: 'planned', detail: `${step.title} via ${script}` }); continue; }
