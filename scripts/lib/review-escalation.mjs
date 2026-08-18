@@ -1309,6 +1309,23 @@ export function parseLatestHumanClearedSha(comments) {
  * `humanClearedSha` from an older head, or one that's `null` because the latest accept-shaped comment was a
  * plain agent accept (see `parseLatestHumanClearedSha`'s own note on why that must not count), still re-parks —
  * this is the fail-CLOSED direction: a fetch miss or an ordering edge case must never suppress the gate.
+ *
+ * KNOWN RESIDUAL, ACCEPTED — a forged clearance CAN suppress THIS specific park (security review, PR #1459).
+ * `parseLatestHumanClearedSha` reads marker CONTENT from `gh pr view --json comments`, never comment AUTHORSHIP
+ * — the same accepted gap `parseReviewedSha` already carries for the neighbouring `#2409` gate (this file's
+ * own header note). Before this function existed, `#2440`'s park was UNCONDITIONAL on a tampering hit — no
+ * comment content was ever consulted, so it was comment-immune. This function removes that immunity: on a PR
+ * that already carries a REAL `review:accepted` label (comment-forgery alone cannot set that), an actor with
+ * mere comment-post access (not label-write access) can post one comment carrying both markers for a NEW,
+ * tampering commit and suppress this park for it. ACCEPTED because (a) the precondition chain is narrow — a
+ * real prior accept, a new commit, AND a precisely-forged marker, not a one-shot exploit, (b) this repo's
+ * actual threat model here is a prompt-injected AGENT, not an external attacker (every actor shares one PAT —
+ * #2439), and author-checking would not help even if added, since an injected agent's `gh pr comment` call is
+ * indistinguishable from a legitimate one by GitHub's own author field, and (c) the real fix — a durable,
+ * non-comment ledger written only by `we:scripts/review-set-label.mjs --to=clear-human`'s own execution,
+ * mirroring the manifest-tamper gate's `we:scripts/lib/review-baseline-state.mjs` pattern — is filed as its own
+ * item rather than bolted on here under time pressure. DO NOT read the narrowness of (a)/(b) as "not worth
+ * fixing" — it is worth fixing, just not by extending this same forgeable primitive further.
  * @returns {boolean}
  */
 export function shouldReparkForTestTampering({ tampered, netDiffScored, humanClearedSha = null, headSha = null } = {}) {
