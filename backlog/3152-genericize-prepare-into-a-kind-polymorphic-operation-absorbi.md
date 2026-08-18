@@ -4,7 +4,7 @@ kind: story
 size: 5
 status: open
 parent: "3029"
-relatedTo: ["3150", "3037"]
+relatedTo: ["3150", "3037", "xj1d04h"]
 dateOpened: "2026-08-17"
 tags: [operations, epic-3029, backlog-workflow, naming]
 ---
@@ -14,7 +14,10 @@ tags: [operations, epic-3029, backlog-workflow, naming]
 The `we:skills-src/prepare-decision-item/SKILL.md` skill only handles decisions, but this repo's own vocabulary
 already treats `/prepare` as a general shape-time verb — `we:docs/agent/platform-decisions.md`'s
 "state lives where its nature dictates" statute lists `/prepare`, `/scaffold`, `/split` together as the three
-shape-time verbs a card gets readied through. The tooling hasn't caught up to the vocabulary.
+shape-time verbs a card gets readied through. The tooling hasn't caught up to the vocabulary. Sibling gap,
+not the same item: the "wrap dispatch-lane in a thin /build skill" story (`relatedTo` above) wraps the
+already-declared `dispatch-lane` operation in a skill; this item is about generalizing `prepare` itself, at
+the operation layer, before any skill wraps it for stories too.
 
 ## What's actually shared vs. kind-specific (2026-08-17 discussion)
 
