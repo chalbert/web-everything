@@ -8,10 +8,12 @@ import {
   detectHost,
   memoryDirs,
   planSteps,
+  selfKey,
+  siblingsFor,
+  skillsDeployScript,
   withBootstrapHook,
   withoutBootstrapHook,
   bootstrapStatus,
-  SIBLINGS,
 } from '../bootstrap-session.mjs';
 
 const step = (steps, id) => steps.find((s) => s.id === id);
@@ -82,9 +84,63 @@ describe('planSteps', () => {
   // Cloud siblings arrive via the harness's add_repo + credential-proxied clone; no script here can do it.
   it('reports missing siblings as siblings of the repo root, never clones them', () => {
     const found = step(planSteps({ ephemeral: true, root: '/workspace/web-everything', exists: () => false }), 'siblings').verify();
-    expect(found.map((s) => s.name)).toEqual(SIBLINGS);
+    expect(found.map((s) => s.name)).toEqual(['frontierui', 'plateau-app']);
     expect(found.map((s) => s.path)).toEqual(['/workspace/frontierui', '/workspace/plateau-app']);
     expect(found.every((s) => s.present === false)).toBe(true);
+  });
+});
+
+// This script must survive its own relocation: the lane/delivery machinery is Plateau's product, and WE is a
+// public PEER that dogfoods it. Anything that hard-codes "I am WE" inverts silently on the day of the move.
+describe('relocation', () => {
+  it('derives which constellation repo it is in, under either WE directory name', () => {
+    expect(selfKey('/workspace/web-everything')).toBe('we');
+    expect(selfKey('/Users/n/workspace/webeverything')).toBe('we');
+    expect(selfKey('/workspace/plateau-app')).toBe('plateau-app');
+  });
+
+  it('returns null for an unrecognised checkout rather than assuming WE', () => {
+    expect(selfKey('/workspace/some-fork')).toBeNull();
+  });
+
+  // The whole point: moved to plateau-app, WE becomes the sibling. A hard-coded list would have reported
+  // plateau-app as missing from itself and never mentioned WE at all.
+  it('names WE as a sibling once it lives in plateau-app', () => {
+    const found = siblingsFor('/workspace/plateau-app', () => false);
+    expect(found.map((s) => s.name)).toEqual(['we', 'frontierui']);
+    expect(found.find((s) => s.name === 'we').path).toBe('/workspace/web-everything');
+  });
+
+  it('never lists the checkout it is in as its own sibling', () => {
+    for (const root of ['/workspace/web-everything', '/workspace/frontierui', '/workspace/plateau-app']) {
+      expect(siblingsFor(root, () => false).map((s) => s.name)).not.toContain(selfKey(root));
+    }
+  });
+
+  it('lists the whole constellation from an unrecognised checkout, rather than a confident subset', () => {
+    expect(siblingsFor('/workspace/some-fork', () => false).map((s) => s.name)).toEqual(['we', 'frontierui', 'plateau-app']);
+  });
+
+  it('resolves a sibling at whichever directory name it actually occupies', () => {
+    const exists = (p) => p === '/ws/webeverything';
+    expect(siblingsFor('/ws/plateau-app', exists).find((s) => s.name === 'we')).toMatchObject({ path: '/ws/webeverything', present: true });
+  });
+});
+
+describe('skillsDeployScript', () => {
+  it('prefers this checkout when it carries the CLI', () => {
+    const exists = (p) => p === '/ws/webeverything/scripts/sync-skills-deploy.mjs';
+    expect(skillsDeployScript('/ws/webeverything', exists)).toBe('/ws/webeverything/scripts/sync-skills-deploy.mjs');
+  });
+
+  // The two halves can move in either order — a bootstrap in plateau-app must still find the skills SoT in WE.
+  it('falls back to a present sibling that carries it', () => {
+    const exists = (p) => p === '/ws/web-everything' || p === '/ws/web-everything/scripts/sync-skills-deploy.mjs';
+    expect(skillsDeployScript('/ws/plateau-app', exists)).toBe('/ws/web-everything/scripts/sync-skills-deploy.mjs');
+  });
+
+  it('reports absence rather than returning a path that resolves nowhere', () => {
+    expect(skillsDeployScript('/ws/plateau-app', () => false)).toBeNull();
   });
 });
 

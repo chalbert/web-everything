@@ -17,6 +17,12 @@
  * full object store to share (cloud clones are `--depth 1`), and the branch guard that FORCED clone-based
  * lanes is not installed — so provisioning a pool costs an `npm ci` per lane and buys nothing.
  *
+ * WHERE THIS LIVES IS NOT WHERE IT STAYS. The lane and delivery machinery this sets up is Plateau's
+ * product; WE is a PUBLIC peer that happens to dogfood it, not the constellation's hub. So nothing here
+ * hard-codes its own home: the checkout it is in is DERIVED (`selfKey`), the siblings come from the shared
+ * constellation table rather than a local literal, and the skills CLI is looked up self-then-siblings so
+ * the two halves can move in either order. Relocating this file should be a `git mv`, not a rewrite.
+ *
  * WHAT IT NEVER DOES. It does not clone the sibling repos: in a cloud session they arrive through the
  * harness's `add_repo` + credential-proxied clone, which no script here can or should perform. It reports
  * which are missing and names the tool. It does not touch the reserved memory lane or repoint the
@@ -35,14 +41,39 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeLineSync } from './lib/write-all-sync.mjs';
+import { CONSTELLATION_REPOS, repoKeyForDir, siblingKeys } from './lib/constellation-repos.mjs';
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The constellation's sibling repos, by the directory name they are expected to occupy. */
-export const SIBLINGS = ['frontierui', 'plateau-app'];
+/**
+ * Which constellation repo is this script sitting in? DERIVED, never assumed.
+ *
+ * This script must survive its own relocation. The lane and delivery machinery is Plateau's product, and WE
+ * — a PUBLIC peer, not a hub — is where it happens to be dogfooded today; the move is a `git mv`, and
+ * anything that hard-coded "I am WE, my siblings are the other two" would silently invert on the day it
+ * happened (reporting WE as a missing sibling of itself). Asking the shared table which checkout we are in
+ * costs one basename lookup and makes the move free. PURE over a root.
+ */
+export function selfKey(root = REPO_ROOT) {
+  return repoKeyForDir(basename(root));
+}
+
+/**
+ * The constellation members this checkout expects beside it, with the path each should occupy. Resolved
+ * relative to the CURRENT repo's parent rather than the table's `$HOME/workspace` literals, because the
+ * laptop and a cloud VM disagree about that prefix and both are correct.
+ */
+export function siblingsFor(root = REPO_ROOT, exists = existsSync) {
+  const parent = dirname(root);
+  return siblingKeys(selfKey(root)).map((key) => {
+    const dirs = CONSTELLATION_REPOS[key].dirs;
+    const found = dirs.map((d) => join(parent, d)).find((p) => exists(p));
+    return { name: key, path: found ?? join(parent, dirs[0]), present: Boolean(found) };
+  });
+}
 
 /**
  * Is this an ephemeral cloud VM rather than a durable workstation?
@@ -104,11 +135,7 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
   steps.push({
     id: 'siblings',
     title: 'report constellation siblings',
-    verify: () =>
-      SIBLINGS.map((name) => {
-        const path = join(dirname(root), name);
-        return { name, path, present: exists(path) };
-      }),
+    verify: () => siblingsFor(root, exists),
   });
 
   steps.push(
@@ -205,9 +232,21 @@ function uninstallHook() {
   return `removed from ${SETTINGS_PATH} (previous saved to ${SETTINGS_PATH}.bak)`;
 }
 
+/**
+ * Where the skills deploy CLI lives — this checkout, else a sibling. PURE over a probe.
+ *
+ * The skills source of truth and this bootstrap are separable: when the delivery machinery moves to Plateau,
+ * `skills-src/` and its deploy script may not move with it, or may move first. Searching self-then-siblings
+ * means neither half has to land in the same commit as the other.
+ */
+export function skillsDeployScript(root = REPO_ROOT, exists = existsSync) {
+  const candidates = [root, ...siblingsFor(root, exists).filter((s) => s.present).map((s) => s.path)];
+  return candidates.map((r) => join(r, 'scripts', 'sync-skills-deploy.mjs')).find((p) => exists(p)) ?? null;
+}
+
 /** Shell the existing skills CLI — never reimplement its deploy, prune or tracked-file rules. */
-function runSkills(argv, { write }) {
-  const args = [join(REPO_ROOT, 'scripts', 'sync-skills-deploy.mjs'), ...argv, ...(write ? [] : ['--check'])];
+function runSkills(script, argv, { write }) {
+  const args = [script, ...argv, ...(write ? [] : ['--check'])];
   try {
     return { ok: true, out: execFileSync(process.execPath, args, { encoding: 'utf8' }).trim().split('\n').at(-1) };
   } catch (e) {
@@ -232,14 +271,20 @@ function main(argv) {
   const write = !has('--check') && !has('--dry-run');
   const detected = detectHost();
   const ephemeral = has('--ephemeral') ? true : has('--laptop') ? false : detected.ephemeral;
-  const report = { host: ephemeral ? 'ephemeral' : 'laptop', signals: detected.signals, steps: [] };
+  const locus = selfKey();
+  const report = { host: ephemeral ? 'ephemeral' : 'laptop', locus, signals: detected.signals, steps: [] };
 
   for (const step of planSteps({ ephemeral })) {
     if (step.skip) { report.steps.push({ id: step.id, status: 'skipped', detail: step.skip }); continue; }
     if (step.info) { report.steps.push({ id: step.id, status: 'info', detail: step.info }); continue; }
     if (step.id === 'skills') {
-      if (has('--dry-run')) { report.steps.push({ id: step.id, status: 'planned', detail: step.title }); continue; }
-      const r = runSkills(step.argv, { write });
+      const script = skillsDeployScript();
+      if (!script) {
+        report.steps.push({ id: step.id, status: 'skipped', detail: 'no sync-skills-deploy.mjs in this checkout or any present sibling — the skills source of truth is not on this machine' });
+        continue;
+      }
+      if (has('--dry-run')) { report.steps.push({ id: step.id, status: 'planned', detail: `${step.title} via ${script}` }); continue; }
+      const r = runSkills(script, step.argv, { write });
       report.steps.push({ id: step.id, status: r.ok ? 'ok' : 'drift', detail: r.out });
       continue;
     }
@@ -253,7 +298,7 @@ function main(argv) {
   if (has('--json')) {
     writeLineSync(1, JSON.stringify(report, null, 2));
   } else {
-    writeLineSync(1, `bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''}`);
+    writeLineSync(1, `bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
     for (const s of report.steps) writeLineSync(1, `  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
     if (report.hook) writeLineSync(1, `  hook     SessionStart ${report.hook}`);
   }

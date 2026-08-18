@@ -48,6 +48,19 @@ its repoint is human-gated. Here, `check-memory.mjs` and `memory-resolve.mjs` bo
 tracked in-repo `.claude/agent-memory`, so `/note` and `[[slug]]` links resolve with no setup — and
 memory written in a VM lands in `agent-memory-src`, where a commit makes it durable.
 
+## This is not the final home
+
+The bootstrap lives in WE today because that is where the lane and delivery machinery is dogfooded, not
+because WE is the constellation's hub. It is not: WE is a **public peer**, and the machinery is Plateau's
+product, so it moves there eventually. Nothing here is written to assume otherwise —
+`bootstrap-session.mjs` derives which checkout it is in rather than declaring it, takes the constellation
+from `scripts/lib/constellation-repos.mjs` rather than a local list, and looks up the skills CLI
+self-then-siblings so the two halves can move in either order. Its `locus:` line reports what it decided.
+
+Two WE-as-hub assumptions do remain, both in that shared table and both flagged there: `we: { path: '' }`
+("the WE primary's own cwd") and `DEFAULT_REPO_KEY = 'we'`. They are the seam the move pulls on, and they
+belong to `review-runner.mjs`, not to this bootstrap.
+
 ## Known rough edge
 
 `.claude/settings.json` is committed and still carries workstation-absolute paths (an
