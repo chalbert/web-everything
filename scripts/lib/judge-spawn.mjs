@@ -362,8 +362,11 @@ export function buildJudgeArgv({
   if (!EFFORT_LEVELS.includes(effort)) {
     throw new TypeError(`judge-spawn: \`effort\` must be one of ${EFFORT_LEVELS.join('|')}, got ${JSON.stringify(effort)}`);
   }
-  if (typeof budget !== 'number' || !Number.isFinite(budget) || budget <= 0) {
-    throw new TypeError('judge-spawn: `budget` must be a positive finite number of USD');
+  // `null` is UNBOUNDED — the flag is OMITTED rather than given a huge number, so the CLI applies no ceiling at
+  // all and nothing has to guess what "big enough" is. Everything else must still be a positive finite number:
+  // `undefined` takes the default, and a typo'd string or `0` stays a caller bug rather than a silent licence.
+  if (budget !== null && (typeof budget !== 'number' || !Number.isFinite(budget) || budget <= 0)) {
+    throw new TypeError('judge-spawn: `budget` must be a positive finite number of USD, or null for no ceiling');
   }
   if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(sessionId)) {
     throw new TypeError('judge-spawn: `sessionId` must be a canonical lowercase UUID — use deriveSessionId()');
@@ -401,7 +404,9 @@ export function buildJudgeArgv({
     ...toolArgs,
     '--model', model,
     '--effort', effort,
-    '--max-budget-usd', String(budget),
+    // OMITTED when `budget` is null — see the validation above. The 10-minute `timeoutMs` kill in `judgeSpawn`
+    // remains the backstop on an unbounded juror, so "no ceiling" means no SPEND ceiling, not no bound at all.
+    ...(budget === null ? [] : ['--max-budget-usd', String(budget)]),
     '--no-session-persistence',
     '--session-id', sessionId,
     '--append-system-prompt', mandate,

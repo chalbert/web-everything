@@ -113,7 +113,21 @@ export const CONFIDENCE_LEVEL_SET = Object.freeze(Object.values(CONFIDENCE_LEVEL
 export const REVIEW_PREP_JUROR_TOOLS = Object.freeze(['Bash', 'Read', 'Grep', 'Glob']);
 export const JUDGE_MODEL = 'sonnet';
 export const JUDGE_EFFORT = 'high';
-export const JUDGE_BUDGET_USD = 1.5;
+/**
+ * NO SPEND CEILING (operator ruling, 2026-08-18 — `#xvkjndx`). `null` omits `--max-budget-usd` entirely.
+ *
+ * The ceiling was never a cost control here; it was a silent TRUNCATION of the review. A tool-bearing juror
+ * that hits it is killed mid-run and reports `stop_reason: "tool_use"`, which reads like a crash — so the
+ * failure costs a misdiagnosis on top of the lost review. Four measured runs on 2026-08-18 spent $0.6152,
+ * $0.6597, $0.6997 and $0.9042; the old inherited default of 0.5 would have killed all four, and between them
+ * they found ten defects a green suite and check:standards both missed. A truncated review is worth less than
+ * its own price.
+ *
+ * The bound that remains is `judgeSpawn`'s 10-minute `timeoutMs` kill, which is a bound on RUNAWAY rather than
+ * on thoroughness — the right shape for this. Measured wall times were 167-312s, so it is real headroom, not a
+ * fig leaf.
+ */
+export const JUDGE_BUDGET_USD = null;
 
 /** The two effect types `record` declares — see the header for why there is no label-swap analogue. */
 export const REVIEW_PREP_EFFECTS = Object.freeze({
