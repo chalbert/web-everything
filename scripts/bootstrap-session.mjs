@@ -354,6 +354,36 @@ export function mayWriteUserTree({ ephemeral, explicitInstall = false } = {}) {
   return Boolean(ephemeral || explicitInstall);
 }
 
+/**
+ * What the `gitdir` step should report, and whether it should write. PURE — the decision lives here so it is
+ * testable; `main` keeps only the fs calls around it.
+ *
+ * WHY IT IS ITS OWN FUNCTION. This branch used to sit inline in `main`, which is not exported and has no
+ * test, and it reported `planned` for EVERY read-only path. That made `--check`'s documented contract
+ * ("report drift only … exit 1 if any") unreachable for this step: a missing grant and a correct one both
+ * printed `planned`, and the exit code — which keys off `status === 'drift'` — could never fire. An
+ * untestable branch is where that hides, so the branch stopped being untestable.
+ *
+ * THE THREE PATHS:
+ *   - `--dry-run` DESCRIBES what would happen and reads nothing → `planned`;
+ *   - any other read-only path (`--check`, and the default report on a durable host) REPORTS STATE
+ *     → `ok` when the grant is present, `drift` when it is not;
+ *   - a writing path grants when absent and reports `ok` either way.
+ *
+ * @param {{gitDir: string, settings: object|null, write: boolean, dryRun?: boolean}} o
+ * @returns {{status: 'planned'|'ok'|'drift', detail: string, grant: boolean}}
+ */
+export function gitDirStatus({ gitDir, settings, write, dryRun = false } = {}) {
+  if (dryRun) return { status: 'planned', detail: gitDir, grant: false };
+  const granted = (settings?.permissions?.additionalDirectories ?? []).includes(gitDir);
+  if (!write) {
+    return granted
+      ? { status: 'ok', detail: `${gitDir} (already granted)`, grant: false }
+      : { status: 'drift', detail: `${gitDir} (NOT granted — run \`npm run bootstrap:install\`)`, grant: false };
+  }
+  return { status: 'ok', detail: `${gitDir}${granted ? ' (already granted)' : ' (granted)'}`, grant: !granted };
+}
+
 function main(argv) {
   const has = (f) => argv.includes(f);
   if (argv[0] === 'uninstall') { writeLineSync(1, `bootstrap-session: ${uninstallHook()}`); return 0; }
@@ -370,11 +400,11 @@ function main(argv) {
     if (step.skip) { report.steps.push({ id: step.id, status: 'skipped', detail: step.skip }); continue; }
     if (step.info) { report.steps.push({ id: step.id, status: 'info', detail: step.info }); continue; }
     if (step.gitDir) {
-      if (!write) { report.steps.push({ id: step.id, status: 'planned', detail: step.gitDir }); continue; }
-      const before = readSettings();
-      const already = (before.permissions?.additionalDirectories ?? []).includes(step.gitDir);
-      if (!already) writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
-      report.steps.push({ id: step.id, status: 'ok', detail: `${step.gitDir}${already ? ' (already granted)' : ' (granted)'}` });
+      const dryRun = has('--dry-run');
+      const before = dryRun ? null : readSettings();
+      const decision = gitDirStatus({ gitDir: step.gitDir, settings: before, write, dryRun });
+      if (decision.grant) writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
+      report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
       continue;
     }
     if (step.id === 'skills' || step.id === 'commands') {

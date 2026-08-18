@@ -4,7 +4,11 @@
  *   laptop and the laptop plan from a container.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  REPO_ROOT,
+  gitDirStatus,
   detectHost,
   memoryDirs,
   planSteps,
@@ -299,5 +303,84 @@ describe('bootstrapStatus', () => {
   it('reports nothing for settings that register no bootstrap', () => {
     expect(bootstrapStatus({})).toEqual([]);
     expect(bootstrapStatus({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node other.mjs' }] }] } })).toEqual([]);
+  });
+});
+
+/**
+ * The `gitdir` step's status decision (converge round 4, `review-pr` correctness juror on #1463).
+ *
+ * The bug this pins: the branch reported `planned` on EVERY read-only path, so `--check`'s "report drift
+ * only … exit 1 if any" contract was unreachable for this step — a missing grant printed exactly what a
+ * correct one printed, and the exit code keys off `drift`. It lived inline in the un-exported `main`, which
+ * is precisely why no test caught it.
+ */
+describe('the gitdir step decides status without writing', () => {
+  const GITDIR = '/ws/webeverything/.git';
+  const withGrant = { permissions: { additionalDirectories: [GITDIR] } };
+  const noGrant = { permissions: { additionalDirectories: ['/somewhere/else/.git'] } };
+
+  it('reports `planned` for --dry-run, which reads nothing', () => {
+    expect(gitDirStatus({ gitDir: GITDIR, settings: null, write: false, dryRun: true }))
+      .toEqual({ status: 'planned', detail: GITDIR, grant: false });
+  });
+
+  it('REPORTS DRIFT when a read-only run finds no grant — the contract that could never fire', () => {
+    const r = gitDirStatus({ gitDir: GITDIR, settings: noGrant, write: false });
+    expect(r.status).toBe('drift');
+    expect(r.grant).toBe(false);
+    expect(r.detail).toMatch(/NOT granted/);
+  });
+
+  it('reports `ok` when a read-only run finds the grant already present', () => {
+    const r = gitDirStatus({ gitDir: GITDIR, settings: withGrant, write: false });
+    expect(r.status).toBe('ok');
+    expect(r.grant).toBe(false);
+  });
+
+  it('never asks for a write on a read-only path, present or absent', () => {
+    for (const settings of [withGrant, noGrant, {}, null]) {
+      expect(gitDirStatus({ gitDir: GITDIR, settings, write: false }).grant).toBe(false);
+    }
+  });
+
+  it('grants exactly once on a writing path — and not again when already present', () => {
+    expect(gitDirStatus({ gitDir: GITDIR, settings: noGrant, write: true }))
+      .toEqual({ status: 'ok', detail: `${GITDIR} (granted)`, grant: true });
+    expect(gitDirStatus({ gitDir: GITDIR, settings: withGrant, write: true }))
+      .toEqual({ status: 'ok', detail: `${GITDIR} (already granted)`, grant: false });
+  });
+
+  it('treats absent/malformed settings as no grant rather than throwing', () => {
+    for (const settings of [{}, null, undefined, { permissions: {} }]) {
+      expect(gitDirStatus({ gitDir: GITDIR, settings, write: false }).status).toBe('drift');
+    }
+  });
+});
+
+/**
+ * The post-merge hook must not CREATE the operator's machine-global commands tree.
+ *
+ * `--all` does not mean "deploy every command" — it means "create the tree on a machine that has never
+ * chosen to have one" (`if (!all && !exists(destRoot)) return null`). Passing it from an unattended hook
+ * turned a routine `git pull` into an unasked write into `~/.claude/commands`, live in every unrelated repo
+ * the operator opens. The skills line above it passes no `--all` and structurally cannot do this.
+ */
+describe('the post-merge hook is consent-preserving', () => {
+  const hook = readFileSync(join(REPO_ROOT, '.githooks', 'post-merge'), 'utf8');
+  const commandsLine = hook.split('\n').find((l) => l.includes('sync-commands-deploy.mjs') && !l.trimStart().startsWith('#'));
+
+  it('invokes the commands deploy WITHOUT --all', () => {
+    expect(commandsLine).toBeTruthy();
+    expect(commandsLine).not.toMatch(/--all/);
+  });
+
+  it('keeps the skills line free of --all too, so the two stay symmetric', () => {
+    const skillsLine = hook.split('\n').find((l) => l.includes('sync-skills-deploy.mjs') && !l.trimStart().startsWith('#'));
+    expect(skillsLine).toBeTruthy();
+    expect(skillsLine).not.toMatch(/--all/);
+  });
+
+  it('does not tell the operator to hand-run --all in its failure message either', () => {
+    expect(commandsLine).not.toMatch(/commands:sync -- --all/);
   });
 });
