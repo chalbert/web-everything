@@ -35,6 +35,7 @@ import { join, resolve } from 'node:path';
 import {
   resolvePassConfig, assertCloneNotInUse, probeCloneState, PROVISION_CMD,
 } from './converge-daemon-pass.mjs';
+import { detectScheduler, renderSystemdUnits, systemdUnitNames } from './lib/converge-daemon-schedulers.mjs';
 
 /** Labelled by the repo that OWNS the source (WE), not by the drain daemon's plateau-app prefix. */
 export const LABEL = 'com.webeverything.converge-daemon';
@@ -167,9 +168,109 @@ function launchctl(...args) {
   return spawnSync('launchctl', args, { encoding: 'utf8' });
 }
 
+function systemctl(...args) {
+  return spawnSync('systemctl', ['--user', ...args], { encoding: 'utf8' });
+}
+
+/** `~/.config/systemd/user/<unit>` for each unit this label owns. */
+function unitPaths(label, home = homedir()) {
+  const dir = join(home, '.config', 'systemd', 'user');
+  const { service, timer } = systemdUnitNames(label);
+  return { dir, service: join(dir, service), timer: join(dir, timer), timerUnit: timer };
+}
+
+/**
+ * The systemd half of the CLI. Same commands, same preflight, same refusals — only the scheduler differs.
+ * Kept beside the launchd body rather than abstracted into one: the two inits disagree about enough
+ * (bootout-vs-disable, plist-vs-two-units, exit-code meanings) that a shared wrapper would hide more than it
+ * saved. What IS shared — the config and the blockers — is genuinely shared.
+ */
+function systemdMain(cmd, cfg, argv) {
+  const u = unitPaths(cfg.label);
+  const units = renderSystemdUnits(cfg);
+
+  if (cmd === 'print') {
+    process.stdout.write(`# ${u.service}\n${units.service}\n# ${u.timer}\n${units.timer}`);
+    return 0;
+  }
+
+  if (cmd === 'status') {
+    const enabled = systemctl('is-enabled', u.timerUnit);
+    const active = systemctl('is-active', u.timerUnit);
+    process.stdout.write(`${JSON.stringify({
+      label: cfg.label, scheduler: 'systemd',
+      // `is-enabled`/`is-active` exit non-zero for "no" as well as for "unknown unit", so report their WORD,
+      // not a boolean derived from the exit code — the two are different states to an operator.
+      timerEnabled: (enabled.stdout || '').trim() || 'unknown',
+      timerActive: (active.stdout || '').trim() || 'unknown',
+      units: [u.service, u.timer], unitsPresent: existsSync(u.service) && existsSync(u.timer),
+      clone: cfg.clone, juryDir: cfg.juryDir, intervalSec: cfg.intervalSec,
+      log: cfg.stdoutPath, shadowLog: cfg.logPath,
+    }, null, 2)}\n`);
+    return 0;
+  }
+
+  if (cmd === 'uninstall') {
+    const off = systemctl('disable', '--now', u.timerUnit);
+    // Remove the unit files whatever disable did — otherwise a daemon-reload brings the timer back.
+    try { rmSync(u.service, { force: true }); rmSync(u.timer, { force: true }); } catch { /* already gone */ }
+    systemctl('daemon-reload');
+    const stderrText = `${off.stderr || ''}`;
+    const wasNotLoaded = off.status === 0 || /not loaded|does not exist|no such file/i.test(stderrText);
+    if (!wasNotLoaded) {
+      process.stderr.write(`converge-daemon: removed the unit files (so the timer will NOT return at login), but `
+        + `\`systemctl --user disable --now ${u.timerUnit}\` failed — it may still be running right now.\n`
+        + `  ${stderrText.trim() || `exit ${off.status}`}\n`);
+      return 1;
+    }
+    process.stdout.write(`converge-daemon: disabled ${u.timerUnit} and removed its unit files\n`);
+    return 0;
+  }
+
+  if (cmd !== 'install') {
+    process.stderr.write('usage: converge-daemon-install.mjs <install|uninstall|status|print> [--force]\n');
+    return 2;
+  }
+
+  const blockers = installBlockers(cfg, existsSync);
+  if (blockers.length && !argv.includes('--force')) {
+    process.stderr.write(`converge-daemon: refusing to install —\n${blockers.map((b) => `  · ${b}`).join('\n')}\n`
+      + '  (--force installs anyway)\n');
+    return 2;
+  }
+
+  mkdirSync(cfg.stateRoot, { recursive: true });
+  mkdirSync(u.dir, { recursive: true });
+  writeFileSync(u.service, units.service);
+  writeFileSync(u.timer, units.timer);
+
+  systemctl('daemon-reload');
+  const on = systemctl('enable', '--now', u.timerUnit);
+  if (on.status !== 0) {
+    process.stderr.write(`converge-daemon: wrote the unit files but \`systemctl --user enable --now ${u.timerUnit}\` `
+      + `failed — ${(on.stderr || '').trim()}\n`
+      + '  On a headless box the user manager may not be running: `loginctl enable-linger $USER`.\n');
+    return 1;
+  }
+  process.stdout.write(`converge-daemon: installed ${u.timerUnit} (every ${cfg.intervalSec}s, from ${cfg.clone})\n`
+    + `  shadow log: ${cfg.logPath}\n  stdout/err: ${cfg.stdoutPath}\n`);
+  return 0;
+}
+
 function main(argv) {
   const cmd = argv.find((a) => !a.startsWith('-')) || 'status';
   const cfg = resolveInstallConfig();
+
+  // Which init schedules this is the ONLY thing the host decides. The pass, the config and the refusals are
+  // the same everywhere — see the header of lib/converge-daemon-schedulers.mjs for what a Linux host does and
+  // does not unblock (it does NOT make this runnable inside a managed cloud VM).
+  const { scheduler, reason } = detectScheduler(process.platform, existsSync);
+  if (!scheduler) {
+    process.stderr.write(`converge-daemon: ${reason}\n`);
+    return 2;
+  }
+  if (scheduler === 'systemd') return systemdMain(cmd, cfg, argv);
+
   const target = `gui/${process.getuid()}`;
   const path = plistPath(cfg.label);
 
