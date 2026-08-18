@@ -17,7 +17,11 @@ In a Claude Code cloud VM, **git works and the GitHub API does not** — and the
 
 So the boundary is per-PROCESS, not per-protocol: the connector holds the only working credential and `gh` cannot borrow it.
 
-**How to apply:** reach GitHub through the connector tools, never by shelling `gh`. When an encoded operation shells `gh` internally, the fix is a transport seam at that call, not a credential hunt — `we:scripts/operations/review-pr-io.mjs` does this for its one `gh pr view` (`resolveViewReader`, `WE_PR_VIEW_DIR`), which is what let `review-pr` run in a VM at all. The `record` half (`review-set-label.mjs`) still shells `gh`, so a verdict can be COMPUTED in a VM but its label cannot be WRITTEN there.
+**How to apply:** reach GitHub through the connector tools, never by shelling `gh`. When an encoded operation shells `gh` internally, the fix is a transport seam at that call, not a credential hunt.
+
+**Status — this note is only useful if it is honest about what has LANDED.** `review-pr` reaches the network exactly once, at the `gh pr view` in `we:scripts/operations/review-pr-io.mjs`. WE PR #1466 turns that one call into a swappable transport so a gh-less host can stage the same JSON on disk; until it lands, the call is a plain `execFileSync('gh', …)` and `review-pr`'s `read` step fails in a VM like everything else here. Check which shape is on `main` before relying on either — do not go looking for identifiers on the strength of this note.
+
+The `record` half (`we:scripts/review-set-label.mjs`) shells `gh` regardless, and #1466 does not touch it. So even with that seam, a verdict can be COMPUTED in a VM but its label cannot be WRITTEN there.
 
 **Two traps that cost time:**
 1. A fresh cloud clone's fetch refspec is `+refs/heads/main:refs/remotes/origin/main` **only**, so `git fetch origin <lane>` populates `FETCH_HEAD` and no tracking ref. Anything resolving `origin/<branch>` (net-diff basis, `fetchExtraRefs`, `--force-with-lease`) fails until you widen it to `+refs/heads/*:refs/remotes/origin/*`.
