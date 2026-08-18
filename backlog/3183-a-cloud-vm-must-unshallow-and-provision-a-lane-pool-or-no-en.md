@@ -1,9 +1,10 @@
 ---
+bornAs: xugi8rx
 kind: story
 size: 5
 parent: "2445"
 status: open
-blockedBy: ["xpb92yn"]
+blockedBy: ["3182"]
 dateOpened: "2026-08-18"
 tags: [delivery, lane, cloud-vm, bootstrap, portability]
 scope:
@@ -19,7 +20,7 @@ A Claude Code cloud session clones `--depth 1`, and `we:lane-pool.mjs` clones la
 clone, and the card-mutation guard refuses every scaffold/claim/resolve outside one with "there is no
 override" — so a cloud VM cannot file or move a single backlog item, and `we:review-prep` cannot get the
 juror lane it requires. `bootstrap-session` makes this worse by skipping the pool on purpose.
-Unshallow the primary and each present sibling first, then provision. Blocked by #xpb92yn, which
+Unshallow the primary and each present sibling first, then provision. Blocked by #3182, which
 introduces every file in this card's scope.
 
 ## Done when
@@ -127,7 +128,7 @@ Confidence: **Low**
 - we:docs/agent/vm-sessions.md does not exist — docs/agent/ contains no such file, contradicting the card's claim that it 'currently states the opposite of this card's conclusion' and needs its table rows rewritten.
 - we:package.json has no `bootstrap` or `bootstrap:check` script (grep for "bootstrap" returns nothing), contradicting checklist item 1 ('npm run bootstrap then …') and the 'Scope consumers' section's claim that these scripts exist and were 'verified by hand'.
 - we:.claude/settings.json has no SessionStart hook of any kind (full file read; only PreToolUse/PostToolUse hooks are registered), contradicting the card's claim that it is 'the repo-level SessionStart hook' consumer of we:scripts/bootstrap-session.mjs.
-- The backlog item file for xugi8rx itself is not present in we:backlog/ (nor in any sibling lane's backlog/), so the card's own claim 'This card was filed by that exact route' cannot be corroborated against repo state.
+- The backlog item file for 3183 itself is not present in we:backlog/ (nor in any sibling lane's backlog/), so the card's own claim 'This card was filed by that exact route' cannot be corroborated against repo state.
 - The premise that appears independently verifiable — we:scripts/lane-pool.mjs's cmdProvision/cloneLane path does `git clone --reference <primary>` (we:scripts/lane-pool.mjs:519-531), which is plausibly incompatible with a shallow reference — is real code and a real risk, but it is decoupled from the rest of the card since the file meant to fix it (we:scripts/bootstrap-session.mjs) doesn't exist to be edited.
 
 The card is well-argued in prose and its interface reasoning is sound in the abstract, but it rests on a false premise: none of its declared-scope files, nor the we:scripts/bootstrap-session.mjs/SessionStart infrastructure it repeatedly quotes as already existing, are present anywhere in the live repo, so the preparation cannot be executed as written.

@@ -1,4 +1,5 @@
 ---
+bornAs: xpb92yn
 kind: story
 size: 8
 parent: "2445"

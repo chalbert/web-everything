@@ -1,4 +1,5 @@
 ---
+bornAs: xny06no
 kind: story
 size: 3
 parent: "3029"
