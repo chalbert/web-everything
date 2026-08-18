@@ -19,7 +19,7 @@ import { join } from 'node:path';
 
 import {
   PR_VIEW_FIELDS, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
-  prViewFileName, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
+  prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
@@ -387,8 +387,14 @@ describe('the PR-view transport', () => {
     expect(resolveViewReader({ WE_PR_VIEW_DIR: root })).not.toBe(ghPrView);
   });
 
-  it('names a staged view by flattened slug and number', () => {
-    expect(prViewFileName('chalbert/web-everything', 1465)).toBe('chalbert-web-everything-1465.json');
+  it('names a staged view by encoded slug and number', () => {
+    expect(prViewFileName('chalbert/web-everything', 1465)).toBe('chalbert%2Fweb-everything-1465.json');
+  });
+
+  // The `-` flattening was NOT injective: a repo name may contain `-`, so two different repos landed on one
+  // file and the second staged view silently answered for the first — wrong labels/body, right diff.
+  it('never collides two different repos onto one file', () => {
+    expect(prViewFileName('foo-bar/baz', 5)).not.toBe(prViewFileName('foo/bar-baz', 5));
   });
 
   it('reads a staged view the resolver points at', () => {
@@ -399,7 +405,7 @@ describe('the PR-view transport', () => {
 
   it('THROWS on a missing staged view, naming the path and the way back to gh', () => {
     expect(() => filePrView({ pr: 9, repo: 'o/r', dir: root }))
-      .toThrow(/no pre-fetched view at .*o-r-9\.json[\s\S]*WE_PR_VIEW_DIR/);
+      .toThrow(/no pre-fetched view at .*o%2Fr-9\.json[\s\S]*WE_PR_VIEW_DIR/);
   });
 
   it('THROWS on a corrupt staged view rather than yielding an empty one', () => {
@@ -413,5 +419,50 @@ describe('the PR-view transport', () => {
     expect(PR_VIEW_FIELDS).toContain('labels');
     expect(PR_VIEW_FIELDS).toContain('comments');
     expect(PR_VIEW_FIELDS).toContain('files');
+  });
+});
+
+/**
+ * The `readView` WIRING inside `readPr` — the integration point, not just the transports.
+ *
+ * The transports each had unit tests, but nothing called the real `readPr` with an injected `readView`, so a
+ * dropped or misnamed argument at the one call site would have surfaced only against a live `gh` or a staged
+ * file (review-pr correctness juror on #1466). `exec` is injected too, so this stays io-free: no `gh`, no
+ * `git`, no network — the property the file header claims.
+ */
+describe('readPr wires the injected view transport', () => {
+  const VIEW = {
+    number: 7, title: 'a title', url: 'https://example.invalid/7', body: 'a body',
+    labels: [{ name: 'review:pending' }], comments: [], files: [{ path: 'a.mjs', additions: 1, deletions: 0 }],
+    headRefName: 'lane/x',
+  };
+  // Enough of a git for the net-diff helpers to resolve a basis and an empty diff without touching a repo.
+  const execStub = () => '';
+
+  it('calls readView with the pr, repo and cwd it was given', () => {
+    const seen = [];
+    readPr({ pr: 7, repo: 'o/n', exec: execStub, cwd: '/somewhere', readView: (o) => { seen.push(o); return VIEW; } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ pr: 7, repo: 'o/n', cwd: '/somewhere' });
+  });
+
+  it('carries the transport-supplied view through into the read finding', () => {
+    const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
+    expect(out.headRefName).toBe('lane/x');
+    expect(out.body).toBe('a body');
+  });
+
+  it('validates pr and repo BEFORE calling the transport — a bad request never reaches it', () => {
+    let called = 0;
+    const readView = () => { called += 1; return VIEW; };
+    expect(() => readPr({ pr: 0, repo: 'o/n', exec: execStub, readView })).toThrow(/positive integer/);
+    expect(() => readPr({ pr: 7, repo: 'not-a-slug', exec: execStub, readView })).toThrow(/owner\/name/);
+    expect(called).toBe(0);
+  });
+
+  it('propagates a transport failure rather than reviewing an empty view', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: execStub, readView: () => { throw new Error('no pre-fetched view at /x.json'); },
+    })).toThrow(/no pre-fetched view/);
   });
 });

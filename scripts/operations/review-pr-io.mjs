@@ -114,10 +114,20 @@ export function ghPrView({ pr, repo, cwd = REPO_ROOT } = {}) {
   }
 }
 
-/** The on-disk name a pre-fetched view is looked up under: `<owner>-<name>-<pr>.json`, slug flattened so the
- *  directory stays flat. PURE. */
+/**
+ * The on-disk name a pre-fetched view is looked up under, keeping the directory flat. PURE.
+ *
+ * THE SEPARATOR MUST NOT BE A CHARACTER A REPO NAME CAN CONTAIN. Flattening the slug with `-` was NOT
+ * injective: a repo name may itself contain `-`, so `foo-bar/baz` and `foo/bar-baz` both produced
+ * `foo-bar-baz-5.json`. Staging both in one `WE_PR_VIEW_DIR` silently overwrote one with the other, and
+ * `filePrView` then returned the WRONG repo's title, body and LABELS for the requested PR — with the diff
+ * still correctly taken from local git, so the mismatch was invisible (review-pr correctness juror on #1466).
+ *
+ * `encodeURIComponent` is injective over the slug charset GitHub allows (`[\w.-]` plus the one `/`): it
+ * touches only the slash, which becomes `%2F`, and `%` cannot appear in a repo name.
+ */
 export function prViewFileName(repo, pr) {
-  return `${String(repo).replace(/\//g, '-')}-${pr}.json`;
+  return `${encodeURIComponent(String(repo))}-${pr}.json`;
 }
 
 /**
