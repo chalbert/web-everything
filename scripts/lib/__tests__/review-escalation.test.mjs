@@ -35,6 +35,8 @@ import {
   isDeclarativeLeashPath,
   isPolicyDerivationPath,
   parseOperatorClearance,
+  parseLatestHumanClearedSha,
+  shouldReparkForTestTampering,
   buildClearedHumanMarker,
   buildClearanceRevocationComment,
   CONFORMANCE_GRADING_PATHS,
@@ -1685,6 +1687,55 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
       .toEqual({ actor: 'Grace' });
     expect(parseOperatorClearance([{ body: 'an ordinary review comment' }])).toBe(null);
     expect(parseOperatorClearance(null)).toBe(null);
+  });
+
+  it('#xuboo0q — parseLatestHumanClearedSha binds the SHA and the clear-human marker to the SAME comment', () => {
+    // A real clear-human comment stamps BOTH markers together, in one comment.
+    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}` };
+    expect(parseLatestHumanClearedSha([clearHumanAt111])).toBe('1111111');
+    // A plain accept stamps ONLY reviewed-sha — never covers a tampering finding.
+    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222') };
+    expect(parseLatestHumanClearedSha([plainAcceptAt222])).toBe(null);
+    // No accept-shaped comment at all.
+    expect(parseLatestHumanClearedSha([{ body: 'an ordinary review comment' }])).toBe(null);
+    expect(parseLatestHumanClearedSha([])).toBe(null);
+    expect(parseLatestHumanClearedSha(null)).toBe(null);
+  });
+
+  it('#xuboo0q — THE ORDERING BUG this function exists to avoid: an older clear-human must NOT cover a newer plain accept', () => {
+    // Naively combining parseOperatorClearance (latest actor, any comment) with parseReviewedSha (latest sha,
+    // any comment) would report BOTH "an operator clearance exists" (from the old clear-human) AND "latest sha
+    // = 3333333" (from the new plain accept) — even though no human ever looked at 3333333. That combination
+    // would let #2440's anti-gaming gate be silently bypassed by a plain agent accept riding on a stale human
+    // clearance. This function must report null for the new head instead.
+    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}` };
+    const laterPlainAcceptAt333 = { body: buildReviewedShaMarker('3333333') };
+    expect(parseLatestHumanClearedSha([clearHumanAt111, laterPlainAcceptAt333])).toBe(null);
+    // …but the reverse order — clear-human is genuinely the LATEST accept-shaped comment — correctly covers it.
+    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222') };
+    const laterClearHumanAt444 = { body: `${buildReviewedShaMarker('4444444')}\n${buildClearedHumanMarker('Ada')}` };
+    expect(parseLatestHumanClearedSha([plainAcceptAt222, laterClearHumanAt444])).toBe('4444444');
+  });
+
+  it('#xuboo0q — shouldReparkForTestTampering: the actual re-park decision, extracted and independently testable', () => {
+    // No tampering, or an unscored diff (no local/sibling clone) → never re-park regardless of clearance state.
+    expect(shouldReparkForTestTampering({ tampered: false, netDiffScored: true })).toBe(false);
+    expect(shouldReparkForTestTampering({ tampered: true, netDiffScored: false })).toBe(false);
+    // Tampering on a scored diff, no clearance at all → re-park. This is the confirmed live bug: PR #1445
+    // re-parked 4 times in ~50 minutes with no new commit in between, because nothing suppressed this branch.
+    expect(shouldReparkForTestTampering({ tampered: true, netDiffScored: true })).toBe(true);
+    expect(shouldReparkForTestTampering({
+      tampered: true, netDiffScored: true, humanClearedSha: null, headSha: '1111111',
+    })).toBe(true);
+    // The fix: a human-cleared SHA that matches the LIVE head suppresses the re-park.
+    expect(shouldReparkForTestTampering({
+      tampered: true, netDiffScored: true, humanClearedSha: '1111111', headSha: '1111111',
+    })).toBe(false);
+    // A human-cleared SHA that does NOT match the live head (a genuinely new commit landed after the clearance)
+    // must still re-park — the fix narrows the loop, it does not disable the gate.
+    expect(shouldReparkForTestTampering({
+      tampered: true, netDiffScored: true, humanClearedSha: '1111111', headSha: '2222222',
+    })).toBe(true);
   });
 
   it('an UNATTRIBUTED marker is not a clearance — it would render two different names downstream', () => {

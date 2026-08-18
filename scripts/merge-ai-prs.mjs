@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -3288,7 +3288,27 @@ async function runCli() {
       // #2890 — `netDiffText` was already fetched above (feeding `scoreEscalation`'s `diffHunks`); reused here
       // rather than re-fetched, so this scan and the escalation score can never disagree on what changed.
       const gaming = scanTestTampering({ diffText: netDiffText.text });
-      if (netDiffText.scored && gaming.tampered) {
+      // #xuboo0q — WAS THIS EXACT TAMPERING FINDING ALREADY HUMAN-CLEARED, AT THE CURRENT HEAD? Before #xuboo0q
+      // this gate had no memory: it re-parked `review:human` on every drain pass that saw a tampering-shaped
+      // diff, even seconds after a human ran the sanctioned `--to=clear-human` ceremony specifically to clear it
+      // — an unconditional re-park loop, confirmed live 4x on PR #1445 (2026-08-17). Lazily fetched, only when a
+      // tampering hit actually needs a second look (the common non-tampering PR pays no extra gh hop, matching
+      // the #2409 gate's own lazy-fetch philosophy a few lines below). `parseLatestHumanClearedSha` (NOT a bare
+      // `reviewed-sha == head` check) binds the SHA and the `clear-human` marker to the SAME comment, so a plain
+      // agent `review:accepted` — which #2440 exists specifically to NOT trust for tampering — can never silently
+      // inherit an older, unrelated human clearance. Any fetch miss leaves `humanClearedSha`/`tamperHeadSha`
+      // `null` → `shouldReparkForTestTampering` falls through to the existing park (fails CLOSED, the stricter
+      // direction — a transient read failure must never suppress the anti-gaming gate).
+      let tamperHeadSha = null;
+      let humanClearedSha = null;
+      if (netDiffText.scored && gaming.tampered && hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
+        try {
+          const cd = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
+          tamperHeadSha = typeof cd.headRefOid === 'string' ? cd.headRefOid : null;
+          humanClearedSha = parseLatestHumanClearedSha(cd.comments || []);
+        } catch { /* fetch miss → both stay null → shouldReparkForTestTampering fails closed (still true) */ }
+      }
+      if (shouldReparkForTestTampering({ tampered: gaming.tampered, netDiffScored: netDiffText.scored, humanClearedSha, headSha: tamperHeadSha })) {
         v.decision = 'skip';
         v.escalated = 'yes';
         v.humanRequired = true;
