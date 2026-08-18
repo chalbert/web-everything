@@ -10,7 +10,10 @@
  *
  * EVERY BINDING HERE SHELLS AN EXISTING SCRIPT. Nothing in this file decides anything about a review:
  *   - the park context is `we:scripts/review-detail.mjs#assembleReviewDetail`, the PURE assembler, fed by ONE
- *     `gh pr view` — the same single call its own CLI makes;
+ *     PR view — by default ONE `gh pr view`, the same single call its own CLI makes. That one call is this
+ *     operation's ONLY reach for the network, so it is the one binding with a swappable transport
+ *     (`resolveViewReader`): a host that cannot authenticate `gh` stages the same JSON on disk instead. The
+ *     diff is still taken from local git either way, so the transport cannot influence what is judged;
  *   - the diff and the changed-file list are `computeNetDiffText` / `computeNetDiffPaths`
  *     (`we:scripts/merge-ai-prs.mjs`, #2450/#2901) off ONE shared basis;
  *   - the label swap is `we:scripts/review-set-label.mjs`, the SINGLE HOME (#2644), shelled as a subprocess so
@@ -22,7 +25,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -90,16 +93,84 @@ export function reviewBodyPath({ root = REPO_ROOT, runId, bodyFile } = {}) {
  */
 const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...opts, cwd });
 
+/** The `--json` fields ONE `gh pr view` is asked for — the exact set `assembleReviewDetail` consumes. Named
+ *  once so an alternate transport supplies the same shape rather than guessing at it. */
+export const PR_VIEW_FIELDS = Object.freeze([
+  'number', 'title', 'url', 'body', 'labels', 'comments', 'files', 'headRefName',
+]);
+
+/**
+ * The default PR-view transport: ONE `gh pr view`, exactly as before.
+ * @returns {object} the parsed `--json` view
+ */
+export function ghPrView({ pr, repo, cwd = REPO_ROOT } = {}) {
+  try {
+    return JSON.parse(execFileSync('gh', [
+      'pr', 'view', String(pr), '--repo', repo, '--json', PR_VIEW_FIELDS.join(','),
+    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd }));
+  } catch (e) {
+    const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
+    throw new Error(`review-pr-io: could not read ${repo}#${pr} — ${msg}`);
+  }
+}
+
+/** The on-disk name a pre-fetched view is looked up under: `<owner>-<name>-<pr>.json`, slug flattened so the
+ *  directory stays flat. PURE. */
+export function prViewFileName(repo, pr) {
+  return `${String(repo).replace(/\//g, '-')}-${pr}.json`;
+}
+
+/**
+ * A PR-view transport that reads a PRE-FETCHED view from disk instead of calling `gh`.
+ *
+ * WHY THIS EXISTS. The review path is otherwise pure `git` + local files, and `gh` is its ONLY reach for the
+ * network — one JSON blob. On a host where `gh` cannot authenticate (a cloud VM whose egress proxy refuses
+ * every GitHub API call not routed through its own connector), that single blob blocks the whole encoded
+ * review, even though the operator can obtain it by other means. This lets them hand it over.
+ *
+ * IT IS A TRANSPORT, NOT AN ESCAPE HATCH. It supplies the SAME shape `gh --json` returns and nothing else —
+ * no verdict, no label, no diff. The judged diff still comes from local git, so a hand-edited view cannot
+ * make the review agree with a tree that was never read.
+ *
+ * FAIL-CLOSED. A missing or unparseable file throws and names the path; it never silently degrades to an
+ * empty view, which would review a PR as if it had no body, no labels and no comments.
+ */
+export function filePrView({ pr, repo, dir } = {}) {
+  const path = join(dir, prViewFileName(repo, pr));
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    throw new Error(
+      `review-pr-io: could not read ${repo}#${pr} — no pre-fetched view at ${path}. `
+      + `Write the \`gh pr view --json ${PR_VIEW_FIELDS.join(',')}\` output there, or unset WE_PR_VIEW_DIR to use gh.`,
+    );
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`review-pr-io: could not read ${repo}#${pr} — ${path} is not valid JSON (${e.message})`);
+  }
+}
+
+/**
+ * Pick the PR-view transport. `gh` unless the operator has explicitly staged views on disk. PURE given `env`.
+ */
+export function resolveViewReader(env = process.env) {
+  const dir = env.WE_PR_VIEW_DIR;
+  return dir ? (o) => filePrView({ ...o, dir: resolve(dir) }) : ghPrView;
+}
+
 /**
  * Read one PR's review context. The `readPr` the declaration is injected with.
  *
  * ONE `gh pr view`, then ONE net-diff basis shared by the text and the path list — the same economy
  * `computeNetDiffSignals` documents (independent resolution measured 5 → 11 subprocesses per PR).
  *
- * @param {{pr: number, repo: string, exec?: Function, cwd?: string}} o
+ * @param {{pr: number, repo: string, exec?: Function, cwd?: string, readView?: Function}} o
  * @returns {{detail: object, net: object, diff: object, headRefName: string, body: string}}
  */
-export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT } = {}) {
+export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT, readView = resolveViewReader() } = {}) {
   // The net-diff helpers take no `cwd`, so it is baked into the injected `exec` (the drain does the same thing
   // for the opposite reason — see the `escCwd` note in `we:scripts/merge-ai-prs.mjs`).
   const gitExec = exec || execFileIn(cwd);
@@ -108,16 +179,7 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT } = {}) {
     throw new TypeError(`review-pr-io: \`repo\` must be <owner/name>, got ${JSON.stringify(repo)}`);
   }
 
-  let view;
-  try {
-    view = JSON.parse(execFileSync('gh', [
-      'pr', 'view', String(pr), '--repo', repo, '--json',
-      'number,title,url,body,labels,comments,files,headRefName',
-    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd }));
-  } catch (e) {
-    const msg = String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || 'gh pr view failed';
-    throw new Error(`review-pr-io: could not read ${repo}#${pr} — ${msg}`);
-  }
+  const view = readView({ pr, repo, cwd });
   // `gh pr view` does not echo the repo back; carry the requested one, exactly as review-detail.mjs's CLI does.
   view.repo = repo;
   const detail = assembleReviewDetail({ view });
