@@ -13,12 +13,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  createReviewPrSinks, isPreWriteRefusal, priorRoundsFor, revParseCommit, reviewBodyPath, reviewSidecarDir,
+  PR_VIEW_FIELDS, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
+  prViewFileName, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
@@ -366,5 +367,51 @@ describe('priorRounds counts the CURRENT loop', () => {
     row(VERDICTS.ACCEPTED, '2026-08-10T13:00:00.000Z');
     row(VERDICTS.CHANGES, '2026-08-10T14:00:00.000Z');
     expect(priorRounds()).toBe(1);
+  });
+});
+
+/**
+ * The PR-view transport (the ONE network reach, made swappable).
+ *
+ * What is worth pinning is not that a file can be read — it is that the swap cannot widen what the review
+ * trusts. `gh` stays the default when nothing is staged; a staged view supplies the SAME field set; and a
+ * missing or corrupt file FAILS rather than degrading to an empty view, which would silently review a PR as
+ * if it had no body, no labels and no comments.
+ */
+describe('the PR-view transport', () => {
+  it('defaults to gh when no view directory is staged', () => {
+    expect(resolveViewReader({})).toBe(ghPrView);
+  });
+
+  it('swaps to the on-disk reader when WE_PR_VIEW_DIR is set', () => {
+    expect(resolveViewReader({ WE_PR_VIEW_DIR: root })).not.toBe(ghPrView);
+  });
+
+  it('names a staged view by flattened slug and number', () => {
+    expect(prViewFileName('chalbert/web-everything', 1465)).toBe('chalbert-web-everything-1465.json');
+  });
+
+  it('reads a staged view the resolver points at', () => {
+    const view = { number: 7, title: 'x', body: 'b', labels: [], comments: [], files: [], headRefName: 'lane/x' };
+    writeFileSync(join(root, prViewFileName('o/r', 7)), JSON.stringify(view));
+    expect(resolveViewReader({ WE_PR_VIEW_DIR: root })({ pr: 7, repo: 'o/r' })).toEqual(view);
+  });
+
+  it('THROWS on a missing staged view, naming the path and the way back to gh', () => {
+    expect(() => filePrView({ pr: 9, repo: 'o/r', dir: root }))
+      .toThrow(/no pre-fetched view at .*o-r-9\.json[\s\S]*WE_PR_VIEW_DIR/);
+  });
+
+  it('THROWS on a corrupt staged view rather than yielding an empty one', () => {
+    writeFileSync(join(root, prViewFileName('o/r', 9)), '{not json');
+    expect(() => filePrView({ pr: 9, repo: 'o/r', dir: root })).toThrow(/is not valid JSON/);
+  });
+
+  it('asks both transports for the same field set', () => {
+    expect(PR_VIEW_FIELDS).toContain('headRefName');
+    expect(PR_VIEW_FIELDS).toContain('body');
+    expect(PR_VIEW_FIELDS).toContain('labels');
+    expect(PR_VIEW_FIELDS).toContain('comments');
+    expect(PR_VIEW_FIELDS).toContain('files');
   });
 });
