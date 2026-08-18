@@ -3,6 +3,7 @@ kind: story
 size: 5
 parent: "2445"
 status: open
+blockedBy: ["xpb92yn"]
 dateOpened: "2026-08-18"
 tags: [delivery, lane, cloud-vm, bootstrap, portability]
 scope:
@@ -18,7 +19,8 @@ A Claude Code cloud session clones `--depth 1`, and `we:lane-pool.mjs` clones la
 clone, and the card-mutation guard refuses every scaffold/claim/resolve outside one with "there is no
 override" — so a cloud VM cannot file or move a single backlog item, and `we:review-prep` cannot get the
 juror lane it requires. `bootstrap-session` makes this worse by skipping the pool on purpose.
-Unshallow the primary and each present sibling first, then provision.
+Unshallow the primary and each present sibling first, then provision. Blocked by #xpb92yn, which
+introduces every file in this card's scope.
 
 ## Done when
 
