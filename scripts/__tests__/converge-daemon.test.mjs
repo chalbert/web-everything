@@ -25,6 +25,7 @@ import {
 } from '../converge-daemon-pass.mjs';
 import {
   LABEL, DEFAULT_INTERVAL_SEC, plistPath, resolveInstallConfig, renderPlist, installBlockers,
+  systemdInstallSteps, systemdMain,
 } from '../converge-daemon-install.mjs';
 
 const HOME = '/home/op';
@@ -333,5 +334,127 @@ describe('installBlockers', () => {
 describe('plistPath', () => {
   it('lands in the per-user LaunchAgents dir under the WE-owned label', () => {
     expect(plistPath(LABEL, HOME)).toBe(join(HOME, 'Library', 'LaunchAgents', 'com.webeverything.converge-daemon.plist'));
+  });
+});
+
+/**
+ * #3197 — the systemd ORCHESTRATION, not its step list.
+ *
+ * `systemdInstallSteps` is separate and exported precisely because the ORDER is the correctness property: the
+ * #1465 juror found that `enable --now` is a no-op on a timer that is already active, so a re-install carrying
+ * a changed interval or clone wrote new unit files and left the RUNNING timer on the old ones — silently
+ * diverging from the config the operator believes is installed. The launchd path never had this bug because it
+ * `bootout`s first; this path claimed to mirror it and did not.
+ *
+ * A test of the pure step list cannot see whether the caller RUNS them in that order, or whether only the one
+ * marked `decides` reaches the exit code. That is what these pin. Every handle is injected — no `systemctl` is
+ * spawned, no unit file is written, so this runs on a mac as readily as on the Linux host it describes.
+ */
+describe('systemdMain() — the install orchestration (#3197)', () => {
+  const cfg = resolveInstallConfig(ENV, HOME, '/usr/bin/node');
+  const OK = { status: 0, stdout: '', stderr: '' };
+
+  const spyIo = (over = {}) => {
+    const io = {
+      calls: [], written: [], removed: [], made: [], out: [], errs: [],
+      systemctl: (...args) => { io.calls.push(args); return OK; },
+      exists: () => true,
+      // A CLEAN clone, injected — `installBlockers` would otherwise shell git at the fixture path, which is
+      // both a real process and a different answer on every machine.
+      probe: () => ({ dirty: false, ahead: false, lease: null }),
+      mkdir: (d) => io.made.push(d),
+      writeFile: (path, content) => io.written.push({ path, content }),
+      rm: (path) => io.removed.push(path),
+      ...over,
+    };
+    io.out = []; io.errs = [];
+    io.outWrites = io.out;
+    return { ...io, out: (t) => io.outWrites.push(t), errOut: (t) => io.errs.push(t), _: io };
+  };
+
+  // THE REGRESSION. Not "three calls happened" — the SEQUENCE, matched against the declared step list so the
+  // two cannot drift apart. `stop` before `enable --now` is the whole fix.
+  it('runs reload → stop → enable --now, in the order systemdInstallSteps declares', () => {
+    const io = spyIo();
+    expect(systemdMain('install', cfg, ['--force'], io)).toBe(0);
+    const timerUnit = io._.calls.at(-1).at(-1);
+    expect(io._.calls).toEqual(systemdInstallSteps(timerUnit).map((s) => s.args));
+    expect(io._.calls.map((c) => c[0])).toEqual(['daemon-reload', 'stop', 'enable']);
+  });
+
+  it('writes both unit files BEFORE it touches systemctl', () => {
+    const order = [];
+    const io = spyIo({
+      writeFile: (path) => order.push(`write:${path.split('/').at(-1)}`),
+      systemctl: (...args) => { order.push(`systemctl:${args[0]}`); return OK; },
+    });
+    systemdMain('install', cfg, ['--force'], io);
+    expect(order.filter((o) => o.startsWith('write:'))).toHaveLength(2);
+    expect(order.findIndex((o) => o.startsWith('systemctl:'))).toBe(2);
+  });
+
+  /**
+   * `daemon-reload` and `stop` are deliberately unchecked: on a FIRST install there is nothing to stop, and
+   * reporting that benign no-op as a failed install would make the installer fail on exactly the machine it
+   * was written for. This pins that BEHAVIOUR.
+   *
+   * It does NOT pin the `if (s.decides)` guard, and saying so is the point. `decides` currently marks the LAST
+   * step, so `on = r` unconditionally would leave the same value in `on` — the guard is unobservable from
+   * outside and removing it reddens nothing here. It is defence for the step list this code does not yet have
+   * (anything appended after `enable --now`), in the same spirit as the depth guard in `needsAcceptanceRestamp`.
+   * A test claiming to cover it would be claiming coverage it does not have.
+   */
+  it('does not let an unchecked step fail the install, and does let the decisive one', () => {
+    const failEarly = spyIo({ systemctl: (...args) => { failEarly._.calls.push(args); return args[0] === 'enable' ? OK : { status: 5, stderr: 'not loaded' }; } });
+    expect(systemdMain('install', cfg, ['--force'], failEarly)).toBe(0);
+
+    const failEnable = spyIo({ systemctl: (...args) => { failEnable._.calls.push(args); return args[0] === 'enable' ? { status: 1, stderr: 'no user manager' } : OK; } });
+    expect(systemdMain('install', cfg, ['--force'], failEnable)).toBe(1);
+    expect(failEnable._.errs.join('')).toMatch(/loginctl enable-linger/);
+  });
+
+  // A refusal must be a refusal: nothing written, nothing enabled. `--force` is the only way past it, and the
+  // test above relies on that, so this pins the gate it steps over.
+  it('refuses to install over a blocker, writing nothing and calling nothing', () => {
+    const io = spyIo({ exists: () => false });   // no clone at the configured path
+    expect(systemdMain('install', cfg, [], io)).toBe(2);
+    expect(io._.calls).toEqual([]);
+    expect(io._.written).toEqual([]);
+    expect(io._.errs.join('')).toMatch(/refusing to install/);
+  });
+
+  // Uninstall removes the unit FILES whatever `disable` did — otherwise the next daemon-reload brings the
+  // timer back — and a `disable` that failed only because nothing was loaded is not a failure.
+  it('removes the unit files even when disable reports the timer was never loaded', () => {
+    const io = spyIo({ systemctl: (...args) => { io._.calls.push(args); return args[0] === 'disable' ? { status: 1, stderr: 'Unit not loaded.' } : OK; } });
+    expect(systemdMain('uninstall', cfg, [], io)).toBe(0);
+    expect(io._.removed).toHaveLength(2);
+    expect(io._.calls.map((c) => c[0])).toEqual(['disable', 'daemon-reload']);
+  });
+
+  it('reports a disable that genuinely failed, after removing the files anyway', () => {
+    const io = spyIo({ systemctl: (...args) => { io._.calls.push(args); return args[0] === 'disable' ? { status: 1, stderr: 'Access denied' } : OK; } });
+    expect(systemdMain('uninstall', cfg, [], io)).toBe(1);
+    expect(io._.removed).toHaveLength(2);
+    expect(io._.errs.join('')).toMatch(/may still be running/);
+  });
+
+  it('print and status touch nothing', () => {
+    const io = spyIo();
+    expect(systemdMain('print', cfg, [], io)).toBe(0);
+    expect(io._.calls).toEqual([]);
+    expect(io._.written).toEqual([]);
+
+    const st = spyIo({ systemctl: (...args) => { st._.calls.push(args); return { status: 0, stdout: 'enabled\n', stderr: '' }; } });
+    expect(systemdMain('status', cfg, [], st)).toBe(0);
+    expect(st._.calls.map((c) => c[0])).toEqual(['is-enabled', 'is-active']);
+    expect(st._.written).toEqual([]);
+    expect(JSON.parse(st._.outWrites.join(''))).toMatchObject({ scheduler: 'systemd', timerEnabled: 'enabled' });
+  });
+
+  it('rejects an unknown command with the usage text and exit 2', () => {
+    const io = spyIo();
+    expect(systemdMain('frobnicate', cfg, [], io)).toBe(2);
+    expect(io._.errs.join('')).toMatch(/usage: converge-daemon-install\.mjs/);
   });
 });

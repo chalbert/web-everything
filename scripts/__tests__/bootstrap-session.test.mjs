@@ -23,6 +23,7 @@ import {
   withBootstrapHook,
   withoutBootstrapHook,
   bootstrapStatus,
+  main,
 } from '../bootstrap-session.mjs';
 
 const step = (steps, id) => steps.find((s) => s.id === id);
@@ -461,5 +462,125 @@ describe('the post-merge hook is consent-preserving', () => {
 
   it('does not tell the operator to hand-run --all in its failure message either', () => {
     expect(commandsLine).not.toMatch(/commands:sync -- --all/);
+  });
+});
+
+/**
+ * #3197 — the ORCHESTRATION, not the decisions.
+ *
+ * `gitDirStatus`, `mayWriteUserTree` and `planSteps` were already pure and tested. What had no test was the
+ * `main()` that calls them: which steps run, what `--dry-run` reports without writing, whether a drift
+ * actually reaches the exit code. An installer is precisely the code a human runs once and trusts, so the
+ * sequencing is the part that must not be wrong — and it was the part nothing pinned.
+ *
+ * Every handle is injected. Nothing here spawns a process or touches a settings file; a test that needed to
+ * would be testing the machine, and would not run on the other kind of host.
+ */
+describe('main() — the installer orchestration', () => {
+  const spyIo = (over = {}) => {
+    const io = {
+      lines: [], writes: [], skills: [], hooks: [],
+      readSettings: () => ({}),
+      writeSettings: (next) => io.writes.push(next),
+      installHook: () => { io.hooks.push('install'); return 'registered'; },
+      uninstallHook: () => { io.hooks.push('uninstall'); return 'removed'; },
+      runSkills: (script, argv, opts) => { io.skills.push({ script, argv, ...opts }); return { ok: true, out: 'in sync' }; },
+      exists: () => true,
+      env: {},
+      out: (line) => io.lines.push(line),
+      ...over,
+    };
+    return io;
+  };
+  const LAPTOP = {};                                   // no runner signals → durable host
+  const VM = { CLAUDE_CODE_CONTAINER_ID: 'container_01X' };
+  const report = (io) => JSON.parse(io.lines.join('\n'));
+
+  const run = (argv, env, over = {}) => { const io = spyIo({ env, ...over }); const code = main(argv, io); return { io, code }; };
+
+  it('reports the host it detected and the checkout it is in', () => {
+    const vm = run(['--json'], VM);
+    expect(vm.code).toBe(0);
+    expect(report(vm.io)).toMatchObject({ host: 'ephemeral', signals: ['CLAUDE_CODE_CONTAINER_ID'] });
+    expect(report(run(['--json'], LAPTOP).io)).toMatchObject({ host: 'laptop', signals: [] });
+  });
+
+  // THE CONSENT INVARIANT, at the orchestration level. A durable host is REPORTED ON. The committed
+  // SessionStart hook means this runs the moment anyone opens the repo, so a default run that wrote would
+  // grant a directory and install a USER-level hook in every unrelated repo on that machine.
+  it('writes NOTHING on a durable host without the explicit `install`', () => {
+    const io = spyIo({ env: LAPTOP });
+    main([], io);
+    expect(io.writes).toEqual([]);
+    expect(io.hooks).toEqual([]);
+    expect(io.lines.join('\n')).toMatch(/reported only/);
+  });
+
+  it('registers the SessionStart hook once `install` is given explicitly', () => {
+    const io = spyIo({ env: LAPTOP });
+    main(['install', '--json'], io);
+    expect(io.hooks).toEqual(['install']);
+    expect(report(io).hook).toBe('registered');
+  });
+
+  it('uninstall short-circuits — no plan is run and nothing else is touched', () => {
+    const io = spyIo({ env: VM });
+    expect(main(['uninstall'], io)).toBe(0);
+    expect(io.hooks).toEqual(['uninstall']);
+    expect(io.skills).toEqual([]);
+    expect(io.writes).toEqual([]);
+  });
+
+  // `--dry-run` must PLAN and not perform. Reporting what it would do is the whole value; doing any of it is
+  // the whole defect.
+  it('--dry-run reports the deploy it would run and does not run it', () => {
+    const io = spyIo({ env: VM });
+    expect(main(['--dry-run', '--json'], io)).toBe(0);
+    const steps = report(io).steps;
+    expect(steps.find((s) => s.id === 'skills')).toMatchObject({ status: 'planned' });
+    expect(steps.find((s) => s.id === 'commands')).toMatchObject({ status: 'planned' });
+    expect(io.skills).toEqual([]);
+    expect(io.writes).toEqual([]);
+    expect(io.hooks).toEqual([]);
+  });
+
+  it('runs the deploys in plan order on a host that may write', () => {
+    const io = spyIo({ env: VM });
+    main(['--json'], io);
+    expect(io.skills.map((s) => s.script.split('/').at(-1)))
+      .toEqual(['sync-skills-deploy.mjs', 'sync-commands-deploy.mjs']);
+    expect(io.skills.every((s) => s.write)).toBe(true);
+  });
+
+  // `--check` is read-only, so the CLI it shells has to be too: `write: false` is what makes the deploy script
+  // report drift instead of repairing it.
+  it('--check reports drift and exits non-zero rather than repairing it', () => {
+    const io = spyIo({ env: VM, runSkills: (script, argv, opts) => { io.skills.push({ script, ...opts }); return { ok: false, out: '3 skills out of date' }; } });
+    expect(main(['--check', '--json'], io)).toBe(1);
+    expect(report(io).steps.find((s) => s.id === 'skills')).toMatchObject({ status: 'drift', detail: '3 skills out of date' });
+    expect(io.skills.every((s) => s.write === false)).toBe(true);
+    expect(io.writes).toEqual([]);
+  });
+
+  // A drift is only an EXIT CODE under --check. A plain run reports it and returns 0, because a plain run is
+  // not a gate and a non-zero there would fail every SessionStart that found anything to do.
+  it('does not turn a drift into a failure outside --check', () => {
+    const io = spyIo({ env: VM, runSkills: () => ({ ok: false, out: 'out of date' }) });
+    expect(main(['--json'], io)).toBe(0);
+  });
+
+  it('skips a deploy whose CLI is not in this checkout, and says so', () => {
+    const io = spyIo({ env: VM, exists: () => false });
+    main(['--json'], io);
+    expect(report(io).steps.find((s) => s.id === 'skills'))
+      .toMatchObject({ status: 'skipped', detail: expect.stringMatching(/not here/) });
+    expect(io.skills).toEqual([]);
+  });
+
+  it('honours --laptop and --ephemeral over what it detected', () => {
+    const vmForcedLaptop = spyIo({ env: VM }); main(['--laptop', '--json'], vmForcedLaptop);
+    expect(report(vmForcedLaptop)).toMatchObject({ host: 'laptop', writes: false });
+    const laptopForcedVm = spyIo({ env: LAPTOP }); main(['--ephemeral', '--json'], laptopForcedVm);
+    expect(report(laptopForcedVm)).toMatchObject({ host: 'ephemeral', writes: true });
   });
 });
