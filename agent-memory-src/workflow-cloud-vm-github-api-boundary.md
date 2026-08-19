@@ -17,7 +17,11 @@ In a Claude Code cloud VM, **git works and the GitHub API does not** — and the
 
 **SUPPLYING YOUR OWN TOKEN DOES NOT HELP, and this is measured — do not spend an afternoon on it.** The proxy ignores the caller's `Authorization` header and answers with its own credential on the endpoints it allows. Probed three ways against `/rate_limit`: no header, the `prox…` sentinel, and a deliberately garbage `ghp_…` string all return the SAME `limit: 15000`; the same three against `/repos/{owner}/{repo}/pulls/{n}` all return `403`. A real PAT is ignored exactly like the garbage one, so provisioning one buys nothing and costs a live credential sitting beside an agent that reads untrusted diffs.
 
-So the boundary is per-PROCESS, not per-protocol: the connector holds the only working credential, `gh` cannot borrow it, and you cannot hand it one.
+**WHY, architecturally — the reason there is no clever way round it.** The GitHub connector does not run in the container. `/tmp/mcp-config-*.json` shows it as an HTTP MCP server hosted at `api.anthropic.com`, addressed by session headers (`X-MCP-Server-ID`, `X-Session-UUID`). The GitHub credential lives server-side and NEVER ENTERS THE VM. So there is no local secret to find, borrow, or point `gh` at, and the session's own system prompt says so outright: *"You do NOT have access to the `gh` CLI, `hub` CLI, or direct GitHub API access."*
+
+That is also why "give a DAEMON access" is the impossible part specifically: access is bound to the SESSION identity. A daemon, a cron job, a subagent's subprocess — none of them are the session, so none can inherit it. Sound design (a runaway process cannot act as the operator on GitHub), and a hard ceiling on anything unattended in a VM.
+
+So the boundary is per-SESSION, not per-process and not per-protocol: the connector holds the only working credential, `gh` cannot borrow it, and you cannot hand it one.
 
 **How to apply:** reach GitHub through the connector tools, never by shelling `gh`. When an encoded operation shells `gh` internally, the fix is a transport seam at that call, not a credential hunt.
 
