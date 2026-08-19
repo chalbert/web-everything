@@ -21,6 +21,23 @@ with its markers, the label add/remove set, and the ORDER the two writes must la
 instead of executing it. A caller with GitHub access applies the steps in order. No decision moves
 out of the home.
 
+## SUPERSEDED IN MECHANISM (2026-08-19) — `--emit-plan` is no longer the shape
+
+Built as `we:scripts/apply-review-request.mjs` plus `we:.github/workflows/apply-review-request.yml`
+instead. The GOAL is unchanged — a judging host that cannot write still records its verdict — but the
+mechanism is better, and this card's central design is now the road not taken.
+
+`--emit-plan` had the home compute everything and print it for something else to carry out. That
+something would have been a MODEL typing the steps back in, and the plan had to carry the #2964 ordering
+because the applier could not re-derive it. Running the real `we:scripts/review-set-label.mjs` in CI
+removes both problems at once: the script performs its own writes, in its own order, with its own markers
+and refusals, and nothing is handed to a model at all. The verdict travels as a committed JSON request —
+data in a diff, never prose re-parsed out of a comment (#3060).
+
+The ledger fork below therefore does not arise (the real script appends its own row), and neither does
+the set-semantics section (the script uses `gh`, not the connector's replace-the-whole-set label call).
+Both are left standing as the record of why the abandoned shape was harder than it looked.
+
 ## Why the cloud-VM case is real, not hypothetical
 
 Measured in a Claude Code cloud VM on 2026-08-18: `gh` INSTALLS (apt, v2.45.0) and still cannot
