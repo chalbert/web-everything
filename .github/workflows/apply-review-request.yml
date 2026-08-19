@@ -56,6 +56,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+
+      # THE SINGLE HOME IS NOT A STANDALONE SCRIPT. `review-set-label.mjs` transitively imports
+      # `we:scripts/lib/review-escalation.mjs`, which needs `markdown-it` — and that is a transitive dependency
+      # of a devDependency (`@11ty/eleventy`), so `--omit=dev` does NOT supply it. The first live run
+      # (32248646760) collected all four requests correctly and then failed every one of them at module
+      # resolution. It failed CLOSED and exited 1, which is the design working; it still applied nothing.
+      #
+      # `--ignore-scripts` because this job holds a write token and its actual work is "move a label, post a
+      # comment". Running every package's install hooks to get a markdown parser is a wider surface than the
+      # task needs, and nothing on this path requires a build step.
+      - run: npm ci --ignore-scripts
 
       - name: Collect the requests THIS push added
         id: collect
