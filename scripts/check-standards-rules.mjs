@@ -2984,18 +2984,38 @@ export function shellCodeOf(line) {
 }
 
 /**
- * `--all` as a passed FLAG, not as a word. `--all-repos` and `--allow-dirty` are different flags and not this
- * one's business.
+ * The shell WORDS one line of code passes. PURE.
  *
- * THE TERMINATOR SET IS THE WHOLE CORRECTNESS OF THIS REGEX, and the first cut got it wrong: it accepted only
- * whitespace, `=` or end-of-line, so `node sync-commands-deploy.mjs --all;` — a shell metacharacter closing the
- * word, in a file full of `if …; then` — was silently NOT flagged while invoking the CLI exactly as the #3196
- * incident did (review-pr correctness juror on PR #1488). A gate that misses the real line is worse than no
- * gate, because it is also a claim of coverage. So the set is every character that can END a shell word:
- * whitespace, `=`, the statement/pipeline separators `;` `|` `&`, a closing `)`, and the redirections `<` `>`.
- * A `-` is deliberately absent — that is what keeps `--all-repos` out.
+ * BOUNDARY MATCHING WAS THE WRONG SHAPE, and two review rounds proved it. This started as a regex that looked
+ * for `--all` with the right characters either side, and each round found another shell-valid way of writing
+ * the same argument that the boundaries did not recognise:
+ *   · round 1 accepted only whitespace / `=` / end-of-line as a terminator, so `… --all;` was missed — in a
+ *     file full of `if …; then`;
+ *   · round 2 still required whitespace or start-of-line BEFORE the flag, so `"--all"`, `` `… --all` `` and
+ *     `--all,foo` were missed too.
+ * Both misses are the same defect and it is the worst shape this gate can have: silently not reporting the
+ * real line, while a passing run reads as coverage. Widening the character classes a third time would be
+ * betting that the next reviewer runs out of shell syntax before the syntax runs out.
+ *
+ * So the question is asked the way a shell asks it: SPLIT THE LINE INTO WORDS, then compare a whole word.
+ * Quote characters are removed rather than treated as boundaries, because quoting is not part of the word —
+ * `"--all"` passes exactly the argument `--all` does. `-` is NOT a separator, and that single omission is what
+ * keeps `--all-repos` and `--allow-dirty` out: they tokenize to themselves and simply are not `--all`.
+ *
+ * Still a scanner, not a shell: `$IFS` games, heredocs and a flag assembled from variables are not modelled.
+ * The bias stays toward treating text as code.
  */
-const ALL_FLAG_RE = /(^|\s)--all(?=$|[\s=;|&)<>])/;
+export function shellWords(code) {
+  return String(code ?? '')
+    .replace(/[`"']/g, ' ')
+    .split(/[\s;|&()<>,]+/)
+    .filter(Boolean);
+}
+
+/** Is this word the flag? `--all=<value>` is the same flag; `--all-repos` is somebody else's. PURE. */
+export function isAllFlagWord(word) {
+  return word === '--all' || String(word).startsWith('--all=');
+}
 
 /**
  * Every line of a git hook that PASSES `--all` without saying why. PURE over the file's text.
@@ -3006,7 +3026,7 @@ export function findGitHookAllFlags(content) {
   const lines = String(content ?? '').split('\n');
   const out = [];
   lines.forEach((raw, i) => {
-    if (!ALL_FLAG_RE.test(shellCodeOf(raw))) return;
+    if (!shellWords(shellCodeOf(raw)).some(isAllFlagWord)) return;
     // The escape is read from the RAW line (and the one above), because it lives in a comment by design.
     if (raw.includes(GITHOOK_ALL_ALLOW) || String(lines[i - 1] ?? '').includes(GITHOOK_ALL_ALLOW)) return;
     out.push({ line: i + 1, text: raw.trim() });

@@ -26,18 +26,24 @@ mistaken for comment openers. It is a scanner and not a shell parser: heredocs a
 modelled, and the bias is deliberately toward treating text as CODE, because a false positive is a sentence in
 a review while a false negative is the flag shipping again.
 
-`--all` is matched as a passed FLAG, not as a word, so `--all-repos` and `--allow-dirty` are somebody else's
-business. The TERMINATOR SET is where that matching lives, and the first cut got it wrong: it accepted only
-whitespace, `=` or end-of-line, so a `--all;` on the commands-deploy line — a shell metacharacter closing the
-word, in a file full of `if …; then` — invoked the CLI exactly as the incident did and was silently not
-reported. The juror on PR #1488 found it. The set is now every character that can END a shell word, and a `-`
-is deliberately still absent, which is what keeps the sibling flags out. The escape is `# standards-allow --all: <why>` on the line or the one above it — a rule a reader can
-only obey is a rule they suppress wholesale, and naming the reason keeps the suppression legible.
+**`--all` is matched as a WORD, not by boundaries**, and getting there took two review rounds that each found
+another shell-valid way of writing the same argument. The first cut looked for `--all` with the right
+characters either side: round 1 accepted only whitespace, `=` or end-of-line as a terminator, so a trailing
+`;` — in a file full of `if …; then` — was missed; round 2 still required whitespace or start-of-line BEFORE
+the flag, so `"--all"`, a backtick-adjacent form and `--all,foo` were missed too. Same defect both times, and
+the worst shape this gate can have: silently not reporting the real line while a passing run reads as coverage.
+
+Widening the character classes a third time would have been betting that the next reviewer runs out of shell
+syntax before the syntax runs out. So the question is now asked the way a shell asks it: split the code half
+into WORDS and compare a whole word. Quote characters are removed rather than treated as separators, because
+quoting is not part of the word. `-` is deliberately NOT a separator, and that single omission is the entire
+reason `--all-repos` and `--allow-dirty` stay out — they tokenize to themselves and simply are not `--all`.
 
 Verified live rather than only in fixtures: re-adding `--all` to `we:.githooks/post-merge` makes
 `npm run check:standards` report that line and exit non-zero; removing it returns to 0 errors. Mutation-checked
-in three directions — dropping comment-stripping reddens 2 tests, loosening the flag boundary to a bare
-substring reddens 1, and ignoring the escape reddens 2.
+in six directions, each on its own: dropping comment-stripping reddens 3, keeping quotes as separators reddens
+2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, loosening the flag
+match to a bare substring reddens 1, and ignoring the escape reddens 2.
 
 ## Done when
 

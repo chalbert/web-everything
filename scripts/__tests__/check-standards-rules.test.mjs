@@ -52,7 +52,7 @@ import {
   lockPointCandidatePaths,
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
-  findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, GITHOOK_ALL_ALLOW,
+  findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, shellWords, isAllFlagWord, GITHOOK_ALL_ALLOW,
 } from '../check-standards-rules.mjs';
 // The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
 import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
@@ -2458,10 +2458,14 @@ describe('findGitHookAllFlags (#3196)', () => {
     expect(findGitHookAllFlags('echo ${x#y} --all')).toHaveLength(1);
   });
 
-  // A shell word ends at more than a space. The first cut accepted only whitespace/`=`/end-of-line, so
-  // `--all;` — in a file full of `if …; then` — invoked the CLI exactly as the incident did and was not
-  // reported. A gate that misses the real line is worse than no gate: it is also a claim of coverage.
-  it('flags the flag closed by any shell metacharacter, not only by a space', () => {
+  /**
+   * EVERY SHELL-VALID WAY OF WRITING THE SAME ARGUMENT. This table is the reason the detector tokenizes
+   * instead of boundary-matching: two review rounds each found another form the character classes did not
+   * recognise — round 1 the trailing `;` (in a file full of `if …; then`), round 2 the leading quote, the
+   * backtick and the comma. Same defect both times, and the worst shape this gate can have: silently not
+   * reporting the real line while a passing run reads as coverage.
+   */
+  it('flags the flag however the shell lets it be written', () => {
     for (const line of [
       'node x.mjs --all;',
       'node x.mjs --all; then',
@@ -2471,15 +2475,35 @@ describe('findGitHookAllFlags (#3196)', () => {
       'node x.mjs --all&& echo ok',
       'node x.mjs --all>out.txt',
       'node x.mjs --all<in.txt',
+      'node x.mjs "--all"',                 // quoting is not part of the word
+      "node x.mjs '--all'",
+      'args=("--all")',
+      'node x.mjs --all`echo hi`',
+      'node x.mjs --all,foo',
+      '$(node x.mjs --all)',
     ]) expect({ line, hits: findGitHookAllFlags(line).length }).toEqual({ line, hits: 1 });
+  });
+
+  it('splits a line the way a shell reads words, dropping the quoting', () => {
+    expect(shellWords('node x.mjs "--all"')).toEqual(['node', 'x.mjs', '--all']);
+    expect(shellWords('args=("--all")')).toEqual(['args=', '--all']);
+    expect(shellWords('')).toEqual([]);
+  });
+
+  // `-` is NOT a separator, and that single omission is the whole reason the sibling flags stay out.
+  it('treats a whole word as the flag, never a prefix of one', () => {
+    expect(isAllFlagWord('--all')).toBe(true);
+    expect(isAllFlagWord('--all=1')).toBe(true);
+    for (const w of ['--all-repos', '--allow-dirty', '--allall', 'all', '-all', '']) expect(isAllFlagWord(w)).toBe(false);
   });
 
   it('leaves a DIFFERENT flag that merely starts with the same letters alone', () => {
     expect(findGitHookAllFlags('node x.mjs --all-repos')).toEqual([]);
     expect(findGitHookAllFlags('node x.mjs --allow-dirty')).toEqual([]);
-    // `-` stays out of the terminator set precisely so these two do; pinned here so widening that set later
-    // cannot quietly swallow them.
+    // `-` stays out of the SEPARATOR set precisely so these two tokenize to themselves; pinned here so
+    // widening that set later cannot quietly swallow them.
     expect(findGitHookAllFlags('node x.mjs --all-repos;')).toEqual([]);
+    expect(findGitHookAllFlags('node x.mjs "--allow-dirty"')).toEqual([]);
   });
 
   it('accepts `--all=<value>` as the flag, because it is', () => {
