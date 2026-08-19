@@ -102,7 +102,9 @@ export const compositionSeamCases: readonly CompositionSeamCase[] = [
     tier: 'first-class',
     runtime: 'available',
     title: '2 · Behavior/decoration (HOC analog, most mature) — a CustomAttribute on a child adds aria-current',
-    seam: "blocks/router/registerRouter.ts:38 attributes.define('route:link', RouteLinkBehavior) → blocks/router/behaviors/RouteLinkBehavior.ts (#updateActiveState adds aria-current='page', add-only)",
+    // No line number on the FUI refs: this vector lives in WE but cites a SIBLING repo, so no WE gate can
+    // catch the citation drifting when FUI edits those files. Name the file + the symbol, never the line.
+    seam: "fui:blocks/router/registerRouter.ts attributes.define('route:link', RouteLinkBehavior) → fui:blocks/router/behaviors/RouteLinkBehavior.ts (#updateActiveState adds aria-current='page', add-only)",
     usage:
       `<nav-item>\n` +
       `  <a route:link href="/inbox">Inbox</a>   <!-- behavior adds aria-current="page"; add-only -->\n` +
