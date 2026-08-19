@@ -1,0 +1,8 @@
+{
+  "repo": "chalbert/web-everything",
+  "pr": 1445,
+  "to": "clear-human",
+  "actor": "Nicolas Gilbert",
+  "channel": "ci-applier",
+  "operatorInstruction": "Please clear human on 1445. (Operator instruction, 2026-08-19, relayed by the session agent. Authorised in the same conversation that ruled: \"For now, I want to allow you to accept an explicit demand to remove human tag. We will build the ui approved later.\" Nothing verifies this quote — #2946 is the open durable fix.)"
+}
