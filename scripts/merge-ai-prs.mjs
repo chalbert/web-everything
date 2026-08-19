@@ -619,14 +619,38 @@ export function isRebaseDropCandidate(v) {
  * #x5e2ldj — shell the SINGLE HOME to re-stamp. IO. Never throws: the caller treats a failure as "it may
  * re-park", which is exactly the behaviour that existed before this, so a broken re-stamp can only fail to
  * improve things — it can never block a land.
+ *
+ * `cwd` IS THE PR'S OWN CLONE, AND OMITTING IT WAS A DEFECT (#3202). `review-set-label.mjs` computes its
+ * `reviewed-diff` fingerprint through a git read with no explicit `cwd`, and its own comment says why that was
+ * safe — the CLI was single-PR and operator-invoked, so it ran from the PR's repo — while naming the exact
+ * condition that breaks it: a caller passing a `--repo` naming a repo other than the cwd's. This IS that
+ * caller. The drain sweeps three repos in one process and never `chdir`s, so a sibling-repo re-stamp spawned
+ * with no `cwd` ran its git reads against whichever tree the drain happened to be standing in.
+ *
+ * Usually that failed soft: the head ref does not resolve in the wrong tree, the read throws, no marker is
+ * stamped, and the staleness gate falls back to SHA identity — the STRICTER path. The case that did not is a
+ * branch of the SAME NAME existing there, which `lane/<NNN>-<slug>` makes entirely possible across the
+ * constellation (`healCollision` above exists because those collisions are real). Then an unrelated repo's
+ * diff is fingerprinted and stamped as this PR's — and a wrong fingerprint does not throw, it simply never
+ * matches, so the PR re-parks on every pass. That is the loop #3200 was built to end, reached through its own
+ * fix.
+ *
+ * Setting the CHILD'S cwd rather than threading a flag pins EVERY git read the CLI makes, not only the one
+ * that is known about today, and leaves the operator's single-PR invocation untouched. `undefined` for a
+ * local-repo PR means "inherit", which is already correct. The scripts still come from THIS checkout — the
+ * path below resolves from `import.meta.url`, never from cwd. `spawn` is injected so the pinning is
+ * assertable without a subprocess.
  */
-function restampAcceptance({ pr, repo, newHead }) {
+export function restampAcceptance({ pr, repo, newHead, cwd, spawn = spawnSync }) {
   try {
-    const r = spawnSync(process.execPath, [
+    const r = spawn(process.execPath, [
       new URL('./review-set-label.mjs', import.meta.url).pathname,
       String(pr), `--repo=${repo}`, '--to=restamp', '--actor=drain',
       '--channel=drain-rebase', `--reason=head moved to ${newHead} by this drain's own content-preserving rebase`,
-    ], { encoding: 'utf8' });
+      // NO `--body-file` HERE, and that must stay true while `cwd` is set: the CLI's body-file allowlist is
+      // rooted at `process.cwd()`, so a body staged under THIS checkout would be refused by a child pinned to
+      // another repo's clone. A caller that needs both has to widen that allowlist deliberately.
+    ], { encoding: 'utf8', cwd });
     if (r.status === 0) return { ok: true };
     return { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim().split('\n').pop() };
   } catch (e) {
@@ -3105,7 +3129,9 @@ async function runCli() {
         // landing — the clear/rebase/re-park loop. Failure is logged and NEVER fatal: a missed re-stamp costs a
         // re-park (today's status quo), while aborting a land over a marker would be strictly worse.
         if (needsAcceptanceRestamp(v, r)) {
-          const out = restampAcceptance({ pr: v.num, repo: v.repo, newHead: r.newCommit });
+          // `cloneDir` — the same directory every git read in this loop is already pinned to. Undefined for a
+          // local-repo PR, which correctly means "inherit this process's cwd". See #3202 on the header.
+          const out = restampAcceptance({ pr: v.num, repo: v.repo, newHead: r.newCommit, cwd: cloneDir });
           v.acceptanceRestamped = out.ok;
           if (!AS_JSON && !out.ok) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} acceptance re-stamp failed (${out.reason}) — it may re-park\n`);
         }

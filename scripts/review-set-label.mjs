@@ -589,11 +589,20 @@ export function runReviewLabelCli({
       // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
       // unscored basis, which here silently costs the fingerprint.
       //
-      // NO EXPLICIT `cwd` HERE, AND THAT IS AN INVARIANT, NOT AN OVERSIGHT (PR #1087 review, note 2). This CLI is
-      // single-PR and operator-invoked, so it runs from the PR's own repo — unlike the drain, which sweeps three
-      // repos in one process and therefore MUST pin every git read to `escCwd` (see the matching block in
-      // merge-ai-prs.mjs, where omitting it was a real defect). If this CLI ever grows a `--repo` that can name a
-      // repo other than the cwd's, this call has to take a `cwd` with it, or it will fingerprint the wrong tree.
+      // NO EXPLICIT `cwd` HERE: THIS READS THE PROCESS'S OWN CWD, AND EVERY CALLER MUST GUARANTEE THAT IS THE
+      // NAMED REPO'S CHECKOUT (PR #1087 review note 2; #3202). The original reasoning was that the CLI is
+      // single-PR and operator-invoked, so it necessarily ran from the PR's repo — and it named the condition
+      // that would break it: a caller passing a `--repo` that can name a repo other than the cwd's.
+      //
+      // THAT CALLER NOW EXISTS, so the rule is load-bearing rather than incidental. `restampAcceptance` in
+      // `we:scripts/merge-ai-prs.mjs` shells this CLI with an explicit `--repo` while the drain sweeps three
+      // repos in one process and never `chdir`s, and `restamp` is inside this very gate. It was spawned with no
+      // `cwd` at first — precisely the wrong-tree fingerprint predicted here — and now pins the child to that
+      // PR's clone, so the guarantee holds by construction instead of by the CLI happening to be run by hand.
+      //
+      // For the NEXT caller: run this CLI from the named repo's checkout, or pin the child process to it. A
+      // `cwd` on this one call would not be enough — the `--body-file` allowlist is rooted at `process.cwd()`
+      // too, so the process's location is the contract, not any single read's.
       const net = computeNetDiffText({
         exec: (cmd, args, opts) => execFileSync(cmd, args, opts),
         rev: headRefName,
