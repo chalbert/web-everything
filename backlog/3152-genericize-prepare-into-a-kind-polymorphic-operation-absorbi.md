@@ -4,7 +4,7 @@ kind: story
 size: 5
 status: open
 parent: "3029"
-relatedTo: ["3150", "3037", "3190"]
+relatedTo: ["3150", "3037", "3193"]
 dateOpened: "2026-08-17"
 tags: [operations, epic-3029, backlog-workflow, naming]
 ---

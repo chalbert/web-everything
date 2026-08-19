@@ -118,7 +118,7 @@ synthesis is a tool-free `judge`; the terminal effect is one `describe()` call i
 returns an in-flight marker, so the shipped executor starts panelist 2 only after panelist 1 resolves: a
 three-panelist committee investigates SERIALLY. Every alternative reachable from a declaration is worse (one
 handle for N sessions makes N-1 unobservable; an ordinary return records `applied` for unfinished work).
-Parallel fan-out is a property of the EXECUTOR, so it is filed as #3189 rather than smuggled in behind a
+Parallel fan-out is a property of the EXECUTOR, so it is filed as #3192 rather than smuggled in behind a
 committee — and the test *"the executor applies the seats ONE AT A TIME"* is the tripwire that fails when it
 lands. Panelist blindness is unaffected: no panelist ever reads another's report.
 
@@ -146,7 +146,7 @@ Round 2 confirmed both blockers closed by driving the code, and found that the f
 said a sibling's report path was now underivable, and two channels remain — the run store sits inside the
 panelist's own cwd, and a reported panelist keeps running long enough to set-difference the agent listing. A
 false security claim is worse than a documented residual, so the note now says what it does and does not close,
-the brief forbids writing anywhere but the one path given, and the structural close is filed as #3191.
+the brief forbids writing anywhere but the one path given, and the structural close is filed as #3194.
 
 **Proof.** `we:scripts/operations/__tests__/explore.test.mjs` — 51 tests, no `claude`, no `gh`, no filesystem.
 The acceptance block drives a THREE-panelist committee from `startRun` to `complete` and asserts each seat's
@@ -157,5 +157,5 @@ nothing while the file-stories run calls the real `we:scripts/backlog.mjs scaffo
 content gates on the card writer — before this they were one deletable line no test would have missed.
 `npx vitest run scripts/operations/ scripts/backlog/` is 884 green.
 
-**Leftovers filed rather than half-done:** #3189 (parallel dispatch fan-out in the executor), #3191 (the
-residual blindness channels), #3190 (nothing reclaims the panelist scratch directory).
+**Leftovers filed rather than half-done:** #3192 (parallel dispatch fan-out in the executor), #3194 (the
+residual blindness channels), #3193 (nothing reclaims the panelist scratch directory).
