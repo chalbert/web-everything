@@ -1,13 +1,20 @@
 /**
  * @file apply-review-request.test.mjs — the machine applier (#x39x752 slice 2).
  *
- * WHAT IS WORTH PINNING is not that a JSON file parses. It is the set of things an UNATTENDED applier must
- * refuse, because the whole point of this path is that no human is watching when it runs:
+ * WHAT IS WORTH PINNING is not that a JSON file parses. It is the set of things this applier must refuse,
+ * because the whole point of this path is that no human is watching when it runs:
  *
- *   · `clear-human` — human-ceremony-only (INVARIANT 2, #2285). CI holds a write token, and a token is not a
- *     ceremony. Refused HERE as well as in the single home; two refusals for one rule is deliberate.
+ *   · `clear-human` WITHOUT `operatorInstruction`. The clearance itself is allowed since the operator ruling
+ *     of 2026-08-19, but only carrying the words that authorise it, verbatim, into the durable comment.
+ *     Nothing verifies those words — #2946 is the open durable fix — so the record has to be WRITTEN.
+ *   · `operatorInstruction` on an ORDINARY verdict — that shape is a copied clearance request with its target
+ *     edited, and silently dropping the field invites the next edit to flip it back.
  *   · an empty `changes` — a bounce with no findings tells an author nothing (#xd6moh1).
  *   · a malformed subject — a request that cannot name its PR must not reach a subprocess.
+ *
+ * THIS HEADER SAID THE OPPOSITE until the review of PR #1477 caught it — it still described `clear-human` as
+ * unconditionally refused while the tests below already accepted it. A stale header on a TEST file is worse
+ * than a stale comment elsewhere: this is the file a reader opens to learn what the rules are.
  *
  * And one thing worth pinning about what it does NOT do: it never builds a `gh` call of its own. The argv it
  * hands over is the single home's CLI, with the single home's flags.
