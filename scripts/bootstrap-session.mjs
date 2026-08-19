@@ -428,38 +428,57 @@ export function gitDirStatus({ gitDir, settings, write, dryRun = false } = {}) {
   return { status: 'ok', detail: `${gitDir}${granted ? ' (already granted)' : ' (granted)'}`, grant: !granted };
 }
 
-function main(argv) {
+/**
+ * EVERYTHING `main` TOUCHES OUTSIDE ITSELF, as one injectable bag (#3197).
+ *
+ * The decisions here were already pure and tested — `gitDirStatus`, `mayWriteUserTree`, `planSteps`. What had
+ * no test was the ORCHESTRATION that calls them: which steps run in what order, what `--dry-run` reports
+ * without writing, whether a drift actually reaches the exit code. An installer is precisely the code a human
+ * runs once and trusts, so the sequencing is the part that must not be wrong, and it was the part nothing
+ * pinned. A bag rather than eight parameters because the list will grow, and a caller that must re-list every
+ * handle to add one is a caller that starts passing partial bags.
+ */
+export function defaultIo() {
+  return {
+    readSettings, writeSettings, installHook, uninstallHook, runSkills,
+    exists: existsSync,
+    env: process.env,
+    out: (line) => writeLineSync(1, line),
+  };
+}
+
+export function main(argv, io = defaultIo()) {
   const has = (f) => argv.includes(f);
-  if (argv[0] === 'uninstall') { writeLineSync(1, `bootstrap-session: ${uninstallHook()}`); return 0; }
+  if (argv[0] === 'uninstall') { io.out(`bootstrap-session: ${io.uninstallHook()}`); return 0; }
   const explicitInstall = argv[0] === 'install';
   const readOnlyFlag = has('--check') || has('--dry-run');
-  const detected = detectHost();
+  const detected = detectHost(io.env);
   const ephemeral = has('--ephemeral') ? true : has('--laptop') ? false : detected.ephemeral;
   // `write` now means "may touch $HOME/.claude", not merely "was --check absent".
   const write = !readOnlyFlag && mayWriteUserTree({ ephemeral, explicitInstall });
   const locus = selfKey();
   const report = { host: ephemeral ? 'ephemeral' : 'laptop', locus, signals: detected.signals, writes: write, steps: [] };
 
-  for (const step of planSteps({ ephemeral })) {
+  for (const step of planSteps({ ephemeral, exists: io.exists })) {
     if (step.skip) { report.steps.push({ id: step.id, status: 'skipped', detail: step.skip }); continue; }
     if (step.info) { report.steps.push({ id: step.id, status: 'info', detail: step.info }); continue; }
     if (step.gitDir) {
       const dryRun = has('--dry-run');
-      const before = dryRun ? null : readSettings();
+      const before = dryRun ? null : io.readSettings();
       const decision = gitDirStatus({ gitDir: step.gitDir, settings: before, write, dryRun });
-      if (decision.grant) writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
+      if (decision.grant) io.writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
       report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
       continue;
     }
     if (step.id === 'skills' || step.id === 'commands') {
       const cli = step.cli ?? 'sync-skills-deploy.mjs';
-      const script = skillsDeployScript(REPO_ROOT, existsSync, cli);
+      const script = skillsDeployScript(REPO_ROOT, io.exists, cli);
       if (!script) {
         report.steps.push({ id: step.id, status: 'skipped', detail: `no ${cli} in this checkout — that source of truth is not here` });
         continue;
       }
       if (has('--dry-run')) { report.steps.push({ id: step.id, status: 'planned', detail: `${step.title} via ${script}` }); continue; }
-      const r = runSkills(script, step.argv, { write });
+      const r = io.runSkills(script, step.argv, { write });
       report.steps.push({ id: step.id, status: r.ok ? 'ok' : 'drift', detail: r.out });
       continue;
     }
@@ -470,17 +489,17 @@ function main(argv) {
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
-  if (write) report.hook = installHook();
+  if (write) report.hook = io.installHook();
 
   if (has('--json')) {
-    writeLineSync(1, JSON.stringify(report, null, 2));
+    io.out(JSON.stringify(report, null, 2));
   } else {
-    writeLineSync(1, `bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
-    for (const s of report.steps) writeLineSync(1, `  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
-    if (report.hook) writeLineSync(1, `  hook     SessionStart ${report.hook}`);
+    io.out(`bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
+    for (const s of report.steps) io.out(`  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
+    if (report.hook) io.out(`  hook     SessionStart ${report.hook}`);
     if (!write && !readOnlyFlag) {
-      writeLineSync(1, '  — reported only. This host is durable, so nothing under $HOME/.claude was touched;');
-      writeLineSync(1, '    run `npm run bootstrap install` to apply, `… uninstall` to undo.');
+      io.out('  — reported only. This host is durable, so nothing under $HOME/.claude was touched;');
+      io.out('    run `npm run bootstrap install` to apply, `… uninstall` to undo.');
     }
   }
 

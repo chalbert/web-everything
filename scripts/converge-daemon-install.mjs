@@ -206,25 +206,50 @@ function unitPaths(label, home = homedir()) {
  * (bootout-vs-disable, plist-vs-two-units, exit-code meanings) that a shared wrapper would hide more than it
  * saved. What IS shared — the config and the blockers — is genuinely shared.
  */
-function systemdMain(cmd, cfg, argv) {
+/**
+ * EVERYTHING `systemdMain` TOUCHES OUTSIDE ITSELF (#3197).
+ *
+ * `systemdInstallSteps` was extracted and tested because the ORDER is the correctness property — but nothing
+ * tested that the orchestration actually RUNS them in that order, or that only the `decides` step reaches the
+ * exit code. That is exactly where the #1465 juror's finding lived: `enable --now` is a no-op on a timer that
+ * is already active, so a re-install wrote new unit files and left the RUNNING timer on the old ones. A test
+ * of the pure step list cannot see that. A test of its caller can.
+ */
+export function systemdIo() {
+  return {
+    systemctl,
+    exists: existsSync,
+    // `installBlockers` shells git through this. It belongs in the bag for the reason the rest does: a test of
+    // the ORCHESTRATION that still spawns git is not testing the orchestration, and it fails on a host where
+    // the daemon clone happens not to exist.
+    probe: probeCloneState,
+    mkdir: (dir) => mkdirSync(dir, { recursive: true }),
+    writeFile: (path, content) => writeFileSync(path, content),
+    rm: (path) => rmSync(path, { force: true }),
+    out: (text) => process.stdout.write(text),
+    errOut: (text) => process.stderr.write(text),
+  };
+}
+
+export function systemdMain(cmd, cfg, argv, io = systemdIo()) {
   const u = unitPaths(cfg.label);
   const units = renderSystemdUnits(cfg);
 
   if (cmd === 'print') {
-    process.stdout.write(`# ${u.service}\n${units.service}\n# ${u.timer}\n${units.timer}`);
+    io.out(`# ${u.service}\n${units.service}\n# ${u.timer}\n${units.timer}`);
     return 0;
   }
 
   if (cmd === 'status') {
-    const enabled = systemctl('is-enabled', u.timerUnit);
-    const active = systemctl('is-active', u.timerUnit);
-    process.stdout.write(`${JSON.stringify({
+    const enabled = io.systemctl('is-enabled', u.timerUnit);
+    const active = io.systemctl('is-active', u.timerUnit);
+    io.out(`${JSON.stringify({
       label: cfg.label, scheduler: 'systemd',
       // `is-enabled`/`is-active` exit non-zero for "no" as well as for "unknown unit", so report their WORD,
       // not a boolean derived from the exit code — the two are different states to an operator.
       timerEnabled: (enabled.stdout || '').trim() || 'unknown',
       timerActive: (active.stdout || '').trim() || 'unknown',
-      units: [u.service, u.timer], unitsPresent: existsSync(u.service) && existsSync(u.timer),
+      units: [u.service, u.timer], unitsPresent: io.exists(u.service) && io.exists(u.timer),
       clone: cfg.clone, juryDir: cfg.juryDir, intervalSec: cfg.intervalSec,
       log: cfg.stdoutPath, shadowLog: cfg.logPath,
     }, null, 2)}\n`);
@@ -232,51 +257,51 @@ function systemdMain(cmd, cfg, argv) {
   }
 
   if (cmd === 'uninstall') {
-    const off = systemctl('disable', '--now', u.timerUnit);
+    const off = io.systemctl('disable', '--now', u.timerUnit);
     // Remove the unit files whatever disable did — otherwise a daemon-reload brings the timer back.
-    try { rmSync(u.service, { force: true }); rmSync(u.timer, { force: true }); } catch { /* already gone */ }
-    systemctl('daemon-reload');
+    try { io.rm(u.service); io.rm(u.timer); } catch { /* already gone */ }
+    io.systemctl('daemon-reload');
     const stderrText = `${off.stderr || ''}`;
     const wasNotLoaded = off.status === 0 || /not loaded|does not exist|no such file/i.test(stderrText);
     if (!wasNotLoaded) {
-      process.stderr.write(`converge-daemon: removed the unit files (so the timer will NOT return at login), but `
+      io.errOut(`converge-daemon: removed the unit files (so the timer will NOT return at login), but `
         + `\`systemctl --user disable --now ${u.timerUnit}\` failed — it may still be running right now.\n`
         + `  ${stderrText.trim() || `exit ${off.status}`}\n`);
       return 1;
     }
-    process.stdout.write(`converge-daemon: disabled ${u.timerUnit} and removed its unit files\n`);
+    io.out(`converge-daemon: disabled ${u.timerUnit} and removed its unit files\n`);
     return 0;
   }
 
   if (cmd !== 'install') {
-    process.stderr.write('usage: converge-daemon-install.mjs <install|uninstall|status|print> [--force]\n');
+    io.errOut('usage: converge-daemon-install.mjs <install|uninstall|status|print> [--force]\n');
     return 2;
   }
 
-  const blockers = installBlockers(cfg, existsSync);
+  const blockers = installBlockers(cfg, io.exists, io.probe);
   if (blockers.length && !argv.includes('--force')) {
-    process.stderr.write(`converge-daemon: refusing to install —\n${blockers.map((b) => `  · ${b}`).join('\n')}\n`
+    io.errOut(`converge-daemon: refusing to install —\n${blockers.map((b) => `  · ${b}`).join('\n')}\n`
       + '  (--force installs anyway)\n');
     return 2;
   }
 
-  mkdirSync(cfg.stateRoot, { recursive: true });
-  mkdirSync(u.dir, { recursive: true });
-  writeFileSync(u.service, units.service);
-  writeFileSync(u.timer, units.timer);
+  io.mkdir(cfg.stateRoot);
+  io.mkdir(u.dir);
+  io.writeFile(u.service, units.service);
+  io.writeFile(u.timer, units.timer);
 
   let on;
   for (const s of systemdInstallSteps(u.timerUnit)) {
-    const r = systemctl(...s.args);
+    const r = io.systemctl(...s.args);
     if (s.decides) on = r;
   }
   if (on.status !== 0) {
-    process.stderr.write(`converge-daemon: wrote the unit files but \`systemctl --user enable --now ${u.timerUnit}\` `
+    io.errOut(`converge-daemon: wrote the unit files but \`systemctl --user enable --now ${u.timerUnit}\` `
       + `failed — ${(on.stderr || '').trim()}\n`
       + '  On a headless box the user manager may not be running: `loginctl enable-linger $USER`.\n');
     return 1;
   }
-  process.stdout.write(`converge-daemon: installed ${u.timerUnit} (every ${cfg.intervalSec}s, from ${cfg.clone})\n`
+  io.out(`converge-daemon: installed ${u.timerUnit} (every ${cfg.intervalSec}s, from ${cfg.clone})\n`
     + `  shadow log: ${cfg.logPath}\n  stdout/err: ${cfg.stdoutPath}\n`);
   return 0;
 }
