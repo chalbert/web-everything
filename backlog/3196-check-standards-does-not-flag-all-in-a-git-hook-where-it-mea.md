@@ -33,17 +33,33 @@ characters either side: round 1 accepted only whitespace, `=` or end-of-line as 
 the flag, so `"--all"`, a backtick-adjacent form and `--all,foo` were missed too. Same defect both times, and
 the worst shape this gate can have: silently not reporting the real line while a passing run reads as coverage.
 
-Widening the character classes a third time would have been betting that the next reviewer runs out of shell
-syntax before the syntax runs out. So the question is now asked the way a shell asks it: split the code half
+Round 3 then found two more: a backslash-escaped dash (`\--all` — unquoted, `\-` is simply a literal `-`, so
+argv is exactly `--all`), and an escape marker matched against the RAW line, so the phrase appearing inside a
+string suppressed a genuine invocation on that same line. Widening the character classes each round was betting
+that the next reviewer runs out of shell syntax before the syntax runs out. So the question is now asked the way a shell asks it: split the code half
 into WORDS and compare a whole word. Quote characters are removed rather than treated as separators, because
-quoting is not part of the word. `-` is deliberately NOT a separator, and that single omission is the entire
-reason `--all-repos` and `--allow-dirty` stay out — they tokenize to themselves and simply are not `--all`.
+quoting — and escaping — are not part of the word. Replacing those characters with a SPACE rather than deleting
+them is deliberate: it can only over-split, which reports, where deleting could weld two words into one that is
+no longer the flag. `-` is deliberately NOT a separator, and that single omission is the entire reason
+`--all-repos` and `--allow-dirty` stay out — they tokenize to themselves and simply are not `--all`.
+
+The escape marker is read from the COMMENT half alone. A marker that can be triggered from code is not a
+marker, whether the triggering is deliberate or accidental.
+
+## What is NOT modelled, stated rather than discovered
+
+This is a scanner, not a shell, and four review rounds is enough evidence that the remaining surface should be
+named instead of assumed empty. Not handled: a flag assembled from a variable (`F=--all; node x $F`), `$IFS`
+games, heredocs, and `"\-\-all"` — which is correctly a non-hit, because inside double quotes a backslash
+escapes only `$`, a backtick, `"` and itself, so that form passes a literal `\-\-all` and not the flag. The
+bias stays toward treating text as code: a false positive is a sentence in a review, a false negative is the
+flag shipping again.
 
 Verified live rather than only in fixtures: re-adding `--all` to `we:.githooks/post-merge` makes
 `npm run check:standards` report that line and exit non-zero; removing it returns to 0 errors. Mutation-checked
 in six directions, each on its own: dropping comment-stripping reddens 3, keeping quotes as separators reddens
-2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, loosening the flag
-match to a bare substring reddens 1, and ignoring the escape reddens 2.
+2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, leaving the
+backslash glued to its word reddens 2, and reading the escape from the raw line reddens 1.
 
 ## Done when
 

@@ -52,7 +52,8 @@ import {
   lockPointCandidatePaths,
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
-  findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, shellWords, isAllFlagWord, GITHOOK_ALL_ALLOW,
+  findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, shellCommentOf, shellWords, isAllFlagWord,
+  GITHOOK_ALL_ALLOW,
 } from '../check-standards-rules.mjs';
 // The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
 import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
@@ -2481,7 +2482,16 @@ describe('findGitHookAllFlags (#3196)', () => {
       'node x.mjs --all`echo hi`',
       'node x.mjs --all,foo',
       '$(node x.mjs --all)',
+      'node x.mjs \\--all',                  // unquoted, `\\-` is a literal `-` — argv is exactly `--all`
     ]) expect({ line, hits: findGitHookAllFlags(line).length }).toEqual({ line, hits: 1 });
+  });
+
+  it('splits on an escape as well as a quote, so a backslash cannot hide the flag', () => {
+    expect(shellWords('node x.mjs \\--all')).toEqual(['node', 'x.mjs', '--all']);
+    // NOT the same thing, and the asymmetry is real shell: inside double quotes a backslash escapes only
+    // `$`, a backtick, `"` and itself — so `"\\-\\-all"` passes the literal `\\-\\-all`, which is not the flag.
+    // Reported as a non-hit here because the shell would not pass `--all` either.
+    expect(findGitHookAllFlags('node x.mjs "\\-\\-all"')).toEqual([]);
   });
 
   it('splits a line the way a shell reads words, dropping the quoting', () => {
@@ -2514,6 +2524,24 @@ describe('findGitHookAllFlags (#3196)', () => {
   it('honours the inline escape on the line and on the line above', () => {
     expect(findGitHookAllFlags(`node x.mjs --all   # ${GITHOOK_ALL_ALLOW} bootstrapping a fresh VM`)).toEqual([]);
     expect(findGitHookAllFlags(`# ${GITHOOK_ALL_ALLOW} bootstrapping a fresh VM\nnode x.mjs --all`)).toEqual([]);
+  });
+
+  /**
+   * The escape is a COMMENT, and only a comment. A raw-line substring match meant the phrase appearing in a
+   * STRING suppressed a genuine invocation on the same line — the round-3 miss. Whether the suppression is
+   * malicious or accidental does not matter: a marker that can be triggered from code is not a marker.
+   */
+  it('reads the escape from the comment half only, never from a string in the code', () => {
+    const line = `echo "${GITHOOK_ALL_ALLOW} fake" ; node x.mjs --all`;
+    expect(findGitHookAllFlags(line)).toHaveLength(1);
+    expect(findGitHookAllFlags(`echo "${GITHOOK_ALL_ALLOW} fake"\nnode x.mjs --all`)).toHaveLength(1);
+  });
+
+  it('splits a line into its code and comment halves at the same point', () => {
+    expect(shellCommentOf('node x.mjs --all   # why')).toBe('# why');
+    expect(shellCommentOf('# whole line')).toBe('# whole line');
+    expect(shellCommentOf('echo "a#b"')).toBe('');
+    expect(shellCommentOf(undefined)).toBe('');
   });
 
   it('does not let an escape two lines up cover an unexplained flag', () => {

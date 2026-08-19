@@ -3007,9 +3007,27 @@ export function shellCodeOf(line) {
  */
 export function shellWords(code) {
   return String(code ?? '')
-    .replace(/[`"']/g, ' ')
+    // Quoting and ESCAPING are not part of the word. `"--all"` and `\--all` both pass exactly the argument
+    // `--all` does — in POSIX shell `\-` is simply a literal `-` — and the backslash form was the round-3
+    // miss (review-pr correctness juror on PR #1488). Replacing with a SPACE rather than deleting is
+    // deliberate: it can only ever over-split a word, which reports, where deleting could weld two words into
+    // one that is no longer the flag.
+    .replace(/[`"'\\]/g, ' ')
     .split(/[\s;|&()<>,]+/)
     .filter(Boolean);
+}
+
+/**
+ * The COMMENT half of a line — everything `shellCodeOf` left behind. PURE.
+ *
+ * The escape marker is read from here and not from the raw line, and round 3 is why: a raw-line substring
+ * match meant `echo "standards-allow --all: fake" ; node x.mjs --all` suppressed a genuine invocation, because
+ * the phrase appeared in a STRING on the same line. The marker is a comment by design, so that is the only
+ * place it counts.
+ */
+export function shellCommentOf(line) {
+  const s = String(line ?? '');
+  return s.slice(shellCodeOf(s).length);
 }
 
 /** Is this word the flag? `--all=<value>` is the same flag; `--all-repos` is somebody else's. PURE. */
@@ -3027,8 +3045,10 @@ export function findGitHookAllFlags(content) {
   const out = [];
   lines.forEach((raw, i) => {
     if (!shellWords(shellCodeOf(raw)).some(isAllFlagWord)) return;
-    // The escape is read from the RAW line (and the one above), because it lives in a comment by design.
-    if (raw.includes(GITHOOK_ALL_ALLOW) || String(lines[i - 1] ?? '').includes(GITHOOK_ALL_ALLOW)) return;
+    // The escape is read from the COMMENT half of this line and of the one above — never from the code, where
+    // the same phrase inside a string would silently suppress a real invocation.
+    const escaped = (l) => shellCommentOf(l).includes(GITHOOK_ALL_ALLOW);
+    if (escaped(raw) || escaped(lines[i - 1])) return;
     out.push({ line: i + 1, text: raw.trim() });
   });
   return out;
