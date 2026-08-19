@@ -66,6 +66,8 @@ import {
   findLockPointFiles, lockPointCandidatePaths,
   findTestOnlyExports,
   scanPublishSecrets,
+  findGitHookAllFlags,
+  gitHookAllFlagError,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
@@ -2010,6 +2012,24 @@ try {
     }
   }
   for (const e of validateDeclaredModuleContract(mods).errors) err(e.message, e.descriptor);
+}
+
+// ── 17b. `--all` inside a git hook (#3196) ─────────────────────────────────────
+// `we:.githooks/post-merge` shipped a commands sync carrying `--all`, where the flag does not mean "deploy
+// everything" but "CREATE the machine-global tree" on a machine that never opted in. A hook runs unattended on
+// every merge and every clone, so the wrong flag there is applied silently and repeatedly — and it was caught
+// by a reviewer, which is the kind of catch that does not repeat. Pure rule (`findGitHookAllFlags`, which
+// strips shell comments so the post-merge hook's own explanation of why it does NOT pass the flag is not
+// itself reported) lives in check-standards-rules.mjs; only the directory read is here.
+{
+  const dir = join(ROOT, '.githooks');
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      const abs = join(dir, name);
+      if (!statSync(abs).isFile()) continue;
+      for (const hit of findGitHookAllFlags(readFileSync(abs, 'utf8'))) err(gitHookAllFlagError(`.githooks/${name}`, hit));
+    }
+  }
 }
 
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────

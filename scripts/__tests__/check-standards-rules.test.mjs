@@ -52,6 +52,7 @@ import {
   lockPointCandidatePaths,
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
+  findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, GITHOOK_ALL_ALLOW,
 } from '../check-standards-rules.mjs';
 // The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
 import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
@@ -2411,5 +2412,100 @@ describe('findUnfencedMandateParams — the #2438 fence, generalized (#2967b)', 
     // Not inert: the scan really did find the builders it is meant to be judging.
     const builders = mods.filter((m) => /export function build[A-Za-z0-9_$]*Mandate/.test(m.content));
     expect(builders.length).toBeGreaterThan(2);
+  });
+});
+
+/**
+ * #3196 — `--all` inside a git hook.
+ *
+ * `we:.githooks/post-merge` shipped a commands sync carrying `--all`. On that CLI the flag does not mean
+ * "deploy every command" — it means CREATE the machine-global tree on a machine that never opted in, so a
+ * routine `git pull` that merely touched a command file populated the operator's user-global config, live in
+ * every unrelated repo they open, without asking. A hook runs unattended on every merge and every clone; it
+ * was caught by a reviewer, and a reviewer catching it is not a mechanism.
+ *
+ * The interesting half is the COMMENT half. That same hook now carries a long explanation of why it does NOT
+ * pass the flag — the exact prose a substring scan reports as a violation, which would make the rule fire
+ * hardest on the file that already got it right.
+ */
+describe('findGitHookAllFlags (#3196)', () => {
+  it('flags the flag where it is actually passed', () => {
+    expect(findGitHookAllFlags('node scripts/sync-commands-deploy.mjs --all\n'))
+      .toEqual([{ line: 1, text: 'node scripts/sync-commands-deploy.mjs --all' }]);
+  });
+
+  // THE ONE THAT MATTERS. Prose ABOUT the flag is not the flag.
+  it('does not report a comment explaining why the flag is absent', () => {
+    // Deliberately BARE (space-delimited) in the prose, not backticked. The backticked form the live hook
+    // happens to use is already rejected by the flag-boundary regex, so a fixture built only from it would
+    // pass with comment-stripping removed — i.e. for the wrong reason.
+    const hook = [
+      '# NO --all HERE, and the asymmetry is the point: --all does not mean "deploy every command".',
+      '# Creating one is the explicit opt-in: `npm run commands:sync -- --all` by hand.',
+      'node scripts/sync-commands-deploy.mjs',
+    ].join('\n');
+    expect(findGitHookAllFlags(hook)).toEqual([]);
+  });
+
+  it('reads the code half of a line that has both', () => {
+    expect(findGitHookAllFlags('node x.mjs --all   # yes, really')).toHaveLength(1);
+    expect(findGitHookAllFlags('node x.mjs   # never pass --all here')).toEqual([]);
+  });
+
+  it('is not fooled by a `#` that opens no comment', () => {
+    expect(shellCodeOf('echo "a#b" --all')).toBe('echo "a#b" --all');
+    expect(shellCodeOf('echo ${x#y} --all')).toBe('echo ${x#y} --all');
+    expect(findGitHookAllFlags('echo ${x#y} --all')).toHaveLength(1);
+  });
+
+  it('leaves a DIFFERENT flag that merely starts with the same letters alone', () => {
+    expect(findGitHookAllFlags('node x.mjs --all-repos')).toEqual([]);
+    expect(findGitHookAllFlags('node x.mjs --allow-dirty')).toEqual([]);
+  });
+
+  it('accepts `--all=<value>` as the flag, because it is', () => {
+    expect(findGitHookAllFlags('node x.mjs --all=1')).toHaveLength(1);
+  });
+
+  // A PROMPT, NOT A WALL: a hook that genuinely needs the flag says so, on the line or the one above it.
+  it('honours the inline escape on the line and on the line above', () => {
+    expect(findGitHookAllFlags(`node x.mjs --all   # ${GITHOOK_ALL_ALLOW} bootstrapping a fresh VM`)).toEqual([]);
+    expect(findGitHookAllFlags(`# ${GITHOOK_ALL_ALLOW} bootstrapping a fresh VM\nnode x.mjs --all`)).toEqual([]);
+  });
+
+  it('does not let an escape two lines up cover an unexplained flag', () => {
+    expect(findGitHookAllFlags(`# ${GITHOOK_ALL_ALLOW} reason\nnode a.mjs --all\nnode b.mjs --all`))
+      .toEqual([{ line: 3, text: 'node b.mjs --all' }]);
+  });
+
+  it('reports every offending line, not just the first', () => {
+    expect(findGitHookAllFlags('node a.mjs --all\nnode b.mjs\nnode c.mjs --all').map((h) => h.line)).toEqual([1, 3]);
+  });
+
+  it('survives empty and absent input', () => {
+    for (const c of ['', '\n', undefined, null]) expect(findGitHookAllFlags(c)).toEqual([]);
+  });
+
+  // A rule a reader can only OBEY is a rule they suppress; the message has to say what the flag does.
+  it('names the consequence and the escape, not merely the prohibition', () => {
+    const msg = gitHookAllFlagError('.githooks/post-merge', { line: 36, text: 'node x.mjs --all' });
+    expect(msg).toMatch(/^\.githooks\/post-merge:36:/);
+    expect(msg).toMatch(/machine-global tree/);
+    expect(msg).toMatch(/never opted in/);
+    expect(msg).toContain(GITHOOK_ALL_ALLOW);
+    expect(msg).toContain('node x.mjs --all');
+  });
+});
+
+// The SHIPPED hooks stay clean — a standing guard, so the rule is judged against real files and not only
+// fixtures. It also proves the scan is not inert: there really are hooks under `.githooks/` to read.
+describe('#3196 — the live .githooks/ tree', () => {
+  it('passes its own rule', () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.githooks');
+    const names = existsSync(dir) ? readdirSync(dir) : [];
+    expect(names.length).toBeGreaterThan(0);
+    for (const n of names) {
+      expect({ [n]: findGitHookAllFlags(readFileSync(join(dir, n), 'utf8')) }).toEqual({ [n]: [] });
+    }
   });
 });
