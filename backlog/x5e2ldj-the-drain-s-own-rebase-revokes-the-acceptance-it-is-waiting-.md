@@ -15,8 +15,8 @@ Observed live 2026-08-19 on PR #1445. A clearance landed through the sanctioned 
 | time (UTC) | what |
 |---|---|
 | 13:03 | PR #1477 merges; `main` moves |
-| 13:06:48 | the clearance for #1445 lands through CI — `review-set-label.mjs` reports `labels: ["review:accepted"]`, markers stamped at head `4266d453` |
-| ~13:07 | `f5bc7940 drain: rebase lane/3154-slice-we-blocks-router-runtime-to-fui onto origin/main, drop transient .lane-manifest.json` |
+| 13:06:48 | the clearance for #1445 lands through CI — `we:scripts/review-set-label.mjs` reports `labels: ["review:accepted"]`, markers stamped at head `4266d453` |
+| ~13:07 | `f5bc7940 drain: rebase lane/3154-slice-we-blocks-router-runtime-to-fui onto origin/main, drop the transient lane manifest` |
 | after | `review:human` is back; the acceptance no longer covers the head |
 
 A second clearance, issued against the rebased head, stuck — which confirms the trigger is the rebase and
@@ -25,7 +25,7 @@ not the clearance.
 ## What it is NOT
 
 **Not the manifest drop.** `normalizeContributionFingerprint` in `we:scripts/lib/review-escalation.mjs`
-already skips the whole `.lane-manifest.json` section (`inManifestSection`), so shedding it cannot move the
+already skips the whole `we:.lane-manifest.json` section (`inManifestSection`), so shedding it cannot move the
 digest. That was the first hypothesis and it is wrong; recorded here so the next reader does not spend the
 same hour on it.
 
