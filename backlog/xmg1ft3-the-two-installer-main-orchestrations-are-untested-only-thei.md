@@ -11,10 +11,10 @@ tags: []
 
 ## Done when
 
-1. **Executable** — a test that drives `bootstrap-session.mjs`'s `main()` over injected settings/write handles
+1. **Executable** — a test that drives `we:scripts/bootstrap-session.mjs`'s `main()` over injected settings/write handles
    and asserts, in order: what `--dry-run` reports and does NOT write, and that a missing grant exits non-zero
    with the drift message rather than silently repairing it.
-2. A test that drives `converge-daemon-install.mjs`'s `systemdMain()` and asserts the three `systemctl` calls
+2. A test that drives `we:scripts/converge-daemon-install.mjs`'s `systemdMain()` and asserts the three `systemctl` calls
    run in the order `systemdInstallSteps` declares — reload, stop, enable — and that only the last one decides
    the exit code.
 3. Neither test spawns a real process or touches a real settings file.
