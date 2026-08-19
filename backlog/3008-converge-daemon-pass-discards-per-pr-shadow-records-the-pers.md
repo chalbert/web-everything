@@ -3,8 +3,10 @@ bornAs: x62n6v6
 kind: story
 size: 2
 parent: "2572"
-status: open
+status: resolved
 dateOpened: "2026-08-08"
+dateResolved: "2026-08-19"
+graduatedTo: none
 tags: [review, converge-daemon, shadow-mode, decision-routing, enforce-flip]
 scope:
   - we:scripts/converge-daemon-pass.mjs

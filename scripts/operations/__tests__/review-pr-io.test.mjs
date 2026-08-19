@@ -13,12 +13,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  createReviewPrSinks, isPreWriteRefusal, priorRoundsFor, revParseCommit, reviewBodyPath, reviewSidecarDir,
+  PR_VIEW_FIELDS, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
+  prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
@@ -366,5 +367,147 @@ describe('priorRounds counts the CURRENT loop', () => {
     row(VERDICTS.ACCEPTED, '2026-08-10T13:00:00.000Z');
     row(VERDICTS.CHANGES, '2026-08-10T14:00:00.000Z');
     expect(priorRounds()).toBe(1);
+  });
+});
+
+/**
+ * The PR-view transport (the ONE network reach, made swappable).
+ *
+ * What is worth pinning is not that a file can be read — it is that the swap cannot widen what the review
+ * trusts. `gh` stays the default when nothing is staged; a staged view supplies the SAME field set; and a
+ * missing or corrupt file FAILS rather than degrading to an empty view, which would silently review a PR as
+ * if it had no body, no labels and no comments.
+ */
+describe('the PR-view transport', () => {
+  it('defaults to gh when no view directory is staged', () => {
+    expect(resolveViewReader({})).toBe(ghPrView);
+  });
+
+  it('swaps to the on-disk reader when WE_PR_VIEW_DIR is set', () => {
+    expect(resolveViewReader({ WE_PR_VIEW_DIR: root })).not.toBe(ghPrView);
+  });
+
+  it('names a staged view by encoded slug and number', () => {
+    expect(prViewFileName('chalbert/web-everything', 1465)).toBe('chalbert%2Fweb-everything-1465.json');
+  });
+
+  // The `-` flattening was NOT injective: a repo name may contain `-`, so two different repos landed on one
+  // file and the second staged view silently answered for the first — wrong labels/body, right diff.
+  it('never collides two different repos onto one file', () => {
+    expect(prViewFileName('foo-bar/baz', 5)).not.toBe(prViewFileName('foo/bar-baz', 5));
+  });
+
+  it('reads a staged view the resolver points at', () => {
+    const view = { number: 7, title: 'x', body: 'b', labels: [], comments: [], files: [], headRefName: 'lane/x' };
+    writeFileSync(join(root, prViewFileName('o/r', 7)), JSON.stringify(view));
+    expect(resolveViewReader({ WE_PR_VIEW_DIR: root })({ pr: 7, repo: 'o/r' })).toEqual(view);
+  });
+
+  it('THROWS on a missing staged view, naming the path and the way back to gh', () => {
+    expect(() => filePrView({ pr: 9, repo: 'o/r', dir: root }))
+      .toThrow(/no pre-fetched view at .*o%2Fr-9\.json[\s\S]*WE_PR_VIEW_DIR/);
+  });
+
+  it('THROWS on a corrupt staged view rather than yielding an empty one', () => {
+    writeFileSync(join(root, prViewFileName('o/r', 9)), '{not json');
+    expect(() => filePrView({ pr: 9, repo: 'o/r', dir: root })).toThrow(/is not valid JSON/);
+  });
+
+  it('asks both transports for the same field set', () => {
+    expect(PR_VIEW_FIELDS).toContain('headRefName');
+    expect(PR_VIEW_FIELDS).toContain('body');
+    expect(PR_VIEW_FIELDS).toContain('labels');
+    expect(PR_VIEW_FIELDS).toContain('comments');
+    expect(PR_VIEW_FIELDS).toContain('files');
+  });
+});
+
+/**
+ * The `readView` WIRING inside `readPr` — the integration point, not just the transports.
+ *
+ * The transports each had unit tests, but nothing called the real `readPr` with an injected `readView`, so a
+ * dropped or misnamed argument at the one call site would have surfaced only against a live `gh` or a staged
+ * file (review-pr correctness juror on #1466). `exec` is injected too, so this stays io-free: no `gh`, no
+ * `git`, no network — the property the file header claims.
+ */
+describe('readPr wires the injected view transport', () => {
+  const VIEW = {
+    number: 7, title: 'a title', url: 'https://example.invalid/7', body: 'a body',
+    labels: [{ name: 'review:pending' }], comments: [], files: [{ path: 'a.mjs', additions: 1, deletions: 0 }],
+    headRefName: 'lane/x',
+  };
+  // Enough of a git for the net-diff helpers to resolve a basis and an empty diff without touching a repo.
+  const execStub = () => '';
+
+  it('calls readView with the pr, repo and cwd it was given', () => {
+    const seen = [];
+    readPr({ pr: 7, repo: 'o/n', exec: execStub, cwd: '/somewhere', readView: (o) => { seen.push(o); return VIEW; } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ pr: 7, repo: 'o/n', cwd: '/somewhere' });
+  });
+
+  it('carries the transport-supplied view through into the read finding', () => {
+    const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
+    expect(out.headRefName).toBe('lane/x');
+    expect(out.body).toBe('a body');
+  });
+
+  it('validates pr and repo BEFORE calling the transport — a bad request never reaches it', () => {
+    let called = 0;
+    const readView = () => { called += 1; return VIEW; };
+    expect(() => readPr({ pr: 0, repo: 'o/n', exec: execStub, readView })).toThrow(/positive integer/);
+    expect(() => readPr({ pr: 7, repo: 'not-a-slug', exec: execStub, readView })).toThrow(/owner\/name/);
+    expect(called).toBe(0);
+  });
+
+  it('propagates a transport failure rather than reviewing an empty view', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: execStub, readView: () => { throw new Error('no pre-fetched view at /x.json'); },
+    })).toThrow(/no pre-fetched view/);
+  });
+
+  /**
+   * THE SUBJECT CROSS-CHECK. Round 1 of this PR's review made the FILENAME injective; the juror's round-2
+   * finding was that the CONTENT under it was still never checked. A view for a different PR — staged by
+   * copy-paste, or left stale under the right name — was accepted whole, and since `headRefName` decides the
+   * diff basis, the judged DIFF was that other PR's too. Nothing downstream could notice: every consumer is
+   * told it is looking at the PR that was requested. `impactIfUnfixed: broken`, and no test defended it.
+   */
+  it('REFUSES a view whose number is not the PR that was asked for', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }),
+    })).toThrow(/refusing to review o\/n#7 .*has #999/);
+  });
+
+  it('names the file to re-stage, so the operator can act on the refusal', () => {
+    let message = '';
+    try {
+      readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }) });
+    } catch (e) { message = e.message; }
+    expect(message).toContain(prViewFileName('o/n', 7));
+    expect(message).toContain('WE_PR_VIEW_DIR');
+  });
+
+  it('refuses a view with NO number — absent is not better evidence than wrong', () => {
+    const { number, ...noNumber } = VIEW;
+    expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => noNumber }))
+      .toThrow(/no `number` field at all/);
+  });
+
+  it('refuses BEFORE the diff basis is resolved — the wrong PR never reaches git', () => {
+    let gitCalls = 0;
+    const countingExec = () => { gitCalls += 1; return ''; };
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: countingExec, readView: () => ({ ...VIEW, number: 999 }),
+    })).toThrow();
+    expect(gitCalls).toBe(0);
+  });
+
+  it('accepts a number that matches, however the transport spells it', () => {
+    // `gh --json` yields a JSON number; a hand-staged file may carry the string. Both name the same PR.
+    for (const number of [7, '7']) {
+      expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number }) }))
+        .not.toThrow();
+    }
   });
 });
