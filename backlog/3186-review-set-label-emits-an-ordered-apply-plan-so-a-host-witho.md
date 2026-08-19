@@ -69,6 +69,29 @@ un-mergeable PR") cannot tolerate.
 Recommend **(a)** for this slice, filing (b) if the row proves load-bearing before Phase 2. The
 decision belongs on this card before build.
 
+## The applier's label write is SET-semantics, and the plan must carry the final set
+
+Checked against the connector's actual tool surface, because "something applies the plan" is only real if
+the something can perform both writes:
+
+| plan step | connector tool | shape |
+|---|---|---|
+| post the verdict comment | `add_issue_comment` | matches `gh pr comment` |
+| swap the labels | `issue_write(method:'update', labels:[…])` | **replaces the whole set** |
+
+`gh pr edit` takes `--add-label` / `--remove-label`; the connector takes *"labels to apply"*. So the two
+appliers are NOT interchangeable, and the plan cannot simply carry `{add, remove}` and hope. It must carry the
+resolved FINAL label set as well, computed by the home from `currentLabels` — which it already reads.
+
+That introduces a race the `gh` path does not have: a label added between emit and apply (`ci:failed`,
+`checking`, a human's own label) is WIPED by a full replace. Options, none picked: re-read labels at apply
+time and refuse if they moved (needs a read step in the plan); carry both shapes and let the applier pick the
+one its transport supports; or emit an expected-current set the applier compares first, refusing on mismatch.
+The third is the closest analogue to `--force-with-lease` and is the recommended starting point.
+
+`presentRemoveLabels` already intersects removals against live labels, so the home has everything it needs to
+compute both shapes; this is about what the plan SAYS, not about new logic.
+
 ## Explicitly NOT in scope
 
 - **A full transport port** (`readPrState` / `setLabels` / `postComment` / `readLabels` as swappable
@@ -90,7 +113,8 @@ decision belongs on this card before build.
    ```
 2. The emitted plan carries: repo, pr, `to`, the independence status, the resolved `addLabel`, the
    INTERSECTED `removeLabels` (`presentRemoveLabels`, so no absent label is ever handed to an edit),
-   the comment body, and the ordered steps with the order's stated reason.
+   the RESOLVED FINAL label set (for a set-semantics applier — see the section above), the comment
+   body, and the ordered steps with the order's stated reason.
 3. Both orderings are covered: a PR already carrying `review:accepted` emits swap-then-comment; one
    not carrying it emits comment-then-swap.
 4. Every refusal that blocks the executing path also blocks `--emit-plan`, proven by a test per
