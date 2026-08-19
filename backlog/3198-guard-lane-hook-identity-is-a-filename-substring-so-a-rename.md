@@ -1,8 +1,10 @@
 ---
 bornAs: xp8ob95
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-08-19"
+dateResolved: "2026-08-19"
 tags: []
 ---
 
@@ -34,6 +36,28 @@ Both directions are reachable without anyone doing anything unusual:
   a clean slate that is not clean.
 - **Someone else's hook mentions the name** — a logger that echoes the command, a wrapper, a comment. A
   re-install deletes it. Nothing warns; it is just gone from their settings.
+
+## How it was closed
+
+The entry carries a marker of its own — `#we:guard-lane`, appended to the command as a trailing shell
+comment. `command` is the one field a settings reader must preserve verbatim, everything after `#` is inert to
+the shell that runs it, and it is legible to whoever opens the user-level `we:.claude/settings.json` wondering what put it there. A
+sidecar key on the hook object would have been tidier and is not guaranteed to survive a schema that does not
+know about it.
+
+The pre-marker shape stays recognised, because every machine with the guard installed today carries it — but
+NARROWED, from a `command.includes(<the guard's filename>)` substring test to a whole-command match on a bare
+`node <path to we:scripts/guard-lane.mjs>`.
+That is what this installer wrote and nothing else looks like, so the mention case stops being ours to delete.
+The legacy name is frozen as a literal rather than derived from the current filename: legacy entries carry the
+name as it WAS, so deriving it would make the fallback stop recognising the entries it exists for.
+
+One thing beyond the card: the sweep now runs over EVERY `PreToolUse` block, not only the matcher's own. An
+entry installed under an earlier matcher, or moved by hand, is still ours, and leaving it behind while adding
+a new one is the same duplicate-guard state.
+
+Mutation-checked in both directions: restoring the substring identity reddens 4 tests, and narrowing the sweep
+back to a single block reddens the fifth.
 
 ## Done when
 

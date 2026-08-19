@@ -16,6 +16,8 @@
  * WHAT IT COSTS, stated rather than discovered. The path is absolute, so MOVING the web-everything checkout
  * breaks it — and `guard-lane.mjs` fails OPEN by design (a guard fault must never wedge the agent), so a broken
  * path means NO GUARD, silently. `status` exists to make that checkable, and re-running `install` repairs it.
+ * Repair depends on the installer RECOGNISING the entry it wrote, which is why identity is a marker of its own
+ * (`HOOK_MARKER`) and not the guard's filename — see #3198 below for what a filename could not survive.
  * Gating "is it installed" in `check:standards` is the obvious next step and is deliberately not done here: it
  * would fail on any machine without the hook, including CI, and that trade needs its own decision.
  *
@@ -52,26 +54,72 @@ export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
 /** The Edit|Write matcher the guard belongs on. Kept as a constant so `status` and `install` cannot disagree. */
 export const MATCHER = 'Edit|Write';
 
+/**
+ * THE ENTRY'S IDENTITY, carried by the entry itself rather than inferred from its path (#3198).
+ *
+ * Identity used to be "the command contains `guard-lane.mjs`", and that is a filename, which is not an
+ * identity. It broke in BOTH directions and neither needs anyone doing anything unusual:
+ *
+ *   · RENAME OR MOVE the guard — the ordinary consequence of reorganising `we:scripts/` — and every hook
+ *     already installed on every machine becomes invisible to this installer. `withGuardHook` appends a
+ *     SECOND entry beside the stale one, `withoutGuardHook` leaves the stale one behind, and `guardStatus`
+ *     reports a clean slate that is not clean. The guard fails OPEN, so a stale entry is not a broken guard
+ *     that complains — it is no guard, on every write, silently.
+ *   · SOMEONE ELSE'S HOOK MENTIONS THE NAME — a logger that echoes its command, a wrapper, a comment — and a
+ *     re-install deletes it. Nothing warns; it is simply gone from their settings.
+ *
+ * A trailing `#`-comment is the marker because it survives where a sidecar field might not: `command` is the
+ * one part of a hook entry a settings reader must preserve verbatim, and everything after `#` is inert to the
+ * shell that runs it. It is also legible to whoever opens `settings.json` looking for what put it there.
+ */
+export const HOOK_MARKER = '#we:guard-lane';
+
+/**
+ * The pre-marker shape, recognised so machines that already carry it are repaired rather than doubled.
+ *
+ * DELIBERATELY NARROWER than the substring test it replaces: the WHOLE command must be a bare node invocation
+ * of a `guard-lane.mjs`, which is what this installer wrote and nothing else looks like. `includes()` also
+ * matched `echo "running guard-lane.mjs"`, and matching it meant DELETING it. The literal name is frozen here
+ * on purpose — legacy entries carry the name as it was, so deriving this from the current filename would make
+ * the fallback stop recognising exactly the entries it exists for.
+ */
+const LEGACY_COMMAND = /^node\s+\S*guard-lane\.mjs$/;
+
+/** Is this entry ours? Marker first, legacy shape second. PURE over the entry. */
+export function isGuardHook(hook) {
+  const cmd = typeof hook?.command === 'string' ? hook.command.trim() : '';
+  return cmd.includes(HOOK_MARKER) || LEGACY_COMMAND.test(cmd);
+}
+
+/** The guard path an entry names, with the marker and the `node` stripped. PURE. */
+export function guardHookPath(command) {
+  return String(command ?? '').replace(HOOK_MARKER, '').replace(/^\s*node\s+/, '').trim();
+}
+
 /** The hook entry, as it appears in settings. Pure — takes the guard path so a test can pass a fake one. */
 export function hookEntry(guardPath = GUARD_PATH) {
-  return { type: 'command', command: `node ${guardPath}` };
+  return { type: 'command', command: `node ${guardPath} ${HOOK_MARKER}` };
 }
 
 /**
  * Add or repair the entry in a settings OBJECT, returning a new one. PURE — the caller does the io.
  *
- * Idempotent by identity, not by count: an entry whose command names this same script is REPLACED rather than
- * appended, so re-running after moving the checkout repairs the path instead of registering a second, stale
- * guard that fails open on every write.
+ * Idempotent by identity, not by count: an entry this installer wrote is REPLACED rather than appended, so
+ * re-running after the checkout moves — or after the guard is renamed — repairs the path instead of
+ * registering a second, stale guard that fails open on every write.
  */
 export function withGuardHook(settings, guardPath = GUARD_PATH) {
   const next = JSON.parse(JSON.stringify(settings ?? {}));
   next.hooks = next.hooks ?? {};
   next.hooks.PreToolUse = Array.isArray(next.hooks.PreToolUse) ? next.hooks.PreToolUse : [];
-  const isOurs = (h) => typeof h?.command === 'string' && h.command.includes('guard-lane.mjs');
+  // Sweep EVERY block, not just the matcher's own: an entry installed under an earlier matcher (or moved by
+  // hand) is still ours, and leaving it behind is the duplicate-guard state this function exists to prevent.
+  for (const block of next.hooks.PreToolUse) {
+    if (Array.isArray(block?.hooks)) block.hooks = block.hooks.filter((h) => !isGuardHook(h));
+  }
   let block = next.hooks.PreToolUse.find((b) => b.matcher === MATCHER);
   if (!block) { block = { matcher: MATCHER, hooks: [] }; next.hooks.PreToolUse.push(block); }
-  block.hooks = Array.isArray(block.hooks) ? block.hooks.filter((h) => !isOurs(h)) : [];
+  if (!Array.isArray(block.hooks)) block.hooks = [];
   block.hooks.push(hookEntry(guardPath));
   return next;
 }
@@ -80,7 +128,7 @@ export function withGuardHook(settings, guardPath = GUARD_PATH) {
 export function withoutGuardHook(settings) {
   const next = JSON.parse(JSON.stringify(settings ?? {}));
   for (const block of next.hooks?.PreToolUse ?? []) {
-    if (Array.isArray(block.hooks)) block.hooks = block.hooks.filter((h) => !String(h?.command || '').includes('guard-lane.mjs'));
+    if (Array.isArray(block.hooks)) block.hooks = block.hooks.filter((h) => !isGuardHook(h));
   }
   return next;
 }
@@ -90,9 +138,8 @@ export function guardStatus(settings, exists = existsSync) {
   const found = [];
   for (const block of settings?.hooks?.PreToolUse ?? []) {
     for (const h of block?.hooks ?? []) {
-      const cmd = String(h?.command || '');
-      if (!cmd.includes('guard-lane.mjs')) continue;
-      const path = cmd.replace(/^node\s+/, '').trim();
+      if (!isGuardHook(h)) continue;
+      const path = guardHookPath(h.command);
       found.push({ matcher: block.matcher, path, resolves: exists(path), absolute: path.startsWith('/') });
     }
   }
