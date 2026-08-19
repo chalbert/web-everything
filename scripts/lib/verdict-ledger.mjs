@@ -129,6 +129,11 @@ export const VERDICTS = Object.freeze({
   PENDING: 'pending',           // parked, awaiting an independent review → holds
   HUMAN: 'human',               // gate-self: only a human may clear → holds
   CLEAR_HUMAN: 'clear-human',   // the #2895 human ceremony lifted a `human` hold → clears
+  // #x5e2ldj — an existing acceptance CARRIED across a head the drain's own rebase moved. It CLEARS, because
+  // the PR was already cleared and nothing about the contribution changed; the row exists so the ledger holds
+  // a witness at the new head rather than a marker nobody can reproduce. It is deliberately NOT `ACCEPTED`:
+  // no review was run, and a reader counting acceptances must not count this as one.
+  RESTAMPED: 'restamped',       // acceptance re-witnessed after a drain-authored rebase → clears
 });
 
 /** Verdicts in the closed set, as an array. */
@@ -136,7 +141,7 @@ export const VERDICT_VALUES = Object.freeze(Object.values(VERDICTS));
 
 /** The two verdicts that CLEAR. Everything else in the closed set is a HOLD. A hold is only ever ended by a
  *  LATER clearing record — never by removing a row, which this format makes impossible anyway. */
-const CLEARING = new Set([VERDICTS.ACCEPTED, VERDICTS.CLEAR_HUMAN]);
+const CLEARING = new Set([VERDICTS.ACCEPTED, VERDICTS.CLEAR_HUMAN, VERDICTS.RESTAMPED]);
 
 /** Does this verdict clear the PR for merge? Pure. An unknown verdict is NOT clearing (fail closed). */
 export function verdictClears(verdict) {
@@ -170,6 +175,7 @@ export function verdictForLabelTarget(to) {
     case 'changes': return VERDICTS.CHANGES;
     case 'clear-human': return VERDICTS.CLEAR_HUMAN;
     case 'rearm': return VERDICTS.PENDING;
+    case 'restamp': return VERDICTS.RESTAMPED;
     default: return null;
   }
 }
@@ -185,6 +191,7 @@ export function verdictLabel(verdict) {
   switch (String(verdict ?? '')) {
     case VERDICTS.ACCEPTED:
     case VERDICTS.CLEAR_HUMAN:
+    case VERDICTS.RESTAMPED:
       return REVIEW_LABELS.accepted;
     case VERDICTS.CHANGES: return REVIEW_LABELS.changes;
     case VERDICTS.HUMAN: return REVIEW_LABELS.human;

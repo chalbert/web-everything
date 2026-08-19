@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete } from '../merge-ai-prs.mjs';
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -3815,5 +3815,52 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     expect(doc).toMatch(/JOIN KEY|join key/);              // what is actually missing
     expect(doc).toMatch(/COST call, not an impossibility/); // the corrected framing, not "unrecoverable"
     expect(doc).toMatch(/gh pr view <num> --json body/);    // the concrete read that makes it recoverable
+  });
+});
+
+/**
+ * `needsAcceptanceRestamp` (#x5e2ldj) — the drain re-stamping the acceptance its OWN rebase invalidated.
+ *
+ * THE MEASURED LOOP, PR #1445 on 2026-08-19: a clearance landed at 13:06:48; the drain rebased that lane onto
+ * the newly-merged main a minute later; `review:human` came back. The rebase preserves the contribution, but a
+ * rebase onto a moved base can change the context-run lengths the contribution digest keeps — so the markers
+ * went stale on the PR the drain was itself about to land. Clear, rebase, re-park, repeat.
+ *
+ * The fix is the one `review-escalation.mjs` already named in its POSITION section — attribute the move to its
+ * actor. These tests pin that the escape stays NARROW, because a re-stamp that fired too widely would carry an
+ * acceptance across a head change the drain did NOT make, which is the staleness gate's whole reason to exist.
+ */
+describe('needsAcceptanceRestamp (#x5e2ldj — carrying an acceptance across the drain\'s own rebase)', () => {
+  const accepted = { humanCleared: true, reviewHeld: false };
+  const rebased = { action: 'rebased', newCommit: 'f5bc7940' };
+
+  it('fires for the one case it exists for: THIS drain rebased an accepted, unheld PR', () => {
+    expect(needsAcceptanceRestamp(accepted, rebased)).toBe(true);
+  });
+
+  it('does NOT fire without a live acceptance — there is nothing to carry', () => {
+    expect(needsAcceptanceRestamp({ humanCleared: false, reviewHeld: false }, rebased)).toBe(false);
+  });
+
+  // DEFENCE IN DEPTH, and labelled as such because the review of PR #1482 was right that it is not a scenario
+  // `classifyPr` can currently produce: `reviewHeld` is only set when the review hold is the SOLE blocker, which
+  // requires no live `review:accepted` — so `humanCleared && reviewHeld` is unreachable through the real drain
+  // today. The guard stays because the cost is one `&&` and the failure it prevents is carrying an acceptance
+  // onto a held PR; but a reader must not mistake this for a case that happens.
+  it('does NOT fire on an uncleared hold — unreachable via classifyPr today, kept as depth', () => {
+    expect(needsAcceptanceRestamp({ humanCleared: true, reviewHeld: true }, rebased)).toBe(false);
+  });
+
+  it('does NOT fire when no new head was minted — `current` rebuilt nothing', () => {
+    // The idempotency path: the tip was already on main and manifest-free, so no SHA moved and no marker went
+    // stale. Re-stamping there would post a comment for a rebase that never happened.
+    expect(needsAcceptanceRestamp(accepted, { action: 'current' })).toBe(false);
+    expect(needsAcceptanceRestamp(accepted, { action: 'skip', reason: 'real conflict beyond manifest' })).toBe(false);
+  });
+
+  it('does NOT fire without a rebase result at all — an author push is not this', () => {
+    expect(needsAcceptanceRestamp(accepted, undefined)).toBe(false);
+    expect(needsAcceptanceRestamp(accepted, null)).toBe(false);
+    expect(needsAcceptanceRestamp(undefined, rebased)).toBe(false);
   });
 });

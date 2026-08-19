@@ -98,7 +98,7 @@
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
-import { execFileSync, execFile } from 'node:child_process';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -613,6 +613,49 @@ export function isRebaseDropCandidate(v) {
   const state = String(v.state || '').toUpperCase();
   const mergeable = String(v.mergeable || '').toUpperCase();
   return mergeable === 'CONFLICTING' || state === 'BEHIND' || state === 'DIRTY';
+}
+
+/**
+ * #x5e2ldj — shell the SINGLE HOME to re-stamp. IO. Never throws: the caller treats a failure as "it may
+ * re-park", which is exactly the behaviour that existed before this, so a broken re-stamp can only fail to
+ * improve things — it can never block a land.
+ */
+function restampAcceptance({ pr, repo, newHead }) {
+  try {
+    const r = spawnSync(process.execPath, [
+      new URL('./review-set-label.mjs', import.meta.url).pathname,
+      String(pr), `--repo=${repo}`, '--to=restamp', '--actor=drain',
+      '--channel=drain-rebase', `--reason=head moved to ${newHead} by this drain's own content-preserving rebase`,
+    ], { encoding: 'utf8' });
+    if (r.status === 0) return { ok: true };
+    return { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim().split('\n').pop() };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
+/**
+ * #x5e2ldj — after a DRAIN-AUTHORED rebase, is an acceptance re-stamp owed? PURE.
+ *
+ * THE LOOP IT ENDS, measured on PR #1445 on 2026-08-19: a clearance landed at 13:06:48 and the drain rebased
+ * that lane onto the newly-merged main a minute later. The rebase preserves the contribution, but a rebase onto
+ * a moved base can change the context-RUN LENGTHS the contribution digest keeps — so the markers went stale and
+ * the PR was re-parked. On the PR the drain was itself about to land. Clear, rebase, re-park, repeat.
+ *
+ * `we:scripts/lib/review-escalation.mjs` names this fix in its POSITION section: *"ATTRIBUTE THE MOVE TO ITS
+ * ACTOR (the drain knows it produced the rebase, so it could re-stamp rather than re-derive)"*. The drain is the
+ * one actor that KNOWS the rebase was content-preserving, and it was the one throwing that knowledge away.
+ *
+ * NARROW BY CONSTRUCTION, and every clause matters:
+ *   · `action === 'rebased'` — ONLY a rebase this drain just performed. An author's push is not this, and
+ *     `'current'` minted nothing so there is no new head to stamp.
+ *   · `humanCleared` — a live `review:accepted`. A re-stamp CARRIES an acceptance; with none there is nothing
+ *     to carry, and `decideSetLabel`'s `restamp` refuses independently (two refusals, deliberately).
+ *   · `!reviewHeld` — an uncleared hold means the acceptance was never complete, and a rebase must not
+ *     complete it.
+ */
+export function needsAcceptanceRestamp(v, rebase) {
+  return !!v && rebase?.action === 'rebased' && !!v.humanCleared && !v.reviewHeld;
 }
 
 /**
@@ -3056,6 +3099,16 @@ async function runCli() {
         // #2684 — a stacked WE half that was BEHIND (its impl landed as a different sha) is the FALLBACK regime:
         // rebuilt onto main, `test` re-runs. Tag it for observability; control flow is unchanged.
         if (stackedWeHalf) v.coupleReCi = 're-ci';
+        // #x5e2ldj — RE-STAMP the acceptance this rebase just invalidated. The markers were stamped against the
+        // pre-rebase head; the new head is content-identical, and THIS process is the one that moved it. Without
+        // this the staleness gate re-derives, disagrees, and re-parks the PR the drain is mid-way through
+        // landing — the clear/rebase/re-park loop. Failure is logged and NEVER fatal: a missed re-stamp costs a
+        // re-park (today's status quo), while aborting a land over a marker would be strictly worse.
+        if (needsAcceptanceRestamp(v, r)) {
+          const out = restampAcceptance({ pr: v.num, repo: v.repo, newHead: r.newCommit });
+          v.acceptanceRestamped = out.ok;
+          if (!AS_JSON && !out.ok) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} acceptance re-stamp failed (${out.reason}) — it may re-park\n`);
+        }
         if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped || r.droppedManifest ? ' (manifest dropped)' : ''}${healTag}${contentTag}${cloneDir ? ` (via ${cloneDir})` : ''}${stackedWeHalf ? ' [couple re-CI: stacked base superseded]' : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (r.action === 'current') {
         // IDEMPOTENCY (drain re-push churn bug) — the tip is ALREADY on main and manifest-free; rebaseDropManifest minted/pushed NOTHING. Treat
