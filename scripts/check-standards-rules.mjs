@@ -2983,8 +2983,19 @@ export function shellCodeOf(line) {
   return s;
 }
 
-/** `--all` as a passed FLAG, not as a word. `--all-repos` is a different flag and not this one's business. */
-const ALL_FLAG_RE = /(^|\s)--all(?=$|[\s=])/;
+/**
+ * `--all` as a passed FLAG, not as a word. `--all-repos` and `--allow-dirty` are different flags and not this
+ * one's business.
+ *
+ * THE TERMINATOR SET IS THE WHOLE CORRECTNESS OF THIS REGEX, and the first cut got it wrong: it accepted only
+ * whitespace, `=` or end-of-line, so `node sync-commands-deploy.mjs --all;` — a shell metacharacter closing the
+ * word, in a file full of `if …; then` — was silently NOT flagged while invoking the CLI exactly as the #3196
+ * incident did (review-pr correctness juror on PR #1488). A gate that misses the real line is worse than no
+ * gate, because it is also a claim of coverage. So the set is every character that can END a shell word:
+ * whitespace, `=`, the statement/pipeline separators `;` `|` `&`, a closing `)`, and the redirections `<` `>`.
+ * A `-` is deliberately absent — that is what keeps `--all-repos` out.
+ */
+const ALL_FLAG_RE = /(^|\s)--all(?=$|[\s=;|&)<>])/;
 
 /**
  * Every line of a git hook that PASSES `--all` without saying why. PURE over the file's text.

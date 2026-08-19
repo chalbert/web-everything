@@ -2458,9 +2458,28 @@ describe('findGitHookAllFlags (#3196)', () => {
     expect(findGitHookAllFlags('echo ${x#y} --all')).toHaveLength(1);
   });
 
+  // A shell word ends at more than a space. The first cut accepted only whitespace/`=`/end-of-line, so
+  // `--all;` — in a file full of `if …; then` — invoked the CLI exactly as the incident did and was not
+  // reported. A gate that misses the real line is worse than no gate: it is also a claim of coverage.
+  it('flags the flag closed by any shell metacharacter, not only by a space', () => {
+    for (const line of [
+      'node x.mjs --all;',
+      'node x.mjs --all; then',
+      '(node x.mjs --all)',
+      'node x.mjs --all|tee log',
+      'node x.mjs --all&',
+      'node x.mjs --all&& echo ok',
+      'node x.mjs --all>out.txt',
+      'node x.mjs --all<in.txt',
+    ]) expect({ line, hits: findGitHookAllFlags(line).length }).toEqual({ line, hits: 1 });
+  });
+
   it('leaves a DIFFERENT flag that merely starts with the same letters alone', () => {
     expect(findGitHookAllFlags('node x.mjs --all-repos')).toEqual([]);
     expect(findGitHookAllFlags('node x.mjs --allow-dirty')).toEqual([]);
+    // `-` stays out of the terminator set precisely so these two do; pinned here so widening that set later
+    // cannot quietly swallow them.
+    expect(findGitHookAllFlags('node x.mjs --all-repos;')).toEqual([]);
   });
 
   it('accepts `--all=<value>` as the flag, because it is', () => {

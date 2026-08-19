@@ -27,7 +27,11 @@ modelled, and the bias is deliberately toward treating text as CODE, because a f
 a review while a false negative is the flag shipping again.
 
 `--all` is matched as a passed FLAG, not as a word, so `--all-repos` and `--allow-dirty` are somebody else's
-business. The escape is `# standards-allow --all: <why>` on the line or the one above it — a rule a reader can
+business. The TERMINATOR SET is where that matching lives, and the first cut got it wrong: it accepted only
+whitespace, `=` or end-of-line, so a `--all;` on the commands-deploy line — a shell metacharacter closing the
+word, in a file full of `if …; then` — invoked the CLI exactly as the incident did and was silently not
+reported. The juror on PR #1488 found it. The set is now every character that can END a shell word, and a `-`
+is deliberately still absent, which is what keeps the sibling flags out. The escape is `# standards-allow --all: <why>` on the line or the one above it — a rule a reader can
 only obey is a rule they suppress wholesale, and naming the reason keeps the suppression legible.
 
 Verified live rather than only in fixtures: re-adding `--all` to `we:.githooks/post-merge` makes
