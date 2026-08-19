@@ -72,6 +72,11 @@ describe('#3007 schema — versioned, closed, and total over the label targets',
     expect(verdictForLabelTarget('clear-human')).toBe(VERDICTS.CLEAR_HUMAN);
     // `rearm` swaps review:changes → review:pending: a HOLD awaiting review, not a verdict on the diff.
     expect(verdictForLabelTarget('rearm')).toBe(VERDICTS.PENDING);
+    // #x5e2ldj — `restamp` re-witnesses an EXISTING acceptance at a head the drain's own rebase moved. It gets
+    // its own verdict rather than reusing ACCEPTED, so a reader counting acceptances does not count a carried
+    // marker as a review that happened.
+    expect(verdictForLabelTarget('restamp')).toBe(VERDICTS.RESTAMPED);
+    expect(verdictForLabelTarget('restamp')).not.toBe(VERDICTS.ACCEPTED);
     // FAIL CLOSED. The old private copy of this ternary defaulted an unrecognised target to a verdict, which
     // is how a `clear-human` clearance would have been recorded as a `changes` hold.
     for (const bad of ['', 'merge-it', 'ACCEPTED', null, undefined, 0]) {
@@ -80,7 +85,7 @@ describe('#3007 schema — versioned, closed, and total over the label targets',
     // Round-trip: the verdict a target implies mirrors to the label that target's swap actually applies.
     for (const target of REVIEW_LABEL_TARGETS) {
       expect(verdictLabel(verdictForLabelTarget(target))).toBe(
-        target === 'clear-human' ? REVIEW_LABELS.accepted
+        target === 'clear-human' || target === 'restamp' ? REVIEW_LABELS.accepted
           : target === 'rearm' ? REVIEW_LABELS.pending : REVIEW_LABELS[target],
       );
     }

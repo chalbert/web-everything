@@ -1862,3 +1862,61 @@ describe('the write arc and its #2964 ordering', () => {
     expect(p.calls).not.toContain('postComment');
   });
 });
+
+/**
+ * `restamp` (#x5e2ldj) — CARRY an acceptance across a head the drain itself moved.
+ *
+ * THE LOOP IT ENDS, measured on PR #1445 on 2026-08-19: a clearance landed at 13:06:48 and the drain rebased
+ * that lane onto the newly-merged main a minute later. The rebase is content-preserving, but a rebase onto a
+ * moved base can change the context-RUN LENGTHS the contribution digest keeps, so the markers went stale and
+ * `review:human` was re-parked — on the PR the drain was itself about to land. Clear, rebase, re-park, repeat.
+ *
+ * `we:scripts/lib/review-escalation.mjs` names this fix in its POSITION section: the drain KNOWS it produced
+ * the rebase, so it can re-stamp rather than leave a gate to re-derive what it already knew.
+ *
+ * WHAT MAKES IT SAFE IS EVERY WAY IT REFUSES. It moves no label; it can only ever carry an acceptance that is
+ * already live. The tests below are mostly refusals for that reason — a `restamp` that could CREATE an
+ * acceptance would be a strictly worse `accepted`: one that skips INVARIANT 2, skips #2844's independence
+ * check, and claims a review nobody ran.
+ */
+describe('decideSetLabel — restamp carries an acceptance, and can do nothing else', () => {
+  const decide = (currentLabels) => decideSetLabel({ to: 'restamp', currentLabels });
+
+  it('ALLOWS the one case it exists for: a live review:accepted, nothing contradicting it', () => {
+    const d = decide(['review:accepted']);
+    expect(d.allowed).toBe(true);
+    expect(d.reason).toMatch(/no review was re-run/);
+  });
+
+  it('moves NO label — the label set was already right; only the markers went stale', () => {
+    const d = decide(['review:accepted', 'ready-to-merge']);
+    expect(d.removeLabels).toEqual([]);
+    expect(d.addLabel).toBe('review:accepted');   // already present: the swap is a no-op by construction
+  });
+
+  it('REFUSES with no acceptance to carry — it may never manufacture one', () => {
+    for (const labels of [[], ['review:pending'], ['review:changes'], ['ready-to-merge']]) {
+      const d = decide(labels);
+      expect(d.allowed).toBe(false);
+      expect(d.reason).toMatch(/no acceptance to carry/);
+    }
+  });
+
+  it('REFUSES on an uncleared review:human — a rebase must not complete a gate-self acceptance', () => {
+    const d = decide(['review:accepted', 'review:human']);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toMatch(/gate-self/);
+  });
+
+  it('REFUSES the contradictory accepted+changes pair rather than resolving it (#2974)', () => {
+    // `accepted` strips a stale `changes` because a reviewer just decided. A re-stamp decides nothing, so
+    // resolving the contradiction in the acceptance's favour would be this target inventing a verdict.
+    const d = decide(['review:accepted', 'review:changes']);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toMatch(/re-review the PR/);
+  });
+
+  it('is in the closed target set, so every totality sweep covers it', () => {
+    expect(REVIEW_LABEL_TARGETS).toContain('restamp');
+  });
+});
