@@ -1,0 +1,21 @@
+# DO NOT ENABLE. This workflow was written on 2026-08-19 and disproved the same hour.
+#
+# It keyed the `clear-human` ceremony on an `issue_comment` whose `author_association == 'OWNER'`, on the
+# argument that a Claude Code cloud VM cannot act as the operator on GitHub. That argument is FALSE, and the
+# evidence was already in this session: every comment the agent posted through the session's GitHub connector
+# carries `user.login: chalbert` and `author_association: OWNER` — indistinguishable, in every field this
+# workflow checked, from a comment the operator typed. The agent could have cleared the gate itself.
+#
+# The same defeat applies to every other GitHub-side gesture — a PR approval, a label, a merge — because the
+# connector performs all of them AS THE OPERATOR. So no action on GitHub is a human-presence signal while an
+# agent in the session holds that connector.
+#
+# #2946 stated the underlying rule and this file misread it. The rule is not "a laptop agent holds the PAT".
+# It is: A CREDENTIAL THE AGENT CAN REACH CANNOT BIND THE AGENT. The connector is such a credential, and
+# `we:agent-memory-src/workflow-cloud-vm-github-api-boundary.md` says so in the same session this was built.
+#
+# What a REMOTE clearance actually needs is a factor that is out-of-band from GitHub AND from the session:
+# a one-time code from the operator's authenticator verified against an Actions secret (single-use, or the
+# agent replays it from the comment it can read), or #2946's WebAuthn assertion. Kept in the tree, disabled,
+# with the reasoning attached, because the next person to want a remote clearance will reach for exactly this
+# design and should find the refutation before they build it.
