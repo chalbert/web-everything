@@ -65,14 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --quiet origin "$AFTER"
-          # A first push to the branch has an all-zero `before`; fall back to that commit's own file list.
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            files=$(git show --pretty=format: --name-only "$AFTER" -- 'ops/review-requests/*.json')
-          else
-            git fetch --quiet origin "$BEFORE" || true
-            files=$(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'ops/review-requests/*.json')
-          fi
-          echo "$files" | tr ' ' '\n' | sed '/^$/d' > /tmp/requests.txt
+          # Harmless and expected to fail on the push that CREATES the branch, where `before` is all zeros.
+          git fetch --quiet origin "$BEFORE" || true
+          # WHICH FILES the push added is decided in a TESTED script, not here. Shell in a workflow cannot be
+          # unit-tested, and the genesis-push case got it wrong when it was: see the header of
+          # `we:scripts/collect-review-requests.mjs` for what was dropped, silently, and why.
+          node scripts/collect-review-requests.mjs --before="$BEFORE" --after="$AFTER" > /tmp/requests.txt
           echo "count=$(wc -l < /tmp/requests.txt)" >> "$GITHUB_OUTPUT"
           cat /tmp/requests.txt
 
