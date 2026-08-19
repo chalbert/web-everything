@@ -97,7 +97,7 @@ import { writeAllSync } from './lib/write-all-sync.mjs';
  * costs a failed run and a lost record, and on an ALREADY-accepted PR — the one case that still swaps first — it
  * costs exactly the old partial state. Add a member here and the projection covers it automatically.
  */
-export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm', 'clear-human']);
+export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm', 'clear-human', 'restamp']);
 
 /**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
@@ -115,6 +115,12 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  *     NEVER removes `review:human`. The strongest thing an auto-fix can do is re-arm the review, never clear it.
  *   • `clear-human` — the #2895 gate-self clearance: the ONLY target that removes `review:human` (and the only
  *     one refused when the PR does NOT carry it). Nothing here checks WHO is asking — see below.
+ *   • `restamp` — the #x5e2ldj re-stamp: moves NO label at all. It exists because the drain's own
+ *     content-preserving rebase moves the head, which makes the acceptance markers stale, which re-parks the
+ *     very PR the drain was about to land — clear, rebase, re-park, forever. `review-escalation.mjs` names this
+ *     fix in its POSITION section: the drain KNOWS it produced the rebase, so it can re-stamp rather than have
+ *     a gate re-derive. REFUSED unless a live `review:accepted` is already on the PR: a re-stamp may only carry
+ *     an acceptance ACROSS a head move, never manufacture one.
  * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array}} o - `currentLabels` is the
  *   observed label array (string or `{name}` shape, per `hasReviewLabel`).
  * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
@@ -196,6 +202,45 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
       reason: isHuman
         ? 're-armed — review:changes→review:pending; review:human KEPT (gate-self stays human-ceremony-only)'
         : 're-armed — review:changes→review:pending; drain AI-review (or a human) re-verdicts',
+    };
+  }
+
+  // we:scripts/review-set-label.mjs#decideSetLabel — restamp (#x5e2ldj): carry an EXISTING acceptance across a
+  // head the drain itself moved. It adds nothing and removes nothing — the label set is already right; what
+  // went stale is the markers, and those are stamped by the write path, not by this decision.
+  //
+  // THE REFUSALS ARE THE WHOLE GUARD. A `restamp` that could CREATE an acceptance would be a strictly worse
+  // `accepted`: one that skips INVARIANT 2, skips #2844's independence check, and claims a review nobody ran.
+  if (to === 'restamp') {
+    if (isHuman) {
+      return {
+        allowed: false, addLabel: '', removeLabels: [], keepsHuman: true,
+        reason: 'gate-self: review:human is uncleared — a re-stamp carries an acceptance, it cannot complete one',
+      };
+    }
+    if (!hasReviewLabel(currentLabels, REVIEW_LABELS.accepted)) {
+      return {
+        allowed: false, addLabel: '', removeLabels: [], keepsHuman: isHuman,
+        reason: 'no review:accepted label — there is no acceptance to carry across the rebase',
+      };
+    }
+    // A PR carrying BOTH `accepted` and `changes` is the self-contradictory pair #2974 exists to prevent, and
+    // the pre-existing totality sweep caught this branch leaving it standing. REFUSE rather than strip:
+    // `accepted` strips a stale `changes` because a reviewer just decided; a re-stamp decides nothing, so
+    // resolving the contradiction in the acceptance's favour would be this target inventing a verdict.
+    if (hasReviewLabel(currentLabels, REVIEW_LABELS.changes)) {
+      return {
+        allowed: false, addLabel: '', removeLabels: [], keepsHuman: isHuman,
+        reason: 'review:accepted and review:changes are both live (#2974) — a re-stamp carries an acceptance, '
+          + 'it does not adjudicate a contradictory one; re-review the PR',
+      };
+    }
+    return {
+      allowed: true,
+      addLabel: REVIEW_LABELS.accepted,
+      removeLabels: [],
+      keepsHuman: isHuman,
+      reason: 're-stamped — acceptance carried across a drain-authored rebase; no review was re-run',
     };
   }
 
@@ -397,7 +442,7 @@ export function runReviewLabelCli({
     );
   }
   const targets = allowClearHuman ? "'accepted', 'changes', or 'clear-human'" : "'accepted' or 'changes'";
-  const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human';
+  const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human' || to === 'restamp';
   if (!fixedTo && !targetOk) {
     fail(`invalid --to — expected ${targets}`);
   }
@@ -487,8 +532,11 @@ export function runReviewLabelCli({
   //     `--actor` plus a quoted `--reason`. `buildVerdictComment` RECORDS the exemption, so the trail says a
   //     human ceremony cleared it rather than an established-independent agent.
   const clearerId = currentActorId();
-  const stampsAcceptance = to === 'accepted' || to === 'clear-human';
-  const independence = stampsAcceptance
+  // `restamp` stamps the markers — carrying them across a head the drain moved is the entire point — but it is
+  // EXCLUDED from the independence check: no clearer is asserting anything, so there is nobody to be
+  // independent OF. The acceptance it carries already passed that check when it was earned.
+  const stampsAcceptance = to === 'accepted' || to === 'clear-human' || to === 'restamp';
+  const independence = (stampsAcceptance && to !== 'restamp')
     ? decideClearerIndependence({ authorId: parseAuthorActorId(prBody), clearerId })
     : null;
   if (to === 'accepted' && independence && independence.status === INDEPENDENCE.SELF_CLEAR) {
@@ -535,7 +583,7 @@ export function runReviewLabelCli({
   // can therefore only ever cost a false re-park, never honour an accept it should not. Computed only for a
   // verdict that actually records an acceptance, so a `changes` verdict pays nothing.
   let reviewedDiff = '';
-  if (to === 'accepted' || to === 'clear-human') {
+  if (to === 'accepted' || to === 'clear-human' || to === 'restamp') {
     try {
       // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
       // caller bug #2952 exists to make diagnosable: it throws a TypeError inside the try and degrades to an
@@ -785,7 +833,7 @@ export function buildVerdictComment({
   // digest changes every time `main` shifts a context line or a hunk offset, which the drain's own rebase-drop
   // pass causes within minutes of every accept — measured on PR #1100, where the clearance was revoked 3m07s
   // after it was granted over three lines of pure base movement.
-  const stampsAcceptance = to === 'accepted' || to === 'clear-human';
+  const stampsAcceptance = to === 'accepted' || to === 'clear-human' || to === 'restamp';
   // #xmnl36p — `clear-human` ALSO stamps a machine-readable clearance marker, so an automated re-score can read
   // the clearance back and announce that it is overriding one (`parseOperatorClearance`). Until this, the only
   // record was the prose attribution below — which the reader still parses as a fallback, so clearances written
