@@ -40,6 +40,7 @@ import { observeRun } from './effect-observer.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
 import { createDispatchObservers, defaultListAgents } from './dispatch-lane-io.mjs';
+import { createExploreObservers } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -353,11 +354,12 @@ export function flagValue(argv, name) {
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  // ONE OBSERVER IS REGISTERED, and it arrived with the first thing that dispatches (#3037). Until then this
-  // table was empty on purpose — an observer with no work to watch is an implementation with no caller — and
-  // the note here said the first real dispatch would register its observer alongside its sink. This is that.
-  // Any OTHER in-flight type is still reported as `no-observer` rather than silently ignored.
-  const observers = createDispatchObservers();
+  // THE OBSERVERS, one per dispatching effect type, and each arrived with the thing that dispatches it: the
+  // delivery agent (#3037) and the committee panelist (#3150). Until the first of them this table was empty on
+  // purpose — an observer with no work to watch is an implementation with no caller. Any OTHER in-flight type
+  // is still reported as `no-observer` rather than silently ignored. The two tables are keyed by DISTINCT
+  // effect types, so the spread cannot shadow either.
+  const observers = { ...createDispatchObservers(), ...createExploreObservers() };
   const argv = process.argv.slice(2);
   const resolveId = flagValue(argv, 'resolve');
   if (resolveId !== undefined) {

@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { laneGuardDecision, resolveReal } from '../../guard-lane.mjs';
+import { assertPublishableContent, writeBacklogMd, writeBacklogMdUnguarded } from '../guarded-write.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(resolve(here, '../../backlog.mjs'), 'utf8');
@@ -89,5 +90,49 @@ describe('writeBacklogMd enforces lane-isolation at the source (item x1vw9g7)', 
     const LANE_ROOT = resolve(WS, '.lanes', 'web-everything', 'lane-3');
     expect(laneGuardDecision(resolveReal(resolve(PRIMARY_ROOT, 'backlog', '1-a.md')), PRIMARY_ROOT)).toMatch(/BLOCKED/);
     expect(laneGuardDecision(resolveReal(resolve(LANE_ROOT, 'backlog', '1-a.md')), LANE_ROOT)).toBe(null);
+  });
+});
+
+// #3150 EXTRACTION: the two CONTENT gates — the #3015 secret scrub and the #883 locus-prefix scan — moved out
+// of `writeBacklogMdUnguarded`'s body into the exported `assertPublishableContent`, so a second code-written
+// committed file (`we:scripts/operations/explore-io.mjs`'s `/research/` topic pair) passes the same two gates
+// instead of carrying a near-copy.
+//
+// WHY THIS BLOCK EXISTS AT ALL (PR #3150 review r2, should-fix 2). Before the extraction the gates were
+// INLINE in the funnel every card mutation goes through — scaffold, claim, resolve, settle, retype, yield,
+// prepare-stamp, `we:scripts/operations/claim-io.mjs`'s sink, the drain's on-land splice. Now they are ONE
+// CALL, and deleting that call would silently drop both gates for every one of those callers with the whole
+// suite still green: `scrubPublish` and `scanRepoLocusPrefixes` are unit-tested standalone, and nothing pinned
+// them on the writer that actually carries them. These four assertions are that pin. They need no filesystem —
+// every refusal happens before `writeFileSync`.
+describe('the card writer still applies both CONTENT gates after the #3150 extraction', () => {
+  const ABS = '/dev/null/never-written.md';
+  const REL = 'backlog/never-written.md';
+
+  it('REFUSES a card carrying a bare code-path ref (#883), on the writer and not only in the scanner', () => {
+    expect(() => writeBacklogMdUnguarded(ABS, REL, '---\nkind: story\n---\n\n# T\n\nSee scripts/operations/engine.mjs line 406.\n'))
+      .toThrow(/locus-prefix: \d+ bare code-path ref/);
+  });
+
+  it('REFUSES a card carrying a credential (#3015) — a card is committed and pushed', () => {
+    expect(() => writeBacklogMdUnguarded(ABS, REL, `---\nkind: story\n---\n\n# T\n\nThe token is ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}.\n`))
+      .toThrow(/secret-scrub: refusing to write/);
+  });
+
+  it('and the SAME two gates are what the shared helper applies, so a second caller cannot get a weaker chain', () => {
+    // `assertPublishableContent` is the exported seam `explore-io.mjs` calls. Asserting it directly is what
+    // makes "extracted verbatim, behaviour preserved" executable rather than a claim in a header.
+    expect(() => assertPublishableContent(REL, 'See scripts/operations/engine.mjs line 406.'))
+      .toThrow(/locus-prefix/);
+    expect(() => assertPublishableContent(REL, 'See we:scripts/operations/engine.mjs line 406.')).not.toThrow();
+  });
+
+  it('the guarded writer reaches those gates too — it delegates rather than skipping past them', () => {
+    // `writeBacklogMd` = lane guard, then delegation. A lane-clone path passes the lane guard, so a bare
+    // code-path ref must still be refused by the delegated content gates. Without the delegation this would
+    // reach `writeFileSync` on a path that cannot be written and throw something else entirely.
+    const laneAbs = resolve('/ws', '.lanes', 'web-everything', 'lane-3', 'backlog', '1-a.md');
+    expect(() => writeBacklogMd(laneAbs, 'backlog/1-a.md', 'See scripts/operations/engine.mjs line 406.', { root: resolve('/ws', '.lanes', 'web-everything', 'lane-3') }))
+      .toThrow(/locus-prefix/);
   });
 });
