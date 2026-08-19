@@ -94,6 +94,14 @@ export function validateRequest(raw) {
   if (!Number.isInteger(pr) || pr <= 0) {
     return { ok: false, error: `\`pr\` must be a positive integer, got ${JSON.stringify(pr)}` };
   }
+  // THE TARGET IS CHECKED FIRST, and the order is the fix rather than a tidy-up. With the field guards ahead of
+  // it, a request naming an unknown target AND carrying a stray instruction was refused for the stray field —
+  // reporting the second-most-wrong thing about it, and sending a reader to fix the wrong line
+  // (review-pr correctness juror on #1477). Whether `to` is a target at all is the more fundamental question,
+  // so it is asked first.
+  if (!APPLIABLE_TARGETS.includes(to)) {
+    return { ok: false, error: `\`to\` must be one of ${APPLIABLE_TARGETS.join('|')}, got ${JSON.stringify(to)}` };
+  }
   if (to === 'clear-human' && (typeof operatorInstruction !== 'string' || !operatorInstruction.trim())) {
     return {
       ok: false,
@@ -106,9 +114,6 @@ export function validateRequest(raw) {
     // A stray instruction on an ordinary verdict means someone copied a clearance request and edited the
     // target. Refuse rather than silently ignore the field: the next edit is the one that flips it back.
     return { ok: false, error: `\`${CLEARANCE_FIELD}\` belongs only on a \`clear-human\` request` };
-  }
-  if (!APPLIABLE_TARGETS.includes(to)) {
-    return { ok: false, error: `\`to\` must be one of ${APPLIABLE_TARGETS.join('|')}, got ${JSON.stringify(to)}` };
   }
   // The single home REFUSES an empty `--to=changes` (#xd6moh1) — a bounce with no findings tells an author
   // nothing. Catch it here too so the request is rejected at validation rather than after a subprocess.

@@ -64,6 +64,16 @@ describe('what this applier REFUSES', () => {
     expect(validateRequest({ ...OK, to: 'changes', body: '- the thing is wrong' }).ok).toBe(true);
   });
 
+  it('reports the TARGET as wrong when a request is wrong in two ways at once', () => {
+    // Guard order is observable, and it was backwards: a request naming an unknown target while also carrying
+    // a stray instruction was refused for the stray field, sending a reader to fix the wrong line
+    // (review-pr correctness juror on #1477). Whether `to` is a target at all is the more fundamental question.
+    const r = validateRequest({ ...OK, to: 'not-a-target', operatorInstruction: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/`to` must be one of/);
+    expect(r.error).not.toMatch(/operatorInstruction/);
+  });
+
   it('refuses a verdict target it does not know', () => {
     for (const to of ['rearm', 'merged', 'ACCEPTED', '', null, undefined]) {
       expect(validateRequest({ ...OK, to }).ok).toBe(false);
