@@ -259,7 +259,7 @@ export function buildPlans({ srcRoot = SRC_ROOT, destRoot, only = null, all = fa
 
 /** #2579 review — exported so the OUTPUT contract is unit-testable. The stale-reporting gap existed
  *  precisely because nothing could assert what this function prints. */
-export function formatPlans(plans, { checkOnly, dryRun }) {
+export function formatPlans(plans, { checkOnly, dryRun, noun = 'skill' }) {
   const drifted = plans.filter((p) => p.actions.length > 0);
   // #2579 review — STALE FILES MUST BE REPORTED. Making deletion opt-in (`--prune`) was justified in this
   // file's own header by "stale files are reported by `--check`, never silently destroyed" — but `plan.stale`
@@ -269,7 +269,7 @@ export function formatPlans(plans, { checkOnly, dryRun }) {
   const withStale = plans.filter((p) => (p.stale || []).length > 0 && !p.pruned);
   const lines = [];
   if (drifted.length === 0 && withStale.length === 0) {
-    lines.push(`✓ in sync — ${plans.length} skill(s) checked, no drift`);
+    lines.push(`✓ in sync — ${plans.length} ${noun}(s) checked, no drift`);
   } else {
     const verb = checkOnly ? 'DRIFT' : dryRun ? 'WOULD SYNC' : 'SYNCED';
     for (const plan of drifted) {
@@ -281,7 +281,7 @@ export function formatPlans(plans, { checkOnly, dryRun }) {
       if (counts.remove) parts.push(`-${counts.remove}`);
       lines.push(`${verb} ${plan.name}: ${parts.join(' ')} (${plan.destDir})`);
     }
-    if (drifted.length) lines.push(`${drifted.length}/${plans.length} skill(s) drifted`);
+    if (drifted.length) lines.push(`${drifted.length}/${plans.length} ${noun}(s) drifted`);
     for (const plan of withStale) {
       lines.push(
         `STALE ${plan.name}: ${plan.stale.length} file(s) at the deploy target are not tracked in source `

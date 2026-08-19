@@ -1,0 +1,93 @@
+# Working from a cloud VM (Claude Code on the web)
+
+A session started from claude.ai/code, the mobile app, or `claude --cloud` runs in an **ephemeral,
+Anthropic-managed container**, not on the workstation. The instruction layer travels there unchanged —
+`AGENTS.md` is committed, so the rules load — but almost everything the laptop setup assumes about the
+*machine* is false. This page is the delta. Read it when `bootstrap-session` reports `host: ephemeral`.
+
+**One command sets the machine up:** `node scripts/bootstrap-session.mjs`. It is idempotent and host-aware.
+On an ephemeral VM it applies and registers itself as a `SessionStart` hook, so the next session in the same
+container does it unasked; on a workstation it only reports (see *Installing on a workstation*).
+`--dry-run` shows the plan, `--check` reports drift without writing.
+
+## What is different, and why
+
+| | Laptop | Cloud VM |
+|---|---|---|
+| Clones | full history | **`--depth 1` shallow** (`rev-parse --is-shallow-repository` → `true`) |
+| Sibling repos | already siblings on disk | arrive via the harness `add_repo` tool, then a clone |
+| Lanes | the clone pool is the unit of work | **no pool — work the checkout directly** |
+| Branch guard | installed at user level (#3074) | not installed |
+| Skills | `~/.claude/skills` synced, scoped | deployed with `--all` (nothing else lives there) |
+| Memory | reserved lane → user-level dir (#2350) | in-repo `.claude/agent-memory` |
+| Uncommitted work | survives indefinitely | **lost when the VM is reclaimed** |
+
+## The rules that only apply here
+
+**Push early, push often — this is the one that bites.** The container is reclaimed after a period of
+inactivity and the filesystem goes with it; only the conversation is restored. Everything the laptop
+learned about lanes being wiped mid-work ([[shared-pool-lane-unsafe-for-manual-work]],
+[[lane-refresh-wipes-unmapped-lanes]]) applies here with a blunter cause: there is no refresher to blame,
+the whole box goes. A WIP commit pushed to a `lane/*` ref is durable; a working tree is not.
+
+**Do not provision a lane pool.** `lane-pool.mjs` exists to dodge the user-global branch guard, to share
+git objects with a primary checkout via `--reference`, and to persist between batches. A cloud VM has no
+guard to dodge, no full object store to reference (the clones are shallow), and no "between batches" — so
+a pool costs an `npm ci` per lane and returns nothing. Edit the checkout, commit, push a `lane/*` ref.
+The convergence half is unchanged: the transport to `main` is still the PR (`/pr`, `/drain`).
+
+**Unshallow before any history work.** `git log`, `blame`, `bisect`, and anything that walks back past
+HEAD need `git fetch --unshallow` first. Cheap to do, silently wrong to skip.
+
+**Siblings are attached, not cloned.** `bootstrap-session` reports which of the constellation are missing
+but never fetches them: private repos are cloned through a credential proxy that deliberately keeps
+credentials out of the sandbox, so the harness's `add_repo` tool is the only route. Attach, clone, then
+re-run the bootstrap.
+
+**Nothing repoints the memory symlink.** The reserved memory lane (#2350) is the laptop's arrangement and
+its repoint is human-gated. Here, `check-memory.mjs` and `memory-resolve.mjs` both fall back to the
+tracked in-repo `.claude/agent-memory`, so `/note` and `[[slug]]` links resolve with no setup — and
+memory written in a VM lands in `agent-memory-src`, where a commit makes it durable.
+
+## This is not the final home
+
+The bootstrap lives in WE today because that is where the lane and delivery machinery is dogfooded, not
+because WE is the constellation's hub. It is not: WE is a **public peer**, and the machinery is Plateau's
+product, so it moves there eventually. Nothing here is written to assume otherwise —
+`bootstrap-session.mjs` derives which checkout it is in rather than declaring it, and takes the
+constellation from `scripts/lib/constellation-repos.mjs` rather than a local list. Its `locus:` line reports
+what it decided. It does NOT look up the skills CLI in siblings — an earlier cut did, and that was a
+cross-repo code-execution path a `/converge` panel rejected; the relocation ordering it bought belongs to
+the multi-project registry (#2472), not to a search-and-execute.
+
+Two WE-as-hub assumptions do remain, both in that shared table and both flagged there: `we: { path: '' }`
+("the WE primary's own cwd") and `DEFAULT_REPO_KEY = 'we'`. They are the seam the move pulls on, and they
+belong to `review-runner.mjs`, not to this bootstrap.
+
+## Installing on a workstation
+
+`npm run bootstrap` **reports** on a workstation; `npm run bootstrap:install` applies. That asymmetry is
+deliberate and is the one thing to understand here.
+
+The committed project `SessionStart` hook means the bootstrap runs the moment anyone opens this repo — so
+a default run must not reach outside the repository. On a durable host it prints what it would do and
+stops: nothing under `$HOME/.claude` is touched, no directory is granted, and no user-level hook is
+installed. `npm run bootstrap:install` is the explicit opt-in and `npm run bootstrap:uninstall` reverses it. (Both exist as their own scripts because `npm run bootstrap install` does NOT forward the bare argument — npm swallows it without a `--` separator, leaving the reader silently in report-only mode.)
+
+An **ephemeral** cloud VM writes freely, because its `$HOME` belongs to a container reclaimed on idle —
+there is no durable state to consent about, and a session that configures itself is the whole point.
+
+This was not the first design. The first one always wrote, which meant opening the repo on a workstation
+silently granted a directory and installed a user-level hook that then fired in **every unrelated repo on
+that machine**. A `/converge` panel caught it before it landed (2026-08-18).
+
+Two things it deliberately does not own: the lane pool (`lane-pool.mjs provision`) and the branch guard
+(`guard-lane-install.mjs install`). Both are laptop-only, both have their own installer with its own
+safety rules, and wrapping them here would put a second source of truth in front of them.
+
+**Nothing about the machine is hand-maintained any more.** The one absolute path that used to be typed by
+hand — the primary checkout's `.git`, granted so a `--reference`d lane can read the objects it shares — is
+now derived from where the checkout actually is and written to `~/.claude/settings.json`. It was a
+`/Users/<name>/…` literal in the COMMITTED `.claude/settings.json`, which made it wrong for anyone else and
+dead in every cloud VM; the stale one-off `Bash(cd /Users/…)` allow-rule beside it is simply gone. Machine
+state lives at machine level, computed — the same conclusion #3074 reached for the guard.

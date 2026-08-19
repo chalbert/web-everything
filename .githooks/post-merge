@@ -19,3 +19,19 @@ esac
 if git diff --name-only ORIG_HEAD HEAD -- skills-src/ 2>/dev/null | grep -q .; then
   node scripts/sync-skills-deploy.mjs || echo "warning: skills deploy sync failed — run 'npm run skills:sync' by hand" >&2
 fi
+
+# Same treatment for slash commands (.claude/commands/): before this they had no deploy path at all, so a
+# landed command fix was live only in a session whose primary directory is this repo.
+#
+# NO `--all` HERE, and the asymmetry is the point. `--all` does not mean "deploy every command" — it means
+# "create the machine-global tree on a machine that has never chosen to have one" (`if (!all &&
+# !exists(destRoot)) return null`). Passing it from an unattended hook let a routine `git pull` that merely
+# touched a command file create `~/.claude/commands` and populate the operator's user-global config, live in
+# every unrelated repo they open, without ever asking. The skills line above cannot do that — it passes no
+# `--all`, and its per-skill plan skips any skill whose destination does not already exist.
+#
+# So this hook only REFRESHES a tree the operator already has. Creating one is the explicit opt-in:
+# `npm run bootstrap:install` on a workstation, or `npm run commands:sync -- --all` by hand.
+if git diff --name-only ORIG_HEAD HEAD -- .claude/commands/ 2>/dev/null | grep -q .; then
+  node scripts/sync-commands-deploy.mjs || echo "warning: commands deploy sync failed — run 'npm run commands:sync' by hand" >&2
+fi
