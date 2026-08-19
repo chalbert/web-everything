@@ -1,8 +1,10 @@
 ---
 bornAs: xsarpbt
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-08-19"
+dateResolved: "2026-08-19"
 tags: []
 ---
 
