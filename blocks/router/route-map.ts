@@ -6,9 +6,9 @@
  * The declarative `<template route>` DOM is the canonical authoring source-of-truth; this is its
  * *derived* serializable projection for non-DOM consumers (sitemap, prerender, config tooling) that
  * cannot read the route table without a running DOM. The projection is a 1:1 drop of the two
- * non-serializable fields on {@link RouteDefinition} — `pattern: URLPattern` + `template:
- * HTMLTemplateElement` — keeping exactly the fields #1685 enumerated: `path`, `guard`, `guardLeave`,
- * `loader`, `outlet`, `isErrorBoundary`.
+ * non-serializable fields on the runtime `RouteDefinition` (`fui:blocks/router/types.ts`) — `pattern:
+ * URLPattern` + `template: HTMLTemplateElement` — keeping exactly the fields #1685 enumerated: `path`,
+ * `guard`, `guardLeave`, `loader`, `outlet`, `isErrorBoundary`.
  *
  * Scope (slice B, #1721): the **schema** (these types) + a structural **validator** + conformance
  * **vectors** (statically-authored route maps in `__fixtures__/route-map-cases.ts`). The derived-map
@@ -22,8 +22,9 @@
  */
 
 /**
- * One entry in the serializable route-map projection — the derived, non-DOM form of a single
- * {@link RouteDefinition}. Carries only the serializable fields (drops `pattern` + `template`).
+ * One entry in the serializable route-map projection — the derived, non-DOM form of a single runtime
+ * `RouteDefinition` (`fui:blocks/router/types.ts`). Carries only the serializable fields (drops `pattern`
+ * + `template`).
  */
 export interface RouteMapEntry {
   /** The URLPattern pathname *template* (e.g. `/users/:id`), never a concrete URL. */
@@ -42,7 +43,8 @@ export interface RouteMapEntry {
 
 /**
  * The serializable route map — an ordered projection of a `<we-route-view>`'s route table. Order is
- * significant (first match wins), exactly as `parseRouteDefinitions` returns it. A `base` mirrors the
+ * significant (first match wins), exactly as the runtime's `parseRouteDefinitions`
+ * (`fui:blocks/router/types.ts`) returns it. A `base` mirrors the
  * router's optional base-path prefix; when present, each entry's `path` is the already-normalized full
  * path (the projection is post-normalization, so consumers read final paths).
  */
@@ -61,7 +63,7 @@ type SerializableRouteFields = Pick<
 
 /**
  * The DOM→map **builder** (#1736) — the faithful derivation #1721 parked for the first consuming slice.
- * Projects a parsed `RouteDefinition[]` (from `parseRouteDefinitions`, `./types`) into the serializable
+ * Projects a parsed `RouteDefinition[]` (from `parseRouteDefinitions`, `fui:blocks/router/types.ts`) into the serializable
  * {@link RouteMap}: it **drops** the two non-serializable fields (`pattern: URLPattern`, `template:
  * HTMLTemplateElement`) and keeps exactly the #1685 serializable fields, in source order.
  *

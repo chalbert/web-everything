@@ -35,19 +35,48 @@ import { writeLineSync } from './lib/write-all-sync.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, '..');
 
-/** The verdicts a MACHINE applier may carry out. */
-export const APPLIABLE_TARGETS = Object.freeze(['accepted', 'changes']);
+/** The verdicts this applier may carry out. */
+export const APPLIABLE_TARGETS = Object.freeze(['accepted', 'changes', 'clear-human']);
+
+/**
+ * `clear-human` requires this field, and its NAME is the guard. You cannot populate `operatorInstruction`
+ * without claiming, in writing, that an operator said something — and it is posted verbatim in the durable
+ * comment, where a false one is legible to anyone who looks.
+ */
+export const CLEARANCE_FIELD = 'operatorInstruction';
 
 /**
  * Validate a staged request. PURE — returns `{ok, request}` or `{ok:false, error}`; never throws, never reads
  * the world, so every refusal below is testable without a runner.
  *
- * `clear-human` IS REFUSED HERE, and it is the one rule in this file that is not merely validation.
- * `review:human` is human-ceremony-only (INVARIANT 2, #2285): the whole tier exists so that a gate-self edit
- * cannot be cleared by a machine. CI holding a write token is still a machine, and a token is not a ceremony —
- * so it is refused BEFORE the CLI is reached, rather than relying on the CLI's own guard. Two refusals for one
- * rule is deliberate: this path is unattended, and the failure mode is silent escalation of the exact tier
- * built to stop it.
+ * ── `clear-human`: REFUSED UNTIL 2026-08-19, NOW ALLOWED WITH ITS AUTHORISATION ATTACHED ────────────────────
+ *
+ * This file used to refuse `clear-human` outright, on the grounds that CI holding a write token is a machine
+ * and a token is not a ceremony. Operator ruling, 2026-08-19, made with the weakness stated in front of them:
+ *
+ *   "For now, I want to allow you to accept an explicit demand to remove human tag. We will build the ui
+ *    approved later."
+ *
+ * WHAT THAT DOES AND DOES NOT GIVE UP. The sanctioned workstation path is `review-set-label.mjs
+ * --to=clear-human --actor=<name> --reason=<quote the operator instruction authorising this>`, and NOTHING
+ * there verifies that a human said it either — #2895 shipped the clearance as "the raw command with better
+ * manners" and deferred the unforgeable signal to #2946. So relaying an operator's instruction through a
+ * request file is exactly as strong as running the command on a laptop, and no stronger. It is not a new
+ * weakness; it is the SAME one, reachable from one more place.
+ *
+ * A day earlier this same session built a comment-triggered clearance that claimed GitHub had authenticated
+ * the operator. It had not: every comment an agent posts through the session's GitHub connector carries the
+ * operator's own login and `author_association: OWNER`. That design was reverted. The lesson is kept here as
+ * the reason this one claims nothing: an honest weak path beats a path that overstates itself.
+ *
+ * WHAT STILL HOLDS THE LINE, given the signal cannot:
+ *   · `operatorInstruction` is MANDATORY and travels verbatim into the durable comment. A clearance nobody
+ *     asked for now requires inventing a quote and publishing it under your own name.
+ *   · The trust boundary is unchanged in kind and wider in blast radius: whoever can push to
+ *     `ops/review-requests` can now also clear a gate-self hold. On a solo repo that is already the same
+ *     authority as pushing the code. On a repo with more than one writer it would need revisiting FIRST.
+ *   · #2946 (a WebAuthn gesture) remains the durable fix and remains open. This does not close it, and every
+ *     record this path writes says so.
  *
  * @param {unknown} raw - the parsed request object
  * @returns {{ok: true, request: object} | {ok: false, error: string}}
@@ -57,6 +86,7 @@ export function validateRequest(raw) {
     return { ok: false, error: 'request must be a JSON object' };
   }
   const { repo, pr, to, actor, body, sessionId, channel } = raw;
+  const operatorInstruction = raw[CLEARANCE_FIELD];
 
   if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return { ok: false, error: `\`repo\` must be <owner/name>, got ${JSON.stringify(repo)}` };
@@ -64,16 +94,26 @@ export function validateRequest(raw) {
   if (!Number.isInteger(pr) || pr <= 0) {
     return { ok: false, error: `\`pr\` must be a positive integer, got ${JSON.stringify(pr)}` };
   }
-  if (to === 'clear-human') {
-    return {
-      ok: false,
-      error: 'REFUSED: `clear-human` is human-ceremony-only (INVARIANT 2, #2285) and a machine applier may '
-        + 'never perform it. CI holding a write token is still a machine; a token is not a ceremony. Clear it '
-        + 'from a session, by a human.',
-    };
-  }
+  // THE TARGET IS CHECKED FIRST, and the order is the fix rather than a tidy-up. With the field guards ahead of
+  // it, a request naming an unknown target AND carrying a stray instruction was refused for the stray field —
+  // reporting the second-most-wrong thing about it, and sending a reader to fix the wrong line
+  // (review-pr correctness juror on #1477). Whether `to` is a target at all is the more fundamental question,
+  // so it is asked first.
   if (!APPLIABLE_TARGETS.includes(to)) {
     return { ok: false, error: `\`to\` must be one of ${APPLIABLE_TARGETS.join('|')}, got ${JSON.stringify(to)}` };
+  }
+  if (to === 'clear-human' && (typeof operatorInstruction !== 'string' || !operatorInstruction.trim())) {
+    return {
+      ok: false,
+      error: `REFUSED: \`clear-human\` requires \`${CLEARANCE_FIELD}\` — the operator's own words authorising `
+        + 'this clearance, quoted verbatim. Nothing verifies them (#2946 is the durable fix and is open), so '
+        + 'the record has to be WRITTEN: it is posted in the durable comment under the actor named here.',
+    };
+  }
+  if (to !== 'clear-human' && operatorInstruction !== undefined) {
+    // A stray instruction on an ordinary verdict means someone copied a clearance request and edited the
+    // target. Refuse rather than silently ignore the field: the next edit is the one that flips it back.
+    return { ok: false, error: `\`${CLEARANCE_FIELD}\` belongs only on a \`clear-human\` request` };
   }
   // The single home REFUSES an empty `--to=changes` (#xd6moh1) — a bounce with no findings tells an author
   // nothing. Catch it here too so the request is rejected at validation rather than after a subprocess.
@@ -91,7 +131,7 @@ export function validateRequest(raw) {
   if (channel !== undefined && (typeof channel !== 'string' || !channel.trim())) {
     return { ok: false, error: '`channel`, when present, must be a non-empty string' };
   }
-  return { ok: true, request: { repo, pr, to, actor, body: body ?? '', sessionId, channel } };
+  return { ok: true, request: { repo, pr, to, actor, body: body ?? '', sessionId, channel, operatorInstruction } };
 }
 
 /**
@@ -108,6 +148,10 @@ export function buildLabelArgv(request, bodyFile) {
   ];
   if (bodyFile) argv.push(`--body-file=${bodyFile}`);
   if (request.channel) argv.push(`--channel=${request.channel}`);
+  // The single home requires `--reason` for `clear-human` (#2895) and posts it verbatim. The operator's words
+  // ARE the reason — nothing is paraphrased, because a paraphrase is the agent's account of what it was told
+  // rather than what it was told.
+  if (request.to === 'clear-human') argv.push(`--reason=${request.operatorInstruction}`);
   return argv;
 }
 

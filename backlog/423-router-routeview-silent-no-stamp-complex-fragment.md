@@ -55,7 +55,8 @@ visible statically (most likely a stamped-fragment auto-upgrade side effect — 
 tree-select behavior clearing its container on upgrade) and needs **live-browser forensics**.
 
 Shipped the **contract-boundary diagnostic** (the second Done-when path) in
-[we:RouteViewElement.ts](../blocks/router/elements/RouteViewElement.ts#L505): a matched non-empty template
+`we:blocks/router/elements/RouteViewElement.ts` (link dropped — that WE copy was sliced out by #3154; the
+diagnostic itself has no FUI counterpart yet and is carried by #3154's residual child): a matched non-empty template
 that stamps zero live nodes now logs a clear, route-identified `[Router] … (#423)` error instead of
 failing silently, and `appendChild` is wrapped so a stamp-time throw surfaces with route context rather
 than as an unhandled rejection. Full test suite green (2368). The **root-cause fix + regression test**
