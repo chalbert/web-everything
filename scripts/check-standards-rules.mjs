@@ -2938,3 +2938,80 @@ export function dirLevelScopeFinding(item) {
   if (rationale) return [];
   return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
 }
+
+// ── `--all` inside a git hook (#3196) ──────────────────────────────────────────────────────────
+// `we:.githooks/post-merge` shipped a commands sync carrying `--all`. On that CLI `--all` does NOT mean
+// "deploy every command" — it means "CREATE the machine-global tree", on a machine that never opted in
+// (`if (!all && !exists(destRoot)) return null`). So a routine `git pull` that merely touched a command file
+// created `~/.claude/commands` and populated the operator's user-global config, live in every unrelated repo
+// they open, without ever asking.
+//
+// WHY A HOOK IS THE PLACE TO GATE IT, and not "anywhere the flag appears": a hook runs on every merge, on
+// every clone, unattended, with nobody reading its output. The same flag typed by hand is a choice; typed
+// into a hook it is applied silently and repeatedly to whoever cloned the repo. It was caught by a reviewer,
+// which is exactly the kind of catch that does not repeat.
+//
+// A PROMPT, NOT A WALL (`GITHOOK_ALL_ALLOW`). A hook that genuinely needs the flag says so on the line or the
+// one above it. A rule you can only obey is a rule people suppress wholesale; one you can answer gets read.
+
+/** The inline escape. Naming the reason is the point — the marker alone would just relocate the silence. */
+export const GITHOOK_ALL_ALLOW = 'standards-allow --all:';
+
+/**
+ * The code half of one shell line, with any trailing `#` comment removed. PURE.
+ *
+ * THE COMMENT HALF IS WHY THIS EXISTS AT ALL. `we:.githooks/post-merge` carries a long comment explaining that
+ * it deliberately does NOT pass `--all` — the exact prose a naive substring scan would report as a violation,
+ * which would make the rule fire hardest on the file that already got it right. Quote tracking is here for the
+ * same reason in miniature: `echo "pass --all # not really"` has no comment in it.
+ *
+ * Honest limit: this is a scanner, not a shell parser. Heredocs, `$(…)` nesting and `${x#y}` expansions are
+ * not modelled. It is deliberately biased toward treating text as CODE — a false positive is a sentence in a
+ * review; a false negative is the flag shipping again.
+ */
+export function shellCodeOf(line) {
+  const s = String(line ?? '');
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && quote !== "'") { i++; continue; }   // an escaped char is never a delimiter
+    if (quote) { if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    // `#` opens a comment only at the start of a word — `${x#y}` and `a#b` are not comments.
+    if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+  }
+  return s;
+}
+
+/** `--all` as a passed FLAG, not as a word. `--all-repos` is a different flag and not this one's business. */
+const ALL_FLAG_RE = /(^|\s)--all(?=$|[\s=])/;
+
+/**
+ * Every line of a git hook that PASSES `--all` without saying why. PURE over the file's text.
+ * @param {string} content
+ * @returns {Array<{line: number, text: string}>}
+ */
+export function findGitHookAllFlags(content) {
+  const lines = String(content ?? '').split('\n');
+  const out = [];
+  lines.forEach((raw, i) => {
+    if (!ALL_FLAG_RE.test(shellCodeOf(raw))) return;
+    // The escape is read from the RAW line (and the one above), because it lives in a comment by design.
+    if (raw.includes(GITHOOK_ALL_ALLOW) || String(lines[i - 1] ?? '').includes(GITHOOK_ALL_ALLOW)) return;
+    out.push({ line: i + 1, text: raw.trim() });
+  });
+  return out;
+}
+
+/**
+ * The finding as the gate reports it. Kept beside the detector so the message and the rule cannot drift, and
+ * so it says what the flag DOES rather than only that it is disallowed — see the header on why.
+ */
+export function gitHookAllFlagError(file, hit) {
+  return `${file}:${hit.line}: \`--all\` passed from a git hook — on these deploy CLIs it does not mean `
+    + '"deploy everything", it means CREATE the machine-global tree (`~/.claude/commands`, `~/.claude/skills`) '
+    + 'on a machine that never opted in. A hook runs unattended on every merge and every clone, so this is '
+    + `applied silently and repeatedly to whoever cloned the repo. Drop the flag (the hook then only REFRESHES `
+    + `a tree the operator already has), or write \`# ${GITHOOK_ALL_ALLOW} <why>\` on that line or the one above.`
+    + `\n    ${hit.text}`;
+}
