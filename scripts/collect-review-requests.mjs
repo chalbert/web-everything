@@ -62,7 +62,14 @@ export function collectArgv({ before, after } = {}) {
     return ['ls-tree', '-r', '--name-only', head, '--', REQUEST_DIR];
   }
   // A (dded) or M (odified) only: a request DELETED by this push is not a verdict to carry out.
-  return ['diff', '--name-only', '--diff-filter=AM', before.trim(), head, '--', REQUEST_DIR];
+  //
+  // `--no-renames` IS LOAD-BEARING, and it was found the hard way. Git's rename detection is on by default, so
+  // a push that adds `1463-accepted-retry1.json` while deleting `1463-accepted.json` is reported as a single
+  // `R099` rename — and `R` is not in `AM`, so the new request was silently dropped and the job went green
+  // having applied nothing. Measured live: `--diff-filter=AM` returned zero files for a push whose four
+  // request files were all new. Similarity, not intent, decides whether git calls something a rename, so the
+  // heuristic must simply be off here: a path that did not exist before and holds a request now IS one.
+  return ['diff', '--name-only', '--diff-filter=AM', '--no-renames', before.trim(), head, '--', REQUEST_DIR];
 }
 
 /**
