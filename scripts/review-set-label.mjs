@@ -874,7 +874,12 @@ export function buildVerdictComment({
   const text = String(typeof body === 'string' ? body : '').trim();
   const heading = to === 'clear-human'
     ? '✅ review — `review:human` cleared via the sanctioned path'
-    : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
+    // #x5e2ldj — `restamp` gets its OWN heading. It is not an accept (no review was run) and emphatically not a
+    // bounce; rendering it as either would make the durable comment say something that did not happen. The
+    // review of PR #1482 caught this exact defect: the ternary fell through to the BOUNCE heading, so a
+    // re-stamped ACCEPTANCE would have announced itself as "changes requested".
+    : to === 'restamp' ? '📌 review — acceptance re-stamped after a rebase (no new review)'
+      : to === 'accepted' ? '✅ review — accepted' : '🔁 review — changes requested';
   // #2895 — the attribution is the point of the whole item: a raw `gh` call recorded none of this. On the
   // gate-self path it must state EXACTLY what the record proves and no more. It proves the sanctioned path was
   // followed; it does NOT prove a human followed it, because `--actor` and `--reason` are free text and nothing

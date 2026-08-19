@@ -1920,3 +1920,31 @@ describe('decideSetLabel — restamp carries an acceptance, and can do nothing e
     expect(REVIEW_LABEL_TARGETS).toContain('restamp');
   });
 });
+
+/**
+ * The RE-STAMP heading (#x5e2ldj, caught by the review of PR #1482 as a blocker).
+ *
+ * The heading ternary was not extended for the new target, so a re-stamped ACCEPTANCE fell through to the
+ * BOUNCE arm and announced itself as "🔁 review — changes requested". A durable comment that states the
+ * opposite of what happened is worse than no comment: the label said accepted, the comment said bounced, and a
+ * reader would have believed the prose.
+ */
+describe('buildVerdictComment — a re-stamp says what it is', () => {
+  const build = (to) => buildVerdictComment({ to, actor: 'drain', headSha: 'f5bc7940', reason: 'r', body: '' });
+
+  it('does NOT render a re-stamp as a bounce', () => {
+    expect(build('restamp')).not.toContain('changes requested');
+  });
+
+  it('does NOT render a re-stamp as a fresh accept either — no review was run', () => {
+    const out = build('restamp');
+    expect(out).toContain('re-stamped');
+    expect(out).toMatch(/no new review/i);
+  });
+
+  it('leaves the three headings it already had exactly as they were', () => {
+    expect(build('accepted')).toContain('✅ review — accepted');
+    expect(build('changes')).toContain('🔁 review — changes requested');
+    expect(build('clear-human')).toContain('cleared via the sanctioned path');
+  });
+});

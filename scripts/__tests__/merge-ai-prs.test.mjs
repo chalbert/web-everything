@@ -3842,7 +3842,12 @@ describe('needsAcceptanceRestamp (#x5e2ldj — carrying an acceptance across the
     expect(needsAcceptanceRestamp({ humanCleared: false, reviewHeld: false }, rebased)).toBe(false);
   });
 
-  it('does NOT fire on an uncleared hold — a rebase must not complete a gate-self acceptance', () => {
+  // DEFENCE IN DEPTH, and labelled as such because the review of PR #1482 was right that it is not a scenario
+  // `classifyPr` can currently produce: `reviewHeld` is only set when the review hold is the SOLE blocker, which
+  // requires no live `review:accepted` — so `humanCleared && reviewHeld` is unreachable through the real drain
+  // today. The guard stays because the cost is one `&&` and the failure it prevents is carrying an acceptance
+  // onto a held PR; but a reader must not mistake this for a case that happens.
+  it('does NOT fire on an uncleared hold — unreachable via classifyPr today, kept as depth', () => {
     expect(needsAcceptanceRestamp({ humanCleared: true, reviewHeld: true }, rebased)).toBe(false);
   });
 
