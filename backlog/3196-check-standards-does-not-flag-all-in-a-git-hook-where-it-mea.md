@@ -61,6 +61,12 @@ per-line scan can see a flag split across two. A backtick is treated differently
 so — it is SUBSTITUTION, not quoting, so it breaks the word; the expansion is unknowable here and an empty one
 leaves exactly `--all`.
 
+A continuation is decided by PARITY of the trailing backslash run, not by its presence — an even run is
+escaped backslashes and the line ends. Testing for "ends with a backslash" welded the next line's head onto
+this one's tail, so a bare `--all` immediately after such a line became `foo--all` and was missed. Over-joining
+is the one direction in which this preprocessing can HIDE a flag rather than expose one, so it is the one place
+the rule has to be exact rather than merely safe.
+
 Removal is quote-blind, which over-reports in one known place: inside double quotes a backslash is literal
 unless it precedes `$`, a backtick, `"` or itself, so `"\-\-all"` really passes `\-\-all` and is called a hit
 anyway. Pinned as a test so it stays a decision rather than a surprise.
@@ -80,8 +86,9 @@ in six directions, each on its own: dropping comment-stripping reddens 3, keepin
 2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, leaving the
 backslash glued to its word reddens 2, reading the escape from the raw line reddens 1, reverting to the
 enumerated separator list reddens 2, dropping `-` from the word charset reddens 12, replacing quotes and
-escapes with a space instead of removing them reddens 3, removing the continuation join reddens 2, and deleting
-a backtick instead of breaking the word on it reddens 2.
+escapes with a space instead of removing them reddens 3, removing the continuation join reddens 2, deleting
+a backtick instead of breaking the word on it reddens 2, and testing continuation by presence rather than
+parity reddens 1.
 
 ## Done when
 

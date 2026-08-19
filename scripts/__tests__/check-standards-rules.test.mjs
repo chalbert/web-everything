@@ -2555,6 +2555,24 @@ describe('findGitHookAllFlags (#3196)', () => {
       expect(logicalLines('one\ntwo')).toEqual([{ line: 1, text: 'one' }, { line: 2, text: 'two' }]);
     });
 
+    /**
+     * PARITY, not presence. An EVEN trailing run is escaped backslashes and the line ends there. Testing for
+     * "ends with a backslash" welded the next line's head onto this one's tail, so a bare `--all` immediately
+     * after such a line became `foo--all` and was MISSED — over-joining is the one direction in which this
+     * preprocessing can HIDE a flag rather than expose one.
+     */
+    it('does not join on an EVEN backslash run — that is a literal backslash, not a continuation', () => {
+      expect(logicalLines('echo foo\\\\\n--all').map((l) => l.line)).toEqual([1, 2]);
+      expect(findGitHookAllFlags('echo foo\\\\\n--all').map((h) => h.line)).toEqual([2]);
+    });
+
+    // Three: a literal backslash AND a continuation. Joining is right, and the welded word is `foo\--all`,
+    // which bash passes as ONE argument — so a non-hit here agrees with the shell rather than missing anything.
+    it('joins on an odd run, and the welded word is correctly not the flag', () => {
+      expect(logicalLines('echo foo\\\\\\\n--all x')).toHaveLength(1);
+      expect(findGitHookAllFlags('echo foo\\\\\\\n--all x')).toEqual([]);
+    });
+
     // A comment ends at its newline whatever precedes it, so a trailing `\` inside one continues nothing.
     it('does not continue a comment that happens to end in a backslash', () => {
       expect(logicalLines('# trailing \\\nnode x.mjs --all').map((l) => l.line)).toEqual([1, 2]);

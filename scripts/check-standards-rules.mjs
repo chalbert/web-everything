@@ -3070,6 +3070,12 @@ export function isAllFlagWord(word) {
  * @param {string} content
  * @returns {Array<{line: number, text: string}>}
  */
+/** Does this physical line continue onto the next? Only an ODD trailing backslash run does. PURE. */
+function continuesLine(text) {
+  const run = shellCodeOf(text).match(/\\*$/);
+  return ((run ? run[0].length : 0) % 2) === 1;
+}
+
 /**
  * The LOGICAL lines of a script: physical lines joined across `\`-newline continuations, each keeping the
  * number of the physical line it starts on. PURE.
@@ -3077,6 +3083,13 @@ export function isAllFlagWord(word) {
  * A continuation can split the flag itself — `node x.mjs --al\` then `l` is one word, `--all`, to bash — so a
  * per-physical-line scan cannot see it. Only a CODE-half backslash continues: a trailing `\` inside a comment
  * is just the last character of that comment, because a comment ends at its newline whatever precedes it.
+ *
+ * PARITY DECIDES, not presence. A trailing run of backslashes continues the line only when it is ODD — an even
+ * run is escaped backslashes, and the line ends. Testing for "ends with a backslash" over-joined `echo foo\\`
+ * onto the line below it, welding that line's head onto the tail of this one, so a bare `--all` invocation
+ * immediately after such a line became `foo--all` and was MISSED (review-pr correctness juror on PR #1488).
+ * Over-joining is the one direction where this preprocessing can hide a flag rather than expose one, which is
+ * why the rule is parity rather than presence.
  */
 export function logicalLines(content) {
   const physical = String(content ?? '').split('\n');
@@ -3084,7 +3097,7 @@ export function logicalLines(content) {
   for (let i = 0; i < physical.length; i++) {
     const start = i;
     let text = physical[i];
-    while (i + 1 < physical.length && /\\$/.test(shellCodeOf(text))) text = `${text.slice(0, -1)}${physical[++i]}`;
+    while (i + 1 < physical.length && continuesLine(text)) text = `${text.slice(0, -1)}${physical[++i]}`;
     out.push({ line: start + 1, text });
   }
   return out;
