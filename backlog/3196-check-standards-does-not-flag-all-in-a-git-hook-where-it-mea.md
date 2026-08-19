@@ -33,10 +33,16 @@ characters either side: round 1 accepted only whitespace, `=` or end-of-line as 
 the flag, so `"--all"`, a backtick-adjacent form and `--all,foo` were missed too. Same defect both times, and
 the worst shape this gate can have: silently not reporting the real line while a passing run reads as coverage.
 
-Round 3 then found two more: a backslash-escaped dash (`\--all` — unquoted, `\-` is simply a literal `-`, so
-argv is exactly `--all`), and an escape marker matched against the RAW line, so the phrase appearing inside a
-string suppressed a genuine invocation on that same line. Widening the character classes each round was betting
-that the next reviewer runs out of shell syntax before the syntax runs out. So the question is now asked the way a shell asks it: split the code half
+Round 3 found two more: a backslash-escaped dash (`\--all` — unquoted, `\-` is simply a literal `-`, so argv
+is exactly `--all`), and an escape marker matched against the RAW line, so the phrase appearing inside a string
+suppressed a genuine invocation on that same line. Round 4 found `}`, in an entirely ordinary
+`${VAR:-node x --all}` default expansion.
+
+FOUR ROUNDS, FOUR MISSING CHARACTERS, ONE SHAPE. Enumerating separators means being wrong until somebody finds
+the next character, and every wrong answer is a SILENT miss. So the set is now defined POSITIVELY — everything
+that is not a word CHARACTER separates — which can only be wrong in the direction that reports: an unlisted
+character splits, which at worst over-splits a word into pieces that are not the flag either. That inversion is
+the actual fix; the three preceding rounds were each a patch on the wrong shape. So the question is now asked the way a shell asks it: split the code half
 into WORDS and compare a whole word. Quote characters are removed rather than treated as separators, because
 quoting — and escaping — are not part of the word. Replacing those characters with a SPACE rather than deleting
 them is deliberate: it can only over-split, which reports, where deleting could weld two words into one that is
@@ -59,7 +65,8 @@ Verified live rather than only in fixtures: re-adding `--all` to `we:.githooks/p
 `npm run check:standards` report that line and exit non-zero; removing it returns to 0 errors. Mutation-checked
 in six directions, each on its own: dropping comment-stripping reddens 3, keeping quotes as separators reddens
 2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, leaving the
-backslash glued to its word reddens 2, and reading the escape from the raw line reddens 1.
+backslash glued to its word reddens 2, reading the escape from the raw line reddens 1, reverting to the
+enumerated separator list reddens 2, and dropping `-` from the word charset reddens 12.
 
 ## Done when
 

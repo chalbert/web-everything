@@ -2483,6 +2483,10 @@ describe('findGitHookAllFlags (#3196)', () => {
       'node x.mjs --all,foo',
       '$(node x.mjs --all)',
       'node x.mjs \\--all',                  // unquoted, `\\-` is a literal `-` — argv is exactly `--all`
+      'node x.mjs --all}',
+      'node x.mjs --all]',
+      '"${OVERRIDE:-node x.mjs --all}"',    // an ordinary bash default expansion, not an exotic construct
+      '[ $x = --all ]',
     ]) expect({ line, hits: findGitHookAllFlags(line).length }).toEqual({ line, hits: 1 });
   });
 
@@ -2492,6 +2496,27 @@ describe('findGitHookAllFlags (#3196)', () => {
     // `$`, a backtick, `"` and itself — so `"\\-\\-all"` passes the literal `\\-\\-all`, which is not the flag.
     // Reported as a non-hit here because the shell would not pass `--all` either.
     expect(findGitHookAllFlags('node x.mjs "\\-\\-all"')).toEqual([]);
+  });
+
+  /**
+   * The separator set is defined POSITIVELY — everything that is not a word character splits — and that
+   * inversion is the fix rather than a tidy-up. Four rounds each found another character an enumerated
+   * separator list did not contain, and every one of those was a SILENT miss. A positive set can only be
+   * wrong in the direction that REPORTS: an unlisted character splits, which at worst over-splits a word into
+   * pieces that are not the flag either.
+   */
+  it('splits on ANY non-word character, so an unlisted one cannot hide the flag', () => {
+    // A character nobody thought to enumerate — the point is that it needs no enumerating.
+    expect(findGitHookAllFlags('node x.mjs --all%')).toHaveLength(1);
+    expect(findGitHookAllFlags('node x.mjs --all~')).toHaveLength(1);
+    expect(findGitHookAllFlags('node x.mjs :--all:')).toHaveLength(1);
+  });
+
+  // The four characters that ARE word characters carry the whole false-positive story, so each is pinned.
+  it('keeps `-` `=` `.` `/` inside a word, which is what the negatives depend on', () => {
+    expect(shellWords('node x.mjs --all-repos')).toEqual(['node', 'x.mjs', '--all-repos']);
+    expect(shellWords('node x.mjs --all=1')).toEqual(['node', 'x.mjs', '--all=1']);
+    expect(findGitHookAllFlags('node foo/--all')).toEqual([]);   // a path, not the flag
   });
 
   it('splits a line the way a shell reads words, dropping the quoting', () => {
@@ -2532,9 +2557,13 @@ describe('findGitHookAllFlags (#3196)', () => {
    * malicious or accidental does not matter: a marker that can be triggered from code is not a marker.
    */
   it('reads the escape from the comment half only, never from a string in the code', () => {
+    // Asserted by LINE, not by count. The `echo` is itself reported — `standards-allow --all:` inside a string
+    // tokenizes to a bare `--all`, so the scanner over-reports it. That is the accepted direction (a sentence
+    // in a review), and counting hits here would make this test fail for a reason that is not its subject.
     const line = `echo "${GITHOOK_ALL_ALLOW} fake" ; node x.mjs --all`;
-    expect(findGitHookAllFlags(line)).toHaveLength(1);
-    expect(findGitHookAllFlags(`echo "${GITHOOK_ALL_ALLOW} fake"\nnode x.mjs --all`)).toHaveLength(1);
+    expect(findGitHookAllFlags(line).map((h) => h.line)).toContain(1);
+    expect(findGitHookAllFlags(`echo "${GITHOOK_ALL_ALLOW} fake"\nnode x.mjs --all`).map((h) => h.line))
+      .toContain(2);
   });
 
   it('splits a line into its code and comment halves at the same point', () => {

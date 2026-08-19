@@ -2984,6 +2984,26 @@ export function shellCodeOf(line) {
 }
 
 /**
+ * What separates one shell word from the next: everything that is not a word CHARACTER.
+ *
+ * THE SET IS DEFINED POSITIVELY, AND THAT INVERSION IS THE FIX. Four review rounds each found another
+ * character the enumerated-separator list did not contain — a trailing `;`, then a leading quote, then `,` and
+ * a backtick, then `}` in an ordinary `${VAR:-node x --all}` default expansion. Enumerating separators means
+ * being wrong until somebody finds the next one, and every wrong answer is a SILENT miss. Enumerating word
+ * characters means being wrong only in the direction that REPORTS: an unlisted character splits, which can at
+ * worst over-split a word into pieces that are not the flag either.
+ *
+ * What is in the set, and why each:
+ *   · `A-Za-z0-9_` with `.` and `/` — ordinary identifier and path characters, so `x.mjs` stays one word.
+ *   · `-` — the single omission from the separator side that keeps `--all-repos` and `--allow-dirty` out.
+ *     They tokenize to themselves and simply are not `--all`.
+ *   · `=` — so `--all=1` survives as one word for `isAllFlagWord`'s prefix arm. It costs `VAR=--all` reading
+ *     as one word too, which is the variable-assembly case this scanner already declares out of scope.
+ *   · `+` — harmless, and keeps `--std=c++17`-shaped arguments intact.
+ */
+const NOT_WORD_CHAR = /[^A-Za-z0-9_./=+-]+/;
+
+/**
  * The shell WORDS one line of code passes. PURE.
  *
  * BOUNDARY MATCHING WAS THE WRONG SHAPE, and two review rounds proved it. This started as a regex that looked
@@ -3013,7 +3033,7 @@ export function shellWords(code) {
     // deliberate: it can only ever over-split a word, which reports, where deleting could weld two words into
     // one that is no longer the flag.
     .replace(/[`"'\\]/g, ' ')
-    .split(/[\s;|&()<>,]+/)
+    .split(NOT_WORD_CHAR)
     .filter(Boolean);
 }
 
