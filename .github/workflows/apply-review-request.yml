@@ -1,0 +1,113 @@
+# Apply staged review verdicts (#x39x752, slice 2).
+#
+# WHY: a judging host is not always a writing host. A cloud VM can run the whole `review-pr` operation and
+# then record nothing — no local process there holds a GitHub credential and none can be given one. Its one
+# outbound write channel is `git push`. So a verdict is pushed as a FILE to this branch, and this workflow —
+# which has `gh` and a token — runs the real `review-set-label.mjs` against it. Nothing here reimplements the
+# label arc; the markers, the #2964 ordering and every refusal stay in the single home (#2644).
+#
+# WHY A BRANCH OF ITS OWN, and not main or the PR's own lane:
+#   · the PR's lane would put the request INSIDE the diff being judged, changing the tree under review and
+#     invalidating its `reviewed-diff` fingerprint. A correctness bug, not untidiness.
+#   · main would run the full CI suite (`on: push: branches: [main]`) per verdict, and add a commit to main
+#     for each one.
+# `ops/review-requests` is watched by nothing else, so neither happens.
+#
+# ONLY WHAT THIS PUSH ADDED IS APPLIED, and that is what keeps the workflow least-privilege. The obvious
+# design — apply every file present, then delete them — needs `contents: write` to clear the queue, which is
+# a strictly wider token than this job's actual job (move a label, post a comment). Diffing the push instead
+# means nothing is ever re-applied and nothing has to be deleted. It matters because the single home is NOT
+# idempotent in its comment half: a second run posts a second durable comment.
+#
+# TRUST BOUNDARY, stated rather than assumed: anyone who can push to this branch can move a review label —
+# INCLUDING clearing `review:human` since the operator ruling of 2026-08-19. On a solo repo that is the same
+# authority as pushing the code itself. It would need revisiting BEFORE a second writer exists, because the
+# gate-self tier is precisely the one that assumes the clearer is not the author. Deliberately NOT
+# `pull_request_target`, and it never checks out a fork's ref: both are the classic routes to running
+# untrusted code with a write token.
+name: Apply review request
+
+on:
+  push:
+    branches: [ops/review-requests]
+    paths: ['ops/review-requests/*.json']
+
+permissions:
+  pull-requests: write   # the label swap
+  issues: write          # a PR's comments are issue comments
+  contents: read         # never pushes — see the "only what this push added" note above
+
+concurrency:
+  # Serialised deliberately. The #2964 ordering is a two-write sequence with no rollback, and two runs
+  # interleaving them on one PR is what could produce the orphan-label state that ordering exists to prevent.
+  # `cancel-in-progress: false` — a cancelled run could stop BETWEEN the two writes.
+  group: apply-review-request
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      # The SCRIPTS come from main, never from the branch carrying the request — otherwise a pushed request
+      # could ship its own `review-set-label.mjs` beside itself and be applied by it.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # THE SINGLE HOME IS NOT A STANDALONE SCRIPT. `review-set-label.mjs` transitively imports
+      # `we:scripts/lib/review-escalation.mjs`, which needs `markdown-it` — and that is a transitive dependency
+      # of a devDependency (`@11ty/eleventy`), so `--omit=dev` does NOT supply it. The first live run
+      # (32248646760) collected all four requests correctly and then failed every one of them at module
+      # resolution. It failed CLOSED and exited 1, which is the design working; it still applied nothing.
+      #
+      # `--ignore-scripts` because this job holds a write token and its actual work is "move a label, post a
+      # comment". Running every package's install hooks to get a markdown parser is a wider surface than the
+      # task needs, and nothing on this path requires a build step.
+      - run: npm ci --ignore-scripts
+
+      - name: Collect the requests THIS push added
+        id: collect
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$AFTER"
+          # Harmless and expected to fail on the push that CREATES the branch, where `before` is all zeros.
+          git fetch --quiet origin "$BEFORE" || true
+          # WHICH FILES the push added is decided in a TESTED script, not here. Shell in a workflow cannot be
+          # unit-tested, and the genesis-push case got it wrong when it was: see the header of
+          # `we:scripts/collect-review-requests.mjs` for what was dropped, silently, and why.
+          node scripts/collect-review-requests.mjs --before="$BEFORE" --after="$AFTER" > /tmp/requests.txt
+          echo "count=$(wc -l < /tmp/requests.txt)" >> "$GITHUB_OUTPUT"
+          cat /tmp/requests.txt
+
+      - name: Apply each request
+        if: steps.collect.outputs.count != '0'
+        env:
+          # `gh` is preinstalled on the runner; this is what it authenticates with. It acts as
+          # github-actions[bot]. That bot is not the AUTHORISER of anything it writes — a `clear-human` request
+          # carries the operator's own instruction verbatim (`operatorInstruction`), and the durable comment
+          # records it. Nothing here verifies that instruction; #2946 is the open durable fix, and every record
+          # this path writes says so.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          failed=0
+          while read -r req; do
+            [ -n "$req" ] || continue
+            echo "::group::$req"
+            # Read the request out of the pushed commit rather than checking the branch out — the working tree
+            # stays main's, so the scripts that run are main's.
+            git show "$AFTER:$req" > /tmp/request.json
+            node scripts/apply-review-request.mjs /tmp/request.json || failed=1
+            echo "::endgroup::"
+          done < /tmp/requests.txt
+          exit $failed

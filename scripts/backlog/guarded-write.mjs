@@ -81,6 +81,30 @@ export function writeBacklogMd(abs, rel, content, { root = DEFAULT_ROOT } = {}) 
  * @param {string} abs @param {string} rel @param {string} content @param {{root?: string}} [opts]
  */
 export function writeBacklogMdUnguarded(abs, rel, content, { root = DEFAULT_ROOT } = {}) {
+  assertPublishableContent(rel, content);
+  writeFileSync(abs, content);
+}
+
+/**
+ * THE CONTENT GATES EVERY COMMITTED FILE THIS REPO WRITES FROM CODE MUST PASS — the #3015 secret scrub and the
+ * #883 locus-prefix scan. THROWS on either; returns nothing.
+ *
+ * EXTRACTED FROM {@link writeBacklogMdUnguarded} (#3150), unchanged, so a SECOND code-written committed file
+ * can pass the same two gates instead of carrying a near-copy of them. The first such caller is
+ * `we:scripts/operations/explore-io.mjs`'s `publish-research` terminal effect, which writes a
+ * `/research/` topic pair from juror-authored prose — text that is, if anything, more likely to carry a bare
+ * code path than a hand-written card is.
+ *
+ * WHY BOTH GATES ARE ABOUT THE SAME MECHANISM GAP. A CLI (or an operation's effect sink) writes straight to
+ * `fs`, never through the `Edit`/`Write` tools, so the PreToolUse hooks never see it — the gap #1574
+ * documented. Enforcing at the SOURCE is what covers the workflow / subagent / cron / headless callers too.
+ *
+ * The `rel` path is used only in the messages and as the scan's `file` key; nothing is read from disk.
+ *
+ * @param {string} rel - the repo-relative path, for the message and the scan key.
+ * @param {string} content - the full file text about to be written.
+ */
+export function assertPublishableContent(rel, content) {
   // #3015 — the PUBLISH-SEAM secret gate, and the load-bearing one. A backlog card is committed and pushed;
   // this writer is the ONE AUTHORING funnel every CLI card-mutation goes through (scaffold/resolve/settle/
   // retype/yield/prepare-stamp/claim), and a CLI writes straight to `fs`, so the PreToolUse(Edit|Write) hooks
@@ -99,5 +123,4 @@ export function writeBacklogMdUnguarded(abs, rel, content, { root = DEFAULT_ROOT
     const { count, sample } = findings[0];
     throw new Error(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`);
   }
-  writeFileSync(abs, content);
 }

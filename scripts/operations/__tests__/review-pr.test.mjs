@@ -710,6 +710,37 @@ describe('the judge request is never built from unvalidated input', () => {
     expect(() => assertSafeJudgeRequest({ mandate: 'x', input: 'y', shape: {}, effort: 'ludicrous' }))
       .toThrow(/effort/);
   });
+
+  /**
+   * THE SECOND VALIDATION OF `budget`, and why it needed its own test.
+   *
+   * `JUDGE_BUDGET_USD = null` declares "no ceiling", and `judgeSpawn` was taught to accept it. This guard —
+   * which runs on the request BEFORE the spawn, in a file that diff never touched — still refused any
+   * non-undefined non-number, so EVERY real review threw here, before a juror existed. "Remove the ceiling"
+   * would have shipped as "no review runs at all", and no test reddened.
+   *
+   * Two validations of one field is fine. Two DIFFERENT rules for it is the defect.
+   */
+  const judgeRequest = (budget) => ({ mandate: 'x', input: 'y', shape: {}, budget });
+
+  it('ACCEPTS `budget: null` — the declared "no ceiling", same rule judgeSpawn uses', () => {
+    expect(() => assertSafeJudgeRequest(judgeRequest(null))).not.toThrow();
+  });
+
+  it('still accepts an omitted budget and a positive number', () => {
+    expect(() => assertSafeJudgeRequest(judgeRequest(undefined))).not.toThrow();
+    expect(() => assertSafeJudgeRequest(judgeRequest(1.5))).not.toThrow();
+  });
+
+  it('still refuses the shapes that are caller bugs rather than declarations', () => {
+    for (const budget of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '1.5', {}, []]) {
+      expect(() => assertSafeJudgeRequest(judgeRequest(budget))).toThrow(/budget/);
+    }
+  });
+
+  it('names `null` in the refusal text, so a reader learns the one way to say "no ceiling"', () => {
+    expect(() => assertSafeJudgeRequest(judgeRequest('1.5'))).toThrow(/null for no ceiling/);
+  });
 });
 
 // #3072 — THE JUROR CAN ACT. A tool-free juror reading a diff found none of the defects the hand-run reviews

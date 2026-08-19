@@ -55,9 +55,8 @@
  */
 import { execFileSync } from 'node:child_process';
 import { resolve, sep } from 'node:path';
-import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
 // #x9xqexm's base-independent third marker. Independent concerns.
@@ -83,6 +82,7 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 // `runReviewLabelCli` for why that distinction is the whole point). Imported from the CLI that owns it, the same
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
 import { computeNetDiffText } from './merge-ai-prs.mjs';
+import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 /**
@@ -321,6 +321,10 @@ export function runReviewLabelCli({
   // shell that no in-process caller runs. A caller that omits it is treated as having supplied nothing.
   verdictBody = '',
   emit = (line) => writeAllSync(1, line),
+  // THE FORGE SEAM (#x8xf5rl). Defaults to `gh`, byte-identical to the inline calls this replaced.
+  // Injected so the WRITE ARC — above all the #2964 ordering below — is assertable without `gh`,
+  // which it never was: the suite could only reach this function's pure helpers and its refusals.
+  provider = createGhProvider(),
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
   // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
@@ -413,9 +417,7 @@ export function runReviewLabelCli({
   // runs inside its WE lane clone, so the current repo IS the PR's repo). Derived once, up front.
   if (repoOptional && !repo) {
     try {
-      repo = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-        encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
-      }).trim();
+      repo = provider.currentRepo();
     } catch (e) {
       fail(ghErr(e, 'gh repo view failed (pass --repo=<owner/name> explicitly)'), 1);
     }
@@ -436,9 +438,7 @@ export function runReviewLabelCli({
   let prState = '';
   let prBody = '';
   try {
-    const parsed = JSON.parse(execFileSync('gh', [
-      'pr', 'view', pr, '--repo', repo, '--json', 'labels,headRefOid,headRefName,state,body',
-    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+    const parsed = provider.readPrState(repo, pr);
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
     // #2979 — the branch name the NET diff is resolved against (see the fingerprint block below). Same gh call,
@@ -645,10 +645,8 @@ export function runReviewLabelCli({
   // `gh pr edit --remove-label` is never handed an absent label (which errors).
   const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
   const applySwap = () => {
-    const editArgs = ['pr', 'edit', pr, '--repo', repo, '--add-label', decision.addLabel];
-    for (const rm of removals) { editArgs.push('--remove-label', rm); }
     try {
-      execFileSync('gh', editArgs, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+      provider.setLabels(repo, pr, { add: decision.addLabel, remove: removals });
     } catch (e) {
       fail(ghErr(e, 'gh pr edit failed'), 1);
     }
@@ -658,16 +656,10 @@ export function runReviewLabelCli({
   // shell-quoting pitfalls (emoji/newlines), then `--body-file`. This is the half that carries the `reviewed-sha`
   // (and `reviewed-diff`) marker the #2409 staleness gate reads.
   const postComment = () => {
-    const tmp = join(tmpdir(), `review-label-${pr}-${Date.now()}.md`);
     try {
-      writeFileSync(tmp, commentBody, 'utf8');
-      execFileSync('gh', ['pr', 'comment', pr, '--repo', repo, '--body-file', tmp], {
-        encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-      });
+      provider.postComment(repo, pr, commentBody);
     } catch (e) {
       fail(ghErr(e, 'gh pr comment failed'), 1);
-    } finally {
-      try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
     }
   };
 
@@ -707,23 +699,17 @@ export function runReviewLabelCli({
   // SAY WHAT THIS DOES NOT BUY: the act is STILL NOT ATOMIC. Two non-atomic calls remain two non-atomic calls —
   // this relocates the partial state onto the half that is safe to lose in each case, it does not eliminate it.
   // Closing it fully needs reconciliation or rollback, which is not what this is.
+  // #x8xf5rl — the order now comes from the PURE `writeOrder`, so the property this block spends forty lines
+  // explaining is finally assertable. The steps themselves are unchanged; only the choosing moved.
   const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
-  if (acceptanceAlreadyLive) {
-    applySwap();
-    postComment();
-  } else {
-    postComment();
-    applySwap();
-  }
+  const steps = { comment: postComment, swap: applySwap };
+  for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — re-read the labels so the printed result reflects the
   // true post-swap state (tolerant: fall back to a locally-derived set if the re-read fails).
   let newLabels;
   try {
-    const out = execFileSync('gh', ['pr', 'view', pr, '--repo', repo, '--json', 'labels'], {
-      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-    });
-    newLabels = (JSON.parse(out).labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean);
+    newLabels = provider.readLabels(repo, pr).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean);
   } catch {
     const names = (Array.isArray(currentLabels) ? currentLabels : [])
       .map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean)

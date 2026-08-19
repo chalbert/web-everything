@@ -315,8 +315,15 @@ export function assertSafeJudgeRequest(request) {
   if (request?.effort !== undefined && !EFFORT_LEVELS.includes(request.effort)) {
     throw new Error(`operations: \`effort\` must be one of ${EFFORT_LEVELS.join('|')}, got ${JSON.stringify(request.effort)}`);
   }
-  if (request?.budget !== undefined && (typeof request.budget !== 'number' || !Number.isFinite(request.budget) || request.budget <= 0)) {
-    throw new Error(`operations: \`budget\` must be a positive finite number of USD, got ${JSON.stringify(request.budget)}`);
+  // `null` is the DECLARED "no ceiling", and it has to be spelled out HERE as well as in `judgeSpawn`. This
+  // guard runs on the request BEFORE the spawn, in a file the budget change never touched, so a `budget: null`
+  // that `judgeSpawn` accepts still threw right here — before a juror existed. "Remove the ceiling" would have
+  // shipped as "no review runs at all". Two validations of one field is fine; two DIFFERENT rules for it is the
+  // defect (review-pr correctness juror on #1472: CONFIRMED, `impactIfUnfixed: broken`, a blocker because
+  // nothing downstream could recover from it).
+  if (request?.budget !== undefined && request?.budget !== null
+      && (typeof request.budget !== 'number' || !Number.isFinite(request.budget) || request.budget <= 0)) {
+    throw new Error(`operations: \`budget\` must be a positive finite number of USD, or null for no ceiling, got ${JSON.stringify(request.budget)}`);
   }
   // A tool name reaches argv as a bare token, so the same flag-shaped-value hazard applies one field over.
   if (request?.allowedTools !== undefined) {

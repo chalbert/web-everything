@@ -1785,3 +1785,80 @@ describe('runReviewLabelCli — a changes verdict must carry its findings (#xd6m
     expect(payload.error ?? '').not.toMatch(/requires the findings/);
   });
 });
+
+/**
+ * THE WRITE ARC, through the real `runReviewLabelCli` with a stub provider (#x8xf5rl).
+ *
+ * Everything above pins a PURE helper. Nothing before this reached `applySwap` / `postComment` or the branch
+ * that chooses between them — there was no seam, so the #2964 ordering, which that file calls "the safety
+ * property", had no test at all. It is the most consequential line in the review path: an orphan
+ * `review:accepted` with no marker makes `acceptanceCoversHead` fail OPEN and the drain merges with the #2409
+ * staleness gate disarmed.
+ */
+describe('the write arc and its #2964 ordering', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => '# verdict body',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  /** Records the ORDER of port calls. Reads answer from `labels`, so a test picks the branch by state. */
+  function stubProvider({ labels = [] } = {}) {
+    const calls = [];
+    return {
+      calls,
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      readPrState: () => {
+        calls.push('readPrState');
+        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' };
+      },
+      readLabels: () => { calls.push('readLabels'); return labels.map((name) => ({ name })); },
+      setLabels: (_r, _p, spec) => { calls.push('setLabels'); calls.push(spec); },
+      postComment: () => { calls.push('postComment'); },
+    };
+  }
+
+  const run = (provider, argv) => {
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  };
+
+  it('COMMENT FIRST when review:accepted is not already live — an orphan label would disarm #2409', () => {
+    const p = stubProvider({ labels: ['review:pending'] });
+    run(p, ['1048', '--repo=o/n', '--to=accepted', '--actor=op']);
+    const order = p.calls.filter((c) => c === 'postComment' || c === 'setLabels');
+    expect(order).toEqual(['postComment', 'setLabels']);
+  });
+
+  it('SWAP FIRST when it is already live — comment-first would freshen coverage of an unapplied accept', () => {
+    const p = stubProvider({ labels: ['review:accepted'] });
+    run(p, ['1048', '--repo=o/n', '--to=accepted', '--actor=op']);
+    const order = p.calls.filter((c) => c === 'postComment' || c === 'setLabels');
+    expect(order).toEqual(['setLabels', 'postComment']);
+  });
+
+  it('never hands the swap a label the PR does not carry', () => {
+    const p = stubProvider({ labels: ['review:pending'] });
+    run(p, ['1048', '--repo=o/n', '--to=accepted', '--actor=op']);
+    const spec = p.calls.find((c) => c && typeof c === 'object' && 'add' in c);
+    expect(spec.add).toBe('review:accepted');
+    for (const rm of spec.remove) { expect(['review:pending']).toContain(rm); }
+  });
+
+  it('a REFUSED run performs no write at all — the refusal precedes the port', () => {
+    const p = stubProvider({ labels: ['review:human'] });
+    const { exitCode } = run(p, ['1048', '--repo=o/n', '--to=accepted', '--actor=op']);
+    expect(exitCode).not.toBe(0);
+    expect(p.calls).not.toContain('setLabels');
+    expect(p.calls).not.toContain('postComment');
+  });
+});
