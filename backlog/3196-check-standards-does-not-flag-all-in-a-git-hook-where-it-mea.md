@@ -52,6 +52,19 @@ no longer the flag. `-` is deliberately NOT a separator, and that single omissio
 The escape marker is read from the COMMENT half alone. A marker that can be triggered from code is not a
 marker, whether the triggering is deliberate or accidental.
 
+Round 5 closed the last class: forms that SPLICE the token rather than change its boundaries — `--al""l`,
+`-"-all"`, `--a"ll"`, `-\-all`, and a `\`-newline continuation splitting the word itself. Quoting and escaping
+are now REMOVED rather than replaced with a space, which is what the shell does: welding adjacent quoted
+fragments into one word is shell behaviour, so the space was inventing a split the shell never makes. Physical
+lines are joined across continuations first, each keeping the number of the line it starts on, because no
+per-line scan can see a flag split across two. A backtick is treated differently from a quote and deliberately
+so — it is SUBSTITUTION, not quoting, so it breaks the word; the expansion is unknowable here and an empty one
+leaves exactly `--all`.
+
+Removal is quote-blind, which over-reports in one known place: inside double quotes a backslash is literal
+unless it precedes `$`, a backtick, `"` or itself, so `"\-\-all"` really passes `\-\-all` and is called a hit
+anyway. Pinned as a test so it stays a decision rather than a surprise.
+
 ## What is NOT modelled, stated rather than discovered
 
 This is a scanner, not a shell, and four review rounds is enough evidence that the remaining surface should be
@@ -66,7 +79,9 @@ Verified live rather than only in fixtures: re-adding `--all` to `we:.githooks/p
 in six directions, each on its own: dropping comment-stripping reddens 3, keeping quotes as separators reddens
 2, splitting on whitespace alone reddens 2, prefix-matching instead of whole-word reddens 2, leaving the
 backslash glued to its word reddens 2, reading the escape from the raw line reddens 1, reverting to the
-enumerated separator list reddens 2, and dropping `-` from the word charset reddens 12.
+enumerated separator list reddens 2, dropping `-` from the word charset reddens 12, replacing quotes and
+escapes with a space instead of removing them reddens 3, removing the continuation join reddens 2, and deleting
+a backtick instead of breaking the word on it reddens 2.
 
 ## Done when
 

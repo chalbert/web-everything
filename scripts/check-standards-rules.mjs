@@ -3027,12 +3027,22 @@ const NOT_WORD_CHAR = /[^A-Za-z0-9_./=+-]+/;
  */
 export function shellWords(code) {
   return String(code ?? '')
-    // Quoting and ESCAPING are not part of the word. `"--all"` and `\--all` both pass exactly the argument
-    // `--all` does — in POSIX shell `\-` is simply a literal `-` — and the backslash form was the round-3
-    // miss (review-pr correctness juror on PR #1488). Replacing with a SPACE rather than deleting is
-    // deliberate: it can only ever over-split a word, which reports, where deleting could weld two words into
-    // one that is no longer the flag.
-    .replace(/[`"'\\]/g, ' ')
+    // A BACKTICK IS SUBSTITUTION, NOT QUOTING, so it BREAKS the word. `--all\`echo hi\`` expands to `--allhi`
+    // in bash and is not the flag — but the same line with a substitution that yields NOTHING is exactly
+    // `--all`. The expansion is unknowable here, so the word breaks and the case reports.
+    .replace(/`/g, ' ')
+    // Quoting and ESCAPING, by contrast, are REMOVED exactly as the shell removes them. `"--all"`, `\--all`,
+    // `--al""l`, `-"-all"` and `-\-all` all pass the identical argument — bash was asked, not assumed. An
+    // earlier cut replaced these with a SPACE on the theory that deleting could "weld two words into one";
+    // that theory was wrong about the shell. Welding adjacent quoted fragments is precisely what the shell
+    // DOES, so the space invented a split the shell never makes and missed every spliced form (review-pr
+    // correctness juror on PR #1488).
+    //
+    // Removal is QUOTE-BLIND, and that over-reports in one known place: inside double quotes a backslash is
+    // literal unless it precedes `$`, a backtick, `"` or itself, so `"\-\-all"` really passes `\-\-all` and we
+    // call it a hit anyway. That is the declared direction — a false positive is a sentence in a review — and
+    // modelling double-quote escape rules to remove it would buy nothing this gate needs.
+    .replace(/["'\\]/g, '')
     .split(NOT_WORD_CHAR)
     .filter(Boolean);
 }
@@ -3060,16 +3070,36 @@ export function isAllFlagWord(word) {
  * @param {string} content
  * @returns {Array<{line: number, text: string}>}
  */
-export function findGitHookAllFlags(content) {
-  const lines = String(content ?? '').split('\n');
+/**
+ * The LOGICAL lines of a script: physical lines joined across `\`-newline continuations, each keeping the
+ * number of the physical line it starts on. PURE.
+ *
+ * A continuation can split the flag itself — `node x.mjs --al\` then `l` is one word, `--all`, to bash — so a
+ * per-physical-line scan cannot see it. Only a CODE-half backslash continues: a trailing `\` inside a comment
+ * is just the last character of that comment, because a comment ends at its newline whatever precedes it.
+ */
+export function logicalLines(content) {
+  const physical = String(content ?? '').split('\n');
   const out = [];
-  lines.forEach((raw, i) => {
-    if (!shellWords(shellCodeOf(raw)).some(isAllFlagWord)) return;
+  for (let i = 0; i < physical.length; i++) {
+    const start = i;
+    let text = physical[i];
+    while (i + 1 < physical.length && /\\$/.test(shellCodeOf(text))) text = `${text.slice(0, -1)}${physical[++i]}`;
+    out.push({ line: start + 1, text });
+  }
+  return out;
+}
+
+export function findGitHookAllFlags(content) {
+  const lines = logicalLines(content);
+  const out = [];
+  lines.forEach(({ line, text }, i) => {
+    if (!shellWords(shellCodeOf(text)).some(isAllFlagWord)) return;
     // The escape is read from the COMMENT half of this line and of the one above — never from the code, where
     // the same phrase inside a string would silently suppress a real invocation.
-    const escaped = (l) => shellCommentOf(l).includes(GITHOOK_ALL_ALLOW);
-    if (escaped(raw) || escaped(lines[i - 1])) return;
-    out.push({ line: i + 1, text: raw.trim() });
+    const escaped = (l) => shellCommentOf(l?.text).includes(GITHOOK_ALL_ALLOW);
+    if (escaped(lines[i]) || escaped(lines[i - 1])) return;
+    out.push({ line, text: text.trim() });
   });
   return out;
 }

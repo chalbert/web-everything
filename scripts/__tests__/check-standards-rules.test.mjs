@@ -53,7 +53,7 @@ import {
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
   findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, shellCommentOf, shellWords, isAllFlagWord,
-  GITHOOK_ALL_ALLOW,
+  logicalLines, GITHOOK_ALL_ALLOW,
 } from '../check-standards-rules.mjs';
 // The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
 import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
@@ -2487,15 +2487,21 @@ describe('findGitHookAllFlags (#3196)', () => {
       'node x.mjs --all]',
       '"${OVERRIDE:-node x.mjs --all}"',    // an ordinary bash default expansion, not an exotic construct
       '[ $x = --all ]',
+      // SPLICED forms. Each was verified against real bash: all four execute argv `--all`.
+      'node x.mjs --al""l',
+      'node x.mjs -"-all"',
+      'node x.mjs --a"ll"',
+      'node x.mjs -\\-all',
     ]) expect({ line, hits: findGitHookAllFlags(line).length }).toEqual({ line, hits: 1 });
   });
 
   it('splits on an escape as well as a quote, so a backslash cannot hide the flag', () => {
     expect(shellWords('node x.mjs \\--all')).toEqual(['node', 'x.mjs', '--all']);
-    // NOT the same thing, and the asymmetry is real shell: inside double quotes a backslash escapes only
-    // `$`, a backtick, `"` and itself — so `"\\-\\-all"` passes the literal `\\-\\-all`, which is not the flag.
-    // Reported as a non-hit here because the shell would not pass `--all` either.
-    expect(findGitHookAllFlags('node x.mjs "\\-\\-all"')).toEqual([]);
+    // A KNOWN over-report, pinned so it stays a decision rather than a surprise: removal is quote-blind, and
+    // inside double quotes a backslash is literal unless it precedes `$`, a backtick, `"` or itself. So
+    // `"\\-\\-all"` really passes `\\-\\-all` and we still call it a hit. Modelling double-quote escape rules
+    // would buy nothing this gate needs, and the direction is the declared one.
+    expect(findGitHookAllFlags('node x.mjs "\\-\\-all"')).toHaveLength(1);
   });
 
   /**
@@ -2519,10 +2525,41 @@ describe('findGitHookAllFlags (#3196)', () => {
     expect(findGitHookAllFlags('node foo/--all')).toEqual([]);   // a path, not the flag
   });
 
-  it('splits a line the way a shell reads words, dropping the quoting', () => {
+  it('splits a line the way a shell reads words, REMOVING the quoting', () => {
     expect(shellWords('node x.mjs "--all"')).toEqual(['node', 'x.mjs', '--all']);
     expect(shellWords('args=("--all")')).toEqual(['args=', '--all']);
     expect(shellWords('')).toEqual([]);
+    // Welding adjacent quoted fragments is what the SHELL does — `--al""l` is one word. An earlier cut
+    // replaced quotes with a space, inventing a split the shell never makes.
+    expect(shellWords('node x.mjs --al""l')).toEqual(['node', 'x.mjs', '--all']);
+    // …but separate words stay separate: the space between them is not inside the quotes.
+    expect(shellWords('echo "--al" "l"')).toEqual(['echo', '--al', 'l']);
+    // A backtick is SUBSTITUTION, not quoting, so it breaks the word instead of splicing it: a substitution
+    // that yields nothing leaves exactly `--all`, and the expansion is unknowable here.
+    expect(shellWords('node x.mjs --all`echo hi`')).toEqual(['node', 'x.mjs', '--all', 'echo', 'hi']);
+  });
+
+  /**
+   * A `\`-newline continuation can split the flag WORD, so no per-physical-line scan can see it: bash joins
+   * `--al\` + `l` into the single word `--all`.
+   */
+  describe('line continuations', () => {
+    it('flags a flag split across a continuation, and reports the line it STARTS on', () => {
+      const hits = findGitHookAllFlags('echo hi\nnode x.mjs --al\\\nl\necho bye');
+      expect(hits).toHaveLength(1);
+      expect(hits[0].line).toBe(2);
+    });
+
+    it('joins physical lines into logical ones, keeping the first line number', () => {
+      expect(logicalLines('a \\\nb\nc')).toEqual([{ line: 1, text: 'a b' }, { line: 3, text: 'c' }]);
+      expect(logicalLines('one\ntwo')).toEqual([{ line: 1, text: 'one' }, { line: 2, text: 'two' }]);
+    });
+
+    // A comment ends at its newline whatever precedes it, so a trailing `\` inside one continues nothing.
+    it('does not continue a comment that happens to end in a backslash', () => {
+      expect(logicalLines('# trailing \\\nnode x.mjs --all').map((l) => l.line)).toEqual([1, 2]);
+      expect(findGitHookAllFlags('# trailing \\\nnode x.mjs --all')).toHaveLength(1);
+    });
   });
 
   // `-` is NOT a separator, and that single omission is the whole reason the sibling flags stay out.
