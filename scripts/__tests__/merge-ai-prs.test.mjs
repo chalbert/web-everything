@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, restampAcceptance, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete } from '../merge-ai-prs.mjs';
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -3862,5 +3862,73 @@ describe('needsAcceptanceRestamp (#x5e2ldj — carrying an acceptance across the
     expect(needsAcceptanceRestamp(accepted, undefined)).toBe(false);
     expect(needsAcceptanceRestamp(accepted, null)).toBe(false);
     expect(needsAcceptanceRestamp(undefined, rebased)).toBe(false);
+  });
+});
+
+/**
+ * `restampAcceptance` (#3202) — WHICH TREE the re-stamp fingerprints.
+ *
+ * The single home computes its `reviewed-diff` fingerprint from a git read with NO explicit `cwd`, and says so:
+ * the CLI was single-PR and operator-invoked, so it ran from the PR's own repo, and the condition that would
+ * break that is a caller passing a `--repo` naming a different one. The #3200 re-stamp became that caller and
+ * spawned the child with no `cwd`, while the drain sweeps three repos in one process and never `chdir`s.
+ *
+ * It failed SOFT most of the time — the head ref does not resolve in the wrong tree, the read throws, no marker
+ * is stamped, and the gate falls back to SHA identity, which is stricter. The case that did not is a branch of
+ * the same name existing there, which `lane/<NNN>-<slug>` makes possible across the constellation. Then an
+ * unrelated repo's diff is stamped as this PR's, and a wrong fingerprint never matches — so the PR re-parks on
+ * every pass, which is the loop #3200 exists to end.
+ *
+ * So these assert the `cwd` that REACHES the spawn, not merely that a spawn happened. A test that only checked
+ * the argv would have passed throughout the defect.
+ */
+describe('restampAcceptance (#3202 — the re-stamp reads the PR\'s OWN tree)', () => {
+  const spy = (status = 0) => {
+    const calls = [];
+    const spawn = (cmd, argv, opts) => { calls.push({ cmd, argv, opts }); return { status, stdout: '', stderr: '' }; };
+    return { calls, spawn };
+  };
+
+  it('pins the child to the sibling repo\'s clone — the wrong-tree fingerprint this exists to prevent', () => {
+    const { calls, spawn } = spy();
+    const out = restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f5bc7940', cwd: '/ws/plateau-app', spawn });
+    expect(out).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.cwd).toBe('/ws/plateau-app');
+  });
+
+  // `undefined` means "inherit", which for a WE PR is already the right tree — so a local-repo re-stamp must
+  // NOT acquire a pinned cwd it never needed.
+  it('inherits the drain\'s cwd for a local-repo PR', () => {
+    const { calls, spawn } = spy();
+    restampAcceptance({ pr: 7, repo: 'chalbert/web-everything', newHead: 'abc1234', spawn });
+    expect(calls[0].opts.cwd).toBeUndefined();
+  });
+
+  // The SCRIPT is this checkout's; only the working directory moves. Resolving the CLI relative to cwd would
+  // run a sibling repo's copy of the label arc — a second implementation of the thing #2644 made singular.
+  it('still runs THIS checkout\'s review-set-label.mjs, not the pinned repo\'s', () => {
+    const { calls, spawn } = spy();
+    restampAcceptance({ pr: 42, repo: 'frontierui', newHead: 'f5bc7940', cwd: '/ws/frontierui', spawn });
+    expect(calls[0].argv[0]).toMatch(/scripts\/review-set-label\.mjs$/);
+    expect(calls[0].argv[0].startsWith('/ws/frontierui')).toBe(false);
+    expect(calls[0].argv).toContain('--to=restamp');
+    expect(calls[0].argv).toContain('--repo=frontierui');
+  });
+
+  // The allowlist for `--body-file` is rooted at `process.cwd()`, so a body staged under THIS checkout would be
+  // refused by a child pinned elsewhere. The re-stamp passes none; this pins that it stays that way.
+  it('passes no --body-file, which a pinned cwd would make unreadable', () => {
+    const { calls, spawn } = spy();
+    restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f5bc7940', cwd: '/ws/plateau-app', spawn });
+    expect(calls[0].argv.some((a) => String(a).startsWith('--body-file='))).toBe(false);
+  });
+
+  it('never throws, and reports a non-zero exit as a failed re-stamp', () => {
+    const { spawn } = spy(1);
+    expect(restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f5bc7940', cwd: '/ws/plateau-app', spawn }).ok).toBe(false);
+    const thrower = () => { throw new Error('spawn ENOENT'); };
+    expect(restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f', spawn: thrower }))
+      .toEqual({ ok: false, reason: 'spawn ENOENT' });
   });
 });
