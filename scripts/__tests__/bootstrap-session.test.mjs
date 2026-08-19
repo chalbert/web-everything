@@ -14,6 +14,7 @@ import {
   planSteps,
   selfKey,
   siblingsFor,
+  lanePool,
   primaryCheckout,
   withPrimaryGitDir,
   skillsDeployScript,
@@ -132,6 +133,84 @@ describe('relocation', () => {
   it('resolves a sibling at whichever directory name it actually occupies', () => {
     const exists = (p) => p === '/ws/webeverything';
     expect(siblingsFor('/ws/plateau-app', exists).find((s) => s.name === 'we')).toMatchObject({ path: '/ws/webeverything', present: true });
+  });
+});
+
+/**
+ * #xsarpbt — THE COMMON CASE WAS THE BROKEN ONE. A lane clone is where agent work actually happens, so
+ * `basename(root)` is `lane-9` far more often than it is `web-everything`, and `lane-9` names no repo. The
+ * resulting `null` is not inert: `siblingKeys(null)` returns the WHOLE table, so one run reported the
+ * checkout it was standing in as an unrecognised repo AND as a missing sibling of itself. Both halves are
+ * asserted here, because fixing only the naming would leave every sibling located inside the lane pool.
+ */
+describe('a lane clone answers for the repo its POOL was cloned from', () => {
+  const LANE = '/ws/.lanes/web-everything/lane-9';
+
+  it('resolves the lane to its repo instead of reading `lane-9` as a directory name', () => {
+    expect(selfKey(LANE)).toBe('we');
+    expect(selfKey('/ws/.lanes/plateau-app/lane-3')).toBe('plateau-app');
+  });
+
+  it('does NOT list the repo the caller is standing in as a missing sibling', () => {
+    const found = siblingsFor(LANE, () => false);
+    expect(found.map((s) => s.name)).toEqual(['frontierui', 'plateau-app']);
+    expect(found.map((s) => s.name)).not.toContain('we');
+  });
+
+  // BOTH parents are live, so both are probed. The laptop puts siblings beside the PRIMARY…
+  it('finds a sibling beside the primary checkout', () => {
+    const exists = (p) => p === '/ws/webeverything' || p === '/ws/frontierui';
+    const found = siblingsFor(LANE, exists);
+    expect(found.find((s) => s.name === 'frontierui')).toMatchObject({ path: '/ws/frontierui', present: true });
+    expect(found.find((s) => s.name === 'plateau-app')).toMatchObject({ path: '/ws/plateau-app', present: false });
+  });
+
+  // …and the cloud VM puts them inside the POOL, beside the lanes that need them. Resolving from the primary
+  // alone is the tidier rule and it is wrong here: measured on this repo's VM, a `--dry-run` from lane-1
+  // reported both siblings MISSING under that rule and both PRESENT once the pool was probed too.
+  it('finds a sibling that lives inside the lane pool, beside the lanes', () => {
+    const exists = (p) => p.startsWith('/ws/.lanes/web-everything/');
+    const found = siblingsFor(LANE, exists);
+    expect(found.find((s) => s.name === 'frontierui'))
+      .toMatchObject({ path: '/ws/.lanes/web-everything/frontierui', present: true });
+    expect(found.find((s) => s.name === 'plateau-app'))
+      .toMatchObject({ path: '/ws/.lanes/web-everything/plateau-app', present: true });
+  });
+
+  // An ABSENT sibling is reported where the operator should put it — beside the primary — not at whichever
+  // candidate happened to be probed last.
+  it('reports a genuinely missing sibling at the primary-relative path', () => {
+    const found = siblingsFor(LANE, () => false);
+    expect(found.map((s) => s.path)).toEqual(['/ws/frontierui', '/ws/plateau-app']);
+  });
+
+  // Fail-closed is the pre-existing contract for an unrecognised checkout, and a lane must not weaken it —
+  // note the workspace here is itself named `web-everything`, which a naive `basename(primaryCheckout(…))`
+  // would happily read as WE even though the pool says otherwise.
+  it('still returns null for a lane of a pool naming no known repo', () => {
+    expect(selfKey('/ws/.lanes/mystery/lane-1')).toBeNull();
+    expect(selfKey('/ws/web-everything/.lanes/mystery/lane-1')).toBeNull();
+  });
+});
+
+describe('lanePool', () => {
+  it('is null for a checkout that is not a lane at all', () => {
+    for (const root of ['/ws/web-everything', '/ws/webeverything', '/']) expect(lanePool(root)).toBeNull();
+  });
+
+  it('names the pool and the workspace around it', () => {
+    expect(lanePool('/ws/.lanes/web-everything/lane-9')).toEqual({ workspace: '/ws', pool: 'web-everything' });
+  });
+
+  // Counting backwards from the end reads `lane-9` as the pool the moment a caller stands one level deeper,
+  // which is why the parse runs FORWARD from the marker.
+  it('reads the pool from a subdirectory of a lane too', () => {
+    expect(lanePool('/ws/.lanes/web-everything/lane-9/scripts/lib')).toEqual({ workspace: '/ws', pool: 'web-everything' });
+    expect(selfKey('/ws/.lanes/web-everything/lane-9/scripts/lib')).toBe('we');
+  });
+
+  it('is null for the pool DIRECTORY itself — nobody works there', () => {
+    expect(lanePool('/ws/.lanes/web-everything')).toBeNull();
   });
 });
 

@@ -55,30 +55,75 @@ import { CONSTELLATION_REPOS, repoKeyForDir, siblingKeys } from './lib/constella
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+/** The path segment that marks a checkout as a lane clone rather than a primary. */
+const LANE_MARKER = `${sep}.lanes${sep}`;
+
 /**
- * Which constellation repo is this script sitting in? DERIVED, never assumed.
+ * The lane pool a checkout belongs to, or `null` when it is not a lane clone at all. PURE.
+ *
+ * `<workspace>/.lanes/<pool>/lane-N`. WHICH SEGMENT IDENTIFIES THE REPO matters and is easy to get wrong:
+ * it is the POOL, never `lane-N` and never the workspace. `lane-pool.mjs` derives the pool name from the
+ * origin URL basename, so it names the repo the pool was cloned from — which is exactly the question every
+ * caller below is really asking. Parsing FORWARD from the marker also survives a caller standing in a
+ * subdirectory of a lane (`…/lane-9/scripts`), where counting backwards from the end reads `lane-9` as the
+ * pool.
+ */
+export function lanePool(root = REPO_ROOT) {
+  const path = String(root);
+  const i = path.indexOf(LANE_MARKER);
+  if (i < 0) return null;
+  const [pool, lane] = path.slice(i + LANE_MARKER.length).split(sep);
+  // A bare `<workspace>/.lanes/<pool>` is the pool DIRECTORY, not a clone inside it — nobody works there,
+  // and treating it as one would answer for a checkout that does not exist.
+  return pool && lane ? { workspace: path.slice(0, i), pool } : null;
+}
+
+/**
+ * Which constellation repo is this checkout part of? DERIVED, never assumed.
  *
  * This script must survive its own relocation. The lane and delivery machinery is Plateau's product, and WE
  * — a PUBLIC peer, not a hub — is where it happens to be dogfooded today; the move is a `git mv`, and
  * anything that hard-coded "I am WE, my siblings are the other two" would silently invert on the day it
  * happened (reporting WE as a missing sibling of itself). Asking the shared table which checkout we are in
  * costs one basename lookup and makes the move free. PURE over a root.
+ *
+ * FROM A LANE CLONE THE BASENAME IS `lane-9`, WHICH NAMES NOTHING (#xsarpbt). That is not an exotic case: a
+ * lane clone is where agent work actually happens, so it is the common one. Reading the basename there
+ * produced `null`, and `null` is not inert — `siblingKeys(null)` returns the WHOLE table, so the bootstrap
+ * reported the checkout it was standing in as an unrecognised repo AND as a missing sibling of itself, in
+ * the same breath. The honest reading of that output is "this environment is broken", when nothing is. So a
+ * lane resolves through its POOL, which is the repo identity the lane was cloned from.
  */
 export function selfKey(root = REPO_ROOT) {
-  return repoKeyForDir(basename(root));
+  const lane = lanePool(root);
+  return repoKeyForDir(lane ? lane.pool : basename(root));
 }
 
 /**
  * The constellation members this checkout expects beside it, with the path each should occupy. Resolved
  * relative to the CURRENT repo's parent rather than the table's `$HOME/workspace` literals, because the
  * laptop and a cloud VM disagree about that prefix and both are correct.
+ *
+ * FROM A LANE THERE ARE TWO PLAUSIBLE PARENTS, and both are in live use — so both are probed rather than one
+ * being declared canonical:
+ *   · beside the PRIMARY checkout (`dirname(primaryCheckout(root))`) — the laptop's arrangement: siblings sit
+ *     in `~/workspace`, with the pool a `.lanes` subtree beneath it.
+ *   · beside the LANE ITSELF (`dirname(root)`, i.e. the pool directory) — what this repo's cloud VMs actually
+ *     do: `.lanes/web-everything/` holds `lane-1…3` AND the `frontierui`/`plateau-app` clones, because the
+ *     lanes are what needs to reach them.
+ *
+ * MEASURED, NOT REASONED. Resolving from the primary alone is the tidier rule and it is wrong here: a
+ * `--dry-run` from lane-1 on the VM reported both siblings MISSING under it, and both PRESENT once the pool
+ * directory was probed as well. A non-lane checkout collapses the two parents to one, so nothing changes for
+ * a primary. The FALLBACK path — what gets reported when a sibling is genuinely absent — stays the
+ * primary-relative one, because that is where an operator should put it.
  */
 export function siblingsFor(root = REPO_ROOT, exists = existsSync) {
-  const parent = dirname(root);
+  const parents = [...new Set([dirname(primaryCheckout(root, exists)), dirname(root)])];
   return siblingKeys(selfKey(root)).map((key) => {
     const dirs = CONSTELLATION_REPOS[key].dirs;
-    const found = dirs.map((d) => join(parent, d)).find((p) => exists(p));
-    return { name: key, path: found ?? join(parent, dirs[0]), present: Boolean(found) };
+    const found = parents.flatMap((parent) => dirs.map((d) => join(parent, d))).find((p) => exists(p));
+    return { name: key, path: found ?? join(parents[0], dirs[0]), present: Boolean(found) };
   });
 }
 
@@ -185,16 +230,15 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
  * reset and recycled, so anything registered from inside one silently stops resolving. PURE.
  */
 export function primaryCheckout(root = REPO_ROOT, exists = existsSync) {
-  const marker = `${sep}.lanes${sep}`;
-  const i = root.indexOf(marker);
-  if (i < 0) return root;
-  const workspace = root.slice(0, i);
+  const lane = lanePool(root);
+  if (!lane) return root;
+  const { workspace } = lane;
   // `<workspace>/.lanes/<pool>/lane-N`. The POOL name is derived by lane-pool.mjs from the origin URL
   // basename (`web-everything`), which is NOT necessarily the directory the primary checkout occupies (the
   // laptop's is `webeverything` — the same divergence guard-lane-install.mjs hard-codes around). So the pool
   // name identifies the REPO, and the primary's directory is then PROBED among that repo's known basenames.
   // Deriving it instead of probing produced a path that resolves nowhere, silently.
-  const dirs = CONSTELLATION_REPOS[repoKeyForDir(root.split(sep).at(-2) ?? '') ?? '']?.dirs;
+  const dirs = CONSTELLATION_REPOS[selfKey(root) ?? '']?.dirs;
   if (!dirs) return workspace;
   return dirs.map((d) => join(workspace, d)).find((p) => exists(p)) ?? join(workspace, dirs[0]);
 }
