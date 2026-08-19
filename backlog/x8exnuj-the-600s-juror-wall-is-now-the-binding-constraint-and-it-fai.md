@@ -9,10 +9,6 @@ tags: []
 
 `we:scripts/lib/judge-spawn.mjs` kills a juror at 600s and rejects, discarding everything it produced. #3200's removal of JUDGE_BUDGET_USD called that wall 'real headroom' on wall times of 167-312s — but those were measured UNDER the ceiling being removed, so the bound moved. Measured 2026-08-19 across eight review-pr rounds: 122, 152, 173, 228, 292, 418, 470s, and one kill at 600s. Two kills this session. A killed round costs full price, returns no partial verdict, cannot resume, and reads as flakiness.
 
-## Done when
-
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
-
 ## Why the headroom claim was true when written and is not now
 
 `#3200` removed the cost ceiling for a good reason, and stated its evidence: four runs on 2026-08-18 spent
@@ -76,8 +72,9 @@ The second and third compose. The first is a stopgap that should not be mistaken
 
 ## Done when
 
-1. **Executable** — a test that drives `judgeSpawn` past its timeout and asserts the caller receives the
-   juror's partial output (or a verdict-shaped degraded result), not only a thrown error. It fails today.
+1. **Executable** — a test in `we:scripts/lib/__tests__/judge-spawn.test.mjs` that drives
+   `we:scripts/lib/judge-spawn.mjs`'s `judgeSpawn` past its timeout and asserts the caller receives the juror's
+   partial output (or a verdict-shaped degraded result), not only a thrown error. It fails today.
 2. Whatever bound remains is DERIVED from a stated measurement, and the source of that measurement is recorded
    beside it — so the next person to widen a ceiling can see whether this bound was sized under it.
 3. A run that hits the bound is distinguishable in its record from a run that crashed, because today they are
