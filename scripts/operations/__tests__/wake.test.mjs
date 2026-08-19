@@ -11,6 +11,10 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { createWakeObservers } from '../wake.mjs';
+import { createDispatchObservers } from '../dispatch-lane-io.mjs';
+import { createExploreObservers } from '../explore-io.mjs';
+
 import { advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects, inFlight, inFlightEntries } from '../effect-executor.mjs';
 import { createEffectObserver, observeRun, planObservations, OBSERVATIONS, SKIPS } from '../effect-observer.mjs';
@@ -743,5 +747,41 @@ describe('the waker labels its own attempts as automatic', () => {
     store.write(run);
     run = (await applyPendingEffects(run, { sinks, store })).run;
     expect(run.effects.map((e) => e.lastAttemptBy)).toEqual(['unknown', 'unknown']);
+  });
+});
+
+/**
+ * THE MERGED OBSERVER TABLE. `wake.mjs`'s CLI watches every dispatching effect type through ONE table built by
+ * spreading two: the delivery agent's (#3037) and the committee panelist's (#3150). Its safety — that the two
+ * are keyed by DISTINCT types, so neither shadows the other — was stated in a comment and defended by nothing
+ * (review-pr correctness juror on #1457: CONFIRMED, `impactIfUnfixed: broken`).
+ *
+ * Why that impact is right, and why a comment was not enough: a spread silently keeps the LAST key. A rename or
+ * a copy-paste that collided the two tables would not throw and would not fail a suite — the losing observer
+ * would simply never run, so its in-flight work would sit unwatched forever while the pass reported success.
+ * These tests exercise the same function the CLI calls, so a collision fails here instead.
+ */
+describe('the observer table the CLI actually runs', () => {
+  it('carries every key from BOTH tables — nothing is shadowed by the spread', () => {
+    const dispatch = Object.keys(createDispatchObservers());
+    const explore = Object.keys(createExploreObservers());
+    const merged = Object.keys(createWakeObservers());
+
+    for (const key of [...dispatch, ...explore]) expect(merged).toContain(key);
+    // The count is the assertion that catches a collision: a shadowed key would make the union SHORTER than
+    // the sum, and `toContain` alone would still pass.
+    expect(merged).toHaveLength(dispatch.length + explore.length);
+  });
+
+  it('the two source tables are disjoint, which is the property the spread depends on', () => {
+    const dispatch = new Set(Object.keys(createDispatchObservers()));
+    const overlap = Object.keys(createExploreObservers()).filter((k) => dispatch.has(k));
+    expect(overlap).toEqual([]);
+  });
+
+  it('every observer is callable — a table entry that is not a function is a silent no-observer', () => {
+    for (const [key, observer] of Object.entries(createWakeObservers())) {
+      expect(typeof observer, `observer for ${key}`).toBe('function');
+    }
   });
 });

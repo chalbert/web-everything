@@ -352,14 +352,26 @@ export function flagValue(argv, name) {
   return eq === -1 ? '' : String(hit).slice(eq + 1);
 }
 
+/**
+ * THE OBSERVERS, one per dispatching effect type, and each arrived with the thing that dispatches it: the
+ * delivery agent (#3037) and the committee panelist (#3150). Until the first of them this table was empty on
+ * purpose — an observer with no work to watch is an implementation with no caller. Any OTHER in-flight type is
+ * still reported as `no-observer` rather than silently ignored.
+ *
+ * EXPORTED, and the CLI calls THIS rather than spreading inline, because the safety of the spread — that the
+ * two tables are keyed by DISTINCT effect types, so neither can shadow the other — was asserted in a comment
+ * and defended by nothing (review-pr correctness juror on #1457: CONFIRMED, `impactIfUnfixed: broken`). A
+ * shadowed observer does not fail loudly; it watches the wrong work, which is the shape that never announces
+ * itself. A test can hold that line only if it can call the same merge the CLI runs — so the merge is a
+ * function, not four words inside an `if`.
+ */
+export function createWakeObservers() {
+  return { ...createDispatchObservers(), ...createExploreObservers() };
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  // THE OBSERVERS, one per dispatching effect type, and each arrived with the thing that dispatches it: the
-  // delivery agent (#3037) and the committee panelist (#3150). Until the first of them this table was empty on
-  // purpose — an observer with no work to watch is an implementation with no caller. Any OTHER in-flight type
-  // is still reported as `no-observer` rather than silently ignored. The two tables are keyed by DISTINCT
-  // effect types, so the spread cannot shadow either.
-  const observers = { ...createDispatchObservers(), ...createExploreObservers() };
+  const observers = createWakeObservers();
   const argv = process.argv.slice(2);
   const resolveId = flagValue(argv, 'resolve');
   if (resolveId !== undefined) {
