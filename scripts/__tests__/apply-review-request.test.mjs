@@ -21,17 +21,38 @@ import {
 
 const OK = { repo: 'chalbert/web-everything', pr: 1466, to: 'accepted', actor: 'reviewer', body: '# verdict' };
 
-describe('what an unattended applier REFUSES', () => {
-  it('REFUSES clear-human — a bot may never perform a human ceremony', () => {
-    const r = validateRequest({ ...OK, to: 'clear-human', reason: 'looks fine to me' });
-    expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/human-ceremony-only/);
-    // The refusal names WHY a token does not qualify, so a reader does not "fix" it by adding a reason field.
-    expect(r.error).toMatch(/a token is not a ceremony/);
+describe('what this applier REFUSES', () => {
+  /**
+   * `clear-human` WAS refused outright here. Operator ruling 2026-08-19 — made with the weakness stated in
+   * front of them — allows it when the request carries the instruction authorising it. These tests changed
+   * DELIBERATELY, and this comment is the record of why, because a suite that quietly flips an invariant is
+   * indistinguishable from one that never held it.
+   *
+   * The ruling gives up less than it looks: the workstation path never verified a human either (#2895 shipped
+   * the clearance as "the raw command with better manners", #2946 is the open durable fix). What the field
+   * buys is that a clearance nobody asked for requires inventing a quote and publishing it.
+   */
+  it('ACCEPTS clear-human when the operator instruction is attached', () => {
+    const r = validateRequest({ ...OK, to: 'clear-human', operatorInstruction: 'remove the human tag on 1445' });
+    expect(r.ok).toBe(true);
+    expect(r.request.operatorInstruction).toBe('remove the human tag on 1445');
   });
 
-  it('refuses clear-human even when the request looks otherwise complete', () => {
-    expect(validateRequest({ ...OK, to: 'clear-human', actor: 'Nicolas', sessionId: 'abc' }).ok).toBe(false);
+  it('REFUSES clear-human with no instruction — the authorisation is the whole guard', () => {
+    for (const operatorInstruction of [undefined, '', '   ', 42, null]) {
+      const r = validateRequest({ ...OK, to: 'clear-human', operatorInstruction });
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/operatorInstruction/);
+    }
+  });
+
+  it('names #2946 in the refusal, so nobody reads the field as verification', () => {
+    expect(validateRequest({ ...OK, to: 'clear-human' }).error).toMatch(/#2946/);
+  });
+
+  it('refuses an instruction attached to an ORDINARY verdict — that is a copied clearance request', () => {
+    expect(validateRequest({ ...OK, to: 'accepted', operatorInstruction: 'x' }).ok).toBe(false);
+    expect(validateRequest({ ...OK, to: 'changes', body: 'f', operatorInstruction: 'x' }).ok).toBe(false);
   });
 
   it('refuses an empty `changes` — a bounce with no findings lands nothing', () => {
@@ -47,7 +68,7 @@ describe('what an unattended applier REFUSES', () => {
     for (const to of ['rearm', 'merged', 'ACCEPTED', '', null, undefined]) {
       expect(validateRequest({ ...OK, to }).ok).toBe(false);
     }
-    expect(APPLIABLE_TARGETS).toEqual(['accepted', 'changes']);
+    expect(APPLIABLE_TARGETS).toEqual(['accepted', 'changes', 'clear-human']);
   });
 
   it('refuses a subject it cannot name', () => {
@@ -84,6 +105,19 @@ describe('the argv handed to the SINGLE HOME', () => {
     const withCh = validateRequest({ ...OK, channel: 'ci-applier' }).request;
     expect(buildLabelArgv(withCh, '/tmp/b.md')).toContain('--channel=ci-applier');
     expect(buildLabelArgv(validateRequest(OK).request, '/tmp/b.md').some((a) => a.startsWith('--channel='))).toBe(false);
+  });
+
+  it('passes the operator instruction as --reason, verbatim, for a clearance', () => {
+    // VERBATIM, not paraphrased: a paraphrase is the agent's account of what it was told rather than what it
+    // was told, and the single home posts this straight into the durable comment.
+    const words = 'For now, I want to allow you to accept an explicit demand to remove human tag.';
+    const { request } = validateRequest({ ...OK, to: 'clear-human', operatorInstruction: words });
+    expect(buildLabelArgv(request, null)).toContain(`--reason=${words}`);
+  });
+
+  it('adds no --reason to an ordinary verdict', () => {
+    const { request } = validateRequest(OK);
+    expect(buildLabelArgv(request, null).some((a) => a.startsWith('--reason='))).toBe(false);
   });
 
   it('omits --body-file when there is no body to pass', () => {

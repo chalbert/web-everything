@@ -19,10 +19,12 @@
 # means nothing is ever re-applied and nothing has to be deleted. It matters because the single home is NOT
 # idempotent in its comment half: a second run posts a second durable comment.
 #
-# TRUST BOUNDARY, stated rather than assumed: anyone who can push to this branch can move a review label.
-# On a solo repo that is the same authority as pushing the code itself — acceptable, and recorded here so it
-# is a decision rather than a side effect. Deliberately NOT `pull_request_target`, and it never checks out a
-# fork's ref: both are the classic routes to running untrusted code with a write token.
+# TRUST BOUNDARY, stated rather than assumed: anyone who can push to this branch can move a review label —
+# INCLUDING clearing `review:human` since the operator ruling of 2026-08-19. On a solo repo that is the same
+# authority as pushing the code itself. It would need revisiting BEFORE a second writer exists, because the
+# gate-self tier is precisely the one that assumes the clearer is not the author. Deliberately NOT
+# `pull_request_target`, and it never checks out a fork's ref: both are the classic routes to running
+# untrusted code with a write token.
 name: Apply review request
 
 on:
@@ -78,8 +80,10 @@ jobs:
         if: steps.collect.outputs.count != '0'
         env:
           # `gh` is preinstalled on the runner; this is what it authenticates with. It acts as
-          # github-actions[bot] — which is exactly why `apply-review-request.mjs` refuses `clear-human`:
-          # a bot must never perform a human ceremony (INVARIANT 2, #2285), and a token is not a ceremony.
+          # github-actions[bot]. That bot is not the AUTHORISER of anything it writes — a `clear-human` request
+          # carries the operator's own instruction verbatim (`operatorInstruction`), and the durable comment
+          # records it. Nothing here verifies that instruction; #2946 is the open durable fix, and every record
+          # this path writes says so.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AFTER: ${{ github.sha }}
         run: |
