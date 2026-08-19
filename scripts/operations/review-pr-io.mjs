@@ -190,6 +190,25 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT, readView = reso
   }
 
   const view = readView({ pr, repo, cwd });
+  // THE TRANSPORT SUPPLIES THE SUBJECT, SO THE SUBJECT IS VERIFIED. `gh` could only ever return the PR it was
+  // asked for, so nothing checked; a FILE has no such property. A stale or mispasted view sitting under the
+  // right filename was otherwise accepted whole — and because `headRefName` a few lines below decides the diff
+  // basis, the judged DIFF was for the wrong PR too. Every consumer downstream is told it is looking at `pr`,
+  // so nothing could notice. Fails closed, which is what this module's header already claims of the seam: a
+  // hand-supplied view "cannot make the review agree with a tree that was never read" (review-pr correctness
+  // juror on #1466, round 2 — the round-1 fix made the FILENAME injective and left the CONTENT unchecked).
+  //
+  // An ABSENT `number` is refused as well as a wrong one: `number` is in `PR_VIEW_FIELDS`, so a view without it
+  // was not produced the declared way, and "no subject" is not better evidence than "wrong subject".
+  if (Number(view?.number) !== pr) {
+    const got = view?.number === undefined ? 'no `number` field at all' : `#${view.number}`;
+    throw new Error(
+      `review-pr-io: refusing to review ${repo}#${pr} — the view supplied by the transport has ${got}. `
+      + 'A view carries the title, body, labels AND the head ref that decides which diff is judged, so a '
+      + `mismatched one silently reviews a different PR. Re-stage ${prViewFileName(repo, pr)}, `
+      + 'or unset WE_PR_VIEW_DIR to read through gh.',
+    );
+  }
   // `gh pr view` does not echo the repo back; carry the requested one, exactly as review-detail.mjs's CLI does.
   view.repo = repo;
   const detail = assembleReviewDetail({ view });

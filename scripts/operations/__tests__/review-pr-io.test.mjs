@@ -465,4 +465,49 @@ describe('readPr wires the injected view transport', () => {
       pr: 7, repo: 'o/n', exec: execStub, readView: () => { throw new Error('no pre-fetched view at /x.json'); },
     })).toThrow(/no pre-fetched view/);
   });
+
+  /**
+   * THE SUBJECT CROSS-CHECK. Round 1 of this PR's review made the FILENAME injective; the juror's round-2
+   * finding was that the CONTENT under it was still never checked. A view for a different PR — staged by
+   * copy-paste, or left stale under the right name — was accepted whole, and since `headRefName` decides the
+   * diff basis, the judged DIFF was that other PR's too. Nothing downstream could notice: every consumer is
+   * told it is looking at the PR that was requested. `impactIfUnfixed: broken`, and no test defended it.
+   */
+  it('REFUSES a view whose number is not the PR that was asked for', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }),
+    })).toThrow(/refusing to review o\/n#7 .*has #999/);
+  });
+
+  it('names the file to re-stage, so the operator can act on the refusal', () => {
+    let message = '';
+    try {
+      readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }) });
+    } catch (e) { message = e.message; }
+    expect(message).toContain(prViewFileName('o/n', 7));
+    expect(message).toContain('WE_PR_VIEW_DIR');
+  });
+
+  it('refuses a view with NO number — absent is not better evidence than wrong', () => {
+    const { number, ...noNumber } = VIEW;
+    expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => noNumber }))
+      .toThrow(/no `number` field at all/);
+  });
+
+  it('refuses BEFORE the diff basis is resolved — the wrong PR never reaches git', () => {
+    let gitCalls = 0;
+    const countingExec = () => { gitCalls += 1; return ''; };
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: countingExec, readView: () => ({ ...VIEW, number: 999 }),
+    })).toThrow();
+    expect(gitCalls).toBe(0);
+  });
+
+  it('accepts a number that matches, however the transport spells it', () => {
+    // `gh --json` yields a JSON number; a hand-staged file may carry the string. Both name the same PR.
+    for (const number of [7, '7']) {
+      expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number }) }))
+        .not.toThrow();
+    }
+  });
 });
