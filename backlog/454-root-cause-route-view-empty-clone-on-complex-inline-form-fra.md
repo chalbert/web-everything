@@ -26,7 +26,8 @@ bootstrap-loaded page) reduced it to a single throwing line, triggered by exactl
 handler then tried `new HTMLSelectElement(options)` (illegal-constructor → `catch`) and the `catch` ran
 `copyOptions` → `clone.options = original.options` → **`TypeError: Cannot set property options of
 HTMLSelectElement which has only a getter`**. That throw escapes `cloneNode`; `route-view` clones the
-template at [we:RouteViewElement.ts:539](../blocks/router/elements/RouteViewElement.ts#L539) *outside* its
+template in `we:blocks/router/elements/RouteViewElement.ts` (link dropped — that WE copy was sliced out by
+#3154) *outside* its
 try/catch, so the whole stamp aborts → blank view. Plain skeletons (no `<select>`) never hit it — which
 is why only the quote wizard / FNOL form "tripped" it.
 
