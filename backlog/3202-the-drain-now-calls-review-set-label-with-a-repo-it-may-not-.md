@@ -1,4 +1,5 @@
 ---
+bornAs: x7qu5y1
 kind: task
 status: open
 dateOpened: "2026-08-19"
@@ -7,7 +8,7 @@ tags: []
 
 # the drain now calls review-set-label with a --repo it may not be standing in
 
-`we:scripts/review-set-label.mjs` computes its reviewed-diff fingerprint with NO explicit cwd, and its own comment calls that an invariant rather than an oversight: the CLI was single-PR and operator-invoked, so it ran from the PR's own repo. It states the condition that would break it — 'if this CLI ever grows a --repo that can name a repo other than the cwd's, this call has to take a cwd with it, or it will fingerprint the wrong tree'. The #x5e2ldj drain re-stamp made the drain a caller, passing an explicit --repo that can name a remote constellation repo, while the drain sweeps three repos in one process. The condition is now met. It does not fire only because `restamp` is absent from the `accepted || clear-human` list that computes the fingerprint, so nothing is computed and only reviewed-sha is stamped.
+`we:scripts/review-set-label.mjs` computes its reviewed-diff fingerprint with NO explicit cwd, and its own comment calls that an invariant rather than an oversight: the CLI was single-PR and operator-invoked, so it ran from the PR's own repo. It states the condition that would break it — 'if this CLI ever grows a --repo that can name a repo other than the cwd's, this call has to take a cwd with it, or it will fingerprint the wrong tree'. The #3200 drain re-stamp made the drain a caller, passing an explicit --repo that can name a remote constellation repo, while the drain sweeps three repos in one process. The condition is now met. It does not fire only because `restamp` is absent from the `accepted || clear-human` list that computes the fingerprint, so nothing is computed and only reviewed-sha is stamped.
 
 ## Why this is a trap rather than a live bug
 
@@ -15,14 +16,14 @@ Today the re-stamp is safe, and safe for an accidental reason. `restamp` stamps 
 the block that computes `reviewedDiff` is gated on `to === 'accepted' || to === 'clear-human'` and `restamp`
 was never added to it. No fingerprint is computed, so no fingerprint can be computed against the wrong tree.
 
-That is sufficient for the loop #x5e2ldj fixes — the SHA marker matches the new head, which is the staleness
+That is sufficient for the loop #3200 fixes — the SHA marker matches the new head, which is the staleness
 gate's first tier — and it degrades toward the STRICTER path, never the looser one.
 
 The trap is the obvious next improvement. Someone will reasonably want the re-stamp to carry the diff and
 contribution fingerprints too, so a LATER head move is still covered. Adding `restamp` to that list is a
 one-word change that looks harmless and would silently fingerprint whatever tree the drain happens to be
 standing in — for a remote constellation repo, not the PR's repo at all. A wrong fingerprint does not throw:
-it produces a marker that never matches, so the PR re-parks forever, which is the exact failure #x5e2ldj was
+it produces a marker that never matches, so the PR re-parks forever, which is the exact failure #3200 was
 built to end.
 
 ## Two ways to close it
