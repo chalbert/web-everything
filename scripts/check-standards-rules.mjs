@@ -2938,3 +2938,194 @@ export function dirLevelScopeFinding(item) {
   if (rationale) return [];
   return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
 }
+
+// ── `--all` inside a git hook (#3196) ──────────────────────────────────────────────────────────
+// `we:.githooks/post-merge` shipped a commands sync carrying `--all`. On that CLI `--all` does NOT mean
+// "deploy every command" — it means "CREATE the machine-global tree", on a machine that never opted in
+// (`if (!all && !exists(destRoot)) return null`). So a routine `git pull` that merely touched a command file
+// created `~/.claude/commands` and populated the operator's user-global config, live in every unrelated repo
+// they open, without ever asking.
+//
+// WHY A HOOK IS THE PLACE TO GATE IT, and not "anywhere the flag appears": a hook runs on every merge, on
+// every clone, unattended, with nobody reading its output. The same flag typed by hand is a choice; typed
+// into a hook it is applied silently and repeatedly to whoever cloned the repo. It was caught by a reviewer,
+// which is exactly the kind of catch that does not repeat.
+//
+// A PROMPT, NOT A WALL (`GITHOOK_ALL_ALLOW`). A hook that genuinely needs the flag says so on the line or the
+// one above it. A rule you can only obey is a rule people suppress wholesale; one you can answer gets read.
+
+/** The inline escape. Naming the reason is the point — the marker alone would just relocate the silence. */
+export const GITHOOK_ALL_ALLOW = 'standards-allow --all:';
+
+/**
+ * The code half of one shell line, with any trailing `#` comment removed. PURE.
+ *
+ * THE COMMENT HALF IS WHY THIS EXISTS AT ALL. `we:.githooks/post-merge` carries a long comment explaining that
+ * it deliberately does NOT pass `--all` — the exact prose a naive substring scan would report as a violation,
+ * which would make the rule fire hardest on the file that already got it right. Quote tracking is here for the
+ * same reason in miniature: `echo "pass --all # not really"` has no comment in it.
+ *
+ * Honest limit: this is a scanner, not a shell parser. Heredocs, `$(…)` nesting and `${x#y}` expansions are
+ * not modelled. It is deliberately biased toward treating text as CODE — a false positive is a sentence in a
+ * review; a false negative is the flag shipping again.
+ */
+export function shellCodeOf(line) {
+  const s = String(line ?? '');
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && quote !== "'") { i++; continue; }   // an escaped char is never a delimiter
+    if (quote) { if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    // `#` opens a comment only at the start of a word — `${x#y}` and `a#b` are not comments.
+    if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+  }
+  return s;
+}
+
+/**
+ * What separates one shell word from the next: everything that is not a word CHARACTER.
+ *
+ * THE SET IS DEFINED POSITIVELY, AND THAT INVERSION IS THE FIX. Four review rounds each found another
+ * character the enumerated-separator list did not contain — a trailing `;`, then a leading quote, then `,` and
+ * a backtick, then `}` in an ordinary `${VAR:-node x --all}` default expansion. Enumerating separators means
+ * being wrong until somebody finds the next one, and every wrong answer is a SILENT miss. Enumerating word
+ * characters means being wrong only in the direction that REPORTS: an unlisted character splits, which can at
+ * worst over-split a word into pieces that are not the flag either.
+ *
+ * What is in the set, and why each:
+ *   · `A-Za-z0-9_` with `.` and `/` — ordinary identifier and path characters, so `x.mjs` stays one word.
+ *   · `-` — the single omission from the separator side that keeps `--all-repos` and `--allow-dirty` out.
+ *     They tokenize to themselves and simply are not `--all`.
+ *   · `=` — so `--all=1` survives as one word for `isAllFlagWord`'s prefix arm. It costs `VAR=--all` reading
+ *     as one word too, which is the variable-assembly case this scanner already declares out of scope.
+ *   · `+` — harmless, and keeps `--std=c++17`-shaped arguments intact.
+ */
+const NOT_WORD_CHAR = /[^A-Za-z0-9_./=+-]+/;
+
+/**
+ * The shell WORDS one line of code passes. PURE.
+ *
+ * BOUNDARY MATCHING WAS THE WRONG SHAPE, and two review rounds proved it. This started as a regex that looked
+ * for `--all` with the right characters either side, and each round found another shell-valid way of writing
+ * the same argument that the boundaries did not recognise:
+ *   · round 1 accepted only whitespace / `=` / end-of-line as a terminator, so `… --all;` was missed — in a
+ *     file full of `if …; then`;
+ *   · round 2 still required whitespace or start-of-line BEFORE the flag, so `"--all"`, `` `… --all` `` and
+ *     `--all,foo` were missed too.
+ * Both misses are the same defect and it is the worst shape this gate can have: silently not reporting the
+ * real line, while a passing run reads as coverage. Widening the character classes a third time would be
+ * betting that the next reviewer runs out of shell syntax before the syntax runs out.
+ *
+ * So the question is asked the way a shell asks it: SPLIT THE LINE INTO WORDS, then compare a whole word.
+ * Quote characters are removed rather than treated as boundaries, because quoting is not part of the word —
+ * `"--all"` passes exactly the argument `--all` does. `-` is NOT a separator, and that single omission is what
+ * keeps `--all-repos` and `--allow-dirty` out: they tokenize to themselves and simply are not `--all`.
+ *
+ * Still a scanner, not a shell: `$IFS` games, heredocs and a flag assembled from variables are not modelled.
+ * The bias stays toward treating text as code.
+ */
+export function shellWords(code) {
+  return String(code ?? '')
+    // A BACKTICK IS SUBSTITUTION, NOT QUOTING, so it BREAKS the word. `--all\`echo hi\`` expands to `--allhi`
+    // in bash and is not the flag — but the same line with a substitution that yields NOTHING is exactly
+    // `--all`. The expansion is unknowable here, so the word breaks and the case reports.
+    .replace(/`/g, ' ')
+    // Quoting and ESCAPING, by contrast, are REMOVED exactly as the shell removes them. `"--all"`, `\--all`,
+    // `--al""l`, `-"-all"` and `-\-all` all pass the identical argument — bash was asked, not assumed. An
+    // earlier cut replaced these with a SPACE on the theory that deleting could "weld two words into one";
+    // that theory was wrong about the shell. Welding adjacent quoted fragments is precisely what the shell
+    // DOES, so the space invented a split the shell never makes and missed every spliced form (review-pr
+    // correctness juror on PR #1488).
+    //
+    // Removal is QUOTE-BLIND, and that over-reports in one known place: inside double quotes a backslash is
+    // literal unless it precedes `$`, a backtick, `"` or itself, so `"\-\-all"` really passes `\-\-all` and we
+    // call it a hit anyway. That is the declared direction — a false positive is a sentence in a review — and
+    // modelling double-quote escape rules to remove it would buy nothing this gate needs.
+    .replace(/["'\\]/g, '')
+    .split(NOT_WORD_CHAR)
+    .filter(Boolean);
+}
+
+/**
+ * The COMMENT half of a line — everything `shellCodeOf` left behind. PURE.
+ *
+ * The escape marker is read from here and not from the raw line, and round 3 is why: a raw-line substring
+ * match meant `echo "standards-allow --all: fake" ; node x.mjs --all` suppressed a genuine invocation, because
+ * the phrase appeared in a STRING on the same line. The marker is a comment by design, so that is the only
+ * place it counts.
+ */
+export function shellCommentOf(line) {
+  const s = String(line ?? '');
+  return s.slice(shellCodeOf(s).length);
+}
+
+/** Is this word the flag? `--all=<value>` is the same flag; `--all-repos` is somebody else's. PURE. */
+export function isAllFlagWord(word) {
+  return word === '--all' || String(word).startsWith('--all=');
+}
+
+/**
+ * Every line of a git hook that PASSES `--all` without saying why. PURE over the file's text.
+ * @param {string} content
+ * @returns {Array<{line: number, text: string}>}
+ */
+/** Does this physical line continue onto the next? Only an ODD trailing backslash run does. PURE. */
+function continuesLine(text) {
+  const run = shellCodeOf(text).match(/\\*$/);
+  return ((run ? run[0].length : 0) % 2) === 1;
+}
+
+/**
+ * The LOGICAL lines of a script: physical lines joined across `\`-newline continuations, each keeping the
+ * number of the physical line it starts on. PURE.
+ *
+ * A continuation can split the flag itself — `node x.mjs --al\` then `l` is one word, `--all`, to bash — so a
+ * per-physical-line scan cannot see it. Only a CODE-half backslash continues: a trailing `\` inside a comment
+ * is just the last character of that comment, because a comment ends at its newline whatever precedes it.
+ *
+ * PARITY DECIDES, not presence. A trailing run of backslashes continues the line only when it is ODD — an even
+ * run is escaped backslashes, and the line ends. Testing for "ends with a backslash" over-joined `echo foo\\`
+ * onto the line below it, welding that line's head onto the tail of this one, so a bare `--all` invocation
+ * immediately after such a line became `foo--all` and was MISSED (review-pr correctness juror on PR #1488).
+ * Over-joining is the one direction where this preprocessing can hide a flag rather than expose one, which is
+ * why the rule is parity rather than presence.
+ */
+export function logicalLines(content) {
+  const physical = String(content ?? '').split('\n');
+  const out = [];
+  for (let i = 0; i < physical.length; i++) {
+    const start = i;
+    let text = physical[i];
+    while (i + 1 < physical.length && continuesLine(text)) text = `${text.slice(0, -1)}${physical[++i]}`;
+    out.push({ line: start + 1, text });
+  }
+  return out;
+}
+
+export function findGitHookAllFlags(content) {
+  const lines = logicalLines(content);
+  const out = [];
+  lines.forEach(({ line, text }, i) => {
+    if (!shellWords(shellCodeOf(text)).some(isAllFlagWord)) return;
+    // The escape is read from the COMMENT half of this line and of the one above — never from the code, where
+    // the same phrase inside a string would silently suppress a real invocation.
+    const escaped = (l) => shellCommentOf(l?.text).includes(GITHOOK_ALL_ALLOW);
+    if (escaped(lines[i]) || escaped(lines[i - 1])) return;
+    out.push({ line, text: text.trim() });
+  });
+  return out;
+}
+
+/**
+ * The finding as the gate reports it. Kept beside the detector so the message and the rule cannot drift, and
+ * so it says what the flag DOES rather than only that it is disallowed — see the header on why.
+ */
+export function gitHookAllFlagError(file, hit) {
+  return `${file}:${hit.line}: \`--all\` passed from a git hook — on these deploy CLIs it does not mean `
+    + '"deploy everything", it means CREATE the machine-global tree (`~/.claude/commands`, `~/.claude/skills`) '
+    + 'on a machine that never opted in. A hook runs unattended on every merge and every clone, so this is '
+    + `applied silently and repeatedly to whoever cloned the repo. Drop the flag (the hook then only REFRESHES `
+    + `a tree the operator already has), or write \`# ${GITHOOK_ALL_ALLOW} <why>\` on that line or the one above.`
+    + `\n    ${hit.text}`;
+}
