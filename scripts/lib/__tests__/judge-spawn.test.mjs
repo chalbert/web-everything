@@ -842,3 +842,35 @@ describe('buildJudgeArgv with allowedTools', () => {
     }
   });
 });
+
+/**
+ * `budget: null` — NO SPEND CEILING (operator ruling 2026-08-18, `#xvkjndx`).
+ *
+ * The ceiling was never a cost control for a review; it was a silent TRUNCATION. A tool-bearing juror that
+ * hits it dies mid-run reporting `stop_reason: "tool_use"`, which reads like a crash. `null` OMITS the flag
+ * rather than passing a large number, so nothing has to guess what "big enough" is — and the distinction that
+ * matters is that `null` is an explicit declaration while `undefined` still takes the default.
+ */
+describe('an unbounded juror budget', () => {
+  it('OMITS --max-budget-usd entirely rather than passing a huge number', () => {
+    const argv = buildJudgeArgv({ mandate: 'm', shape: SHAPE, budget: null, sessionId: SID });
+    expect(argv).not.toContain('--max-budget-usd');
+  });
+
+  it('still emits the flag for a declared numeric ceiling', () => {
+    const argv = buildJudgeArgv({ mandate: 'm', shape: SHAPE, budget: 2.5, sessionId: SID });
+    expect(flagValue(argv, '--max-budget-usd')).toBe('2.5');
+  });
+
+  it('leaves `undefined` on the DEFAULT, so unbounded stays opt-in and is never inherited by silence', () => {
+    const argv = buildJudgeArgv({ mandate: 'm', shape: SHAPE, sessionId: SID });
+    expect(argv).toContain('--max-budget-usd');
+  });
+
+  it('still REFUSES the shapes that are caller bugs rather than declarations', () => {
+    for (const bad of [0, -1, Number.NaN, Infinity, '1.5', {}]) {
+      expect(() => buildJudgeArgv({ mandate: 'm', shape: SHAPE, budget: bad, sessionId: SID }))
+        .toThrow(/positive finite number of USD, or null/);
+    }
+  });
+});
