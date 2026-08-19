@@ -11,11 +11,13 @@ In a Claude Code cloud VM, **git works and the GitHub API does not** — and the
 
 **What does not:** any GitHub API call from a local process.
 - `gh` is **NOT missing** — `apt-get install -y gh` succeeds (v2.45.0). Installing it is not the fix, and reporting "gh is unavailable" is wrong.
-- `gh auth status` → *"The token in GH_TOKEN is invalid."*
-- GraphQL (what `gh pr view` uses) → `HTTP 403: This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.` That message is misleading: it names a fallback that also fails.
+- `gh auth status` → *"The token in GH_TOKEN is invalid."* — and that message MISLEADS. `GH_TOKEN` IS set, but it is a 14-character sentinel beginning `prox…`, not a credential (a real one is `ghp_`/`github_pat_`, 40+ chars). `gh` says "invalid" because it is not a token at all — not because a good token went stale.
+- GraphQL (what `gh pr view` uses) → `HTTP 403: This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served. Use REST via gh api repos/{owner}/{repo}/... instead.` That message is misleading too: it names a fallback that also fails.
 - REST → `403 {"message":"GitHub access is not enabled for this session..."}` **with or without** the env token, via `gh api` or plain `curl`.
 
-So the boundary is per-PROCESS, not per-protocol: the connector holds the only working credential and `gh` cannot borrow it.
+**SUPPLYING YOUR OWN TOKEN DOES NOT HELP, and this is measured — do not spend an afternoon on it.** The proxy ignores the caller's `Authorization` header and answers with its own credential on the endpoints it allows. Probed three ways against `/rate_limit`: no header, the `prox…` sentinel, and a deliberately garbage `ghp_…` string all return the SAME `limit: 15000`; the same three against `/repos/{owner}/{repo}/pulls/{n}` all return `403`. A real PAT is ignored exactly like the garbage one, so provisioning one buys nothing and costs a live credential sitting beside an agent that reads untrusted diffs.
+
+So the boundary is per-PROCESS, not per-protocol: the connector holds the only working credential, `gh` cannot borrow it, and you cannot hand it one.
 
 **How to apply:** reach GitHub through the connector tools, never by shelling `gh`. When an encoded operation shells `gh` internally, the fix is a transport seam at that call, not a credential hunt.
 
