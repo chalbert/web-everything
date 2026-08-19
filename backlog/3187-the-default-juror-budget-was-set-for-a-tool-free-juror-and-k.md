@@ -88,6 +88,6 @@ ceilings.
 - `DEFAULT_BUDGET_USD = 0.5` in `we:scripts/lib/judge-spawn.mjs`, both `JUDGE_BUDGET_USD = 1.5`
   declarations, and `we:scripts/lib/judge-panel.mjs`'s `budget = DEFAULT_BUDGET_USD` default were all
   read directly — confirming the converge panel is the path that inherits it.
-- Confirmed NOT already filed: #3182 asserts "Filed separately against #3072", and neither #3072 nor
+- Confirmed NOT already filed: #3191 asserts "Filed separately against #3072", and neither #3072 nor
   #3151 mentions a budget anywhere. That false claim is corrected by the same change that adds this
   card.
