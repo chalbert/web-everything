@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  lintBacklogItemRendering, findUnquotedColonScalars, DIGEST_MAX_WORDS,
+  lintBacklogItemRendering, findUnquotedColonScalars, DIGEST_MAX_WORDS, scanRepoLocusPrefixes,
 } from './check-standards-rules.mjs';
 import { TIERS } from './lib/build-queue.mjs';
 
@@ -141,6 +141,27 @@ if (item.blockedBy !== undefined) {
   }
 }
 
+// #883 locus-prefix — a backticked code path in the BODY must carry its `<repo>:` prefix. ERROR.
+//
+// THE GAP THIS CLOSES (#3201). The scan already ran in two places and neither is one an author reaches while
+// writing: `we:scripts/backlog/guarded-write.mjs` runs it at CLI WRITE time (so the scaffold's digest is always
+// right, and the author learns the rule there), and `check:standards` runs it in CI. The body is appended
+// AFTER the scaffold and is the part carrying all the file references — so the tool named "check this backlog
+// item" reported clean and the gate rejected minutes later. Measured cost: four cycles across 2026-08-19
+// (#1479, #1480, and twice more the same day), every one with the same signature.
+//
+// THE SAME FUNCTION the other two callers use, never a second copy — a per-item check that could DISAGREE
+// with the gate would be worse than one that merely omitted it.
+{
+  const findings = scanRepoLocusPrefixes([{ file: `backlog/${id}.md`, content }]);
+  for (const f of findings) {
+    errors.push(
+      `Backlog item "${id}" has ${f.count} bare code-path ref(s) lacking a <repo>: prefix (#883; e.g. `
+      + `"${f.sample}" → "we:${f.sample}"). The CLI write path and check:standards both reject these.`,
+    );
+  }
+}
+
 // ── Report ──────────────────────────────────────────────────────────────────────
 for (const m of warnings) console.log(`  warn  ${m}`);
 for (const m of errors) console.log(` error  ${m}`);
@@ -150,3 +171,8 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(`✓ ${tag} — clean${warnings.length ? ` (${warnings.length} warning(s))` : ''}`);
+// WHAT A CLEAN RUN DOES NOT MEAN (#3201). This pass sees ONE file, so every cross-entity check is out of its
+// reach — and silence about that is exactly what made a clean bill here read as a clean bill everywhere. Named
+// rather than implied, because the reader who does not know the difference is the one who needs to.
+console.log('  note  single-file pass: the cross-entity checks (graduatedTo/relatedProject resolution, the '
+  + 'blockedBy cycle walk, duplicate ids) belong to `npm run check:standards` and did NOT run here.');
