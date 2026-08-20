@@ -415,6 +415,10 @@ export function createDefaultJudge({ spawn = judgeSpawn, cwd, model } = {}) {
       sessionId: outcome.sessionId,
       loadedContextTokens: outcome.loadedContextTokens,
       usage: outcome.usage,
+      // #3203 — the juror hit the WALL and its answer was recovered from the killed process. Recorded so the
+      // row says which happened: a bound being hit and a crash used to be indistinguishable here, and a
+      // recovered review is worth knowing about even though it is a real verdict.
+      timedOut: outcome.timedOut,
       // WHICH MODEL JUDGED, not only what it cost (#3151). Nothing filled this slot before — merely incomplete
       // while the model was a declared LITERAL, since the declaration answered "which model" for anyone who
       // read it. `--model` makes it operator-controllable, and a verdict recorded without the model that

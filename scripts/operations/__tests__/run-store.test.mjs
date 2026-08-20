@@ -218,6 +218,20 @@ describe('the pure core', () => {
     expect(JSON.stringify(row)).not.toContain('THE MANDATE');
   });
 
+  /**
+   * #3203 — a juror that hit the WALL and a juror that crashed used to produce identical rows, which is what
+   * teaches a reader to retry rather than to look. The flag makes them different facts in the record.
+   */
+  it('normalizeJudgeTelemetry records `timedOut` only when it is true', () => {
+    const withFlag = normalizeJudgeTelemetry({ step: 'judge', stepIndex: 1, telemetry: { costUsd: 1, timedOut: true } });
+    expect(withFlag.timedOut).toBe(true);
+    // Absence is the ordinary case: a `false` on every row is noise, so it is simply not written.
+    for (const timedOut of [false, undefined, 'true', 1, null]) {
+      expect(normalizeJudgeTelemetry({ step: 'judge', telemetry: { costUsd: 1, timedOut } }))
+        .not.toHaveProperty('timedOut');
+    }
+  });
+
   it('totalJudgeSpend sums the meter, and reports zero for a run that spawned nothing', () => {
     const run = { ...sample(), telemetry: [{ costUsd: 0.02, wallMs: 100 }, { costUsd: 0.03, wallMs: 250, durationMs: 200 }] };
     expect(totalJudgeSpend(run)).toEqual({ jurors: 2, costUsd: 0.05, wallMs: 350, durationMs: 200 });

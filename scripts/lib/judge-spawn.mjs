@@ -127,6 +127,64 @@ if (typeof REAL_PATH !== 'function') {
 export const JUDGE_CLI = 'claude';
 
 /**
+ * How long a juror may run before it is killed — DERIVED, with the measurement it was derived from recorded
+ * here so the next person to change a bound can see what it was sized against (#3203).
+ *
+ * THE MEASUREMENT, 2026-08-19, ten tool-bearing `review-pr` rounds on one repo: 122, 152, 173, 228, 292, 418
+ * and 470 seconds, plus TWO kills at the then-current 600s wall.
+ *
+ * WHY THE PREVIOUS BOUND WAS WRONG, because the shape of the error matters more than the number. #3200
+ * removed the per-juror cost ceiling and justified the surviving 600s wall as "real headroom" on wall times of
+ * 167–312s. That measurement was sound and the inference was not: those times were produced by jurors running
+ * UNDER the ceiling being removed, and a juror that stops when it runs out of budget stops early. The
+ * distribution used to size the wall was the distribution the wall was about to invalidate. Any bound
+ * justified by data gathered under a tighter bound has this defect.
+ *
+ * THE DERIVATION: 2× the longest surviving run (470s) = 940s, rounded UP to the next whole five minutes — 20
+ * minutes. The multiplier is applied to a value known to be TOO SMALL: two runs were censored by the old wall,
+ * so the observed maximum is a lower bound on the real tail, not an estimate of it. Rounding UP follows from
+ * that and rounding down would contradict it — the first cut of this constant said "rounded to 15 minutes",
+ * which is BELOW its own stated derivation, and the assertion written from the derivation caught it.
+ *
+ * RE-DERIVE THIS when the juror's work changes — a new lens, a wider tool set, a bigger diff corpus. And note
+ * what makes that safe now: hitting this bound is no longer total loss (see `judgeSpawn`), so the cost of it
+ * being slightly wrong is a degraded review rather than a discarded one.
+ */
+export const JUDGE_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
+ * How long to wait for `close` after the kill before returning what the streams already delivered. SIGKILL is
+ * uncatchable, so `close` normally fires within milliseconds; this is the belt, not the braces.
+ */
+export const JUDGE_TIMEOUT_GRACE_MS = 2000;
+
+/**
+ * A juror that hit the wall AND left nothing parseable behind.
+ *
+ * A DISTINCT TYPE because the run record must distinguish "hit the bound" from "crashed", and before this it
+ * could not (#3203, Done-when 3): both arrived as a bare `Error`, so a wall-clock kill read as a juror
+ * failure and taught the reader to retry rather than to look. It carries the partial streams because a killed
+ * tool-bearing juror has usually done most of the review, and discarding that is the loss this exists to end.
+ */
+export class JudgeTimeoutError extends Error {
+  constructor({ timeoutMs, wallMs, stdout = '', stderr = '' }) {
+    super(
+      `judge-spawn: the juror exceeded ${timeoutMs}ms and was killed (ran ${wallMs}ms). `
+      + 'Its output did not parse, so no partial verdict is available — but this is a BOUND being hit, not a '
+      + `crash: see JUDGE_TIMEOUT_MS for what the bound was derived from.\n`
+      + `stdout[0..600]: ${String(stdout).slice(0, 600)}\n`
+      + `stderr[-600..]: ${String(stderr).trim().slice(-600) || '<empty>'}`,
+    );
+    this.name = 'JudgeTimeoutError';
+    this.timedOut = true;
+    this.timeoutMs = timeoutMs;
+    this.wallMs = wallMs;
+    this.partialStdout = String(stdout);
+    this.partialStderr = String(stderr);
+  }
+}
+
+/**
  * Flags this helper must NEVER emit, with the reason it is banned. `--bare` forces key-based auth and
  * cannot see a subscription login (#3028's recorded trap) — a spawn using it fails "Not logged in".
  */
@@ -530,7 +588,7 @@ export async function judgeSpawn({
   cwd = null,
   env = process.env,
   cli = JUDGE_CLI,
-  timeoutMs = 10 * 60 * 1000,
+  timeoutMs = JUDGE_TIMEOUT_MS,
   allowedTools = null,
   spawnFn = nodeSpawn,
 } = {}) {
@@ -560,7 +618,11 @@ export async function judgeSpawn({
   assertNoForbiddenArgv(argv);
 
   const startedAt = Date.now();
-  const { stdout, stderr, code } = await new Promise((resolve, reject) => {
+  // THE KILL RESOLVES, IT DOES NOT REJECT (#3203). It used to reject, which threw away every byte the juror had
+  // already written — and a tool-bearing juror at the wall has usually done most of the review. Killing and
+  // then settling with the accumulated streams turns total loss into a parse attempt: often the answer IS
+  // there and only the process failed to exit.
+  const { stdout, stderr, code, timedOut } = await new Promise((resolve, reject) => {
     let child;
     try {
       child = spawnFn(cli, argv, { cwd: spawnCwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -571,10 +633,25 @@ export async function judgeSpawn({
     let out = '';
     let err = '';
     let timer = null;
+    let grace = null;
+    let killed = false;
+    let settled = false;
+    // `close` and the grace timer can both fire; whichever is first wins and the other is inert.
+    const settle = (r) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (grace) clearTimeout(grace);
+      resolve(r);
+    };
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
+        killed = true;
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
-        reject(new Error(`judge-spawn: the juror exceeded ${timeoutMs}ms and was killed`));
+        // Settling on `close` rather than here is what preserves the partial output: Node delivers the
+        // buffered `data` events first. The grace timer only covers a `close` that never arrives.
+        grace = setTimeout(() => settle({ stdout: out, stderr: err, code: null, timedOut: true }), JUDGE_TIMEOUT_GRACE_MS);
+        if (typeof grace.unref === 'function') grace.unref();
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
     }
@@ -582,19 +659,27 @@ export async function judgeSpawn({
     child.stderr?.on('data', (d) => { err += d; });
     child.on('error', (e) => {
       if (timer) clearTimeout(timer);
+      if (grace) clearTimeout(grace);
       reject(new Error(`judge-spawn: \`${cli}\` failed to run: ${e.message}`));
     });
-    child.on('close', (c) => {
-      if (timer) clearTimeout(timer);
-      resolve({ stdout: out, stderr: err, code: c });
-    });
+    child.on('close', (c) => settle({ stdout: out, stderr: err, code: c, timedOut: killed }));
     // The judged material rides stdin — see the header on ARG_MAX and the variadic `--tools`.
     child.stdin?.on('error', () => { /* the child may exit before we finish writing; `close` reports it */ });
     child.stdin?.end(input);
   });
 
   const wallMs = Date.now() - startedAt;
+  // A KILLED JUROR IS TRIED, NOT DISCARDED. The wall is a bound on runaway, and a juror that emitted its
+  // answer and then failed to exit has produced a perfectly good review — the old code threw it away along
+  // with the ones that really had nothing. `timedOut` rides out on the result so the run record can say which
+  // happened, because "hit the bound" and "crashed" are different facts about a review.
+  if (timedOut) {
+    let outcome = null;
+    try { outcome = parseJudgeOutcome(stdout, stderr); } catch { outcome = null; }
+    if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout, stderr });
+    return { ...outcome, wallMs, timedOut: true, loadedContextTokens: loadedContextTokens(outcome.usage), argv };
+  }
   // `parseJudgeOutcome` throws with the CLI's own words; a non-zero exit with unparseable stdout lands there too.
   const outcome = parseJudgeOutcome(stdout, stderr || (code === 0 ? '' : `exit code ${code}`));
-  return { ...outcome, wallMs, loadedContextTokens: loadedContextTokens(outcome.usage), argv };
+  return { ...outcome, wallMs, timedOut: false, loadedContextTokens: loadedContextTokens(outcome.usage), argv };
 }

@@ -38,6 +38,8 @@ import {
   loadedContextTokens,
   judgeSpawn,
   assertLaneCwd,
+  JUDGE_TIMEOUT_MS,
+  JudgeTimeoutError,
   laneRootOf,
   sameDirectory,
   REAL_PATH,
@@ -548,6 +550,105 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     });
     await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5, spawnFn }))
       .rejects.toThrow(/exceeded 5ms and was killed/);
+  });
+
+  /**
+   * #3203 — THE WALL IS NO LONGER TOTAL LOSS.
+   *
+   * The kill used to `reject`, discarding every byte the juror had already written. A tool-bearing juror at
+   * the wall has usually done most of the review, so the round cost full price and delivered nothing, could
+   * not resume, and — because which round dies depends on how much work the juror chose to do — read as
+   * flakiness rather than as a bound being hit. Two of ten measured rounds on 2026-08-19 died this way.
+   */
+  describe('a juror that hits the wall', () => {
+    // A child that emits a COMPLETE answer and then never exits: the exact shape the old code threw away.
+    const answeringChild = (payload) => {
+      const handlers = {};
+      return {
+        stdout: { on: (_e, cb) => cb(JSON.stringify(payload)) },
+        stderr: { on: () => {} },
+        stdin: { on: () => {}, end: () => {} },
+        on: (e, cb) => { handlers[e] = cb; },
+        kill: () => { /* never closes — only the grace timer can settle this */ },
+      };
+    };
+    const ANSWER = {
+      is_error: false,
+      stop_reason: 'tool_use',
+      session_id: 'aaaaaaaa-bbbb-8ccc-9ddd-eeeeeeeeeeee',
+      total_cost_usd: 1.42,
+      duration_ms: 899_000,
+      num_turns: 31,
+      usage: { input_tokens: 2, output_tokens: 4 },
+      structured_output: { verdict: 'reject', findings: ['found it just before the wall'] },
+    };
+
+    it('returns the review the juror had already produced, instead of discarding it', async () => {
+      const r = await judgeSpawn({
+        mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5,
+        spawnFn: () => answeringChild(ANSWER),
+      });
+      expect(r.value).toEqual({ verdict: 'reject', findings: ['found it just before the wall'] });
+      expect(r.costUsd).toBe(1.42);
+    });
+
+    // "Hit the bound" and "crashed" are different facts about a review, and before this they arrived
+    // identically. A caller that cannot tell them apart learns to retry rather than to look.
+    it('marks the result as timed out, so the record can say which happened', async () => {
+      const r = await judgeSpawn({
+        mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5,
+        spawnFn: () => answeringChild(ANSWER),
+      });
+      expect(r.timedOut).toBe(true);
+    });
+
+    it('marks an ordinary completed juror as NOT timed out', async () => {
+      const spawnFn = () => {
+        const handlers = {};
+        return {
+          stdout: { on: (_e, cb) => cb(JSON.stringify(ANSWER)) },
+          stderr: { on: () => {} },
+          stdin: { on: () => {}, end: () => {} },
+          on: (e, cb) => { handlers[e] = cb; if (e === 'close') setTimeout(() => cb(0), 0); },
+          kill: () => {},
+        };
+      };
+      const r = await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, spawnFn });
+      expect(r.timedOut).toBe(false);
+    });
+
+    // Nothing parseable IS still a failure — but a TYPED one, carrying what there was.
+    it('throws a JudgeTimeoutError carrying the partial streams when nothing parsed', async () => {
+      const spawnFn = () => ({
+        stdout: { on: (_e, cb) => cb('{"structured_output": {"verd') },
+        stderr: { on: (_e, cb) => cb('reading scripts/foo.mjs\n') },
+        stdin: { on: () => {}, end: () => {} },
+        on: () => {},
+        kill: () => {},
+      });
+      const err = await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, timeoutMs: 5, spawnFn })
+        .then(() => null, (e) => e);
+      expect(err).toBeInstanceOf(JudgeTimeoutError);
+      expect(err.timedOut).toBe(true);
+      expect(err.partialStdout).toContain('structured_output');
+      expect(err.partialStderr).toContain('scripts/foo.mjs');
+      // It says BOUND, not crash — that distinction is the whole point of the type.
+      expect(err.message).toMatch(/JUDGE_TIMEOUT_MS/);
+    });
+  });
+
+  /**
+   * The bound is DERIVED, not typed: 2× the longest surviving run of the ten measured on 2026-08-19, rounded
+   * UP because two of those ten were censored by the old wall — the observed maximum is a lower bound on the
+   * tail, not an estimate of it.
+   *
+   * The second assertion is the one that earns its place. The first cut of the constant read "rounded to 15
+   * minutes", which is BELOW 2 × 470s and so contradicted the derivation written directly above it; this
+   * assertion, written from the derivation rather than from the number, failed and caught it.
+   */
+  it('defaults to a bound at least twice the longest run that survived the old wall', async () => {
+    expect(JUDGE_TIMEOUT_MS).toBeGreaterThanOrEqual(2 * 470_000);
+    expect(JUDGE_TIMEOUT_MS).toBe(20 * 60 * 1000);
   });
 
   it('reports a missing binary as a start failure naming the CLI', async () => {
