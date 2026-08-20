@@ -1,8 +1,10 @@
 ---
 bornAs: x2t6cr5
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-08-20"
+dateResolved: "2026-08-20"
 tags: []
 ---
 
@@ -41,3 +43,29 @@ overstates its coverage is worse than one that admits its limits.
 2. A card that is genuinely clean still passes, so the check does not become a wall.
 3. If the scan is deliberately left out, the checker's own output states which gates it does not run — silence
    is what made this cost two cycles.
+
+## How it was closed
+
+The per-item checker now runs the #883 locus-prefix scan — the SAME `scanRepoLocusPrefixes` the other two
+callers use, never a second copy. A per-item check that could DISAGREE with the gate would be worse than one
+that merely omitted it.
+
+Worth naming precisely where the scan already ran, because the shape of the gap is the lesson: at CLI WRITE
+time in `we:scripts/backlog/guarded-write.mjs` (which is why the scaffold's digest is always right and the
+author learns the rule there), and in CI. Neither is a place an author reaches while writing the body — and
+the body, appended after the scaffold, is the part carrying all the file references.
+
+Both closures from the fork were taken, not one. The scan runs (the first), AND a clean run now states which
+gates it did not run (the second): the cross-entity checks — graduatedTo/relatedProject resolution, the
+blockedBy cycle walk, duplicate ids — that a single-file pass structurally cannot see. The card argued the
+second was worth doing anyway if the first was deferred; it is worth doing regardless, because "clean" from a
+tool that checks less than the gate is the thing that misled in the first place.
+
+## Verified
+
+Live, not only in fixtures: appending an unprefixed backticked path (the drain's own module, written without its `we:`) to a real card's body makes
+`check-backlog-item` exit 1 and name the fix; removing it returns to exit 0.
+
+The new test drives the CLI as a subprocess, because the rules it composes are already unit-tested where they
+live and what had no test was which of them this CLI RUNS — a missing wire is invisible to every rule-level
+test in the repo. Mutation-checked: removing the scan wiring reddens 1, dropping the coverage note reddens 1.
