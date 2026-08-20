@@ -43,6 +43,9 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+import { openPrOperation, OPEN_PR_OP } from './open-pr.mjs';
+import { createOpenPrSinks } from './open-pr-io.mjs';
+import { PARK_LABELS } from '../pr-land.mjs';
 import { recordVerdictOperation, RECORD_VERDICT_OP } from './record-verdict.mjs';
 import { createRunReader, createRecordVerdictSinks } from './record-verdict-io.mjs';
 import { validateRequest, APPLIABLE_TARGETS } from '../apply-review-request.mjs';
@@ -126,6 +129,17 @@ export const OPERATIONS = Object.freeze({
   // injected reader — every input is a declared field and the panel's reports arrive on the run record as the
   // `investigate` step's own finding — so this entry binds sinks only. The matching OBSERVER is registered by
   // the waker (`we:scripts/operations/wake.mjs`), which is the process that polls it.
+  // Opening a PR goes THROUGH `we:scripts/pr-land.mjs`, which already owns the lane-ref guard, the bodyless-PR
+  // refusal, the park label and the #2833 verify finish-guard. This declaration re-decides none of them; it
+  // exists so the step is reachable as an operation instead of by reaching for the GitHub connector directly,
+  // which is how three PRs in one session skipped every one of those guards and one shipped red.
+  //
+  // PARK_LABELS is the home's own, injected rather than restated: a second list here could ask for a park the
+  // home refuses.
+  [OPEN_PR_OP]: () => ({
+    declaration: openPrOperation({ parkLabels: PARK_LABELS }),
+    sinks: createOpenPrSinks(),
+  }),
   [EXPLORE_OP]: () => ({
     declaration: exploreOperation(),
     // The SAME `WE_DISPATCH_AGENT_ARGS` a dispatched delivery agent runs under, and deliberately not a second

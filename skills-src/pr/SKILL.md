@@ -42,6 +42,29 @@ first sweep.
 - Per lane isolation (#2123) the edit should already have happened in a lane clone; the commit you are
   landing is that lane's HEAD (or a commit already ff'd onto the primary's `main`).
 
+## Never open a PR any other way (#xlqwz62)
+
+Everything below runs through `we:scripts/pr-land.mjs`, and there is a declared operation over it:
+
+```
+node scripts/operations/run.mjs open-pr --ref=lane/<slug> --title="<title>" --bodyFile=<path> --json
+```
+
+**Reaching for the GitHub API directly — a connector, a hand-rolled `gh pr create`, anything — skips
+every guard on this page in one step.** The lane-ref carve-out (#1934), the bodyless-PR refusal (#2332),
+the park label (#2622) and the #2833 lane-verification finish-guard all live in the home, and none of
+them fires for a PR opened around it. This is not hypothetical: three PRs in one session were opened via
+the connector because on a credential-less host `gh` fails and the connector plainly works, and one of
+the three shipped with a red suite.
+
+**On a host with no `gh` credential the operation FAILS rather than falling back**, reporting `unrun` —
+never `opened`, and never a quiet reroute. What it always gives you is the `plan`: the exact argv it
+decided on. Submit *that*, unedited, through whatever channel does hold a credential. The decision was
+still made by the operation; only the execution moved.
+
+It parks by default (`review:pending` — an independent review is owed), because an agent PR marching to
+`ready-to-merge` unreviewed is what park exists to stop. `--mode=` chooses otherwise, deliberately.
+
 ## Steps
 
 1. **Pick a `lane/*` ref name** — the #1934 guard carve-out only allows pushing to `lane/*` (never a
