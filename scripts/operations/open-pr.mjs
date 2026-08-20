@@ -211,20 +211,33 @@ export function classifySubmit({ status, signal, stdout = '', stderr = '', error
   if (!parsed || typeof parsed !== 'object') {
     return { outcome: 'unrun', reason: `exit ${status ?? '?'} with no parseable report from pr-land — this is NOT a refusal and NOT an open. Last output: ${tail || '<empty>'}` };
   }
-  if (parsed.pr || parsed.url) return { outcome: 'opened', pr: parsed.pr ?? null, url: parsed.url ?? null, parked: parsed.parked ?? null };
-
+  // THE `reason` IS CONSULTED FIRST, AND THE ORDER IS THE WHOLE CORRECTNESS OF THIS FUNCTION.
+  //
+  // A `pr` field does NOT mean success. In `label-on-green` mode the home opens the PR and THEN waits on
+  // required checks, so its post-open refusals carry BOTH a `pr` number (the PR exists by then) and a
+  // refusal `reason`: `check-red`, `behind`, `conflict`, `check-timeout`, and the post-open `empty-body`
+  // recheck — five real `emit()` sites in `we:scripts/pr-land.mjs`. Testing `parsed.pr` first reported a RED
+  // REQUIRED CHECK as `opened`, which is the precise failure class this operation exists to prevent,
+  // recurring inside it and in the CI-gating mode. Found by the correctness juror on PR #1500, which
+  // reconstructed this function and fed it the home's actual payload.
   if (parsed.reason) {
-    // The home's OWN word for what happened decides, not the exit code: pr-land exits 3 for a guard refusal
-    // AND for an environment failure, so the code alone cannot tell the caller which it is.
+    // The home's OWN word for what happened decides, not the exit code and not the presence of a `pr`:
+    // pr-land exits 3 for a guard refusal AND for an environment failure, so neither signal separates them.
     const known = HOME_REASONS[parsed.reason];
     const outcome = known === 'opened' ? 'opened' : (known ?? 'unrun');
     return {
       outcome,
       reason: parsed.reason,
       detail: parsed.detail ?? tail,
+      // Carried even on a refusal: a post-open refusal names a PR that EXISTS, and the caller needs its
+      // number to go look at what was opened-then-refused.
+      pr: parsed.pr ?? null,
+      url: parsed.url ?? null,
       verifyStatus: parsed.verifyStatus ?? null,
       ...(known ? {} : { unclassified: true }),
     };
   }
+  // Only with no `reason` at all does a `pr`/`url` imply an open.
+  if (parsed.pr || parsed.url) return { outcome: 'opened', pr: parsed.pr ?? null, url: parsed.url ?? null, parked: parsed.parked ?? null };
   return { outcome: 'unrun', reason: `pr-land exited ${status ?? '?'} without opening a PR or naming a refusal: ${tail || '<empty>'}` };
 }

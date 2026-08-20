@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import {
@@ -158,6 +159,53 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
     }
     // Every key of the table is one of the three, so a typo'd value cannot slip in.
     for (const v of Object.values(HOME_REASONS)) expect(SUBMIT_OUTCOMES).toContain(v);
+  });
+
+  /**
+   * THE PRECEDENCE BUG, AND THE CONTRACT GATE FOR IT (found by the correctness juror on PR #1500).
+   *
+   * A `pr` field does NOT mean success. In `label-on-green` mode the home opens the PR and THEN waits on
+   * required checks, so its post-open refusals carry BOTH a `pr` and a refusal `reason`. Checking
+   * `parsed.pr` first reported a RED REQUIRED CHECK as `opened` — the exact failure class this operation
+   * exists to prevent, inside the operation, in the CI-gating mode.
+   *
+   * These are the REAL shapes, transcribed from `pr-land.mjs`'s own `emit()` call sites rather than
+   * hand-composed as `{reason}` alone — which is precisely why the original suite missed it: every refusal
+   * test built a payload the home never actually emits.
+   */
+  const POST_OPEN_REFUSALS = [
+    { reason: 'conflict', pr: 1501, detail: 'PR #1501 has merge conflicts with main', want: 'refused' },
+    { reason: 'check-red', pr: 1501, detail: 'PR #1501 required check RED', want: 'refused' },
+    { reason: 'behind', pr: 1501, detail: 'PR #1501 is behind main (strict up-to-date)', want: 'refused' },
+    { reason: 'check-timeout', pr: 1501, detail: 'PR #1501 not ready past timeout', want: 'unrun' },
+    { reason: 'empty-body', pr: 1501, detail: 'PR #1501 has an empty/whitespace description', want: 'refused' },
+  ];
+
+  it('never reports a POST-OPEN refusal as opened, even though it carries a pr number', () => {
+    for (const { want, ...payload } of POST_OPEN_REFUSALS) {
+      const r = classifySubmit({ status: 3, stdout: JSON.stringify({ repo: 'chalbert/web-everything', merged: false, ...payload }) });
+      expect({ reason: payload.reason, outcome: r.outcome }).toEqual({ reason: payload.reason, outcome: want });
+      // …and the PR number still reaches the caller, who needs it to go look at what was opened-then-refused.
+      expect(r.pr).toBe(1501);
+    }
+  });
+
+  // The mirror image: with NO reason, a pr/url genuinely does mean opened.
+  it('still reports a bare pr/url with no reason as opened', () => {
+    expect(classifySubmit({ status: 0, stdout: JSON.stringify({ pr: 1501, url: 'u' }) }).outcome).toBe('opened');
+  });
+
+  /**
+   * THE DURABLE GATE the juror asked for: derive the reason vocabulary from the HOME's source rather than
+   * from this file's memory of it, so a reason added to `pr-land.mjs` that `HOME_REASONS` has not learned
+   * fails here instead of silently classifying as `unrun` forever.
+   */
+  it('has an opinion about every reason pr-land can actually emit', () => {
+    const src = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'pr-land.mjs'), 'utf8');
+    const emitted = [...src.matchAll(/reason:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+    expect(emitted.length).toBeGreaterThan(10);
+    const unknown = [...new Set(emitted)].filter((r) => !(r in HOME_REASONS) && r !== 'dry-run');
+    expect(unknown, `pr-land emits reason(s) HOME_REASONS does not classify: ${unknown.join(', ')}`).toEqual([]);
   });
 
   /**
