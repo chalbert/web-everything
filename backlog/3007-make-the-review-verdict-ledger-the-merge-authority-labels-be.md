@@ -1,7 +1,8 @@
 ---
 bornAs: x3q28ce
 kind: story
-size: 5
+size: 3
+blockedBy: ["xvatzyf", "x7kjrzg", "xu357cb", "xksotz7"]
 status: open
 parent: "2405"
 dateOpened: "2026-08-08"
@@ -196,3 +197,45 @@ and covered by the unit suite. The exit code was chosen so the CLI can later be 
    the seams" above, still only logging to stderr, and not touched by Phase 1.
 6. **The `idempotent` flag** on #3035's ledger effect stays `false`. Reconciliation makes a replay harmless in
    practice; flip it when the dedupe is load-bearing rather than incidental.
+
+---
+
+## SLICED 2026-08-20 — this item is now the GATE READ only
+
+Phase 2's "what it still needs" list was six unbuilt things plus a storage question none of them could
+answer. That is not one story. It is sliced per *backlog-workflow.md → step 1*'s edge case: this item
+**already has a parent** (`#2405`), so it is NOT converted into a nested epic — it stays a story, re-sized
+to its core slice, and the rest are **siblings under the same parent**.
+
+**What stays here:** the gate read. `we:scripts/lib/pr-merge-gate.mjs` / `decideReviewGate` answering from
+the fold plus `ledgerCoversHead`, with no unanswered hold. That is the authority flip itself and it is the
+one piece that cannot be delivered independently of the others.
+
+**What moved out, each independently deliverable:**
+
+| slice | why it is separable |
+| --- | --- |
+| `#xvatzyf` (decision) | where the ledger lives once it is the authority — blocks everything below |
+| `#x7kjrzg` | ledger the drain's OWN holds; the blocking precondition, and what makes `phase2Safe` reachable |
+| `#xu357cb` | the shadow reviewer's would-clear decisions append; useful even if the flip never happens |
+| `#xksotz7` | the write-miss posture, which follows the home decision rather than pre-empting it |
+
+**The storage question is a decision, not a build**, and it is carved out rather than narrated here — per
+*backlog-workflow.md → Rules*, an item that narrates an open fork in its body is burying a decision. It is
+`#xvatzyf`, and this item `blockedBy` it.
+
+### What that decision found
+
+`verdictLedgerDir()` is a **machine-global** path (`~/.claude/verdict-ledger/`), not in the repo and not
+shared. On a credential-less host the only working writer is CI, which runs the real label CLI **on a
+GitHub runner** with no ledger persistence — so six verdicts recorded in one session wrote six rows that no
+longer exist anywhere. `#2626` (ratified a week after Phase 1 landed) names a third home for exactly this
+class of state but **does not list the verdict ledger**, because it did not exist in that taxonomy yet.
+
+That is a seventh Phase-2 precondition the list above never had, and it is why the decision blocks the flip.
+
+### Still true, and unchanged by the slicing
+
+`ledgerCoversHead` is built and wired nowhere outside its own module; `we:scripts/lib/pr-merge-gate.mjs` contains zero
+ledger references; `summarizeAgreement().phase2Safe` is `disagree === 0 && unledgered === 0`. All three
+verified 2026-08-20.
