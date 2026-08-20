@@ -48,6 +48,7 @@ import { CLAIM_OP } from '../claim.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
+import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -303,6 +304,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // list below. Its io (the spawn of the single home) lives entirely in `verify-io.mjs` and arrives only
     // through the `runChecks` its builder is handed in `../run.mjs`, which is what keeps this module pure.
     [VERIFY_OP]: 'verify.mjs',
+    // `stage-pr-view`'s `write` step puts a file on disk, so it is NOT read-only; listed here for map
+    // coverage. Its own suite pins the property this list cannot express for a writing operation: the
+    // DECLARING module reaches nothing that can act, and every write lives in `stage-pr-view-io.mjs`.
+    [STAGE_PR_VIEW_OP]: 'stage-pr-view.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
