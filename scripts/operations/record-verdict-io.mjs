@@ -65,13 +65,25 @@ export function createRunReader({ root = REPO_ROOT, store = createFileRunStore()
  * own directory, so the caller's tree is never touched — and the worktree is removed afterwards whether the
  * push succeeded or not, because a stranded worktree wedges the next run on the same branch.
  *
- * `git` is shelled through the injected `run` so the whole sequence is assertable without a remote.
+ * EVERY SIDE EFFECT IS INJECTED — `git` AND the three filesystem calls. `git` alone was not enough, and CI
+ * caught it: a suite that injected only `run` still executed the real `mkdirSync` against its fixture root of
+ * `/repo`. As root that SUCCEEDED, silently creating a directory at the filesystem root and leaving the tests
+ * green over a sink that had genuinely written outside its checkout; as an ordinary CI user it failed `EACCES`
+ * and reddened four tests. The green run was the worse outcome of the two, and a partially-injected sink is
+ * what allowed it — so `mkdir`/`write`/`rm` are parameters here for the same reason `run` always was.
  */
-export function createRecordVerdictSinks({ root = REPO_ROOT, run = defaultGit, now = () => Date.now() } = {}) {
+export function createRecordVerdictSinks({
+  root = REPO_ROOT,
+  run = defaultGit,
+  now = () => Date.now(),
+  mkdir = mkdirSync,
+  write = writeFileSync,
+  rm = rmSync,
+} = {}) {
   return {
     [STAGE_REQUEST_EFFECT]: async (payload) => {
       const wt = join(root, '.operations', 'transport', `wt-${now()}`);
-      mkdirSync(dirname(wt), { recursive: true });
+      mkdir(dirname(wt), { recursive: true });
       try {
         run(['fetch', '--quiet', 'origin', TRANSPORT_BRANCH], { cwd: root });
         // `--force` on the worktree add is about the DIRECTORY, not the branch: a leftover registration from a
@@ -80,8 +92,8 @@ export function createRecordVerdictSinks({ root = REPO_ROOT, run = defaultGit, n
         run(['checkout', '-B', TRANSPORT_BRANCH, `origin/${TRANSPORT_BRANCH}`], { cwd: wt });
 
         const abs = join(wt, payload.path);
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, payload.content);
+        mkdir(dirname(abs), { recursive: true });
+        write(abs, payload.content);
 
         run(['add', '--', payload.path], { cwd: wt });
         // NOTHING TO COMMIT IS A SUCCESS, not a failure: the identical request is already staged, which is
@@ -97,7 +109,7 @@ export function createRecordVerdictSinks({ root = REPO_ROOT, run = defaultGit, n
         // ALWAYS, and in this order: remove the directory, then prune the registration. A worktree left behind
         // makes the next `worktree add` on the same branch fail, which would turn one bad run into every
         // subsequent one failing.
-        try { rmSync(wt, { recursive: true, force: true }); } catch { /* already gone */ }
+        try { rm(wt, { recursive: true, force: true }); } catch { /* already gone */ }
         try { run(['worktree', 'prune'], { cwd: root }); } catch { /* best effort */ }
       }
     },

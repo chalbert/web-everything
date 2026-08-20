@@ -153,11 +153,45 @@ describe('the stage effect', () => {
 });
 
 describe('the sink — a worktree, never a branch switch in the caller\'s lane', () => {
-  const sink = (calls, over = {}) => createRecordVerdictSinks({
+  /**
+   * EVERY side effect is stubbed, filesystem included, and that is not belt-and-braces.
+   *
+   * The first version of this helper injected `run` only. The sink's own `mkdirSync` therefore ran for real
+   * against the fixture root `/repo` — and as root it SUCCEEDED, creating a directory at the filesystem root
+   * while the suite reported green. CI, running as an ordinary user, failed it `EACCES` and reddened four
+   * tests. The red was the honest result; the local green was a suite asserting a sink's behaviour while that
+   * sink wrote outside its checkout, unnoticed.
+   *
+   * `fs` records into the same `calls` array as `run`, so a test can assert on where the sink writes as
+   * readily as on what it shells.
+   */
+  const stub = (calls, over = {}, onRun) => createRecordVerdictSinks({
     root: '/repo',
     now: () => 111,
-    run: (args, opts) => { calls.push({ args, cwd: opts?.cwd }); return over[args[0]] ?? ''; },
-  })[STAGE_REQUEST_EFFECT];
+    run: (args, opts) => {
+      calls.push({ args, cwd: opts?.cwd });
+      if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      return over[args[0]] ?? '';
+    },
+    mkdir: (p, o) => calls.push({ fs: 'mkdir', path: p, opts: o }),
+    write: (p, c) => calls.push({ fs: 'write', path: p, content: c }),
+    rm: (p, o) => calls.push({ fs: 'rm', path: p, opts: o }),
+  });
+  const sink = (calls, over = {}) => stub(calls, over)[STAGE_REQUEST_EFFECT];
+
+  /**
+   * THE REGRESSION GUARD for the above: a sink built with no fs stubs must not be what these tests exercise.
+   * Asserted by construction — the builder accepts the three, and passing them is what keeps the suite
+   * hermetic. If someone removes the parameters, this stops compiling against the real signature.
+   */
+  it('takes its filesystem calls as injected parameters, so a test never writes for real', async () => {
+    const calls = [];
+    await sink(calls, { diff: '' })({ path: 'ops/review-requests/1-accepted.json', content: '{}\n', pr: 1, to: 'accepted' });
+    const writes = calls.filter((c) => c.fs);
+    expect(writes.length).toBeGreaterThan(0);
+    // …and every path it touched is under the worktree it created, never the caller's root itself.
+    for (const w of writes) expect(w.path.startsWith('/repo/.operations/transport')).toBe(true);
+  });
 
   /**
    * Checking the transport branch out over the caller's lane would take their uncommitted work with it. I did
@@ -168,24 +202,22 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
     const calls = [];
     await sink(calls, { diff: 'ops/review-requests/1496-accepted.json' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' })
       .catch(() => {});
-    const checkouts = calls.filter((c) => c.args[0] === 'checkout');
+    const checkouts = calls.filter((c) => c.args?.[0] === 'checkout');
     expect(checkouts.length).toBeGreaterThan(0);
     for (const c of checkouts) expect(c.cwd).not.toBe('/repo');
   });
 
   it('always prunes the worktree, even when the push throws', async () => {
     const calls = [];
-    const sinks = createRecordVerdictSinks({
-      root: '/repo',
-      now: () => 111,
-      run: (args, opts) => {
-        calls.push({ args, cwd: opts?.cwd });
-        if (args[0] === 'push') throw new Error('network');
-        return args[0] === 'diff' ? 'ops/review-requests/1496-accepted.json' : '';
-      },
+    const sinks = stub(calls, { diff: 'ops/review-requests/1496-accepted.json' }, (args) => {
+      if (args[0] === 'push') throw new Error('network');
+      return undefined;
     });
     await expect(sinks[STAGE_REQUEST_EFFECT]({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' })).rejects.toThrow(/network/);
-    expect(calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'prune')).toBe(true);
+    expect(calls.some((c) => c.args?.[0] === 'worktree' && c.args?.[1] === 'prune')).toBe(true);
+    // The DIRECTORY removal too, not just the registration prune — a `finally` that dropped one of the two
+    // would still pass a check for the other.
+    expect(calls.some((c) => c.fs === 'rm')).toBe(true);
   });
 
   // A replay that stages identical bytes has nothing to commit, and that is the `idempotent: true` promise
@@ -194,13 +226,13 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
     const calls = [];
     const out = await sink(calls, { diff: '' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' });
     expect(out).toMatchObject({ pushed: false });
-    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+    expect(calls.some((c) => c.args?.[0] === 'push')).toBe(false);
   });
 
   it('pushes to the branch CI actually watches', async () => {
     const calls = [];
     await sink(calls, { diff: 'x' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' });
-    const push = calls.find((c) => c.args[0] === 'push');
+    const push = calls.find((c) => c.args?.[0] === 'push');
     expect(push.args).toContain(`HEAD:${TRANSPORT_BRANCH}`);
   });
 });
