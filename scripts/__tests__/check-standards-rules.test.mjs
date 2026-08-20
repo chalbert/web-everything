@@ -53,7 +53,7 @@ import {
   findTestOnlyExports, extractExportedNames, hasTestOnlyExportOkMarker, TEST_ONLY_EXPORT_ENFORCED,
   findUnfencedMandateParams, UNFENCED_MANDATE_ENFORCED, MANDATE_FENCE_ALLOWED_PARAMS,
   findGitHookAllFlags, gitHookAllFlagError, shellCodeOf, shellCommentOf, shellWords, isAllFlagWord,
-  logicalLines, GITHOOK_ALL_ALLOW,
+  logicalLines, scanShellLine, GITHOOK_ALL_ALLOW,
 } from '../check-standards-rules.mjs';
 // The SHIPPED rule-19 wiring — imported, never re-implemented (PR #1235 review, finding 4).
 import { scanUnfencedMandateParams, readMandateBuilderModules } from '../lib/mandate-fence-scan.mjs';
@@ -2654,6 +2654,83 @@ describe('findGitHookAllFlags (#3196)', () => {
 
 // The SHIPPED hooks stay clean — a standing guard, so the rule is judged against real files and not only
 // fixtures. It also proves the scan is not inert: there really are hooks under `.githooks/` to read.
+/**
+ * #3204 — QUOTE STATE CROSSES LINES.
+ *
+ * `shellCodeOf` decides where a line's code ends by tracking quotes, but every physical line used to start
+ * with none open. A single-quoted string spanning two lines whose continuation begins with `#` therefore read
+ * as a whole-line comment, and a real invocation after the closing quote on that line was never tokenized.
+ *
+ * This is a worse failure than the boundary misses the six earlier rounds closed. Those were a boundary the
+ * scan could not SEE; this one made it stop LOOKING — and a scan that stops looking cannot even degrade
+ * toward the escape hatch.
+ */
+describe('a string that spans physical lines (#3204)', () => {
+  const Q = "'";
+  const HOOK = `MSG=${Q}explanation that spans\n# multiple lines${Q} ; node scripts/sync-commands-deploy.mjs --all`;
+
+  // THE REGRESSION, verified against real bash by the juror on PR #1488 round 7: this invocation runs.
+  it('reports an invocation after a closing quote on a line that OPENS with a hash', () => {
+    expect(findGitHookAllFlags(HOOK).map((h) => h.line)).toEqual([2]);
+  });
+
+  it('carries the open quote out of one line and into the next', () => {
+    expect(scanShellLine(`MSG=${Q}spans`).openQuote).toBe(Q);
+    // Fed that state, the `#` is inside a string and opens nothing.
+    const next = scanShellLine(`# lines${Q} ; node x.mjs --all`, Q);
+    expect(next.comment).toBe('');
+    expect(next.openQuote).toBeNull();
+  });
+
+  // The fix must not trade this miss for noise on every hook in the tree.
+  it('still treats a genuine comment as a comment', () => {
+    expect(findGitHookAllFlags('# never pass --all here\nnode scripts/sync-commands-deploy.mjs')).toEqual([]);
+    expect(scanShellLine('# whole line').comment).toBe('# whole line');
+    expect(scanShellLine('node x.mjs   # why').code.trim()).toBe('node x.mjs');
+  });
+
+  it('leaves the escape hatch working across the same seam', () => {
+    expect(findGitHookAllFlags('node x.mjs --all  # standards-allow --all: reason')).toEqual([]);
+  });
+
+  // A backslash is LITERAL inside single quotes, so a line that begins inside one continues nothing.
+  it('does not treat a trailing backslash as a continuation while inside a single-quoted string', () => {
+    // Three physical lines; the middle one ends in a backslash that is LITERAL because the string opened on
+    // line 1 is still open. So nothing joins and all three stay their own logical line.
+    const src = `A=${Q}open\nstill open\\\nclosed${Q}`;
+    expect(src.split('\n')).toHaveLength(3);
+    expect(logicalLines(src).map((l) => l.line)).toEqual([1, 2, 3]);
+  });
+
+  // …and OUTSIDE a string the same trailing backslash still joins, so the guard is narrow rather than a
+  // blanket "never continue".
+  it('still joins an odd trailing backslash outside any string', () => {
+    expect(logicalLines('node x.mjs --al\\\nl').map((l) => l.line)).toEqual([1]);
+  });
+
+  /**
+   * The guard reads the quote state at the END of the line, not the one the line began with, because a quote
+   * can open on the SAME physical line as its trailing backslash. Fed the incoming state the guard never
+   * fired: the lines spliced, and the invocation on the second was reported at line 1 under FABRICATED text.
+   * It still reported — nothing hid — but it pointed at the wrong line. I had considered this exact case and
+   * judged it harmless because the resulting argv matched the shell; the argv did, the LOCATION did not.
+   */
+  it('reports at the real line when the quote opens on the same line as the backslash', () => {
+    const src = `A=${Q}foo\\\nbar${Q} ; node scripts/sync-commands-deploy.mjs --all`;
+    const hits = findGitHookAllFlags(src);
+    expect(hits.map((h) => h.line)).toEqual([2]);
+    // The reported text is the real second line, not a splice of both.
+    expect(hits[0].text).toBe(`bar${Q} ; node scripts/sync-commands-deploy.mjs --all`);
+  });
+
+  // The cost of that choice, pinned so it stays a decision: a `--all` that is only ever STRING CONTENT is
+  // now reported. That is the declared direction — a false positive is a sentence in a review, and the escape
+  // hatch answers it — where a wrong line number quietly misleads.
+  it('over-reports a --all that is merely string content, which is the accepted direction', () => {
+    expect(findGitHookAllFlags(`A=${Q}x\\\n--all${Q}`).map((h) => h.line)).toEqual([2]);
+  });
+});
+
 describe('#3196 — the live .githooks/ tree', () => {
   it('passes its own rule', () => {
     const dir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.githooks');

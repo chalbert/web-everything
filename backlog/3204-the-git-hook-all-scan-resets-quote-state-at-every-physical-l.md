@@ -1,8 +1,10 @@
 ---
 bornAs: x8952dw
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-08-20"
+dateResolved: "2026-08-20"
 tags: []
 ---
 
@@ -49,3 +51,44 @@ The second is enough if the first is deferred, because the failure being closed 
 2. A line that is genuinely a comment is still treated as one, so the fix does not trade this miss for noise on
    every hook in the tree.
 3. `we:.githooks/` still passes the gate unchanged — the shipped hooks are the standing regression.
+
+## How it was closed
+
+The FIRST fork — carry the state — rather than the cheaper refusal, because it makes the comment decision
+correct for every multi-line string instead of only for the one shape that was reported.
+
+`shellCodeOf` is now a thin wrapper over a `scanShellLine(line, openQuote)` that takes the quote still open
+when the line began and returns the one still open when it ended. `findGitHookAllFlags` walks the logical lines
+in order, threading that state, so a `#` inside a string opens nothing — which is exactly what the shell does.
+
+One thing beyond the card, because it is the same seam and fails in the same direction: `logicalLines` now
+threads the state too, and a trailing backslash on a line that BEGINS inside a single-quoted string no longer
+continues anything. A backslash is literal in single quotes, and over-joining is the one direction in which
+this preprocessing can HIDE a flag rather than expose one — the same lesson round 6 of PR #1488 taught about
+backslash parity.
+
+## Verified
+
+Mutation-checked, each independently: restarting the quote state at every line reddens 1 (the reported case
+itself), dropping the single-quote continuation guard reddens 1.
+
+Done-when 2 and 3 are pinned rather than asserted: a genuine comment is still a comment (three separate
+assertions, including that the escape hatch still works across the same seam), and the live `we:.githooks/`
+tree keeps its standing guard in the same suite.
+
+## Round 2 — the guard read the wrong state
+
+The juror found the continuation guard was fed the quote state the line BEGAN with, not the one it ended with,
+and a quote can open on the same physical line as its trailing backslash. So `A='foo\` spliced onto the line
+below it and the invocation there was reported at line 1 under fabricated text. It still reported — nothing
+hid — but it pointed at the wrong line.
+
+I had considered this exact case while writing the guard and judged it harmless, on the grounds that the
+resulting argv matched the shell. The argv did; the LOCATION did not, and a finding at a fabricated line is a
+finding an author cannot act on.
+
+It now reads the end-of-line state. The cost is pinned rather than absorbed: a `--all` that is only ever
+STRING CONTENT is now reported. That is the declared direction — a false positive is a sentence in a review,
+answerable with the escape hatch, where a wrong line number quietly misleads.
+
+Mutation-checked: restoring the incoming state reddens 2.
