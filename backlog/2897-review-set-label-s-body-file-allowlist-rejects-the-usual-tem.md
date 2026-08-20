@@ -2,7 +2,7 @@
 bornAs: xa8r1qf
 kind: story
 size: 2
-status: open
+status: resolved
 blockedBy: ["2882"]
 relatedTo: ["2644", "2409"]
 scope:
@@ -10,6 +10,8 @@ scope:
   - we:scripts/__tests__/review-set-label.test.mjs
   - we:skills-src/review/SKILL.md
 dateOpened: "2026-08-03"
+dateStarted: "2026-08-20"
+dateResolved: "2026-08-20"
 tags: [review, cli, usability, single-home]
 ---
 
@@ -58,3 +60,44 @@ the sanctioned path unusable re-creates the pressure that put the raw path there
   config file) is still refused.
 - we:skills-src/review/SKILL.md says **where** to write the findings file, rather than leaving the reviewer to
   guess and hit the refusal.
+
+## How it was closed
+
+`checkBodyFileLocation` is now a pure, exported predicate over injected roots, and `bodyFileRoots()` names
+them: the repo root, the OS temp dir, and `/tmp` EXPLICITLY. The explicit entry is the fix — on macOS
+`tmpdir()` is a per-user folder under `/var/folders/…` and `/tmp` is neither it nor a prefix of it.
+
+Symlinks are resolved on BOTH sides, and on the DIRECTORY rather than the file: the file must exist to be
+read, but reporting "outside the allowlist" for a missing one would name the wrong problem — the
+unreadable-file error downstream is clearer. A root that does not resolve is dropped rather than compared as
+written, so a platform without `/tmp` has one fewer root instead of a phantom that matches nothing.
+
+The refusal now NAMES the roots it will accept, which is the difference between a caller fixing their path and
+a caller hand-rolling a comment.
+
+`we:skills-src/review/SKILL.md` says where to write the file (`/tmp`, which works on every host) and says
+plainly not to route around a refusal — that bypass is what the single home exists to close.
+
+## Verified
+
+Mutation-checked: comparing paths as written reddens 2, removing the guard entirely reddens 3, and dropping
+`/tmp` from the roots reddens 2.
+
+That last one is worth recording, because it reddened NOTHING at first. On Linux `tmpdir()` IS `/tmp`, so a
+host-dependent assertion passes either way — the case the entry exists for cannot be reproduced on this host.
+The tests now exercise the macOS SHAPE by injecting roots, so the behaviour is pinned on any platform.
+
+## Round 2 — resolving only the immediate parent was not enough
+
+The juror found that when an INTERMEDIATE directory does not exist, `realpathSync` on the parent throws and
+the check fell back to the literal path — which is then compared against RESOLVED roots. On macOS that is the
+exact spelling mismatch this card exists to end: a verdict file written into a not-yet-created subdirectory of the shared
+temp dir, refused against that same root resolved through its symlink. Writing to a fresh scratch directory is the ordinary case,
+not an exotic one, so the widening would have missed its own headline use.
+
+It now resolves the DEEPEST EXISTING ANCESTOR and rejoins the tail that does not exist. Resolving the ancestor
+is not a loophole — a nonexistent path outside every root is still refused, and that is pinned.
+
+The mutation for this one also reddened nothing at first, for the same reason as the `/tmp` root: `/tmp` is not
+a symlink on Linux, so a missing directory under it exercises nothing. The test now BUILDS the shape — a
+symlinked root plus a target whose parents do not exist — so it is pinned on any platform.

@@ -85,6 +85,12 @@ and that is the invariant working. The only thing that removes `review:human` is
 node scripts/review-set-label.mjs <PR> --repo=<owner/name> --to=clear-human --actor="<operator>" --reason="<quoted instruction>" --body-file=<findings.md>
 ```
 
+**Where `<findings.md>` goes, because the path is constrained (#2897).** Its contents are published to a public
+PR and cannot be unpublished, so the CLI refuses a path outside the repo root, the OS temp dir, or `/tmp`.
+Write it under `/tmp` — that works on every host, including a session scratchpad nested beneath it. Do NOT
+route around a refusal by hand-rolling the comment: that is the bypass the single home exists to close, and
+the refusal names the roots it will accept.
+
 It is deliberately **not** a step of the operation: it demands an operator instruction quoted verbatim, which is
 judgment, not a declared input. **You may run it ONLY on an explicit in-conversation instruction from the
 operator naming that PR, and you must pass that instruction verbatim as `--reason`.** No instruction, or an
