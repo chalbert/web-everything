@@ -2707,6 +2707,28 @@ describe('a string that spans physical lines (#3204)', () => {
   it('still joins an odd trailing backslash outside any string', () => {
     expect(logicalLines('node x.mjs --al\\\nl').map((l) => l.line)).toEqual([1]);
   });
+
+  /**
+   * The guard reads the quote state at the END of the line, not the one the line began with, because a quote
+   * can open on the SAME physical line as its trailing backslash. Fed the incoming state the guard never
+   * fired: the lines spliced, and the invocation on the second was reported at line 1 under FABRICATED text.
+   * It still reported — nothing hid — but it pointed at the wrong line. I had considered this exact case and
+   * judged it harmless because the resulting argv matched the shell; the argv did, the LOCATION did not.
+   */
+  it('reports at the real line when the quote opens on the same line as the backslash', () => {
+    const src = `A=${Q}foo\\\nbar${Q} ; node scripts/sync-commands-deploy.mjs --all`;
+    const hits = findGitHookAllFlags(src);
+    expect(hits.map((h) => h.line)).toEqual([2]);
+    // The reported text is the real second line, not a splice of both.
+    expect(hits[0].text).toBe(`bar${Q} ; node scripts/sync-commands-deploy.mjs --all`);
+  });
+
+  // The cost of that choice, pinned so it stays a decision: a `--all` that is only ever STRING CONTENT is
+  // now reported. That is the declared direction — a false positive is a sentence in a review, and the escape
+  // hatch answers it — where a wrong line number quietly misleads.
+  it('over-reports a --all that is merely string content, which is the accepted direction', () => {
+    expect(findGitHookAllFlags(`A=${Q}x\\\n--all${Q}`).map((h) => h.line)).toEqual([2]);
+  });
 });
 
 describe('#3196 — the live .githooks/ tree', () => {

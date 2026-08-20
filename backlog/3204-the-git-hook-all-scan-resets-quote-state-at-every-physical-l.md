@@ -75,3 +75,20 @@ itself), dropping the single-quote continuation guard reddens 1.
 Done-when 2 and 3 are pinned rather than asserted: a genuine comment is still a comment (three separate
 assertions, including that the escape hatch still works across the same seam), and the live `we:.githooks/`
 tree keeps its standing guard in the same suite.
+
+## Round 2 — the guard read the wrong state
+
+The juror found the continuation guard was fed the quote state the line BEGAN with, not the one it ended with,
+and a quote can open on the same physical line as its trailing backslash. So `A='foo\` spliced onto the line
+below it and the invocation there was reported at line 1 under fabricated text. It still reported — nothing
+hid — but it pointed at the wrong line.
+
+I had considered this exact case while writing the guard and judged it harmless, on the grounds that the
+resulting argv matched the shell. The argv did; the LOCATION did not, and a finding at a fabricated line is a
+finding an author cannot act on.
+
+It now reads the end-of-line state. The cost is pinned rather than absorbed: a `--all` that is only ever
+STRING CONTENT is now reported. That is the declared direction — a false positive is a sentence in a review,
+answerable with the escape hatch, where a wrong line number quietly misleads.
+
+Mutation-checked: restoring the incoming state reddens 2.

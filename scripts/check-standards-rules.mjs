@@ -3090,6 +3090,13 @@ export function isAllFlagWord(word) {
 /**
  * Does this physical line continue onto the next? Only an ODD trailing backslash run does — and only outside a
  * SINGLE-quoted string, where a backslash is literal and continues nothing. PURE.
+ *
+ * THE STATE PASSED HERE IS THE ONE AT THE END OF THE LINE, not the one it began with, and the difference is a
+ * real case: `A='foo\` opens the quote on the SAME line as its trailing backslash. Fed the incoming state
+ * (null) the guard never fired, the two lines were spliced, and the invocation on the second was reported at
+ * line 1 under fabricated text — it still reported, so nothing hid, but it pointed at the wrong line
+ * (review-pr correctness juror on PR #1494). I had considered this case and judged it harmless on the grounds
+ * that the resulting argv matched the shell; the argv did, the LOCATION did not.
  */
 function continuesLine(code, openQuote = null) {
   if (openQuote === "'") return false;
@@ -3121,7 +3128,7 @@ export function logicalLines(content) {
     const start = i;
     let text = physical[i];
     let scan = scanShellLine(text, open);
-    while (i + 1 < physical.length && continuesLine(scan.code, open)) {
+    while (i + 1 < physical.length && continuesLine(scan.code, scan.openQuote)) {
       text = `${text.slice(0, -1)}${physical[++i]}`;
       scan = scanShellLine(text, open);
     }
