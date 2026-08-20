@@ -1,4 +1,5 @@
 ---
+bornAs: xhqqy9j
 kind: task
 status: open
 dateOpened: "2026-08-20"
@@ -38,7 +39,7 @@ exists to serve. The line that works is **presence, not emptiness**:
 - `labels` **missing** → refused. No claim was made, and no claim must never read as "none".
 - `"labels": []` → believed. That is a claim by whoever staged it, and claims are believed.
 
-This is the same line `verify` (#xp240uk) draws between a check that failed and one that never ran.
+This is the same line `verify` (#3207) draws between a check that failed and one that never ran.
 Absence of evidence is not evidence of absence, and the whole value here is refusing to let it become one.
 
 Types are checked, not just presence, because the realistic error is a mapping that puts `labels` as an
