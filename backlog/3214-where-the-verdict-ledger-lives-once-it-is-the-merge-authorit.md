@@ -60,7 +60,66 @@ constellation already operates, and `#2626`'s hard requirement is that vendor sp
 which a git-backed shell satisfies trivially. But it is a genuine extension of a ruled taxonomy, so it is
 the operator's call.
 
+## THE CALL (operator, 2026-08-20): **(b) — the `ops/review-requests` git transport**
+
+Ratified as **A′** — option (b) plus three requirements the red-team forced. The bare (b) is not what was
+adopted; these are part of the deliverable, not follow-ups.
+
+### A′ — what is actually ruled
+
+1. **The ledger JSONL lives on the `ops/review-requests` branch.** Durable, shared, readable from any clone
+   with no credential — which matters because the recording host routinely has none. Vendor specifics stay
+   in a git-backed io-shell, so `#2626`'s hard requirement holds and the eventual DO/D1 swap touches one file.
+2. **`#2626` is amended in the same act.** A git transport is a FOURTH home its taxonomy does not name.
+   Ratifying this decision IS that amendment — same operator, same ruling — and the deliverable includes
+   writing the clause into `we:docs/agent/platform-decisions.md` with the migration trigger (`#2703`) stated.
+   It is not a downstream approval to go and seek.
+3. **Fetch-append-retry is an acceptance criterion, not future work**, with bounded retries and a LOUD
+   failure on exhaustion — never a silent drop. A two-writer concurrency test must pass before the store may
+   be called append-only and before the authority may flip.
+4. **The durable comment is demoted to a MIRROR** rendered from the ledger row, exactly the clause `#3007`
+   already applies to labels. One authority, two renderings, neither independently authored.
+
+### The red-team, and what it changed
+
+Two skeptic rounds through `we:skills-src/jury/panel-fanout.mjs` ($0.20 total). **The attack landed both
+times**; the default was amended rather than defended.
+
+**Round 1** — three findings, two `worseThanBase`:
+- (A) concedes it is a fourth home `#2626` does not contemplate and proceeds anyway → became requirement 2.
+- (A) admitted its concurrency gap as future work, rated `broken`: two verdicts landing together could
+  silently drop one, *"recreating exactly the failure class #3007 is meant to close"* → became requirement 3.
+- (A) would leave the branch ledger AND the durable comment as two parallel records that can diverge — the
+  sharpest finding, and one this card had missed → became requirement 4.
+
+**Round 2** — three findings against the amended form. Its stated principle: *"the amendments substitute
+stated intent for verified artifacts."* Fair for a decision card, whose artifacts do not exist yet by
+definition, but two points were folded in anyway: the `#2626` amendment was made part of THIS ratification
+rather than a conditional external approval, and retry-exhaustion behaviour was specified (loud, never
+silent).
+
+**One round-2 finding is REFUTED on the facts.** It argued the ledger/mirror split is unsafe because
+*"#3007's pattern works because the ledger and the label live on the same surface (GitHub)"*. They do not:
+Phase 1's ledger is `~/.claude/verdict-ledger/` — a local file — while the label is on GitHub. The
+cross-system non-atomicity it flags **already exists today** and is inherited, not introduced by A′. The
+concern is real and `#3007`'s own posture answers it: a mirror disagreeing with the ledger is a display bug,
+not a gate bug. Recorded rather than silently dropped.
+
+A third round was not run. The remaining round-2 findings reduce to "the artifacts do not exist yet", which
+is inherent to ratifying a direction — saying so plainly rather than implying the attack converged.
+
+### Why not (a), (c) or (d)
+
+- **(b) over (a) "wait for DO/D1"** — gated on `#2703`, which has not fired; Phase 2 would block indefinitely.
+- **(b) over (c) "keep it local"** — preserves exactly the split brain this decision exists to close.
+- **(b) over deriving from PR comments** — that needs the API to read, so a lane cannot answer "is this
+  cleared?" offline, and it keeps the authority inside the same mutable GitHub surface whose mutability
+  motivated `#3007`. Under A′ the comment survives as a rendering, so its cheapness is kept where it is safe
+  (human reading) and dropped where it is not (the gate).
+
 ## Done when
 
-The verdict ledger has a ruled home, `#2626`'s clause is amended to name it either way, and `#3007` Phase 2
-is unblocked or explicitly re-gated behind `#2703`.
+`#2626`'s clause names the git transport as the interim home with its migration trigger; the ledger's
+io-shell writes to `ops/review-requests` behind the existing pure core; the fetch-append-retry loop exists
+with a two-writer concurrency test and a loud-on-exhaustion contract; and the durable comment is rendered
+from the ledger row rather than authored beside it.
