@@ -377,7 +377,7 @@ describe('describe — one declaration, one description', () => {
     expect(described.input.tier).toEqual({ type: 'string', required: false, default: 'A', enum: ['A', 'B'] });
     expect(described.steps).toEqual([
       { name: 'board', kind: 'compute', reads: ['input.scanOpenPrs'] },
-      { name: 'shortlist', kind: 'compute', reads: ['input.tier', 'input.limit', 'input.batchableOnly', 'findings.board'] },
+      { name: 'shortlist', kind: 'compute', reads: ['input.tier', 'input.limit', 'input.batchableOnly', 'input.parent', 'input.tag', 'input.locus', 'findings.board'] },
     ]);
     expect(described.readOnly).toBe(true);
     expect(described.readOnlyBecause).toContain('every declared step is `compute`');
