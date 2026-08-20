@@ -2958,30 +2958,47 @@ export function dirLevelScopeFinding(item) {
 export const GITHOOK_ALL_ALLOW = 'standards-allow --all:';
 
 /**
- * The code half of one shell line, with any trailing `#` comment removed. PURE.
+ * SPLIT one shell line into its code half and its comment half, carrying the quote state IN and OUT. PURE.
  *
  * THE COMMENT HALF IS WHY THIS EXISTS AT ALL. `we:.githooks/post-merge` carries a long comment explaining that
  * it deliberately does NOT pass `--all` — the exact prose a naive substring scan would report as a violation,
  * which would make the rule fire hardest on the file that already got it right. Quote tracking is here for the
  * same reason in miniature: `echo "pass --all # not really"` has no comment in it.
  *
+ * THE STATE CROSSES LINES, and that is #3204. The predecessor started every physical line with no quote open,
+ * so a single-quoted string spanning two lines whose continuation begins with `#` read as a whole-line
+ * comment — and a real invocation after the closing quote on that line was never tokenized at all. That is a
+ * worse failure than the boundary misses this scan has had before: those were a boundary it could not SEE,
+ * this one made it stop LOOKING, and a scan that stops looking cannot even degrade toward the escape hatch.
+ *
  * Honest limit: this is a scanner, not a shell parser. Heredocs, `$(…)` nesting and `${x#y}` expansions are
  * not modelled. It is deliberately biased toward treating text as CODE — a false positive is a sentence in a
  * review; a false negative is the flag shipping again.
+ *
+ * @param {string} line
+ * @param {string|null} openQuote - the quote character still open when this line began, or null.
+ * @returns {{code: string, comment: string, openQuote: string|null}}
  */
-export function shellCodeOf(line) {
+export function scanShellLine(line, openQuote = null) {
   const s = String(line ?? '');
-  let quote = null;
+  let quote = openQuote ?? null;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === '\\' && quote !== "'") { i++; continue; }   // an escaped char is never a delimiter
     if (quote) { if (c === quote) quote = null; continue; }
     if (c === '"' || c === "'") { quote = c; continue; }
-    // `#` opens a comment only at the start of a word — `${x#y}` and `a#b` are not comments.
-    if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+    // `#` opens a comment only at the start of a word — `${x#y}` and `a#b` are not comments. Unreachable
+    // while a quote is open, which is the whole point: a `#` inside a string is not a comment opener.
+    if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return { code: s.slice(0, i), comment: s.slice(i), openQuote: null };
   }
-  return s;
+  return { code: s, comment: '', openQuote: quote };
 }
+
+/** The code half of ONE line read in isolation. Thin over {@link scanShellLine}. PURE. */
+export function shellCodeOf(line) {
+  return scanShellLine(line).code;
+}
+
 
 /**
  * What separates one shell word from the next: everything that is not a word CHARACTER.
@@ -3048,17 +3065,17 @@ export function shellWords(code) {
 }
 
 /**
- * The COMMENT half of a line — everything `shellCodeOf` left behind. PURE.
+ * The COMMENT half of ONE line read in isolation. Thin over {@link scanShellLine}. PURE.
  *
- * The escape marker is read from here and not from the raw line, and round 3 is why: a raw-line substring
- * match meant `echo "standards-allow --all: fake" ; node x.mjs --all` suppressed a genuine invocation, because
- * the phrase appeared in a STRING on the same line. The marker is a comment by design, so that is the only
- * place it counts.
+ * The escape marker is read from here and not from the raw line: a raw-line substring match meant
+ * `echo "standards-allow --all: fake" ; node x.mjs --all` suppressed a genuine invocation, because the phrase
+ * appeared in a STRING on the same line. The marker is a comment by design, so that is the only place it
+ * counts.
  */
 export function shellCommentOf(line) {
-  const s = String(line ?? '');
-  return s.slice(shellCodeOf(s).length);
+  return scanShellLine(line).comment;
 }
+
 
 /** Is this word the flag? `--all=<value>` is the same flag; `--all-repos` is somebody else's. PURE. */
 export function isAllFlagWord(word) {
@@ -3070,9 +3087,13 @@ export function isAllFlagWord(word) {
  * @param {string} content
  * @returns {Array<{line: number, text: string}>}
  */
-/** Does this physical line continue onto the next? Only an ODD trailing backslash run does. PURE. */
-function continuesLine(text) {
-  const run = shellCodeOf(text).match(/\\*$/);
+/**
+ * Does this physical line continue onto the next? Only an ODD trailing backslash run does — and only outside a
+ * SINGLE-quoted string, where a backslash is literal and continues nothing. PURE.
+ */
+function continuesLine(code, openQuote = null) {
+  if (openQuote === "'") return false;
+  const run = String(code).match(/\\*$/);
   return ((run ? run[0].length : 0) % 2) === 1;
 }
 
@@ -3094,28 +3115,45 @@ function continuesLine(text) {
 export function logicalLines(content) {
   const physical = String(content ?? '').split('\n');
   const out = [];
+  // The quote state crosses PHYSICAL lines, so it is carried here rather than restarted per line (#3204).
+  let open = null;
   for (let i = 0; i < physical.length; i++) {
     const start = i;
     let text = physical[i];
-    while (i + 1 < physical.length && continuesLine(text)) text = `${text.slice(0, -1)}${physical[++i]}`;
+    let scan = scanShellLine(text, open);
+    while (i + 1 < physical.length && continuesLine(scan.code, open)) {
+      text = `${text.slice(0, -1)}${physical[++i]}`;
+      scan = scanShellLine(text, open);
+    }
     out.push({ line: start + 1, text });
+    open = scan.openQuote;
   }
   return out;
 }
 
+
 export function findGitHookAllFlags(content) {
-  const lines = logicalLines(content);
+  // ONE ordered pass, carrying the open quote from each logical line into the next (#3204). Scanning each
+  // line from a clean state let a string that spans lines turn its continuation into a "comment", and the
+  // invocation after the closing quote was then never tokenized at all.
+  let open = null;
+  const lines = logicalLines(content).map(({ line, text }) => {
+    const scan = scanShellLine(text, open);
+    open = scan.openQuote;
+    return { line, text, code: scan.code, comment: scan.comment };
+  });
   const out = [];
-  lines.forEach(({ line, text }, i) => {
-    if (!shellWords(shellCodeOf(text)).some(isAllFlagWord)) return;
+  lines.forEach(({ line, text, code }, i) => {
+    if (!shellWords(code).some(isAllFlagWord)) return;
     // The escape is read from the COMMENT half of this line and of the one above — never from the code, where
     // the same phrase inside a string would silently suppress a real invocation.
-    const escaped = (l) => shellCommentOf(l?.text).includes(GITHOOK_ALL_ALLOW);
+    const escaped = (l) => String(l?.comment ?? '').includes(GITHOOK_ALL_ALLOW);
     if (escaped(lines[i]) || escaped(lines[i - 1])) return;
     out.push({ line, text: text.trim() });
   });
   return out;
 }
+
 
 /**
  * The finding as the gate reports it. Kept beside the detector so the message and the rule cannot drift, and
