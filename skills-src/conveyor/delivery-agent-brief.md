@@ -144,9 +144,18 @@ not merely discouraged. The authoritative, marker-recording synchronous verifica
 your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same suites, run green so you may resolve.
 
 ```bash
-npm run check:standards          # (or the item's locus gate) — FOREGROUND, blocking; never `&`/background-and-yield
+# The DECLARED form — one answer, three values, and the same marker `pr-land` gates on:
+node scripts/operations/run.mjs verify --checkout="$PWD" --json     # FOREGROUND, blocking; never `&`
 node scripts/backlog.mjs resolve {{ITEM_NUM}}
 ```
+
+**Read `verdict.ok`, and read `verdict.unrun` before you believe a green.** The operation shells
+`we:scripts/verify-lane.mjs` and maps its exit codes and marker vocabulary onto three outcomes: `pass`, `fail`,
+and `unrun`. `unrun` covers a crashed runner, a killed suite, a `corrupt` marker and a marker for a DIFFERENT
+commit — none of which is a failure the suites observed, and none of which may satisfy this gate. It is the
+value a hand-rolled `check:standards | grep` cannot produce, and therefore the one that used to be lost. The
+raw command still works and is what the operation runs; use the operation so the answer is data rather than
+your reading of a terminal.
 
 ### 6. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
 
