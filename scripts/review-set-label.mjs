@@ -54,8 +54,8 @@
  * label strings.
  */
 import { execFileSync } from 'node:child_process';
-import { resolve, sep } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
@@ -302,6 +302,42 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
 export function presentRemoveLabels(removeLabels, currentLabels) {
   return (Array.isArray(removeLabels) ? removeLabels : []).filter((l) => hasReviewLabel(currentLabels, l));
 }
+
+/**
+ * WHERE A `--body-file` MAY LIVE (#2897). PURE over injected roots, so both directions are testable.
+ *
+ * THE GUARD STAYS; ONLY THE ALLOWLIST WIDENS. The file's contents are published to a PUBLIC PR and cannot be
+ * unpublished, so an unconstrained path turns a review CLI into an exfiltration primitive. That is why the
+ * check exists and why this does not remove it.
+ *
+ * WHAT WAS WRONG WITH IT: the roots were `process.cwd()` and `tmpdir()` compared as written. On macOS
+ * `tmpdir()` is a PER-USER folder under `/var/folders/…`, so the conventional shared `/tmp` was refused — and
+ * so was an agent session scratchpad. `/tmp` is itself a symlink to `/private/tmp` there, so even naming the
+ * real temp dir could be refused on SPELLING. A caller who cannot use the sanctioned flag hand-rolls a
+ * comment instead, which is precisely the bypass #2882 was built to close: a usability defect that pushes
+ * people off the safe path is a safety defect one step removed.
+ *
+ * SYMLINKS ARE RESOLVED ON BOTH SIDES, and on the DIRECTORY rather than the file: the file must exist to be
+ * read, but reporting "outside the allowlist" for a missing one would name the wrong problem — the
+ * unreadable-file error downstream is the clearer message. A root that does not resolve is dropped rather
+ * than compared as written, so a platform without `/tmp` simply has one fewer root.
+ *
+ * @param {string} abs - the already-resolved absolute path to the body file.
+ * @param {string[]} roots - candidate root directories.
+ * @returns {{ok: true} | {ok: false, roots: string[]}}
+ */
+export function checkBodyFileLocation(abs, roots) {
+  const real = (p) => { try { return realpathSync(p); } catch { return null; } };
+  const allowed = [...new Set(roots.map(real).filter(Boolean))];
+  const dir = real(dirname(abs));
+  const target = dir ? join(dir, basename(abs)) : abs;
+  const ok = allowed.some((root) => target === root || target.startsWith(root + sep));
+  return ok ? { ok: true } : { ok: false, roots: allowed };
+}
+
+/** The roots a `--body-file` may sit under. `/tmp` is listed EXPLICITLY because on macOS it is neither
+ *  `tmpdir()` nor a prefix of it, and it is where callers actually write. */
+export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp, '/tmp'];
 
 /**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
@@ -1102,11 +1138,13 @@ if (IS_CLI) {
   let verdictBody = '';
   if (bodyFileArg) {
     // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
-    // shell variable or a wrong path would otherwise leak whatever it points at, with the CLI reporting success.
+    // shell variable or a wrong path would otherwise leak whatever it points at, with the CLI reporting
+    // success. See {@link checkBodyFileLocation} for which roots and why the refusal now NAMES them.
     const abs = resolve(bodyFileArg);
-    const allowed = [resolve(process.cwd()), resolve(tmpdir())];
-    if (!allowed.some((root) => abs === root || abs.startsWith(root + sep))) {
-      fail(`--body-file must live under the repo root or the temp dir (got ${abs}) — its contents are published to a public PR`);
+    const located = checkBodyFileLocation(abs, bodyFileRoots());
+    if (!located.ok) {
+      fail(`--body-file must live under the repo root or a temp dir (got ${abs}) — its contents are published `
+        + `to a public PR, so the path is constrained. Allowed roots: ${located.roots.join(', ')}`);
     }
     try { verdictBody = readFileSync(abs, 'utf8'); }
     catch (e) { fail(`--body-file=${bodyFileArg} is unreadable (${String((e && e.message) || e).split('\n')[0]})`); }
