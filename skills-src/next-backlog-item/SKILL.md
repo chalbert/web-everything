@@ -200,7 +200,8 @@ an item*). The backlog file is the durable, resumable record — the item body *
 6. **Resume, don't re-pick, an `active` item.** Asked to continue one (or finding a stranded claim): read
    its `## Progress`, check out its branch, continue from **Next**.
 7. **Close it out when done — mark it `resolved`** (*backlog-workflow.md → Closing out a completed item*).
-   Confirm done (tests + `check:standards` green), take a **careful last look for leftovers** and capture
+   Confirm done — `node scripts/operations/run.mjs verify --checkout=<lane> --json`, whose `verdict.ok` is true
+   only when every check PASSED (an `unrun` check is not a pass; see *backlog-workflow.md → Closing out*) — take a **careful last look for leftovers** and capture
    each as its **own new item** via **`node scripts/backlog.mjs scaffold --type=… --workitem=… --size=…
    --title='…' --digest='…' [--blocked-by=NNN]`** (**single quotes** — item text in a double-quoted value
    still runs `` ` `` / `$(…)` through bash; *backlog-workflow.md → Authoring an item → The quoting rule*)

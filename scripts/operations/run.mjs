@@ -41,6 +41,8 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+import { verifyOperation, VERIFY_OP } from './verify.mjs';
+import { createChecksRunner } from './verify-io.mjs';
 import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -64,6 +66,12 @@ export const OPERATIONS = Object.freeze({
   [REVIEW_PREP_OP]: () => ({
     declaration: reviewPrepOperation({ readPrep: createReviewPrepReader() }),
     sinks: createReviewPrepSinks(),
+  }),
+  // #xp240uk — the step between "work done" and "open a PR", which was hand-rolled shell every time. Two
+  // compute steps and no sink, so the HTTP adapter derives a GET with no run record, exactly as `suggest-next`
+  // and `gate-health` do.
+  [VERIFY_OP]: () => ({
+    declaration: verifyOperation({ runChecks: createChecksRunner() }),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
