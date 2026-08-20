@@ -110,6 +110,29 @@ only downgrades the record to *"Independence NOT established"*.
 an accept. Do not re-run the panel: prove the net patch is byte-identical, then re-run the operation with a body
 that says so. `reviewed-contribution` (#x9xqexm) already covers pure base movement.
 
+**A host that cannot authenticate to GitHub — record through the operation, never by hand (#xrk6hmj).** On a
+cloud VM no local process holds a GitHub credential, so the `record` effect's shell-out to
+`we:scripts/review-set-label.mjs` fails and the verdict has to travel as a file on the `ops/review-requests`
+branch, which `we:.github/workflows/apply-review-request.yml` applies with the real CLI. That transport has a
+caller now — use it:
+
+```
+node scripts/operations/run.mjs record-verdict --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
+```
+
+**There is deliberately no `--pr`.** The subject, the repo, the juror's session id and the staged write-up are
+read back out of the run record the review itself wrote, because the failure mode here is not tedium — it is
+retyping. A hand-assembled request restates the PR number in a fresh `JSON.stringify`, and a wrong one records
+your verdict on somebody else's PR while every artefact still names yours. That is the class #1466 closed on the
+reading side; this closes it on the writing side. Do not hand-roll the JSON, and do not `git checkout` the
+transport branch over your lane — the operation pushes through its own worktree precisely because doing it by
+hand takes your uncommitted work with it.
+
+It refuses rather than inventing: a run that produced no verdict, a run that is not a review, and a run that
+staged no write-up are all refused, because each would put a request on the transport branch indistinguishable
+from a real review. `--to=clear-human` still carries every constraint of the ceremony above — the instruction
+goes in `--operatorInstruction`, verbatim, and the applier refuses the target without it.
+
 ## Invariant
 
 A **`review:human` PR is never agent-cleared.** The core may render an advisory take; the `review:accepted` label
