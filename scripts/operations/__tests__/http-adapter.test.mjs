@@ -46,6 +46,7 @@ import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
+import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -292,6 +293,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // the stronger property this map cannot express: `explore.mjs` reaches nothing that can act (it is a
     // declaration with no injected reader at all), asserted in `explore.test.mjs`.
     [EXPLORE_OP]: 'explore.mjs',
+    // #xrk6hmj — `record-verdict`'s `stage` step pushes to the transport branch, so it is emphatically NOT
+    // read-only; listed here only for map coverage. Its declaring module still imports nothing that can act
+    // (the reader and the git sinks live in `record-verdict-io.mjs`), but that is a discipline its own suite
+    // pins, not a claim this pinned list makes.
+    [RECORD_VERDICT_OP]: 'record-verdict.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
