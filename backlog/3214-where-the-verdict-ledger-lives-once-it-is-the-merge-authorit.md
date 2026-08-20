@@ -2,8 +2,11 @@
 bornAs: xvatzyf
 kind: decision
 parent: "2405"
-status: open
+codifiedIn: "docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates"
+ratifiedBy: "Nicolas Gilbert (operator)"
+status: resolved
 dateOpened: "2026-08-20"
+dateResolved: "2026-08-20"
 tags: []
 ---
 
