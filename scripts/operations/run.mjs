@@ -41,6 +41,9 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+import { recordVerdictOperation, RECORD_VERDICT_OP } from './record-verdict.mjs';
+import { createRunReader, createRecordVerdictSinks } from './record-verdict-io.mjs';
+import { validateRequest, APPLIABLE_TARGETS } from '../apply-review-request.mjs';
 import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -64,6 +67,12 @@ export const OPERATIONS = Object.freeze({
   [REVIEW_PREP_OP]: () => ({
     declaration: reviewPrepOperation({ readPrep: createReviewPrepReader() }),
     sinks: createReviewPrepSinks(),
+  }),
+  // #xrk6hmj — carry a verdict from a host with no GitHub credential to the CI job that has one. The request's
+  // rules are the APPLIER's, passed in rather than restated: one answer to "is this request legal".
+  [RECORD_VERDICT_OP]: () => ({
+    declaration: recordVerdictOperation({ readRun: createRunReader() }, { validateRequest, appliableTargets: APPLIABLE_TARGETS }),
+    sinks: createRecordVerdictSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
