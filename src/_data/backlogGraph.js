@@ -1,5 +1,25 @@
 // backlogGraph.js — the dependency relationship graph data for /backlog/ (#255).
 //
+// The ONE ordering primitive both the node sort and the edge sort use. Exported so it can be tested
+// directly on both id shapes rather than only through whatever the live backlog happens to contain.
+//
+// `Number()` IS NaN ON A HASH ID. Under JIT numbering (#2288) an unlanded item's id is a hash (`xvatzyf`),
+// not an `NNN`, so `Number(a) - Number(b)` yields NaN for any pair involving one — and a comparator that
+// returns NaN is INCONSISTENT, leaving `Array.sort` free to permute the same data differently between runs.
+// Numbered ids keep their numeric order and sort ahead of hash ids; hash ids compare lexicographically.
+// Total, and stable for equal ids (which cannot occur here — ids are unique).
+function compareIds(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  const aNum = Number.isFinite(na);
+  const bNum = Number.isFinite(nb);
+  if (aNum && bNum) return na - nb;
+  if (aNum !== bNum) return aNum ? -1 : 1;
+  const sa = String(a);
+  const sb = String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
 // Builds a node/edge model of the backlog's `blockedBy` network from the loader (src/_data/backlog.js),
 // reusing the reverse-edge + leverage derivations #254 already computed (no re-derivation here). Emitted
 // as JSON in the page; src/assets/js/backlog-graph.js lays it out and draws an SVG (no chart library —
@@ -36,15 +56,7 @@ module.exports = () => {
   //
   // Numbered items keep their numeric order and sort ahead of hash ids; hash ids fall back to a lexicographic
   // compare, which is total and stable. `num` is unique, so no pair ever compares equal.
-  const byNumThenId = (a, b) => {
-    const na = Number(a.num);
-    const nb = Number(b.num);
-    const aNum = Number.isFinite(na);
-    const bNum = Number.isFinite(nb);
-    if (aNum && bNum) return na - nb;
-    if (aNum !== bNum) return aNum ? -1 : 1;
-    return String(a.num) < String(b.num) ? -1 : String(a.num) > String(b.num) ? 1 : 0;
-  };
+  const byNumThenId = (a, b) => compareIds(a.num, b.num);
 
   // Longest prerequisite-chain depth, memoised + cycle-safe (validator forbids cycles; the guard just
   // stops a stray back-edge from looping). DAG ⇒ the memo is always complete.
@@ -96,7 +108,14 @@ module.exports = () => {
       if (inEdge.has(b.num)) edges.push({ from: b.num, to: it.num }); // prerequisite → dependent
     }
   }
-  edges.sort((a, b) => Number(a.from) - Number(b.from) || Number(a.to) - Number(b.to));
+  // SAME total order as the nodes, for the same reason — `Number()` is NaN on a hash id, and an
+  // inconsistent comparator makes edge order implementation-defined too. Fixing only the node sort
+  // left this live in the same file (PR #1503 correctness juror, round 2).
+  edges.sort((a, b) => compareIds(a.from, b.from) || compareIds(a.to, b.to));
 
   return { nodes, edges, empty: nodes.length === 0, maxLayer: nodes.reduce((m, n) => Math.max(m, n.layer), 0) };
 };
+
+// Attached to the exported builder so a test can drive the ordering primitive DIRECTLY on both id
+// shapes, instead of only through whatever ids the live backlog happens to contain that day.
+module.exports.compareIds = compareIds;

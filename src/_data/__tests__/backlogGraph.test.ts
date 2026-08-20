@@ -66,27 +66,52 @@ describe('backlog dependency graph — model invariants', () => {
   });
 
   /**
-   * NODE ORDER MUST BE TOTAL ACROSS BOTH ID SHAPES. Under JIT numbering (#2288) an unlanded item's `num` is a
-   * HASH (`xvatzyf`), not an `NNN`, and `Number('xvatzyf')` is `NaN` — so the original
-   * `Number(a.num) - Number(b.num)` comparator returned `NaN` for any pair involving one. A comparator that
-   * returns `NaN` is INCONSISTENT and `Array.sort` may then permute the same data differently between runs,
-   * which is the "byte-identical" invariant above failing intermittently rather than honestly.
+   * ORDER MUST BE TOTAL ACROSS BOTH ID SHAPES, and this is asserted on the PRIMITIVE rather than on the live
+   * corpus — because a corpus-only assertion silently no-ops the day the backlog contains no hash ids, which
+   * is exactly what the first version of this test did (PR #1503 correctness juror, round 2).
    *
-   * Asserted on the ORDER rather than on the comparator, so it holds however the sort is implemented:
-   * numbered nodes ascend numerically and all precede hash-id nodes, which ascend lexicographically.
+   * Under JIT numbering (#2288) an unlanded item's id is a HASH (`xvatzyf`), not an `NNN`, and
+   * `Number('xvatzyf')` is `NaN` — so a `Number(a) - Number(b)` comparator returns `NaN` for any pair
+   * involving one. A comparator that returns `NaN` is INCONSISTENT and `Array.sort` may then permute the
+   * same data differently between runs, which is the byte-identical invariant above failing intermittently
+   * rather than honestly.
    */
-  it('orders numbered nodes before hash-id nodes, each totally (#2288 JIT numbering)', () => {
+  it('compareIds is a TOTAL order over numbered and hash ids, and never returns NaN', () => {
+    const { compareIds } = buildGraph as unknown as { compareIds: (a: string, b: string) => number };
+    // numbered ids sort numerically, not lexicographically ('4' before '10', which a string sort reverses)
+    expect(compareIds('4', '10')).toBeLessThan(0);
+    expect(compareIds('004', '010')).toBeLessThan(0);
+    // every numbered id precedes every hash id, in both argument orders (antisymmetry)
+    expect(compareIds('999', 'xabc')).toBeLessThan(0);
+    expect(compareIds('xabc', '999')).toBeGreaterThan(0);
+    // hash ids compare lexicographically among themselves
+    expect(compareIds('xa', 'xb')).toBeLessThan(0);
+    expect(compareIds('xb', 'xa')).toBeGreaterThan(0);
+    expect(compareIds('xa', 'xa')).toBe(0);
+    // THE LOAD-BEARING ONE: never NaN, for any mix — that is what makes the comparator consistent.
+    for (const [a, b] of [['1', '2'], ['1', 'x'], ['x', '1'], ['x', 'y'], ['004', 'xvatzyf']]) {
+      expect(Number.isFinite(compareIds(a, b))).toBe(true);
+    }
+    // Two ids that are numerically equal compare 0 — `'4'` and `'004'` are the same NNN, so this cannot
+    // arise between two real items (`num` is unique) and stable sort keeps their input order either way.
+    // Asserted rather than assumed, because it is the one input for which the order is not total.
+    expect(compareIds('4', '004')).toBe(0);
+
+    // sorting a mixed list of DISTINCT ids is therefore total
+    const mixed = ['xb', '10', 'xa', '4', '002'];
+    expect([...mixed].sort(compareIds)).toEqual(['002', '4', '10', 'xa', 'xb']);
+  });
+
+  // …and the live graph actually uses it, for nodes AND edges (the round-2 finding was that only the node
+  // sort had been fixed while `edges.sort` kept the NaN comparator).
+  it('applies that order to both nodes and edges', () => {
+    const { compareIds } = buildGraph as unknown as { compareIds: (a: string, b: string) => number };
     const nums = graph.nodes.map((n: any) => String(n.num));
-    const isNumeric = (v: string) => Number.isFinite(Number(v));
-    const firstHash = nums.findIndex((v) => !isNumeric(v));
-    if (firstHash === -1) return; // no unlanded items in the corpus right now — nothing to assert
-    // every numbered node precedes every hash-id node
-    expect(nums.slice(0, firstHash).every(isNumeric)).toBe(true);
-    expect(nums.slice(firstHash).some(isNumeric)).toBe(false);
-    // …and each run is itself sorted, so the order is total rather than merely grouped
-    const numeric = nums.slice(0, firstHash).map(Number);
-    expect(numeric).toEqual([...numeric].sort((a, b) => a - b));
-    const hashes = nums.slice(firstHash);
-    expect(hashes).toEqual([...hashes].sort());
+    expect(nums).toEqual([...nums].sort(compareIds));
+    const keys = graph.edges.map((e: any) => `${e.from}\u0000${e.to}`);
+    const resorted = [...graph.edges]
+      .sort((a: any, b: any) => compareIds(a.from, b.from) || compareIds(a.to, b.to))
+      .map((e: any) => `${e.from}\u0000${e.to}`);
+    expect(keys).toEqual(resorted);
   });
 });
