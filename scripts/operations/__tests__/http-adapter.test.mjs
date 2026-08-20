@@ -46,6 +46,7 @@ import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
+import { OPEN_PR_OP } from '../open-pr.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -292,6 +293,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // the stronger property this map cannot express: `explore.mjs` reaches nothing that can act (it is a
     // declaration with no injected reader at all), asserted in `explore.test.mjs`.
     [EXPLORE_OP]: 'explore.mjs',
+    // `open-pr`'s `submit` step shells `pr-land.mjs`, so it is NOT read-only; listed here for map coverage.
+    // Its own suite pins the two properties that matter for a routing operation and that this list cannot
+    // express: the declaring module reaches nothing at all, and the io shell reaches `child_process` and NO
+    // network — the home is its only route to GitHub.
+    [OPEN_PR_OP]: 'open-pr.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
