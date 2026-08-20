@@ -30,7 +30,9 @@ import { createRegistry } from './registry.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
-import { createReviewPrReader, createReviewPrSinks } from './review-pr-io.mjs';
+import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
+import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
+import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
 import { reviewPrepOperation, REVIEW_PREP_OP } from './review-prep.mjs';
 import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
@@ -113,6 +115,21 @@ export const OPERATIONS = Object.freeze({
     // knob: a committee panelist and a delivery agent are the same kind of spawned background session, so an
     // operator who set the permission mode for one meant it for both. Unset → no extra flags.
     sinks: createExploreSinks({ extraArgs: exploreAgentArgsFromEnv() }),
+  }),
+  // The other half of the file transport `review-pr-io.mjs` already reads from: on a host where `gh` cannot
+  // authenticate, the view is staged by hand, and a hand-assembled view drops a field by omission. The reader
+  // DEFAULTS every one of those to empty, so an absent `labels` makes a `review:human` PR look clearable.
+  // This refuses an incomplete view before it is written.
+  //
+  // THE FIELD LIST AND THE FILENAME ARE THE READER'S OWN, injected here rather than restated in the
+  // declaration — the same single-home wiring `record-verdict` uses for the applier's validator. A second
+  // namer would send the review to a different file than the one staged (#1466).
+  [STAGE_PR_VIEW_OP]: () => ({
+    declaration: stagePrViewOperation(
+      { readPayload: createPayloadReader() },
+      { fields: PR_VIEW_FIELDS, viewFileName: prViewFileName, defaultDir: defaultViewDir() },
+    ),
+    sinks: createStagePrViewSinks(),
   }),
 });
 

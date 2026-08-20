@@ -36,6 +36,28 @@ pointing it at another repo's clone does not make a cross-repo review work (#313
 still works as a fallback — it was the ONLY way until #3151, which is why older dispatch prompts thread it by
 hand.)
 
+### On a host where `gh` cannot authenticate — stage the view first (#xhqqy9j)
+
+`read` makes exactly one network call: `gh pr view --json`. On a cloud VM that call fails and the whole review
+stops before it starts. The transport for that case is a view **staged on disk**, which `review-pr-io.mjs`
+reads instead of calling `gh` whenever `WE_PR_VIEW_DIR` is set. Obtain the view however this host can (a
+connector, another machine), write it to a file, and stage it **through the operation** — never by copying it
+into place yourself:
+
+```
+node scripts/operations/run.mjs stage-pr-view --pr=<PR> --repo=<owner/name> --from=<payload.json> --dir="$WE_PR_VIEW_DIR" --json
+```
+
+**Why it must not be a `cp`.** A view assembled by hand from another API's response drops a field by
+omission, and the reader DEFAULTS every field it consumes rather than failing: an absent `labels` makes a
+`review:human` PR read as unlabelled and clearable, an absent `comments` hides the escalation and the last
+verdict, an absent `body` loses the park's disposition. None of that throws — you get a completed review of a
+PR that was never fully read. The operation refuses an **absent** field by name and believes an **explicitly
+empty** one (`"labels": []` is a claim; omission is not), and it writes the file under the reader's own
+injective name so the review finds the view you staged rather than another repo's.
+
+It does not fetch, and cannot: nothing on this host holds a credential. It checks and it places.
+
 It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
 invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
 reason, the disposition, the net changed-file list, any advisory comment), its `spend` (what the juror cost —
