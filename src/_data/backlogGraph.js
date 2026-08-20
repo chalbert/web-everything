@@ -24,6 +24,28 @@ module.exports = () => {
     }
   }
 
+  // ORDER MUST NOT DEPEND ON `Number()`. Under JIT numbering (#2288) an unlanded item's `num` is a HASH
+  // (`xvatzyf`), not an `NNN`, and `Number('xvatzyf')` is `NaN` — so `Number(a.num) - Number(b.num)` returns
+  // `NaN` for any pair involving one. A comparator that returns `NaN` is INCONSISTENT, and `Array.sort` is
+  // then free to produce a different permutation for the same data: the node order becomes
+  // implementation-defined, which is exactly what the "a second build is byte-identical" invariant forbids.
+  //
+  // Every open hash-id item is already a node (the `isLiveStatus` half of the filter), so this was latent
+  // from the moment JIT numbering shipped; it only became reachable when hash-id items started carrying
+  // `blockedBy` edges to each other.
+  //
+  // Numbered items keep their numeric order and sort ahead of hash ids; hash ids fall back to a lexicographic
+  // compare, which is total and stable. `num` is unique, so no pair ever compares equal.
+  const byNumThenId = (a, b) => {
+    const na = Number(a.num);
+    const nb = Number(b.num);
+    const aNum = Number.isFinite(na);
+    const bNum = Number.isFinite(nb);
+    if (aNum && bNum) return na - nb;
+    if (aNum !== bNum) return aNum ? -1 : 1;
+    return String(a.num) < String(b.num) ? -1 : String(a.num) > String(b.num) ? 1 : 0;
+  };
+
   // Longest prerequisite-chain depth, memoised + cycle-safe (validator forbids cycles; the guard just
   // stops a stray back-edge from looping). DAG ⇒ the memo is always complete.
   const layerCache = new Map();
@@ -65,7 +87,7 @@ module.exports = () => {
       layer: layer(it.num),
       inEdge: inEdge.has(it.num),       // participates in ≥1 blockedBy edge (vs. a standalone open item)
     }))
-    .sort((a, b) => Number(a.num) - Number(b.num)); // stable node order
+    .sort(byNumThenId); // stable node order — see `byNumThenId`, which hash ids made load-bearing
 
   const edges = [];
   for (const it of items) {

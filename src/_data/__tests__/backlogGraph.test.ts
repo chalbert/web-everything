@@ -64,4 +64,29 @@ describe('backlog dependency graph — model invariants', () => {
   it('is deterministic — a second build is byte-identical', () => {
     expect(JSON.stringify(buildGraph())).toEqual(JSON.stringify(graph));
   });
+
+  /**
+   * NODE ORDER MUST BE TOTAL ACROSS BOTH ID SHAPES. Under JIT numbering (#2288) an unlanded item's `num` is a
+   * HASH (`xvatzyf`), not an `NNN`, and `Number('xvatzyf')` is `NaN` — so the original
+   * `Number(a.num) - Number(b.num)` comparator returned `NaN` for any pair involving one. A comparator that
+   * returns `NaN` is INCONSISTENT and `Array.sort` may then permute the same data differently between runs,
+   * which is the "byte-identical" invariant above failing intermittently rather than honestly.
+   *
+   * Asserted on the ORDER rather than on the comparator, so it holds however the sort is implemented:
+   * numbered nodes ascend numerically and all precede hash-id nodes, which ascend lexicographically.
+   */
+  it('orders numbered nodes before hash-id nodes, each totally (#2288 JIT numbering)', () => {
+    const nums = graph.nodes.map((n: any) => String(n.num));
+    const isNumeric = (v: string) => Number.isFinite(Number(v));
+    const firstHash = nums.findIndex((v) => !isNumeric(v));
+    if (firstHash === -1) return; // no unlanded items in the corpus right now — nothing to assert
+    // every numbered node precedes every hash-id node
+    expect(nums.slice(0, firstHash).every(isNumeric)).toBe(true);
+    expect(nums.slice(firstHash).some(isNumeric)).toBe(false);
+    // …and each run is itself sorted, so the order is total rather than merely grouped
+    const numeric = nums.slice(0, firstHash).map(Number);
+    expect(numeric).toEqual([...numeric].sort((a, b) => a - b));
+    const hashes = nums.slice(firstHash);
+    expect(hashes).toEqual([...hashes].sort());
+  });
 });
