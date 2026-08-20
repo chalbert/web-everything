@@ -149,6 +149,13 @@ export function computeSelection(items) {
     // 'tracking' (open children, no epic-level action). Loader-derived; null for non-epics.
     epicState: it.epicState ?? null,
     childlessReason: it.childlessReason ?? null,
+    // WHICH EPIC AND WHICH THEME an item belongs to. Carried for the same reason `locus` above is: they
+    // are facts the loader already derived, and a consumer that wants to ask "what is left in this epic"
+    // or "what else is tagged `gate`" would otherwise have to re-read the backlog to recover them —
+    // a second read of the board, which is how two views of it drift apart. Projection only; neither
+    // participates in the ranking.
+    parent: it.parent ?? null,
+    tags: Array.isArray(it.tags) ? [...it.tags] : [],
     // A decision is PREPARED once `preparedDate` is set — its forks are researched, the research is
     // published as a /research/ topic, and each fork states options + a bold default (the
     // "prepared-fork shape", backlog-workflow.md). A prepared Tier-B item is ready to *ratify*, not research.

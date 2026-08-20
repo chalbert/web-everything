@@ -191,6 +191,49 @@ export function explainRank(item) {
 }
 
 /**
+ * The scope fields a caller may narrow by. Each one already rides the loader's item; none of them is
+ * derived here, so a filter can never disagree with the board about what an item IS.
+ */
+export const SCOPE_FIELDS = Object.freeze(['parent', 'tag', 'locus']);
+
+/**
+ * Narrow the pool to a scope. PURE, and it does NOT reorder — the ranking arrives from `computeSelection`
+ * and leaves in the same order, minus what the scope excluded.
+ *
+ * THE WHOLE DESIGN RULE IS THAT A FILTER IS NOT A SECOND RANKING. "Which items am I asking about" and
+ * "which of them matters most" are different questions, and the second already has exactly one owner. A
+ * scope that re-sorted — "surface the epic's blockers first", say — would be a second answer to the
+ * ranking question living in a filter, which is how two orderings drift apart. So this only removes.
+ *
+ * `parent` is compared on the PADDED number, because the loader stores it as the frontmatter string
+ * (`"2405"`) while a caller naturally types `2405` — and `2405`/`02405` are the same epic.
+ *
+ * @param {object[]} items - the already-ranked pool.
+ * @param {{parent?: string, tag?: string, locus?: string}} scope
+ * @returns {object[]} the items in scope, order preserved.
+ */
+export function applyScope(items, scope = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const parent = scope.parent ? padNum(scope.parent) : '';
+  const tag = scope.tag ? String(scope.tag).trim().toLowerCase() : '';
+  const locus = scope.locus ? String(scope.locus).trim().toLowerCase() : '';
+  if (!parent && !tag && !locus) return list;
+  return list.filter((it) => {
+    if (parent && padNum(it.parent ?? '') !== parent) return false;
+    if (tag && !(Array.isArray(it.tags) ? it.tags : []).some((t) => String(t).trim().toLowerCase() === tag)) return false;
+    if (locus && String(it.locus ?? '').trim().toLowerCase() !== locus) return false;
+    return true;
+  });
+}
+
+/** The scope a caller asked for, echoed with only the fields they actually set. PURE. */
+export function describeScope(scope = {}) {
+  const asked = {};
+  for (const f of SCOPE_FIELDS) if (scope[f]) asked[f] = String(scope[f]);
+  return asked;
+}
+
+/**
  * PROJECT the board finding into the ranked shortlist. PURE, and the ORDER IS NOT TOUCHED: the tier list
  * arrives already ranked by `computeSelection` and this only filters and slices it.
  *
@@ -201,11 +244,15 @@ export function explainRank(item) {
  * @param {boolean} o.batchableOnly
  * @returns {object} the `shortlist` finding — and the run's verdict.
  */
-export function rankShortlist({ board, tier, limit, batchableOnly }) {
+export function rankShortlist({ board, tier, limit, batchableOnly, scope = {} }) {
   const applied = clampLimit(limit);
   const excluded = new Set(board.excludedNums ?? []);
   const pool = tier === 'B' ? board.tierB : (batchableOnly ? board.batchable : board.tierA);
-  const eligible = (pool ?? []).filter((it) => !excluded.has(padNum(it.num)));
+  const unscoped = (pool ?? []).filter((it) => !excluded.has(padNum(it.num)));
+  // Scope narrows AFTER the exclusions and BEFORE the slice, so `limit` counts items the caller could
+  // actually take rather than items that happened to survive the filter.
+  const eligible = applyScope(unscoped, scope);
+  const asked = describeScope(scope);
   const suggested = eligible.slice(0, applied).map((it, rank) => ({
     rank: rank + 1,
     num: it.num,
@@ -222,6 +269,10 @@ export function rankShortlist({ board, tier, limit, batchableOnly }) {
     transitiveUnblocks: it.transitiveUnblocks,
     prepared: it.prepared,
     epicState: it.epicState,
+    // Carried so a caller can see WHY an item matched the scope it asked for, rather than taking the
+    // filter on faith. Absent on an item that has neither, which is honest rather than defaulted.
+    ...(it.parent ? { parent: padNum(it.parent) } : {}),
+    ...(Array.isArray(it.tags) && it.tags.length ? { tags: [...it.tags] } : {}),
     why: explainRank(it),
   }));
   return {
@@ -233,13 +284,30 @@ export function rankShortlist({ board, tier, limit, batchableOnly }) {
     next: suggested[0] ?? null,
     suggested,
     eligible: eligible.length,
+    // The scope the caller asked for, echoed with only the fields they set, plus how many ranked items it
+    // removed. A caller must be able to tell "this epic has nothing ready" from "I typo'd the epic number".
+    scope: asked,
+    scopedOut: unscoped.length - eligible.length,
     excludedNums: [...excluded],
     exclusionSources: board.exclusionSources ?? [],
     counts: board.counts,
-    // LEGIBLE EMPTY (#083). An empty pool means one of three different things and they are not
+    // LEGIBLE EMPTY (#083). An empty pool means one of several different things and they are not
     // interchangeable — `computeSelection` already derives the numbers that tell them apart.
+    //
+    // A SCOPE THAT MATCHED NOTHING IS ITS OWN CASE, checked FIRST, and it is never widened back to the
+    // unscoped list. Falling back would answer a question the caller did not ask — the same defect as
+    // reporting a check that did not run as a pass. `scopedOut` says how many ranked items the scope
+    // removed, which separates "this epic has nothing ready" from "that scope matches nothing at all".
     empty: eligible.length === 0
-      ? {
+      ? (Object.keys(asked).length > 0 && unscoped.length > 0
+        ? {
+          inFlight: board.inFlight?.length ?? 0,
+          filler: board.filler?.length ?? 0,
+          scopedOut: unscoped.length - eligible.length,
+          note: `the scope ${JSON.stringify(asked)} matched none of the ${unscoped.length} ranked item(s) at this tier `
+            + '— the pool is NOT empty, your scope is. Widen it or check the spelling; nothing was ranked away.',
+        }
+        : {
         inFlight: board.inFlight?.length ?? 0,
         filler: board.filler?.length ?? 0,
         note: (board.inFlight?.length ?? 0) > 0
@@ -247,7 +315,7 @@ export function rankShortlist({ board, tier, limit, batchableOnly }) {
           : (board.filler?.length ?? 0) > 0
             ? 'nothing agent-ready, but `priority: low` filler exists — browsable and pickable when nothing better does.'
             : 'the pool is genuinely empty at this tier.',
-      }
+        })
       : null,
   };
 }
@@ -284,6 +352,19 @@ export function suggestNextOperation({ loadBoard, loadExclusions } = {}) {
       // because a suggestion that re-hands work already sitting in a PR is the documented mis-pick. A caller
       // that wants a fast, network-free read passes `false` and is told in `exclusionSources` what it gave up.
       scanOpenPrs: { type: 'boolean', required: false, default: true },
+      // ── SCOPE. Three narrowers over the SAME ranking, never a second ordering (see `applyScope`).
+      // Each is optional and unset means "no narrowing"; a scope that matches nothing is REPORTED as an
+      // empty scope, never widened back to the unscoped list.
+      //
+      // `parent` — items under one epic. The question "what is left in this epic" had no answer before
+      // this, so a caller had to grep `parent:` across the backlog, which is a second read of the board.
+      parent: { type: 'string', required: false },
+      // `tag` — items sharing a theme (`gate`, `review-integrity`, …). Matched case-insensitively against
+      // the loader's own `tags`, so this cannot disagree with the board about what an item is tagged.
+      tag: { type: 'string', required: false },
+      // `locus` — items whose gate home is one repo. `explainRank` already surfaces a non-default locus;
+      // this lets a caller ask for it instead of reading it off every line.
+      locus: { type: 'string', required: false },
     },
     // The shortlist IS the run's verdict — declared, not inferred by a caller reading findings.
     verdictFrom: 'shortlist',
@@ -305,12 +386,13 @@ export function suggestNextOperation({ loadBoard, loadExclusions } = {}) {
     // ── 2. shortlist ────────────────────────────────────────────────────────────────────────────────────────
     // Pure projection over the already-ranked lists. Reorders nothing.
     shortlist: compute({
-      reads: ['input.tier', 'input.limit', 'input.batchableOnly', 'findings.board'],
+      reads: ['input.tier', 'input.limit', 'input.batchableOnly', 'input.parent', 'input.tag', 'input.locus', 'findings.board'],
       fn: (view) => rankShortlist({
         board: view.findings.board,
         tier: view.input.tier,
         limit: view.input.limit,
         batchableOnly: view.input.batchableOnly === true,
+        scope: { parent: view.input.parent, tag: view.input.tag, locus: view.input.locus },
       }),
     }),
   });

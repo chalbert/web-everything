@@ -119,10 +119,25 @@ highest-leverage blocker* directly, even if Tier-A items exist:
 
 With no item named, run the full selection flow below.
 
-1. **Get the ranked list instantly — `npm run check:readiness -- --select`** (don't re-tier by hand).
-   The loader already computes tier/batchable/leverage — the same data the `/backlog/` Prioritisation
-   tab shows — printed ordered, zero desync. The CLI gives Tier **A** (agent-ready) / **B** (one nod
-   away) / **C** already ordered; your only added judgment is the body-fork pre-flight on the
+1. **Get the ranked list through the OPERATION — `node scripts/operations/run.mjs suggest-next --json`**
+   (don't re-tier by hand, and don't reach past it to the raw CLI). It declares over the same loader
+   `npm run check:readiness -- --select` prints, so tier/batchable/leverage are identical — but it answers
+   as data, and it takes a **scope** (#xhhsfnq), which the raw CLI does not:
+
+   ```
+   node scripts/operations/run.mjs suggest-next --tier=A --limit=5 --json      # the ranked pool
+   node scripts/operations/run.mjs suggest-next --parent=<NNN> --json          # what is left in ONE epic
+   node scripts/operations/run.mjs suggest-next --tag=<tag> --json             # one theme
+   node scripts/operations/run.mjs suggest-next --locus=<repo> --json          # one gate home
+   ```
+
+   **Reach for a scope before you reach for `grep`.** "What is left in this epic" and "what else is tagged
+   `gate`" are the two questions that used to send an agent grepping `parent:` across `we:backlog/` and
+   reading cards by hand — a second read of the board, and how two views of it drift apart. A scope that
+   matches nothing says so (`empty.note` — *"the pool is NOT empty, your scope is"*) and is never widened
+   back to the unscoped list, so an empty answer is never a silently broader one.
+
+   The scope only NARROWS; it never re-ranks. Your added judgment is the body-fork pre-flight on the
    **shortlist** plus the dependency/concurrency re-read before committing. Then follow
    *backlog-workflow.md → Selecting the next item to work on*. Do **not** re-glob and re-score all 100+
    items in prose.

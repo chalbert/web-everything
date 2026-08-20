@@ -31,6 +31,9 @@ import {
   rankShortlist,
   shapeBoardFinding,
   suggestNextOperation,
+  applyScope,
+  describeScope,
+  SCOPE_FIELDS,
 } from '../suggest-next.mjs';
 
 /**
@@ -226,5 +229,102 @@ describe('suggest-next — what makes it the right first HTTP operation', () => 
     // …and the same derived parser refuses an unknown value with no per-operation code anywhere.
     expect(parseOperationArgv(declaration, ['--tier=C']).errors)
       .toEqual([expect.stringContaining('must be one of A|B')]);
+  });
+});
+
+describe('scope — a filter narrows the population, it never re-ranks and never widens', () => {
+  /**
+   * THE NUMBERS ARE DELIBERATELY OUT OF ASCENDING ORDER relative to rank. A first cut of this fixture had
+   * rank order and num order coincide, which made the "never reorders" assertion below VACUOUS — a mutant
+   * that sorted the survivors by `num` passed every test. Mutation testing caught it; the fixture now makes
+   * the two orders disagree, so any re-sort is visible.
+   */
+  const ranked = [
+    { num: '007', id: '007-a', title: 'a', kind: 'task', tier: 'A', parent: '2405', tags: ['gate', 'review'], locus: 'webeverything', leverageScore: 9 },
+    { num: '002', id: '002-b', title: 'b', kind: 'task', tier: 'A', parent: '3029', tags: ['ops'], locus: 'frontierui', leverageScore: 5 },
+    { num: '001', id: '001-c', title: 'c', kind: 'task', tier: 'A', parent: '2405', tags: ['Gate'], locus: 'webeverything', leverageScore: 1 },
+    { num: '004', id: '004-d', title: 'd', kind: 'task', tier: 'A', tags: [], locus: 'webeverything', leverageScore: 0 },
+  ];
+
+  it('is a no-op when no scope field is set', () => {
+    expect(applyScope(ranked, {})).toHaveLength(4);
+    expect(applyScope(ranked)).toHaveLength(4);
+  });
+
+  it('narrows by parent, matching the padded number a caller naturally types', () => {
+    expect(applyScope(ranked, { parent: '2405' }).map((i) => i.num)).toEqual(['007', '001']);
+    // `2405` and `02405` are the same epic — the loader stores the frontmatter string, the caller types a number.
+    expect(applyScope(ranked, { parent: 2405 }).map((i) => i.num)).toEqual(['007', '001']);
+  });
+
+  it('narrows by tag, case-insensitively, against the loader\'s own tags', () => {
+    expect(applyScope(ranked, { tag: 'gate' }).map((i) => i.num)).toEqual(['007', '001']);
+    expect(applyScope(ranked, { tag: 'GATE' }).map((i) => i.num)).toEqual(['007', '001']);
+  });
+
+  it('narrows by locus', () => {
+    expect(applyScope(ranked, { locus: 'frontierui' }).map((i) => i.num)).toEqual(['002']);
+  });
+
+  it('ANDs the fields it was given', () => {
+    expect(applyScope(ranked, { parent: '2405', tag: 'review' }).map((i) => i.num)).toEqual(['007']);
+    expect(applyScope(ranked, { parent: '2405', locus: 'frontierui' })).toEqual([]);
+  });
+
+  /**
+   * THE LOAD-BEARING PROPERTY. "Which items am I asking about" and "which of them matters most" are
+   * different questions and the second already has exactly one owner (`computeSelection`). A scope that
+   * reordered — surfacing an epic's blockers first, say — would be a second ranking living inside a
+   * filter, and the two would drift. So the survivors must come out in the order they went in.
+   */
+  it('never reorders — the ranking is not this function\'s to make', () => {
+    const out = applyScope(ranked, { locus: 'webeverything' });
+    expect(out.map((i) => i.num)).toEqual(['007', '001', '004']);
+    // …and each survivor is the SAME object, not a re-derived copy that could disagree with the board.
+    expect(out[0]).toBe(ranked[0]);
+  });
+
+  it('echoes only the fields the caller actually set', () => {
+    expect(describeScope({ parent: '2405' })).toEqual({ parent: '2405' });
+    expect(describeScope({})).toEqual({});
+    expect(SCOPE_FIELDS).toEqual(['parent', 'tag', 'locus']);
+  });
+
+  /**
+   * A SCOPE THAT MATCHED NOTHING IS NOT AN EMPTY POOL, and must never be answered by widening back to the
+   * unscoped list — that answers a question the caller did not ask, the same defect as reporting a check
+   * that did not run as a pass.
+   */
+  it('reports an empty SCOPE distinctly from an empty pool, and suggests nothing', () => {
+    const board = { tierA: ranked, tierB: [], batchable: [], filler: [], inFlight: [], excludedNums: [], counts: {} };
+    const out = rankShortlist({ board, tier: 'A', limit: 5, batchableOnly: false, scope: { parent: '9999' } });
+    expect(out.suggested).toEqual([]);
+    expect(out.next).toBeNull();
+    expect(out.scopedOut).toBe(4);
+    expect(out.empty.note).toMatch(/your scope is/);
+    expect(out.empty.note).toMatch(/NOT empty/);
+  });
+
+  it('reports a genuinely empty pool with the pool\'s own reason, not the scope\'s', () => {
+    const board = { tierA: [], tierB: [], batchable: [], filler: [], inFlight: [], excludedNums: [], counts: {} };
+    const out = rankShortlist({ board, tier: 'A', limit: 5, batchableOnly: false, scope: { parent: '2405' } });
+    expect(out.empty.note).toMatch(/genuinely empty at this tier/);
+    expect(out.empty.note).not.toMatch(/your scope is/);
+  });
+
+  it('carries parent and tags into the shortlist so a caller sees WHY an item matched', () => {
+    const board = { tierA: ranked, tierB: [], batchable: [], filler: [], inFlight: [], excludedNums: [], counts: {} };
+    const out = rankShortlist({ board, tier: 'A', limit: 5, batchableOnly: false, scope: { parent: '2405' } });
+    expect(out.suggested[0]).toMatchObject({ num: '007', parent: '2405', tags: ['gate', 'review'] });
+    // …and an item with neither carries neither, rather than a defaulted empty.
+    const all = rankShortlist({ board, tier: 'A', limit: 5, batchableOnly: false, scope: {} });
+    expect(all.suggested[3]).not.toHaveProperty('parent');
+  });
+
+  // `limit` must count items the caller could actually take, not items that survived the filter.
+  it('applies the scope BEFORE the limit slice', () => {
+    const board = { tierA: ranked, tierB: [], batchable: [], filler: [], inFlight: [], excludedNums: [], counts: {} };
+    const out = rankShortlist({ board, tier: 'A', limit: 2, batchableOnly: false, scope: { parent: '2405' } });
+    expect(out.suggested.map((i) => i.num)).toEqual(['007', '001']);
   });
 });
