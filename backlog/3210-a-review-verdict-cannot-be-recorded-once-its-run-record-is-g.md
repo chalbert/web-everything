@@ -1,4 +1,5 @@
 ---
+bornAs: x5royou
 kind: story
 size: 5
 status: open
@@ -14,7 +15,7 @@ record-verdict reads every fact from the run record the review wrote, which is t
 
 ## The dependency, and why it is deliberate
 
-`record-verdict` (#xrk6hmj) takes `--runId` and pointedly **no** `--pr`: the subject, the repo, the
+`record-verdict` (#3206) takes `--runId` and pointedly **no** `--pr`: the subject, the repo, the
 juror's session id and the staged write-up are all read back out of the run record the review itself
 wrote, so none of them can be mistyped onto another PR. That is the defect it closes and it is worth
 keeping.
