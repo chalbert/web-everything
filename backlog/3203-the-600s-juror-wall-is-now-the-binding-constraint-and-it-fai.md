@@ -1,18 +1,16 @@
 ---
 bornAs: x8exnuj
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-08-20"
+dateResolved: "2026-08-20"
 tags: []
 ---
 
 # the 600s juror wall is now the binding constraint, and it fails by total loss
 
 `we:scripts/lib/judge-spawn.mjs` kills a juror at 600s and rejects, discarding everything it produced. #3200's removal of JUDGE_BUDGET_USD called that wall 'real headroom' on wall times of 167-312s — but those were measured UNDER the ceiling being removed, so the bound moved. Measured 2026-08-19 across eight review-pr rounds: 122, 152, 173, 228, 292, 418, 470s, and one kill at 600s. Two kills this session. A killed round costs full price, returns no partial verdict, cannot resume, and reads as flakiness.
-
-## Done when
-
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
 
 ## Why the headroom claim was true when written and is not now
 
@@ -77,9 +75,40 @@ The second and third compose. The first is a stopgap that should not be mistaken
 
 ## Done when
 
-1. **Executable** — a test that drives `judgeSpawn` past its timeout and asserts the caller receives the
-   juror's partial output (or a verdict-shaped degraded result), not only a thrown error. It fails today.
+1. **Executable** — a test in `we:scripts/lib/__tests__/judge-spawn.test.mjs` that drives
+   `we:scripts/lib/judge-spawn.mjs`'s `judgeSpawn` past its timeout and asserts the caller receives the juror's
+   partial output (or a verdict-shaped degraded result), not only a thrown error. It fails today.
 2. Whatever bound remains is DERIVED from a stated measurement, and the source of that measurement is recorded
    beside it — so the next person to widen a ceiling can see whether this bound was sized under it.
 3. A run that hits the bound is distinguishable in its record from a run that crashed, because today they are
    not.
+
+## How it was closed
+
+TWO of the three forks, which compose. The third — raise the number — is done too, but as a consequence rather
+than a choice.
+
+**The kill resolves instead of rejecting.** It still `SIGKILL`s, but then settles with the streams the process
+had already delivered and tries to parse them. A tool-bearing juror at the wall has usually emitted its answer
+and merely failed to exit, so that round now returns a real verdict where it used to return nothing. `close`
+does the settling (Node delivers the buffered `data` events first); a short grace timer covers a `close` that
+never arrives.
+
+**The bound is derived and carries its own provenance.** `JUDGE_TIMEOUT_MS` is 2× the longest surviving run of
+the ten measured, rounded UP to the next whole five minutes — 20 minutes. Rounding up follows from the
+censoring: two of those ten were killed by the old wall, so the observed maximum is a lower bound on the tail,
+not an estimate of it. The measurement and the derivation are recorded on the constant, which is the actual
+Done-when 2: the next person to widen a ceiling can see what this was sized against.
+
+That constant caught its own first draft. It read *"rounded to 15 minutes"*, which is BELOW 2 × 470s and so
+contradicted the derivation written directly above it. The assertion in the test was written from the
+derivation rather than from the number, and failed.
+
+**Hitting the bound is a distinct fact in the record.** `JudgeTimeoutError` is its own type, carrying the
+partial streams and saying plainly that a bound was hit rather than a juror crashed. A recovered verdict rides
+out with `timedOut: true`, which the run-record whitelist now keeps — only when true, because a `false` on
+every row is noise and the fact being recorded is the exception.
+
+Mutation-checked, each independently: restoring the reject reddens 3, never setting `timedOut` reddens 1,
+throwing a plain `Error` instead of the typed one reddens 1, dropping the flag from the record whitelist
+reddens 1.

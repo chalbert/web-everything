@@ -107,6 +107,12 @@ export function newRunRecord({ id, op, input = {} } = {}) {
  */
 const TELEMETRY_NUMBERS = Object.freeze(['costUsd', 'durationMs', 'wallMs', 'numTurns', 'loadedContextTokens']);
 const TELEMETRY_STRINGS = Object.freeze(['sessionId', 'stopReason', 'lens', 'model', 'effort']);
+/**
+ * THE FLAGS, recorded only when TRUE. A `timedOut: false` on every row is noise; the fact being recorded is
+ * the exception, and its absence is the ordinary case (#3203). Without it a juror that hit the wall and a
+ * juror that crashed produced identical records, which is what taught a reader to retry rather than look.
+ */
+const TELEMETRY_FLAGS = Object.freeze(['timedOut']);
 
 /**
  * NORMALIZE one juror spawn's telemetry into a run-record row. PURE.
@@ -118,7 +124,8 @@ const TELEMETRY_STRINGS = Object.freeze(['sessionId', 'stopReason', 'lens', 'mod
  * `advance`. This takes the five numbers, the five names and the counter block that answer "what did that
  * juror cost", and drops everything else silently — a caller adding a field gets no error and no leak.
  *
- * `usage` is copied ONE level deep and only its numeric entries, for the same reason.
+ * `usage` is copied ONE level deep and only its numeric entries, for the same reason. A flag is copied only
+ * when true — see {@link TELEMETRY_FLAGS}.
  *
  * @param {{step?: string, stepIndex?: number, telemetry?: object}} o
  * @returns {object} a frozen row: `{ step, stepIndex, …scalars, usage }`.
@@ -131,6 +138,9 @@ export function normalizeJudgeTelemetry({ step = '', stepIndex = null, telemetry
   }
   for (const k of TELEMETRY_STRINGS) {
     if (typeof src[k] === 'string' && src[k]) row[k] = src[k];
+  }
+  for (const k of TELEMETRY_FLAGS) {
+    if (src[k] === true) row[k] = true;
   }
   const usage = {};
   if (isPlainObject(src.usage)) {
