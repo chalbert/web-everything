@@ -47,6 +47,7 @@ import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
+import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -298,6 +299,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // (the reader and the git sinks live in `record-verdict-io.mjs`), but that is a discipline its own suite
     // pins, not a claim this pinned list makes.
     [RECORD_VERDICT_OP]: 'record-verdict.mjs',
+    // `stage-pr-view`'s `write` step puts a file on disk, so it is NOT read-only; listed here for map
+    // coverage. Its own suite pins the property this list cannot express for a writing operation: the
+    // DECLARING module reaches nothing that can act, and every write lives in `stage-pr-view-io.mjs`.
+    [STAGE_PR_VIEW_OP]: 'stage-pr-view.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
