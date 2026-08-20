@@ -160,11 +160,46 @@ export function openPrOperation({ parkLabels } = {}) {
 }
 
 /**
+ * The home's own `reason` vocabulary, split by WHAT THE CALLER SHOULD DO — which is the only split that
+ * matters here and is not the same as "did it exit non-zero".
+ *
+ * A GUARD ANSWERED (`refused`): the home looked at the request and said no. Editing the request, or fixing
+ * the lane, is the fix. This is the bucket that must survive to the caller intact, because it includes
+ * #2833's verify refusals — the guard the whole operation exists to route through.
+ *
+ * THE ENVIRONMENT COULD NOT COMPLETE (`unrun`): the request was fine and the home could not act on it. A
+ * missing `gh` credential is the case that matters on this host, and calling it a refusal — as the first
+ * cut of this function did, because pr-land emits a structured `reason` for it — sends the caller off to
+ * edit a request that was never the problem. Found by running the operation, not by reading it.
+ */
+export const HOME_REASONS = Object.freeze({
+  // opened
+  opened: 'opened', parked: 'opened', 'merged-git-fallback': 'opened',
+  // a guard answered — fix the request or the lane
+  'bad-park': 'refused', 'bad-ref': 'refused', 'empty-body': 'refused', 'locus-prefix': 'refused',
+  'no-ref': 'refused', 'no-such-src': 'refused', behind: 'refused', conflict: 'refused',
+  'check-red': 'refused',
+  // …and the #2833 verify refusals, which come from `lib/lane-verify.mjs`'s own `verifyGateDecision`
+  // rather than from pr-land's argv parsing. THESE ARE THE ONES THAT MATTER: they are the guard the
+  // bypass skipped, and every one of them must reach the caller as an answer, never as a shrug.
+  'verify-unfinished': 'refused', 'verify-red': 'refused', 'verify-corrupt': 'refused',
+  unverified: 'refused', untracked: 'refused', 'red-ci-gated': 'refused',
+  // the environment could not complete — the request is not what is wrong
+  'gh-error': 'unrun', 'push-failed': 'unrun', 'fallback-failed': 'unrun', 'check-timeout': 'unrun',
+  'blocked-on-infra': 'unrun',
+});
+
+/**
  * Map the home's report onto the three outcomes. PURE.
  *
  * `refused` and `unrun` are kept apart for the same reason `verify` keeps `fail` and `unrun` apart: a home
  * that refused has ANSWERED — the ref was wrong, the body was empty, the verify marker was not green — and a
  * home that could not run has not. Only the first tells the caller what to fix.
+ *
+ * AN UNRECOGNISED REASON IS `unrun`, deliberately. The home may grow a reason this table has not learned,
+ * and "we do not know whether a guard fired" is not the same as "a guard fired". Reporting `refused` on a
+ * reason we cannot interpret would claim an answer nobody gave — the failure mode this whole family of
+ * operations exists to refuse. The raw reason rides along so the caller can read what actually happened.
  */
 export function classifySubmit({ status, signal, stdout = '', stderr = '', error } = {}) {
   const tail = `${stdout}${stderr}`.trim().split('\n').slice(-3).join(' / ').slice(0, 300);
@@ -177,9 +212,19 @@ export function classifySubmit({ status, signal, stdout = '', stderr = '', error
     return { outcome: 'unrun', reason: `exit ${status ?? '?'} with no parseable report from pr-land — this is NOT a refusal and NOT an open. Last output: ${tail || '<empty>'}` };
   }
   if (parsed.pr || parsed.url) return { outcome: 'opened', pr: parsed.pr ?? null, url: parsed.url ?? null, parked: parsed.parked ?? null };
-  // Exit 3 is the home's own "I refuse, here is why" — including #2833's `refusing to land … stall guard`.
-  if (status === 3 || parsed.reason) {
-    return { outcome: 'refused', reason: parsed.reason ?? 'refused', detail: parsed.detail ?? tail, verifyStatus: parsed.verifyStatus ?? null };
+
+  if (parsed.reason) {
+    // The home's OWN word for what happened decides, not the exit code: pr-land exits 3 for a guard refusal
+    // AND for an environment failure, so the code alone cannot tell the caller which it is.
+    const known = HOME_REASONS[parsed.reason];
+    const outcome = known === 'opened' ? 'opened' : (known ?? 'unrun');
+    return {
+      outcome,
+      reason: parsed.reason,
+      detail: parsed.detail ?? tail,
+      verifyStatus: parsed.verifyStatus ?? null,
+      ...(known ? {} : { unclassified: true }),
+    };
   }
   return { outcome: 'unrun', reason: `pr-land exited ${status ?? '?'} without opening a PR or naming a refusal: ${tail || '<empty>'}` };
 }

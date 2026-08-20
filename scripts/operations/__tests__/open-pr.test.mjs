@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import {
   openPrOperation, planOpen, classifySubmit, defaultParkLabel,
-  OPEN_PR_OP, SUBMIT_PR_EFFECT, OPEN_MODES, SUBMIT_OUTCOMES,
+  OPEN_PR_OP, SUBMIT_PR_EFFECT, OPEN_MODES, SUBMIT_OUTCOMES, HOME_REASONS,
 } from '../open-pr.mjs';
 import { createPrLandRunner, createOpenPrSinks, PR_LAND_CLI } from '../open-pr-io.mjs';
 import { PARK_LABELS } from '../../pr-land.mjs';
@@ -123,9 +123,51 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
   it('reports the home\'s refusal, carrying the guard that fired', () => {
     const r = classifySubmit({
       status: 3,
-      stdout: JSON.stringify({ reason: 'verify-not-green', detail: 'refusing to land lane/x — no green marker', verifyStatus: 'absent' }),
+      stdout: JSON.stringify({ reason: 'verify-unfinished', detail: 'refusing to land lane/x — verification is UNFINISHED', verifyStatus: 'running' }),
     });
-    expect(r).toMatchObject({ outcome: 'refused', reason: 'verify-not-green', verifyStatus: 'absent' });
+    expect(r).toMatchObject({ outcome: 'refused', reason: 'verify-unfinished', verifyStatus: 'running' });
+  });
+
+  /**
+   * FOUND BY RUNNING IT, not by reading it. `gh pr create` failing for want of a credential comes back from
+   * the home as a STRUCTURED `reason: 'gh-error'`, and the first cut of this function treated any structured
+   * reason as a refusal. That sent the caller off to fix a request that was never the problem — the request
+   * was fine and the host had no credential. The home's own word decides, not the exit code, because pr-land
+   * exits 3 for both kinds.
+   */
+  it('calls a missing credential unrun, not a refusal — the request was never what was wrong', () => {
+    const r = classifySubmit({ status: 3, stdout: JSON.stringify({ reason: 'gh-error', detail: 'gh pr create failed' }) });
+    expect(r.outcome).toBe('unrun');
+    expect(r.reason).toBe('gh-error');
+  });
+
+  it('splits the home\'s vocabulary by what the caller should DO about it', () => {
+    const outcomeFor = (reason) => classifySubmit({ status: 3, stdout: JSON.stringify({ reason }) }).outcome;
+    // A guard answered — editing the request or the lane is the fix.
+    for (const reason of ['bad-ref', 'empty-body', 'no-such-src', 'behind', 'conflict', 'check-red', 'locus-prefix',
+      // the #2833 guard's own vocabulary, from `lib/lane-verify.mjs` — the reasons this operation exists for
+      'verify-unfinished', 'verify-red', 'verify-corrupt', 'unverified', 'untracked', 'red-ci-gated']) {
+      expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'refused' });
+    }
+    // The environment could not complete — the request is not what is wrong.
+    for (const reason of ['gh-error', 'push-failed', 'check-timeout', 'blocked-on-infra', 'fallback-failed']) {
+      expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'unrun' });
+    }
+    for (const reason of ['opened', 'parked', 'merged-git-fallback']) {
+      expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'opened' });
+    }
+    // Every key of the table is one of the three, so a typo'd value cannot slip in.
+    for (const v of Object.values(HOME_REASONS)) expect(SUBMIT_OUTCOMES).toContain(v);
+  });
+
+  /**
+   * A reason the table has not learned is `unrun`, and flagged. The home may grow one, and "we cannot tell
+   * whether a guard fired" is not "a guard fired" — reporting `refused` there would claim an answer nobody
+   * gave, which is the exact failure this family of operations exists to refuse.
+   */
+  it('treats an unrecognised reason as unrun and marks it unclassified', () => {
+    const r = classifySubmit({ status: 3, stdout: JSON.stringify({ reason: 'some-new-guard' }) });
+    expect(r).toMatchObject({ outcome: 'unrun', reason: 'some-new-guard', unclassified: true });
   });
 
   it('reports a home that could not run as unrun, NOT as a refusal', () => {
