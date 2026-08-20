@@ -317,10 +317,12 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  * comment instead, which is precisely the bypass #2882 was built to close: a usability defect that pushes
  * people off the safe path is a safety defect one step removed.
  *
- * SYMLINKS ARE RESOLVED ON BOTH SIDES, and on the DIRECTORY rather than the file: the file must exist to be
- * read, but reporting "outside the allowlist" for a missing one would name the wrong problem — the
- * unreadable-file error downstream is the clearer message. A root that does not resolve is dropped rather
- * than compared as written, so a platform without `/tmp` simply has one fewer root.
+ * SYMLINKS ARE RESOLVED ON BOTH SIDES, and the target side resolves its DEEPEST EXISTING ANCESTOR before
+ * rejoining the tail that does not exist yet. The file need not exist — reporting "outside the allowlist" for
+ * a missing one would name the wrong problem, and the unreadable-file error downstream is clearer — but a
+ * path whose parents are also missing must still be compared in resolved form, or a caller writing to a fresh
+ * scratch directory under a symlinked root is refused on spelling. A root that does not resolve is dropped
+ * rather than compared as written, so a platform without `/tmp` simply has one fewer root.
  *
  * @param {string} abs - the already-resolved absolute path to the body file.
  * @param {string[]} roots - candidate root directories.
@@ -328,9 +330,23 @@ export function presentRemoveLabels(removeLabels, currentLabels) {
  */
 export function checkBodyFileLocation(abs, roots) {
   const real = (p) => { try { return realpathSync(p); } catch { return null; } };
+  // RESOLVE THE DEEPEST ANCESTOR THAT EXISTS, then rejoin the tail that does not. Resolving only the immediate
+  // parent left the literal path whenever an intermediate directory was absent — and a LITERAL path compared
+  // against RESOLVED roots is exactly the spelling mismatch this widening exists to end: on macOS
+  // `/tmp/scratch/verdict.md` under a not-yet-created `scratch/` was refused against a root resolved to
+  // `/private/tmp` (review-pr correctness juror on PR #1495). A caller writing to a fresh scratch directory is
+  // the ordinary case, not an exotic one.
+  const resolveDeepest = (p) => {
+    const tail = [];
+    for (let dir = p; ; dir = dirname(dir)) {
+      const hit = real(dir);
+      if (hit) return tail.length ? join(hit, ...tail.reverse()) : hit;
+      if (dirname(dir) === dir) return p;   // walked to the root and nothing resolved
+      tail.push(basename(dir));
+    }
+  };
   const allowed = [...new Set(roots.map(real).filter(Boolean))];
-  const dir = real(dirname(abs));
-  const target = dir ? join(dir, basename(abs)) : abs;
+  const target = resolveDeepest(abs);
   const ok = allowed.some((root) => target === root || target.startsWith(root + sep));
   return ok ? { ok: true } : { ok: false, roots: allowed };
 }

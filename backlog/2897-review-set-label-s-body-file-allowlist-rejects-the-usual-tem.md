@@ -86,3 +86,18 @@ Mutation-checked: comparing paths as written reddens 2, removing the guard entir
 That last one is worth recording, because it reddened NOTHING at first. On Linux `tmpdir()` IS `/tmp`, so a
 host-dependent assertion passes either way — the case the entry exists for cannot be reproduced on this host.
 The tests now exercise the macOS SHAPE by injecting roots, so the behaviour is pinned on any platform.
+
+## Round 2 — resolving only the immediate parent was not enough
+
+The juror found that when an INTERMEDIATE directory does not exist, `realpathSync` on the parent throws and
+the check fell back to the literal path — which is then compared against RESOLVED roots. On macOS that is the
+exact spelling mismatch this card exists to end: a verdict file written into a not-yet-created subdirectory of the shared
+temp dir, refused against that same root resolved through its symlink. Writing to a fresh scratch directory is the ordinary case,
+not an exotic one, so the widening would have missed its own headline use.
+
+It now resolves the DEEPEST EXISTING ANCESTOR and rejoins the tail that does not exist. Resolving the ancestor
+is not a loophole — a nonexistent path outside every root is still refused, and that is pinned.
+
+The mutation for this one also reddened nothing at first, for the same reason as the `/tmp` root: `/tmp` is not
+a symlink on Linux, so a missing directory under it exercises nothing. The test now BUILDS the shape — a
+symlinked root plus a target whose parents do not exist — so it is pinned on any platform.

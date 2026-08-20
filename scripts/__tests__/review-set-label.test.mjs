@@ -2023,6 +2023,44 @@ describe('checkBodyFileLocation (#2897)', () => {
     }
   });
 
+  /**
+   * A path whose PARENTS do not exist yet must still be compared in resolved form. Resolving only the
+   * immediate parent left the literal path when an intermediate directory was absent, and a literal path
+   * compared against resolved roots is the very spelling mismatch this widening exists to end: on macOS
+   * `/tmp/scratch/verdict.md` under a not-yet-created `scratch/` was refused against a root resolved to
+   * `/private/tmp`. Writing to a fresh scratch directory is the ordinary case.
+   */
+  it('accepts a path under a temp root whose intermediate directories do not exist yet', () => {
+    const fresh = join(TMP, `no-such-dir-${process.pid}`, 'deeper', 'verdict.md');
+    expect(existsSync(dirname(fresh))).toBe(false);
+    expect(checkBodyFileLocation(fresh, bodyFileRoots()).ok).toBe(true);
+  });
+
+  /**
+   * THE macOS SHAPE, built here because it cannot be reproduced by host: `/tmp` is not a symlink on Linux, so
+   * an assertion that merely uses a missing directory under `/tmp` passes with or without the fix. What
+   * matters is a root that IS a symlink AND a target whose parents do not exist — resolving only the
+   * immediate parent then leaves a LITERAL path compared against a RESOLVED root, and refuses it.
+   */
+  it('resolves through a SYMLINKED root even when the path below it does not exist yet', () => {
+    const realRoot = mkdtempSync(join(TMP, 'allow-real-'));
+    const linkRoot = join(TMP, `allow-link-${process.pid}`);
+    try {
+      symlinkSync(realRoot, linkRoot);
+      const target = join(linkRoot, 'not-created-yet', 'verdict.md');
+      expect(existsSync(dirname(target))).toBe(false);
+      expect(checkBodyFileLocation(target, [linkRoot]).ok).toBe(true);
+    } finally {
+      rmSync(linkRoot, { force: true });
+      rmSync(realRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('still refuses a nonexistent path OUTSIDE every root — resolving the ancestor is not a loophole', () => {
+    expect(checkBodyFileLocation('/nowhere/at/all/verdict.md', bodyFileRoots()).ok).toBe(false);
+    expect(checkBodyFileLocation(join(homedir(), 'no-such-dir', 'v.md'), bodyFileRoots()).ok).toBe(false);
+  });
+
   // A root that does not resolve is dropped rather than compared as written, so a platform without `/tmp`
   // simply has one fewer root instead of a phantom that matches nothing.
   it('drops a root that does not exist, and reports the ones that do', () => {
