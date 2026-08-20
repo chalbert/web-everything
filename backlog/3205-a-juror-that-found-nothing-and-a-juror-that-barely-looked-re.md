@@ -40,7 +40,7 @@ which decided the task was not for it, all terminate normally with a well-formed
 *nothing* is caught — but one that produced *an empty answer* is indistinguishable from a clean bill of
 health.
 
-**This is `verify`'s `unrun` (#xp240uk) one layer up.** There, a check that could not run must never
+**This is `verify`'s `unrun` (#3207) one layer up.** There, a check that could not run must never
 satisfy a gate; the same argument applies to a judgment that was never really made. Absence of evidence
 is not evidence of absence.
 

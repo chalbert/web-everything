@@ -47,6 +47,9 @@ import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
+import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
+import { VERIFY_OP } from '../verify.mjs';
+import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -298,6 +301,19 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // express: the declaring module reaches nothing at all, and the io shell reaches `child_process` and NO
     // network — the home is its only route to GitHub.
     [OPEN_PR_OP]: 'open-pr.mjs',
+    // #xrk6hmj — `record-verdict`'s `stage` step pushes to the transport branch, so it is emphatically NOT
+    // read-only; listed here only for map coverage. Its declaring module still imports nothing that can act
+    // (the reader and the git sinks live in `record-verdict-io.mjs`), but that is a discipline its own suite
+    // pins, not a claim this pinned list makes.
+    [RECORD_VERDICT_OP]: 'record-verdict.mjs',
+    // #xp240uk — `verify` is two `compute` steps with no sink, so it IS read-only and appears in the pinned
+    // list below. Its io (the spawn of the single home) lives entirely in `verify-io.mjs` and arrives only
+    // through the `runChecks` its builder is handed in `../run.mjs`, which is what keeps this module pure.
+    [VERIFY_OP]: 'verify.mjs',
+    // `stage-pr-view`'s `write` step puts a file on disk, so it is NOT read-only; listed here for map
+    // coverage. Its own suite pins the property this list cannot express for a writing operation: the
+    // DECLARING module reaches nothing that can act, and every write lives in `stage-pr-view-io.mjs`.
+    [STAGE_PR_VIEW_OP]: 'stage-pr-view.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
@@ -307,7 +323,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, SUGGEST_NEXT_OP].sort());
+    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

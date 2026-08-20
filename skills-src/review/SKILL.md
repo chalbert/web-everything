@@ -36,6 +36,28 @@ pointing it at another repo's clone does not make a cross-repo review work (#313
 still works as a fallback — it was the ONLY way until #3151, which is why older dispatch prompts thread it by
 hand.)
 
+### On a host where `gh` cannot authenticate — stage the view first (#xhqqy9j)
+
+`read` makes exactly one network call: `gh pr view --json`. On a cloud VM that call fails and the whole review
+stops before it starts. The transport for that case is a view **staged on disk**, which `review-pr-io.mjs`
+reads instead of calling `gh` whenever `WE_PR_VIEW_DIR` is set. Obtain the view however this host can (a
+connector, another machine), write it to a file, and stage it **through the operation** — never by copying it
+into place yourself:
+
+```
+node scripts/operations/run.mjs stage-pr-view --pr=<PR> --repo=<owner/name> --from=<payload.json> --dir="$WE_PR_VIEW_DIR" --json
+```
+
+**Why it must not be a `cp`.** A view assembled by hand from another API's response drops a field by
+omission, and the reader DEFAULTS every field it consumes rather than failing: an absent `labels` makes a
+`review:human` PR read as unlabelled and clearable, an absent `comments` hides the escalation and the last
+verdict, an absent `body` loses the park's disposition. None of that throws — you get a completed review of a
+PR that was never fully read. The operation refuses an **absent** field by name and believes an **explicitly
+empty** one (`"labels": []` is a claim; omission is not), and it writes the file under the reader's own
+injective name so the review finds the view you staged rather than another repo's.
+
+It does not fetch, and cannot: nothing on this host holds a credential. It checks and it places.
+
 It reads the PR, judges the diff, reduces to a verdict, and then **suspends**. It writes nothing on this
 invocation. Present its `verdict` (the findings and the reduced verdict), its `findings.read` (the escalation
 reason, the disposition, the net changed-file list, any advisory comment), its `spend` (what the juror cost —
@@ -109,6 +131,29 @@ only downgrades the record to *"Independence NOT established"*.
 **Re-accepting after a rebase.** `acceptanceCoversHead` keys on head-SHA identity, so a benign rebase invalidates
 an accept. Do not re-run the panel: prove the net patch is byte-identical, then re-run the operation with a body
 that says so. `reviewed-contribution` (#x9xqexm) already covers pure base movement.
+
+**A host that cannot authenticate to GitHub — record through the operation, never by hand (#xrk6hmj).** On a
+cloud VM no local process holds a GitHub credential, so the `record` effect's shell-out to
+`we:scripts/review-set-label.mjs` fails and the verdict has to travel as a file on the `ops/review-requests`
+branch, which `we:.github/workflows/apply-review-request.yml` applies with the real CLI. That transport has a
+caller now — use it:
+
+```
+node scripts/operations/run.mjs record-verdict --runId=<run-id> --to=accepted|changes|clear-human [--operatorInstruction="<quoted instruction>"] --json
+```
+
+**There is deliberately no `--pr`.** The subject, the repo, the juror's session id and the staged write-up are
+read back out of the run record the review itself wrote, because the failure mode here is not tedium — it is
+retyping. A hand-assembled request restates the PR number in a fresh `JSON.stringify`, and a wrong one records
+your verdict on somebody else's PR while every artefact still names yours. That is the class #1466 closed on the
+reading side; this closes it on the writing side. Do not hand-roll the JSON, and do not `git checkout` the
+transport branch over your lane — the operation pushes through its own worktree precisely because doing it by
+hand takes your uncommitted work with it.
+
+It refuses rather than inventing: a run that produced no verdict, a run that is not a review, and a run that
+staged no write-up are all refused, because each would put a request on the transport branch indistinguishable
+from a real review. `--to=clear-human` still carries every constraint of the ceremony above — the instruction
+goes in `--operatorInstruction`, verbatim, and the applier refuses the target without it.
 
 ## Invariant
 
