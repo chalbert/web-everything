@@ -44,6 +44,8 @@ import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 import { recordVerdictOperation, RECORD_VERDICT_OP } from './record-verdict.mjs';
 import { createRunReader, createRecordVerdictSinks } from './record-verdict-io.mjs';
 import { validateRequest, APPLIABLE_TARGETS } from '../apply-review-request.mjs';
+import { verifyOperation, VERIFY_OP } from './verify.mjs';
+import { createChecksRunner } from './verify-io.mjs';
 import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -73,6 +75,12 @@ export const OPERATIONS = Object.freeze({
   [RECORD_VERDICT_OP]: () => ({
     declaration: recordVerdictOperation({ readRun: createRunReader() }, { validateRequest, appliableTargets: APPLIABLE_TARGETS }),
     sinks: createRecordVerdictSinks(),
+  }),
+  // #xp240uk — the step between "work done" and "open a PR", which was hand-rolled shell every time. Two
+  // compute steps and no sink, so the HTTP adapter derives a GET with no run record, exactly as `suggest-next`
+  // and `gate-health` do.
+  [VERIFY_OP]: () => ({
+    declaration: verifyOperation({ runChecks: createChecksRunner() }),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
