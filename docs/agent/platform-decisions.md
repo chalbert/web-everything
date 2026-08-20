@@ -3185,6 +3185,36 @@ leaking into the pure core or into any consuming code path, so a future substrat
 discipline applies to any future vendor-specific infrastructure integration, not only this store. Store choice
 (Durable Objects + D1 over MongoDB) is a settled lean, not itself a ratified fork.
 
+**Extended 2026-08-20 (Nicolas, operator; #xvatzyf)** — a **fourth home**, and the first one that is
+*interim by construction*: a **git transport branch**, for operational state that must be **durable and
+shared BEFORE the trigger above fires**. The case that forced it is the verdict ledger
+(`we:scripts/lib/verdict-ledger.mjs`): `#3007` Phase 2 makes it the authority the drain merges on, but it is
+written to a machine-global `~/.claude/` path, and on a credential-less host the only writer that works runs
+inside ephemeral CI — six verdicts recorded in one session wrote six rows that no longer exist. A merge
+authority cannot wait on the `#2703` trigger, so it does not.
+
+Three clauses, and the first is what keeps this from becoming a fifth taxonomy by drift:
+
+1. **It is a WAITING ROOM, not a destination.** State placed here is state that has already been classified
+   as belonging in the shared durable store; the branch holds it until that store exists. Anything whose
+   nature says *session-local* or *committed frontmatter* stays where clause 1 or 2 put it — this home is
+   not a general-purpose escape from the taxonomy, and an artifact may only use it while naming the
+   shared-store row it is destined for.
+2. **The same vendor-abstraction requirement applies, unchanged.** The git specifics live in the artifact's
+   io-shell, never in its pure core — so the eventual move to Durable Objects + D1 touches one shell, which
+   is the whole reason clause 3 above exists. `we:scripts/operations/record-verdict.mjs` is the worked
+   example: a pure declaration over a shell that pushes.
+3. **Append-only means append-only, including under contention.** A git branch is not automatically an
+   append-only store: two writers pushing concurrently is a non-fast-forward, and a writer that drops the
+   row on rejection has silently lost a verdict — precisely the failure class `#3007` exists to close. So an
+   artifact using this home MUST carry a fetch-append-retry loop with bounded retries and a LOUD failure on
+   exhaustion, proven by a two-writer concurrency test, before it may be called append-only or relied on as
+   an authority.
+
+The migration trigger is the same one clause 3 above names (`#2703`); this home simply does not wait for it.
+Ratified against a two-round skeptic pass that landed both times — the fourth-home governance gap and the
+contention defect above are findings it forced, not afterthoughts.
+
 ---
 
 ### Event-driven land is WAKE-only — one polling drain stays the sole writer; a webhook may wake it, never add a second writer; the merge-queue build defers behind measured saturation {#event-driven-land-is-wake-only}
