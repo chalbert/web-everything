@@ -2,7 +2,7 @@
 bornAs: x3q28ce
 kind: story
 size: 3
-blockedBy: ["xvatzyf", "x7kjrzg", "xu357cb", "xksotz7"]
+blockedBy: ["3214", "3215", "3217", "3216"]
 status: open
 parent: "2405"
 dateOpened: "2026-08-08"
@@ -215,14 +215,14 @@ one piece that cannot be delivered independently of the others.
 
 | slice | why it is separable |
 | --- | --- |
-| `#xvatzyf` (decision) | where the ledger lives once it is the authority — blocks everything below |
-| `#x7kjrzg` | ledger the drain's OWN holds; the blocking precondition, and what makes `phase2Safe` reachable |
-| `#xu357cb` | the shadow reviewer's would-clear decisions append; useful even if the flip never happens |
-| `#xksotz7` | the write-miss posture, which follows the home decision rather than pre-empting it |
+| `#3214` (decision) | where the ledger lives once it is the authority — blocks everything below |
+| `#3215` | ledger the drain's OWN holds; the blocking precondition, and what makes `phase2Safe` reachable |
+| `#3217` | the shadow reviewer's would-clear decisions append; useful even if the flip never happens |
+| `#3216` | the write-miss posture, which follows the home decision rather than pre-empting it |
 
 **The storage question is a decision, not a build**, and it is carved out rather than narrated here — per
 *backlog-workflow.md → Rules*, an item that narrates an open fork in its body is burying a decision. It is
-`#xvatzyf`, and this item `blockedBy` it.
+`#3214`, and this item `blockedBy` it.
 
 ### What that decision found
 
