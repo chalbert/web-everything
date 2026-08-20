@@ -54,8 +54,8 @@
  * label strings.
  */
 import { execFileSync } from 'node:child_process';
-import { resolve, sep } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
@@ -302,6 +302,58 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
 export function presentRemoveLabels(removeLabels, currentLabels) {
   return (Array.isArray(removeLabels) ? removeLabels : []).filter((l) => hasReviewLabel(currentLabels, l));
 }
+
+/**
+ * WHERE A `--body-file` MAY LIVE (#2897). PURE over injected roots, so both directions are testable.
+ *
+ * THE GUARD STAYS; ONLY THE ALLOWLIST WIDENS. The file's contents are published to a PUBLIC PR and cannot be
+ * unpublished, so an unconstrained path turns a review CLI into an exfiltration primitive. That is why the
+ * check exists and why this does not remove it.
+ *
+ * WHAT WAS WRONG WITH IT: the roots were `process.cwd()` and `tmpdir()` compared as written. On macOS
+ * `tmpdir()` is a PER-USER folder under `/var/folders/…`, so the conventional shared `/tmp` was refused — and
+ * so was an agent session scratchpad. `/tmp` is itself a symlink to `/private/tmp` there, so even naming the
+ * real temp dir could be refused on SPELLING. A caller who cannot use the sanctioned flag hand-rolls a
+ * comment instead, which is precisely the bypass #2882 was built to close: a usability defect that pushes
+ * people off the safe path is a safety defect one step removed.
+ *
+ * SYMLINKS ARE RESOLVED ON BOTH SIDES, and the target side resolves its DEEPEST EXISTING ANCESTOR before
+ * rejoining the tail that does not exist yet. The file need not exist — reporting "outside the allowlist" for
+ * a missing one would name the wrong problem, and the unreadable-file error downstream is clearer — but a
+ * path whose parents are also missing must still be compared in resolved form, or a caller writing to a fresh
+ * scratch directory under a symlinked root is refused on spelling. A root that does not resolve is dropped
+ * rather than compared as written, so a platform without `/tmp` simply has one fewer root.
+ *
+ * @param {string} abs - the already-resolved absolute path to the body file.
+ * @param {string[]} roots - candidate root directories.
+ * @returns {{ok: true} | {ok: false, roots: string[]}}
+ */
+export function checkBodyFileLocation(abs, roots) {
+  const real = (p) => { try { return realpathSync(p); } catch { return null; } };
+  // RESOLVE THE DEEPEST ANCESTOR THAT EXISTS, then rejoin the tail that does not. Resolving only the immediate
+  // parent left the literal path whenever an intermediate directory was absent — and a LITERAL path compared
+  // against RESOLVED roots is exactly the spelling mismatch this widening exists to end: on macOS
+  // `/tmp/scratch/verdict.md` under a not-yet-created `scratch/` was refused against a root resolved to
+  // `/private/tmp` (review-pr correctness juror on PR #1495). A caller writing to a fresh scratch directory is
+  // the ordinary case, not an exotic one.
+  const resolveDeepest = (p) => {
+    const tail = [];
+    for (let dir = p; ; dir = dirname(dir)) {
+      const hit = real(dir);
+      if (hit) return tail.length ? join(hit, ...tail.reverse()) : hit;
+      if (dirname(dir) === dir) return p;   // walked to the root and nothing resolved
+      tail.push(basename(dir));
+    }
+  };
+  const allowed = [...new Set(roots.map(real).filter(Boolean))];
+  const target = resolveDeepest(abs);
+  const ok = allowed.some((root) => target === root || target.startsWith(root + sep));
+  return ok ? { ok: true } : { ok: false, roots: allowed };
+}
+
+/** The roots a `--body-file` may sit under. `/tmp` is listed EXPLICITLY because on macOS it is neither
+ *  `tmpdir()` nor a prefix of it, and it is where callers actually write. */
+export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp, '/tmp'];
 
 /**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
@@ -1102,11 +1154,13 @@ if (IS_CLI) {
   let verdictBody = '';
   if (bodyFileArg) {
     // Constrain the path: this file's contents are published to a PUBLIC PR and cannot be unpublished. A stale
-    // shell variable or a wrong path would otherwise leak whatever it points at, with the CLI reporting success.
+    // shell variable or a wrong path would otherwise leak whatever it points at, with the CLI reporting
+    // success. See {@link checkBodyFileLocation} for which roots and why the refusal now NAMES them.
     const abs = resolve(bodyFileArg);
-    const allowed = [resolve(process.cwd()), resolve(tmpdir())];
-    if (!allowed.some((root) => abs === root || abs.startsWith(root + sep))) {
-      fail(`--body-file must live under the repo root or the temp dir (got ${abs}) — its contents are published to a public PR`);
+    const located = checkBodyFileLocation(abs, bodyFileRoots());
+    if (!located.ok) {
+      fail(`--body-file must live under the repo root or a temp dir (got ${abs}) — its contents are published `
+        + `to a public PR, so the path is constrained. Allowed roots: ${located.roots.join(', ')}`);
     }
     try { verdictBody = readFileSync(abs, 'utf8'); }
     catch (e) { fail(`--body-file=${bodyFileArg} is unreadable (${String((e && e.message) || e).split('\n')[0]})`); }

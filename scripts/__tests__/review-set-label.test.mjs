@@ -6,13 +6,16 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
+  checkBodyFileLocation, bodyFileRoots,
 } from '../review-set-label.mjs';
 import {
   parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
@@ -1946,5 +1949,123 @@ describe('buildVerdictComment — a re-stamp says what it is', () => {
     expect(build('accepted')).toContain('✅ review — accepted');
     expect(build('changes')).toContain('🔁 review — changes requested');
     expect(build('clear-human')).toContain('cleared via the sanctioned path');
+  });
+});
+
+/**
+ * #2897 — WHERE A `--body-file` MAY LIVE.
+ *
+ * The guard exists because the file's contents are published to a PUBLIC PR and cannot be unpublished, so an
+ * unconstrained path turns a review CLI into an exfiltration primitive. This widens the allowlist and never
+ * removes the check.
+ *
+ * What was wrong: the roots were `process.cwd()` and `tmpdir()` compared AS WRITTEN. On macOS `tmpdir()` is a
+ * per-user folder under `/var/folders/…`, so the conventional shared `/tmp` was refused — and `/tmp` is itself
+ * a symlink to `/private/tmp` there, so even naming the real temp dir could be refused on spelling. A caller
+ * who cannot use the sanctioned flag hand-rolls a comment instead, which is the exact bypass #2882 closed. A
+ * usability defect that pushes people off the safe path is a safety defect one step removed.
+ */
+describe('checkBodyFileLocation (#2897)', () => {
+  const TMP = realpathSync(tmpdir());
+
+  it('accepts the OS temp dir', () => {
+    expect(checkBodyFileLocation(join(TMP, 'verdict.md'), bodyFileRoots()).ok).toBe(true);
+  });
+
+  /**
+   * THE macOS CASE, tested by SHAPE because it cannot be reproduced here. On Linux `tmpdir()` IS `/tmp`, so a
+   * host-dependent assertion passes either way — dropping `/tmp` from the roots reddened nothing until this
+   * was written. On macOS `tmpdir()` is a per-user folder under `/var/folders/…` and `/tmp` is neither it nor
+   * a prefix of it, which is the whole reason the shared path is listed explicitly.
+   */
+  it('lists the conventional shared /tmp explicitly, not merely via tmpdir()', () => {
+    expect(bodyFileRoots('/repo', '/var/folders/ab/T')).toContain('/tmp');
+  });
+
+  it('accepts /tmp on a host whose OS temp dir is somewhere else entirely', () => {
+    const macOsish = bodyFileRoots('/repo', '/var/folders/ab/T');
+    expect(checkBodyFileLocation(join(TMP, 'verdict.md'), macOsish).ok).toBe(true);
+    // …and without the shared root it would be refused, which is the defect this closes.
+    expect(checkBodyFileLocation(join(TMP, 'verdict.md'), ['/repo', '/var/folders/ab/T']).ok).toBe(false);
+  });
+
+  it('accepts a scratch path nested under a temp root — an agent session scratchpad is not special', () => {
+    expect(checkBodyFileLocation(join(TMP, 'claude-0', 'session', 'verdict.md'), bodyFileRoots()).ok).toBe(true);
+  });
+
+  it('accepts a file under the repo root', () => {
+    expect(checkBodyFileLocation(join(realpathSync(process.cwd()), '.operations', 'v.md'), bodyFileRoots()).ok).toBe(true);
+  });
+
+  // THE GUARD IS INTACT. This is the direction that matters: the check exists to stop the CLI publishing
+  // whatever a stale shell variable happened to point at.
+  it('still refuses a path outside every root', () => {
+    for (const p of [join(homedir(), '.ssh', 'config'), '/etc/passwd', join(homedir(), 'notes.md')]) {
+      expect(checkBodyFileLocation(p, bodyFileRoots()).ok).toBe(false);
+    }
+  });
+
+  // Resolved on BOTH sides, so a root reached by a different spelling is not refused for it.
+  it('compares resolved paths, so a symlinked temp dir is not refused on spelling', () => {
+    const dir = mkdtempSync(join(TMP, 'bodyfile-'));
+    const link = join(TMP, `bodyfile-link-${process.pid}`);
+    try {
+      symlinkSync(dir, link);
+      expect(checkBodyFileLocation(join(link, 'v.md'), bodyFileRoots()).ok).toBe(true);
+      // …and a symlink pointing OUT of the allowlist is still refused, which is the half that matters.
+      const escape = join(TMP, `bodyfile-escape-${process.pid}`);
+      symlinkSync(homedir(), escape);
+      expect(checkBodyFileLocation(join(escape, '.ssh', 'config'), bodyFileRoots()).ok).toBe(false);
+      rmSync(escape, { force: true });
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A path whose PARENTS do not exist yet must still be compared in resolved form. Resolving only the
+   * immediate parent left the literal path when an intermediate directory was absent, and a literal path
+   * compared against resolved roots is the very spelling mismatch this widening exists to end: on macOS
+   * `/tmp/scratch/verdict.md` under a not-yet-created `scratch/` was refused against a root resolved to
+   * `/private/tmp`. Writing to a fresh scratch directory is the ordinary case.
+   */
+  it('accepts a path under a temp root whose intermediate directories do not exist yet', () => {
+    const fresh = join(TMP, `no-such-dir-${process.pid}`, 'deeper', 'verdict.md');
+    expect(existsSync(dirname(fresh))).toBe(false);
+    expect(checkBodyFileLocation(fresh, bodyFileRoots()).ok).toBe(true);
+  });
+
+  /**
+   * THE macOS SHAPE, built here because it cannot be reproduced by host: `/tmp` is not a symlink on Linux, so
+   * an assertion that merely uses a missing directory under `/tmp` passes with or without the fix. What
+   * matters is a root that IS a symlink AND a target whose parents do not exist — resolving only the
+   * immediate parent then leaves a LITERAL path compared against a RESOLVED root, and refuses it.
+   */
+  it('resolves through a SYMLINKED root even when the path below it does not exist yet', () => {
+    const realRoot = mkdtempSync(join(TMP, 'allow-real-'));
+    const linkRoot = join(TMP, `allow-link-${process.pid}`);
+    try {
+      symlinkSync(realRoot, linkRoot);
+      const target = join(linkRoot, 'not-created-yet', 'verdict.md');
+      expect(existsSync(dirname(target))).toBe(false);
+      expect(checkBodyFileLocation(target, [linkRoot]).ok).toBe(true);
+    } finally {
+      rmSync(linkRoot, { force: true });
+      rmSync(realRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('still refuses a nonexistent path OUTSIDE every root — resolving the ancestor is not a loophole', () => {
+    expect(checkBodyFileLocation('/nowhere/at/all/verdict.md', bodyFileRoots()).ok).toBe(false);
+    expect(checkBodyFileLocation(join(homedir(), 'no-such-dir', 'v.md'), bodyFileRoots()).ok).toBe(false);
+  });
+
+  // A root that does not resolve is dropped rather than compared as written, so a platform without `/tmp`
+  // simply has one fewer root instead of a phantom that matches nothing.
+  it('drops a root that does not exist, and reports the ones that do', () => {
+    const out = checkBodyFileLocation('/nowhere/v.md', [TMP, '/definitely-not-here']);
+    expect(out.ok).toBe(false);
+    expect(out.roots).toEqual([TMP]);
   });
 });
