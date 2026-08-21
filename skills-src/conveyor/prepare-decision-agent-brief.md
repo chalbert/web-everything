@@ -167,8 +167,8 @@ printf '%s\n' "WE #{{ITEM_NUM}}: prepare decision forks for #{{ITEM_NUM}}" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}} src/_data/researchTopics.json src/_includes/research-descriptions/
 
-node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
-  --body-file=<pr-body> --label-on-green
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
+  --bodyFile=<pr-body> --mode=label-on-green --json
 ```
 
 `--label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
