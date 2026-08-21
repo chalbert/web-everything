@@ -51,6 +51,8 @@ import { createRunReader, createRecordVerdictSinks } from './record-verdict-io.m
 import { validateRequest, APPLIABLE_TARGETS } from '../apply-review-request.mjs';
 import { verifyOperation, VERIFY_OP } from './verify.mjs';
 import { createChecksRunner } from './verify-io.mjs';
+import { mutationCheckOperation, MUTATION_CHECK_OP } from './mutation-check.mjs';
+import { createMutationCheckSinks } from './mutation-check-io.mjs';
 import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -86,6 +88,13 @@ export const OPERATIONS = Object.freeze({
   // and `gate-health` do.
   [VERIFY_OP]: () => ({
     declaration: verifyOperation({ runChecks: createChecksRunner() }),
+  }),
+  // #x4omld5 — put the bug back and prove the guard goes red. UNLIKE `verify` above it has a SINK, and that
+  // is deliberate: its probe writes to a source file, so declaring the transaction as an `effect` keeps the
+  // operation off `./http-adapter.mjs`'s GET-only read-only surface. See the effect's own comment.
+  [MUTATION_CHECK_OP]: () => ({
+    declaration: mutationCheckOperation(),
+    sinks: createMutationCheckSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
