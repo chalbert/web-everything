@@ -88,3 +88,22 @@ node/selector before editing any page.
    is recorded on this item the way #2376's close-out records its three. An axe rule disabled, a route removed
    from the derived set, or a `.axe-exclude` added fails this criterion. (Tier 3 — read the per-route notes
    added to this card.)
+
+## Independent review — 2026-08-21
+
+Confidence: **Medium**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (addressed; strategy: verify by mutation or reversion BEFORE building) — The 2026-08-15 measurement is 6 days stale by today (2026-08-21), but the card's Design step 1 explicitly requires re-measuring in the lane's own dev pair before trusting the list, and calls out the WE_ELEVENTY_PORT false-green trap (we:tests/a11y/sitemap-routes.ts:106-114).
+- **consumer** (NOT addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — we:tests/a11y/__tests__/sitemap-routes.test.ts:69-77 hardcodes `expect(ENFORCED_ROUTES.has('/semantics/')).toBe(false)` and `.has('/compat/')).toBe(false)` — both routes the card promotes into ENFORCED_ROUTES. The card's declared scope (we:tests/a11y/sitemap-routes.ts, we:src/) omits this test file, and its Done-when never runs `npm test` (vitest), only `npm run test:a11y` (playwright) and a header re-read.
+- **blast-radius** (addressed; strategy: measure against the real corpus before wiring) — Done-when #1 (A11Y_ENFORCE=1, whole lane) and #3 (npm run test:a11y fails on exactly one test, no other) together catch any collateral regression a shared color-contrast token fix could cause in already-enforced routes.
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — The card explicitly forbids silencing the drain-trigger assertion and requires stating the expected single red test on the item and PR (Design 'The intended failure at the end').
+
+**Corrections recommended:**
+
+- none — the preparation held up as written.
+
+The card's factual claims (route lists, line numbers, git history, the 33+10=43 math) all check out live, but it misses a consumer test file that will break the moment the 10 routes are promoted.
+
+_Recorded through the declared `review-prep` operation._
