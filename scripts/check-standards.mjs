@@ -71,6 +71,10 @@ import {
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
+// #3224 — the skill/operation wiring scan, and the map of what each operation declares over.
+import { findSkillsNamingUndelegatedHomes } from './lib/skill-operation-wiring.mjs';
+import { DECLARED_HOMES } from './operations/declared-homes.mjs';
+import { parseDeclaredHome } from './operations/registry.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
@@ -2123,6 +2127,52 @@ try {
   for (const w of testOnly.warnings) warn(w.message, w.descriptor);
 } catch (e) {
   warn(`Test-only-export scan failed: ${e.message}`);
+}
+
+// ── 18b. A skill instructing a raw home a declared operation owns (#3224) ──────
+// THE THIRD CALLER. #3029/#3035 derive the CLI and the HTTP routes from one declaration, so those two cannot
+// drift. The skill prose telling an agent which command to run is derived from nothing — it is a hand edit
+// somebody makes once, if they remember — and 5 of 11 operations were named by ZERO skills when this was
+// measured. This closes that by making the omission visible.
+//
+// It flags a skill line ONLY when the home does not reach the operation. `backlog.mjs claim` delegates, so
+// naming it is naming the declared layer; `verify-lane.mjs` does not, so naming it bypasses `verify`. The
+// difference is derived from the homes' own sources below, never declared.
+try {
+  const SKIP = new Set(['node_modules', 'dist', '.git', '__snapshots__', '__tests__']);
+  const skills = [];
+  const walkMd = (dir, rel) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP.has(ent.name)) continue;
+      const abs = join(dir, ent.name);
+      const relPath = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) walkMd(abs, relPath);
+      else if (ent.name.endsWith('.md')) skills.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+    }
+  };
+  if (existsSync(join(ROOT, 'skills-src'))) walkMd(join(ROOT, 'skills-src'), 'skills-src');
+
+  // Read each declared home's SOURCE so delegation is derived rather than believed. A home that cannot be
+  // read stays `undefined`, and the scan turns that into "unknown" — which never produces a finding.
+  const operations = Object.entries(DECLARED_HOMES).map(([name, entries]) => ({
+    name,
+    declaresOver: entries.map(parseDeclaredHome).filter(Boolean),
+  }));
+  const homeSources = new Map();
+  for (const op of operations) {
+    for (const d of op.declaresOver) {
+      const p = d.home.replace(/^[a-z][a-z0-9-]*:/, '');
+      if (homeSources.has(p)) continue;
+      const abs = join(ROOT, p);
+      if (existsSync(abs)) homeSources.set(p, readFileSync(abs, 'utf8'));
+    }
+  }
+
+  const wiring = findSkillsNamingUndelegatedHomes(skills, operations, homeSources);
+  for (const e of wiring.errors) err(e.message, e.descriptor);
+  for (const w of wiring.warnings) warn(w.message, w.descriptor);
+} catch (e) {
+  warn(`Skill/operation wiring scan failed: ${e.message}`);
 }
 
 // ── 19. Unfenced mandate params (#2967b) ───────────────────────────────────────
