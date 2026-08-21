@@ -2,8 +2,9 @@
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: []
 ---
 
@@ -14,3 +15,16 @@ Three vacuous tests reached a paid juror in one session (PR #1503 rounds 1, 2, 3
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## BUILT AND MERGED — resolved 2026-08-21, before this card landed
+
+`mutation-check` shipped in #1509 while this PR was still open, so the card would have
+landed describing an already-closed gap. Caught by the PR's own correctness juror,
+which is the right outcome: filing a gap and then closing it in the same session is
+exactly how a backlog accumulates stale open cards.
+
+Landed as `we:scripts/operations/mutation-check.mjs`. The measurement and rationale above are kept rather than
+deleted — they are why the operation exists, and a resolved card is the audit trail.
+
+This is the same failure mode as `#x2sqf62` (~12% of prepared cards described work
+already done). Two more would have been added by the very PR that reports it.
