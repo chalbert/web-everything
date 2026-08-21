@@ -86,13 +86,15 @@ describe('planOpen — the home\'s rules as a pre-flight, and nothing more', () 
   });
 
   it('refuses an empty title and a missing body file', () => {
-    expect(() => planOpen(good({ title: '  ' }))).toThrow(/`title` must be non-empty/);
+    // `title` no longer refuses empty — see the #3245 block below. The body-file refusal still stands.
     expect(() => planOpen(good({ bodyFile: '' }))).toThrow(/bodyless PR/);
   });
 
   it('names every problem at once rather than one per attempt', () => {
+    // Still three problems, and still all in one message — `title` simply is not one of them any more
+    // (#3245: empty means "the home derives it"), so the assertion names the three that remain.
     expect(() => planOpen({ ref: 'main', base: 'main', title: '', bodyFile: '', mode: 'park' }))
-      .toThrow(/lane\/\* ref.*must be non-empty.*bodyless/s);
+      .toThrow(/lane\/\* ref.*bodyless.*parkLabel/s);
   });
 
   /**
@@ -196,6 +198,53 @@ describe('the sha / requireVerified / dryRun pass-through (#3242)', () => {
     expect(decl.input.requireVerified).toMatchObject({ type: 'boolean', required: false, default: false });
     // Defaulting `requireVerified` to true would be a policy change smuggled in as a schema edit.
     expect(decl.input.dryRun).toMatchObject({ type: 'boolean', required: false, default: false });
+  });
+});
+
+// ── #3245: `title` MATCHES THE HOME, WHICH DERIVES ONE ───────────────────────────────────────────────────
+describe('an omitted title lets the home derive one', () => {
+  const noTitle = () => { const g = good(); delete g.title; return g; };
+
+  it('OMITS the flag entirely when no title is given', () => {
+    // `we:scripts/pr-land.mjs` computes `derivedTitle = TITLE ?? <commit subject> ?? "land <ref>"`, so the
+    // home always has one. Requiring a title here made this operation stricter than the thing it declares
+    // over, and every skill instruction of the home omits it.
+    expect(planOpen(noTitle()).argv.some((a) => a.startsWith('--title'))).toBe(false);
+  });
+
+  it('never passes `--title=` empty — that is a blank title, not a derived one', () => {
+    expect(planOpen(good({ title: '' })).argv.some((a) => a.startsWith('--title'))).toBe(false);
+  });
+
+  it('treats WHITESPACE as omitted too, like `sha` and `verify`\'s `gate`', () => {
+    // Consistency here is load-bearing rather than cosmetic. The input declares `default: ''`, so the command
+    // line hands `planOpen` an EMPTY STRING whenever `--title` is absent — a guard that refused empty-as-given
+    // would refuse every call that omitted the flag, which is all six sites this change exists to unblock.
+    expect(planOpen(good({ title: '   ' })).argv.some((a) => a.startsWith('--title'))).toBe(false);
+  });
+
+  it('forwards a real title unchanged', () => {
+    expect(planOpen(good({ title: 'a real title' })).argv).toContain('--title=a real title');
+  });
+
+  it('still requires bodyFile, so the argv can never be TITLE-ONLY', () => {
+    // The home is headless-safe only because a bare `--title` with no body drops into an interactive prompt
+    // and dies (#2176). Making the title optional must not open that shape.
+    expect(() => planOpen({ ...noTitle(), bodyFile: '' })).toThrow(/bodyless PR/);
+  });
+
+  it('argv and verdict agree on the title — both trimmed (PR #1522 juror)', () => {
+    // The verdict already reported `title.trim()` while the argv pushed the raw value, so the two disagreed
+    // whenever a caller's title carried surrounding whitespace: the argv would publish "  a title  " while
+    // the verdict claimed "a title". The verdict is what a caller reads back, so one value, decided once.
+    const plan = planOpen(good({ title: '  spaced title  ' }));
+    expect(plan.title).toBe('spaced title');
+    expect(plan.argv).toContain('--title=spaced title');
+  });
+
+  it('declares the input as optional with an empty default', () => {
+    const decl = openPrOperation({ parkLabels: PARK_LABELS });
+    expect(decl.input.title).toMatchObject({ type: 'string', required: false, default: '' });
   });
 });
 

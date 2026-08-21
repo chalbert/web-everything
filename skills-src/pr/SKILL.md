@@ -86,7 +86,7 @@ It parks by default (`review:pending` — an independent review is owed), becaus
    change, or `lane/<NNN>-<slug>` when it closes a backlog item.
 2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing:
    ```
-   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --dry-run
+   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --dry-run  # @operation-home-ok: #x6ry8mf — this rehearsal runs BEFORE the body exists; the home's #2332 guard exempts --dry-run, `open-pr` requires bodyFile unconditionally
    ```
 3. **Write a PR body to a file and ALWAYS pass `--body-file`** — this is required, not optional:
    `pr-land` derives the title from the commit subject, and `gh pr create --title …` with **no** body
@@ -96,7 +96,7 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 4. **Open + hand off** (self-approved, wait for the `test` check, label green, trigger the drain — #2290
    pr-land NEVER merges):
    ```
-   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>
+   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>  # @operation-home-ok: #x6ry8mf — no mode flag is the home's DEFAULT path, which also TRIGGERS the fast drain that lands the PR; `open-pr`'s label-on-green stops at the label, so naming it here would leave the PR sitting unlanded
    ```
    - **Default:** open → wait for required checks → label `ready-to-merge` when green → **trigger a
      single-couple fast drain** (`merge-ai-prs.mjs --only=<pr> --this-repo`) that lands it. The trigger is

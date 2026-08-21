@@ -167,20 +167,20 @@ printf '%s\n' "WE #{{ITEM_NUM}}: prepare decision forks for #{{ITEM_NUM}}" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}} src/_data/researchTopics.json src/_includes/research-descriptions/
 
-node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
-  --body-file=<pr-body> --label-on-green
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
+  --bodyFile=<pr-body> --mode=label-on-green --json
 ```
 
-`--label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
+`--mode=label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
 **only when green, then STOPS** (the resident drain lands it). This is the **default and expected** outcome: a
 prepare PR is bounded (one decision + its research topic) and **auto-lands with no human in the loop** — the
 prepared forks are PRESENTED (and ratified) later. There is **no review escalation** for a prepare PR unless the
 decision itself is **statute-touching** (`pr-land`'s deterministic rubric, #2307, parks it `review:human` on its
 own — you do nothing extra). Do **not** blanket-park a prepare PR.
 
-`pr-land --label-on-green` BLOCKS until `test` is green (often several minutes). Run it BACKGROUNDED (or with a
+`open-pr --mode=label-on-green` BLOCKS until `test` is green (often several minutes). Run it BACKGROUNDED (or with a
 generous timeout) — a foreground call may hit the tool timeout mid-wait, which is EXPECTED and harmless: the PR
-is already open (`checking`), and re-invoking `pr-land` with the SAME `--ref` is idempotent.
+is already open (`checking`), and re-invoking `open-pr` with the SAME `--ref` is idempotent.
 
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
