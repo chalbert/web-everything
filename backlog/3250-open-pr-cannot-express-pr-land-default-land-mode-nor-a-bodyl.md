@@ -3,8 +3,9 @@ bornAs: x6ry8mf
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: []
 ---
 

@@ -47,7 +47,19 @@ export const SUBMIT_PR_EFFECT = 'open-pr.submit';
  * that opens a PR and lets it march toward `ready-to-merge` unreviewed is the shape #2171/#2262 park exists
  * to stop. Choosing the un-parked mode is then a deliberate flag rather than an omission.
  */
-export const OPEN_MODES = Object.freeze(['park', 'label-on-green', 'no-wait']);
+/**
+ * `land` IS THE HOME'S OWN DEFAULT, and it is a MODE here rather than an omission (#x6ry8mf).
+ *
+ * `we:scripts/pr-land.mjs` with no mode flag does the most consequential thing it can: open, wait for the
+ * required check, label `ready-to-merge`, and TRIGGER THE SINGLE-COUPLE FAST DRAIN that lands the PR. (It
+ * never merges directly — #2290 — the drain does.) `label-on-green` stops at the label, so it is NOT a
+ * substitute: pointing a caller of the default path at it leaves the PR sitting open, labelled and unlanded.
+ *
+ * That gap is why `we:skills-src/pr/SKILL.md` could not name this operation and had to carry an exemption
+ * marker. Naming the mode explicitly — rather than letting it be "the one where you pass nothing" — keeps
+ * the choice deliberate at the call site, which is the same reason `park` is the default below.
+ */
+export const OPEN_MODES = Object.freeze(['park', 'label-on-green', 'no-wait', 'land']);
 
 /** The submission outcomes a caller acts on. THREE, for the reason `verify` has three. */
 export const SUBMIT_OUTCOMES = Object.freeze(['opened', 'refused', 'unrun']);
@@ -82,15 +94,26 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   // omitted the flag — which is every one of the six skill sites this change exists to unblock. My own test
   // caught it; the first cut of this rule was a refusal.
   if (title !== undefined && typeof title !== 'string') problems.push('`title` must be a string when given');
-  if (typeof bodyFile !== 'string' || !bodyFile.trim()) {
-    // #2332's producer-side prevention, surfaced before the push rather than after it.
-    problems.push('`bodyFile` must name a file holding a non-empty body — the drain gate rejects a bodyless PR at land, which stalls the queue');
+  // REQUIRED, EXCEPT ON A DRY RUN (#x6ry8mf). #2332's producer-side prevention exists because a bodyless PR
+  // passes the producer and is then REFUSED at land, stalling the queue — but a `--dry-run` opens nothing, so
+  // there is no PR to stall and no body to be missing. The home draws that line itself: its `prCreateBodyGuard`
+  // guards the CREATE path only, and its own comment says the empty-body branch "is only ever reached by the
+  // dry-run plan render, never by a real `gh pr create`". Requiring a body here for a rehearsal made the
+  // operation stricter than the home for the one call that touches nothing — which is why `pr/SKILL.md`'s
+  // rehearsal step could not name it.
+  if (!dryRun && (typeof bodyFile !== 'string' || !bodyFile.trim())) {
+    problems.push('`bodyFile` must name a file holding a non-empty body — the drain gate rejects a bodyless PR at land, which stalls the queue (not required with `dryRun`, which opens nothing)');
   }
   if (!OPEN_MODES.includes(mode)) problems.push(`\`mode\` must be one of ${OPEN_MODES.join('|')}`);
   if (mode === 'park' && !parkLabel) problems.push('`parkLabel` is required in `park` mode — that is what parking means');
   if (problems.length) throw new Error(`open-pr: cannot plan this PR — ${problems.join('; ')}`);
 
-  const argv = ['--ref=' + ref, '--base=' + base, '--body-file=' + bodyFile];
+  const argv = ['--ref=' + ref, '--base=' + base];
+  // OMITTED WHEN EMPTY, like `--title` and `--sha` — the third time this rule applies in this function, and
+  // the first two did not carry it here. `--body-file=` with no path is not "no body": the home reads the
+  // flag as a string and would try to READ the empty path. Only a dry run can reach an empty `bodyFile` at
+  // all (the guard above requires one otherwise), and a dry run must pass no body rather than a broken one.
+  if (typeof bodyFile === 'string' && bodyFile.trim()) argv.push('--body-file=' + bodyFile.trim());
   // OMITTED when absent, never passed empty: `--title=` would publish the empty string as the PR title,
   // which is not "let the home decide" — it is a titled PR with a blank title. Same rule as `--sha`.
   // TRIMMED IN BOTH PLACES. The verdict already reported `title.trim()`, so pushing the RAW value here made
@@ -100,7 +123,12 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   if (typeof title === 'string' && title.trim()) argv.splice(2, 0, '--title=' + title.trim());
   if (mode === 'park') argv.push('--park=' + parkLabel);
   else if (mode === 'label-on-green') argv.push('--label-on-green');
-  else argv.push('--no-wait');
+  else if (mode === 'no-wait') argv.push('--no-wait');
+  // `land` PASSES NO MODE FLAG — that IS the home's default path, and inventing a `--land` the home does not
+  // accept would fail at the shell rather than land anything. Written as an explicit branch instead of the
+  // old `else`, so a fifth mode added later cannot silently inherit "pass nothing" and become `land` by
+  // accident: that would turn a typo into the one mode that publishes.
+  else if (mode !== 'land') throw new Error(`open-pr: unreachable mode ${JSON.stringify(mode)} — OPEN_MODES and this switch disagree`);
 
   // #3242 — the three flags every real call site passes and this operation could not express. Each is
   // OMITTED rather than passed with a falsey value, and for two different reasons that both matter:
@@ -176,7 +204,11 @@ export function openPrOperation({ parkLabels } = {}) {
       title: { type: 'string', required: false, default: '' },
       // A PATH, not the body: a PR body is multi-line prose and an argv-borne one gets mangled, which is why
       // the home prefers `--body-file` too (#2170).
-      bodyFile: { type: 'string', required: true },
+      // OPTIONAL IN THE SCHEMA, ENFORCED IN `planOpen` — and the split is deliberate rather than sloppy. The
+      // requirement is CONDITIONAL (#x6ry8mf: a `dryRun` opens nothing, so it needs no body), and the input
+      // schema has no way to say "required unless another field is set". Leaving it `required: true` here
+      // would refuse a legal dry run at the command line, BEFORE the step that knows the condition ever runs.
+      bodyFile: { type: 'string', required: false, default: '' },
       mode: { type: 'string', required: false, default: 'park', enum: [...OPEN_MODES] },
       parkLabel: { type: 'string', required: false, default: defaultParkLabel(parkLabels), enum: [...parkLabels] },
       // #3242 — the three the home takes and this operation could not pass. Every one of the six skill
