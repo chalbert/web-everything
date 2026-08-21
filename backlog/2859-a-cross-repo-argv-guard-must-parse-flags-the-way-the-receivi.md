@@ -3,9 +3,10 @@ bornAs: x2a76pj
 kind: story
 size: 2
 parent: "2612"
-status: open
+status: resolved
 dateOpened: "2026-08-02"
-dateStarted: "2026-08-15"
+dateStarted: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: [drain, conveyor, gate, cross-repo, argv, tech-debt]
 scope:
   - we:scripts/lib/reconcile-predicate.mjs
@@ -386,3 +387,21 @@ cross-repo ORDER, not either repo's internal diff, that must not be collapsed.
   card's own sequencing: `plateau-app` CI resolves the WE sibling at its default branch, no `ref:` override).
 - **Notes:** this item's own "Verification against the live tree" section already re-confirmed both line
   refs and the two named divergences live as of 2026-08-15 — no re-grounding needed before resuming.
+
+## Shipped (2026-08-21)
+
+The WE half was already in place: `we:scripts/lib/reconcile-predicate.mjs` is a dependency-free leaf built for exactly this cross-repo import, and `we:scripts/merge-ai-prs.mjs` already consumes it as `RECONCILE`'s single source. What was missing was plateau-app actually using it.
+
+**plateau-app PR #144** rewrites `childPassEnforcesHoldInvariant` (`plateau-app:tools/drain-daemon/lib.mjs`) to parse the argv the way the receiving CLI parses it. Three divergences confirmed against WE's own predicate, **all failing OPEN** — the guard said "reconcile is on" about an argv WE would not reconcile:
+
+| argv | old guard | WE |
+| --- | --- | --- |
+| `--no-reconcile-labels=1` | enforced | reconcile off |
+| `--no-reconcile-labels=false` | enforced | reconcile off (WE tests the STRING; `'false'` is truthy) |
+| `--label=` empty | enforced | no label, no reconcile |
+
+First two live, third latent. The parse is DUPLICATED rather than imported because the daemon resolves the WE checkout at RUNTIME (`wePrimary`), so `plateau-app:tools/drain-daemon/lib.mjs` has nothing to statically import — and it is PINNED by a conformance test that imports `reconcileWouldRunFor` and asserts agreement across a table carrying all three divergences, plus a case asserting both verdicts appear so agreement cannot be vacuous.
+
+Verified: CI ran `plateau-app:tools/drain-daemon/lib.test.mjs` with **173 tests passing**, confirming the `@webeverything/reconcile-predicate` alias resolves against the sibling checkout. Reviewed `accept`, zero findings.
+
+**A method note worth keeping.** The review nearly did not happen: `we:scripts/operations/run.mjs` calls `createReviewPrReader()` bare, so the CLI cannot say "read the subject from another repo" (#3137), and that was first reported as "the review cannot be run". It can — `createReviewPrReader({ cwd })` is a documented injection seam, and driving `we:scripts/operations/cli-adapter.mjs`'s `runOperationCli` with it produced a correct net basis (`c050cca..42580f0`, plateau-app's own main to the PR head). The CLI lacking a flag is not the operation lacking the capability.
