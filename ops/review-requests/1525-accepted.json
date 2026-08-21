@@ -1,0 +1,8 @@
+{
+  "repo": "chalbert/web-everything",
+  "pr": 1525,
+  "to": "accepted",
+  "actor": "claude-review-pr",
+  "body": "## Human review verdict — chalbert/web-everything#1525\n\n**Verdict:** ✅ pass — no blocking findings\n\n### Panel verdicts\n\n| lens | weight | verdict |\n| --- | --- | --- |\n| correctness | mandatory | accept |\n\n### Findings (0)\n\n_No findings._\n\n---\n\n**Decision:** `accept` — recorded by operator.\n**Lens:** `correctness` — a SINGLE-LENS run. One `judge` step, one juror, one lens; the table above lists only the lens that judged. The other 3 panel lenses (security, simplicity, standards-conformance) did NOT run and are not reported as unjudged.\nNet basis: `f01b2285b443de3e09d75a38d9ee7e2837d051a0..8dd94ded32f558ece381555fbc2410350ae0ff8a` (rev `origin/lane/claim-stop-opt-in` at review time) — 6 net changed file(s) vs current main (#2450), not `gh pr diff`'s three-dot list.\n\n_Recorded through the declared `review-pr` operation (#3035)._",
+  "sessionId": "9e06d2af-e495-8ef9-ab80-b17bd36c6f31"
+}
