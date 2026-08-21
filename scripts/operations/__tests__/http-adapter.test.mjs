@@ -52,6 +52,7 @@ import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
 import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
+import { PR_STATUS_OP } from '../pr-status.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import {
   DEFAULT_BASE_PATH,
@@ -324,6 +325,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // see whether the suite notices — but that write is transactional and self-reversing, lives entirely in
     // `mutation-check-io.mjs`, and arrives only through the `probe` its builder is handed in `../run.mjs`.
     // It declares no effect because there is nothing durable for a replay to re-apply.
+    // #xewnork — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports only
+    // `registry.mjs` and `step-kinds.mjs`, and every `gh` call lives in `pr-status-io.mjs` behind the
+    // injected reader. It reads PRs; it can act on none of them.
+    [PR_STATUS_OP]: 'pr-status.mjs',
     [MUTATION_CHECK_OP]: 'mutation-check.mjs',
     // #xrrpfo7 — `claim`'s sibling at the close of the lifecycle, and NOT read-only for the same reason
     // `claim` is not: its `write` step splices the card. Listed here for map coverage; its own suite pins
@@ -343,7 +348,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([GATE_HEALTH_OP, PR_STATUS_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
