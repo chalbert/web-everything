@@ -233,6 +233,15 @@ describe('an omitted title lets the home derive one', () => {
     expect(() => planOpen({ ...noTitle(), bodyFile: '' })).toThrow(/bodyless PR/);
   });
 
+  it('argv and verdict agree on the title — both trimmed (PR #1522 juror)', () => {
+    // The verdict already reported `title.trim()` while the argv pushed the raw value, so the two disagreed
+    // whenever a caller's title carried surrounding whitespace: the argv would publish "  a title  " while
+    // the verdict claimed "a title". The verdict is what a caller reads back, so one value, decided once.
+    const plan = planOpen(good({ title: '  spaced title  ' }));
+    expect(plan.title).toBe('spaced title');
+    expect(plan.argv).toContain('--title=spaced title');
+  });
+
   it('declares the input as optional with an empty default', () => {
     const decl = openPrOperation({ parkLabels: PARK_LABELS });
     expect(decl.input.title).toMatchObject({ type: 'string', required: false, default: '' });

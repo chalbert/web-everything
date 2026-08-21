@@ -93,7 +93,11 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   const argv = ['--ref=' + ref, '--base=' + base, '--body-file=' + bodyFile];
   // OMITTED when absent, never passed empty: `--title=` would publish the empty string as the PR title,
   // which is not "let the home decide" — it is a titled PR with a blank title. Same rule as `--sha`.
-  if (typeof title === 'string' && title.trim()) argv.splice(2, 0, '--title=' + title);
+  // TRIMMED IN BOTH PLACES. The verdict already reported `title.trim()`, so pushing the RAW value here made
+  // the two disagree whenever a caller's title carried surrounding whitespace — the argv would publish
+  // `"  a title  "` while the verdict claimed `"a title"`, and the verdict is what a caller reads back
+  // (PR #1522 juror). One value, decided once.
+  if (typeof title === 'string' && title.trim()) argv.splice(2, 0, '--title=' + title.trim());
   if (mode === 'park') argv.push('--park=' + parkLabel);
   else if (mode === 'label-on-green') argv.push('--label-on-green');
   else argv.push('--no-wait');
