@@ -59,6 +59,14 @@ export const DECLARED_HOMES = Object.freeze({
   // three. This entry must never produce a finding; the suite pins that it does not.
   claim: Object.freeze(['we:scripts/backlog.mjs claim']),
 
+  // #3242 DELIBERATELY DID NOT ADD an `open-pr` entry, and the reason is the rule this map is built on.
+  // `open-pr`'s header says it declares over `we:scripts/pr-land.mjs`, and #3242 closed three of the four
+  // gaps that stopped it replacing that home (`sha`, `requireVerified`, `dryRun`). The fourth remains:
+  // `open-pr` REQUIRES `title`, while the home treats it as optional and lets `gh` derive it from the commit
+  // subject — and all six skill instructions of the home omit it. So a skill still cannot simply name the
+  // operation, and an entry here would emit six findings whose only honest answer is six exemption markers.
+  // A gate reporting a gap nobody can close is how a gate gets ignored. See #x5bpt2m.
+
   // `dispatch-lane` CONSUMES `planTick`'s `decisions.spawnBuilds` and refuses to invent a launch of its own —
   // "IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT". A skill telling an agent to run the core by
   // hand is telling it to execute a dispatch the operation exists to make structural.

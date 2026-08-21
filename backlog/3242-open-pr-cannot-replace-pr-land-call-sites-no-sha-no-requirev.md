@@ -3,8 +3,10 @@ bornAs: xz7ofjw
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateStarted: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: []
 ---
 
@@ -14,4 +16,16 @@ tags: []
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/operations/__tests__/open-pr.test.mjs` passes, covering the
+   pass-through at BOTH layers because each can drop a value independently: `planOpen` emits `--sha`,
+   `--require-verified` and `--dry-run` when asked, and the `plan` step both declares the three reads and
+   threads them into `planOpen`.
+2. **Executable** — the same suite pins that an unset `sha` OMITS the flag (the home's `HEAD` default is not
+   restated here) and that a false boolean omits its flag rather than passing `--dry-run=false`, which the
+   home reads as `!!'false'` — true — and would silently turn a real land into a rehearsal.
+3. **Observable** — the operation still cannot WAIVE the gate: no value of any input emits `--break-glass` or
+   `--no-verify`, and the load-bearing negative test says so.
+
+**Not done here, deliberately:** the `#3224` map still carries no `open-pr` entry, because `title` remains
+required where the home makes it optional — see `#x5bpt2m`. Three of four gaps closed, and the fourth is
+named rather than papered over.
