@@ -80,6 +80,9 @@ import {
 } from '../lib/review-core.mjs';
 import { DISPOSITIONS } from '../lib/jury-core.mjs';
 import { renderPanelComment } from '../lib/review-render.mjs';
+// #xwp8ioh — the SAME predicate `we:scripts/review-set-label.mjs` enforces at the write side (#2953), imported
+// rather than restated, so the read side and the write side cannot drift into two answers (#2644).
+import { classifyPrLiveness, inertPrMessage } from '../lib/pr-liveness.mjs';
 // THE GUARD, IMPORTED NOT INJECTED — see property 2 in the header.
 import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 
@@ -159,9 +162,27 @@ export const REVIEW_EFFECTS = Object.freeze({
 export const REVIEW_JUDGE_SHAPE = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['findings'],
+  // `summary` IS REQUIRED, and #x0p5k2q is why. It was optional, so a juror could answer exactly
+  // `{findings: []}` — having said nothing about what it looked at — and `deriveVerdict` reduced that to
+  // `accept`. Observed twice on PR #1513: two independent jurors, 13 turns and ~$0.79 each over a 48.5k-char
+  // diff, both returning an empty array and no summary. PR #1510's juror returned the same empty array
+  // alongside a 548-character account of what it had verified, so the field's absence is NOT a property of a
+  // clean review.
+  //
+  // `record-verdict` already refuses such a run ("staged no write-up to carry"), which is what caught this and
+  // means nothing false was ever recorded. But refusing THERE only deadlocks the pipeline: the operator has
+  // been told the PR was accepted and the verdict can never be carried. Requiring it here refuses at the step
+  // that produced the emptiness, which is the only place it can still be re-asked.
+  //
+  // A JUROR THAT JUDGED MUST SAY WHAT IT JUDGED. Zero findings stays a perfectly good answer — this asks only
+  // that it be an answer rather than a silence, the same line drawn between `unrun` and `pass` everywhere else.
+  required: ['findings', 'summary'],
   properties: {
-    summary: { type: 'string', description: 'One sentence on the diff as a whole.' },
+    summary: {
+      type: 'string',
+      description: 'REQUIRED. One sentence on the diff as a whole — what you examined and what you concluded. '
+        + 'Zero findings is a fine verdict; saying nothing is not one, and an empty summary is refused.',
+    },
     findings: {
       type: 'array',
       items: {
@@ -216,6 +237,22 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
   const detail = raw.detail && typeof raw.detail === 'object' ? raw.detail : {};
   const net = raw.net && typeof raw.net === 'object' ? raw.net : {};
   const diff = raw.diff && typeof raw.diff === 'object' ? raw.diff : {};
+
+  // #xwp8ioh — THE LIVENESS REFUSAL, FIRST on purpose: before the net-diff contract check, before any
+  // shaping, and — because this is the `read` step — before `judge` spends a juror. `we:scripts/review-set-
+  // label.mjs` has refused an inert PR since #2953, but only at the WRITE side, so the cost was already sunk
+  // by the time it fired. On 2026-08-20 that meant three correctness rounds (~$4) against PR #1503, which had
+  // merged two hours before round 1 began; every refusal was right and every one of them was too late.
+  //
+  // `unknown` refuses too. A read that could not report the state has not told us the PR is live, and
+  // reviewing on "we couldn't tell" is the absence-of-evidence-as-evidence move this engine refuses
+  // everywhere else (`verify`'s `unrun`, #3203's killed-vs-crashed juror).
+  const liveness = classifyPrLiveness({ state: raw.state });
+  if (liveness.outcome !== 'reviewable') {
+    throw new Error(
+      `review-pr.read: ${inertPrMessage({ pr: `${repo}#${pr}`, state: liveness.state, phase: 'read' })}`,
+    );
+  }
 
   if (net.scored !== true && net.reason === 'exec-contract') {
     throw new Error(
@@ -459,6 +496,19 @@ export function reviewPrOperation({ readPr } = {}) {
         const read = view.findings.read;
         const answer = view.findings.judge && typeof view.findings.judge === 'object' ? view.findings.judge : {};
         const findings = normalizeFindings(answer.findings);
+        // #x0p5k2q — REFUSE A SILENT JUROR, here as well as in the shape. `required` in JSON Schema only
+        // asserts the KEY is present, so `{findings: [], summary: ""}` satisfies it and arrives as the same
+        // nothing. Checked at the reduce step because this is where an empty answer would otherwise become
+        // `accept`: `deriveVerdict` reads only the findings array, so silence and a clean bill are the same
+        // input to it. Zero findings remains a fine verdict — this asks only that it be an ANSWER.
+        const summary = String(answer.summary ?? '').trim();
+        if (!summary) {
+          throw new Error(
+            'review-pr.reduce: the juror returned no summary — it reported nothing about what it examined, '
+            + `which is \`unrun\`, not an accept (${findings.length} finding(s) returned). A juror that judged `
+            + 'must say what it judged. Re-run the review; do not record a verdict on this run.',
+          );
+        }
         const humanRequired = read.humanRequired === true;
         const verdict = deriveVerdict({ findings, humanRequired });
         return {
@@ -470,7 +520,7 @@ export function reviewPrOperation({ readPr } = {}) {
           humanRequired,
           lens: view.input.lens,
           findings,
-          summary: String(answer.summary || ''),
+          summary,
         };
       },
     }),

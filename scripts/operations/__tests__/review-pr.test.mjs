@@ -35,6 +35,7 @@ import {
   REVIEW_EFFECTS,
   REVIEW_PR_CHANNEL,
   REVIEW_PR_OP,
+  REVIEW_JUDGE_SHAPE,
   renderJudgeInput,
   renderVerdictWriteUp,
   reviewPrOperation,
@@ -48,8 +49,14 @@ const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.
 const GH_ONLY_PATH = 'a-sibling-lane-file-that-already-landed.md';
 
 /** A stub `readPr`. `labels` decides gate-self; `netReason` forces an unscored basis. */
-function stubReader({ labels = ['review:pending'], netScored = true, netReason = undefined, title = 'a parked PR' } = {}) {
+function stubReader({
+  labels = ['review:pending'], netScored = true, netReason = undefined, title = 'a parked PR',
+  // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
+  // written for; overridden only by the liveness tests.
+  state = 'OPEN',
+} = {}) {
   return ({ pr, repo }) => ({
+    state,
     detail: {
       pr, repo, title, url: `https://example.invalid/${pr}`,
       labels,
@@ -188,6 +195,104 @@ describe('the net basis', () => {
     const shaped = shapeReadFinding(stubReader({})({ pr: 1, repo: 'o/n' }), { pr: 1, repo: 'o/n' });
     expect(shaped.netChangedFiles).toEqual(NET_PATHS);
     expect(renderJudgeInput(shaped)).not.toContain(GH_ONLY_PATH);
+  });
+
+  /**
+   * #xwp8ioh — THE REFUSAL MUST HAPPEN AT `read`, WHICH IS TO SAY BEFORE `judge`.
+   *
+   * `we:scripts/review-set-label.mjs` has refused an inert PR since #2953, and that guard was never wrong —
+   * it was just last. Asserting "a merged PR is refused" against the WRITE side would pass today and would
+   * have passed on 2026-08-20, when three rounds were judged against a PR that merged two hours earlier.
+   * So the property under test is positional: `shapeReadFinding` — the pure `read` shaper, the step BEFORE
+   * `judge` — is what throws.
+   */
+  it('#xwp8ioh — a merged PR is refused at `read`, before any juror can be spent', () => {
+    const merged = stubReader({ state: 'MERGED' })({ pr: 1503, repo: 'o/n' });
+    expect(() => shapeReadFinding(merged, { pr: 1503, repo: 'o/n' }))
+      .toThrow(/o\/n#1503 is MERGED, not OPEN/);
+    // It says WHY it is refusing early — that nothing has been spent is the point of the new position.
+    expect(() => shapeReadFinding(merged, { pr: 1503, repo: 'o/n' }))
+      .toThrow(/Refusing BEFORE the `judge` step, so no juror is paid/);
+    // And it names the remedy. Without this clause the reflex is to push the fix to the merged PR's branch,
+    // which is exactly what produced five orphaned commits.
+    expect(() => shapeReadFinding(merged, { pr: 1503, repo: 'o/n' }))
+      .toThrow(/open a new PR for the findings/);
+  });
+
+  it('#xwp8ioh — a CLOSED PR is just as inert as a merged one', () => {
+    // Closed-but-unmerged is not a lesser case: nothing downstream reads a label on it either.
+    expect(() => shapeReadFinding(stubReader({ state: 'CLOSED' })({ pr: 9, repo: 'o/n' }), { pr: 9, repo: 'o/n' }))
+      .toThrow(/o\/n#9 is CLOSED, not OPEN/);
+  });
+
+  it('#xwp8ioh — an UNREADABLE state refuses too, and is not folded into either answer', () => {
+    // The absence-of-evidence rule this engine applies everywhere else (`verify`'s `unrun`, #3203's
+    // killed-vs-crashed juror): a read that could not report the state has NOT reported that the PR is live.
+    // Reviewing on "we couldn't tell" is the failure; so is claiming it is merged.
+    for (const state of ['', '   ', null, 42]) {
+      expect(() => shapeReadFinding(stubReader({ state })({ pr: 4, repo: 'o/n' }), { pr: 4, repo: 'o/n' }))
+        .toThrow(/is in an unreadable state, not OPEN/);
+    }
+    // The FIELD-ABSENT case cannot be expressed through `stubReader` — a destructuring default turns
+    // `{state: undefined}` back into `'OPEN'`, so routing it through the helper would assert nothing. (That
+    // is not hypothetical: the first cut of this test did exactly that and passed for the wrong reason.)
+    // A transport that simply never sets the key is the realistic shape, so build it directly.
+    const { state: _dropped, ...noStateField } = stubReader({})({ pr: 4, repo: 'o/n' });
+    expect('state' in noStateField).toBe(false);
+    expect(() => shapeReadFinding(noStateField, { pr: 4, repo: 'o/n' }))
+      .toThrow(/is in an unreadable state, not OPEN/);
+  });
+
+  it('#xwp8ioh — an OPEN PR is untouched by the guard', () => {
+    // The other half of the property: the guard must not become a blanket refusal. Without this, deleting
+    // the `outcome !== 'reviewable'` condition and always throwing would still pass the three tests above.
+    const shaped = shapeReadFinding(stubReader({ state: 'open' })({ pr: 2, repo: 'o/n' }), { pr: 2, repo: 'o/n' });
+    expect(shaped.pr).toBe(2); // and case-insensitively — `gh` reports OPEN, other transports may not
+  });
+});
+
+// ── A SILENT JUROR IS `unrun`, NOT AN ACCEPT (#x0p5k2q) ───────────────────────────────────────────────────
+describe('a juror that judged must say what it judged', () => {
+  // Observed twice on PR #1513: two independent jurors, 13 turns and ~$0.79 each over a 48.5k-char diff, each
+  // returning exactly `{findings: []}` with no summary. `deriveVerdict` reads only the findings array, so
+  // silence and a clean bill were the SAME input to it and both reduced to `accept`. `record-verdict` refused
+  // downstream ("staged no write-up to carry"), which is what caught it — but refusing there only deadlocks:
+  // the operator has already been told the PR was accepted.
+  const registry = () => registryFor({}).registry;
+  const reduceWith = (answer) => atConfirm({ registry: registry(), input: BASE_INPUT, answer, id: `run-sum-${Math.abs(JSON.stringify(answer).length)}` });
+
+  it('REFUSES an answer with no summary at all', () => {
+    expect(() => reduceWith({ findings: [] })).toThrow(/returned no summary/);
+  });
+
+  it('REFUSES an EMPTY or whitespace summary — `required` in JSON Schema only asserts the key is present', () => {
+    for (const summary of ['', '   ', '\n']) {
+      expect(() => reduceWith({ summary, findings: [] })).toThrow(/returned no summary/);
+    }
+  });
+
+  it('REFUSES a silent juror even when it DID return findings', () => {
+    // The refusal is about the juror having spoken, not about the verdict being clean. A juror that lists
+    // blockers but says nothing about the diff as a whole has still not reported what it examined.
+    expect(() => reduceWith({ findings: [{ summary: 'x', file: NET_PATHS[0], disposition: 'blocker' }] }))
+      .toThrow(/returned no summary/);
+  });
+
+  it('ACCEPTS zero findings when the juror actually said something', () => {
+    // The other half, and the one that matters most: "always refuse" would pass all three tests above while
+    // making every clean review unrecordable. Zero findings stays a perfectly good verdict.
+    const { run } = reduceWith({ summary: 'read all 6 files; nothing blocking', findings: [] });
+    expect(run.verdict.verdict).toBe('accept');
+    expect(run.verdict.summary).toBe('read all 6 files; nothing blocking');
+  });
+
+  it('trims the summary it carries, so padding cannot pass as content', () => {
+    expect(reduceWith({ summary: '  looked at the guard  ', findings: [] }).run.verdict.summary)
+      .toBe('looked at the guard');
+  });
+
+  it('the judge shape REQUIRES summary, so the refusal is also asked for up front', () => {
+    expect(REVIEW_JUDGE_SHAPE.required).toContain('summary');
   });
 });
 
@@ -640,6 +745,7 @@ describe('the net basis is pinned to a commit, not a moving ref', () => {
 
   it('records the resolved SHA and keeps the ref it came from', () => {
     const finding = shapeReadFinding({
+      state: 'OPEN', // #xwp8ioh — this suite is about the net basis, not liveness
       detail: { pr: 1, repo: 'o/n', labels: [] },
       net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/3058-seed-encoding', revSha: SHA, scored: true },
       diff: { text: 'x', scored: true },
@@ -650,6 +756,7 @@ describe('the net basis is pinned to a commit, not a moving ref', () => {
 
   it('renders the commit in the comment — the ref appears only as provenance', () => {
     const read = shapeReadFinding({
+      state: 'OPEN', // #xwp8ioh — this suite is about the net basis, not liveness
       detail: { pr: 1, repo: 'o/n', labels: [] },
       net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/3058-seed-encoding', revSha: SHA, scored: true },
       diff: { text: 'x', scored: true },
@@ -662,6 +769,7 @@ describe('the net basis is pinned to a commit, not a moving ref', () => {
 
   it('says UNPINNED rather than quietly recording the mutable ref when it will not resolve', () => {
     const read = shapeReadFinding({
+      state: 'OPEN', // #xwp8ioh — this suite is about the net basis, not liveness
       detail: { pr: 1, repo: 'o/n', labels: [] },
       net: { paths: ['a.mjs'], base: 'abc', rev: 'origin/lane/gone', revSha: null, scored: true },
       diff: { text: 'x', scored: true },

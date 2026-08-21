@@ -38,7 +38,32 @@
 import { STEP_KINDS, isStep } from './step-kinds.mjs';
 
 /** Keys of a declaration body that are NOT steps. Everything else must be a step. */
-export const RESERVED_DECLARATION_KEYS = Object.freeze(['input', 'verdictFrom']);
+export const RESERVED_DECLARATION_KEYS = Object.freeze(['input', 'verdictFrom', 'declaresOver']);
+
+/**
+ * Parse one `declaresOver` entry — `"we:scripts/lane-pool.mjs acquire"` — into `{home, command}`. PURE.
+ *
+ * THE SHAPE IS `<locus-prefixed path> [subcommand]`, and the subcommand is OPTIONAL because the two cases are
+ * genuinely different. `we:scripts/verify-lane.mjs` has no subcommands, so naming the file names the whole
+ * invocation. `we:scripts/backlog.mjs` has a dozen, and `claim` is declared over while `list` is not — a
+ * file-granular claim there would condemn every `backlog.mjs` line in every skill, which is both wrong and
+ * the fastest way to get a gate switched off.
+ *
+ * WHAT THIS FIELD IS FOR, and the line it draws. Only the AUTHOR knows which raw invocation an operation was
+ * built to replace; nothing in the import graph says it. So that intent is DECLARED here — and nothing else
+ * is. Whether the home actually reaches the operation is DERIVED from the import graph by the scan, never
+ * restated as a flag on the declaration, because a restated fact goes stale the moment someone removes the
+ * delegation and the declaration keeps insisting it is there. Declare what cannot be derived; derive the rest.
+ *
+ * A `command` of `null` means THE WHOLE FILE.
+ */
+export function parseDeclaredHome(entry) {
+  const raw = String(entry ?? '').trim();
+  if (!raw) return null;
+  const [home, ...rest] = raw.split(/\s+/);
+  if (!/^[a-z][a-z0-9-]*:/.test(home)) return null; // #883 — a locus prefix, or it names nothing resolvable
+  return { home, command: rest.length ? rest.join(' ') : null };
+}
 
 /** Field types an input schema may declare. */
 export const INPUT_TYPES = Object.freeze(['string', 'number', 'boolean', 'object', 'array']);
@@ -265,10 +290,31 @@ export function op(name, body) {
     verdictFrom = body.verdictFrom;
   }
 
+  // #3224 — the raw invocations this operation was built to replace. REFUSED AT REGISTRATION if malformed,
+  // for the same reason everything else here is: a `declaresOver` entry that silently parses to nothing
+  // produces a scan that silently checks nothing, which is the failure mode the gate exists to close.
+  let declaresOver = Object.freeze([]);
+  if (body.declaresOver != null) {
+    if (!Array.isArray(body.declaresOver)) {
+      throw new TypeError(`operations: \`${name}\` — \`declaresOver\` must be an array of "<locus:path> [subcommand]" strings`);
+    }
+    declaresOver = Object.freeze(body.declaresOver.map((entry) => {
+      const parsed = parseDeclaredHome(entry);
+      if (!parsed) {
+        throw new TypeError(
+          `operations: \`${name}\` — \`declaresOver\` entry ${JSON.stringify(entry)} is not a locus-prefixed `
+          + 'path (#883), e.g. "we:scripts/lane-pool.mjs acquire". An unparseable entry would declare over nothing.',
+        );
+      }
+      return Object.freeze(parsed);
+    }));
+  }
+
   return Object.freeze({
     name: name.trim(),
     input,
     verdictFrom,
+    declaresOver,
     steps: Object.freeze(steps.map((s) => Object.freeze(s))),
     stepNames: Object.freeze(steps.map((s) => s.name)),
   });

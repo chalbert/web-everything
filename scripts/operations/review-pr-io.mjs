@@ -97,6 +97,10 @@ const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...op
  *  once so an alternate transport supplies the same shape rather than guessing at it. */
 export const PR_VIEW_FIELDS = Object.freeze([
   'number', 'title', 'url', 'body', 'labels', 'comments', 'files', 'headRefName',
+  // #xwp8ioh — `state` rides the SAME call (one more json field, no extra hop — the pattern #2953 and #2844
+  // both used). Without it `review-pr` could not tell a live PR from a merged one, so it paid a juror to
+  // review PRs that had already landed. Consumed by `shapeReadFinding`'s liveness refusal.
+  'state',
 ]);
 
 /**
@@ -230,6 +234,9 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT, readView = reso
     priorRounds,
     detail,
     headRefName,
+    // #xwp8ioh — carried up so the PURE `shapeReadFinding` can refuse an inert PR. Read here, judged there:
+    // the io shell fetches, the declaration decides, which is what keeps the refusal testable with no `gh`.
+    state: typeof view.state === 'string' ? view.state : '',
     body: typeof view.body === 'string' ? view.body : '',
     // PIN THE REV. `computeNetDiffPaths` reports `rev` as the candidate it resolved — `origin/<headRefName>`,
     // a MUTABLE ref — so the recorded basis stopped describing the judged diff as soon as the lane pushed

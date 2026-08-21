@@ -62,6 +62,20 @@ never `opened`, and never a quiet reroute. What it always gives you is the `plan
 decided on. Submit *that*, unedited, through whatever channel does hold a credential. The decision was
 still made by the operation; only the execution moved.
 
+> **The fallback DROPS THE PARK LABEL — you must re-apply it by hand.** This instruction used to stop at
+> "submit the argv", and that is not sufficient: the argv carries `--park=review:pending`, but a
+> connector's create-PR call has **no label parameter**, so a submission that follows this page perfectly
+> still opens the PR **unheld**. Observed 2026-08-21 — three PRs opened this way came out labelled
+> `["checking"]` with no `review:*` at all, which the #2820 merge predicate reads as nothing to wait for.
+>
+> So the fallback is **two** calls, not one, and the second is not optional:
+> 1. create the PR from the plan's `--ref` / `--title` / body file;
+> 2. immediately apply the plan's `--park=<label>` value as a label on that PR, and **re-read the PR to
+>    confirm it stuck** before moving on.
+>
+> Until step 2 lands, the PR is a candidate for the drain on its next green sweep. Do not batch step 2 to
+> the end of a run of PRs — apply it per-PR, as each one is created.
+
 It parks by default (`review:pending` — an independent review is owed), because an agent PR marching to
 `ready-to-merge` unreviewed is what park exists to stop. `--mode=` chooses otherwise, deliberately.
 
@@ -181,7 +195,12 @@ run comes back `merged: false`.
   - `locus-prefix` — a bare code-path ref in this lane's corpus changes (#883/#2331). Prefix them
     (`foo.ts` → `we:foo.ts`), `git commit --amend`, re-run. Raised **before** the push, so there is no PR yet.
   - `unverified` / `verify-red` / `verify-unfinished` / `verify-corrupt` — the #2833 stall guard, also before
-    the push. Run `node scripts/verify-lane.mjs` (foreground, blocking) on **this** head and re-run.
+    the push. Run the OPERATION — `node scripts/operations/run.mjs verify --checkout=<lane> --json`
+    (foreground, blocking) on **this** head, then re-run. It declares over `we:scripts/verify-lane.mjs` and
+    records the same #2833 HEAD-keyed marker `pr-land` gates on, so the two never disagree; what it adds is
+    the three-valued read — `verdict.ok` is true only when EVERY check passed, and a check that could not run
+    is `unrun`, never a quiet pass. `--mode=check` reads the marker without running the suites, which is what
+    to poll with rather than a `pgrep` loop.
   - `no-ref` / `bad-ref` / `no-such-src` — fix the invocation (`--ref=lane/<name>`, `--sha=<commit>`).
   - `push-failed` / `check-timeout` — transport or CI-wait; re-run. A `check-timeout` leaves the PR open and
     unlabelled, which is **not** a hold — the drain's reconcile labels it from CI truth on its next sweep.

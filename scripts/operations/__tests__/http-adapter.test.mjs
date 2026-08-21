@@ -50,6 +50,7 @@ import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
+import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import {
   DEFAULT_BASE_PATH,
@@ -89,6 +90,7 @@ function stubReader({ labels = ['review:pending'] } = {}) {
       diffStat: [{ path: 'scripts/x.mjs', additions: 1, deletions: 0 }],
     },
     headRefName: 'lane/thing',
+    state: 'OPEN', // #xwp8ioh — `review-pr.read` refuses a non-OPEN or unreadable PR before `judge`
     body: 'the PR description',
     net: { paths: ['scripts/x.mjs'], base: 'a'.repeat(40), revSha: 'b'.repeat(40), rev: 'origin/lane/thing', scored: true },
     diff: { text: '--- a/x\n+++ b/x\n+one\n', scored: true },
@@ -315,6 +317,13 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // coverage. Its own suite pins the property this list cannot express for a writing operation: the
     // DECLARING module reaches nothing that can act, and every write lives in `stage-pr-view-io.mjs`.
     [STAGE_PR_VIEW_OP]: 'stage-pr-view.mjs',
+    // #x4omld5 — `mutation-check` is two `compute` steps with no sink, so it is read-only BY THE TEST THIS
+    // FILE APPLIES: its declaring module imports only `registry.mjs` and `step-kinds.mjs` and can reach
+    // nothing that acts. Worth stating plainly that the OPERATION does write — it sabotages a source file to
+    // see whether the suite notices — but that write is transactional and self-reversing, lives entirely in
+    // `mutation-check-io.mjs`, and arrives only through the `probe` its builder is handed in `../run.mjs`.
+    // It declares no effect because there is nothing durable for a replay to re-apply.
+    [MUTATION_CHECK_OP]: 'mutation-check.mjs',
     // #xrrpfo7 — `claim`'s sibling at the close of the lifecycle, and NOT read-only for the same reason
     // `claim` is not: its `write` step splices the card. Listed here for map coverage; its own suite pins
     // the property this list cannot express for a writing operation — the DECLARING module reaches nothing
