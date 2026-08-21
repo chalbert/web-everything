@@ -2,8 +2,9 @@
 bornAs: xqz1mat
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-08-11"
+dateStarted: "2026-08-21"
 tags: [gate, review, independence, guard, footgun]
 scope:
   - we:scripts/lib/review-independence.mjs
@@ -72,3 +73,19 @@ trade `we:scripts/lib/review-independence.mjs` documents as impossible today.
 - [ ] The stamp is restored where the opener is recoverable.
 - [ ] Where it is not, the clear REFUSES rather than reading as `unknown-author`.
 - [ ] The web-UI route is covered, since it is the one no shell guard can reach — and is the test case.
+
+## Progress
+
+**Status:** the owed wiring is done and live. The item stays `active` — two halves remain, both deliberate.
+
+**Branch:** `lane/3067-author-stamp`
+
+**Done.** `we:scripts/lib/review-independence.mjs` grew `prCreatedAt`/`stampLostMarked` as OPT-IN inputs and its own header named the gap: *"wiring them into `we:scripts/review-set-label.mjs` / `we:scripts/lib/auto-land-seam.mjs` (so a live clear actually consults them) is left as this item's own owed follow-up"*. No live caller passed either, so **every clearance recorded `unknown-author`** whether the PR predated the regime or had a stamp stripped an hour ago — including all five recorded in this session.
+
+`createdAt` now rides the existing `gh pr view` (one more `--json` field, no extra hop — the pattern `body` (#2844) and `state` (#2953) already use), and `we:scripts/review-set-label.mjs` passes both signals. A post-regime PR with no stamp now records **`stamp-lost`**; a pre-regime one still records `unknown-author`. Three end-to-end tests drive the real CLI against the recording fake `gh` and assert the durable comment, plus the opt-in case (no `createdAt` → byte-identical old behaviour). Mutant killed: dropping `prCreatedAt` from the call reddens the suite.
+
+**Not done — `we:scripts/lib/auto-land-seam.mjs`, deliberately.** That seam is already STRICT fail-closed: `unknown-author` and `stamp-lost` both refuse, so wiring it changes only the reason string. It would cost threading two parameters through three signatures (`decideAutoLand`, `applyAutoLand`, and their caller) for no behaviour change. Recorded as a decision, not an oversight.
+
+**Not done — making the clear REFUSE on `stamp-lost`.** This is the half that turns detection into enforcement, and it needs a call first. `we:scripts/review-set-label.mjs` refuses only `SELF_CLEAR`; adding `STAMP_LOST` would block **every PR opened outside `pr-land`** — which on a credential-less host is all of them, because `pr-land` needs `gh` and the MCP connector does not stamp. Those PRs are correctly `stamp-lost` (no authorship evidence exists, so tolerating them was never safe), but blocking them with no alternative stamping route strands the whole credential-less workflow. The refusal should land together with a route that stamps a PR opened without `pr-land`, not before it.
+
+**Next.** Decide the pairing above; and check whether `we:scripts/pr-body-edit.mjs --repair` should run automatically from the drain (the card's second Done-when) rather than only by hand.

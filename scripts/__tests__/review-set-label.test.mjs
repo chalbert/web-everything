@@ -1554,6 +1554,8 @@ if (a[0] === 'pr' && a[1] === 'view') {
     headRefName: 'lane/x',
     state: 'OPEN',
     body: process.env.GH_PR_BODY,
+    // #3067 — the fake must return what the REAL read now returns, or the wiring under test is unexercised.
+    createdAt: process.env.GH_PR_CREATED_AT || '',
   }));
   process.exit(0);
 }
@@ -1580,7 +1582,7 @@ process.exit(0);
 
   // Drive the REAL CLI with the recording fake `gh`. `labels` is what the fake PR carries, so the same harness
   // covers the ordinary parked PR AND the `review:human` gate-self one the clear-human ceremony needs.
-  const runCli = (args, { sessionId, prBody = BODY, labels = ['review:pending', 'ready-to-merge'] }) => spawnSync(
+  const runCli = (args, { sessionId, prBody = BODY, labels = ['review:pending', 'ready-to-merge'], createdAt = '' }) => spawnSync(
     'node', [script, '1099', '--repo=o/n', ...args],
     {
       encoding: 'utf8',
@@ -1592,6 +1594,7 @@ process.exit(0);
         GH_HEAD_SHA: SHA,
         GH_PR_BODY: prBody,
         GH_PR_LABELS: JSON.stringify(labels),
+        GH_PR_CREATED_AT: createdAt,
         CLAUDE_CODE_SESSION_ID: sessionId,
       },
     },
@@ -1601,6 +1604,42 @@ process.exit(0);
     ? readFileSync(join(dir, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean)
       .map((l) => JSON.parse(l).slice(0, 2).join(' '))
     : []);
+
+  // ── #3067: the stamp's ABSENCE is now a checkable comparison, not an assumption ──────────────────────────
+  // The pure decider grew `prCreatedAt`/`stampLostMarked` as OPT-IN inputs and NO live caller passed them, so
+  // every real clearance recorded `unknown-author` whether the PR predated the stamp regime or had one
+  // stripped an hour ago. These drive the REAL CLI end to end and assert the recorded status differs.
+  const STAMPLESS = 'Resolve #1: something real.\n';
+
+  it('records STAMP-LOST for a post-regime PR whose stamp is missing (#3067)', () => {
+    const r = runCli(['--to=accepted', '--actor=an agent'],
+      { sessionId: 'clearer-x', prBody: STAMPLESS, createdAt: '2026-08-20T00:00:00Z' });
+    expect(r.status).toBe(0); // it still CLEARS — only self-clear refuses here; the RECORD is what changed
+    // Asserted on the durable comment, which is where the operator actually reads this.
+    const note = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(note).toMatch(/STAMP LOST/);
+    expect(note).toMatch(/at\/after the #2844 stamp regime began/);
+  });
+
+  it('still records UNKNOWN-AUTHOR for a PR that predates the regime (#3067 — the tolerance is kept)', () => {
+    // The other half. Without it, "call everything stamp-lost" passes the case above and strands every PR
+    // opened before the stamp existed — the exact failure #2844's tolerance was written to avoid.
+    const r = runCli(['--to=accepted', '--actor=an agent'],
+      { sessionId: 'clearer-x', prBody: STAMPLESS, createdAt: '2026-07-01T00:00:00Z' });
+    expect(r.status).toBe(0);
+    const note = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(note).not.toMatch(/STAMP LOST/);
+    expect(note).toMatch(/no authored-by-actor stamp/);
+  });
+
+  it('a caller that supplies no createdAt sees the OLD behaviour exactly (#3067 opt-in)', () => {
+    const r = runCli(['--to=accepted', '--actor=an agent'],
+      { sessionId: 'clearer-x', prBody: STAMPLESS, createdAt: '' });
+    expect(r.status).toBe(0);
+    const note = readFileSync(join(dir, 'comment.md'), 'utf8');
+    expect(note).not.toMatch(/STAMP LOST/);
+    expect(note).toMatch(/no authored-by-actor stamp/);
+  });
 
   it('ADVERSARIAL: the PR\'s own author clearing it to accepted is REFUSED, and nothing is written', () => {
     const r = run(AUTHOR);
