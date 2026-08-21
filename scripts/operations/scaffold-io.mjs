@@ -62,10 +62,15 @@ export function createScaffoldReader({
  * scaffold leaves no half-made card behind. That is the property worth preserving: the failure mode this
  * replaces is a file on disk that the gate rejects minutes later.
  */
-export function createScaffoldSinks({ root = REPO_ROOT } = {}) {
+export function createScaffoldSinks({ root = REPO_ROOT, write = writeBacklogMd } = {}) {
   return {
     [SCAFFOLD_EFFECT]: async (payload) => {
-      writeBacklogMd(payload.abs, payload.rel, payload.content, { root });
+      // `write` is injected ONLY so a test can OBSERVE the call. It defaults to the guarded writer and a
+      // caller must never substitute it in production: that writer owns the lane-not-primary refusal and the
+      // #883 locus scan, and a sink that wrote around either would put a card on disk the gate then rejects.
+      // #1497's lesson is the reason it is injected at all — a partially-injected shell is how a suite goes
+      // green over code that genuinely wrote outside its fixture.
+      write(payload.abs, payload.rel, payload.content, { root });
       return { rel: payload.rel, written: true };
     },
   };

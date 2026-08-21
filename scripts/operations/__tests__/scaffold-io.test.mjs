@@ -48,12 +48,34 @@ describe('the reader supplies exactly what the allocator needs', () => {
 });
 
 describe('the sink writes through the guarded writer and nothing else', () => {
-  it('applies the effect and reports what it wrote', async () => {
-    const wrote = [];
-    // The guarded writer is the thing under contract here: it owns the lane-not-primary refusal AND the #883
-    // locus scan. The sink must call it — never a bare write — so a bad digest is refused with nothing on disk.
-    const sinks = createScaffoldSinks({ root: '/repo' });
-    expect(typeof sinks[SCAFFOLD_EFFECT]).toBe('function');
-    expect(Object.keys(sinks)).toEqual([SCAFFOLD_EFFECT]);
+  /**
+   * THE FIRST CUT OF THIS BLOCK WAS VACUOUS and a juror caught it (PR #1511 round 2): its title promised the
+   * sink writes through the guarded writer, and the body never CALLED the sink — it asserted a key existed.
+   * Written, of all places, while closing a carve-out about missing io coverage. A test that names a
+   * behaviour and never exercises it is worse than no test, because it is counted as coverage.
+   */
+  it('CALLS the writer with the planned bytes, and reports what it wrote', async () => {
+    const calls = [];
+    const sinks = createScaffoldSinks({ root: '/repo', write: (...a) => calls.push(a) });
+    const out = await sinks[SCAFFOLD_EFFECT]({
+      abs: '/repo/backlog/xabc-a-card.md', rel: 'backlog/xabc-a-card.md', content: '---\nkind: task\n---\n',
+    });
+    expect(calls).toHaveLength(1);
+    const [abs, rel, content, opts] = calls[0];
+    expect(abs).toBe('/repo/backlog/xabc-a-card.md');
+    expect(rel).toBe('backlog/xabc-a-card.md');
+    expect(content).toContain('kind: task');   // the bytes the PLAN computed, unaltered by the sink
+    expect(opts).toEqual({ root: '/repo' });
+    expect(out).toEqual({ rel: 'backlog/xabc-a-card.md', written: true });
   });
+
+  it('declares exactly one effect type, and nothing else', () => {
+    expect(Object.keys(createScaffoldSinks({ root: '/r' }))).toEqual([SCAFFOLD_EFFECT]);
+  });
+
+  // NOT TESTED HERE: that the DEFAULT `write` is the guarded writer. The only honest ways to assert it are
+  // to grep this module's source — a weak form I have argued against elsewhere in this session and will not
+  // adopt here for convenience — or to let it write to a real path, which is not this suite's business. The
+  // property is held by the default argument being written down in one place and by the comment beside it
+  // saying a caller must never substitute it in production.
 });
