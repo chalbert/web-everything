@@ -342,3 +342,31 @@ describe('#3253 — only ARGV counts, not everything that looks like it (PR #152
     expect(r.errors[0].descriptor.flag).toBe('nope');
   });
 });
+
+// ── the fourth false-positive class, found by PR #1526 round 2 ───────────────────────────────────────────────
+describe('#3253 — a continuation is flags ONLY, not flags-then-prose (PR #1526 round 2)', () => {
+  const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
+  const scaffold = { title: { type: 'string', required: true }, workItem: { type: 'string', required: false } };
+  const scan = (content) => findMalformedOperationCalls([{ file: 'f.md', content }], new Map([['scaffold', scaffold]]), CONTROL);
+
+  it('does NOT absorb a prose line that merely OPENS with a flag name', () => {
+    // The sentence this gate invites people to write. Documenting the rename it exists to catch would
+    // otherwise produce a false finding ABOUT that documentation.
+    const md = 'node scripts/operations/run.mjs scaffold --title=x --json\n'
+      + '--workitem is the raw home spelling; the operation declares --workItem';
+    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'json']);
+    expect(scan(md).errors).toEqual([]);
+  });
+
+  it('still absorbs a genuine wrapped invocation', () => {
+    // The other half — "never continue" would pass the case above vacuously and re-break the #1526 round-1 fix.
+    const md = 'node scripts/operations/run.mjs scaffold\n  --title=x --workItem=story --json';
+    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'workItem', 'json']);
+    expect(scan(md).warnings).toEqual([]);
+  });
+
+  it('a quoted value with spaces is ONE token, not four', () => {
+    const md = "node scripts/operations/run.mjs scaffold\n  --title='a b c' --json";
+    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'json']);
+  });
+});

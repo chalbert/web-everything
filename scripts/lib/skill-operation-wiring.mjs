@@ -292,8 +292,19 @@ function scannableTail(tail) {
  * There is no continuation marker to key on: the prose simply wraps. So the rule is structural — a line
  * consisting ONLY of flags (and their values) continues the command. Anything else on the line ends it, so
  * this cannot swallow the paragraph that follows a fenced command.
+ *
+ * "ONLY FLAGS" MEANS EVERY TOKEN, NOT JUST THE FIRST (PR #1526 round 2). The first cut tested that the line
+ * STARTED with a flag and let `(?:[=\s].*)?` swallow the rest — so a prose line that merely OPENS with a flag
+ * name was absorbed, and every `--word` in it counted as passed. The sentence that triggers it is one this
+ * very gate invites people to write: "`--workitem` is the raw home spelling; the operation declares
+ * `--workItem`". Documenting the rename the gate exists to catch would have produced a false finding about it.
+ *
+ * Quotes are blanked first (via `scannableTail`) so a legitimate `--title='a b c'` is one token, not four.
  */
-const CONTINUATION_LINE = /^\s*--[A-Za-z][A-Za-z0-9-]*(?:[=\s].*)?$/;
+function isContinuationLine(line) {
+  const s = scannableTail(line).trim();
+  return s.startsWith('--') && s.split(/\s+/).every((t) => t.startsWith('--'));
+}
 
 /**
  * Find every operation invocation in one body, with its line, flags and exemption state. PURE.
@@ -308,7 +319,7 @@ export function extractOperationCalls(content) {
     const exempt = exemptAt(lines, i);
     for (const m of lines[i].matchAll(OPERATION_CALL)) {
       const flags = [...scannableTail(m[2]).matchAll(FLAG_IN_TAIL)].map((f) => f[1]);
-      for (let j = i + 1; j < lines.length && CONTINUATION_LINE.test(lines[j]); j += 1) {
+      for (let j = i + 1; j < lines.length && isContinuationLine(lines[j]); j += 1) {
         for (const f of scannableTail(lines[j]).matchAll(FLAG_IN_TAIL)) flags.push(f[1]);
       }
       out.push({ op: m[1], flags, line: i + 1, exempt });
