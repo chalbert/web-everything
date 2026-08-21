@@ -276,6 +276,80 @@ export function knownGitDirs(root = REPO_ROOT) {
   return Object.values(CONSTELLATION_REPOS).flatMap((m) => m.dirs.map((d) => join(parent, d, '.git')));
 }
 
+/**
+ * The PR-watch tools, pre-approved so a session can subscribe without a permission prompt.
+ *
+ * WHY IT BELONGS HERE AND NOT IN A LIVE `$HOME`. Watching a PR is needed on exactly the host whose `$HOME`
+ * does not survive: a cloud VM is reclaimed on idle, so an allow rule added by hand is gone by the next
+ * session and gets re-approved by hand every time. That is machine state, which is what this script exists
+ * to make travel.
+ *
+ * ONLY THE STABLE NAMES ARE LISTED, and the omission is deliberate. An MCP tool's permission name embeds its
+ * SERVER id, and this harness also serves these two from a session-scoped server whose id is a bare uuid
+ * (`mcp__<uuid>__subscribe_pr_activity`). That id is derivable from nothing in the repo — there is no
+ * `.mcp.json` here — so committing one would be the same defect as the `/Users/<name>/…` literal this file's
+ * header describes: right on one machine, wrong everywhere else, and silently dead in the next VM. The
+ * `mcp__github__` pair is the name that is identical on every host, so it is the one that travels.
+ */
+export const PR_WATCH_TOOLS = Object.freeze([
+  'mcp__github__subscribe_pr_activity',
+  'mcp__github__unsubscribe_pr_activity',
+]);
+
+/**
+ * Add tool names to `permissions.allow`, additively. PURE.
+ *
+ * PURELY ADDITIVE, UNLIKE {@link withPrimaryGitDir}, and the difference is worth stating rather than leaving
+ * to be inferred. That function REPAIRS — it drops a stale grant it can prove it wrote — because a moved
+ * checkout leaves a dead absolute path behind. Nothing here goes stale: a tool name is not a path, so an
+ * entry this script wrote last month is exactly as valid today. There is therefore nothing to prune, and
+ * pruning is the only way this could ever remove an allow rule an operator added by hand. It cannot, by
+ * construction — which is the property that matters, since `permissions.allow` is the operator's list.
+ *
+ * Idempotent: re-running adds nothing and reorders nothing.
+ */
+export function withToolAllowlist(settings, tools = PR_WATCH_TOOLS) {
+  const next = JSON.parse(JSON.stringify(settings ?? {}));
+  next.permissions = next.permissions ?? {};
+  const allow = Array.isArray(next.permissions.allow) ? next.permissions.allow : [];
+  const missing = tools.filter((t) => !allow.includes(t));
+  next.permissions.allow = missing.length ? [...allow, ...missing] : allow;
+  return next;
+}
+
+/** Which of {@link PR_WATCH_TOOLS} a settings object does not yet allow. PURE. */
+export function missingToolAllows(settings, tools = PR_WATCH_TOOLS) {
+  const allow = Array.isArray(settings?.permissions?.allow) ? settings.permissions.allow : [];
+  return tools.filter((t) => !allow.includes(t));
+}
+
+/**
+ * Decide (and, when permitted, apply) the PR-watch allow step, in the SAME status vocabulary the `gitdir`
+ * step uses — `ok` / `drift` / `planned`.
+ *
+ * THE VOCABULARY IS THE POINT, not the shape. `--check` exits non-zero on `drift` and on nothing else, so a
+ * step is only covered by the drift gate if it speaks that word. `gitDirStatus` exists in this file for the
+ * identical reason; a second answer to "how does a step report" is how one of them ends up outside the gate.
+ *
+ * `drift` is reserved for READ-ONLY runs, where the rule genuinely is missing and stays missing. A run that
+ * may write reports `ok` because it just fixed it, and `planned` is the `--dry-run` case: nothing was written
+ * and nothing is being claimed about the end state.
+ *
+ * @param {{settings: object|null, write: boolean, dryRun?: boolean, apply?: (s: object) => void}} o
+ * @returns {{id: string, status: 'ok'|'drift'|'planned', detail: string}}
+ */
+export function toolAllowStatus({ settings, write, dryRun = false, apply } = {}) {
+  const missing = missingToolAllows(settings);
+  const id = 'pr-watch';
+  if (!missing.length) return { id, status: 'ok', detail: `already allowed: ${PR_WATCH_TOOLS.join(', ')}` };
+  if (dryRun) return { id, status: 'planned', detail: `would allow ${missing.join(', ')}` };
+  if (!write) {
+    return { id, status: 'drift', detail: `NOT allowed: ${missing.join(', ')} — run \`npm run bootstrap:install\`` };
+  }
+  if (typeof apply === 'function') apply(withToolAllowlist(settings));
+  return { id, status: 'ok', detail: `allowed ${missing.join(', ')}` };
+}
+
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
@@ -486,6 +560,20 @@ export function main(argv, io = defaultIo()) {
     const ok = step.id === 'memory' ? Boolean(v) : v.every((s) => s.present);
     report.steps.push({ id: step.id, status: ok ? 'ok' : step.id === 'siblings' ? 'missing' : 'drift', detail: v });
   }
+
+  // Pre-approve the PR-watch tools. Behind the SAME `write` consent as everything else, so a durable host is
+  // still only ever reported on: `permissions.allow` is the operator's list, and widening it silently on a
+  // laptop is exactly the implicit mutation this script's consent rule exists to prevent. On an ephemeral VM
+  // there is nothing to consent about and a session that configures itself is the whole point.
+  //
+  // IT REPORTS THROUGH `report.steps`, NOT A FIELD OF ITS OWN, and that is load-bearing rather than tidiness.
+  // `--check`'s exit code is `report.steps.some((s) => s.status === 'drift')`, so a step that reports beside
+  // that array is INVISIBLE to the drift gate: a missing allow rule would print in the summary and still exit
+  // 0, which is a checker that reports a problem and passes anyway. This file already paid that lesson down
+  // once for the `gitdir` step — its `gitDirStatus` returns the same `planned`/`ok`/`drift` vocabulary for
+  // exactly this reason — so the second step to need it reuses the vocabulary instead of inventing one
+  // (PR #1520 correctness juror).
+  report.steps.push(toolAllowStatus({ settings: io.readSettings(), write, dryRun: has('--dry-run'), apply: io.writeSettings }));
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
