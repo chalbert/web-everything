@@ -102,16 +102,46 @@ describe('backlog dependency graph — model invariants', () => {
     expect([...mixed].sort(compareIds)).toEqual(['002', '4', '10', 'xa', 'xb']);
   });
 
-  // …and the live graph actually uses it, for nodes AND edges (the round-2 finding was that only the node
-  // sort had been fixed while `edges.sort` kept the NaN comparator).
-  it('applies that order to both nodes and edges', () => {
-    const { compareIds } = buildGraph as unknown as { compareIds: (a: string, b: string) => number };
-    const nums = graph.nodes.map((n: any) => String(n.num));
-    expect(nums).toEqual([...nums].sort(compareIds));
-    const keys = graph.edges.map((e: any) => `${e.from}\u0000${e.to}`);
-    const resorted = [...graph.edges]
-      .sort((a: any, b: any) => compareIds(a.from, b.from) || compareIds(a.to, b.to))
-      .map((e: any) => `${e.from}\u0000${e.to}`);
-    expect(keys).toEqual(resorted);
+  /**
+   * …and BOTH sorts use it — asserted on the comparators the sorts actually pass to `Array.sort`, driven
+   * over SYNTHETIC rows that always contain hash ids.
+   *
+   * The previous version of this test re-sorted the live `graph.edges` with a comparator it built itself
+   * and checked the order came back unchanged. That proves nothing: the hand-built comparator and the
+   * broken `Number(a) - Number(b)` one agree on every pair of numbered ids, so on any day the backlog
+   * holds no hash-id edges the assertion passes against a fully unfixed implementation — it no-ops
+   * exactly when it is needed (PR #1503 correctness juror, round 3). Same class of hole as the round-2
+   * finding, one level further out: round 2 was a guard that returned early, this was a guard that
+   * compared a thing against itself.
+   *
+   * Driving the exported `compareNodes`/`compareEdges` makes the assertion corpus-independent: revert
+   * either sort to `Number()` and these fail on their own fixtures, today and every day.
+   */
+  it('the node and edge sorts BOTH use that total order (asserted on synthetic rows, not the corpus)', () => {
+    const { compareNodes, compareEdges } = buildGraph as unknown as {
+      compareNodes: (a: any, b: any) => number;
+      compareEdges: (a: any, b: any) => number;
+    };
+
+    // Nodes: numbered ids in numeric (not lexicographic) order, all of them ahead of the hash ids.
+    const nodes = [{ num: 'xb' }, { num: '10' }, { num: 'xa' }, { num: '4' }, { num: '002' }];
+    expect([...nodes].sort(compareNodes).map((n) => n.num)).toEqual(['002', '4', '10', 'xa', 'xb']);
+
+    // Edges: ordered by `from`, ties broken by `to`, with hash ids on both ends of the mix.
+    const edges = [
+      { from: 'xa', to: '3' },
+      { from: '10', to: 'xa' },
+      { from: '4', to: 'xb' },
+      { from: '4', to: '10' },
+      { from: 'xa', to: 'xb' },
+    ];
+    expect([...edges].sort(compareEdges).map((e) => `${e.from}->${e.to}`)).toEqual([
+      '4->10', '4->xb', '10->xa', 'xa->3', 'xa->xb',
+    ]);
+
+    // And these are the same functions the built graph was sorted with, so the fixtures above guard the
+    // live order too — this last part is the cheap corroboration, the fixtures are the proof.
+    expect(graph.nodes).toEqual([...graph.nodes].sort(compareNodes));
+    expect(graph.edges).toEqual([...graph.edges].sort(compareEdges));
   });
 });
