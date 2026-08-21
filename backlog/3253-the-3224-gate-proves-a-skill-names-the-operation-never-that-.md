@@ -58,7 +58,7 @@ A gate whose first live run cries wolf twice is a gate that gets switched off, s
 
 37 wiring tests green (26 → 37); 7633 tests across 242 files; `check:standards` 0 errors, and the 7 spurious warnings gone. Three mutants killed: the `--resume` carve-out, the control-flag allowance, and the continuation absorber.
 
-## Five defects, and what they were about
+## Six defects, and what they were about
 
 Every one had the same root — treating text NEAR an invocation as argv — and the count is the point, not a footnote:
 
@@ -69,7 +69,8 @@ Every one had the same root — treating text NEAR an invocation as argv — and
 | 3 | same-line non-argv (trailing `#` comment, `--` inside a quoted value) | false positive | juror, round 1 |
 | 4 | flags-then-prose absorbed as continuation | false positive | juror, round 2 |
 | 5 | juror-only `--cwd`/`--model` accepted on every operation | **false negative** | juror, round 3 |
+| 6 | mixed quote kinds blank across a real flag | **false negative** | juror, round 4 |
 
-#5 is the only one in the safe direction, and it is fixed by `acceptedControlFlags` in `we:scripts/operations/cli-adapter.mjs` — the adapter's OWN filter, lifted out so the gate and the runtime refusal cannot disagree (#2644). #2 and #4 were both the continuation absorber, which is why it is gone rather than patched a third time.
+#6 is the sharpest of the lot: `scannableTail` blanked single-quoted spans in one pass and double-quoted in a second, so an apostrophe inside a double-quoted value opened a span that closed on a later `'` — blanking the middle and making a real `--nope` **disappear from detection entirely**. One left-to-right alternation fixes it: whichever quote opens first owns the span, which is what a shell does. #5 and #6 are the two in the safe direction, and it is fixed by `acceptedControlFlags` in `we:scripts/operations/cli-adapter.mjs` — the adapter's OWN filter, lifted out so the gate and the runtime refusal cannot disagree (#2644). #2 and #4 were both the continuation absorber, which is why it is gone rather than patched a third time.
 
 The gate now scans **one physical line** and says so. An unknown flag on a continuation line is missed — a miss, never a false alarm, pinned by a test so the limitation stays a decision on the record.

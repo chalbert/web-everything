@@ -277,8 +277,13 @@ const FLAG_IN_TAIL = /--([A-Za-z][A-Za-z0-9-]*)/g;
  */
 function scannableTail(tail) {
   return String(tail ?? '')
-    .replace(/'[^']*'/g, "''")
-    .replace(/"[^"]*"/g, '""')
+    // ONE LEFT-TO-RIGHT PASS OVER BOTH QUOTE KINDS, never two sequential passes (PR #1526 round 4). Blanking
+    // all single-quoted spans first and double-quoted spans second mis-pairs the moment the two kinds mix: in
+    // `--a="it's here" --nope=1 --b='x'` the FIRST pass sees the apostrophe inside the double-quoted value as
+    // an opening quote and closes it on the later `'`, blanking the whole middle — and `--nope` disappeared
+    // from detection entirely. An alternation scans once, so whichever quote OPENS first owns the span, which
+    // is what a shell does too.
+    .replace(/'[^']*'|"[^"]*"/g, (m) => (m[0] === "'" ? "''" : '""'))
     .replace(/\s#.*$/, '');
 }
 

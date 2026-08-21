@@ -375,3 +375,33 @@ describe('#3253 — one physical line, and the miss is stated not hidden', () =>
     expect(scan('`node scripts/operations/run.mjs scaffold --title=x --workitem=story`').errors).toHaveLength(1);
   });
 });
+
+// ── the sixth defect, found by PR #1526 round 4 ──────────────────────────────────────────────────────────────
+describe('#3253 — mixed quote kinds must not blank across a real flag (PR #1526 round 4)', () => {
+  const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
+  const scaffold = { title: { type: 'string', required: true }, digest: { type: 'string', required: false } };
+  const scan = (c) => findMalformedOperationCalls([{ file: 'f.md', content: c }],
+    new Map([['scaffold', scaffold]]), new Map([['scaffold', CONTROL]]));
+
+  it('an apostrophe INSIDE a double-quoted value does not swallow the rest of the line', () => {
+    // Two sequential passes made the apostrophe an opening quote and closed it on a later `'`, blanking the
+    // middle — `--nope` vanished from detection entirely. A false NEGATIVE, and invisible.
+    const md = String.raw`node scripts/operations/run.mjs scaffold --title="it's here" --nope=1 --digest='x'`;
+    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'nope', 'digest']);
+    expect(scan(md).errors).toHaveLength(1);
+    expect(scan(md).errors[0].descriptor.flag).toBe('nope');
+  });
+
+  it('still blanks each quote kind on its own', () => {
+    // The other half — "never blank anything" would pass the case above and re-break rounds 1 and 3.
+    expect(extractOperationCalls(`node scripts/operations/run.mjs scaffold --title='a --fake b'`)[0].flags)
+      .toEqual(['title']);
+    expect(extractOperationCalls(`node scripts/operations/run.mjs scaffold --title="a --fake b"`)[0].flags)
+      .toEqual(['title']);
+  });
+
+  it('whichever quote OPENS first owns the span', () => {
+    expect(extractOperationCalls(`node scripts/operations/run.mjs scaffold --title='say "--hi" ok' --json`)[0].flags)
+      .toEqual(['title', 'json']);
+  });
+});
