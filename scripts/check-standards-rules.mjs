@@ -2152,6 +2152,58 @@ export function duplicateBacklogNums(items = []) {
 }
 
 /**
+ * TWO NUMBERED CARDS CLAIMING THE SAME BIRTH. Under JIT numbering (#2288) an item is born with a hash and the
+ * drain mints its NNN at land, recording the hash as `bornAs`. That hash is the item's IDENTITY across the
+ * rename, so two cards carrying the same one are the same item minted twice.
+ *
+ * WHY EVERY EXISTING CHECK MISSES IT, which is why this is its own rule rather than a branch of one:
+ *   · `duplicateBacklogNums` compares `num`. The twins have DIFFERENT numbers — that is what makes them twins
+ *     rather than a collision — so it sees nothing.
+ *   · `strandedHashesOnMain` looks for a hash still in the FILENAME. Both twins are properly numbered; the
+ *     duplication lives in the frontmatter, which that rule never reads.
+ * The one state nothing looked for is the one that actually happened.
+ *
+ * HOW IT HAPPENS, from the live case this was written for. A stale hash-named copy of an already-landed card
+ * sat in a lane's working tree; a `git add -A` swept it into an unrelated commit; the drain, doing its job,
+ * minted it a fresh NNN. Result: `#3201` resolved and `#3244` OPEN, same `bornAs`, byte-identical bodies — a
+ * card describing finished work back in the ready pool, where selection would hand it to someone to redo.
+ * PR #1506's juror caught that exact file one commit before it minted and said it "would have minted a
+ * duplicate bornAs". It later did.
+ *
+ * ERRORS ONLY WHEN A TWIN IS UNRESOLVED, because that is the case with a live cost. Two RESOLVED twins are an
+ * audit-trail smudge and warn instead — this tree carries such a pair (#3111/#3112) predating the rule, and
+ * erroring on it would redden main over a defect with no consequence, which is how a gate gets ignored.
+ *
+ * @param {Array<{num: string, id: string, bornAs?: string, status?: string}>} items
+ * @returns {{errors: string[], warnings: string[]}}
+ */
+export function duplicateBornAs(items = []) {
+  const byHash = new Map();
+  for (const item of items) {
+    const hash = typeof item?.bornAs === 'string' ? item.bornAs.trim() : '';
+    if (!hash) continue;
+    if (!byHash.has(hash)) byHash.set(hash, []);
+    byHash.get(hash).push(item);
+  }
+  const errors = []; const warnings = [];
+  for (const [hash, twins] of byHash) {
+    if (twins.length < 2) continue;
+    const names = twins.map((t) => `#${t.num}${t.status ? ` (${t.status})` : ''}`).join(' and ');
+    const live = twins.filter((t) => t.status !== 'resolved');
+    const msg =
+      `Backlog hash \`${hash}\` is the \`bornAs\` of ${twins.length} cards — ${names}. Under JIT numbering `
+      + "(#2288) the hash is the item's identity across its rename, so this is ONE item minted twice — "
+      + 'typically a stale hash-named copy swept in by a `git add -A` and then numbered by the drain. '
+      + (live.length
+        ? 'At least one twin is UNRESOLVED, so a card describing work already done is sitting in the ready '
+          + 'pool. Resolve the later twin, naming the original it duplicates.'
+        : 'Both are resolved, so nothing selects them — an audit-trail smudge rather than live work.');
+    (live.length ? errors : warnings).push(msg);
+  }
+  return { errors, warnings };
+}
+
+/**
  * #2319 — hash-on-main invariant. Under JIT numbering (#2288) a new item is born with a provisional hash id
  * (`xNNNNNN`) and the drain mints its real NNN AT LAND (`numberPendingHashes`). So a `backlog/<id>-*.md` on
  * `origin/main` whose leading id is NON-numeric means a land route bypassed numbering (e.g. `pr-land
