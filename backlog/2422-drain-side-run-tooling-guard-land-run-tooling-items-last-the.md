@@ -15,4 +15,163 @@ scope:
 
 # Drain-side RUN_TOOLING guard: land run-tooling items last + the RUN_TOOLING vocabulary/drift-test (steady-state residual of #2077)
 
-Steady-state residual of decision #2077. The route-(a) apparatus its build arm #2420 specified was superseded by the #2183 PR-fan-out orchestrator, which dissolved the in-run self-modification hazard (each item edits only its own lane clone; the producer never merges to primary mid-run). Under the deferred-queue substrate the only live risk is in the DRAIN: it shells out to run-tooling (we:scripts/push-if-green.mjs, we:scripts/readiness/*, we:scripts/pr-land.mjs), so a queued item that edits that surface must land LAST in a drain pass (or a dedicated final pass), and the drain must invoke no run-tooling script after landing one; likewise no serial/solo re-route may land a run-tooling change while a /workflow run is live. Build: a RUN_TOOLING pathspec + isRunTooling()/selfModifying() in we:scripts/readiness/lane-partition.mjs grounded in the drain's REAL transitive shell-out set (the #2077 regex list is stale on two axes: #2266 moved the skill dir to skills-src/, and #2183 changed the shell-out surface), a coverage-parity drift test, and the drain-pass ordering. Codified under #pr-flow-rollout-mechanism.
+Steady-state residual of decision #2077. Under the deferred-queue substrate the only live self-modification
+risk is in the DRAIN, which loads run-tooling from disk on every pass — so a queued item that edits that
+surface must land LAST in a drain pass, and nothing may land after it. Build: a `RUN_TOOLING` pathspec +
+`isRunTooling()`/`selfModifyingFiles()` in `we:scripts/readiness/lane-partition.mjs`, grounded in the drain's
+REAL transitive dependency set, a coverage-parity drift test, and the drain-pass ordering. Codified under
+`#pr-flow-rollout-mechanism`.
+
+## What #2077's route (a) left behind
+
+The route-(a) apparatus its build arm #2420 specified was superseded by the #2183 PR-fan-out orchestrator,
+which dissolved the in-run self-modification hazard (each item edits only its own lane clone; the producer
+never merges to primary mid-run). What survives is the drain-era residual #2077 recorded, plus the rule that
+no serial/solo re-route may land a run-tooling change while a `/workflow` run is live. The #2077 regex list
+is stale on two axes: #2266 moved the authored skill dir to `we:skills-src/`, and #2183 changed the
+executing surface entirely.
+
+## Design
+
+**Correct the surface first — the card's own shell-out list is wrong.** Grepped 2026-08-21 against
+`we:scripts/merge-ai-prs.mjs`: the drain **does not** shell out to `we:scripts/push-if-green.mjs` or
+`we:scripts/pr-land.mjs`. Its only child processes are `gh` and `git` (`execFileSync` at
+`we:scripts/merge-ai-prs.mjs:2561`, `:2612`, `:2656`, `:2719`, `:3298`, …). Its run-tooling dependency is
+by **static ESM import**, resolved from disk when the pass process starts:
+
+- `we:scripts/readiness/drain-lock.mjs`, `we:scripts/readiness/lane-manifest.mjs`,
+  `we:scripts/readiness/red-main-remediation.mjs`
+- `we:scripts/lane-drain.mjs`, `we:scripts/lib/pr-merge-gate.mjs`,
+  `we:scripts/lib/review-escalation.mjs`, `we:scripts/lib/review-baseline-state.mjs`,
+  `we:scripts/lib/rebase-drop-manifest.mjs`, `we:scripts/lib/rebase-drop-content.mjs`,
+  `we:scripts/lib/nnn-collision-heal.mjs`, `we:scripts/lib/duplicate-id-tripwire.mjs`,
+  `we:scripts/lib/reconcile-predicate.mjs`, `we:scripts/lib/remote-manifest.mjs`,
+  `we:scripts/lib/write-all-sync.mjs`
+
+The dependency runs the **other** way for `we:scripts/pr-land.mjs`, which spawns the drain
+(`we:scripts/pr-land.mjs:581` resolves the drain script as `DRAIN_SCRIPT`) — so the fast-drain caller is
+itself part of the surface, not a callee of it.
+
+Why this matters for the guard rather than being a nitpick: an ESM import graph is **machine-derivable**
+(walk `import` specifiers from the entrypoints transitively), where a hand-kept regex list is not. The
+#2077 coverage-parity rider ("walk **transitive** shell-outs") is satisfiable exactly and cheaply once the
+derivation is over the import graph plus the small explicit set of spawned scripts, and that derivation is
+what makes the drift test real instead of a second copy of the list.
+
+**Seam: mirror the merge-risk pattern already in the module.** `we:scripts/readiness/lane-partition.mjs`
+already carries a repo-keyed pathspec + a repo-qualified predicate:
+`RESERVED_MERGE_RISK_BY_REPO` (`we:scripts/readiness/lane-partition.mjs:53`) and `isMergeRiskFile`
+(`:73`, which splits `"<repo>:<path>"` and matches the remainder against that repo's set). Add the
+run-tooling pair in exactly that shape, next to it:
+
+```js
+export const RUN_TOOLING_BY_REPO = { we: [ /* entrypoints + the derived transitive set */ ], frontierui: [], 'plateau-app': [] };
+export function isRunTooling(repoQualifiedPath) { /* same split/lookup contract as isMergeRiskFile */ }
+export function selfModifyingFiles(entry) { /* filesOf(entry) ∩ isRunTooling — mirrors mergeRiskFilesOf */ }
+```
+
+`filesOf` (`:89`) and `mergeRiskFilesOf` (`:105`) are the two functions to copy the contract from —
+`selfModifyingFiles` is `mergeRiskFilesOf` with `isRunTooling` swapped for `isMergeRiskFile`.
+
+**The two stale axes named in the digest, resolved.** (1) `.claude/skills/batch-backlog-items/` is no
+longer the executing skill dir — #2266 moved authored skills to `we:skills-src/` (the deployed copy is
+generated by `we:scripts/sync-skills-deploy.mjs`), so the pathspec names `we:skills-src/…`, not
+`.claude/skills/…`. (2) the #2077 list was written for the in-run orchestrator; under the deferred queue the
+executing surface is the drain's import graph above, not the workflow source.
+
+**Ordering — and the part it is easy to get wrong.** The *ordering function* is `planLabelDrain`
+(`we:scripts/merge-ai-prs.mjs:1429`): it sorts `ready` and computes `deferred`/`waitOn`. It has **two**
+callers, and both must be covered or the guard is a no-op on the path that matters:
+
+- `planDrainPass` (`:1317`, composing `prepareDrainVerdicts` `:1300` and `buildDrainVerdicts` `:1236`) —
+  the dry-run/report path, and the easy one to unit-test.
+- the **live cascade** in `runCli`: a local `replan` closure (`:3669`) calls `planLabelDrain` again on the
+  remaining candidates *after every merge* (`:3736`). This is the loop that actually lands PRs.
+
+So "a RUN_TOOLING item sorts last" belongs in `planLabelDrain`, where both callers inherit it — but "nothing
+lands after it" is a **pass-level** invariant the re-planning cascade can defeat: a later `replan` iteration
+re-derives a fresh plan from the remaining candidates and knows nothing about what already landed unless it
+is told. So the cascade must carry a sticky "a RUN_TOOLING change landed this pass" signal and stop landing,
+threaded the way `landedThisPass` already is through `replan` (`:3669`). `runCli` has no test coverage
+today, which is exactly where a guard like this silently becomes decorative.
+
+## Done when
+
+1. **tier 1** — `we:scripts/readiness/__tests__/lane-partition.test.mjs` gains cases pinning `isRunTooling`
+   on the same four-way contract `isMergeRiskFile` already carries: true for
+   `we:scripts/readiness/drain-lock.mjs` and `we:skills-src/drain/SKILL.md`, false for
+   `we:src/_data/traits.json`, false for an unqualified path, false for an unknown repo prefix. Fails
+   before — the symbol does not exist, so the import throws.
+2. **tier 1** — the same file gains the **coverage-parity drift test**: it derives the drain's transitive
+   dependency set from `we:scripts/merge-ai-prs.mjs` (walk `import` specifiers from the entrypoint, plus
+   the scripts it spawns) and asserts `RUN_TOOLING_BY_REPO.we` covers every derived entry. Prove it can
+   fail: feed the derivation a fixture source carrying one extra import and assert the test's predicate
+   reports the gap.
+3. **tier 1** — ordering AND the pass-level halt, both pinned in
+   `we:scripts/__tests__/merge-ai-prs.test.mjs`: (a) a `planLabelDrain` case where the one candidate
+   touching a RUN_TOOLING path sorts **last**, inherited by `planDrainPass`; and (b) a case over the
+   re-planning cascade proving that once a RUN_TOOLING candidate lands, a subsequent `replan` iteration
+   lands **nothing**. (b) is what stops this guard being decorative — without it the sort can be correct
+   while the multi-PR pass lands straight past it.
+4. **tier 2** — `we:scripts/readiness/lane-partition.mjs` contains no `.claude/skills` reference: the
+   pathspec names the authored `we:skills-src/` tree, not the generated deploy copy (axis 1 of the
+   stale-list correction).
+5. **tier 3** — `we:skills-src/drain/SKILL.md` states the land-last ordering rule, and
+   `npm run skills:sync:check` exits 0 (the deployed copy is regenerated, never hand-edited).
+
+The commands that decide 1-4:
+
+```
+npx vitest run scripts/readiness/__tests__/lane-partition.test.mjs
+npx vitest run scripts/__tests__/merge-ai-prs.test.mjs
+grep -rn "\.claude/skills" scripts/readiness/lane-partition.mjs   # must print nothing
+```
+
+## Independent review — 2026-08-21
+
+Confidence: **Medium**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (addressed; strategy: confirm by mutation or reversion BEFORE building) — Verified against the live repo: we:scripts/merge-ai-prs.mjs shells out only to gh/git (no we:scripts/push-if-green.mjs or we:scripts/pr-land.mjs subprocess calls), we:scripts/pr-land.mjs:581/:588 does spawn the drain script as DRAIN_SCRIPT, we:backlog/2420-*.md confirms the #2183 fan-out dissolved route (a), and the plateau-app drain daemon (`plateau:tools/drain-daemon/daemon.mjs`, outside this repo) spawns the drain script as a fresh one-shot child process per pass — so the goal's 'loads run-tooling from disk on every pass' premise holds even under the newer daemon architecture the card doesn't mention.
+- **consumer** (NOT addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — The card's Design section names we:scripts/merge-ai-prs.mjs's dependency set but never traces the call graph to `runCli` (the unexported, untested cascade loop at ~line 3647-3746) — the actual live consumer of the ordering invariant it is building; it also omits the direct static import `we:scripts/backlog/id.mjs` from its own enumerated dependency list (self-correcting via the drift test, so low severity on its own, but consistent with the same under-tracing).
+- **interface** (addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — The coverage-parity drift test (Done-when item 2) is exactly a round-trip check at the seam between the derived import-walk and the declared RUN_TOOLING_BY_REPO.we list, with an explicit 'prove it can fail' fixture requirement.
+- **decorative-guard** (NOT addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Done-when item 3 only pins a single `planDrainPass` call's returned plan; nothing in the Done-when tests or wires the outer `for(;;)` cascade loop in `runCli` (we:scripts/merge-ai-prs.mjs) to actually halt landing further PRs after a RUN_TOOLING merge across re-plan iterations of the same pass — so the guard can be built exactly as specified and still be a no-op for the multi-PR case the goal targets.
+- **legibility** (NOT addressed; strategy: assert the failure SURFACES, not just that it occurs) — Same root gap as decorative-guard: if the outer cascade loop keeps landing PRs after a RUN_TOOLING merge in the same pass, nothing surfaces this — no test, no runtime log/error — because the card never extends coverage or wiring into `runCli`, which currently has zero test coverage of any kind.
+
+**Corrections applied by this review:**
+
+- The card cites specific execFileSync line numbers in we:scripts/merge-ai-prs.mjs (:2561, :2612, :2656, :2719, :3298) that do not match any execFileSync call site in the live file (actual sites cluster near :2494, :2545, :2549, :2589, :2652, :2739, :2765, :3128, :3208, :3268, :3306, :3386, :3442, :3515, :3765, :3801, :3906, :3951) — the underlying claim (only gh/git subprocess calls, no we:scripts/push-if-green.mjs or we:scripts/pr-land.mjs) is correct, but the citations are stale.
+- The card cites buildDrainVerdicts/prepareDrainVerdicts/planDrainPass at :1236/:1300/:1317; the live file has them at :1169/:1233/:1250 — a consistent ~65-line offset, so the citations were taken against a different revision.
+- The card's 'Ordering' section attributes plan-building to planDrainPass/prepareDrainVerdicts/buildDrainVerdicts but never names planLabelDrain (we:scripts/merge-ai-prs.mjs:1362) — the actual function that sorts `ready` and computes `deferred`/`waitOn`, and the one function genuinely shared by both the dry-run report (via planDrainPass) and the live cascade (via the local `replan` closure, :3590) — so the card's own citation of where ordering 'belongs' is incomplete.
+
+The card's factual grounding (drain's real import graph, pr-land↔drain spawn direction, the #2420/#2077 history, the stale `.claude/skills` reference) checks out against the live repo, but its "Ordering" design section never traces execution to the actual live-cascade consumer (`runCli`'s multi-iteration `for(;;)` loop in we:scripts/merge-ai-prs.mjs), so the Done-when tests can go fully green while the process-wide "nothing lands after it" invariant — the card's own stated goal — remains unenforced across re-plan iterations within one pass.
+
+_Recorded through the declared `review-prep` operation._
+
+### Response to that review (2026-08-21)
+
+**Accepted and fixed in the card:**
+
+- **consumer / decorative-guard / legibility** — all three name the same real gap and the review is right:
+  the ordering design stopped at `planDrainPass` and never reached the live cascade. The *Design* section
+  now names `planLabelDrain` (`we:scripts/merge-ai-prs.mjs:1429`) as the ordering function and the `replan`
+  closure (`:3669`, called at `:3736`) as the loop that actually lands PRs, and Done-when criterion 3 now
+  requires a case proving a later `replan` iteration lands **nothing** after a RUN_TOOLING merge. A correct
+  sort with no pass-level halt was exactly the no-op the review predicted.
+- The missing `we:scripts/backlog/id.mjs` entry in the enumerated dependency list is real; it is left to the
+  drift test (criterion 2), which is what that test exists for — a hand-maintained enumeration in a card is
+  not the authority.
+
+**Rejected, with reasoning — the two line-number "corrections" are wrong.** Both were re-verified against
+`origin/main` at the same revision the juror read:
+
+- A `grep -n` for `execFileSync(` in `we:scripts/merge-ai-prs.mjs` returns call sites at :2561, :2612, :2616, :2656,
+  :2659, :2719, :2806, :2832, :2863, :2864, :3207, :3238, :3287, :3298, … — the card's cited lines are
+  present and correct. The alternative set the review lists (:2494, :2545, …) matches nothing in this file.
+- `grep -n "^export function buildDrainVerdicts"` returns **1236**, `prepareDrainVerdicts` **1300**,
+  `planDrainPass` **1317** — the card's numbers, not the review's ":1169/:1233/:1250". There is no
+  ~65-line offset; the file the card cites is the file on `main`.
+
+The review's third correction (that the Ordering section never named `planLabelDrain`) **was** right, and is
+the one folded in above.

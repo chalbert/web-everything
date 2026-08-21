@@ -66,3 +66,86 @@ Filed at the operator's direction after the human `/review` accept on **PR #982*
 The individual preventions were filed as #2842–#2850 and #2852; this item names the **class** they are surfaces
 of, which the round-3 review noted was tracked nowhere. Related: #2842, #2850, #2852, `2856`, #2823
 (the prevention-introspection discipline this generalizes).
+
+## Design
+
+Two corrections to the *Mechanical fix* above, both from reading the tree on 2026-08-21 — make them before
+building, or the item lands in the wrong file and rebuilds something that exists.
+
+**Correction 1 — `buildSubjectMandate` does not live in `we:scripts/lib/review-core.mjs`.** It is exported
+from `we:scripts/lib/jury-core.mjs:1445` and *imported* by `we:scripts/lib/review-core.mjs:125`, which is why
+`buildMandate` (`we:scripts/lib/review-core.mjs:271`) and `buildPanelMandate` (`:1051`) both frame into it.
+The single-skeleton reasoning in the mandate half is right; the file is wrong. The clause goes in
+`we:scripts/lib/jury-core.mjs`, in the same `[...].join(' ')` list that already single-sources the #2950
+disposition block and the #2823 prevention-introspection block — those two are the shape to copy, including
+their "required, for EVERY finding" framing and the explicit statement of what happens when the field is
+omitted (silence must cost, not save, a round).
+
+**Correction 2 — the gate half is partly built, and wider than this card assumes.** #2842 landed as
+`validateCitedItemStatusClaims` (`we:scripts/lib/validate-rules-anchors.cjs:444`), and `runStatuteCheck`
+(`:520`) already feeds it `srcByDoc` built over **every** entry in `RULE_DOCS`
+(`we:scripts/lib/rules-loader.cjs:29`) — `platform-decisions`, `block-standard`, `backlog-workflow`,
+`vision-tiers` — not just the statute doc. So "generalize the anchor-scoped lints to run over all
+`we:docs/agent/*.md`" is **already true for the four registered rule docs**. What genuinely remains:
+
+- **`kind: decision` backlog bodies are not scanned at all.** `runStatuteCheck` reads `backlog/` only for
+  `codifiedIn` cites (`collectCodifiedCites`, `:32`) and item statuses (`collectItemStatuses`, `:310`), never
+  for cited-claim text. That is the real extension, and `collectItemStatuses` is the status oracle it needs
+  — already built, already passed in as `statusOf`.
+- **Predicate consistency beyond status.** The landed rule keys on explicit status words
+  (`CLAIM_STATUS_WORDS`, `:385`) and the `OPEN` token (`:404`). The `cleared`/`precedent` → resolved and
+  `owed`/`build-pending` → not-resolved predicates this card names are additional claim families in the same
+  scanner, not a new scanner.
+- Unregistered docs under `we:docs/agent/` (anything outside `RULE_DOCS`) are still unscanned — widening the
+  corpus is a one-line change to how `srcByDoc` is built, and it is worth deciding deliberately whether the
+  claim rules should apply to all of them or only the four rule docs.
+
+**Sequencing.** The mandate half is a text edit with a unit test and no dependencies — do it first and alone;
+it is the only half that covers claims made outside a statute anchor, which is the class this card names.
+
+## Done when
+
+1. **tier 1 — the clause is in the skeleton, so every surface inherits it.**
+   `we:scripts/lib/__tests__/jury-core.test.mjs` asserts `buildSubjectMandate` output contains the
+   verification clause, and `we:scripts/lib/__tests__/review-core.test.mjs` asserts it is present in the
+   strings returned by **both** `buildMandate` and `buildPanelMandate` — proving inheritance rather than
+   three copies. Fails before — no such clause exists in `we:scripts/lib/jury-core.mjs`.
+2. **tier 1 — a cited claim in a `kind: decision` body is checked.**
+   `we:scripts/__tests__/rules-anchors.test.mjs` pins `validateCitedItemStatusClaims` over a decision-body
+   fixture: a body claiming a cited `#NNNN` is a *cleared precedent* while `statusOf` reports it non-resolved
+   yields an error; the same body with a resolved cite yields none. Fails before — backlog bodies are not
+   fed to the scanner.
+3. **tier 1 — the `owed` predicate.** The same file pins the inverse family: a body describing a cited
+   `#NNNN` as *owed* / *build-pending* while `statusOf` reports it `resolved` yields an error.
+4. **tier 2 — no new gate errors on the live corpus.** `npm run check:statute` and `npm run check:standards`
+   both exit 0 against the current tree after the widening, or every new error is fixed in the same pass.
+   The widened corpus firing on real historical text is expected; leaving it red is not.
+5. **tier 3 — the class is named where an author will meet it.** `we:docs/agent/backlog-workflow.md` (or the
+   statute anchor this item codifies into) states the rule in one sentence and lists which surfaces enforce
+   it, so #2842 / #2850 / #2852 / `2856` read as instances of a named class rather than four unrelated lints.
+
+The commands that decide 1-4:
+
+```
+npx vitest run scripts/lib/__tests__/jury-core.test.mjs scripts/lib/__tests__/review-core.test.mjs scripts/__tests__/rules-anchors.test.mjs
+npm run check:statute
+npm run check:standards
+```
+
+## Independent review — 2026-08-21
+
+Confidence: **High**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (addressed; strategy: confirm by mutation or reversion BEFORE building) — Card explicitly re-verified its own mechanical-fix design against the live repo on 2026-08-21 (Correction 1/2) and both corrections check out exactly: buildSubjectMandate is at we:scripts/lib/jury-core.mjs:1445 (not we:scripts/lib/review-core.mjs as the original mechanical-fix draft assumed), and runStatuteCheck (we:scripts/lib/validate-rules-anchors.cjs:520) already builds srcByDoc over all four RULE_DOCS (we:scripts/lib/rules-loader.cjs:29-34), so the anchor-scoped-lint generalization is already partly built — exactly the kind of premise check the taxonomy calls for.
+- **blast-radius** (addressed; strategy: measure against the real corpus before wiring) — Widening validateCitedItemStatusClaims to scan kind:decision backlog bodies is a real, non-trivial blast radius: 498 kind:decision items exist in we:backlog/, and a rough proxy for the existing CLAIM_A/B/C regexes hits ~138 candidate lines across them. The card does not pre-measure this, but Done-when tier 2 requires npm run check:statute and npm run check:standards to exit 0 on the live corpus after widening ('every new error is fixed in the same pass'), which forces the same discipline reactively rather than proactively — real work, but not silently skipped.
+- **consumer** (addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — Verified via ES-import grep that buildSubjectMandate (we:scripts/lib/jury-core.mjs) is called directly by at least three adapters beyond we:scripts/lib/review-core.mjs — we:scripts/lib/decision-prose-adapter.mjs and we:scripts/lib/design-pixels-adapter.mjs — confirming the card's claim that placing the clause in the skeleton (not in we:scripts/lib/review-core.mjs) is required for all surfaces to inherit it, and that check:statute/check:standards (we:scripts/check-statute.mjs, we:scripts/check-standards.mjs) are the subprocess callers of runStatuteCheck the card names.
+- **decorative-guard** (addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Done-when tier 1 items are stated as red-before-green ('Fails before — no such clause exists' / 'Fails before — backlog bodies are not fed to the scanner'), and the fixture-injectable test scaffolding for validateCitedItemStatusClaims already exists in we:scripts/__tests__/rules-anchors.test.mjs with doc()/statuses() helpers, so extending it with decision-body fixtures is a proven, non-speculative pattern rather than a guard that could pass vacuously.
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — The existing push() error format in we:scripts/lib/validate-rules-anchors.cjs:449-455 names the doc:line twice and states the fix, and the mandate clause routes into the existing 'Judge only: report concrete findings' framing — both surface failures as explicit findings/errors, not silence.
+
+**Corrections recommended:**
+
+- none — the preparation held up as written.
+
+_Recorded through the declared `review-prep` operation._
