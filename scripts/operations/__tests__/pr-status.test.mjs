@@ -11,9 +11,9 @@ import { describe, it, expect } from 'vitest';
 
 import {
   prStatusOperation, reduceCheckState, labelDisagreements, shapeReadFinding, assessPrs,
-  PR_STATUS_OP, CHECK_STATES, LABEL_CLAIMS,
+  PR_STATUS_OP, CHECK_STATES, LABEL_CLAIMS, FAILING_CONCLUSIONS,
 } from '../pr-status.mjs';
-import { listArgv, checksArgv, parseJsonLines, labelNames, createPrReader } from '../pr-status-io.mjs';
+import { listArgv, checksArgv, parseJsonLines, labelNames, createPrReader, LIST_LIMIT } from '../pr-status-io.mjs';
 
 const done = (conclusion, name = 'test') => ({ name, status: 'completed', conclusion });
 const running = (name = 'test') => ({ name, status: 'in_progress', conclusion: null });
@@ -111,7 +111,7 @@ describe('shapeReadFinding — an unreadable result is not "no open PRs"', () =>
   });
 
   it('accepts a genuinely empty open-PR list — that IS an answer', () => {
-    expect(shapeReadFinding({ repo: 'o/r', prs: [] })).toEqual({ repo: 'o/r', prs: [] });
+    expect(shapeReadFinding({ repo: 'o/r', prs: [] })).toEqual({ repo: 'o/r', prs: [], truncated: false });
   });
 });
 
@@ -205,6 +205,57 @@ describe('the io shell', () => {
     const out = read({ repo: 'o/r' });
     expect(out.prs[0]).toMatchObject({ number: 9, headSha: 'abc123', labels: ['checking'], mergeable: 'mergeable' });
     expect(seen[1]).toContain('commits/abc123/check-runs');
+  });
+});
+
+// ── THE TWO CARVE-OUTS PR #1521's JUROR CONFIRMED ────────────────────────────────────────────────────────
+describe('startup_failure is a check that RAN and failed (#1521 juror)', () => {
+  it('reports red, not unchecked', () => {
+    // Omitting it sent this case to `unreadable`, which reports `unchecked`. The direction matters: `red`
+    // says "someone broke something, go look"; `unchecked` says "nothing has been asked yet". A broken
+    // workflow file yields `startup_failure` on EVERY run, so the whole PR would have read as never checked
+    // rather than as reliably failing.
+    expect(reduceCheckState([done('startup_failure')]).state).toBe('red');
+    expect(FAILING_CONCLUSIONS).toContain('startup_failure');
+  });
+
+  it('still refuses to guess at a conclusion it genuinely does not know', () => {
+    // The list must not become a catch-all: an unrecognised value is still `unchecked`, never `red` and
+    // never `green`. Widening it to "anything that is not success" would be the opposite error.
+    expect(reduceCheckState([done('a_conclusion_github_adds_in_2027')]).state).toBe('unchecked');
+  });
+});
+
+describe('the list cap is REPORTED, not silent (#1521 juror)', () => {
+  const rows = (n) => Array.from({ length: n }, (_, i) => ({ number: i + 1, title: 't', labels: [], mergeable: 'MERGEABLE', headRefOid: `sha${i}` }));
+  const readerFor = (n) => createPrReader({ run: (_bin, argv) => (argv[0] === 'pr' ? JSON.stringify(rows(n)) : '') });
+
+  it('marks a FULL listing as truncated — the honest answer is "I cannot tell"', () => {
+    // This operation exists so silence does not read as absence, and the first cut silently dropped every PR
+    // past the 100th from a report whose whole purpose is noticing a PR nobody is looking at. `gh` does not
+    // say whether more existed, so neither may this.
+    expect(readerFor(LIST_LIMIT)({ repo: 'o/r' }).truncated).toBe(true);
+  });
+
+  it('does NOT cry truncation on a short listing', () => {
+    // Without this, "always truncated" passes the test above and the flag means nothing.
+    expect(readerFor(3)({ repo: 'o/r' }).truncated).toBe(false);
+  });
+
+  it('never marks a single-PR read as truncated — there was nothing to cap', () => {
+    const read = createPrReader({ run: (_bin, argv) => (argv[0] === 'pr' ? JSON.stringify(rows(1)[0]) : '') });
+    expect(read({ repo: 'o/r', pr: 1 }).truncated).toBe(false);
+  });
+
+  it('carries truncation into the verdict, where a caller will see it', () => {
+    // A flag the reader sets and the verdict drops is the same silence one layer along.
+    const v = assessPrs(shapeReadFinding({ repo: 'o/r', truncated: true, prs: [] }));
+    expect(v.truncated).toBe(true);
+    expect(assessPrs(shapeReadFinding({ repo: 'o/r', prs: [] })).truncated).toBeUndefined();
+  });
+
+  it('asks for the raised limit', () => {
+    expect(listArgv({ repo: 'o/r' })).toContain(String(LIST_LIMIT));
   });
 });
 

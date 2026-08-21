@@ -11,6 +11,19 @@ import { execFileSync } from 'node:child_process';
 export const GH_TIMEOUT_MS = 60 * 1000;
 
 /**
+ * How many open PRs one listing may return.
+ *
+ * A CAP THAT IS REPORTED, NOT ONE THAT IS SILENT (PR #1521 juror). The first cut asked for 100 and said
+ * nothing when a repo had more, so PR 101 was simply absent from a report whose whole purpose is noticing a
+ * PR nobody is looking at. That is this operation's own defect turned on itself: silence reading as absence.
+ *
+ * Raised, and — more importantly — `createPrReader` now detects a listing that came back FULL and marks the
+ * result `truncated`, because the honest answer to "were there more?" is either "no" or "I cannot tell", and
+ * a bare list cannot distinguish them. `no silent caps` is the rule; this is it applied to itself.
+ */
+export const LIST_LIMIT = 200;
+
+/**
  * The argv for the open-PR listing. PURE, and exported so a test can assert the exact command with no
  * subprocess — the discipline `verify-io.mjs` applies to its own spawn.
  *
@@ -23,7 +36,7 @@ export function listArgv({ repo, pr = 0 }) {
   const fields = 'number,title,labels,mergeable,headRefOid';
   return pr > 0
     ? ['pr', 'view', String(pr), '--repo', repo, '--json', fields]
-    : ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', fields];
+    : ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(LIST_LIMIT), '--json', fields];
 }
 
 /**
@@ -84,6 +97,8 @@ export function createPrReader({ run = execFileSync } = {}) {
       };
     });
 
-    return { repo, prs };
+    // A listing that came back FULL may have been cut off — `gh` does not say. Reported rather than assumed
+    // either way: the reader's job is to state what it knows, and `assessPrs` turns it into a finding.
+    return { repo, prs, truncated: pr === 0 && rows.length >= LIST_LIMIT };
   };
 }

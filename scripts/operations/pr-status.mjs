@@ -59,8 +59,19 @@ export const CHECK_STATES = Object.freeze(['green', 'red', 'pending', 'unchecked
  */
 export const NON_BLOCKING_CONCLUSIONS = Object.freeze(['skipped', 'neutral']);
 
-/** Conclusions that mean the check ran and did not succeed. */
-export const FAILING_CONCLUSIONS = Object.freeze(['failure', 'timed_out', 'cancelled', 'action_required', 'stale']);
+/**
+ * Conclusions that mean the check ran and did not succeed.
+ *
+ * `startup_failure` IS IN THE LIST and was missing from the first cut (PR #1521 juror). A check whose runner
+ * failed to even start is a check that ran and failed — GitHub says so — but omitting it sent that case to
+ * `unreadable`, which this file reports as `unchecked`. Getting it wrong in that direction is worse than it
+ * sounds: `red` says "someone broke something, go look", `unchecked` says "nothing has been asked yet". A
+ * broken workflow file produces `startup_failure` on every run, so the whole PR would have read as never
+ * checked rather than as reliably failing.
+ */
+export const FAILING_CONCLUSIONS = Object.freeze([
+  'failure', 'timed_out', 'cancelled', 'action_required', 'stale', 'startup_failure',
+]);
 
 /**
  * Reduce one PR's check runs to a single three-valued state. PURE.
@@ -200,7 +211,7 @@ export function shapeReadFinding(raw) {
       checks: Array.isArray(p?.checks) ? p.checks : [],
     };
   });
-  return { repo: String(raw.repo ?? ''), prs };
+  return { repo: String(raw.repo ?? ''), prs, truncated: raw.truncated === true };
 }
 
 /**
@@ -243,6 +254,11 @@ export function assessPrs(finding) {
     // Stated rather than implied, for the same reason `verify` marks an empty suite: a repo with no open PRs
     // has told the caller something, and silence must not be mistaken for it.
     ...(prs.length === 0 ? { noOpenPrs: true } : {}),
+    // AND THE SAME RULE APPLIED TO THIS OPERATION'S OWN LIMIT. A full listing may have been cut off, and a
+    // report that quietly omits PR 201 is this operation committing the defect it exists to catch. `gh` does
+    // not say whether more existed, so the honest answer is "I cannot tell", carried as a flag rather than
+    // swallowed (PR #1521 juror).
+    ...(finding.truncated ? { truncated: true } : {}),
   };
 }
 
