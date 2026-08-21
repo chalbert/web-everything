@@ -45,6 +45,7 @@ import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
+import { SCAFFOLD_OP } from '../scaffold.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
@@ -314,6 +315,10 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // coverage. Its own suite pins the property this list cannot express for a writing operation: the
     // DECLARING module reaches nothing that can act, and every write lives in `stage-pr-view-io.mjs`.
     [STAGE_PR_VIEW_OP]: 'stage-pr-view.mjs',
+    // #xrrpfo7 — the BIRTH of the lifecycle. NOT read-only, for the same reason `claim` is not: its `write`
+    // step creates the card. Listed for map coverage; the declaring module reaches nothing that can act and
+    // every write lives in `scaffold-io.mjs`, behind the guarded writer.
+    [SCAFFOLD_OP]: 'scaffold.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {

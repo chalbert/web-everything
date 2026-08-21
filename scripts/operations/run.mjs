@@ -43,6 +43,8 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+import { scaffoldOperation, SCAFFOLD_OP } from './scaffold.mjs';
+import { createScaffoldReader, createScaffoldSinks } from './scaffold-io.mjs';
 import { openPrOperation, OPEN_PR_OP } from './open-pr.mjs';
 import { createOpenPrSinks } from './open-pr-io.mjs';
 import { PARK_LABELS } from '../pr-land.mjs';
@@ -86,6 +88,12 @@ export const OPERATIONS = Object.freeze({
   // and `gate-health` do.
   [VERIFY_OP]: () => ({
     declaration: verifyOperation({ runChecks: createChecksRunner() }),
+  }),
+  // #xrrpfo7 — the BIRTH of the lifecycle whose open is `claim` and whose close is `resolve`. 45 raw calls
+  // in one session, the most-invoked backlog verb, and no operation over it until now.
+  [SCAFFOLD_OP]: () => ({
+    declaration: scaffoldOperation({ readScaffoldContext: createScaffoldReader() }),
+    sinks: createScaffoldSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({

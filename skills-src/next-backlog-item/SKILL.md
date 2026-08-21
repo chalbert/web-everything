@@ -217,8 +217,12 @@ an item*). The backlog file is the durable, resumable record — the item body *
 7. **Close it out when done — mark it `resolved`** (*backlog-workflow.md → Closing out a completed item*).
    Confirm done — `node scripts/operations/run.mjs verify --checkout=<lane> --json`, whose `verdict.ok` is true
    only when every check PASSED (an `unrun` check is not a pass; see *backlog-workflow.md → Closing out*) — take a **careful last look for leftovers** and capture
-   each as its **own new item** via **`node scripts/backlog.mjs scaffold --type=… --workitem=… --size=…
-   --title='…' --digest='…' [--blocked-by=NNN]`** (**single quotes** — item text in a double-quoted value
+   each as its **own new item** via the OPERATION — **`node scripts/operations/run.mjs scaffold
+   --title='…' --workItem=… --size=… --digest='…' [--parent=NNN] [--blockedBy=NNN,xhash] --json`** (#xrrpfo7).
+   It refuses with a NAMED reason rather than writing a malformed card: `bad-kind`, `no-title`,
+   `story-needs-size`. `--blockedBy` and `--parent` take numbers OR hashes and normalize each correctly —
+   a number pads, a hash does **not** (padding `xvatzyf` corrupts it into an id that resolves to nothing).
+   The legacy `--type`/`--workitem` spelling still resolves, so older invocations keep working (**single quotes** — item text in a double-quoted value
    still runs `` ` `` / `$(…)` through bash; *backlog-workflow.md → Authoring an item → The quoting rule*)
    — it allocates the next free `NNN` atomically and writes
    a `check:standards`-shaped skeleton (or author by hand: re-`ls backlog/` right before writing, yield to
