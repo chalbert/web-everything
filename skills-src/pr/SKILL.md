@@ -84,9 +84,12 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 1. **Pick a `lane/*` ref name** — the #1934 guard carve-out only allows pushing to `lane/*` (never a
    local branch, never `main` directly). Use a descriptive slug: `lane/<short-slug>` for an ad-hoc
    change, or `lane/<NNN>-<slug>` when it closes a backlog item.
-2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing:
+2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing. **Pass the SAME `--mode` you
+   will pass in step 4** — a rehearsal that previews a different mode is worse than no rehearsal, because it
+   shows the user a plan that is not the one about to run. The operation defaults to `park`, which is NOT the
+   raw home's default, so the mode has to be explicit on both:
    ```
-   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --dry-run  # @operation-home-ok: #x6ry8mf — this rehearsal runs BEFORE the body exists; the home's #2332 guard exempts --dry-run, `open-pr` requires bodyFile unconditionally
+   node scripts/operations/run.mjs open-pr --ref=lane/<slug> --sha=HEAD --base=main --mode=land --dryRun=true --json
    ```
 3. **Write a PR body to a file and ALWAYS pass `--body-file`** — this is required, not optional:
    `pr-land` derives the title from the commit subject, and `gh pr create --title …` with **no** body
@@ -96,13 +99,14 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 4. **Open + hand off** (self-approved, wait for the `test` check, label green, trigger the drain — #2290
    pr-land NEVER merges):
    ```
-   node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>  # @operation-home-ok: #x6ry8mf — no mode flag is the home's DEFAULT path, which also TRIGGERS the fast drain that lands the PR; `open-pr`'s label-on-green stops at the label, so naming it here would leave the PR sitting unlanded
+   node scripts/operations/run.mjs open-pr --ref=lane/<slug> --sha=HEAD --base=main --bodyFile=<path> --mode=land --json
    ```
-   - **Default:** open → wait for required checks → label `ready-to-merge` when green → **trigger a
-     single-couple fast drain** (`merge-ai-prs.mjs --only=<pr> --this-repo`) that lands it. The trigger is
+   - **`--mode=land`** (the home's default path, named explicitly by the operation): open → wait for
+     required checks → label `ready-to-merge` when green → **trigger a single-couple fast drain**
+     (`merge-ai-prs.mjs --only=<pr> --this-repo`) that lands it. The trigger is
      best-effort: if review parks the PR (or the drain hiccups), `/pr` still exits success with the PR
      labelled and the standalone drain lands it later. **No `gh pr merge` runs from pr-land.**
-   - `--label-on-green` is the **batch producer** mode (#2199): open the PR, **wait for the required
+   - `--mode=label-on-green` is the **batch producer** mode (#2199): open the PR, **wait for the required
      checks, apply `ready-to-merge` only once they are green**, then STOP — does NOT trigger a drain (a
      `/workflow` or `/batch` closeout runs the standalone drain over the whole set).
    - `--no-wait` opens the self-approved PR **UNLABELLED** and returns immediately (CI unconfirmed). **This is

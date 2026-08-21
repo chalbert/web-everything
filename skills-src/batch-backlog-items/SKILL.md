@@ -81,7 +81,7 @@ the per-item chat-rename — a batch labels the session **once**.
    + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit the item's files in its lane clone and open a
    ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
    #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
-   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --label-on-green` — which opens the PR, <!-- @operation-home-ok: #x6ry8mf — this instruction passes no `--body-file`, which `open-pr` requires; the home's own #2332 guard would refuse it too, so the line needs a body before it can be rewired. -->
+   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --label-on-green` — which opens the PR, <!-- @operation-home-ok: #x2v3kgr — this instruction passes no body file and nothing above writes one, so the home's own #2332 guard would REFUSE it as written; the line needs fixing before it can name `open-pr`, which requires a body for a real open too. -->
    **waits for the required checks, and applies the `ready-to-merge` label ONLY once they are green** (#2199:
    the label means "fully checked, the drain may land", never "a local lint passed"; #2196: the shared transport
    is the single labelling step — no separate `gh pr edit`). The item's own gate above already ran the FULL

@@ -248,6 +248,63 @@ describe('an omitted title lets the home derive one', () => {
   });
 });
 
+// ── #x6ry8mf: THE HOME'S DEFAULT PATH, AND A REHEARSAL THAT OPENS NOTHING ────────────────────────────────
+describe('`land` mode — the home\'s default, named rather than omitted', () => {
+  it('passes NO mode flag, because that IS the default path', () => {
+    // `pr-land` with no mode flag opens, waits, labels `ready-to-merge` and TRIGGERS the fast drain that
+    // lands the PR. Inventing a `--land` the home does not accept would fail at the shell instead.
+    const argv = planOpen(good({ mode: 'land' })).argv;
+    for (const flag of ['--park', '--label-on-green', '--no-wait', '--land']) {
+      expect(argv.some((a) => a.startsWith(flag))).toBe(false);
+    }
+  });
+
+  it('is NOT the same as label-on-green — that one stops at the label', () => {
+    // The distinction the whole card is about: pointing a caller of the default path at `label-on-green`
+    // leaves the PR open, labelled and UNLANDED. A test, so a later "simplify the modes" cannot merge them.
+    expect(planOpen(good({ mode: 'label-on-green' })).argv).toContain('--label-on-green');
+    expect(planOpen(good({ mode: 'land' })).argv).not.toContain('--label-on-green');
+  });
+
+  it('is not the default — publishing must stay a deliberate flag', () => {
+    const decl = openPrOperation({ parkLabels: PARK_LABELS });
+    expect(decl.input.mode.default).toBe('park');
+    expect(decl.input.mode.enum).toEqual([...OPEN_MODES]);
+    expect(OPEN_MODES).toContain('land');
+  });
+
+  it('REFUSES a mode outside the declared set rather than silently landing', () => {
+    // The `else` that used to catch everything now throws. Without it, a fifth mode added to OPEN_MODES and
+    // forgotten here would inherit "pass nothing" — which is `land`, the one mode that publishes.
+    expect(() => planOpen(good({ mode: 'no-wait' })).argv).not.toThrow();
+    expect(() => planOpen({ ...good(), mode: 'typo' })).toThrow(/`mode` must be one of/);
+  });
+});
+
+describe('a dry run opens nothing, so it needs no body', () => {
+  const noBody = (over = {}) => { const g = good({ ...over }); delete g.bodyFile; return g; };
+
+  it('ACCEPTS a bodyless dry run', () => {
+    // #2332 exists because a bodyless PR passes the producer and is REFUSED at land, stalling the queue.
+    // A `--dry-run` opens nothing, so there is no PR to stall — the home draws that line itself.
+    expect(() => planOpen(noBody({ dryRun: true }))).not.toThrow();
+  });
+
+  it('still REFUSES a bodyless real open', () => {
+    // The half that must not be lost with it.
+    expect(() => planOpen(noBody({ dryRun: false }))).toThrow(/bodyless PR/);
+    expect(() => planOpen(noBody())).toThrow(/bodyless PR/);
+  });
+
+  it('OMITS `--body-file` entirely rather than passing it empty', () => {
+    // The third field in this function to need the rule, and the first two did not carry it here.
+    // `--body-file=` is not "no body": the home reads the flag as a string and would try to READ that path.
+    const argv = planOpen(noBody({ dryRun: true })).argv;
+    expect(argv.some((a) => a.startsWith('--body-file'))).toBe(false);
+    expect(argv).toContain('--dry-run');
+  });
+});
+
 describe('classifySubmit — refused and could-not-run are different facts', () => {
   it('reports an opened PR', () => {
     const r = classifySubmit({ status: 0, stdout: JSON.stringify({ pr: 1500, url: 'https://x/1500', parked: 'review:pending' }) });
