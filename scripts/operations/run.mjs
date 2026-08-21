@@ -43,6 +43,12 @@ import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
+// ALIASED, and the collision is worth naming: this file already exports `resolveOperation(name)` — the
+// registry LOOKUP ("resolve an operation by name"). An operation literally called `resolve` produces a
+// builder with the identical name under the `<op>Operation` convention. Aliasing at the import keeps the
+// convention intact in `./resolve.mjs` where it reads correctly.
+import { resolveOperation as buildResolveOperation, RESOLVE_OP } from './resolve.mjs';
+import { createResolveReader, createResolveSinks } from './resolve-io.mjs';
 import { openPrOperation, OPEN_PR_OP } from './open-pr.mjs';
 import { createOpenPrSinks } from './open-pr-io.mjs';
 import { PARK_LABELS } from '../pr-land.mjs';
@@ -86,6 +92,13 @@ export const OPERATIONS = Object.freeze({
   // and `gate-health` do.
   [VERIFY_OP]: () => ({
     declaration: verifyOperation({ runChecks: createChecksRunner() }),
+  }),
+  // #xrrpfo7 — `claim`'s sibling: the CLOSE of the lifecycle whose OPEN #3034 declared. Same shape (read →
+  // plan → write), same guarded writer, and the guards are REPLAYED from `we:scripts/backlog.mjs`'s
+  // `transition()` rather than reinvented.
+  [RESOLVE_OP]: () => ({
+    declaration: buildResolveOperation({ readResolveContext: createResolveReader() }),
+    sinks: createResolveSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({

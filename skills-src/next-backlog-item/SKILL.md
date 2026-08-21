@@ -227,9 +227,20 @@ an item*). The backlog file is the durable, resumable record — the item body *
    and, if a story or unstoried epic, a Fibonacci `size` (*backlog-workflow.md → Agile sizing*); set its
    `blockedBy` correctly (*backlog-workflow.md → Keep the blocker DAG honest*) so it doesn't enter as a
    falsely-ready Tier-A item; open it with a real digest (≤100-word "what + why" lead — *backlog-workflow.md
-   → The digest*). Then run **`node scripts/backlog.mjs resolve <NNN> [--graduated-to=<entity>|none]`** — it
-   flips `active → resolved`, stamps `dateResolved`, sets `graduatedTo` if passed — then re-run
-   `check:standards`. The file stays (`resolved` items drop from selection, hidden by default on
+   → The digest*). Then run the OPERATION —
+   **`node scripts/operations/run.mjs resolve --ref=<NNN> [--graduatedTo=<entity>] [--codifiedTo=<anchor>] --json`**
+   (#xrrpfo7, `claim`'s sibling at the close of the lifecycle). It flips `active → resolved`, stamps
+   `dateResolved`, sets `graduatedTo`/`codifiedIn` if passed — then re-run `check:standards`.
+
+   It REFUSES rather than writing a contradiction, and each refusal names itself so you can act on it:
+   `open-children` (#658 — an epic cannot close over live slices), `uncodified-decision` (#911 — a decision
+   must carry its rule into the statute layer first), `scope-drift` (#2803 — an item that edited a UI surface
+   its `scope:` never declared), `not-in-flight` (only an in-flight item resolves). `--force=true` steps over
+   the first and third **and the verdict records which** (`forced`, `steppedOver`) — so a batch close-out can
+   refuse to proceed over a forced resolve, which the old stderr warning made impossible.
+
+   `verdict.scopeUnchecked` is a THIRD state, not a flavour of clean: it means the item declared no `scope:`
+   so the #2803 reconciliation could not run at all. Do not read it as "checked and fine". The file stays (`resolved` items drop from selection, hidden by default on
    `/backlog/`) — an audit trail, not clutter. Do **not** delete the file.
 8. **Hand off the next pick — emit the carry-forward list.** Re-present the runner-ups held from step 3
    (drop any now `active`/`resolved`) as a **plain bullet list, not `AskUserQuestion`** — one bullet per
