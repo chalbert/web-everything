@@ -282,29 +282,6 @@ function scannableTail(tail) {
     .replace(/\s#.*$/, '');
 }
 
-/**
- * A line that is nothing but a continuation of the invocation above it.
- *
- * FOUND BY RUNNING THIS SCAN AGAINST THE LIVE TREE BEFORE SHIPPING IT. `we:skills-src/next-backlog-item/SKILL.md`
- * wraps a `scaffold` call so `--title` lands on the NEXT line, and a single-line read reported that required
- * input as missing — a false finding, from the gate, about a call site that is correct.
- *
- * There is no continuation marker to key on: the prose simply wraps. So the rule is structural — a line
- * consisting ONLY of flags (and their values) continues the command. Anything else on the line ends it, so
- * this cannot swallow the paragraph that follows a fenced command.
- *
- * "ONLY FLAGS" MEANS EVERY TOKEN, NOT JUST THE FIRST (PR #1526 round 2). The first cut tested that the line
- * STARTED with a flag and let `(?:[=\s].*)?` swallow the rest — so a prose line that merely OPENS with a flag
- * name was absorbed, and every `--word` in it counted as passed. The sentence that triggers it is one this
- * very gate invites people to write: "`--workitem` is the raw home spelling; the operation declares
- * `--workItem`". Documenting the rename the gate exists to catch would have produced a false finding about it.
- *
- * Quotes are blanked first (via `scannableTail`) so a legitimate `--title='a b c'` is one token, not four.
- */
-function isContinuationLine(line) {
-  const s = scannableTail(line).trim();
-  return s.startsWith('--') && s.split(/\s+/).every((t) => t.startsWith('--'));
-}
 
 /**
  * Find every operation invocation in one body, with its line, flags and exemption state. PURE.
@@ -318,11 +295,16 @@ export function extractOperationCalls(content) {
   for (let i = 0; i < lines.length; i += 1) {
     const exempt = exemptAt(lines, i);
     for (const m of lines[i].matchAll(OPERATION_CALL)) {
-      const flags = [...scannableTail(m[2]).matchAll(FLAG_IN_TAIL)].map((f) => f[1]);
-      for (let j = i + 1; j < lines.length && isContinuationLine(lines[j]); j += 1) {
-        for (const f of scannableTail(lines[j]).matchAll(FLAG_IN_TAIL)) flags.push(f[1]);
-      }
-      out.push({ op: m[1], flags, line: i + 1, exempt });
+      // ONE PHYSICAL LINE, DELIBERATELY. A multi-line absorber lived here for two rounds and caused two of
+      // this gate's five defects: it swallowed prose that merely opened with a flag (round 2), and the fix for
+      // that stopped absorbing a REAL wrapped call decorated with markdown — `[--parent=NNN]`, a trailing
+      // `**`, a `(#card)` tail (round 3). Distinguishing a decorated wrapped command from a sentence starting
+      // with a flag is not reliably decidable from a markdown line, so the scan stops claiming it can.
+      //
+      // THE COST IS A MISS, NOT A FALSE ALARM: a flag on a continuation line is not scanned, so an unknown one
+      // there goes unreported. That is the safe direction for a gate whose whole value is that its errors are
+      // trusted, and it is stated in `findMalformedOperationCalls`'s own contract rather than left implicit.
+      out.push({ op: m[1], flags: [...scannableTail(m[2]).matchAll(FLAG_IN_TAIL)].map((f) => f[1]), line: i + 1, exempt });
     }
   }
   return out;
@@ -331,32 +313,24 @@ export function extractOperationCalls(content) {
 /**
  * Judge ONE invocation against one operation's declared input schema. PURE.
  *
- * `unknown` is the error case and `missing` is the warning case, and the asymmetry is deliberate. An
- * undeclared flag is unambiguous — it is a typo, a stale name, or a flag that moved — and the CLI would refuse
- * it at runtime, so reporting it costs nothing and catches the rename class outright. A missing required input
- * is NOT unambiguous: skill prose legitimately shows abbreviated invocations, and erroring on those would
- * train readers to ignore the gate, which is how a gate dies.
+ * ONLY UNDECLARED FLAGS. A missing-required check lived here and was withdrawn with the multi-line absorber it
+ * depended on: deciding whether an invocation is COMPLETE needs the whole command, and the whole command is
+ * not reliably recoverable from decorated markdown. The remaining check needs no such assembly — a flag on the
+ * line is either declared or it is not.
+ *
+ * It is also the half that carries the value. An undeclared flag is the RENAME class (`--workitem` for
+ * `--workItem`) and it fails SILENTLY: the CLI drops the value rather than refusing. A missing required input
+ * fails loudly at runtime with the CLI's own message, so missing it costs a clear error, not a silent one.
  *
  * @param {{flags: string[], input: object, controlFlags: readonly string[]}} o
- * @returns {{unknown: string[], missing: string[]}}
+ * @returns {{unknown: string[]}}
  */
 export function judgeOperationCall({ flags = [], input = {}, controlFlags = [] } = {}) {
   const declared = new Set(Object.keys(input || {}));
   const control = new Set(controlFlags || []);
   const passed = new Set(flags || []);
 
-  // A `--resume` CARRIES NO INPUTS, AND REQUIRING THEM IS THE GATE'S OWN BUG. The CLI's second usage line is
-  // `run.mjs <op> --resume=<run-id> [--answer=<option>] [--json]` — the inputs were supplied on the ORIGINAL
-  // call and live in the run record, so a resume that repeated them would be redundant at best. Found the
-  // same way as `CONTINUATION_LINE`: running this against the live tree reported all three of
-  // `we:skills-src/review/SKILL.md`'s resume lines as missing `--pr` and `--repo`, which is correct prose and
-  // a wrong finding. Unknown flags are still judged on a resume — a typo is a typo either way.
-  const resuming = passed.has('resume');
-
-  return {
-    unknown: [...passed].filter((f) => !declared.has(f) && !control.has(f)),
-    missing: resuming ? [] : [...declared].filter((f) => input[f]?.required === true && !passed.has(f)),
-  };
+  return { unknown: [...passed].filter((f) => !declared.has(f) && !control.has(f)) };
 }
 
 /**
@@ -367,13 +341,20 @@ export function judgeOperationCall({ flags = [], input = {}, controlFlags = [] }
  * credential, a path) is UNKNOWN, and judging a call site against a schema we could not load would invent
  * findings out of our own inability to look.
  *
+ * PER-OPERATION CONTROL FLAGS, NOT A FLAT LIST (PR #1526 round 3). `--cwd`/`--model` are refused where the
+ * declaration has no `judge` step and `--resume`/`--answer`/`--run-id` where it cannot suspend, so one union
+ * applied to every operation accepted `--cwd` on `scaffold` — a command the CLI itself rejects. The caller
+ * passes `acceptedControlFlags(declaration)` per operation; an operation absent from the map falls back to
+ * none, which can only ever over-report, never under-report.
+ *
  * @param {Array<{file: string, content: string}>} docs
  * @param {Map<string, object>|object} schemas - operation name → its declared `input` object
- * @param {readonly string[]} controlFlags - the CLI adapter's own flags, PASSED not restated (#2644)
+ * @param {Map<string, readonly string[]>|object} controls - operation name → the control flags IT accepts
  * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
  */
-export function findMalformedOperationCalls(docs = [], schemas = new Map(), controlFlags = []) {
+export function findMalformedOperationCalls(docs = [], schemas = new Map(), controls = new Map()) {
   const readSchema = (n) => (schemas instanceof Map ? schemas.get(n) : schemas?.[n]);
+  const readControls = (n) => (controls instanceof Map ? controls.get(n) : controls?.[n]) ?? [];
   const errors = [];
   const warnings = [];
 
@@ -382,7 +363,7 @@ export function findMalformedOperationCalls(docs = [], schemas = new Map(), cont
       if (call.exempt) continue;
       const input = readSchema(call.op);
       if (input === undefined) continue; // unknown operation — never a finding
-      const { unknown, missing } = judgeOperationCall({ flags: call.flags, input, controlFlags });
+      const { unknown } = judgeOperationCall({ flags: call.flags, input, controlFlags: readControls(call.op) });
 
       for (const flag of unknown) {
         errors.push({
@@ -397,15 +378,6 @@ export function findMalformedOperationCalls(docs = [], schemas = new Map(), cont
         });
       }
 
-      for (const flag of missing) {
-        warnings.push({
-          message:
-            `operation call omits a required input (#3253): ${file}:${call.line} invokes \`${call.op}\` without `
-            + `\`--${flag}\`, which the operation declares \`required: true\`. If this line is an abbreviated `
-            + 'illustration rather than a command to run, put `@operation-home-ok: <reason>` on it.',
-          descriptor: { kind: 'operation-call-missing-required', file, line: call.line, operation: call.op, flag },
-        });
-      }
     }
   }
   return { errors, warnings };

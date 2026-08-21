@@ -230,7 +230,7 @@ describe('#3253 — operation call sites judged against declared inputs', () => 
     blockedBy: { type: 'string', required: false },
   };
   const doc = (content, file = 'skills-src/x/SKILL.md') => [{ file, content }];
-  const scan = (content) => findMalformedOperationCalls(doc(content), new Map([['scaffold', scaffold]]), CONTROL);
+  const scan = (content) => findMalformedOperationCalls(doc(content), new Map([['scaffold', scaffold]]), new Map([['scaffold', CONTROL]]));
 
   it('ERRORS on the rename class — the kebab-case spelling the raw home uses', () => {
     // THE WHOLE POINT. `backlog.mjs scaffold` takes `--workitem`; the operation declares `workItem`. The CLI
@@ -251,20 +251,13 @@ describe('#3253 — operation call sites judged against declared inputs', () => 
   it('accepts every declared input and every CLI control flag', () => {
     const r = scan('`node scripts/operations/run.mjs scaffold --title=x --workItem=story --blockedBy=12 --json --cwd=/l`');
     expect(r.errors).toEqual([]);
-    expect(r.warnings).toEqual([]);
   });
 
-  it('WARNS (never errors) on a missing required input — prose shows abbreviated commands', () => {
-    const r = scan('`node scripts/operations/run.mjs scaffold --workItem=story`');
-    expect(r.errors).toEqual([]);
-    expect(r.warnings).toHaveLength(1);
-    expect(r.warnings[0].descriptor).toMatchObject({ kind: 'operation-call-missing-required', flag: 'title' });
-  });
 
   it('an operation whose schema could not be built produces NO finding', () => {
     // Absence of evidence is not evidence of a defect — the same line the wiring scan draws around a home
     // whose source it could not read, and `verify` draws around `unrun`.
-    const r = findMalformedOperationCalls(doc('`node scripts/operations/run.mjs mystery --whatever=1`'), new Map(), CONTROL);
+    const r = findMalformedOperationCalls(doc('`node scripts/operations/run.mjs mystery --whatever=1`'), new Map(), new Map());
     expect(r.errors).toEqual([]);
     expect(r.warnings).toEqual([]);
   });
@@ -280,27 +273,8 @@ describe('#3253 — operation call sites judged against declared inputs', () => 
   });
 
   // ── the two the live tree taught it ────────────────────────────────────────────────────────────────────
-  it('a WRAPPED invocation is one invocation — the flag on the next line counts (live-tree false positive)', () => {
-    // `we:skills-src/next-backlog-item/SKILL.md` wraps a scaffold call so `--title` lands on the next line.
-    const r = scan('   **`node scripts/operations/run.mjs scaffold\n   --title=x --workItem=story --json`**');
-    expect(r.warnings).toEqual([]);
-    expect(r.errors).toEqual([]);
-    expect(extractOperationCalls('node scripts/operations/run.mjs scaffold\n  --title=x').flat()[0].flags).toContain('title');
-  });
 
-  it('a continuation stops at the first line that is not purely flags', () => {
-    // The absorbing rule must not swallow the paragraph after a fenced command.
-    const calls = extractOperationCalls('node scripts/operations/run.mjs scaffold --title=x\nThen do something else --nope');
-    expect(calls[0].flags).toEqual(['title']);
-  });
 
-  it('a --resume carries NO inputs, so requiring them is the gate\'s bug (live-tree false positive)', () => {
-    // `we:skills-src/review/SKILL.md`'s three resume lines were each reported as missing --pr and --repo.
-    // The inputs were supplied on the ORIGINAL call and live in the run record.
-    const r = scan('`node scripts/operations/run.mjs scaffold --resume=abc --answer=accept`');
-    expect(r.warnings).toEqual([]);
-    expect(r.errors).toEqual([]);
-  });
 
   it('but a typo on a --resume line is still a typo', () => {
     const r = scan('`node scripts/operations/run.mjs scaffold --resume=abc --nope=1`');
@@ -313,7 +287,7 @@ describe('#3253 — operation call sites judged against declared inputs', () => 
 describe('#3253 — only ARGV counts, not everything that looks like it (PR #1526 juror)', () => {
   const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
   const scaffold = { title: { type: 'string', required: true }, workItem: { type: 'string', required: false } };
-  const scan = (content) => findMalformedOperationCalls([{ file: 'f.md', content }], new Map([['scaffold', scaffold]]), CONTROL);
+  const scan = (content) => findMalformedOperationCalls([{ file: 'f.md', content }], new Map([['scaffold', scaffold]]), new Map([['scaffold', CONTROL]]));
 
   it('a trailing shell comment is NOT argv', () => {
     // The likely shape: PR #1522 moved these docs TO trailing `#` comments because HTML comments break inside
@@ -344,29 +318,60 @@ describe('#3253 — only ARGV counts, not everything that looks like it (PR #152
 });
 
 // ── the fourth false-positive class, found by PR #1526 round 2 ───────────────────────────────────────────────
-describe('#3253 — a continuation is flags ONLY, not flags-then-prose (PR #1526 round 2)', () => {
-  const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
-  const scaffold = { title: { type: 'string', required: true }, workItem: { type: 'string', required: false } };
-  const scan = (content) => findMalformedOperationCalls([{ file: 'f.md', content }], new Map([['scaffold', scaffold]]), CONTROL);
 
-  it('does NOT absorb a prose line that merely OPENS with a flag name', () => {
-    // The sentence this gate invites people to write. Documenting the rename it exists to catch would
-    // otherwise produce a false finding ABOUT that documentation.
-    const md = 'node scripts/operations/run.mjs scaffold --title=x --json\n'
-      + '--workitem is the raw home spelling; the operation declares --workItem';
-    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'json']);
+// ── the fifth class, found by PR #1526 round 3: a FALSE NEGATIVE, not a false positive ──────────────────────
+describe('#3253 — control flags are per-operation, not a flat union (PR #1526 round 3)', () => {
+  const scaffold = { title: { type: 'string', required: true } };
+  const doc = (content) => [{ file: 'f.md', content }];
+  const scan = (content, controls) => findMalformedOperationCalls(doc(content), new Map([['scaffold', scaffold]]), controls);
+
+  it('ERRORS on a juror flag passed to an operation with no judge step', () => {
+    // `--cwd`/`--model` mean the juror's lane and model. On a compute-only operation the CLI refuses them, so
+    // a gate that accepts them green-lights a command that cannot run — the one job it claims to do.
+    const r = scan('`node scripts/operations/run.mjs scaffold --title=x --cwd=/lane`',
+      new Map([['scaffold', ['help', 'json', 'resume', 'answer', 'run-id']]]));
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0].descriptor.flag).toBe('cwd');
+  });
+
+  it('ACCEPTS the same flag on an operation that DOES declare a judge step', () => {
+    // The other half. Without it, "reject every control flag" passes the case above.
+    const r = scan('`node scripts/operations/run.mjs scaffold --title=x --cwd=/lane`',
+      new Map([['scaffold', ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model']]]));
+    expect(r.errors).toEqual([]);
+  });
+
+  it('an operation with no entry in the map accepts no control flags — over-report, never under-report', () => {
+    const r = scan('`node scripts/operations/run.mjs scaffold --title=x --json`', new Map());
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0].descriptor.flag).toBe('json');
+  });
+});
+
+// ── what this gate DELIBERATELY does not do (PR #1526 round 3) ───────────────────────────────────────────────
+describe('#3253 — one physical line, and the miss is stated not hidden', () => {
+  const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
+  const scaffold = { title: { type: 'string', required: true } };
+  const scan = (c) => findMalformedOperationCalls([{ file: 'f.md', content: c }],
+    new Map([['scaffold', scaffold]]), new Map([['scaffold', CONTROL]]));
+
+  it('does not scan a continuation line — a MISS, never a false alarm', () => {
+    // The absorber that used to read these caused two of this gate's five defects. Removing it means an
+    // unknown flag on a wrapped line goes unreported; that is the safe direction and it is pinned here so the
+    // limitation is a decision on the record rather than an accident someone re-"fixes" later.
+    const md = 'node scripts/operations/run.mjs scaffold --title=x\n  --nope=1';
+    expect(extractOperationCalls(md)[0].flags).toEqual(['title']);
     expect(scan(md).errors).toEqual([]);
   });
 
-  it('still absorbs a genuine wrapped invocation', () => {
-    // The other half — "never continue" would pass the case above vacuously and re-break the #1526 round-1 fix.
-    const md = 'node scripts/operations/run.mjs scaffold\n  --title=x --workItem=story --json';
-    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'workItem', 'json']);
-    expect(scan(md).warnings).toEqual([]);
+  it('a real markdown-decorated wrapped call produces NO false finding', () => {
+    // Verbatim shape from `we:skills-src/next-backlog-item/SKILL.md`: bracketed optional flags, a trailing
+    // `**`, a `(#card)` tail. The round-2 absorber mis-read this; nothing reads it now.
+    const md = "**`node scripts/operations/run.mjs scaffold\n  --title='…' [--parent=NNN] --json`** (#xrrpfo7).";
+    expect(scan(md).errors).toEqual([]);
   });
 
-  it('a quoted value with spaces is ONE token, not four', () => {
-    const md = "node scripts/operations/run.mjs scaffold\n  --title='a b c' --json";
-    expect(extractOperationCalls(md)[0].flags).toEqual(['title', 'json']);
+  it('still reports an undeclared flag on the invocation line itself', () => {
+    expect(scan('`node scripts/operations/run.mjs scaffold --title=x --workitem=story`').errors).toHaveLength(1);
   });
 });

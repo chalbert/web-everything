@@ -102,6 +102,29 @@ export function declaresJudgeStep(declaration) {
 }
 
 /**
+ * Which control flags THIS declaration actually accepts. PURE.
+ *
+ * `CONTROL_FLAGS` is the union across all operations and is NOT the per-operation answer: `--cwd`/`--model`
+ * are refused where there is no `judge` step, and `--resume`/`--answer`/`--run-id` where the run cannot
+ * suspend. The unknown-flag refusal below already filters exactly this way; this lifts that filter out so a
+ * SECOND caller can ask the same question instead of re-deriving it (#2644).
+ *
+ * THE SECOND CALLER IS THE #3253 GATE, and it needed this (PR #1526 round 3). Judging every call site against
+ * the flat union made the gate accept `--cwd` on `scaffold` — a command the real CLI refuses. That is a false
+ * NEGATIVE rather than a false positive, so milder than this gate's other bugs, but a validator that
+ * green-lights a command the CLI rejects is not doing the one job it claims to do.
+ */
+export function acceptedControlFlags(declaration) {
+  const judged = declaresJudgeStep(declaration);
+  const resumable = !isReadOnlyOperation(declaration);
+  return CONTROL_FLAGS.filter((f) => {
+    if (JUROR_FLAGS.includes(f)) return judged;
+    if (RESUME_FLAGS.includes(f)) return resumable;
+    return true;
+  });
+}
+
+/**
  * What `--help` says about the juror flags, for a declaration that has a `judge` step.
  *
  * IT NAMES THE REFUSAL IT PREVENTS, verbatim enough to be searchable: an operator who has already hit
@@ -256,12 +279,9 @@ export function parseOperationArgv(declaration, argv = []) {
       // EVERY HALF OF THIS LIST IS DERIVED, not just the juror half. Naming `--resume`/`--answer`/`--run-id` on
       // a `compute`-only operation would advertise flags the usage text three lines below says cannot apply —
       // the same "listed as accepted, refused in practice" trap the juror flags are filtered for.
-      const resumable = !isReadOnlyOperation(declaration);
-      const accepted = [...known, ...CONTROL_FLAGS.filter((f) => {
-        if (JUROR_FLAGS.includes(f)) return judged;
-        if (RESUME_FLAGS.includes(f)) return resumable;
-        return true;
-      })];
+      // The filter now lives in `acceptedControlFlags` so the #3253 gate asks the same question rather than
+      // re-deriving it — this refusal and that gate must never disagree about what is accepted.
+      const accepted = [...known, ...acceptedControlFlags(declaration)];
       errors.push(`unknown flag --${name} — \`${declaration.name}\` accepts ${accepted.map((k) => `--${k}`).join(', ')}`);
       continue;
     }

@@ -80,7 +80,7 @@ import { parseDeclaredHome } from './operations/registry.mjs';
 // The operation table and the CLI's own control-flag list, IMPORTED not restated (#2644): a second copy of
 // either is a second answer to "what may a call site pass", and the gate would drift from the CLI it judges.
 import { OPERATIONS, resolveOperation } from './operations/run.mjs';
-import { CONTROL_FLAGS } from './operations/cli-adapter.mjs';
+import { acceptedControlFlags } from './operations/cli-adapter.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
@@ -2205,15 +2205,23 @@ try {
   };
   if (existsSync(join(ROOT, 'docs'))) walkDocsMd(join(ROOT, 'docs'), 'docs');
 
+  // PER-OPERATION control flags, not the flat union (PR #1526 round 3): `--cwd`/`--model` are refused where
+  // there is no `judge` step, so judging every site against `CONTROL_FLAGS` green-lit `--cwd` on `scaffold` —
+  // a command the real CLI rejects. `acceptedControlFlags` IS the adapter's own filter, so the gate and the
+  // refusal cannot disagree.
   const schemas = new Map();
+  const controls = new Map();
   for (const name of Object.keys(OPERATIONS)) {
     try {
       const { declaration } = resolveOperation(name);
-      if (declaration?.input) schemas.set(name, declaration.input);
+      if (declaration?.input) {
+        schemas.set(name, declaration.input);
+        controls.set(name, acceptedControlFlags(declaration));
+      }
     } catch { /* unbuildable on this host — stays unknown, which never produces a finding */ }
   }
 
-  const calls = findMalformedOperationCalls(docs, schemas, CONTROL_FLAGS);
+  const calls = findMalformedOperationCalls(docs, schemas, controls);
   for (const e of calls.errors) err(e.message, e.descriptor);
   for (const w of calls.warnings) warn(w.message, w.descriptor);
 } catch (e) {
