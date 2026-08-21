@@ -445,8 +445,13 @@ async function claimViaOperation() {
   // would STALL waiting for a hand-off that never comes. Detect that context DETERMINISTICALLY (the
   // conveyor's `conveyor-*` session-slug convention, or an explicit `--background` flag the agent passes)
   // and, for the ACTIVE claim, replace the whole rename + stop block with a one-line "no stop"
-  // acknowledgement so the agent proceeds. Interactive human sessions — and the `preparing` claim, which
-  // already has no stop — are unchanged.
+  // acknowledgement so the agent proceeds.
+  //
+  // STILL LOAD-BEARING AFTER #xd0hvsg, though it is no longer the ONLY way out. Its last sentence used to
+  // read "interactive human sessions … are unchanged", which is now false — the stop is opt-in, so an
+  // ordinary interactive claim does not stop either. What this flag still buys is PRECEDENCE: it asserts
+  // there is no human to end the turn, so it wins even when `--stop-for-rename` is also passed, and an agent
+  // can never be stalled by a caller that asked for both.
   const background = claimedStatus === 'active'
     && (argv.includes('--background') || (flag('session') ?? '').startsWith('conveyor-'));
 

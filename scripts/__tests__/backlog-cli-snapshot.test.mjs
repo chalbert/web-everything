@@ -101,11 +101,15 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
     expect(after).toContain('# Title'); // body untouched
   });
 
-  // #2621: the interactive two-turn "rename the chat / ⏸ stop here" message stalls a background delivery
-  // agent (no human to end the turn), so `claim` suppresses it for a conveyor/background session — detected
-  // by a `conveyor-*` session slug or an explicit `--background` flag. An item is claimable ONCE
-  // (open→active), so each case below uses a FRESH item and a single claim, asserting the human-readable
-  // stdout (the message text carries the signal) plus the machine-readable `background` field.
+  // #2621: the two-turn "rename the chat / ⏸ stop here" message stalls a background delivery agent (no human
+  // to end the turn), so `claim` suppresses it for a conveyor/background session — detected by a `conveyor-*`
+  // session slug or an explicit `--background` flag. An item is claimable ONCE (open→active), so each case
+  // below uses a FRESH item and a single claim, asserting the human-readable stdout (the message text carries
+  // the signal) plus the machine-readable `background` field.
+  //
+  // READ THIS BLOCK AS OF #xd0hvsg, NOT #2621: it described the carve-out as the exception to an otherwise
+  // always-on stop, and that framing is dead. The stop is now opt-in for everyone; `--background` survives as
+  // PRECEDENCE (it wins over `--stop-for-rename`), not as the only escape.
 
   // #xd0hvsg INVERTED THE DEFAULT. The stop belongs to the /next SELECTION hand-off, which now asks for it
   // with `--stop-for-rename`; every other caller proceeds in the same turn. Before this, `--background` was
