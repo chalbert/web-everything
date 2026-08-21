@@ -33,6 +33,12 @@ So the **label-scoped drain client-side path blocks a `review:changes`-only PR**
 
 ## Fix direction
 
+> **SUPERSEDED for bullets 1 and 2 — see the 2026-08-21 re-verification below.** The client-side hard veto
+> both bullets ask for SHIPPED as #2820: `classifyPr` in `we:scripts/merge-ai-prs.mjs` (~L534, ~L561–594)
+> now ANDs `hasUnclearedReviewLabel` against `ready-to-merge` — the merge decision is an AND, never an OR on
+> `ready-to-merge` alone — and flags `reviewHeld`. Only bullet 3 (the server-side belt) is still open. Kept
+> verbatim as the filing record; do not build 1 or 2.
+
 **A PR carrying `review:changes` must NOT be merged** — treat it as non-landable until it is re-reviewed to `review:accepted`:
 
 - Make `review:changes` a **first-class merge veto** with the same strength as `review:human`: a hard block that is checked **alongside / before** the `review:accepted` short-circuit, so a coexisting `review:changes` cannot be overridden by a stale `review:accepted`.
@@ -96,3 +102,129 @@ So make the accept branch **refuse** when `review:changes` is live (the same sha
 - **#2309** (resolved) — `review:human` is a sticky merge veto, not only a fresh-diff score. Same *class* of fix (sticky veto + a recommended server-side belt) but a **different label/axis**: `review:human` = gate-self, human-only clear; `review:changes` = reviewer rejected the diff, the author lane must re-push. #2309 hardened `review:human`; this item does the equivalent for `review:changes` (and #2309's own body flags STRIPPING `review:human`, a distinct concern).
 - **#2416** (open, sibling under #2405) — honor `review:accepted` only when a human applied it (the WHO/provenance of the accept). Different axis: this item is about `review:changes` never being overridden, not about who applied `review:accepted`.
 - **#2412** (open) — escalated blast-radius/statute parks auto-land un-reviewed on a merge-anyway timeout. Different mechanism (the timeout path), same goal (no un-reviewed land).
+
+## Prep re-verification (2026-08-21) — half of this item has been closed by #2974, and its ruled fix was overruled
+
+Read this before building. Three of the four things above were re-checked against the live tree and two have
+moved.
+
+**1. The secondary finding — the asymmetric accept swap — is FIXED, and by the opposite of the fix this item
+ruled.** `decideSetLabel`'s `accepted` branch in `we:scripts/review-set-label.mjs` now returns
+`removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.changes]`. The strip landed as #2974
+(`status: resolved`, `dateResolved: 2026-08-08`, `scope: ["we:scripts/review-set-label.mjs"]`), whose own
+comment says so in as many words: *"`changes` (below) already strips a stale `accepted`; `accepted` was the
+one asymmetric target."* So the section above titled **"Fix: REFUSE the transition, do NOT strip the label"**
+is **superseded** — do not build it. It is kept as the record of the reasoning, not as an instruction.
+
+The forward-looking hazard that reasoning raised is real and was NOT the thing #2974 answered: a strip in
+shared code ships into the automated accept path the day the enforce gate arms
+(`we:scripts/lib/auto-land-seam.mjs` shells `--to=accepted` with no human actor). That interaction is now
+LIVE in the code and un-guarded, so it is a genuine follow-on question — but it is a question about #2974's
+landed behaviour, not an argument for un-landing it inside this item.
+
+**2. `hasUnclearedReviewLabel` was updated in the same direction, deliberately.** Its `accepted + changes`
+clause in `we:scripts/lib/review-escalation.mjs` now reads: *"NOT refused. #2974 RULED that the reviewer
+verdict wins over a stale bounce… Refusing it here would reverse a ratified reading."* So residual **3**
+above (accept-first precedence) is no longer a defect — accept-over-changes is the ratified semantics. Do not
+"fix" `decideReviewGate`'s ordering; that would reverse a ruling.
+
+**2b. The client-side half was closed by #2820, and a same-day sibling already recorded that.**
+`we:backlog/2751-unresolved-review-label-must-veto-land.md` (`status: resolved`) was filed the SAME day as
+this card about the SAME PR #870 incident, and its prep note found that the "must not merge — AND, not OR on
+`ready-to-merge`" hard veto this card's *Fix direction* bullets 1–2 describe had already shipped as
+`we:backlog/2820-review-hold-labels-must-block-merge-regardless-of-ready-to-m.md`, landed in `classifyPr`
+(`we:scripts/merge-ai-prs.mjs`, the `HOLD-INTEGRITY (#2820)` block ~L534/~L561–594). #2751 explicitly asks
+whoever picks up #2750 next to check it against that evidence first — this pass did not, and the *Fix
+direction* section is now banner-marked accordingly. Note also that the *Current gate* section above frames
+`hasUnclearedReviewLabel` as a "bare-orphan-sweep backstop"; since #2820 it is `classifyPr`'s HOLD-INTEGRITY
+invariant on the main merge path, which is a stronger guarantee than that section credits.
+
+**3. Residual 1 — the server-side belt — is STILL OPEN and is now the whole item.** `grep` for
+`review:changes` across `we:.github/workflows/` returns nothing. The only workflow that touches review labels
+at all is `we:.github/workflows/apply-review-request.yml`, which *applies* verdicts; nothing blocks a merge.
+So a `gh pr merge` that does not route through `we:scripts/merge-ai-prs.mjs` still lands a `review:changes`
+PR, exactly as PR #870 did.
+
+**4. The four raw readers are still un-hardened.** Re-confirmed on this tree:
+`we:scripts/conveyor/pr-watch.mjs` `PARK_LABELS` (~L88) still lists `review:changes` and the file still has no
+concept of `review:accepted`; `we:scripts/conveyor/tick-core.mjs` `routeWatcherExit` `case 2` (~L659) still
+routes on `ls.includes(REVIEW_CHANGES_LABEL)` alone; `we:scripts/lane-resume.mjs` still derives
+`reviewChanges` from the label alone (~L121); `we:scripts/conveyor/status-board.mjs` still surfaces it. #2974's
+scope was the label WRITER only. Because the sanctioned writer now strips, the phantom-bounce state can only
+arise from an out-of-band label write — so this is a latent robustness gap, not the live one the earlier
+sighting notes described.
+
+## Design
+
+**Scope this to the belt.** After the re-verification above, the buildable residual is one thing: make
+`review:changes` block a merge at the GitHub layer, so a transport that never calls
+`we:scripts/merge-ai-prs.mjs` cannot land it. That is the follow-up #2309 named for `review:human` and never
+built, generalized to the changes axis.
+
+**The seam.** the `test` job in `we:.github/workflows/ci.yml` is the required check (the drain's `--assume-green`
+path and `pr-land` both gate on it). Two shapes:
+
+- **(a) a step inside `test`** that reads the PR's labels and fails when `review:changes` is present. Cheapest
+  — no new required check to register — but that workflow triggers on `on: pull_request: branches: [main]` with
+  **no `types:` filter**, so it runs on `opened`/`synchronize`/`reopened` and **not** on `labeled`/`unlabeled`.
+  A label applied after the last push would not re-run it, so the belt would be stale exactly when it matters.
+  Adding `types: [opened, synchronize, reopened, labeled, unlabeled]` fixes that but re-runs the entire
+  sharded suite on every label move — which the drain does constantly.
+- **(b) a new, tiny required check** in its own workflow keyed on `pull_request: types: [labeled, unlabeled,
+  opened, synchronize, reopened]` that does nothing but read labels and exit non-zero on `review:changes`.
+  Seconds to run, safe to fire on every label change, and registerable as required independently of `test`.
+  `we:.github/workflows/apply-review-request.yml` is the precedent for a narrow, least-privilege,
+  label-scoped workflow in this repo (`permissions: pull-requests: write` / `contents: read`; this one needs
+  only `pull-requests: read`).
+
+(b) is the shape the trigger analysis points at; rule it explicitly rather than discovering the `types:`
+problem after wiring (a).
+
+**Say plainly what the belt cannot do.** Making the check *required* is a branch-protection setting, which
+lives in GitHub settings rather than in the repo. The workflow itself lands in this item and is fully
+buildable; flipping the new check to required afterwards is a one-click operator step that must be called out
+on the PR, or the belt ships inert and reads as done.
+
+**Do not touch `decideReviewGate` ordering or `decideSetLabel`'s accept branch** — see re-verification 1 and 2.
+
+## Done when
+
+1. A new workflow at `we:.github/workflows/` exits **non-zero** on a PR carrying `review:changes` and zero
+   without it, and its `on:` block includes `labeled` and `unlabeled` — so applying the label after the last
+   push re-fires it. Verify against a scratch PR (label on → check red; label off → check green) and record
+   both runs on the item. (Tier 1.)
+2. Its pure decision — "these labels ⇒ block" — lives in a unit-tested function, not inline in YAML, so
+   `npx vitest run` covers `review:changes` present, absent, and co-present with `review:accepted` (which
+   must still BLOCK at the server layer even though `decideReviewGate` merges on it — the belt is the
+   fail-closed backstop, and this asymmetry is the whole point of a second layer). (Tier 1.)
+3. The workflow declares `permissions:` no wider than `pull-requests: read`, and is not
+   `pull_request_target`. One read of the workflow header, against the trust-boundary note in
+   `we:.github/workflows/apply-review-request.yml`. (Tier 2.)
+4. The post-land operator step — registering the new check as **required** in branch protection — is stated
+   on the PR body and on this item, with the check's exact name. An item that ships the workflow without
+   saying this reads as done while the belt is inert. (Tier 3.)
+5. Nothing in `we:scripts/lib/review-escalation.mjs` `decideReviewGate` or
+   `we:scripts/review-set-label.mjs` `decideSetLabel` changed. Both encode #2974's ratified accept-over-stale-
+   bounce reading, and reversing it is out of scope here. (Tier 2 — one `git diff --stat` over those two
+   files shows no change.)
+
+## Independent review — 2026-08-21
+
+Confidence: **Medium**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (NOT addressed; strategy: verify by mutation or reversion up front) — The card's 2026-08-21 re-verification pass is genuinely careful (confirms PR #870's merge commit 11f68b1c via git log, confirms #2974 already fixed the asymmetric accept-swap in we:scripts/review-set-label.mjs, confirms hasUnclearedReviewLabel's accepted+changes carve-out is ratified rather than a bug), but it never searched the backlog corpus for prior work on the same incident. we:backlog/2751-unresolved-review-label-must-veto-land.md was filed the SAME DAY (2026-07-28) about the SAME PR #870, and its own resolved (2026-08-15) prep note found the exact 'must not merge, AND not OR on ready-to-merge' hard veto (this card's Fix-direction bullets 1-2) already shipped and hardened over four independent review rounds as we:backlog/2820-review-hold-labels-must-block-merge-regardless-of-ready-to-m.md, landed in we:scripts/merge-ai-prs.mjs's classifyPr (the 'HOLD-INTEGRITY (#2820)' block, confirmed live: it ANDs hasUnclearedReviewLabel against ready-to-merge and skips with reviewHeld=true). #2751's prep explicitly says: 'whoever picks it next should check it against the same #2820 evidence above before scoping any build work into it' — #2750 does not. The card's own 'Current gate' section already cites hasUnclearedReviewLabel and correctly concludes the drain currently blocks a review:changes-labeled PR, but frames that predicate merely as a 'bare-orphan-sweep backstop' rather than naming it as classifyPr's #2820 HOLD-INTEGRITY invariant — so the card ends up at the right final scope (the belt only) without ever crediting or citing the item that already closed the client-side half, and its un-superseded 'Fix direction' bullets 1-2 read as still-open asks that a builder or future reviewer could mistake for live work, costing a review round to re-discover what #2751 already established. This is a real gap in an otherwise strong verification pass, not a correctness defect in the final Done-when scope.
+- **decorative-guard** (addressed; strategy: mutate the guarded line; require a NAMED test to redden) — The whole point of this item is a new enforcement gate, and the card guards against it being a no-op: Done-when item 1 requires an actual scratch-PR red/green test (not just a passing unit test), and item 4 explicitly calls out that flipping the check to 'required' in branch protection is a manual step that must be stated on the PR or 'the belt ships inert and reads as done.'
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — Item 4 of Done-when directly targets this: the operator step (registering the new check as required) is a GitHub-settings action outside the repo that a grep/test cannot verify, so the card requires it be stated explicitly with the check's exact name rather than left as a silent assumption.
+- **interface** (addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — Done-when item 2 requires the label-based decision to live in a unit-tested pure function (present/absent/co-present-with-accepted), not inline YAML — a round-trip test at the seam between the label state and the new workflow's pass/fail.
+- **consumer** (addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — For the parts it touches (decideSetLabel's accept branch), the card traces consumers both ways — ES import (we:scripts/lib/disposition-land-seam.mjs) and subprocess/shell caller (we:scripts/lib/auto-land-seam.mjs shelling `we:scripts/review-set-label.mjs` with `--to=accepted`) — which is exactly why it correctly refuses to touch that branch.
+
+**Corrections applied by this review:**
+
+- The card never cites we:backlog/2751-unresolved-review-label-must-veto-land.md (a same-day sibling about the identical PR #870 incident) nor we:backlog/2820-review-hold-labels-must-block-merge-regardless-of-ready-to-m.md (which already shipped, in we:scripts/merge-ai-prs.mjs's classifyPr, the exact client-side AND-based hard veto the card's own 'Fix direction' bullets 1-2 describe as still needed) — #2751's own resolved prep note explicitly asks whoever picks up #2750 next to check it against that evidence first.
+- The 'Fix direction' section's first two bullets (make review:changes a hard block checked alongside/before review:accepted; treat ready-to-merge+review:changes as a re-parked invariant violation) describe work already shipped via #2820 and are not marked superseded the way the 'Secondary contributing factor' section explicitly is — only the later 'Design' section ('Scope this to the belt') makes clear these are done, so a reader stopping earlier could mistake them for open asks.
+
+The preparation's technical re-verification against the live repo is unusually careful and accurate (line numbers, PR merge commit, #2974's fix all check out), and its final scope (Design/"Done when": build only the server-side belt) is sound and non-duplicative — but it never cites backlog #2751, a same-day sibling about the exact same PR #870 incident whose own resolved prep note already found the client-side "hard veto" (fix-direction bullets 1–2) shipped via #2820, and explicitly told whoever works #2750 next to check it against that evidence.
+
+_Recorded through the declared `review-prep` operation._
