@@ -186,11 +186,20 @@ an item*). The backlog file is the durable, resumable record — the item body *
 
 4. **Claim it on start — claiming is its own turn; do not start work in it.** This step runs whenever you
    flip an item to `active`, **including decision-mode** (0b/3a/3b), where the claimable work is the
-   discussion itself. Run **`node scripts/backlog.mjs claim <NNN>`** — it wins the race (refuses if no
-   longer `open`, or if the item's own file has uncommitted edits — the claim-first guard, `--force` to
-   override), flips `open → active` + stamps `dateStarted` (today) in one splice,
-   and prints the rename slug. (`check:standards` does not backfill `dateStarted`, so the stamping command
-   is the point; `dateResolved`/`graduatedTo` come later, at step 7.) Then **STOP that turn immediately** —
+   discussion itself. Run the OPERATION — **`node scripts/operations/run.mjs claim --ref=<NNN> --json`**
+   (#3034). It declares over `we:scripts/backlog.mjs`'s own `transition()` and replays its guard order in a
+   pure `plan` step, so the refusals are identical — it wins the race (refuses if no longer `open`, if the
+   item is queued or prepare-held, or if the item's own file has uncommitted edits — the claim-first guard,
+   `--force=true` to override), flips `open → active` + stamps `dateStarted` (today) in one splice, and
+   prints the rename slug. (`check:standards` does not backfill `dateStarted`, so the stamping command is the
+   point; `dateResolved`/`graduatedTo` come later, at step 7.)
+
+   > **It has no `--dry-run`: invoking it CLAIMS.** There is no way to inspect its interface without causing
+   > the write, so do not run it to "see what it does" — `--help` prints the derived flags without touching
+   > anything. Note also that its guards do NOT include `blockedBy`: it will claim a blocked item, so the
+   > readiness check in steps 1–3 is what keeps that from happening, not the operation.
+
+   Then **STOP that turn immediately** —
    the claim edit and the label prompt are the *only* things that turn does. Do **not** chain reads,
    planning, or any other tool call after the flip; if you keep working, the label prompt gets buried and
    silently skipped. End the turn with a "Claimed #NNN — starting next" note, then the label prompt (Claude
