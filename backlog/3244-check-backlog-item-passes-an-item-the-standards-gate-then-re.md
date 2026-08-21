@@ -10,10 +10,10 @@ tags: []
 
 # check-backlog-item passes an item the standards gate then rejects
 
-A duplicate of #3201, resolved as such rather than because the work happened twice. Both cards carry `bornAs: x2t6cr5` and byte-identical bodies; #3201 is the real item and was resolved 2026-08-20. This copy was minted when a stale hash-named file was swept into an unrelated commit and the drain numbered it. `check:standards` now errors on an unresolved `bornAs` twin, which is the structural fix.
+A duplicate of #3201, resolved as such rather than because the work happened twice. Both cards carry `bornAs: 3244` and byte-identical bodies; #3201 is the real item and was resolved 2026-08-20. This copy was minted when a stale hash-named file was swept into an unrelated commit and the drain numbered it. `check:standards` now errors on an unresolved `bornAs` twin, which is the structural fix.
 
 > **DUPLICATE OF #3201 — resolved as such, not because the work happened twice.** Both cards carry
-> `bornAs: x2t6cr5` and byte-identical bodies. #3201 is the real item and was resolved 2026-08-20.
+> `bornAs: 3244` and byte-identical bodies. #3201 is the real item and was resolved 2026-08-20.
 >
 > This copy exists because a stale hash-named file sat in a lane's working tree after the original had
 > already landed, a `git add -A` swept it into an unrelated commit, and the drain — doing exactly its job —
