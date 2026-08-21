@@ -80,6 +80,9 @@ import {
 } from '../lib/review-core.mjs';
 import { DISPOSITIONS } from '../lib/jury-core.mjs';
 import { renderPanelComment } from '../lib/review-render.mjs';
+// #xwp8ioh — the SAME predicate `we:scripts/review-set-label.mjs` enforces at the write side (#2953), imported
+// rather than restated, so the read side and the write side cannot drift into two answers (#2644).
+import { classifyPrLiveness, inertPrMessage } from '../lib/pr-liveness.mjs';
 // THE GUARD, IMPORTED NOT INJECTED — see property 2 in the header.
 import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 
@@ -216,6 +219,22 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
   const detail = raw.detail && typeof raw.detail === 'object' ? raw.detail : {};
   const net = raw.net && typeof raw.net === 'object' ? raw.net : {};
   const diff = raw.diff && typeof raw.diff === 'object' ? raw.diff : {};
+
+  // #xwp8ioh — THE LIVENESS REFUSAL, FIRST on purpose: before the net-diff contract check, before any
+  // shaping, and — because this is the `read` step — before `judge` spends a juror. `we:scripts/review-set-
+  // label.mjs` has refused an inert PR since #2953, but only at the WRITE side, so the cost was already sunk
+  // by the time it fired. On 2026-08-20 that meant three correctness rounds (~$4) against PR #1503, which had
+  // merged two hours before round 1 began; every refusal was right and every one of them was too late.
+  //
+  // `unknown` refuses too. A read that could not report the state has not told us the PR is live, and
+  // reviewing on "we couldn't tell" is the absence-of-evidence-as-evidence move this engine refuses
+  // everywhere else (`verify`'s `unrun`, #3203's killed-vs-crashed juror).
+  const liveness = classifyPrLiveness({ state: raw.state });
+  if (liveness.outcome !== 'reviewable') {
+    throw new Error(
+      `review-pr.read: ${inertPrMessage({ pr: `${repo}#${pr}`, state: liveness.state, phase: 'read' })}`,
+    );
+  }
 
   if (net.scored !== true && net.reason === 'exec-contract') {
     throw new Error(
