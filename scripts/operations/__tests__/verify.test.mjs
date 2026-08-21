@@ -23,9 +23,35 @@ describe('the declaration', () => {
   it('derives its own command line from the declaration — no argv code', () => {
     const decl = verifyOperation({ runChecks: () => ({ checks: [check()] }) });
     expect(decl.name).toBe(VERIFY_OP);
-    expect(Object.keys(decl.input)).toEqual(['checkout', 'mode']);
+    expect(Object.keys(decl.input)).toEqual(['checkout', 'mode', 'gate']);
     expect(decl.input.checkout.required).toBe(true);
     expect(decl.input.mode.enum).toEqual([...VERIFY_MODES]);
+    // #xvj8sj0 — OPTIONAL, defaulting to empty, which the io reads as "let the home apply its own default".
+    // Making it required would break every existing caller; giving it a default HERE would restate the home's.
+    expect(decl.input.gate).toMatchObject({ required: false, default: '' });
+  });
+
+  // #3240 / PR #1516 correctness juror, CONFIRMED. The gate pass-through was tested only at the IO layer
+  // (`verifyArgv`, `createChecksRunner`). The DECLARATION's own `run` step — which threads `view.input.gate`
+  // into the injected `runChecks()` — had no test, and the juror proved it by dropping that field and watching
+  // the full 869-test operations suite stay green.
+  //
+  // That is the same defect this PR's own commit message claims to have killed ("the runner drops the field"),
+  // fixed one layer down and left standing one layer up. The two layers need separate tests because each can
+  // drop the value independently.
+  it('the `run` STEP threads the caller\'s gate into the injected runner (#3240)', () => {
+    const seen = [];
+    const decl = verifyOperation({ runChecks: (args) => { seen.push(args); return { checks: [check()] }; } });
+    const runStep = decl.steps.find((s) => s.name === 'run').step;
+    runStep.fn({ input: { checkout: '/lane-3', mode: 'run', gate: 'npm run locus:gate' } });
+    expect(seen).toEqual([{ cwd: '/lane-3', mode: 'run', gate: 'npm run locus:gate' }]);
+  });
+
+  it('the `run` step declares a READ of input.gate — an undeclared read is refused by the engine', () => {
+    // The engine only hands a step what it declared. Without `input.gate` in `reads`, the fn above would see
+    // `undefined` no matter what the caller passed, so the read list is part of the wiring, not bookkeeping.
+    const decl = verifyOperation({ runChecks: () => ({ checks: [check()] }) });
+    expect(decl.steps.find((s) => s.name === 'run').step.reads).toContain('input.gate');
   });
 
   // Defaulting to `process.cwd()` is the #1178 shape: an operation that verifies whichever directory the
@@ -109,6 +135,44 @@ describe('verifyArgv — it shells the home, and the home is this repo\'s', () =
   it('uses the home\'s own read-only subcommand for `check`, as a positional before the flags', () => {
     expect(verifyArgv({ checkout: '/lane-3', mode: 'check' }))
       .toEqual([VERIFY_LANE_CLI, 'check', '--repo=/lane-3', '--json']);
+  });
+
+  // #xvj8sj0 — the gate pass-through. Found by the #3224 scan: the delivery-agent brief runs the home with the
+  // item's LOCUS gate, and with no `gate` input, rewiring that line to the operation would have run the
+  // DEFAULT suite while reporting green — the PR #1508 shape of a rewrite that silently drops what the raw
+  // call did.
+  describe('the caller\'s gate reaches the home (#xvj8sj0)', () => {
+    it('forwards a supplied gate as ONE argv element', () => {
+      // One element, not shell-split. The value is a full command line containing `&&`, and splitting it here
+      // would hand the home a fragment and leak the rest toward a shell.
+      expect(verifyArgv({ checkout: '/lane-3', mode: 'run', gate: 'npm run test:unit && npm run check:standards' }))
+        .toEqual([VERIFY_LANE_CLI, '--repo=/lane-3', '--json', '--gate=npm run test:unit && npm run check:standards']);
+    });
+
+    it('OMITS the flag when no gate is given, so the home applies its own default', () => {
+      // `--gate=` is not "use the default": the home reads it as a string and would run the EMPTY command.
+      // The default itself is never restated here — one answer per question (#2644).
+      for (const gate of ['', '   ', undefined]) {
+        expect(verifyArgv({ checkout: '/lane-3', mode: 'run', gate })).not.toContain('--gate=');
+        expect(verifyArgv({ checkout: '/lane-3', mode: 'run', gate })).toEqual([VERIFY_LANE_CLI, '--repo=/lane-3', '--json']);
+      }
+    });
+
+    it('never passes a gate in `check` mode, which runs no suites at all', () => {
+      // `check` reads the marker HEAD already carries. A gate there is an argument the home ignores, which
+      // reads to the next author as though the mode honoured it.
+      expect(verifyArgv({ checkout: '/lane-3', mode: 'check', gate: 'npm run test:unit' }))
+        .toEqual([VERIFY_LANE_CLI, 'check', '--repo=/lane-3', '--json']);
+    });
+
+    it('the runner carries the gate from its caller through to the argv', () => {
+      // The WIRING, not just the pure function — the PR #1510 blocker in one assertion: every test above
+      // would pass while `createChecksRunner` dropped the field on the floor.
+      let seen = null;
+      const run = createChecksRunner({ spawn: (_exe, argv) => { seen = argv; return { status: 0, stdout: '{"status":"green","sha":"abc"}' }; } });
+      run({ cwd: '/lane-3', mode: 'run', gate: 'npm run locus:gate' });
+      expect(seen).toContain('--gate=npm run locus:gate');
+    });
   });
 
   // Resolved from THIS file, never from cwd: the operation may verify another checkout, and the script that

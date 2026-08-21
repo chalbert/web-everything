@@ -3,8 +3,9 @@ bornAs: xvj8sj0
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: []
 ---
 
@@ -14,4 +15,12 @@ The `verify` operation shells `we:scripts/verify-lane.mjs` but forwards no gate,
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/operations/__tests__/verify.test.mjs` passes, covering the
+   pass-through at BOTH layers, because each can drop the value independently: the declaration's `run` step
+   calls the injected runner WITH the gate and declares `input.gate` in its reads, and `verifyArgv` forwards a
+   non-empty gate as one argv element while omitting the flag entirely when it is empty or the mode is `check`.
+2. **Executable** — `npm run check:standards` reports no #3224 finding for
+   `we:skills-src/conveyor/delivery-agent-brief.md`, and that line names the operation with no
+   `@operation-home-ok` marker — the exemption is gone because the gap is closed, not because it was excused.
+3. **Observable** — the brief's prose no longer promises the home's `exit 2 = red` contract, which the
+   operation does not honour (#x0uj8hj).
