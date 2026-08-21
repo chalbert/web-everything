@@ -107,14 +107,47 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
   // (open→active), so each case below uses a FRESH item and a single claim, asserting the human-readable
   // stdout (the message text carries the signal) plus the machine-readable `background` field.
 
-  it('claim: an interactive session gets the two-turn stop message + rename prompt (#2621 baseline)', () => {
+  // #xd0hvsg INVERTED THE DEFAULT. The stop belongs to the /next SELECTION hand-off, which now asks for it
+  // with `--stop-for-rename`; every other caller proceeds in the same turn. Before this, `--background` was
+  // the only way out and only the conveyor knew to pass it, so a batch (which labels its session ONCE) and
+  // every directed claim were each told to stop and wait for a rename that was never coming.
+
+  it('claim: the stop is NOT emitted by default — the plain claim proceeds in the same turn (#xd0hvsg)', () => {
     write('9020-int.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
     const human = runHuman(['claim', '9020']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).not.toContain('claim turn — it ends here');
+    expect(human.stdout).not.toContain('Rename this chat');
+    expect(human.stdout).toContain('proceed with the work in the same turn');
+    expect(human.stdout).toContain('9020'); // the slug is still reported, as data
+    expect(read('9020-int.md')).toContain('status: active'); // it still really claims
+  });
+
+  it('claim: --stop-for-rename opts INTO the two-turn stop + rename prompt (#xd0hvsg, the /next path)', () => {
+    write('9030-sel.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const human = runHuman(['claim', '9030', '--stop-for-rename']);
     expect(human.code).toBe(0);
     expect(human.stdout).toContain('claim turn — it ends here');
     expect(human.stdout).toContain('Rename this chat');
     expect(human.stdout).not.toContain('background session — no stop');
-    expect(read('9020-int.md')).toContain('status: active'); // it still really claims
+    expect(read('9030-sel.md')).toContain('status: active');
+  });
+
+  it('claim: --background still wins over --stop-for-rename — an agent must never stall (#2621)', () => {
+    // The carve-out is the stronger claim: `--background` asserts there is NO human to end the turn, so a
+    // caller that passes both is asking for a hand-off that cannot happen. Background wins.
+    write('9031-both.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    const res = run(['claim', '9031', '--background', '--stop-for-rename']);
+    expect(res.code).toBe(0);
+    expect(res.json.background).toBe(true);
+    expect(res.json.stop).toBe(false);
+  });
+
+  it('claim: the JSON payload reports stop=true only when it was asked for (#xd0hvsg)', () => {
+    write('9028-a.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    write('9029-b.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
+    expect(run(['claim', '9028']).json.stop).toBe(false);
+    expect(run(['claim', '9029', '--stop-for-rename']).json.stop).toBe(true);
   });
 
   it('claim: the JSON payload carries background=false for an interactive claim (#2621)', () => {
@@ -150,12 +183,18 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
     expect(human.stdout).not.toContain('claim turn — it ends here');
   });
 
-  it('claim: a NON-conveyor --session does NOT suppress the stop message (carve-out is conveyor-only, #2621)', () => {
+  it('claim: a NON-conveyor --session is not treated as background (carve-out is conveyor-only, #2621/#xd0hvsg)', () => {
+    // THIS TEST ASSERTED TWO THINGS AND ONLY ONE SURVIVED #xd0hvsg. (a) the BACKGROUND carve-out is
+    // conveyor-only, so a batch slug must not slip into it — still true, still pinned below, and it is what
+    // the title has always been about. (b) "…therefore a batch session gets the stop" — no longer true, and
+    // it was never the carve-out's claim: it was the old default showing through. A batch labels its session
+    // ONCE (`we:skills-src/batch-backlog-items/SKILL.md`), so a per-item stop was always wrong for it.
     write('9023-batch.md', item({ kind: 'story', size: 2, status: 'open', dateOpened: '"2026-07-01"' }));
     const human = runHuman(['claim', '9023', '--session=batch-abc']);
     expect(human.code).toBe(0);
-    expect(human.stdout).toContain('claim turn — it ends here');
-    expect(human.stdout).not.toContain('background session — no stop');
+    expect(human.stdout).not.toContain('background session — no stop'); // (a) — the carve-out did NOT fire
+    expect(human.stdout).not.toContain('claim turn — it ends here');    // (b) — and no stop either, now
+    expect(human.stdout).toContain('proceed with the work in the same turn');
   });
 
   it('claim --as=preparing under a conveyor session keeps the prep (non-stop) message, NOT the background line (#2621)', () => {

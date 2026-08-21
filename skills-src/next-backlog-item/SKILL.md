@@ -186,14 +186,22 @@ an item*). The backlog file is the durable, resumable record — the item body *
 
 4. **Claim it on start — claiming is its own turn; do not start work in it.** This step runs whenever you
    flip an item to `active`, **including decision-mode** (0b/3a/3b), where the claimable work is the
-   discussion itself. Run **`node scripts/backlog.mjs claim <NNN>`** — and note WHY this one names the CLI
-   and not the operation, because the rule is easy to get backwards (this exact step was rewired to
-   `run.mjs claim` and the correctness juror on PR #1508 caught it as a regression):
+   discussion itself. Run **`node scripts/backlog.mjs claim <NNN> --stop-for-rename`**.
+
+   **The flag is what asks for the stop, and `/next` is the only caller that passes it** (#xd0hvsg). The
+   two-turn stop guards the SELECTION hand-off — a human renames the chat and re-prompts — so it belongs to
+   THIS flow, not to claiming in general. A batch labels its session once and a directed claim owns its own
+   turn structure; both proceed in the same turn. Omit the flag and the claim will not stop.
+
+   Also note WHY this step names the CLI and not the operation, because the rule is easy to get backwards
+   (this exact step was rewired to `run.mjs claim` and the correctness juror on PR #1508 caught it as a
+   regression):
 
    > **`backlog.mjs claim` ALREADY DELEGATES to the declared `claim` operation** (`claimViaOperation`, #3034)
    > — and then does three things the operation deliberately does not own: it clears any cross-session soft
    > reservation (#083 invariant 2), records the `.claude/skills/batch-backlog-items/claims.json` attribution
-   > baseline that `check:standards --scope=<session>` reads, and prints the rename slug + two-turn stop block
+   > baseline that `check:standards --scope=<session>` reads, and (given `--stop-for-rename`) prints the
+   > rename slug + two-turn stop block
    > that the rest of THIS step depends on. Calling the operation directly silently drops all three.
    >
    > **The rule, stated once:** name whichever caller COMPOSES the other. Where the CLI wraps the operation

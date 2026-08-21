@@ -449,21 +449,43 @@ async function claimViaOperation() {
   // already has no stop — are unchanged.
   const background = claimedStatus === 'active'
     && (argv.includes('--background') || (flag('session') ?? '').startsWith('conveyor-'));
+
+  // THE STOP IS OPT-IN, AND `/next` IS WHAT OPTS IN (#xd0hvsg).
+  //
+  // The hard-stop guards the SELECTION flow's two-go arc: there the claim really is the whole turn, a human
+  // renames the chat, and a present+discuss must not collapse into a commit. That is a property of HOW THE
+  // CLAIM WAS REACHED, not of claiming — so `we:skills-src/next-backlog-item/SKILL.md` passes
+  // `--stop-for-rename` and nothing else does.
+  //
+  // WHAT IT WAS BEFORE, and why that was wrong: emitted for every non-conveyor `active` claim, with
+  // `--background` the only escape and only the conveyor knowing to pass it — an allow-list of one. Every
+  // other caller paid a wasted turn obeying a hand-off that was never coming.
+  // `we:skills-src/batch-backlog-items/SKILL.md` labels the session ONCE for a whole batch and was still told
+  // to stop and rename per item, contradicting its own rule; a directed claim was told to wait for a human
+  // who was already waiting on it. The block's own comment said "emit the stop only for the decision claim
+  // (#1397)" while the code emitted it for all of them — the intent was written down and never implemented.
+  //
+  // INVERTED RATHER THAN kind-GATED. Gating on `kind: decision` would have matched that stale comment, but
+  // the arc it protects is the selection hand-off, and `/next` runs it for a story just as much as for a
+  // decision. The caller knows which flow it is; the item's kind does not.
+  const stop = claimedStatus === 'active' && !background && argv.includes('--stop-for-rename');
+
+  const renameBlock = `\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\``;
   let tailBlock;
   if (background) {
     tailBlock = `\n\n${DIM}claimed (background session — no stop); proceed with the readiness pre-check + build in the same turn.${RST}`;
+  } else if (claimedStatus === 'preparing') {
+    // /prepare has no two-go arc — prep is autonomous agent work (research + authoring, no ruling), so a
+    // `preparing` claim flows straight into the passes. Unchanged: it keeps the rename prompt, never a stop.
+    tailBlock = `${renameBlock}\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`;
+  } else if (stop) {
+    tailBlock = `${renameBlock}\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
   } else {
-    // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
-    // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
-    // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling), so
-    // a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
-    // decision claim (#1397).
-    const tail = claimedStatus === 'preparing'
-      ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
-      : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
-    tailBlock = `\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`;
+    // THE NEW DEFAULT. The slug is still reported — it is useful data, and a caller that wants to label a
+    // session can — but as a fact rather than as an instruction, and with no stop attached.
+    tailBlock = `\n\n${DIM}claimed (slug \`${slug}\`); proceed with the work in the same turn — pass \`--stop-for-rename\` if this claim is a /next selection hand-off.${RST}`;
   }
-  ok({ verb: 'claim', id, file: rel, slug, status: claimedStatus, background }, `${head}${tailBlock}`);
+  ok({ verb: 'claim', id, file: rel, slug, status: claimedStatus, background, stop }, `${head}${tailBlock}`);
 }
 
 /** Read the cross-session reservation registry (#083); a missing/unreadable file degrades to empty. */
