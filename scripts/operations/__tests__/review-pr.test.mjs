@@ -35,6 +35,7 @@ import {
   REVIEW_EFFECTS,
   REVIEW_PR_CHANNEL,
   REVIEW_PR_OP,
+  REVIEW_JUDGE_SHAPE,
   renderJudgeInput,
   renderVerdictWriteUp,
   reviewPrOperation,
@@ -247,6 +248,51 @@ describe('the net basis', () => {
     // the `outcome !== 'reviewable'` condition and always throwing would still pass the three tests above.
     const shaped = shapeReadFinding(stubReader({ state: 'open' })({ pr: 2, repo: 'o/n' }), { pr: 2, repo: 'o/n' });
     expect(shaped.pr).toBe(2); // and case-insensitively — `gh` reports OPEN, other transports may not
+  });
+});
+
+// ── A SILENT JUROR IS `unrun`, NOT AN ACCEPT (#x0p5k2q) ───────────────────────────────────────────────────
+describe('a juror that judged must say what it judged', () => {
+  // Observed twice on PR #1513: two independent jurors, 13 turns and ~$0.79 each over a 48.5k-char diff, each
+  // returning exactly `{findings: []}` with no summary. `deriveVerdict` reads only the findings array, so
+  // silence and a clean bill were the SAME input to it and both reduced to `accept`. `record-verdict` refused
+  // downstream ("staged no write-up to carry"), which is what caught it — but refusing there only deadlocks:
+  // the operator has already been told the PR was accepted.
+  const registry = () => registryFor({}).registry;
+  const reduceWith = (answer) => atConfirm({ registry: registry(), input: BASE_INPUT, answer, id: `run-sum-${Math.abs(JSON.stringify(answer).length)}` });
+
+  it('REFUSES an answer with no summary at all', () => {
+    expect(() => reduceWith({ findings: [] })).toThrow(/returned no summary/);
+  });
+
+  it('REFUSES an EMPTY or whitespace summary — `required` in JSON Schema only asserts the key is present', () => {
+    for (const summary of ['', '   ', '\n']) {
+      expect(() => reduceWith({ summary, findings: [] })).toThrow(/returned no summary/);
+    }
+  });
+
+  it('REFUSES a silent juror even when it DID return findings', () => {
+    // The refusal is about the juror having spoken, not about the verdict being clean. A juror that lists
+    // blockers but says nothing about the diff as a whole has still not reported what it examined.
+    expect(() => reduceWith({ findings: [{ summary: 'x', file: NET_PATHS[0], disposition: 'blocker' }] }))
+      .toThrow(/returned no summary/);
+  });
+
+  it('ACCEPTS zero findings when the juror actually said something', () => {
+    // The other half, and the one that matters most: "always refuse" would pass all three tests above while
+    // making every clean review unrecordable. Zero findings stays a perfectly good verdict.
+    const { run } = reduceWith({ summary: 'read all 6 files; nothing blocking', findings: [] });
+    expect(run.verdict.verdict).toBe('accept');
+    expect(run.verdict.summary).toBe('read all 6 files; nothing blocking');
+  });
+
+  it('trims the summary it carries, so padding cannot pass as content', () => {
+    expect(reduceWith({ summary: '  looked at the guard  ', findings: [] }).run.verdict.summary)
+      .toBe('looked at the guard');
+  });
+
+  it('the judge shape REQUIRES summary, so the refusal is also asked for up front', () => {
+    expect(REVIEW_JUDGE_SHAPE.required).toContain('summary');
   });
 });
 
