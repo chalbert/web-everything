@@ -1,4 +1,5 @@
 ---
+bornAs: x729f3a
 kind: story
 size: 5
 parent: "3029"
