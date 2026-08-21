@@ -107,3 +107,71 @@ Same seam (`we:scripts/review-set-label.mjs` and the `/review` skill's documente
 turns into a real allowlist design discussion, or if (3) grows past the one-field state check into the wider
 "freeze a PR while a review is in flight" question — that is a distinct design problem and is **not** in scope
 here (see #2750 / #2751 for the merge-veto half).
+
+## Status check 2026-08-21 — all three appear to have landed already
+
+Read against `origin/main` while preparing this card. Every one of the three papercuts has a fix in the tree,
+each carrying the item number or its sibling's in a code comment. **This card looks stale, not unbuilt.** It
+is left `status: open` here (preparation does not change status); the next agent to pick it up should verify
+against the checks below and, if they hold, resolve it rather than re-implement anything.
+
+1. **`--body-file` allowlist — landed under #2897.** `bodyFileRoots(cwd, tmp)`
+   (`we:scripts/review-set-label.mjs:356`) now returns `[cwd, tmp, '/tmp']`, and `checkBodyFileLocation`
+   (`:331`) resolves symlinks **on both sides**, resolving the deepest existing ancestor before rejoining
+   the not-yet-created tail — so a session scratchpad nested under `/tmp` (or `/private/tmp`) is accepted
+   without weakening the leak guard. The doc comment names exactly the failure this card reported.
+   `we:skills-src/review/SKILL.md:111-112` documents the widened rule.
+2. **`renderReviewNotice` vocabulary — landed, tagged `#2953`.** `we:scripts/lib/review-core.mjs:1350`
+   normalizes `accepted` → `accept` before the outcome check, and the error message now lists all three
+   spellings. It is not a fail-open: an omitted or misspelled outcome still throws.
+3. **PR-state guard — landed, tagged `#2953`.** `runReviewLabelCli` reads `state` on the existing
+   `gh pr view --json` call (`we:scripts/review-set-label.mjs:544`) and fails closed on anything but
+   `OPEN` (`:559`), naming the state in the error — the "one extra field, no new gh hop" fix this card
+   specified.
+
+## Done when
+
+This item's remaining work is **verification and close-out**, not a build. If any check below fails, that
+part is genuinely unbuilt and the fix this card specifies applies.
+
+1. **tier 1 — the vocabulary fix is pinned.** `we:scripts/lib/__tests__/review-core.test.mjs` asserts
+   `renderReviewNotice` accepts the `accepted` spelling with the same rendering as `accept`, and still
+   throws on an unknown or omitted outcome.
+2. **tier 1 — the state guard is pinned.** `we:scripts/__tests__/review-set-label.test.mjs` asserts
+   `runReviewLabelCli` refuses on a non-`OPEN` PR **before any mutation**, for `--to=changes` and for
+   `--to=accepted`.
+3. **tier 1 — the allowlist fix is pinned.** The same file asserts `checkBodyFileLocation` accepts a path
+   under a temp-root symlink and under a not-yet-created nested scratch directory, and still refuses a
+   path outside every root.
+4. **tier 2 — the skill documents the sanctioned path.** `we:skills-src/review/SKILL.md` tells the
+   operator to write the findings file under a temp root (not the repo root), and
+   `npm run skills:sync:check` exits 0.
+5. **tier 3 — the close-out records which of the three were already landed and by which item**, so the
+   provenance is not lost when this card resolves. Look at the `#2897` / `#2953` comments named above.
+
+The commands that decide 1-4:
+
+```
+npx vitest run scripts/lib/__tests__/review-core.test.mjs scripts/__tests__/review-set-label.test.mjs
+npm run skills:sync:check
+```
+
+## Independent review — 2026-08-21
+
+Confidence: **High**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (addressed; strategy: verify by mutation or reversion BEFORE building) — Card's core premise — three papercuts are real AND already fixed on origin/main — holds. Verified we:scripts/review-set-label.mjs (bodyFileRoots/checkBodyFileLocation at lines 356/331, PR-state fail-closed at line ~559), we:scripts/lib/review-core.mjs (outcome normalization at line ~1350), and we:skills-src/review/SKILL.md (documents the #2897 root set at lines ~110-115) all match the card's citations on origin/main.
+- **consumer** (addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — Card claims we:scripts/lib/disposition-land-seam.mjs and we:scripts/lib/auto-land-seam.mjs both route through decideSetLabel BEFORE merge, so the new OPEN-state guard in runReviewLabelCli breaks nothing sanctioned. Confirmed by grep: both import and call decideSetLabel directly (not runReviewLabelCli's gh-backed state check), so neither is affected by the new guard.
+- **decorative-guard** (addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Mutated the guarded line in we:scripts/review-set-label.mjs (`if (prState !== 'OPEN')` short-circuited to never fire) and re-ran we:scripts/__tests__/review-set-label.test.mjs — exactly 3 named tests under 'runReviewLabelCli fails closed on a non-OPEN PR (#2953)' reddened (MERGED/CLOSED refusal + the decisive accepted-on-MERGED case), 216 others stayed green. The guard is real, not decorative.
+- **interface** (addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — The vocabulary seam between we:scripts/review-set-label.mjs's CLI ('accepted') and we:scripts/lib/review-core.mjs's renderReviewNotice is round-trip tested: we:scripts/lib/__tests__/review-core.test.mjs:1071-1073 explicitly asserts the 'accepted' spelling renders identically to 'accept', and a separate test asserts an unknown/omitted outcome still throws (no silent fail-open).
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — The whole point of finding #3's fix is that the failure now SURFACES instead of reporting ok:true on an inert verdict. Confirmed: the fail-closed error at we:scripts/review-set-label.mjs names the actual PR state and explains the merge already happened, and this is pinned by the named test set verified above rather than merely occurring.
+
+**Corrections recommended:**
+
+- none — the preparation held up as written.
+
+All three papercuts the card describes are real and independently reproducible, and the card's own "already landed" status check is accurate: verified against origin/main (my local `main` was 167 commits stale and initially looked like the fix was missing — a red herring from checking the wrong ref), all three fixes exist at the cited files/lines, the two named test files pass in full (515/515), and a mutation probe on the new PR-state guard reddens exactly the three named `#2953` tests.
+
+_Recorded through the declared `review-prep` operation._
