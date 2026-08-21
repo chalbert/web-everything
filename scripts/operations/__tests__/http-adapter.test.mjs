@@ -45,6 +45,7 @@ import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
 import { REVIEW_PREP_OP } from '../review-prep.mjs';
 import { CLAIM_OP } from '../claim.mjs';
+import { RESOLVE_OP } from '../resolve.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
@@ -323,6 +324,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // `mutation-check-io.mjs`, and arrives only through the `probe` its builder is handed in `../run.mjs`.
     // It declares no effect because there is nothing durable for a replay to re-apply.
     [MUTATION_CHECK_OP]: 'mutation-check.mjs',
+    // #xrrpfo7 — `claim`'s sibling at the close of the lifecycle, and NOT read-only for the same reason
+    // `claim` is not: its `write` step splices the card. Listed here for map coverage; its own suite pins
+    // the property this list cannot express for a writing operation — the DECLARING module reaches nothing
+    // that can act, and every write lives in `resolve-io.mjs`.
+    [RESOLVE_OP]: 'resolve.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
