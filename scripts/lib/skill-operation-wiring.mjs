@@ -261,6 +261,28 @@ const OPERATION_CALL = /(?:^|[\s`$(])node\s+(?:[a-z][a-z0-9-]*:)?scripts\/operat
 const FLAG_IN_TAIL = /--([A-Za-z][A-Za-z0-9-]*)/g;
 
 /**
+ * The part of a line that is actually ARGV, with the parts that only LOOK like argv removed. PURE.
+ *
+ * FOUND BY THE PR #1526 CORRECTNESS JUROR, which ran the shipped code rather than reading it. A bare scan of
+ * everything after the operation name treats any `--word` later on the same physical line as a flag the call
+ * passes — so a trailing shell comment or a `--` inside a quoted VALUE becomes a false `unknown flag` ERROR,
+ * against a call site that is perfectly correct.
+ *
+ * Not hypothetical, and the comment case is the likely one: PR #1522 moved these docs TO trailing `#` shell
+ * comments precisely because HTML comments break inside the fenced "exact gh sequence" blocks. So the shape
+ * this misreads is the shape the surrounding convention produces.
+ *
+ * QUOTES ARE BLANKED BEFORE THE COMMENT IS CUT, never after — a `#` inside a quoted value is data, and cutting
+ * on it first would truncate a legitimate argv at its own content.
+ */
+function scannableTail(tail) {
+  return String(tail ?? '')
+    .replace(/'[^']*'/g, "''")
+    .replace(/"[^"]*"/g, '""')
+    .replace(/\s#.*$/, '');
+}
+
+/**
  * A line that is nothing but a continuation of the invocation above it.
  *
  * FOUND BY RUNNING THIS SCAN AGAINST THE LIVE TREE BEFORE SHIPPING IT. `we:skills-src/next-backlog-item/SKILL.md`
@@ -285,9 +307,9 @@ export function extractOperationCalls(content) {
   for (let i = 0; i < lines.length; i += 1) {
     const exempt = exemptAt(lines, i);
     for (const m of lines[i].matchAll(OPERATION_CALL)) {
-      const flags = [...String(m[2] ?? '').matchAll(FLAG_IN_TAIL)].map((f) => f[1]);
+      const flags = [...scannableTail(m[2]).matchAll(FLAG_IN_TAIL)].map((f) => f[1]);
       for (let j = i + 1; j < lines.length && CONTINUATION_LINE.test(lines[j]); j += 1) {
-        for (const f of lines[j].matchAll(FLAG_IN_TAIL)) flags.push(f[1]);
+        for (const f of scannableTail(lines[j]).matchAll(FLAG_IN_TAIL)) flags.push(f[1]);
       }
       out.push({ op: m[1], flags, line: i + 1, exempt });
     }

@@ -308,3 +308,37 @@ describe('#3253 — operation call sites judged against declared inputs', () => 
     expect(r.errors[0].descriptor.flag).toBe('nope');
   });
 });
+
+// ── the third false-positive class, found by PR #1526's correctness juror ────────────────────────────────────
+describe('#3253 — only ARGV counts, not everything that looks like it (PR #1526 juror)', () => {
+  const CONTROL = ['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model'];
+  const scaffold = { title: { type: 'string', required: true }, workItem: { type: 'string', required: false } };
+  const scan = (content) => findMalformedOperationCalls([{ file: 'f.md', content }], new Map([['scaffold', scaffold]]), CONTROL);
+
+  it('a trailing shell comment is NOT argv', () => {
+    // The likely shape: PR #1522 moved these docs TO trailing `#` comments because HTML comments break inside
+    // the fenced "exact gh sequence" blocks. So the convention produces exactly what this used to misread.
+    const r = scan('`node scripts/operations/run.mjs scaffold --title=x --json`  # --workitem is the raw spelling');
+    expect(r.errors).toEqual([]);
+    expect(extractOperationCalls('node scripts/operations/run.mjs scaffold --title=x  # --nope')[0].flags)
+      .toEqual(['title']);
+  });
+
+  it('a `--` inside a QUOTED value is data, not a flag', () => {
+    const r = scan("`node scripts/operations/run.mjs scaffold --title='mentions --nope in prose' --json`");
+    expect(r.errors).toEqual([]);
+  });
+
+  it('a `#` inside a quoted value does NOT truncate the argv', () => {
+    // Quotes are blanked BEFORE the comment is cut. Cutting first would drop the real flags after it.
+    expect(extractOperationCalls("node scripts/operations/run.mjs scaffold --title='fixes #123' --workItem=story")[0].flags)
+      .toEqual(['title', 'workItem']);
+  });
+
+  it('and a real trailing flag is still read', () => {
+    // The other half — "strip everything" would pass the three above vacuously.
+    const r = scan('`node scripts/operations/run.mjs scaffold --title=x --nope=1`');
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0].descriptor.flag).toBe('nope');
+  });
+});
