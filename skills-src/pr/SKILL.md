@@ -62,6 +62,20 @@ never `opened`, and never a quiet reroute. What it always gives you is the `plan
 decided on. Submit *that*, unedited, through whatever channel does hold a credential. The decision was
 still made by the operation; only the execution moved.
 
+> **The fallback DROPS THE PARK LABEL — you must re-apply it by hand.** This instruction used to stop at
+> "submit the argv", and that is not sufficient: the argv carries `--park=review:pending`, but a
+> connector's create-PR call has **no label parameter**, so a submission that follows this page perfectly
+> still opens the PR **unheld**. Observed 2026-08-21 — three PRs opened this way came out labelled
+> `["checking"]` with no `review:*` at all, which the #2820 merge predicate reads as nothing to wait for.
+>
+> So the fallback is **two** calls, not one, and the second is not optional:
+> 1. create the PR from the plan's `--ref` / `--title` / body file;
+> 2. immediately apply the plan's `--park=<label>` value as a label on that PR, and **re-read the PR to
+>    confirm it stuck** before moving on.
+>
+> Until step 2 lands, the PR is a candidate for the drain on its next green sweep. Do not batch step 2 to
+> the end of a run of PRs — apply it per-PR, as each one is created.
+
 It parks by default (`review:pending` — an independent review is owed), because an agent PR marching to
 `ready-to-merge` unreviewed is what park exists to stop. `--mode=` chooses otherwise, deliberately.
 
