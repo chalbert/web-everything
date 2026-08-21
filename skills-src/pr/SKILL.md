@@ -84,9 +84,12 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 1. **Pick a `lane/*` ref name** — the #1934 guard carve-out only allows pushing to `lane/*` (never a
    local branch, never `main` directly). Use a descriptive slug: `lane/<short-slug>` for an ad-hoc
    change, or `lane/<NNN>-<slug>` when it closes a backlog item.
-2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing:
+2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing. **Pass the SAME `--mode` you
+   will pass in step 4** — a rehearsal that previews a different mode is worse than no rehearsal, because it
+   shows the user a plan that is not the one about to run. The operation defaults to `park`, which is NOT the
+   raw home's default, so the mode has to be explicit on both:
    ```
-   node scripts/operations/run.mjs open-pr --ref=lane/<slug> --sha=HEAD --base=main --dryRun=true --json
+   node scripts/operations/run.mjs open-pr --ref=lane/<slug> --sha=HEAD --base=main --mode=land --dryRun=true --json
    ```
 3. **Write a PR body to a file and ALWAYS pass `--body-file`** — this is required, not optional:
    `pr-land` derives the title from the commit subject, and `gh pr create --title …` with **no** body
