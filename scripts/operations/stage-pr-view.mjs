@@ -59,6 +59,12 @@ export const VIEW_FIELD_TYPES = Object.freeze({
   comments: 'array',
   files: 'array',
   headRefName: 'string',
+  // #xwp8ioh — `state` decides whether the PR is a thing a review can act on at all. An absent one is the
+  // sharpest case this table exists for: `review-pr.read` classifies a missing state as `unknown` and
+  // REFUSES, so a staged view without it cannot be reviewed on this host at all. Refusing here names the
+  // field while it can still be re-staged, instead of surfacing three steps later as a liveness error about
+  // a PR that is in fact perfectly open.
+  state: 'string',
 });
 
 const kindOf = (v) => (Array.isArray(v) ? 'array' : typeof v);

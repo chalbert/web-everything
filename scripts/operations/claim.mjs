@@ -34,6 +34,9 @@
  */
 
 import { op } from './registry.mjs';
+// #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
+// consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute, effect as effectStep } from './step-kinds.mjs';
 import { applyTransition } from '../backlog/frontmatter.mjs';
 
@@ -157,6 +160,7 @@ export function claimOperation({ readClaimContext } = {}) {
   }
 
   return op(CLAIM_OP, {
+    declaresOver: DECLARED_HOMES.claim,
     input: {
       // A backlog item ref — numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288). The exact shape
       // `we:scripts/backlog.mjs`'s own `resolveFile` accepts.

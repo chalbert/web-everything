@@ -84,6 +84,9 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 import { computeNetDiffText } from './merge-ai-prs.mjs';
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
+// before a juror is paid instead of this site being the only place it is checked.
+import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
@@ -556,9 +559,16 @@ export function runReviewLabelCli({
   // — `review:changes` landed six minutes after `mergedAt`) used to report `{"ok":true}`, which reads as a live
   // bounce the drain ignored when in fact the merge gate was never involved. The findings belong on a NEW PR, not
   // on the merged one.
-  if (prState !== 'OPEN') {
-    fail(`PR ${pr} is ${prState}, not OPEN — a review verdict here would be inert (the merge, if any, already `
-      + 'happened); open a new PR for the findings instead of relabeling this one', 1);
+  //
+  // #xwp8ioh — the predicate and its wording now live in `we:scripts/lib/pr-liveness.mjs`, imported rather
+  // than restated here, because `we:scripts/operations/review-pr.mjs` gained the SAME check at its `read`
+  // step and two copies of one rule is the drift #2644 forbids. The behaviour at THIS site is unchanged: any
+  // non-OPEN state still fails closed with the same sentence and the same exit code. What moved forward is
+  // WHEN it first fires — the read side now refuses before a juror is paid, so this write-side guard becomes
+  // the backstop it should always have been rather than the only line of defence.
+  const liveness = classifyPrLiveness({ state: prState });
+  if (liveness.outcome !== 'reviewable') {
+    fail(inertPrMessage({ pr, state: liveness.state }), 1);
   }
 
   // #2844 — THE SELF-CLEAR REFUSAL. Independence is EVALUATED for both targets that record an acceptance

@@ -230,6 +230,9 @@ git commit -F <msgfile> <explicit-paths>
 # suites exit), recording a green marker keyed to this exact commit. Do NOT background this and yield: a
 # half-run verification strands a `running` marker and pr-land's finish-guard (--require-verified) will
 # refuse to publish. Exit 0 = green (proceed); exit 2 = red (a hard stop — fix, re-commit, re-verify).
+# @operation-home-ok: #xvj8sj0 — `verify` declares over this home but forwards NO gate, and this call
+# site chooses one. Naming the operation here would silently drop `--gate` and run the default suite,
+# which is the PR #1508 regression shape. Rewire once the operation takes a gate input.
 node scripts/verify-lane.mjs --gate="npm run check:standards"   # (or the item's locus gate)
 
 node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \

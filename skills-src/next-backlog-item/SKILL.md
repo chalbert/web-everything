@@ -186,11 +186,32 @@ an item*). The backlog file is the durable, resumable record — the item body *
 
 4. **Claim it on start — claiming is its own turn; do not start work in it.** This step runs whenever you
    flip an item to `active`, **including decision-mode** (0b/3a/3b), where the claimable work is the
-   discussion itself. Run **`node scripts/backlog.mjs claim <NNN>`** — it wins the race (refuses if no
-   longer `open`, or if the item's own file has uncommitted edits — the claim-first guard, `--force` to
-   override), flips `open → active` + stamps `dateStarted` (today) in one splice,
-   and prints the rename slug. (`check:standards` does not backfill `dateStarted`, so the stamping command
-   is the point; `dateResolved`/`graduatedTo` come later, at step 7.) Then **STOP that turn immediately** —
+   discussion itself. Run **`node scripts/backlog.mjs claim <NNN>`** — and note WHY this one names the CLI
+   and not the operation, because the rule is easy to get backwards (this exact step was rewired to
+   `run.mjs claim` and the correctness juror on PR #1508 caught it as a regression):
+
+   > **`backlog.mjs claim` ALREADY DELEGATES to the declared `claim` operation** (`claimViaOperation`, #3034)
+   > — and then does three things the operation deliberately does not own: it clears any cross-session soft
+   > reservation (#083 invariant 2), records the `.claude/skills/batch-backlog-items/claims.json` attribution
+   > baseline that `check:standards --scope=<session>` reads, and prints the rename slug + two-turn stop block
+   > that the rest of THIS step depends on. Calling the operation directly silently drops all three.
+   >
+   > **The rule, stated once:** name whichever caller COMPOSES the other. Where the CLI wraps the operation
+   > (`claim`), the CLI is the fuller caller and the skill names it. Where the operation wraps the CLI
+   > (`verify` over `we:scripts/verify-lane.mjs`), the operation is the fuller caller and the skill names
+   > that. "Skill mentions a raw home" is therefore NOT automatically a miswiring — check which way the
+   > delegation runs before rewiring anything.
+
+   It wins the race (refuses if no longer `open`, if the item is queued or prepare-held, or if the item's own
+   file has uncommitted edits — the claim-first guard, `--force` to override), flips `open → active` + stamps
+   `dateStarted` (today) in one splice, and prints the rename slug. (`check:standards` does not backfill
+   `dateStarted`, so the stamping command is the point; `dateResolved`/`graduatedTo` come later, at step 7.)
+
+   > Two properties of the underlying operation worth knowing anyway: it has **no `--dry-run`** — there is no
+   > way to inspect it without causing the write — and its guards do **not** include `blockedBy`, so it will
+   > claim blocked work. The readiness check in steps 1–3 is what prevents that, not the claim.
+
+   Then **STOP that turn immediately** —
    the claim edit and the label prompt are the *only* things that turn does. Do **not** chain reads,
    planning, or any other tool call after the flip; if you keep working, the label prompt gets buried and
    silently skipped. End the turn with a "Claimed #NNN — starting next" note, then the label prompt (Claude

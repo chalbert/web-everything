@@ -34,6 +34,9 @@
  * a juror anything at all.
  */
 import { op } from './registry.mjs';
+// #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
+// consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute } from './step-kinds.mjs';
 
 export const VERIFY_OP = 'verify';
@@ -132,6 +135,7 @@ export function verifyOperation({ runChecks } = {}) {
   }
 
   return op(VERIFY_OP, {
+    declaresOver: DECLARED_HOMES.verify,
     input: {
       // NAMED `checkout`, NOT `cwd`, and the adapter refused the first spelling: `--cwd` is its own control
       // flag (the juror's lane), and a declaration field colliding with it would be ambiguous on the command
