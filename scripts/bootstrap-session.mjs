@@ -276,6 +276,53 @@ export function knownGitDirs(root = REPO_ROOT) {
   return Object.values(CONSTELLATION_REPOS).flatMap((m) => m.dirs.map((d) => join(parent, d, '.git')));
 }
 
+/**
+ * The PR-watch tools, pre-approved so a session can subscribe without a permission prompt.
+ *
+ * WHY IT BELONGS HERE AND NOT IN A LIVE `$HOME`. Watching a PR is needed on exactly the host whose `$HOME`
+ * does not survive: a cloud VM is reclaimed on idle, so an allow rule added by hand is gone by the next
+ * session and gets re-approved by hand every time. That is machine state, which is what this script exists
+ * to make travel.
+ *
+ * ONLY THE STABLE NAMES ARE LISTED, and the omission is deliberate. An MCP tool's permission name embeds its
+ * SERVER id, and this harness also serves these two from a session-scoped server whose id is a bare uuid
+ * (`mcp__<uuid>__subscribe_pr_activity`). That id is derivable from nothing in the repo — there is no
+ * `.mcp.json` here — so committing one would be the same defect as the `/Users/<name>/…` literal this file's
+ * header describes: right on one machine, wrong everywhere else, and silently dead in the next VM. The
+ * `mcp__github__` pair is the name that is identical on every host, so it is the one that travels.
+ */
+export const PR_WATCH_TOOLS = Object.freeze([
+  'mcp__github__subscribe_pr_activity',
+  'mcp__github__unsubscribe_pr_activity',
+]);
+
+/**
+ * Add tool names to `permissions.allow`, additively. PURE.
+ *
+ * PURELY ADDITIVE, UNLIKE {@link withPrimaryGitDir}, and the difference is worth stating rather than leaving
+ * to be inferred. That function REPAIRS — it drops a stale grant it can prove it wrote — because a moved
+ * checkout leaves a dead absolute path behind. Nothing here goes stale: a tool name is not a path, so an
+ * entry this script wrote last month is exactly as valid today. There is therefore nothing to prune, and
+ * pruning is the only way this could ever remove an allow rule an operator added by hand. It cannot, by
+ * construction — which is the property that matters, since `permissions.allow` is the operator's list.
+ *
+ * Idempotent: re-running adds nothing and reorders nothing.
+ */
+export function withToolAllowlist(settings, tools = PR_WATCH_TOOLS) {
+  const next = JSON.parse(JSON.stringify(settings ?? {}));
+  next.permissions = next.permissions ?? {};
+  const allow = Array.isArray(next.permissions.allow) ? next.permissions.allow : [];
+  const missing = tools.filter((t) => !allow.includes(t));
+  next.permissions.allow = missing.length ? [...allow, ...missing] : allow;
+  return next;
+}
+
+/** Which of {@link PR_WATCH_TOOLS} a settings object does not yet allow. PURE. */
+export function missingToolAllows(settings, tools = PR_WATCH_TOOLS) {
+  const allow = Array.isArray(settings?.permissions?.allow) ? settings.permissions.allow : [];
+  return tools.filter((t) => !allow.includes(t));
+}
+
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
@@ -487,6 +534,18 @@ export function main(argv, io = defaultIo()) {
     report.steps.push({ id: step.id, status: ok ? 'ok' : step.id === 'siblings' ? 'missing' : 'drift', detail: v });
   }
 
+  // Pre-approve the PR-watch tools. Behind the SAME `write` consent as everything else, so a durable host is
+  // still only ever reported on: `permissions.allow` is the operator's list, and widening it silently on a
+  // laptop is exactly the implicit mutation this script's consent rule exists to prevent. On an ephemeral VM
+  // there is nothing to consent about and a session that configures itself is the whole point.
+  {
+    const before = io.readSettings();
+    const missing = missingToolAllows(before);
+    if (!missing.length) report.toolAllows = 'already allowed';
+    else if (!write || has('--dry-run')) report.toolAllows = `would allow ${missing.join(', ')}`;
+    else { io.writeSettings(withToolAllowlist(before)); report.toolAllows = `allowed ${missing.join(', ')}`; }
+  }
+
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
   if (write) report.hook = io.installHook();
@@ -496,6 +555,7 @@ export function main(argv, io = defaultIo()) {
   } else {
     io.out(`bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
     for (const s of report.steps) io.out(`  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
+    if (report.toolAllows) io.out(`  allow    pr-watch  ${report.toolAllows}`);
     if (report.hook) io.out(`  hook     SessionStart ${report.hook}`);
     if (!write && !readOnlyFlag) {
       io.out('  — reported only. This host is durable, so nothing under $HOME/.claude was touched;');

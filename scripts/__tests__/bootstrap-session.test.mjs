@@ -17,6 +17,9 @@ import {
   lanePool,
   primaryCheckout,
   withPrimaryGitDir,
+  withToolAllowlist,
+  missingToolAllows,
+  PR_WATCH_TOOLS,
   skillsDeployScript,
   mayWriteUserTree,
   knownGitDirs,
@@ -256,6 +259,56 @@ describe('knownGitDirs', () => {
 
   it('never returns empty — an empty set silently disables the repair it gates', () => {
     expect(knownGitDirs('/ws/webeverything').length).toBeGreaterThan(0);
+  });
+});
+
+describe('withToolAllowlist — the PR-watch pre-approval that has to survive a fresh VM', () => {
+  it('adds the tools to an empty settings object', () => {
+    expect(withToolAllowlist({}).permissions.allow).toEqual([...PR_WATCH_TOOLS]);
+  });
+
+  it('is IDEMPOTENT — a second run adds nothing and reorders nothing', () => {
+    const once = withToolAllowlist({});
+    expect(withToolAllowlist(once)).toEqual(once);
+  });
+
+  it('NEVER drops an allow rule the operator added by hand', () => {
+    // The property that matters, because `permissions.allow` is the operator's list. `withPrimaryGitDir`
+    // prunes a stale grant it can prove it wrote; a tool name never goes stale, so there is nothing to prune
+    // and no path by which this can remove anything. Asserted, not assumed.
+    const before = { permissions: { allow: ['Artifact', 'Bash(git *)', 'mcp__someone__else'] } };
+    const after = withToolAllowlist(before).permissions.allow;
+    for (const kept of before.permissions.allow) expect(after).toContain(kept);
+    expect(after.slice(0, 3)).toEqual(before.permissions.allow);
+  });
+
+  it('preserves the rest of the settings tree, including sibling permission keys', () => {
+    const before = { hooks: { SessionStart: [{ hooks: [] }] }, permissions: { additionalDirectories: ['/w/.git'] } };
+    const after = withToolAllowlist(before);
+    expect(after.hooks).toEqual(before.hooks);
+    expect(after.permissions.additionalDirectories).toEqual(['/w/.git']);
+  });
+
+  it('tolerates a malformed allow list rather than throwing on it', () => {
+    // A hand-edited settings file is the normal case for this key, so a non-array must not crash the
+    // bootstrap — that would take out the SessionStart registration and the skills deploy with it.
+    expect(withToolAllowlist({ permissions: { allow: 'Artifact' } }).permissions.allow).toEqual([...PR_WATCH_TOOLS]);
+  });
+
+  it('missingToolAllows reports exactly what is absent, and nothing once applied', () => {
+    expect(missingToolAllows({})).toEqual([...PR_WATCH_TOOLS]);
+    expect(missingToolAllows({ permissions: { allow: [PR_WATCH_TOOLS[0]] } })).toEqual([PR_WATCH_TOOLS[1]]);
+    expect(missingToolAllows(withToolAllowlist({}))).toEqual([]);
+  });
+
+  it('commits ONLY server-stable tool names — no bare-uuid server id', () => {
+    // An MCP permission name embeds its SERVER id, and this harness also serves these two from a
+    // session-scoped server whose id is a uuid. Committing one would be the `/Users/<name>/…` defect this
+    // file's header describes: right on one machine, dead in the next VM.
+    for (const t of PR_WATCH_TOOLS) {
+      expect(t).toMatch(/^mcp__github__/);
+      expect(t).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+    }
   });
 });
 
