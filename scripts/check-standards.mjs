@@ -60,6 +60,7 @@ import {
   classifySurfacePaths,
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBacklogNums,
+  duplicateBornAs,
   strandedHashesOnMain,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
@@ -527,6 +528,13 @@ for (const item of backlog) {
 // #2248 — the duplicate-NNN tripwire, now a pure unit-tested detector (was inline). A collision silently drops
 // one item from the loader's last-wins byNum Map, so it must ERROR (caught on the second colliding PR's CI).
 for (const msg of duplicateBacklogNums(backlog)) err(msg);
+// One item minted twice — same `bornAs`, two NNNs. Neither of the checks above can see it: the numbers
+// differ (so it is not a duplicate NNN) and both filenames are numeric (so no hash is stranded).
+{
+  const born = duplicateBornAs(backlog);
+  for (const msg of born.errors) err(msg);
+  for (const msg of born.warnings) warn(msg);
+}
 // #2319 — hash-on-main invariant: a backlog file on origin/main with a non-numeric leading id means a land route
 // bypassed JIT numbering (#2288) and stranded a hash. Read the MAIN tree (not the working tree) so in-lane
 // pre-land hashes on a lane/* branch don't false-trip. Fail-SOFT: origin/main unresolvable (fresh/offline

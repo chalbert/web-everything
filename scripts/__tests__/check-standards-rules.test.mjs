@@ -39,6 +39,7 @@ import {
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   duplicateBacklogNums,
+  duplicateBornAs,
   strandedHashesOnMain,
   lintBacklogItemRendering,
   detectClassificationCollapse,
@@ -1705,6 +1706,55 @@ describe('validateUntrackedDerivedArtifacts — local-vs-CI divergence guard (#2
     const untracked = raw.split('\n').filter(Boolean);
     const { errors } = validateUntrackedDerivedArtifacts(untracked);
     expect(errors).toEqual([]);
+  });
+});
+
+describe('duplicateBornAs — one item minted twice, which every other check misses', () => {
+  const card = (num, bornAs, status = 'open') => ({ num, id: `${num}-slug`, bornAs, status });
+
+  it('ERRORS when a twin is unresolved — a done card back in the ready pool', () => {
+    // The live case: #3201 resolved, #3244 open, same bornAs, identical bodies. Selection would hand the
+    // open one to someone to redo work that is already finished.
+    const r = duplicateBornAs([card('3201', 'x2t6cr5', 'resolved'), card('3244', 'x2t6cr5', 'open')]);
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]).toContain('x2t6cr5');
+    expect(r.errors[0]).toMatch(/#3201 \(resolved\) and #3244 \(open\)/);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('WARNS when both twins are resolved — a smudge, not live work', () => {
+    // The tree carries #3111/#3112 from before this rule. Erroring on a pair nothing selects would redden
+    // main over a defect with no consequence, which is how a gate gets ignored.
+    const r = duplicateBornAs([card('3111', 'xzdi27a', 'resolved'), card('3112', 'xzdi27a', 'resolved')]);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+  });
+
+  it('says NOTHING about a corpus with no twins — the common case', () => {
+    // Without this, "always fire" passes both tests above.
+    const r = duplicateBornAs([card('1', 'aaa'), card('2', 'bbb', 'resolved'), card('3', 'ccc')]);
+    expect(r).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('ignores items with no bornAs, and never groups them together', () => {
+    // Pre-JIT items carry no bornAs at all. Treating absent as a shared key would report every one of the
+    // ~2,400 of them as twins of each other — the scan would be pure noise on its first run.
+    const r = duplicateBornAs([{ num: '1', id: '1-a' }, { num: '2', id: '2-b' }, card('3', '', 'open'), card('4', '   ')]);
+    expect(r).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('reports three-way and higher duplication once, with the count', () => {
+    const r = duplicateBornAs([card('1', 'dup', 'resolved'), card('2', 'dup', 'resolved'), card('3', 'dup', 'open')]);
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]).toContain('bornAs` of 3 cards');
+  });
+
+  it('catches what neither sibling check can see', () => {
+    // The reason this is its own rule: the twins have DIFFERENT numbers, so the NNN-collision detector is
+    // silent by design, and both filenames are numeric, so nothing is stranded either.
+    const twins = [card('3201', 'x2t6cr5', 'resolved'), card('3244', 'x2t6cr5', 'open')];
+    expect(duplicateBacklogNums(twins)).toEqual([]);
+    expect(duplicateBornAs(twins).errors).toHaveLength(1);
   });
 });
 
