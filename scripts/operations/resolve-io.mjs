@@ -155,8 +155,19 @@ export function createResolveReader({
         try { body = readText(join(backlogDir(root), f)); } catch { continue; }
         const parent = readField(body, 'parent');
         if (!parent || parent.replace(/^["']|["']$/g, '') !== id) continue;
-        const st = readField(body, 'status') || '';
-        if (st === 'open' || st === 'active' || st === 'preparing') openChildren.push({ num: idFromName(f), status: st });
+        // THE HOME'S OWN PREDICATE, not an approximation of it: `openChildrenOf` in
+        // `we:scripts/backlog.mjs` counts a child as open when its status is anything OTHER THAN
+        // `resolved`, defaulting an absent status to `open`. An ALLOWLIST of open/active/preparing was
+        // here first and silently dropped `parked` — a first-class status — so an epic with parked
+        // children resolved through the operation while the CLI would have refused it (PR #1510
+        // correctness juror, round 3).
+        //
+        // An exclusion is the right shape for the same reason it is there: a status this file has never
+        // heard of must count as OPEN, because the alternative is a new status silently disabling the
+        // guard. This is the third finding on this operation with one root — re-deriving a predicate
+        // instead of reading the home that owns it.
+        const st = readField(body, 'status') || 'open';
+        if (st !== 'resolved') openChildren.push({ num: idFromName(f), status: st });
       }
     }
 

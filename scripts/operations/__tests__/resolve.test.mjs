@@ -320,3 +320,43 @@ describe('the #2803 guard answers correctly, against the real reconciliation', (
     expect(planResolve(shapeResolveRead(read)).scopeUnchecked).toBe(true);
   });
 });
+
+/**
+ * THE OPEN-CHILD PREDICATE IS THE HOME'S, NOT AN APPROXIMATION — PR #1510's round-3 blocker.
+ *
+ * `openChildrenOf` counts a child open when its status is anything other than `resolved`. An allowlist of
+ * open/active/preparing was here first, which silently dropped `parked`: an epic with parked children
+ * resolved through the operation while the CLI refused it. The exclusion shape matters beyond `parked` —
+ * a status this file has never heard of must count as OPEN, or a new status silently disables the guard.
+ */
+describe('an epic\'s open children are counted the way the home counts them', () => {
+  const epic = '---\nkind: epic\nstatus: active\ndateOpened: "2026-08-01"\n---\n\n# e\n\nb.\n';
+  const child = (status) => `---\nkind: story\nstatus: ${status}\nparent: "100"\ndateOpened: "2026-08-01"\n---\n\n# c\n\nb.\n`;
+  const readerWith = (childStatus) => createResolveReader({
+    root: '/repo',
+    listFiles: () => ['100-e.md', '200-c.md'],
+    readText: (p) => (String(p).includes('200-c') ? child(childStatus) : epic),
+    exec: () => '', today: () => '2026-08-21',
+  })({ ref: '100' });
+
+  it('counts a PARKED child as open — the allowlist dropped it', () => {
+    expect(readerWith('parked').openChildren.map((c) => c.status)).toEqual(['parked']);
+    expect(() => planResolve(shapeResolveRead(readerWith('parked')))).toThrow(/open child slice/);
+  });
+
+  it('counts a status it has never heard of as open, rather than ignoring it', () => {
+    // The property the exclusion buys: a status added later cannot silently disable the guard.
+    expect(readerWith('some-future-status').openChildren).toHaveLength(1);
+  });
+
+  it('still counts open / active / preparing', () => {
+    for (const st of ['open', 'active', 'preparing']) {
+      expect(readerWith(st).openChildren).toHaveLength(1);
+    }
+  });
+
+  it('does NOT count a resolved child — the guard must not become a blanket refusal', () => {
+    expect(readerWith('resolved').openChildren).toEqual([]);
+    expect(planResolve(shapeResolveRead(readerWith('resolved'))).status).toBe('resolved');
+  });
+});
