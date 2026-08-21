@@ -23,4 +23,4 @@ The `verify` operation shells `we:scripts/verify-lane.mjs` but forwards no gate,
    `we:skills-src/conveyor/delivery-agent-brief.md`, and that line names the operation with no
    `@operation-home-ok` marker — the exemption is gone because the gap is closed, not because it was excused.
 3. **Observable** — the brief's prose no longer promises the home's `exit 2 = red` contract, which the
-   operation does not honour (#x0uj8hj).
+   operation does not honour (#3243).
