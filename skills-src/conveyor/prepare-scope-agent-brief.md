@@ -160,16 +160,16 @@ node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-scope-<slug> --s
   --bodyFile=<pr-body> --mode=label-on-green --json
 ```
 
-`--label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
+`--mode=label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
 **only when green, then STOPS** (the resident drain lands it). This is the **default and expected** outcome:
 your diff is **one backlog file** — low-risk and bounded — so it **auto-lands with no human in the loop**. There
 is **no review escalation** for a scope-only PR unless the item itself is **statute-touching** (`pr-land`'s
 deterministic rubric, #2307, applies `review:human` on its own if so — you do nothing extra). Do **not**
 blanket-park a scope PR.
 
-`pr-land --label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run it
+`open-pr --mode=label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run it
 BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
-EXPECTED and harmless: the PR is already open (`checking`), and re-invoking `pr-land` with the SAME `--ref` is
+EXPECTED and harmless: the PR is already open (`checking`), and re-invoking `open-pr` with the SAME `--ref` is
 idempotent (it targets the existing PR and applies the label, never a duplicate).
 
 - End the commit message with:

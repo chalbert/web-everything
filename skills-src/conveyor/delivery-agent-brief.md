@@ -234,7 +234,7 @@ git commit -F <msgfile> <explicit-paths>
 # READ `verdict.ok` — DO NOT READ THE EXIT CODE. The operation exits 0 whenever the RUN completed, which it
 # does even when the suites went red or never ran: `{ok: false, blocking: [...]}` arrives on exit 0. The raw
 # home's `exit 2 = red` contract is the HOME's, and it does not survive the operation (#x0uj8hj). Proceed only
-# on `ok: true` with an empty `blocking`; `unrun` is not a pass. `pr-land --require-verified` below is the
+# on `ok: true` with an empty `blocking`; `unrun` is not a pass. `open-pr --requireVerified=true` below is the
 # independent backstop — it re-reads the marker and refuses regardless of what you concluded here.
 node scripts/operations/run.mjs verify --checkout="$PWD" --gate="npm run check:standards" --json   # (or the item's locus gate)
 
@@ -242,20 +242,20 @@ node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEA
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json
 ```
 
-`--require-verified` (#2833) makes `pr-land` refuse to publish the lane ref unless the HEAD it is landing has a
+`--requireVerified=true` (#2833) makes the home refuse to publish the lane ref unless the HEAD it is landing has a
 fresh GREEN verification marker from the `verify-lane` run just above — so a lane that skipped or backgrounded
 its verification is caught at the finish line instead of stranding silently. `WE_LAND_UNVERIFIED=1` is the
 documented break-glass if you ever must land on CI alone.
 
-`--label-on-green` is the **producer mode** you want: it opens the self-approved PR, **waits for the required
+`--mode=label-on-green` is the **producer mode** you want: it opens the self-approved PR, **waits for the required
 `test` check, applies the `ready-to-merge` label ONLY once it is green, then STOPS**. It does **not** trigger a
 drain — the resident drain daemon lands the labelled PR on its next pass. The `ready-to-merge` label means
 "fully checked, the drain may land" — it is applied by `pr-land` after CI is green, never eagerly at open, so a
 red PR never enters the drain's queue.
 
-`pr-land --label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run it
-BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
-EXPECTED and harmless: the PR is already open (`checking`), and re-invoking `pr-land` with the SAME `--ref` is
+`open-pr --mode=label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run
+it BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
+EXPECTED and harmless: the PR is already open (`checking`), and re-invoking it with the SAME `--ref` is
 idempotent (it targets the existing PR and applies the label, never a duplicate).
 
 - End the commit message with:
@@ -408,7 +408,7 @@ know well, that is not a good reason — let the committee's already-elevated ri
      label. This is the only one of the three where a PR exists, and **leaving it unlabelled does not hold
      it**: the daemon's green reconcile labels *any* producer-owned AI PR `ready-to-merge` the moment CI reads
      green on a later run (`shouldLabelOnGreen`, #2216), which a flaky re-run or a rebase can produce, and it
-     lands unreviewed. So park it: re-run `pr-land` on the SAME `--ref` with `--park=review:human` (park mode
+     lands unreviewed. So park it: re-run `open-pr` on the SAME `--ref` with `--mode=park --parkLabel=review:human` (park mode
      skips the check-wait, so it labels a red PR immediately), **then confirm the label actually landed** (see
      the note below the list). Report the failing check and stop.
 3. **A review finding that turns on human judgment** — the step-6 adversarial code review (or the step-7 visual
