@@ -59,13 +59,13 @@ export const DECLARED_HOMES = Object.freeze({
   // three. This entry must never produce a finding; the suite pins that it does not.
   claim: Object.freeze(['we:scripts/backlog.mjs claim']),
 
-  // #3242 DELIBERATELY DID NOT ADD an `open-pr` entry, and the reason is the rule this map is built on.
-  // `open-pr`'s header says it declares over `we:scripts/pr-land.mjs`, and #3242 closed three of the four
-  // gaps that stopped it replacing that home (`sha`, `requireVerified`, `dryRun`). The fourth remains:
-  // `open-pr` REQUIRES `title`, while the home treats it as optional and lets `gh` derive it from the commit
-  // subject — and all six skill instructions of the home omit it. So a skill still cannot simply name the
-  // operation, and an entry here would emit six findings whose only honest answer is six exemption markers.
-  // A gate reporting a gap nobody can close is how a gate gets ignored. See #x5bpt2m.
+  // `open-pr` SHELLS `we:scripts/pr-land.mjs`; its own header says it declares over that home. The entry was
+  // withheld twice on purpose, and the reason it is here now is that the gap it named is actually closed:
+  // #3242 built the `sha`/`requireVerified`/`dryRun` inputs, and #3245 made `title` optional to match the
+  // home (which derives one from the commit subject). Until both landed, an entry would have emitted six
+  // findings whose only honest answer was six exemption markers — a gate reporting a gap nobody could close,
+  // which is how a gate gets ignored. Now every one of those six sites can name the operation instead.
+  'open-pr': Object.freeze(['we:scripts/pr-land.mjs']),
 
   // `dispatch-lane` CONSUMES `planTick`'s `decisions.spawnBuilds` and refuses to invent a launch of its own —
   // "IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT". A skill telling an agent to run the core by

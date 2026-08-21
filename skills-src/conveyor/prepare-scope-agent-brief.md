@@ -156,8 +156,8 @@ printf '%s\n' "WE #{{ITEM_NUM}}: author scope: for #{{ITEM_NUM}}" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}}
 
-node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-scope-<slug> --sha=HEAD --base=main \
-  --body-file=<pr-body> --label-on-green
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-scope-<slug> --sha=HEAD --base=main \
+  --bodyFile=<pr-body> --mode=label-on-green --json
 ```
 
 `--label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`

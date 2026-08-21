@@ -238,8 +238,8 @@ git commit -F <msgfile> <explicit-paths>
 # independent backstop — it re-reads the marker and refuses regardless of what you concluded here.
 node scripts/operations/run.mjs verify --checkout="$PWD" --gate="npm run check:standards" --json   # (or the item's locus gate)
 
-node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
-  --body-file=<pr-body> --label-on-green --require-verified
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
+  --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json
 ```
 
 `--require-verified` (#2833) makes `pr-land` refuse to publish the lane ref unless the HEAD it is landing has a

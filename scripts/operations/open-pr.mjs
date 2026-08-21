@@ -28,6 +28,8 @@
  * here and the credentialed executor is CI.
  */
 import { op } from './registry.mjs';
+// #3224/#3245 — the raw invocation this operation declares over, now that it can genuinely replace it.
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute, effect } from './step-kinds.mjs';
 
 export const OPEN_PR_OP = 'open-pr';
@@ -63,7 +65,23 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   if (typeof ref !== 'string' || !/^lane\//.test(ref)) {
     problems.push(`\`ref\` must be a lane/* ref (the #1934 guard carve-out), got ${JSON.stringify(ref)}`);
   }
-  if (typeof title !== 'string' || !title.trim()) problems.push('`title` must be non-empty');
+  // `title` IS OPTIONAL, and matching the home is the whole reason (#3245). `we:scripts/pr-land.mjs` computes
+  // `derivedTitle = TITLE ?? <source commit subject> ?? \`land <ref>\``, so the home ALWAYS has a title —
+  // omitting the flag hands the job to the commit subject rather than leaving the PR untitled. Requiring one
+  // here made this operation stricter than the thing it declares over, and all six skill instructions of the
+  // home omit it, so not one of them could name the operation without inventing a title that duplicates the
+  // subject it would have derived anyway. That was the last gap keeping an `open-pr` entry out of the #3224
+  // map.
+  //
+  // WHAT MUST NOT BE LOOSENED WITH IT: the home is headless-safe only because the argv is never TITLE-ONLY
+  // (#2176 — a bare `--title` with no body drops into an interactive prompt and dies headless). `bodyFile`
+  // stays REQUIRED above, so an omitted title can never produce that shape.
+  // EMPTY MEANS OMITTED, exactly as it does for `sha` and for `verify`'s `gate`. That consistency is not
+  // cosmetic: the input declares `default: ''`, so the command line hands this fn an EMPTY STRING whenever
+  // `--title` is absent. A guard that refused empty-as-given would therefore have refused every call that
+  // omitted the flag — which is every one of the six skill sites this change exists to unblock. My own test
+  // caught it; the first cut of this rule was a refusal.
+  if (title !== undefined && typeof title !== 'string') problems.push('`title` must be a string when given');
   if (typeof bodyFile !== 'string' || !bodyFile.trim()) {
     // #2332's producer-side prevention, surfaced before the push rather than after it.
     problems.push('`bodyFile` must name a file holding a non-empty body — the drain gate rejects a bodyless PR at land, which stalls the queue');
@@ -72,7 +90,10 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   if (mode === 'park' && !parkLabel) problems.push('`parkLabel` is required in `park` mode — that is what parking means');
   if (problems.length) throw new Error(`open-pr: cannot plan this PR — ${problems.join('; ')}`);
 
-  const argv = ['--ref=' + ref, '--base=' + base, '--title=' + title, '--body-file=' + bodyFile];
+  const argv = ['--ref=' + ref, '--base=' + base, '--body-file=' + bodyFile];
+  // OMITTED when absent, never passed empty: `--title=` would publish the empty string as the PR title,
+  // which is not "let the home decide" — it is a titled PR with a blank title. Same rule as `--sha`.
+  if (typeof title === 'string' && title.trim()) argv.splice(2, 0, '--title=' + title);
   if (mode === 'park') argv.push('--park=' + parkLabel);
   else if (mode === 'label-on-green') argv.push('--label-on-green');
   else argv.push('--no-wait');
@@ -97,7 +118,7 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = ''
   return {
     ref,
     base,
-    title,
+    title: typeof title === 'string' ? title.trim() : '',
     bodyFile,
     mode,
     ...(mode === 'park' ? { parkLabel } : {}),
@@ -142,11 +163,13 @@ export function openPrOperation({ parkLabels } = {}) {
   }
 
   return op(OPEN_PR_OP, {
+    declaresOver: DECLARED_HOMES['open-pr'],
     input: {
       // A lane ref, never a local branch — the home's rule, and the pre-flight above states it early.
       ref: { type: 'string', required: true },
       base: { type: 'string', required: false, default: 'main' },
-      title: { type: 'string', required: true },
+      // Optional — see `planOpen`. Empty means "the home derives it from the commit subject".
+      title: { type: 'string', required: false, default: '' },
       // A PATH, not the body: a PR body is multi-line prose and an argv-borne one gets mangled, which is why
       // the home prefers `--body-file` too (#2170).
       bodyFile: { type: 'string', required: true },

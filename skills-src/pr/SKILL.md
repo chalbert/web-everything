@@ -86,6 +86,7 @@ It parks by default (`review:pending` — an independent review is owed), becaus
    change, or `lane/<NNN>-<slug>` when it closes a backlog item.
 2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing:
    ```
+   <!-- @operation-home-ok: #x6ry8mf — `open-pr` requires `bodyFile` unconditionally, but this rehearsal runs BEFORE the body is written; the home's #2332 guard exempts `--dry-run` and the operation does not. -->
    node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --dry-run
    ```
 3. **Write a PR body to a file and ALWAYS pass `--body-file`** — this is required, not optional:
@@ -96,6 +97,7 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 4. **Open + hand off** (self-approved, wait for the `test` check, label green, trigger the drain — #2290
    pr-land NEVER merges):
    ```
+   <!-- @operation-home-ok: #x6ry8mf — no mode flag means the home's DEFAULT land path (open, wait, label AND MERGE); `open-pr` has park/label-on-green/no-wait and cannot express it, so naming it would silently stop the merge. -->
    node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>
    ```
    - **Default:** open → wait for required checks → label `ready-to-merge` when green → **trigger a

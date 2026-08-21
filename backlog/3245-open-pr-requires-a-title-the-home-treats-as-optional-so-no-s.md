@@ -3,8 +3,10 @@ bornAs: x5bpt2m
 kind: story
 size: 2
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateStarted: "2026-08-21"
+dateResolved: "2026-08-21"
 tags: []
 ---
 
