@@ -27,5 +27,5 @@ exactly how a backlog accumulates stale open cards.
 Landed as `we:scripts/operations/mutation-check.mjs`. The measurement and rationale above are kept rather than
 deleted — they are why the operation exists, and a resolved card is the audit trail.
 
-This is the same failure mode as `#x2sqf62` (~12% of prepared cards described work
+This is the same failure mode as `#3229` (~12% of prepared cards described work
 already done). Two more would have been added by the very PR that reports it.
