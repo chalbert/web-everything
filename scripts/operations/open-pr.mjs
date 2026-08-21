@@ -58,7 +58,7 @@ export const SUBMIT_OUTCOMES = Object.freeze(['opened', 'refused', 'unrun']);
  * happened — but they are the home's rules, restated as a pre-flight, and the home still applies them. The
  * verify marker is deliberately NOT among them: that decision has one home and this is not it.
  */
-export function planOpen({ ref, base, title, bodyFile, mode, parkLabel } = {}) {
+export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = '', requireVerified = false, dryRun = false } = {}) {
   const problems = [];
   if (typeof ref !== 'string' || !/^lane\//.test(ref)) {
     problems.push(`\`ref\` must be a lane/* ref (the #1934 guard carve-out), got ${JSON.stringify(ref)}`);
@@ -77,6 +77,23 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel } = {}) {
   else if (mode === 'label-on-green') argv.push('--label-on-green');
   else argv.push('--no-wait');
 
+  // #3242 — the three flags every real call site passes and this operation could not express. Each is
+  // OMITTED rather than passed with a falsey value, and for two different reasons that both matter:
+  //
+  //   · `--sha` DEFAULTS TO `HEAD` IN THE HOME (`typeof flags.sha === 'string' ? flags.sha : 'HEAD'`). An
+  //     unset sha must therefore omit the flag and let the home apply that default — restating `'HEAD'` here
+  //     would be a second answer to "which commit" that goes stale the day the home's default changes (#2644).
+  //     This is the same shape as `verify`'s gate (#3240), which is the sibling gap this closes.
+  //
+  //   · THE TWO BOOLEANS ARE PRESENCE FLAGS, and passing them with a value is actively wrong. The home reads
+  //     `!!flags['dry-run']`, and `!!'false'` is TRUE — so `--dry-run=false` would REQUEST a dry run while
+  //     reading, to anyone scanning the argv, as though it had disabled one. A caller who set `dryRun: false`
+  //     and got a rehearsal instead of a landed PR would have no way to see why. Omission is the only
+  //     encoding of "off" the home understands.
+  if (typeof sha === 'string' && sha.trim()) argv.push('--sha=' + sha.trim());
+  if (requireVerified === true) argv.push('--require-verified');
+  if (dryRun === true) argv.push('--dry-run');
+
   return {
     ref,
     base,
@@ -84,6 +101,11 @@ export function planOpen({ ref, base, title, bodyFile, mode, parkLabel } = {}) {
     bodyFile,
     mode,
     ...(mode === 'park' ? { parkLabel } : {}),
+    // Reported so a caller reading the verdict sees WHICH commit and WHICH guards this plan carries, rather
+    // than having to re-parse `argv`. `sha` is empty exactly when the home's own default applies.
+    sha: typeof sha === 'string' ? sha.trim() : '',
+    requireVerified: requireVerified === true,
+    dryRun: dryRun === true,
     // The exact argv for the home. Exported in the verdict so a caller that must submit through another
     // channel submits what the operation decided rather than something it composed itself.
     argv,
@@ -130,11 +152,29 @@ export function openPrOperation({ parkLabels } = {}) {
       bodyFile: { type: 'string', required: true },
       mode: { type: 'string', required: false, default: 'park', enum: [...OPEN_MODES] },
       parkLabel: { type: 'string', required: false, default: defaultParkLabel(parkLabels), enum: [...parkLabels] },
+      // #3242 — the three the home takes and this operation could not pass. Every one of the six skill
+      // instructions of `we:scripts/pr-land.mjs` uses at least one, so without them, rewiring any of those
+      // sites to the operation would silently drop a flag: the PR #1508 regression shape.
+      //
+      // `sha` PINS THE COMMIT being published to the lane ref. Empty means "the home's default" (`HEAD`), not
+      // "no commit" — the default lives in the home and is not restated here (#2644).
+      sha: { type: 'string', required: false, default: '' },
+      // The #2833 finish-guard: refuse to land a HEAD with no green verification marker. Defaulting it to
+      // `true` would be a policy change smuggled in as a schema edit — the home's callers decide.
+      requireVerified: { type: 'boolean', required: false, default: false },
+      // Rehearsal: the home prints the exact gh sequence and executes nothing.
+      dryRun: { type: 'boolean', required: false, default: false },
     },
     verdictFrom: 'plan',
 
     plan: compute({
-      reads: ['input.ref', 'input.base', 'input.title', 'input.bodyFile', 'input.mode', 'input.parkLabel'],
+      // EVERY FIELD THE FN READS MUST BE DECLARED HERE. The engine projects only the declared reads, so a
+      // field missing from this list arrives as `undefined` no matter what the caller passed — the wiring bug
+      // PR #1516's round-1 juror found in `verify`, where the io layer was tested and this layer was not.
+      reads: [
+        'input.ref', 'input.base', 'input.title', 'input.bodyFile', 'input.mode', 'input.parkLabel',
+        'input.sha', 'input.requireVerified', 'input.dryRun',
+      ],
       fn: (view) => planOpen({
         ref: view.input.ref,
         base: view.input.base,
@@ -142,6 +182,9 @@ export function openPrOperation({ parkLabels } = {}) {
         bodyFile: view.input.bodyFile,
         mode: view.input.mode,
         parkLabel: view.input.parkLabel,
+        sha: view.input.sha,
+        requireVerified: view.input.requireVerified,
+        dryRun: view.input.dryRun,
       }),
     }),
 
