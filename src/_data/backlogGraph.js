@@ -1,5 +1,32 @@
 // backlogGraph.js — the dependency relationship graph data for /backlog/ (#255).
 //
+// The ONE ordering primitive both the node sort and the edge sort use. Exported so it can be tested
+// directly on both id shapes rather than only through whatever the live backlog happens to contain.
+//
+// `Number()` IS NaN ON A HASH ID. Under JIT numbering (#2288) an unlanded item's id is a hash (`xvatzyf`),
+// not an `NNN`, so `Number(a) - Number(b)` yields NaN for any pair involving one — and a comparator that
+// returns NaN is INCONSISTENT, leaving `Array.sort` free to permute the same data differently between runs.
+// Numbered ids keep their numeric order and sort ahead of hash ids; hash ids compare lexicographically.
+// Total, and stable for equal ids (which cannot occur here — ids are unique).
+function compareIds(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  const aNum = Number.isFinite(na);
+  const bNum = Number.isFinite(nb);
+  if (aNum && bNum) return na - nb;
+  if (aNum !== bNum) return aNum ? -1 : 1;
+  const sa = String(a);
+  const sb = String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+// The two comparators the sorts below ACTUALLY call, hoisted to module scope and exported so a test can
+// drive them on synthetic rows containing hash ids. Re-sorting the live corpus with a comparator the test
+// builds itself proves nothing: it agrees with the broken `Number()` version on any day the backlog holds
+// no hash ids, so the guard silently no-ops exactly when it is not needed (PR #1503 juror, round 3).
+const compareNodes = (a, b) => compareIds(a.num, b.num);
+const compareEdges = (a, b) => compareIds(a.from, b.from) || compareIds(a.to, b.to);
+
 // Builds a node/edge model of the backlog's `blockedBy` network from the loader (src/_data/backlog.js),
 // reusing the reverse-edge + leverage derivations #254 already computed (no re-derivation here). Emitted
 // as JSON in the page; src/assets/js/backlog-graph.js lays it out and draws an SVG (no chart library —
@@ -23,6 +50,19 @@ module.exports = () => {
       for (const b of it.blockers) inEdge.add(b.num);
     }
   }
+
+  // ORDER MUST NOT DEPEND ON `Number()`. Under JIT numbering (#2288) an unlanded item's `num` is a HASH
+  // (`xvatzyf`), not an `NNN`, and `Number('xvatzyf')` is `NaN` — so `Number(a.num) - Number(b.num)` returns
+  // `NaN` for any pair involving one. A comparator that returns `NaN` is INCONSISTENT, and `Array.sort` is
+  // then free to produce a different permutation for the same data: the node order becomes
+  // implementation-defined, which is exactly what the "a second build is byte-identical" invariant forbids.
+  //
+  // Every open hash-id item is already a node (the `isLiveStatus` half of the filter), so this was latent
+  // from the moment JIT numbering shipped; it only became reachable when hash-id items started carrying
+  // `blockedBy` edges to each other.
+  //
+  // Numbered items keep their numeric order and sort ahead of hash ids; hash ids fall back to a lexicographic
+  // compare, which is total and stable. `num` is unique, so no pair ever compares equal. See `compareNodes`.
 
   // Longest prerequisite-chain depth, memoised + cycle-safe (validator forbids cycles; the guard just
   // stops a stray back-edge from looping). DAG ⇒ the memo is always complete.
@@ -65,7 +105,7 @@ module.exports = () => {
       layer: layer(it.num),
       inEdge: inEdge.has(it.num),       // participates in ≥1 blockedBy edge (vs. a standalone open item)
     }))
-    .sort((a, b) => Number(a.num) - Number(b.num)); // stable node order
+    .sort(compareNodes); // stable node order — see `compareNodes`, which hash ids made load-bearing
 
   const edges = [];
   for (const it of items) {
@@ -74,7 +114,17 @@ module.exports = () => {
       if (inEdge.has(b.num)) edges.push({ from: b.num, to: it.num }); // prerequisite → dependent
     }
   }
-  edges.sort((a, b) => Number(a.from) - Number(b.from) || Number(a.to) - Number(b.to));
+  // SAME total order as the nodes, for the same reason — `Number()` is NaN on a hash id, and an
+  // inconsistent comparator makes edge order implementation-defined too. Fixing only the node sort
+  // left this live in the same file (PR #1503 correctness juror, round 2).
+  edges.sort(compareEdges);
 
   return { nodes, edges, empty: nodes.length === 0, maxLayer: nodes.reduce((m, n) => Math.max(m, n.layer), 0) };
 };
+
+// Attached to the exported builder so a test can drive the ordering primitive — and the two comparators
+// the sorts actually pass to `Array.sort` — DIRECTLY on both id shapes, instead of only through whatever
+// ids the live backlog happens to contain that day.
+module.exports.compareIds = compareIds;
+module.exports.compareNodes = compareNodes;
+module.exports.compareEdges = compareEdges;
