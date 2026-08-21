@@ -71,6 +71,7 @@ import {
 // for what the id rests on (the harness session identity, NOT the free-text `--actor`) and for the residual.
 import {
   currentActorId, parseAuthorActorId, buildClearerActorMarker, decideClearerIndependence, INDEPENDENCE,
+  hasStampLostMarker,
 } from './lib/review-independence.mjs';
 // #3007 PHASE 1 (SHADOW) — the append-only verdict ledger. This CLI is the SINGLE HOME of a label swap, so it
 // is also the single home of a ledger row: every caller (the `/review` ceremony, the #3035 operation's label
@@ -537,6 +538,7 @@ export function runReviewLabelCli({
   let headRefName = '';
   let prState = '';
   let prBody = '';
+  let prCreatedAt = '';
   try {
     const parsed = provider.readPrState(repo, pr);
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
@@ -548,6 +550,10 @@ export function runReviewLabelCli({
     // #2844 — the PR body carries the `authored-by-actor` stamp pr-land wrote at open. Same gh call, one more
     // json field, no extra hop — the same "ride the existing read" pattern #2953 used for `state`.
     prBody = typeof parsed.body === 'string' ? parsed.body : '';
+    // #3067 — and its open date, on that same call. A stamp missing from a PR opened AFTER the regime began was
+    // STRIPPED; one missing from an older PR was never written. Until this was read, both looked identical and
+    // both were tolerated.
+    prCreatedAt = typeof parsed.createdAt === 'string' ? parsed.createdAt : '';
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
@@ -599,7 +605,16 @@ export function runReviewLabelCli({
   // independent OF. The acceptance it carries already passed that check when it was earned.
   const stampsAcceptance = to === 'accepted' || to === 'clear-human' || to === 'restamp';
   const independence = (stampsAcceptance && to !== 'restamp')
-    ? decideClearerIndependence({ authorId: parseAuthorActorId(prBody), clearerId })
+    // #3067 WIRED HERE — the module's own header named this as the owed follow-up: the pure decider grew
+    // `prCreatedAt` and `stampLostMarked` as OPT-IN inputs, and until a live caller passed them a stripped
+    // stamp stayed indistinguishable from an absent one. Both are supplied now, so a post-regime PR with no
+    // stamp resolves to STAMP_LOST (refused) instead of UNKNOWN_AUTHOR (tolerated).
+    ? decideClearerIndependence({
+      authorId: parseAuthorActorId(prBody),
+      clearerId,
+      prCreatedAt,
+      stampLostMarked: hasStampLostMarker(prBody),
+    })
     : null;
   if (to === 'accepted' && independence && independence.status === INDEPENDENCE.SELF_CLEAR) {
     // THE MESSAGE NAMES ONLY ROUTES THAT ACTUALLY WORK (PR #1100 review). The first cut inherited the decider's
