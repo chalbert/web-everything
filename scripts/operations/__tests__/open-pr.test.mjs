@@ -99,15 +99,103 @@ describe('planOpen — the home\'s rules as a pre-flight, and nothing more', () 
    * THE LOAD-BEARING NEGATIVE. The verify marker has ONE home — `verifyGateDecision`, which `pr-land.mjs`
    * already calls. If this operation ever grows its own check, it becomes a second answer that can disagree
    * with the one that actually blocks the land, which is the exact defect `verify` committed against
-   * `verify-lane.mjs`. Asserted structurally: the planner takes no marker, reads no sha, and its output
-   * mentions no verification at all.
+   * `verify-lane.mjs`. Asserted structurally: the planner takes no marker and reads no marker file.
+   *
+   * NARROWED DELIBERATELY BY #3242, and the distinction is the whole point of the rule rather than a
+   * loosening of it:
+   *
+   *   · RE-DECIDING is reading the marker here and forming a verdict — still forbidden, still asserted.
+   *   · FORWARDING `--require-verified` is the CALLER asking the single home to apply its own guard more
+   *     strictly. That is not a second answer; it is the same home, told to be stricter, and it is the only
+   *     way the six skill call sites that pass the flag can ever name this operation (#1508's shape is
+   *     dropping it, not forwarding it).
+   *
+   * So the flag ban keeps exactly the direction that was dangerous — anything that turns the guard OFF —
+   * and no longer bans the one that turns it UP. The original test could lump all three together only
+   * because the operation had no way to pass any of them.
    */
   it('does NOT re-decide the lane-verification gate — that has one home', () => {
     const plan = planOpen(good());
-    expect(Object.keys(plan).sort()).toEqual(['argv', 'base', 'bodyFile', 'mode', 'parkLabel', 'ref', 'title']);
-    expect(JSON.stringify(plan)).not.toMatch(/verif/i);
-    // …and the argv carries no flag that would turn the home's guard off.
-    expect(plan.argv.some((a) => /break-glass|require-verified|no-verify/.test(a))).toBe(false);
+    expect(Object.keys(plan).sort())
+      .toEqual(['argv', 'base', 'bodyFile', 'dryRun', 'mode', 'parkLabel', 'ref', 'requireVerified', 'sha', 'title']);
+    // No marker, no verdict, no gate decision — only the caller's own request, echoed back.
+    expect(plan.requireVerified).toBe(false);
+    expect(JSON.stringify(plan)).not.toMatch(/marker|break-glass|verifyGate/i);
+    // The DISABLING flags stay banned outright: this operation must never be the thing that waives the gate.
+    expect(plan.argv.some((a) => /break-glass|no-verify/.test(a))).toBe(false);
+    // And an unasked-for guard is never added on the caller's behalf.
+    expect(plan.argv.some((a) => a.startsWith('--require-verified'))).toBe(false);
+  });
+
+  it('CANNOT waive the gate — no input reaches a disabling flag', () => {
+    // The other half of the narrowing. `requireVerified` may only ever ADD the flag; there is no value of any
+    // input that emits `--break-glass` or `--no-verify`, so widening the schema later cannot quietly create a
+    // waiver path through this operation.
+    for (const requireVerified of [true, false, 'false', undefined]) {
+      const argv = planOpen(good({ requireVerified })).argv;
+      expect(argv.some((a) => /break-glass|no-verify/.test(a))).toBe(false);
+    }
+  });
+});
+
+// ── #3242: THE THREE FLAGS EVERY REAL CALL SITE PASSES ───────────────────────────────────────────────────
+// Without these the operation could not replace a single one of the six skill instructions of
+// `we:scripts/pr-land.mjs` — rewiring any of them would have silently dropped a flag, which is the PR #1508
+// regression shape. Tested at BOTH layers because each can lose the value independently: PR #1516's round-1
+// juror found exactly that hole in `verify`, where the argv builder was covered and the declaration was not.
+describe('the sha / requireVerified / dryRun pass-through (#3242)', () => {
+  it('forwards each flag when set', () => {
+    const argv = planOpen(good({ sha: 'abc1234', requireVerified: true, dryRun: true })).argv;
+    expect(argv).toContain('--sha=abc1234');
+    expect(argv).toContain('--require-verified');
+    expect(argv).toContain('--dry-run');
+  });
+
+  it('OMITS an unset sha so the home applies its own `HEAD` default', () => {
+    // The home reads `typeof flags.sha === 'string' ? flags.sha : 'HEAD'`. Restating `HEAD` here would be a
+    // second answer to "which commit" (#2644); passing `--sha=` would publish the empty string.
+    for (const sha of ['', '   ', undefined]) {
+      expect(planOpen(good({ sha })).argv.some((a) => a.startsWith('--sha'))).toBe(false);
+    }
+  });
+
+  it('OMITS a false boolean rather than passing it — `--dry-run=false` would REQUEST a dry run', () => {
+    // The trap this test exists for: the home reads `!!flags['dry-run']`, and `!!'false'` is TRUE. A caller
+    // who set `dryRun: false` and got a rehearsal instead of a landed PR would have no way to see why.
+    const argv = planOpen(good({ requireVerified: false, dryRun: false })).argv;
+    expect(argv.some((a) => a.startsWith('--dry-run'))).toBe(false);
+    expect(argv.some((a) => a.startsWith('--require-verified'))).toBe(false);
+  });
+
+  it('treats only a literal `true` as on, never a truthy string', () => {
+    // A CLI that handed through `'false'` must not enable the guard.
+    const argv = planOpen(good({ requireVerified: 'false', dryRun: 'false' })).argv;
+    expect(argv.some((a) => a.startsWith('--require-verified'))).toBe(false);
+    expect(argv.some((a) => a.startsWith('--dry-run'))).toBe(false);
+  });
+
+  it('reports all three in the verdict, so a caller need not re-parse argv', () => {
+    expect(planOpen(good({ sha: ' abc ', requireVerified: true, dryRun: false })))
+      .toMatchObject({ sha: 'abc', requireVerified: true, dryRun: false });
+  });
+
+  it('the `plan` STEP threads all three into planOpen, and DECLARES the reads', () => {
+    // The declaration layer, which is where PR #1516's round-1 finding lived. The engine projects only the
+    // declared reads, so a field missing from `reads` arrives as `undefined` however the caller called it —
+    // the read list is wiring, not bookkeeping, and both halves need pinning.
+    const decl = openPrOperation({ parkLabels: PARK_LABELS });
+    const planStep = decl.steps.find((st) => st.name === 'plan').step;
+    for (const r of ['input.sha', 'input.requireVerified', 'input.dryRun']) expect(planStep.reads).toContain(r);
+    const out = planStep.fn({ input: { ...good(), sha: 'deadbee', requireVerified: true, dryRun: true } });
+    expect(out.argv).toEqual(expect.arrayContaining(['--sha=deadbee', '--require-verified', '--dry-run']));
+  });
+
+  it('declares the three inputs as optional with off-by-default values', () => {
+    const decl = openPrOperation({ parkLabels: PARK_LABELS });
+    expect(decl.input.sha).toMatchObject({ type: 'string', required: false, default: '' });
+    expect(decl.input.requireVerified).toMatchObject({ type: 'boolean', required: false, default: false });
+    // Defaulting `requireVerified` to true would be a policy change smuggled in as a schema edit.
+    expect(decl.input.dryRun).toMatchObject({ type: 'boolean', required: false, default: false });
   });
 });
 
