@@ -27,5 +27,5 @@ tags: []
    `--no-verify`, and the load-bearing negative test says so.
 
 **Not done here, deliberately:** the `#3224` map still carries no `open-pr` entry, because `title` remains
-required where the home makes it optional — see `#x5bpt2m`. Three of four gaps closed, and the fourth is
+required where the home makes it optional — see `#3245`. Three of four gaps closed, and the fourth is
 named rather than papered over.
