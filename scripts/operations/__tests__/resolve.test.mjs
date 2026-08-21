@@ -265,3 +265,58 @@ describe('the wired reader actually reconciles (#2803)', () => {
     expect(() => planResolve(shapeResolveRead(read))).toThrow(/scope: never declared/);
   });
 });
+
+/**
+ * THE GUARD MUST GIVE THE RIGHT ANSWER, not merely run — PR #1510's round-2 blocker.
+ *
+ * Round 1's fix proved the reconciliation was WIRED. Nothing proved it was wired with the right SHAPE, and it
+ * was not: `declared` went in as the raw frontmatter string where `reconcileScope` takes a parsed `string[]`,
+ * so `normScope` read every declared scope as empty and the guard flagged files the item's scope covered
+ * perfectly. "It never fires" became "it always fires", which is the worse of the two — a guard that cries
+ * wolf gets `--force`d past on reflex.
+ *
+ * So these drive the REAL `reconcileScope`, not a stub. A stub would have agreed with either shape.
+ */
+describe('the #2803 guard answers correctly, against the real reconciliation', () => {
+  const card = (scope) => `---\nkind: story\nstatus: active\nscope: ${scope}\ndateOpened: "2026-08-01"\n---\n\n# c\n\nb.\n`;
+  const readerFor = (scopeYaml, observed) => createResolveReader({
+    root: '/repo',
+    listFiles: () => ['100-a.md'],
+    readText: () => card(scopeYaml),
+    exec: () => '',
+    today: () => '2026-08-21',
+    observedFiles: () => observed,
+    // reconcile left at its DEFAULT — the real `reconcileScope`. A stub here would prove nothing about shape.
+  })({ ref: '100' });
+
+  it('parses `scope:` into an ARRAY — a raw string reads as no scope at all', () => {
+    // The bug in one assertion. `readScopeList` returns the parsed list; `readField` would return the string.
+    const read = readerFor('["we:src/pages/"]', ['we:src/pages/x.njk']);
+    expect(read.scopeDeclared).toBe(true);
+  });
+
+  it('does NOT flag a presentation file the declared scope COVERS', () => {
+    // The false positive the wrong shape produced: every declared scope read as empty, so every touched
+    // presentation file was drift.
+    const read = readerFor('["we:src/pages/"]', ['we:src/pages/x.njk']);
+    expect(read.offending).toEqual([]);
+    expect(planResolve(shapeResolveRead(read)).status).toBe('resolved');
+  });
+
+  it('still DOES flag a presentation file outside the declared scope', () => {
+    // The other half — without this, "never flag anything" would pass the test above.
+    const read = readerFor('["we:scripts/"]', ['we:src/pages/x.njk']);
+    expect(read.offending.length).toBeGreaterThan(0);
+    expect(() => planResolve(shapeResolveRead(read))).toThrow(/scope: never declared/);
+  });
+
+  it('treats an absent `scope:` as unchecked, not as an empty declared list', () => {
+    const read = createResolveReader({
+      root: '/repo', listFiles: () => ['100-a.md'],
+      readText: () => '---\nkind: story\nstatus: active\ndateOpened: "2026-08-01"\n---\n\n# c\n\nb.\n',
+      exec: () => '', today: () => '2026-08-21', observedFiles: () => ['we:src/pages/x.njk'],
+    })({ ref: '100' });
+    expect(read.scopeDeclared).toBe(false);
+    expect(planResolve(shapeResolveRead(read)).scopeUnchecked).toBe(true);
+  });
+});

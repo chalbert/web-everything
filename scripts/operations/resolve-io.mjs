@@ -27,6 +27,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createRequire } from 'node:module';
+
 import { readField } from '../backlog/frontmatter.mjs';
 // #2803 — the REAL reconciliation, wired by default. See `createResolveReader`'s note: defaulting these to
 // `null` shipped a guard that never ran.
@@ -47,6 +49,28 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolvePath(HERE, '..', '..');
 
 const backlogDir = (root) => join(root, 'backlog');
+
+/**
+ * The item's `scope:` as a PARSED STRING ARRAY — what `reconcileScope` actually takes.
+ *
+ * `reconcileScope`'s own signature is `@param {string[]} a.declared`, and `we:scripts/backlog.mjs`'s
+ * `readScopeList` feeds it a gray-matter-parsed array. Passing `readField`'s raw frontmatter STRING instead
+ * made `normScope` treat every declared scope as EMPTY, so the #2803 guard flagged every touched presentation
+ * file as drift even when the item's scope covered it perfectly (PR #1510 correctness juror, round 2).
+ *
+ * That is the second bug in this one guard: round 1 was "it never runs", and the fix for it produced "it runs
+ * on the wrong shape". Both had the same root — the reader was reasoning about the reconciliation's contract
+ * instead of reading it.
+ *
+ * Returns `null` (not `[]`) when there is no usable list, so the caller can tell "no scope declared" from
+ * "declared an empty one".
+ */
+export function readScopeList(content) {
+  try {
+    const scope = createRequire(import.meta.url)('gray-matter')(content)?.data?.scope;
+    return Array.isArray(scope) ? scope.filter((x) => typeof x === 'string' && x.trim()) : null;
+  } catch { return null; }
+}
 const idFromName = (file) => file.replace(/\.md$/, '').split('-')[0];
 
 /**
@@ -141,13 +165,13 @@ export function createResolveReader({
     // for a check that never executed — the exact collapse the declaration's three states exist to prevent.
     let scopeDeclared = false;
     let offending = [];
-    const declared = readField(content, 'scope');
-    const hasDeclaredScope = Boolean(declared && String(declared).trim() && String(declared).trim() !== '[]');
+    const declared = readScopeList(content);
+    const hasDeclaredScope = Array.isArray(declared) && declared.length > 0;
     if (hasDeclaredScope && typeof reconcile === 'function' && typeof observedFiles === 'function') {
       try {
         const observed = observedFiles({ root, exec });
         offending = reconcile({
-          declared: String(declared),
+          declared, // the PARSED ARRAY — see `readScopeList`
           observed,
           routeGraph: { routeEntries: ROUTE_ENTRIES },
         })?.offending ?? [];
