@@ -56,6 +56,9 @@
  */
 
 import { op } from './registry.mjs';
+// #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
+// consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute, effect as effectStep } from './step-kinds.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
@@ -550,6 +553,7 @@ export function dispatchLaneOperation({ readTick } = {}) {
   }
 
   return op(DISPATCH_LANE_OP, {
+    declaresOver: DECLARED_HOMES['dispatch-lane'],
     input: {
       // A STRING, not a number: an item id may be a `xNNNNNN` JIT hash, and the shell's `normNum` is what turns
       // either spelling into one identity.
