@@ -3185,7 +3185,7 @@ leaking into the pure core or into any consuming code path, so a future substrat
 discipline applies to any future vendor-specific infrastructure integration, not only this store. Store choice
 (Durable Objects + D1 over MongoDB) is a settled lean, not itself a ratified fork.
 
-**Extended 2026-08-20 (Nicolas, operator; #xvatzyf)** — a **fourth home**, and the first one that is
+**Extended 2026-08-20 (Nicolas, operator; #3214)** — a **fourth home**, and the first one that is
 *interim by construction*: a **git transport branch**, for operational state that must be **durable and
 shared BEFORE the trigger above fires**. The case that forced it is the verdict ledger
 (`we:scripts/lib/verdict-ledger.mjs`): `#3007` Phase 2 makes it the authority the drain merges on, but it is
