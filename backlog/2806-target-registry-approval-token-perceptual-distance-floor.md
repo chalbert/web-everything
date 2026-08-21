@@ -94,14 +94,18 @@ rather than left standing):**
   `we:scripts/design-refs/__tests__/export-corpus.test.mjs`, `we:scripts/design-refs/__tests__/harvest.test.mjs`,
   `we:scripts/design-refs/__tests__/archive-quarantine.test.mjs` (import pure exports only — unaffected by an
   additive export).
-- *Subprocess callers*: `we:package.json` line 74 defines the `design-refs` npm script running
+- *Subprocess callers*: `we:package.json` line 81 defines the `design-refs` npm script running
   `we:scripts/design-refs.mjs` (the `collect` / `dedup` / `harvest` / `report` CLI). Unaffected — no existing
   subcommand's behavior changes.
 - No caller of `we:scripts/lib/target-registry.mjs` exists yet (new file) — this slice is foundation, consumed
-  later by `#2812` (WE floor: record consumption + warn→error) and `#2803` (resolve-time reconciliation),
-  matching the epic's own build-wave order (`#2804`: `{scaffold/readiness, harness, **registry**}` precedes
-  `{…, WE-floor, scope-reconcile}`). Shipping it unwired is the same shape `#2805` shipped in (a pure,
-  independently-tested library) before `#2812`/`#2803` call it.
+  later by `#2812` (WE floor: record consumption + warn→error), matching the epic's own build-wave order
+  (`#2804`: `{scaffold/readiness, harness, **registry**}` precedes `{…, WE-floor, scope-reconcile}`).
+  Shipping it unwired is the same shape `#2805` shipped in (a pure, independently-tested library) before
+  `#2812` calls it. **Correction (2026-08-21):** `#2803` (resolve-time reconciliation) was named here as a
+  second future consumer and is not one — it is `status: resolved` (`dateResolved: "2026-08-16"`) and its
+  shipped code references neither `target-registry` nor `registryId`/`contentHash`. It shipped WITHOUT
+  consuming this mechanism, so `#2812` is the only live consumer; whether #2803 owes a follow-up that wires
+  it is an open question this card does not answer.
 
 **De-risking probe run (checklist item 8).** The riskiest assumption was reusing `we:scripts/design-refs.mjs`'s
 perceptual primitives (`hammingHex`/`dHash`) despite the file's top-level `import { chromium } from 'playwright'`
@@ -141,9 +145,9 @@ Each answer below is a real design call this story is making, not a menu; the re
 alternative are stated so a reviewer can override a specific one without re-deriving all seven.
 
 **1. Authorization predicate on mint — structural provenance, not identity.** WE has no user-identity or
-credential system to check against — `we:scripts/lib/verdict-ledger.mjs:196-214` states this plainly for the
+credential system to check against — `we:scripts/lib/verdict-ledger.mjs:207-236` states this plainly for the
 adjacent review-verdict ledger ("Nothing in this repo distinguishes the operator from an agent... everything
-runs under one token and one session id"), and `we:scripts/lib/review-independence.mjs:193` (`decideClearerIndependence`)
+runs under one token and one session id"), and `we:scripts/lib/review-independence.mjs:261` (`decideClearerIndependence`)
 already solves an analogous problem the same way: not by authenticating who acted, but by comparing two
 **declared identifiers** (author session vs. clearer session) for equality. This story mirrors that pattern
 with commit/lane identifiers instead of session ids: `mintAuthorizationVerdict({ authoredInCommit, buildCommit,
@@ -228,7 +232,7 @@ The registry entry's optional `source` block requires `sourceHash` (a `sha256:`-
 archived raw payload) and a boolean `redacted: true` claim. WE's validator checks the **shape** only — it never
 opens or parses the raw payload itself (Figma node JSON, potentially carrying PII, is normalized and archived
 product-side, and WE holds zero implementation, MEMORY #6). This is the identical honesty pattern
-`we:scripts/lib/verdict-ledger.mjs:196-229` already documents for its own `actor` block ("IT CAN PROVE... IT
+`we:scripts/lib/verdict-ledger.mjs:207-236` already documents for its own `actor` block ("IT CAN PROVE... IT
 CANNOT PROVE"), applied to `source` instead of `actor`: WE can prove a `sourceHash` and a `redacted` claim are
 *present and well-formed*; it cannot prove redaction actually happened. Stated in the module docstring, not
 left implicit.
@@ -317,11 +321,11 @@ already establish, so a partially-written or hand-mangled ledger degrades rather
    plus the `prevDigest` chain input).
 4. `mintAuthorizationVerdict`, `frozenArtifactScan`.
 5. `buildRegistryEntry` / `validateRegistryEntry` / `serializeRegistryEntry` / `parseRegistryLog` (mirror
-   `we:scripts/lib/verdict-ledger.mjs:291-428`'s builder/validator/parse triad).
+   `we:scripts/lib/verdict-ledger.mjs:298-428`'s builder/validator/parse triad).
 6. `foldTargetRegistry`, `verifyChain`.
 7. `verifyPerceptualFloor` (imports `hammingHex` from `we:scripts/design-refs.mjs`).
 8. IO shell: `targetRegistryPath`, `appendRegistryEntry` (locked append via `reserve`/`releaseLockDir`,
-   `we:scripts/readiness/file-locks.mjs:237` / `:225`, mirroring `we:scripts/lib/verdict-ledger.mjs:722-745`),
+   `we:scripts/readiness/file-locks.mjs:237` / `:225`, mirroring `we:scripts/lib/verdict-ledger.mjs:729-745`),
    `readTargetRegistry`.
 9. `we:scripts/__tests__/target-registry.test.mjs` — full coverage per Done-when.
 10. Module-header docstring mapping each of the seven security requirements to the function that resolves it
@@ -365,7 +369,8 @@ already establish, so a partially-written or hand-mangled ledger degrades rather
 file is either brand-new (`we:scripts/lib/target-registry.mjs` and its test) or an additive-only extension of
 an existing file (`we:scripts/design-refs.mjs` gains two exports, no existing signature changes) with no live
 caller anywhere in either repo yet. There is no flag to hide it behind and nothing to stage across a boundary:
-the eventual consumers (`#2812`, `#2803`) are separate, later slices in the epic's own build-wave order, so
+the eventual consumer (`#2812`; `#2803` already resolved without consuming it — see the Scope section) is a
+separate, later slice in the epic's own build-wave order, so
 this lands as a complete, independently-tested, currently-unwired library — the same shape `#2805` shipped in.
 If a builder or reviewer prefers a smaller diff, the perceptual-floor seam named in the Size section can peel
 off as its own PR first with no redesign of the rest; that is a delivery-sequencing choice, not a design
@@ -397,3 +402,45 @@ and are fixed above, not merely noted:
 - **One flagged-not-blocking note carried into the design:** the perceptual-floor's reused Hamming threshold
   (5 of 64 bits) is a dedup default, not a validated security constant — called out as a tuning question for
   the eventual live-gate wiring (`#2812`), not asserted as settled here.
+
+### Citation re-verification (2026-08-21 batch pass) — 5 line refs corrected, design unchanged
+
+A second grounding pass re-read every code citation in this card against the live tree. The design is
+unchanged and every named symbol still exists where claimed; five line numbers had drifted and are corrected
+in place:
+
+| claim | was | is |
+|---|---|---|
+| the "nothing distinguishes the operator from an agent" honesty block in `we:scripts/lib/verdict-ledger.mjs` | `:196-214` / `:196-229` | `:207-236` (`:207` IT CAN PROVE, `:216` IT CANNOT PROVE, `:236` `ACTOR_PROVES`) |
+| `decideClearerIndependence` in `we:scripts/lib/review-independence.mjs` | `:193` | `:261` |
+| the builder/validator/parse triad in `we:scripts/lib/verdict-ledger.mjs` | `:291-428` | `:298-428` (`buildVerdictRecord` `:298`, `validateVerdictRecord` `:358`, `serializeVerdictRecord` `:409`, `parseVerdictLog` `:424`) |
+| the locked append the IO shell mirrors | `:722-745` | `:729-745` (`appendVerdict` `:729`) |
+
+Re-confirmed unchanged and correct: `imageFileToWebp` at `we:scripts/design-refs.mjs:110`, `hammingHex` at
+`:800`, the private `shotDHash` at `:829`, the dedup near-dup default `threshold = 5` at `:851`,
+`FIXTURE_ROUTE_RE` at `we:scripts/lib/fidelity-contract.mjs:51`, and `reserve` / `releaseLockDir` at
+`we:scripts/readiness/file-locks.mjs:237` / `:225`. The `## Done when` list above (4 criteria, all tier-1 or
+tier-2) already satisfies the #2949 bar and was left as authored.
+
+## Independent review — 2026-08-21
+
+Confidence: **Medium**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (NOT addressed; strategy: prove the premise by mutation or reversion first) — Most premise claims (blockedBy cleared per we:backlog/2805-ui-fidelity-contract-schema-validator.md status:resolved; no target-registry/ledger code exists anywhere via grep) verify true. But the claim that we:backlog/2803-resolve-time-scope-reconciliation.md is a future consumer 'matching the epic's own build-wave order' is stale: #2803 already resolved on 2026-08-16, and its shipped implementation (we:scripts/readiness/scope-reconcile.mjs, we:scripts/backlog.mjs) has zero reference to registryId/contentHash/target-registry — it will not consume this slice as the card implies.
+- **consumer** (addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — Checklist item 1 was done both ways (ES importers of we:scripts/design-refs.mjs, and the we:package.json subprocess CLI entry) and correctly concludes no live caller of we:scripts/lib/target-registry.mjs exists yet. Only flaw is the stale #2803 citation noted under premise above, which doesn't change the 'no consumer today' conclusion.
+- **interface** (NOT addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — The WE/plateau integrityDigest canonicalization is hand-mirrored across two non-npm-linked repos (we:scripts/lib/target-registry.mjs's computeIntegrityDigest vs plateau's `plateau:scripts/dev/fidelity-render.mjs` canonicalReplacer) with no round-trip/interop test possible yet since no plateau-side conforming client exists — an inherent consequence of shipping foundation-only, not a defect this card introduced, but a real seam left unverified.
+- **population** (NOT addressed; strategy: name the population each threshold guards) — The perceptual-threshold population is handled well (card explicitly names the dedup-vs-security population mismatch and defers re-tuning to #2812). But frozenArtifactScan's named live-fetch attribute population (script src, link href, img src, CSS url()) does not include SVG-specific fetch vectors (href/xlink:href on <image>/<use>), despite SVG mock content being the explicitly discussed canonicalization target and the Figma-CDN-image scenario (requirement #5's own motivating example) typically manifesting as an SVG <image href="..."> rather than an img/script/link tag.
+- **decorative-guard** (addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Done-when specifies real mutation-shaped tests, e.g. tamper detection mutates one field of a historical entry and requires verifyChain to return {valid:false, brokenAt:<index>}, and frozen-artifact rejection requires a violation naming the offending reference plus a must-not-flag xmlns case.
+- **unmeasured-impact** (addressed; strategy: measure the constraint before sizing) — The de-risking probe actually ran (npx vitest run against we:scripts/design-refs/__tests__/perceptual.test.mjs, 10/10 pass in 511ms) and confirmed cwebp/dwebp resolve locally before committing to reusing we:scripts/design-refs.mjs's primitives.
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — verifyChain, frozenArtifactScan, and mintAuthorizationVerdict all return structured reason/violations/brokenAt fields rather than booleans, and the Done-when criteria require asserting on those surfaced fields, not just on pass/fail.
+
+**Corrections applied by this review:**
+
+- The we:package.json citation for the design-refs npm script is off: the card cites line 74 (which is actually the propose:readiness script), the design-refs entry is at we:package.json:81.
+- The claim that we:backlog/2803-resolve-time-scope-reconciliation.md will later consume this slice 'matching the epic's own build-wave order' no longer holds: #2803 is already status:resolved (dateResolved 2026-08-16) and its shipped code has no reference to target-registry/registryId/contentHash — it shipped without consuming this mechanism.
+
+A thorough, unusually well-grounded preparation — every cited line number, status, and reuse claim checked out against the live repo with only two minor citation staleness issues — but the frozenArtifactScan design's own illustrative attribute list omits the SVG href/xlink:href vector that is the archetypal case for requirement #5's motivating scenario (a Figma CDN image embedded in the SVG mock content this registry explicitly canonicalizes).
+
+_Recorded through the declared `review-prep` operation._
