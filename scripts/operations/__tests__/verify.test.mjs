@@ -31,6 +31,29 @@ describe('the declaration', () => {
     expect(decl.input.gate).toMatchObject({ required: false, default: '' });
   });
 
+  // #3240 / PR #1516 correctness juror, CONFIRMED. The gate pass-through was tested only at the IO layer
+  // (`verifyArgv`, `createChecksRunner`). The DECLARATION's own `run` step — which threads `view.input.gate`
+  // into the injected `runChecks()` — had no test, and the juror proved it by dropping that field and watching
+  // the full 869-test operations suite stay green.
+  //
+  // That is the same defect this PR's own commit message claims to have killed ("the runner drops the field"),
+  // fixed one layer down and left standing one layer up. The two layers need separate tests because each can
+  // drop the value independently.
+  it('the `run` STEP threads the caller\'s gate into the injected runner (#3240)', () => {
+    const seen = [];
+    const decl = verifyOperation({ runChecks: (args) => { seen.push(args); return { checks: [check()] }; } });
+    const runStep = decl.steps.find((s) => s.name === 'run').step;
+    runStep.fn({ input: { checkout: '/lane-3', mode: 'run', gate: 'npm run locus:gate' } });
+    expect(seen).toEqual([{ cwd: '/lane-3', mode: 'run', gate: 'npm run locus:gate' }]);
+  });
+
+  it('the `run` step declares a READ of input.gate — an undeclared read is refused by the engine', () => {
+    // The engine only hands a step what it declared. Without `input.gate` in `reads`, the fn above would see
+    // `undefined` no matter what the caller passed, so the read list is part of the wiring, not bookkeeping.
+    const decl = verifyOperation({ runChecks: () => ({ checks: [check()] }) });
+    expect(decl.steps.find((s) => s.name === 'run').step.reads).toContain('input.gate');
+  });
+
   // Defaulting to `process.cwd()` is the #1178 shape: an operation that verifies whichever directory the
   // caller happened to be standing in reports on the wrong tree, and a green verdict for another checkout is
   // worse than no verdict.
