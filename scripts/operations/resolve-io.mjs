@@ -28,6 +28,12 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readField } from '../backlog/frontmatter.mjs';
+// #2803 — the REAL reconciliation, wired by default. See `createResolveReader`'s note: defaulting these to
+// `null` shipped a guard that never ran.
+import { reconcileScope } from '../readiness/scope-reconcile.mjs';
+import { parseObservedFiles } from '../readiness/scope-lease-collect.mjs';
+import { repoKeyFromSlug } from '../readiness/lane-manifest.mjs';
+import { ROUTE_ENTRIES } from '../lib/route-import-graph.mjs';
 import { writeBacklogMd } from '../backlog/guarded-write.mjs';
 // #2747 — the shared wall-clock helper, NOT a hand-rolled UTC ISO day-slice. The hand-rolled form stamps the
 // runtime's UTC day, which runs a day ahead of a UTC-behind operator all evening. `check:standards` scans for
@@ -59,11 +65,39 @@ export function resolveBacklogFile(ref, root, listFiles) {
 }
 
 /**
+ * The observed touch-set for #2803, replaying `we:scripts/backlog.mjs`'s `observedFilesForResolve`.
+ *
+ * The slug normalization is load-bearing and is NOT incidental: `repoKeyFromSlug` takes an `owner/name` slug,
+ * not a remote URL — it splits on `/` and never strips `.git`, so a raw `git@github.com:owner/name.git` keys
+ * as `name.git`, NOTHING matches a `we:`-qualified declared entry, and the guard is silently inert. That is
+ * the same silent-inertness this file was just caught shipping one level up, so it is replayed exactly.
+ */
+export function observedFilesForResolve({ root, exec }) {
+  const git = (args) => exec('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const url = String(git(['remote', 'get-url', 'origin'])).trim();
+  const slug = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1] ?? url;
+  const repoKey = repoKeyFromSlug(slug);
+  if (!repoKey) throw new Error(`origin remote "${url}" yields no repo key`);
+  const base = String(git(['merge-base', 'origin/main', 'HEAD'])).trim();
+  if (!base) throw new Error('empty merge-base against origin/main');
+  return parseObservedFiles({
+    diffOut: String(git(['diff', '--name-only', '--end-of-options', `${base}...HEAD`])),
+    porcelainOut: String(git(['status', '--porcelain'])),
+    repoKey,
+  });
+}
+
+/**
  * Build the injected reader.
  *
- * `reconcile` and `observed` are parameters rather than direct imports so a test can drive the #2803 branch
- * without a git tree. #1497's lesson applies here as much as anywhere: a partially-injected shell is how a
- * suite goes green over code that genuinely reached the filesystem.
+ * `reconcile` and `observedFiles` DEFAULT TO THE REAL BINDINGS. They were parameters defaulting to `null` so
+ * a test could drive the #2803 branch without a git tree — and `run.mjs` calls this with no arguments, so the
+ * scope-drift guard NEVER RECONCILED ANYTHING in the wired operation (PR #1510 correctness juror, blocker).
+ *
+ * The second half of that bug is subtler and is fixed below: with `reconcile` null, this reported
+ * `scopeDeclared: true` with an empty `offending`, which `planResolve` reads as "ran and found nothing".
+ * The declaration's whole three-state design exists to keep "could not check" apart from "checked clean",
+ * and the wiring collapsed it anyway. `scopeDeclared` now means THE RECONCILIATION RAN — nothing else.
  */
 export function createResolveReader({
   root = REPO_ROOT,
@@ -73,8 +107,8 @@ export function createResolveReader({
   today = localToday,
   // Injected so the declaration's scope-drift branch is reachable in a test. The real bindings are
   // `we:scripts/lib/scope-reconcile.mjs` and the observed-file walk the CLI uses.
-  reconcile = null,
-  observedFiles = null,
+  reconcile = reconcileScope,
+  observedFiles = observedFilesForResolve,
 } = {}) {
   return ({ ref }) => {
     const file = resolveBacklogFile(ref, root, listFiles);
@@ -102,22 +136,27 @@ export function createResolveReader({
       }
     }
 
-    // #2803 — three-state, see the header. `scopeDeclared: false` is "could not check", NOT "clean".
+    // #2803 — THREE-STATE. `scopeDeclared` means THE RECONCILIATION RAN, not merely that the card names a
+    // `scope:`. Setting it from the frontmatter alone is what let a null `reconcile` report "checked clean"
+    // for a check that never executed — the exact collapse the declaration's three states exist to prevent.
     let scopeDeclared = false;
     let offending = [];
     const declared = readField(content, 'scope');
-    if (declared && String(declared).trim() && String(declared).trim() !== '[]') {
-      scopeDeclared = true;
-      if (typeof reconcile === 'function') {
-        try {
-          const observed = typeof observedFiles === 'function' ? observedFiles({ root, exec }) : [];
-          offending = reconcile({ declared: String(declared), observed })?.offending ?? [];
-        } catch {
-          // A reconciliation that THREW has not reported clean. Report the check as un-runnable rather than
-          // returning an empty `offending`, which the declaration would read as "ran and found nothing".
-          scopeDeclared = false;
-          offending = [];
-        }
+    const hasDeclaredScope = Boolean(declared && String(declared).trim() && String(declared).trim() !== '[]');
+    if (hasDeclaredScope && typeof reconcile === 'function' && typeof observedFiles === 'function') {
+      try {
+        const observed = observedFiles({ root, exec });
+        offending = reconcile({
+          declared: String(declared),
+          observed,
+          routeGraph: { routeEntries: ROUTE_ENTRIES },
+        })?.offending ?? [];
+        scopeDeclared = true; // set ONLY after the reconciliation actually returned
+      } catch {
+        // A reconciliation that THREW has not reported clean. Left `false` so the declaration reports
+        // `scopeUnchecked` rather than a clean run.
+        scopeDeclared = false;
+        offending = [];
       }
     }
 

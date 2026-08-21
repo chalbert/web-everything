@@ -23,6 +23,7 @@ import { createMemoryRunStore } from '../run-store.mjs';
 import {
   planResolve, shapeResolveRead, resolveOperation, RESOLVE_OP, RESOLVE_EFFECT, RESOLVE_REFUSALS,
 } from '../resolve.mjs';
+import { createResolveReader } from '../resolve-io.mjs';
 
 /** A minimal card body the real `applyTransition` will splice. */
 const card = ({ kind = 'story', status = 'active', extra = '' } = {}) =>
@@ -187,5 +188,80 @@ describe('the declaration end to end', () => {
 
   it('refuses to build without an injected reader', () => {
     expect(() => resolveOperation({})).toThrow(/needs a `readResolveContext/);
+  });
+});
+
+/**
+ * THE WIRING, NOT JUST THE DECLARATION — the blocker PR #1510's juror found.
+ *
+ * Every test above drives `planResolve` with a hand-built `read` fixture, so all of them passed while the
+ * REAL reader shipped with `reconcile`/`observedFiles` defaulting to `null` and `run.mjs` calling it with no
+ * arguments. The #2803 guard never reconciled anything in the wired operation.
+ *
+ * The second half was worse than the first: with `reconcile` null the reader still reported
+ * `scopeDeclared: true` and an empty `offending`, which `planResolve` reads as "ran and found nothing". The
+ * declaration's three states exist precisely to keep "could not check" apart from "checked clean", and the
+ * WIRING collapsed them anyway. A fixture-only suite cannot see that, by construction.
+ */
+describe('the wired reader actually reconciles (#2803)', () => {
+  const CARD = '---\nkind: story\nstatus: active\nscope: ["we:src/"]\ndateOpened: "2026-08-01"\n---\n\n# c\n\nb.\n';
+  const io = (over = {}) => ({
+    root: '/repo',
+    listFiles: () => ['100-a.md'],
+    readText: () => CARD,
+    exec: () => '',
+    today: () => '2026-08-21',
+    ...over,
+  });
+
+  it('with NO overrides at all, a broken tree reports UNCHECKED — not clean', () => {
+    // The regression this pins, stated as BEHAVIOUR rather than as a grep for `= null`. `run.mjs` calls
+    // `createResolveReader()` with no arguments, so the defaults ARE the production path. If they were null
+    // again, the old code set `scopeDeclared: true` off the frontmatter alone and the declaration read that
+    // as CHECKED AND CLEAN. Here `exec` returns nothing, so the real observed-files read throws, and the
+    // only acceptable answer is "could not check".
+    const read = createResolveReader(io())({ ref: '100' });
+    expect(read.scopeDeclared).toBe(false);
+    expect(read.offending).toEqual([]);
+    expect(planResolve(shapeResolveRead(read)).scopeUnchecked).toBe(true);
+  });
+
+  it('actually CALLS the reconciliation — the call path is live, not just present', () => {
+    let called = 0;
+    const read = createResolveReader(io({
+      reconcile: (args) => { called += 1; expect(args.declared).toContain('we:src/'); return { offending: [] }; },
+      observedFiles: () => ['src/x.js'],
+    }))({ ref: '100' });
+    expect(called).toBe(1);
+    expect(read.scopeDeclared).toBe(true);
+  });
+
+  it('reports scopeUnchecked when the reconciliation CANNOT run — never a clean run', () => {
+    // `observedFiles` throwing is the realistic shape (no git, no origin, detached tree). The old wiring
+    // returned `scopeDeclared: true, offending: []` here, which the declaration read as CHECKED AND CLEAN.
+    const read = createResolveReader(io({
+      reconcile: () => ({ offending: [] }),
+      observedFiles: () => { throw new Error('no git here'); },
+    }))({ ref: '100' });
+    expect(read.scopeDeclared).toBe(false);
+    expect(planResolve(shapeResolveRead(read)).scopeUnchecked).toBe(true);
+  });
+
+  it('reports a REAL clean run as checked, distinguishably', () => {
+    const read = createResolveReader(io({
+      reconcile: () => ({ offending: [] }),
+      observedFiles: () => ['src/x.js'],
+    }))({ ref: '100' });
+    expect(read.scopeDeclared).toBe(true);
+    expect(planResolve(shapeResolveRead(read)).scopeUnchecked).toBe(false);
+  });
+
+  it('surfaces drift the reconciliation found, so the guard can actually refuse', () => {
+    const read = createResolveReader(io({
+      reconcile: () => ({ offending: ['src/pages/x.njk'] }),
+      observedFiles: () => ['src/pages/x.njk'],
+    }))({ ref: '100' });
+    expect(read.offending).toEqual(['src/pages/x.njk']);
+    expect(() => planResolve(shapeResolveRead(read))).toThrow(/scope: never declared/);
   });
 });
