@@ -135,6 +135,19 @@ describe('the exemption is POSITIONAL', () => {
     expect(scan(`# @operation-home-ok: #xvj8sj0 — the operation forwards no gate\n# so naming it would drop the caller's gate.\n${CMD}`)).toEqual([]);
   });
 
+  it('markdown BOLD and BULLET lines end the walk — `*` is not a comment in markdown', () => {
+    // PR #1513 correctness juror, CONFIRMED. `COMMENT_LINE` carried a `*` alternative over from the JS-source
+    // walk its precedents perform, where `*` continues a JSDoc block. This scan reads only markdown, where `*`
+    // opens a bullet or the leading star of `**bold**` — 169 lines in the current skills-src tree start with
+    // `**`. So a marker written to excuse ONE command silently exempted an unrelated mention below it.
+    //
+    // The juror's own probe is what makes this test necessary rather than decorative: it removed `\*` from the
+    // pattern and all 25 tests still passed, so no named test exercised the branch at all.
+    const marker = '<!-- @operation-home-ok: a reason for a DIFFERENT command -->';
+    expect(scan(`${marker}\n**Note:** unrelated prose.\n**More bold prose.**\n${CMD}`)).toHaveLength(1);
+    expect(scan(`${marker}\n* an unrelated bullet\n${CMD}`)).toHaveLength(1);
+  });
+
   it('a blank line ends the walk — the block must be attached to the mention', () => {
     expect(scan(`# @operation-home-ok: #xvj8sj0 — a reason\n\n${CMD}`)).toHaveLength(1);
   });

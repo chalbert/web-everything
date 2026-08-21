@@ -101,8 +101,22 @@ export function homeDelegates(homeContent, opName) {
   return re.test(src);
 }
 
-/** A line that is only a comment — the forms these skills use: `#` in a shell fence, `//`, `<!-- -->`, `*`. */
-const COMMENT_LINE = /^\s*(?:#|\/\/|<!--|\*)/;
+/**
+ * A line that is only a comment, in the forms these skills use: `<!-- -->` in prose, and `#` or `//` inside a
+ * fenced code block.
+ *
+ * `*` IS DELIBERATELY ABSENT, and it was present, which was the bug (PR #1513 correctness juror). The
+ * alternative came over from the JS-source comment walk this function's own cited precedents perform
+ * (`hasCohesiveEscapeHatch`, `hasTestOnlyExportOkMarker`), where `*` legitimately continues a JSDoc block. This
+ * scan reads ONLY markdown, and there `*` opens a bullet or the leading star of `**bold**` — 169 lines in the
+ * current `skills-src` tree begin with `**`. So an ordinary bold or bulleted line sitting directly under a
+ * marker EXTENDED the walk across unrelated prose, and a marker written to excuse one command could silently
+ * exempt a different raw-home mention several lines below it.
+ *
+ * Same root as the findings this file was built to catch, one level up: a predicate carried over from a
+ * precedent without re-deriving what it means in the new file type.
+ */
+const COMMENT_LINE = /^\s*(?:#|\/\/|<!--)/;
 
 /**
  * Is the mention on line `i` exempted? PURE.
