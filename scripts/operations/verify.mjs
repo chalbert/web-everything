@@ -147,12 +147,26 @@ export function verifyOperation({ runChecks } = {}) {
       // green verdict for another checkout is worse than no verdict. The caller must say which.
       checkout: { type: 'string', required: true },
       mode: { type: 'string', required: false, default: 'run', enum: [...VERIFY_MODES] },
+      // #xvj8sj0 — THE SUITE COMMAND, passed through to the home's `--gate`. It was absent until the #3224
+      // scan made the omission visible: `we:skills-src/conveyor/delivery-agent-brief.md` runs the home with
+      // the item's LOCUS gate, and without this field, rewiring that line to the operation would silently run
+      // the DEFAULT suite instead — a green verdict for checks the caller never asked for. That is the PR
+      // #1508 shape, a rewrite that quietly drops what the raw call did, which is why the scan's finding was
+      // answered by building this input rather than by rewiring the skill.
+      //
+      // EMPTY MEANS "THE HOME'S DEFAULT", not "no gate". The default (`test:unit && check:standards`) lives in
+      // `we:scripts/verify-lane.mjs` and is deliberately NOT restated here — a second copy is a second answer
+      // to one question (#2644), and it would drift. An empty string simply omits the flag, which is exactly
+      // how the home is invoked by a caller that expresses no preference.
+      gate: { type: 'string', required: false, default: '' },
     },
     verdictFrom: 'assess',
 
     run: compute({
-      reads: ['input.checkout', 'input.mode'],
-      fn: (view) => shapeRunFinding(runChecks({ cwd: view.input.checkout, mode: view.input.mode })),
+      reads: ['input.checkout', 'input.mode', 'input.gate'],
+      fn: (view) => shapeRunFinding(runChecks({
+        cwd: view.input.checkout, mode: view.input.mode, gate: view.input.gate,
+      })),
     }),
 
     assess: compute({

@@ -49,11 +49,24 @@ export const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** The argv for one invocation. PURE, and exported so a test can assert the exact command with no subprocess —
  *  the same discipline `we:scripts/collect-review-requests.mjs` applies to its git argv. */
-export function verifyArgv({ checkout, mode }) {
+export function verifyArgv({ checkout, mode, gate = '' }) {
   const base = [VERIFY_LANE_CLI];
   // `check` is the home's READ-ONLY subcommand and must come before the flags, as a positional.
   if (mode === 'check') base.push('check');
   base.push(`--repo=${checkout}`, '--json');
+  // #xvj8sj0 — forward the caller's suite command. TWO CONDITIONS, and both matter:
+  //
+  //   • ONLY WHEN NON-EMPTY. Passing `--gate=` with an empty value is not "use the default": the home reads
+  //     `flags.gate` as a string and would run the empty command, so an unset gate must OMIT the flag and let
+  //     the home apply its own default. Never restate that default here (#2644).
+  //   • NEVER IN `check` MODE. `check` runs no suites at all — it reads the marker HEAD already carries and
+  //     prints its verdict. A gate there would be an argument the home ignores, which reads to the next author
+  //     as though the mode honoured it.
+  //
+  // Passed as ONE argv element, never shell-interpolated: the value is a full command line
+  // (`npm run test:unit && npm run check:standards`), and `execFile` hands it to the home as a single
+  // argument rather than letting `&&` reach a shell in this process.
+  if (mode !== 'check' && typeof gate === 'string' && gate.trim()) base.push(`--gate=${gate}`);
   return base;
 }
 
@@ -102,8 +115,8 @@ export function classifyVerifyResult({ status, signal, stdout = '', stderr = '',
  * branch above is reachable with no suites, no git and no clock.
  */
 export function createChecksRunner({ spawn = spawnSync } = {}) {
-  return ({ cwd, mode }) => {
-    const argv = verifyArgv({ checkout: cwd, mode });
+  return ({ cwd, mode, gate = '' }) => {
+    const argv = verifyArgv({ checkout: cwd, mode, gate });
     const startedAt = Date.now();
     let r;
     try {
