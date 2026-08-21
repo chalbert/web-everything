@@ -106,3 +106,20 @@ surrogate pair) or leave it unimplemented rather than shipping a plausible-looki
    check. One read of the `test` job's step list. (Tier 2.)
 5. `frontierui:plugs/webdirectives/ssr/go/README.md` exists and records the parser choice and the
    implemented-vector subset, in the shape `frontierui:plugs/webdirectives/ssr/net/README.md` uses. (Tier 2.)
+
+## Independent review — 2026-08-21
+
+Confidence: **High**
+
+**Risks assessed** (per we:backlog/3103-*.md's taxonomy):
+
+- **premise** (addressed; strategy: verify by mutation or reversion BEFORE building) — Verified against the live repo: frontierui:plugs/webdirectives/ssr/go/ does not exist yet (truly greenfield, matches the card's framing), and both precedents it claims to mirror (frontierui:plugs/webdirectives/ssr/net/, frontierui:plugs/webdirectives/ssr/jvm/) are merged and present with the exact shared-helper/dispatch/harness shape the card describes.
+- **interface** (addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — The Done-when list requires build.sh to actually run the full source-to-render-to-byte-compare round trip against we:conformance-vectors/webdirectives-ssr.vectors.json, which is the real seam between the WE-owned vector contract and the FUI-owned renderer, not a mocked or partial check.
+- **decorative-guard** (NOT addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Done-when #3's byte-mutation proof is a one-time manual act ('run once by hand, recorded in the PR body'), not a persisted automated test. Verified this gap is also true of the merged .NET precedent (frontierui:plugs/webdirectives/ssr/net/tests/ConformanceTests.cs has no mutation-based regression test) and the JVM precedent, so a future refactor that quietly loosens byte comparison would go uncaught by CI in any of the three renderers. This is a pre-existing pattern inherited from #2383/#2368, not introduced by this card, so it is a carve-out rather than a blocker here.
+- **legibility** (addressed; strategy: assert the failure SURFACES, not just that it occurs) — Done-when #2 explicitly requires the harness to distinguish 'skipped' from 'failed' for the five vectors this slice does not own, matching the .NET precedent's Report.Skipped/Report.Failed split (frontierui:plugs/webdirectives/ssr/net/src/ConformanceHarness.cs), so a silent-skip-as-pass bug would be visible rather than merely occurring.
+
+**Corrections recommended:**
+
+- none — the preparation held up as written.
+
+_Recorded through the declared `review-prep` operation._
