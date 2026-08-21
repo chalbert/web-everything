@@ -27,6 +27,7 @@ const view = (over = {}) => ({
   comments: [],
   files: [{ path: 'scripts/operations/verify.mjs', additions: 10, deletions: 0 }],
   headRefName: 'lane/verify-operation',
+  state: 'OPEN', // #xwp8ioh — a staged view without it cannot be reviewed at all (see VIEW_FIELD_TYPES)
   ...over,
 });
 const check = (v, over = {}) => checkStagedView({ view: v, pr: 1496, repo: 'chalbert/web-everything', fields: PR_VIEW_FIELDS, ...over });

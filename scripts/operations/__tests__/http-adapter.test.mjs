@@ -88,6 +88,7 @@ function stubReader({ labels = ['review:pending'] } = {}) {
       diffStat: [{ path: 'scripts/x.mjs', additions: 1, deletions: 0 }],
     },
     headRefName: 'lane/thing',
+    state: 'OPEN', // #xwp8ioh — `review-pr.read` refuses a non-OPEN or unreadable PR before `judge`
     body: 'the PR description',
     net: { paths: ['scripts/x.mjs'], base: 'a'.repeat(40), revSha: 'b'.repeat(40), rev: 'origin/lane/thing', scored: true },
     diff: { text: '--- a/x\n+++ b/x\n+one\n', scored: true },
