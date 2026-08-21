@@ -30,3 +30,81 @@ Both let real metadata slip past the gate unread — coverage that stops at one 
 ## Provenance
 
 Captures two outstanding **minor** preventions (the codifiedIn-array minor and the front-matter-key-allowlist minor) from the human `/review` on **PR #982** (`we:backlog/2851-stop-the-line-conveyor-governance-the-orchestrator-never-abs.md`), grouped as one item per the prevention-introspection discipline (#2823). Enforcement belongs on the open conveyor-mechanization line (#2840 / #2785); this item does not reopen the resolved decision.
+
+## Design
+
+Two independent edits; do them in one item but in this order, because the second one's baseline is only
+measurable once you have looked at the corpus.
+
+### 1. `codifiedIn` accepts an array
+
+The scalar assumption is hard-coded in a regex, not in a schema, so widening it means touching the one place
+that reads the field for statute coverage plus the one place that reads it for citation ownership:
+
+- **`we:scripts/lib/validate-rules-anchors.cjs`** — `CODIFIED_RE = /^codifiedIn:\s*["']?([^"'\n]+?)["']?\s*$/m`
+  (~L18). This is a raw-text regex over the file, not a YAML read, so a block-sequence value is simply not
+  matched and the item's statute coverage silently drops to zero. `collectCodifiedCites` (~L31) feeds
+  `validateRulesAnchors` (~L48, the resolution gate) and the substance/orphan passes below it (~L112, ~L182).
+  Widening here is the load-bearing half: resolution + substance must run **per anchor**, so the return shape
+  becomes one cite per array element rather than one per file.
+- **`we:scripts/lib/citation-check.mjs`** — `buildAnchorOwners` (~L90–110) iterates
+  `for (const field of [it.codifiedIn, it.graduatedTo])` treating each as a scalar string. An array
+  `codifiedIn` must contribute EVERY element to the anchor→owner map, or the #2821 attribution rule starts
+  reporting false "attributed to a non-owner" findings the day the first array lands.
+- **`we:scripts/check-standards-rules.mjs`** `validateBacklogItem` (~L168) is where the accepted SHAPE is
+  declared (string or non-empty string[], mirroring how `scope` is validated) — see the `scope` precedent in
+  `we:docs/agent/backlog-workflow.md`.
+- The loader (`we:src/_data/backlog.js`) spreads `...data` unchanged, so an array value reaches every consumer
+  without a loader edit. `we:scripts/backlog.mjs`'s `resolve` verb writes the field (~L345) and stays
+  scalar-writing — accepting an array does not require the CLI to mint one.
+
+Nothing on the tree carries an array `codifiedIn` today (450 items carry the scalar), so the widening is
+purely additive and cannot regress an existing item.
+
+### 2. The front-matter key allowlist
+
+There is no key-allowlist anywhere in `we:scripts/check-standards.mjs` or
+`we:scripts/check-standards-rules.mjs` today — unknown keys are simply spread through by the loader and
+ignored. The natural home is `validateBacklogItem`, which is already pure and fixture-unit-tested.
+
+**The one design constraint that will bite:** `validateBacklogItem` receives the LOADER's item, not the raw
+frontmatter, and the loader (`we:src/_data/backlog.js`, ~L349–367) adds derived keys that are not frontmatter
+(`id`, `num`, `slug`, `reportDate`) alongside ones that legitimately are (`title`, `summary`, `details`,
+`scope`). A naive `Object.keys(item)` allowlist therefore has to allowlist the loader's own inventions,
+which couples the gate to the loader's internals. Either pass the raw key list through `backlogCtx`
+(the ctx object is built at `we:scripts/check-standards.mjs` ~L554 and already carries injected maps), or
+re-read the frontmatter in the caller. Rule it explicitly; do not discover it mid-build.
+
+**Measured baseline** (this tree, 3191 items — this is what the allowlist has to be reconciled against, and
+what makes the rule worth having). Keys used **once or twice** across the whole corpus, i.e. the exact
+novel/stale/typo class the card is about:
+
+`summary` (2) · `formerSlugs` (2) · `dateClosed` (2) · `triagedDate` (1) · `supersededBy` (1) · `workItem` (1)
+· `relatedDecision` (1) · `relatedResearch` (1) · `reportDate` (1) · `parkedDate` (1) · `decidedDate` (1) ·
+`relatedItem` (1)
+
+Several are plainly wrong rather than merely rare: `relatedItem` against the corpus's `relatedItems`/`relatedTo`,
+`parkedDate`/`decidedDate`/`dateClosed`/`triagedDate` against the corpus's `dateParked`/`dateResolved`
+convention, and `reportDate` **shadowing a key the loader derives** (~L346) — the frontmatter value is
+overwritten on every load, so it has never done anything. `dateRatified`, the key the PR #982 review found,
+is no longer present anywhere. Every one of these must be either fixed or explicitly admitted BEFORE the rule
+errors; shipping it as an error against an un-triaged corpus reds the gate for everyone.
+
+## Done when
+
+1. `npx vitest run rules-anchors` fails before and passes after, with a new case in
+   `we:scripts/__tests__/rules-anchors.test.mjs` proving an ARRAY `codifiedIn` with two anchors produces
+   resolution + substance findings for **both** — the second element is where the bug is, so a single-element
+   array case does not count. (Tier 1.)
+2. `npx vitest run citation-check` covers an array `codifiedIn` in `buildAnchorOwners`: both anchors map to
+   the same owning item, and an attribution to that item via the SECOND anchor is not reported as a
+   non-owner. (Tier 1.)
+3. `npx vitest run check-standards` covers the key allowlist in both directions — a fixture item with a
+   known-key-only frontmatter is clean, and one carrying `dateRatified` produces exactly one finding naming
+   the key. (Tier 1.)
+4. `npm run check:standards` is GREEN on the whole tree after the rule lands — meaning every key in the
+   measured-baseline list above was fixed at source or added to the allowlist with a reason. A run that is
+   green only because the rule was shipped as a warning does NOT satisfy this; if the corpus triage is
+   deferred, say so on the item and ship the rule warn-first explicitly. (Tier 1.)
+5. No item on the tree still carries `reportDate` in frontmatter, since the loader overwrites it — one
+   `grep -c '^reportDate:' backlog/*.md` returns nothing. (Tier 2.)

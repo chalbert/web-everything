@@ -96,3 +96,97 @@ So make the accept branch **refuse** when `review:changes` is live (the same sha
 - **#2309** (resolved) — `review:human` is a sticky merge veto, not only a fresh-diff score. Same *class* of fix (sticky veto + a recommended server-side belt) but a **different label/axis**: `review:human` = gate-self, human-only clear; `review:changes` = reviewer rejected the diff, the author lane must re-push. #2309 hardened `review:human`; this item does the equivalent for `review:changes` (and #2309's own body flags STRIPPING `review:human`, a distinct concern).
 - **#2416** (open, sibling under #2405) — honor `review:accepted` only when a human applied it (the WHO/provenance of the accept). Different axis: this item is about `review:changes` never being overridden, not about who applied `review:accepted`.
 - **#2412** (open) — escalated blast-radius/statute parks auto-land un-reviewed on a merge-anyway timeout. Different mechanism (the timeout path), same goal (no un-reviewed land).
+
+## Prep re-verification (2026-08-21) — half of this item has been closed by #2974, and its ruled fix was overruled
+
+Read this before building. Three of the four things above were re-checked against the live tree and two have
+moved.
+
+**1. The secondary finding — the asymmetric accept swap — is FIXED, and by the opposite of the fix this item
+ruled.** `decideSetLabel`'s `accepted` branch in `we:scripts/review-set-label.mjs` now returns
+`removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.changes]`. The strip landed as #2974
+(`status: resolved`, `dateResolved: 2026-08-08`, `scope: ["we:scripts/review-set-label.mjs"]`), whose own
+comment says so in as many words: *"`changes` (below) already strips a stale `accepted`; `accepted` was the
+one asymmetric target."* So the section above titled **"Fix: REFUSE the transition, do NOT strip the label"**
+is **superseded** — do not build it. It is kept as the record of the reasoning, not as an instruction.
+
+The forward-looking hazard that reasoning raised is real and was NOT the thing #2974 answered: a strip in
+shared code ships into the automated accept path the day the enforce gate arms
+(`we:scripts/lib/auto-land-seam.mjs` shells `--to=accepted` with no human actor). That interaction is now
+LIVE in the code and un-guarded, so it is a genuine follow-on question — but it is a question about #2974's
+landed behaviour, not an argument for un-landing it inside this item.
+
+**2. `hasUnclearedReviewLabel` was updated in the same direction, deliberately.** Its `accepted + changes`
+clause in `we:scripts/lib/review-escalation.mjs` now reads: *"NOT refused. #2974 RULED that the reviewer
+verdict wins over a stale bounce… Refusing it here would reverse a ratified reading."* So residual **3**
+above (accept-first precedence) is no longer a defect — accept-over-changes is the ratified semantics. Do not
+"fix" `decideReviewGate`'s ordering; that would reverse a ruling.
+
+**3. Residual 1 — the server-side belt — is STILL OPEN and is now the whole item.** `grep` for
+`review:changes` across `we:.github/workflows/` returns nothing. The only workflow that touches review labels
+at all is `we:.github/workflows/apply-review-request.yml`, which *applies* verdicts; nothing blocks a merge.
+So a `gh pr merge` that does not route through `we:scripts/merge-ai-prs.mjs` still lands a `review:changes`
+PR, exactly as PR #870 did.
+
+**4. The four raw readers are still un-hardened.** Re-confirmed on this tree:
+`we:scripts/conveyor/pr-watch.mjs` `PARK_LABELS` (~L88) still lists `review:changes` and the file still has no
+concept of `review:accepted`; `we:scripts/conveyor/tick-core.mjs` `routeWatcherExit` `case 2` (~L659) still
+routes on `ls.includes(REVIEW_CHANGES_LABEL)` alone; `we:scripts/lane-resume.mjs` still derives
+`reviewChanges` from the label alone (~L121); `we:scripts/conveyor/status-board.mjs` still surfaces it. #2974's
+scope was the label WRITER only. Because the sanctioned writer now strips, the phantom-bounce state can only
+arise from an out-of-band label write — so this is a latent robustness gap, not the live one the earlier
+sighting notes described.
+
+## Design
+
+**Scope this to the belt.** After the re-verification above, the buildable residual is one thing: make
+`review:changes` block a merge at the GitHub layer, so a transport that never calls
+`we:scripts/merge-ai-prs.mjs` cannot land it. That is the follow-up #2309 named for `review:human` and never
+built, generalized to the changes axis.
+
+**The seam.** the `test` job in `we:.github/workflows/ci.yml` is the required check (the drain's `--assume-green`
+path and `pr-land` both gate on it). Two shapes:
+
+- **(a) a step inside `test`** that reads the PR's labels and fails when `review:changes` is present. Cheapest
+  — no new required check to register — but that workflow triggers on `on: pull_request: branches: [main]` with
+  **no `types:` filter**, so it runs on `opened`/`synchronize`/`reopened` and **not** on `labeled`/`unlabeled`.
+  A label applied after the last push would not re-run it, so the belt would be stale exactly when it matters.
+  Adding `types: [opened, synchronize, reopened, labeled, unlabeled]` fixes that but re-runs the entire
+  sharded suite on every label move — which the drain does constantly.
+- **(b) a new, tiny required check** in its own workflow keyed on `pull_request: types: [labeled, unlabeled,
+  opened, synchronize, reopened]` that does nothing but read labels and exit non-zero on `review:changes`.
+  Seconds to run, safe to fire on every label change, and registerable as required independently of `test`.
+  `we:.github/workflows/apply-review-request.yml` is the precedent for a narrow, least-privilege,
+  label-scoped workflow in this repo (`permissions: pull-requests: write` / `contents: read`; this one needs
+  only `pull-requests: read`).
+
+(b) is the shape the trigger analysis points at; rule it explicitly rather than discovering the `types:`
+problem after wiring (a).
+
+**Say plainly what the belt cannot do.** Making the check *required* is a branch-protection setting, which
+lives in GitHub settings rather than in the repo. The workflow itself lands in this item and is fully
+buildable; flipping the new check to required afterwards is a one-click operator step that must be called out
+on the PR, or the belt ships inert and reads as done.
+
+**Do not touch `decideReviewGate` ordering or `decideSetLabel`'s accept branch** — see re-verification 1 and 2.
+
+## Done when
+
+1. A new workflow at `we:.github/workflows/` exits **non-zero** on a PR carrying `review:changes` and zero
+   without it, and its `on:` block includes `labeled` and `unlabeled` — so applying the label after the last
+   push re-fires it. Verify against a scratch PR (label on → check red; label off → check green) and record
+   both runs on the item. (Tier 1.)
+2. Its pure decision — "these labels ⇒ block" — lives in a unit-tested function, not inline in YAML, so
+   `npx vitest run` covers `review:changes` present, absent, and co-present with `review:accepted` (which
+   must still BLOCK at the server layer even though `decideReviewGate` merges on it — the belt is the
+   fail-closed backstop, and this asymmetry is the whole point of a second layer). (Tier 1.)
+3. The workflow declares `permissions:` no wider than `pull-requests: read`, and is not
+   `pull_request_target`. One read of the workflow header, against the trust-boundary note in
+   `we:.github/workflows/apply-review-request.yml`. (Tier 2.)
+4. The post-land operator step — registering the new check as **required** in branch protection — is stated
+   on the PR body and on this item, with the check's exact name. An item that ships the workflow without
+   saying this reads as done while the belt is inert. (Tier 3.)
+5. Nothing in `we:scripts/lib/review-escalation.mjs` `decideReviewGate` or
+   `we:scripts/review-set-label.mjs` `decideSetLabel` changed. Both encode #2974's ratified accept-over-stale-
+   bounce reading, and reversing it is out of scope here. (Tier 2 — one `git diff --stat` over those two
+   files shows no change.)

@@ -124,3 +124,83 @@ rewrite path consult the cross-clone record that already exists.
 Surfaced by a red-team of a rejected proposal to reserve numbers early (the red team correctly killed
 that proposal; this gap was found while tracing why it was unnecessary). Not yet observed in the wild
 — filed from the code path, so A4's audit is what would confirm or clear real damage.
+
+## Design
+
+### The insertion point is one line above `applyLedger`
+
+In `numberPendingHashes` (`we:scripts/lane-drain.mjs`, ~L578) the sequence is: gather `files` → order the
+pending hashes topologically → assign `max+1` into `ledger` → `applyLedger(files, ledger)` (~L670) → write
+`ledgerAbs` (~L730) → stage + commit. The fix goes between the assignment and the `applyLedger` call:
+
+```
+// A hash the LOCAL ledger cannot resolve may still have LANDED — under another clone's numbering pass.
+// bornAs on origin/main is the cross-clone record; landedNumberFor already reads it.
+const unresolved = /* every x-hash token in `files` that is not a key of `ledger` */;
+const crossClone = Object.fromEntries(
+  [...unresolved].map((h) => [h, landedNumberFor(h, CWD)]).filter(([, nnn]) => nnn),
+);
+const { renames, rewrites, pathRenames } = applyLedger(files, { ...ledger, ...crossClone });
+```
+
+**Pass the MERGED map to `applyLedger`; keep `crossClone` out of the persisted ledger.** The ledger's own
+docblock (~L724–730) states the invariant that the ledger (`we:.claude/skills/batch-backlog-items/id-ledger.json`, `LEDGER_REL` ~L556) and `bornAs`-on-main "cannot diverge" because
+both are minted from the same assignment. Writing a foreign clone's resolutions into it would break that
+statement for no gain — `applyLedger` takes the map as a parameter, so the merge can be local to the call.
+
+**Why this is safe against a spurious rename.** `applyLedger` (`we:scripts/backlog/id.mjs`, ~L144) pushes a
+`rename` only when `idFromName(name)` is itself a key of the map (~L175). A cross-clone-resolved hash is by
+definition already landed and numbered elsewhere, so no file in `files` carries it as its leading id token —
+but assert this rather than assume it: guard the rename branch on `ledger` (the local assignment map), not on
+the merged map, so a resolution can rewrite refs and can never rename a file.
+
+**The scan scope is already the whole corpus.** `files` (~L624) is *every* backlog stem (`stems`, ~L583 —
+all `.md`, not just the pending ones) plus every tracked `docs/agent/*.md` (#2428) plus every tracked
+`agent-memory-src/*.md` (#3100). So the moment cross-clone resolution exists, **A4's corpus repair is not a
+separate sweep** — the next drain pass that numbers anything repairs every resolvable stale hash in all three
+trees automatically. Design A4 as "prove the existing pass does it", not as a new script.
+
+### The A5 hazard scales with this change, and that is the main risk
+
+`applyLedger` rewrites with a **blind whole-token swap** (`swapHashes` per line, ~L157), guarded only against
+a `bornAs:` value line (`BORN_AS_RE`). Widening the map from "the handful of hashes this pass assigned" to
+"every landed hash the corpus mentions" multiplies the surface for the #2826 failure the card already
+documents live: `we:backlog/2899-…md:37` was authored with a `bornAs` hash in a table cell and now reads
+`` `2880` ``, which is meaningless as a birth hash. The adjacent row, `` `xo75zon` `` for #2450, is still
+intact only because that hash was never in this clone's ledger — i.e. it survives for exactly the reason this
+item is about to remove. **A quoted-prose exclusion is not optional follow-up work here; it is a precondition
+for widening the map.** The `bornAs:`-line guard is a frontmatter guard and does nothing for a table cell.
+
+### The audit's four cases, re-verified on this tree
+
+| ref | resolves to | verdict |
+|---|---|---|
+| `we:backlog/2692-…md:245` `#xvwmwkx` | `bornAs: xvwmwkx` on `origin/main` → #2685 | genuine dangling ref — repair |
+| `we:backlog/2431-…md:7` `#x1vw9g7` | #2431 | borderline — a faithful quote of a commit title |
+| `we:backlog/2428-…md:15` `#2421` | #2421 | not damage — a deliberately quoted example |
+| `we:backlog/2899-…md:36` `xo75zon` | #2450 | not damage — a `bornAs` value quoted as prose in a table |
+
+Rows 2–4 are the exclusion set the A5 guard must leave alone; row 1 is the one A1 must repair.
+
+## Done when
+
+The five criteria below are the proof-shaped form of A1–A5 above; A1–A5 stay as the prose spec.
+
+1. `npx vitest run lane-drain-numbering` fails before and passes after, with the A3 two-clone fixture:
+   clone A numbers a blocker and stamps its `bornAs` on its `origin/main`; clone B, ledger **empty**, lands a
+   dependent whose `blockedBy` names that hash, and the ref is rewritten to the number. Today's suite
+   (`we:scripts/__tests__/lane-drain-numbering.test.mjs`) has 20+ cases and none of them uses two clones —
+   `resolves a dependent that references an already-numbered blocker via a pre-seeded ledger` (~L117) is the
+   nearest, and it pre-seeds the ledger, which is precisely the input clone B does not have. (Tier 1.)
+2. A quoted-prose exclusion case in the same file, asserting **both** directions on the real shapes: a live
+   `#<hash>` cross-ref IS rewritten, and a hash sitting in a table cell as a quoted `bornAs` value (the
+   `we:backlog/2899-…md:36` shape) is NOT. This must go red if the exclusion is dropped, which is what stops
+   this change from widening #2826. (Tier 1.)
+3. A case for A2: a hash that resolves in neither the ledger nor `bornAs` is reported distinguishably — the
+   return value of `numberPendingHashes` carries it as a named field, so "still in flight" and "dead" do not
+   both read as "no change". Assert the field, not a log line. (Tier 1.)
+4. On this tree, `we:backlog/2692-…md:245` no longer cites `#xvwmwkx`; one `grep` of that file shows `#2685`.
+   The other three audit rows are unchanged — one `grep` each. (Tier 2.)
+5. The rename branch in `applyLedger` (`we:scripts/backlog/id.mjs` ~L175) keys on the local assignment map,
+   not the merged resolution map, so a cross-clone resolution can never rename a file. (Tier 3 — read that
+   branch's condition and the parameter it is passed.)
