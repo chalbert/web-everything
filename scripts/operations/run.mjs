@@ -49,6 +49,8 @@ import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 // convention intact in `./resolve.mjs` where it reads correctly.
 import { resolveOperation as buildResolveOperation, RESOLVE_OP } from './resolve.mjs';
 import { createResolveReader, createResolveSinks } from './resolve-io.mjs';
+import { scaffoldOperation, SCAFFOLD_OP } from './scaffold.mjs';
+import { createScaffoldReader, createScaffoldSinks } from './scaffold-io.mjs';
 import { openPrOperation, OPEN_PR_OP } from './open-pr.mjs';
 import { createOpenPrSinks } from './open-pr-io.mjs';
 import { PARK_LABELS } from '../pr-land.mjs';
@@ -108,6 +110,12 @@ export const OPERATIONS = Object.freeze({
   [RESOLVE_OP]: () => ({
     declaration: buildResolveOperation({ readResolveContext: createResolveReader() }),
     sinks: createResolveSinks(),
+  }),
+  // #xrrpfo7 — the BIRTH of the lifecycle whose open is `claim` and whose close is `resolve`. 45 raw calls
+  // in one session, the most-invoked backlog verb, and no operation over it until now.
+  [SCAFFOLD_OP]: () => ({
+    declaration: scaffoldOperation({ readScaffoldContext: createScaffoldReader() }),
+    sinks: createScaffoldSinks(),
   }),
   [SUGGEST_NEXT_OP]: () => ({
     declaration: suggestNextOperation({
