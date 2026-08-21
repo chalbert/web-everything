@@ -38,6 +38,8 @@ import { createReviewPrepReader, createReviewPrepSinks } from './review-prep-io.
 import { suggestNextOperation, SUGGEST_NEXT_OP } from './suggest-next.mjs';
 import { createBoardReader, createExclusionReader } from './suggest-next-io.mjs';
 import { gateHealthOperation, GATE_HEALTH_OP, classifyFollowUp } from './gate-health.mjs';
+import { prStatusOperation, PR_STATUS_OP } from './pr-status.mjs';
+import { createPrReader } from './pr-status-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
@@ -130,6 +132,12 @@ export const OPERATIONS = Object.freeze({
   // Registering here is what makes `gate-health` callable at all. It shipped unregistered in PR #1163, so
   // `resolveOperation` threw and its "callable from the command line and over HTTP" claim was false — the
   // reviewer could only run it by hand-writing the wiring. Same no-sinks reasoning as `suggest-next`.
+  // #xewnork — did a check actually RUN on the head that is there now? Read-only, same no-sinks reasoning as
+  // `suggest-next` and `gate-health`: every step is `compute`, so no effect exists for a sink to apply.
+  [PR_STATUS_OP]: () => ({
+    declaration: prStatusOperation({ readPrs: createPrReader() }),
+    sinks: {},
+  }),
   [GATE_HEALTH_OP]: () => ({
     declaration: gateHealthOperation({ loadHistory: createHistoryReader({ classify: classifyFollowUp }) }),
     sinks: {},
