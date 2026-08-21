@@ -229,11 +229,14 @@ git commit -F <msgfile> <explicit-paths>
 # #2833 — synchronously verify the FINAL HEAD you are about to land, in the FOREGROUND (blocks until the
 # suites exit), recording a green marker keyed to this exact commit. Do NOT background this and yield: a
 # half-run verification strands a `running` marker and pr-land's finish-guard (--require-verified) will
-# refuse to publish. Exit 0 = green (proceed); exit 2 = red (a hard stop — fix, re-commit, re-verify).
-# @operation-home-ok: #xvj8sj0 — `verify` declares over this home but forwards NO gate, and this call
-# site chooses one. Naming the operation here would silently drop `--gate` and run the default suite,
-# which is the PR #1508 regression shape. Rewire once the operation takes a gate input.
-node scripts/verify-lane.mjs --gate="npm run check:standards"   # (or the item's locus gate)
+# refuse to publish.
+#
+# READ `verdict.ok` — DO NOT READ THE EXIT CODE. The operation exits 0 whenever the RUN completed, which it
+# does even when the suites went red or never ran: `{ok: false, blocking: [...]}` arrives on exit 0. The raw
+# home's `exit 2 = red` contract is the HOME's, and it does not survive the operation (#x0uj8hj). Proceed only
+# on `ok: true` with an empty `blocking`; `unrun` is not a pass. `pr-land --require-verified` below is the
+# independent backstop — it re-reads the marker and refuses regardless of what you concluded here.
+node scripts/operations/run.mjs verify --checkout="$PWD" --gate="npm run check:standards" --json   # (or the item's locus gate)
 
 node scripts/pr-land.mjs --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
   --body-file=<pr-body> --label-on-green --require-verified
