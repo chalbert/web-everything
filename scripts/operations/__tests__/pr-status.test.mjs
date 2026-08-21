@@ -257,6 +257,14 @@ describe('the list cap is REPORTED, not silent (#1521 juror)', () => {
   it('asks for the raised limit', () => {
     expect(listArgv({ repo: 'o/r' })).toContain(String(LIST_LIMIT));
   });
+
+  it('PAGINATES the check-runs fetch too — the sibling call, not just the one that was patched', () => {
+    // PR #1521 round 2. The REST default page size is 30, so a head with more check runs than that silently
+    // drops the later ones — and `reduceCheckState` reads only what it is handed, so a dropped FAILING check
+    // turns a `red` head `green`. Fixing the PR-list cap and leaving this one is the same defect one call
+    // along, in the file whose whole argument is that silence must not read as absence.
+    expect(checksArgv({ repo: 'o/r', sha: 'abc' })).toContain('--paginate');
+  });
 });
 
 describe('the declaration', () => {

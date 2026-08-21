@@ -48,7 +48,20 @@ export function listArgv({ repo, pr = 0 }) {
  * commit-statuses endpoint for an explicit sha cannot do that.
  */
 export function checksArgv({ repo, sha }) {
-  return ['api', `repos/${repo}/commits/${sha}/check-runs`, '--jq', '.check_runs[] | {name,status,conclusion}'];
+  return [
+    'api',
+    // `--paginate` FOR THE SAME REASON `LIST_LIMIT` REPORTS ITSELF, and it was missing here even after that
+    // one was fixed (PR #1521 round 2). The REST default page size is 30, so a head with more check runs than
+    // that would silently drop the later ones — and `reduceCheckState` reads only what it is handed, so a
+    // dropped FAILING check turns a `red` head into a `green` one. That is the worst direction available.
+    //
+    // This operation exists so silence does not read as absence, and one call along from the cap I had just
+    // fixed it was doing exactly that. Fixing one site and leaving its sibling is the recurring shape here:
+    // the same reasoning has to be carried to every call it applies to, not only the one under the cursor.
+    '--paginate',
+    `repos/${repo}/commits/${sha}/check-runs`,
+    '--jq', '.check_runs[] | {name,status,conclusion}',
+  ];
 }
 
 /** One `gh` invocation. Throws on failure — a reader that could not read must never return an empty list. */
