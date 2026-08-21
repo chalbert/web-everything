@@ -86,10 +86,16 @@ node scripts/backlog.mjs prepare-hold {{ITEM_NUM}} --session={{SESSION_SLUG}}
 
 `prepare-hold` is a HARD local hold (#2219/#2264): `--select` skips it and `claim` refuses it until you
 `prepare-release`, so a concurrent session can't select or steal the fork you're researching. It writes **no**
-frontmatter to primary — the item stays `open`; the hold is a local, lease-bearing token. **The `prepare-hold`
-CLI may print an interactive "⏸ stop here / rename the chat" message meant for a human session — you MUST ignore
-it and proceed to the prepare work in the SAME run** (you are a background agent; obeying it literally would stall
-you). Then run the **full `/prepare` method** (the `prepare-decision-item` skill) in your lane clone:
+frontmatter to primary — the item stays `open`; the hold is a local, lease-bearing token. Proceed to the prepare
+work in the SAME run.
+
+> **This paragraph used to carry a "the CLI may print ⏸ stop here / rename the chat — you MUST ignore it"
+> workaround.** It is gone because the cause is fixed (#xd0hvsg): the stop is now opt-in via
+> `--stop-for-rename`, which only `we:skills-src/next-backlog-item/SKILL.md` passes, so no background or
+> directed caller is told to stall for a hand-off that cannot come. Telling an agent in prose to disobey its
+> tool's output was always the weaker fix — it works only where someone remembered to write it.
+
+Then run the **full `/prepare` method** (the `prepare-decision-item` skill) in your lane clone:
 
 - **Read `{{ITEM_SPEC_PATH}}` in full**, then run the documented passes IN ORDER: the **standing test** (is each
   concern even a fork?) → **prior-art research** (survey browser standards + the benchmark libraries; publish a
