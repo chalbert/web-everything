@@ -1,4 +1,5 @@
 ---
+bornAs: xa7ygu6
 kind: task
 parent: "2288"
 status: open
@@ -14,8 +15,8 @@ Running it there races the drain. Both allocate from the same free-number pool a
 
 ## Twice this session, both outcomes
 
-- **Diverged.** Main's drain gave `x6ry8mf` → #3250; a local `number-stranded` run, started before that commit was visible, gave it #3251 and handed #3250 to a different card. Result: `#3250` used by two files and `x6ry8mf` as the `bornAs` of two cards. CI went red on PR #1523 — caught by the `duplicateBornAs` gate added in #1519, which is the only reason it did not land. Repair cost a revert, a rebase and two `--skip`s.
-- **Agreed by luck.** An hour later, three cards from #1523 (`x2v3kgr`, `x729f3a`, `xxc7d18`) showed the same error. A local run numbered them #3251/#3252/#3253; the drain's own commit landed ~1 minute later with **identical** numbers, because both happened to walk the same allocation order. The local commit rebased away as already-applied. No damage, and no mechanism prevented damage — the two runs simply did not interleave.
+- **Diverged.** Main's drain gave `3250` → #3250; a local `number-stranded` run, started before that commit was visible, gave it #3251 and handed #3250 to a different card. Result: `#3250` used by two files and `3250` as the `bornAs` of two cards. CI went red on PR #1523 — caught by the `duplicateBornAs` gate added in #1519, which is the only reason it did not land. Repair cost a revert, a rebase and two `--skip`s.
+- **Agreed by luck.** An hour later, three cards from #1523 (`3251`, `3252`, `3253`) showed the same error. A local run numbered them #3251/#3252/#3253; the drain's own commit landed ~1 minute later with **identical** numbers, because both happened to walk the same allocation order. The local commit rebased away as already-applied. No damage, and no mechanism prevented damage — the two runs simply did not interleave.
 
 The second case is the concerning one: it looks like the workflow working.
 
