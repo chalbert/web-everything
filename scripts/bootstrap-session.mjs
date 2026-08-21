@@ -323,6 +323,33 @@ export function missingToolAllows(settings, tools = PR_WATCH_TOOLS) {
   return tools.filter((t) => !allow.includes(t));
 }
 
+/**
+ * Decide (and, when permitted, apply) the PR-watch allow step, in the SAME status vocabulary the `gitdir`
+ * step uses — `ok` / `drift` / `planned`.
+ *
+ * THE VOCABULARY IS THE POINT, not the shape. `--check` exits non-zero on `drift` and on nothing else, so a
+ * step is only covered by the drift gate if it speaks that word. `gitDirStatus` exists in this file for the
+ * identical reason; a second answer to "how does a step report" is how one of them ends up outside the gate.
+ *
+ * `drift` is reserved for READ-ONLY runs, where the rule genuinely is missing and stays missing. A run that
+ * may write reports `ok` because it just fixed it, and `planned` is the `--dry-run` case: nothing was written
+ * and nothing is being claimed about the end state.
+ *
+ * @param {{settings: object|null, write: boolean, dryRun?: boolean, apply?: (s: object) => void}} o
+ * @returns {{id: string, status: 'ok'|'drift'|'planned', detail: string}}
+ */
+export function toolAllowStatus({ settings, write, dryRun = false, apply } = {}) {
+  const missing = missingToolAllows(settings);
+  const id = 'pr-watch';
+  if (!missing.length) return { id, status: 'ok', detail: `already allowed: ${PR_WATCH_TOOLS.join(', ')}` };
+  if (dryRun) return { id, status: 'planned', detail: `would allow ${missing.join(', ')}` };
+  if (!write) {
+    return { id, status: 'drift', detail: `NOT allowed: ${missing.join(', ')} — run \`npm run bootstrap:install\`` };
+  }
+  if (typeof apply === 'function') apply(withToolAllowlist(settings));
+  return { id, status: 'ok', detail: `allowed ${missing.join(', ')}` };
+}
+
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
@@ -538,13 +565,15 @@ export function main(argv, io = defaultIo()) {
   // still only ever reported on: `permissions.allow` is the operator's list, and widening it silently on a
   // laptop is exactly the implicit mutation this script's consent rule exists to prevent. On an ephemeral VM
   // there is nothing to consent about and a session that configures itself is the whole point.
-  {
-    const before = io.readSettings();
-    const missing = missingToolAllows(before);
-    if (!missing.length) report.toolAllows = 'already allowed';
-    else if (!write || has('--dry-run')) report.toolAllows = `would allow ${missing.join(', ')}`;
-    else { io.writeSettings(withToolAllowlist(before)); report.toolAllows = `allowed ${missing.join(', ')}`; }
-  }
+  //
+  // IT REPORTS THROUGH `report.steps`, NOT A FIELD OF ITS OWN, and that is load-bearing rather than tidiness.
+  // `--check`'s exit code is `report.steps.some((s) => s.status === 'drift')`, so a step that reports beside
+  // that array is INVISIBLE to the drift gate: a missing allow rule would print in the summary and still exit
+  // 0, which is a checker that reports a problem and passes anyway. This file already paid that lesson down
+  // once for the `gitdir` step — its `gitDirStatus` returns the same `planned`/`ok`/`drift` vocabulary for
+  // exactly this reason — so the second step to need it reuses the vocabulary instead of inventing one
+  // (PR #1520 correctness juror).
+  report.steps.push(toolAllowStatus({ settings: io.readSettings(), write, dryRun: has('--dry-run'), apply: io.writeSettings }));
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
@@ -555,7 +584,6 @@ export function main(argv, io = defaultIo()) {
   } else {
     io.out(`bootstrap-session — host: ${report.host}${report.signals.length ? ` (${report.signals.join(', ')})` : ''} · locus: ${report.locus ?? 'UNKNOWN checkout — siblings listed in full'}`);
     for (const s of report.steps) io.out(`  ${s.status.padEnd(8)} ${s.id.padEnd(9)} ${describe(s)}`);
-    if (report.toolAllows) io.out(`  allow    pr-watch  ${report.toolAllows}`);
     if (report.hook) io.out(`  hook     SessionStart ${report.hook}`);
     if (!write && !readOnlyFlag) {
       io.out('  — reported only. This host is durable, so nothing under $HOME/.claude was touched;');

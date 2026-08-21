@@ -19,6 +19,7 @@ import {
   withPrimaryGitDir,
   withToolAllowlist,
   missingToolAllows,
+  toolAllowStatus,
   PR_WATCH_TOOLS,
   skillsDeployScript,
   mayWriteUserTree,
@@ -309,6 +310,57 @@ describe('withToolAllowlist — the PR-watch pre-approval that has to survive a 
       expect(t).toMatch(/^mcp__github__/);
       expect(t).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
     }
+  });
+});
+
+describe('toolAllowStatus — the step has to speak `drift` or the check gate cannot see it', () => {
+  const empty = { permissions: { allow: [] } };
+  const full = { permissions: { allow: [...PR_WATCH_TOOLS] } };
+
+  it('reports DRIFT on a read-only run with the rules missing', () => {
+    // PR #1520 correctness juror, CONFIRMED. `--check` exits non-zero on `report.steps.some(s => s.status ===
+    // "drift")` and nothing else, so the first cut — which reported on an ad-hoc `report.toolAllows` field —
+    // printed the problem in the summary and still exited 0. A checker that reports a problem and passes is
+    // worse than no checker. This file already paid the lesson down once for the `gitdir` step.
+    const r = toolAllowStatus({ settings: empty, write: false });
+    expect(r).toMatchObject({ id: 'pr-watch', status: 'drift' });
+    expect(r.detail).toContain('bootstrap:install');
+  });
+
+  it('reports OK when the rules are already there, whatever the write mode', () => {
+    for (const write of [true, false]) {
+      expect(toolAllowStatus({ settings: full, write })).toMatchObject({ status: 'ok' });
+    }
+  });
+
+  it('reports PLANNED and writes NOTHING on --dry-run', () => {
+    let wrote = false;
+    const r = toolAllowStatus({ settings: empty, write: true, dryRun: true, apply: () => { wrote = true; } });
+    expect(r.status).toBe('planned');
+    expect(wrote).toBe(false);
+  });
+
+  it('APPLIES and reports ok on a writing run, passing the widened settings to the writer', () => {
+    let written = null;
+    const r = toolAllowStatus({ settings: empty, write: true, apply: (s) => { written = s; } });
+    expect(r.status).toBe('ok');
+    expect(written.permissions.allow).toEqual([...PR_WATCH_TOOLS]);
+  });
+
+  it('writes NOTHING on a read-only run, even though it reports drift', () => {
+    // Reporting drift must never be the thing that fixes it — that would make `--check` a mutating command.
+    let wrote = false;
+    toolAllowStatus({ settings: empty, write: false, apply: () => { wrote = true; } });
+    expect(wrote).toBe(false);
+  });
+
+  it('uses the same status vocabulary as the gitdir step, so one gate covers both', () => {
+    const statuses = [
+      toolAllowStatus({ settings: empty, write: false }).status,
+      toolAllowStatus({ settings: full, write: false }).status,
+      toolAllowStatus({ settings: empty, write: true, dryRun: true }).status,
+    ];
+    for (const st of statuses) expect(['ok', 'drift', 'planned']).toContain(st);
   });
 });
 
