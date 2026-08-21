@@ -219,3 +219,171 @@ export function findSkillsNamingUndelegatedHomes(skills = [], operations = [], h
   }
   return { errors: [], warnings };
 }
+
+// ── #3253: THE CALL SITE ITSELF, NOT JUST THE NAME ──────────────────────────────────────────────────────────
+//
+// The scan above answers "does this skill instruct a raw home the operation owns". It cannot answer the
+// question that actually bit, three times in one session: does the operation invocation DO what the raw one
+// did. `verify` dropped the gate flag; `open-pr` dropped sha/requireVerified/dryRun; PR #1523 rewired a
+// dry-run preview to a different mode than the real call. Every one was caught by a human or a juror reading
+// two commands side by side, and every one passed the #3224 gate green.
+//
+// WHAT IS MECHANIZABLE, AND WHAT IS NOT — the fork #3253 asked, answered as BOTH, split on a property that is
+// itself checkable. Argv equivalence against the home is reachable only where the operation SHELLS that home,
+// because a pure exported argv builder exists there by convention (`verify-io.mjs`: "PURE, and exported so a
+// test can assert the exact command with no subprocess"; also `planOpen`, `listArgv`, `checksArgv`). It is
+// STRUCTURALLY impossible elsewhere, for reasons no gate can paper over: `claim`'s home delegates INTO the
+// operation, so the arrow points the other way; `dispatch-lane` consumes `planTick`'s decisions and refuses
+// to re-derive the tick; `scaffold`/`suggest-next`/`stage-pr-view` shell nothing.
+//
+// SO THIS SCAN CLAIMS THE SMALLER THING IT CAN ACTUALLY PROVE: the call site is WELL-FORMED against the
+// operation's own declared `input` — every flag it passes is a real one, and the inputs the operation requires
+// are supplied. That is the failure mode blocking the backfill, and it is silent: the ~26 `scaffold`/`resolve`
+// sites each need a flag RENAME (`--workitem`→`--workItem`, `--blocked-by`→`--blockedBy`,
+// `--graduated-to`→`--graduatedTo`, `resolve <NNN>` positional→`--ref=`), and a case mismatch does not fail
+// loudly — it lands a card with no `workItem`, which the readiness loader then mis-tiers.
+//
+// IT DOES NOT CLAIM EQUIVALENCE, and says so in its own finding text. A well-formed invocation can still be
+// the wrong one: #1523's rehearsal was well-formed and previewed the wrong mode. A green here must never read
+// as "the rewire is safe", so the limit is stated rather than left for a reader to infer.
+
+/**
+ * A `run.mjs <op> …` invocation. The `node ` prefix is load-bearing for the same reason it is in
+ * `HOME_MENTION`: prose ABOUT an operation ("the `open-pr` operation now takes `--mode`") is not a call site,
+ * and treating it as one would report findings against documentation of the very rule being followed.
+ *
+ * The operation name is `[a-z][a-z0-9-]*`, which also excludes the generic `run.mjs <operation>` in usage
+ * text — a placeholder is not an invocation and has no schema to judge against.
+ */
+const OPERATION_CALL = /(?:^|[\s`$(])node\s+(?:[a-z][a-z0-9-]*:)?scripts\/operations\/run\.mjs\s+([a-z][a-z0-9-]*)([^\n`]*)/g;
+
+/** Flag names on one invocation's tail. Values are ignored — this judges the SHAPE, never the content. */
+const FLAG_IN_TAIL = /--([A-Za-z][A-Za-z0-9-]*)/g;
+
+/**
+ * The part of a line that is actually ARGV, with the parts that only LOOK like argv removed. PURE.
+ *
+ * FOUND BY THE PR #1526 CORRECTNESS JUROR, which ran the shipped code rather than reading it. A bare scan of
+ * everything after the operation name treats any `--word` later on the same physical line as a flag the call
+ * passes — so a trailing shell comment or a `--` inside a quoted VALUE becomes a false `unknown flag` ERROR,
+ * against a call site that is perfectly correct.
+ *
+ * Not hypothetical, and the comment case is the likely one: PR #1522 moved these docs TO trailing `#` shell
+ * comments precisely because HTML comments break inside the fenced "exact gh sequence" blocks. So the shape
+ * this misreads is the shape the surrounding convention produces.
+ *
+ * QUOTES ARE BLANKED BEFORE THE COMMENT IS CUT, never after — a `#` inside a quoted value is data, and cutting
+ * on it first would truncate a legitimate argv at its own content.
+ */
+function scannableTail(tail) {
+  return String(tail ?? '')
+    // ONE LEFT-TO-RIGHT PASS OVER BOTH QUOTE KINDS, never two sequential passes (PR #1526 round 4). Blanking
+    // all single-quoted spans first and double-quoted spans second mis-pairs the moment the two kinds mix: in
+    // `--a="it's here" --nope=1 --b='x'` the FIRST pass sees the apostrophe inside the double-quoted value as
+    // an opening quote and closes it on the later `'`, blanking the whole middle — and `--nope` disappeared
+    // from detection entirely. An alternation scans once, so whichever quote OPENS first owns the span, which
+    // is what a shell does too.
+    .replace(/'[^']*'|"[^"]*"/g, (m) => (m[0] === "'" ? "''" : '""'))
+    .replace(/\s#.*$/, '');
+}
+
+
+/**
+ * Find every operation invocation in one body, with its line, flags and exemption state. PURE.
+ *
+ * @param {string} content - the skill or doc markdown
+ * @returns {Array<{op: string, flags: string[], line: number, exempt: boolean}>}
+ */
+export function extractOperationCalls(content) {
+  const lines = String(content ?? '').split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const exempt = exemptAt(lines, i);
+    for (const m of lines[i].matchAll(OPERATION_CALL)) {
+      // ONE PHYSICAL LINE, DELIBERATELY. A multi-line absorber lived here for two rounds and caused two of
+      // this gate's five defects: it swallowed prose that merely opened with a flag (round 2), and the fix for
+      // that stopped absorbing a REAL wrapped call decorated with markdown — `[--parent=NNN]`, a trailing
+      // `**`, a `(#card)` tail (round 3). Distinguishing a decorated wrapped command from a sentence starting
+      // with a flag is not reliably decidable from a markdown line, so the scan stops claiming it can.
+      //
+      // THE COST IS A MISS, NOT A FALSE ALARM: a flag on a continuation line is not scanned, so an unknown one
+      // there goes unreported. That is the safe direction for a gate whose whole value is that its errors are
+      // trusted, and it is stated in `findMalformedOperationCalls`'s own contract rather than left implicit.
+      out.push({ op: m[1], flags: [...scannableTail(m[2]).matchAll(FLAG_IN_TAIL)].map((f) => f[1]), line: i + 1, exempt });
+    }
+  }
+  return out;
+}
+
+/**
+ * Judge ONE invocation against one operation's declared input schema. PURE.
+ *
+ * ONLY UNDECLARED FLAGS. A missing-required check lived here and was withdrawn with the multi-line absorber it
+ * depended on: deciding whether an invocation is COMPLETE needs the whole command, and the whole command is
+ * not reliably recoverable from decorated markdown. The remaining check needs no such assembly — a flag on the
+ * line is either declared or it is not.
+ *
+ * It is also the half that carries the value. An undeclared flag is the RENAME class (`--workitem` for
+ * `--workItem`) and it fails SILENTLY: the CLI drops the value rather than refusing. A missing required input
+ * fails loudly at runtime with the CLI's own message, so missing it costs a clear error, not a silent one.
+ *
+ * @param {{flags: string[], input: object, controlFlags: readonly string[]}} o
+ * @returns {{unknown: string[]}}
+ */
+export function judgeOperationCall({ flags = [], input = {}, controlFlags = [] } = {}) {
+  const declared = new Set(Object.keys(input || {}));
+  const control = new Set(controlFlags || []);
+  const passed = new Set(flags || []);
+
+  return { unknown: [...passed].filter((f) => !declared.has(f) && !control.has(f)) };
+}
+
+/**
+ * THE SCAN. Pure — every input is passed in.
+ *
+ * AN OPERATION ABSENT FROM `schemas` PRODUCES NO FINDING, the same line the wiring scan draws around a home
+ * whose source could not be read. A declaration that failed to construct (its io wanted an env var, a
+ * credential, a path) is UNKNOWN, and judging a call site against a schema we could not load would invent
+ * findings out of our own inability to look.
+ *
+ * PER-OPERATION CONTROL FLAGS, NOT A FLAT LIST (PR #1526 round 3). `--cwd`/`--model` are refused where the
+ * declaration has no `judge` step and `--resume`/`--answer`/`--run-id` where it cannot suspend, so one union
+ * applied to every operation accepted `--cwd` on `scaffold` — a command the CLI itself rejects. The caller
+ * passes `acceptedControlFlags(declaration)` per operation; an operation absent from the map falls back to
+ * none, which can only ever over-report, never under-report.
+ *
+ * @param {Array<{file: string, content: string}>} docs
+ * @param {Map<string, object>|object} schemas - operation name → its declared `input` object
+ * @param {Map<string, readonly string[]>|object} controls - operation name → the control flags IT accepts
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findMalformedOperationCalls(docs = [], schemas = new Map(), controls = new Map()) {
+  const readSchema = (n) => (schemas instanceof Map ? schemas.get(n) : schemas?.[n]);
+  const readControls = (n) => (controls instanceof Map ? controls.get(n) : controls?.[n]) ?? [];
+  const errors = [];
+  const warnings = [];
+
+  for (const { file, content } of docs || []) {
+    for (const call of extractOperationCalls(content)) {
+      if (call.exempt) continue;
+      const input = readSchema(call.op);
+      if (input === undefined) continue; // unknown operation — never a finding
+      const { unknown } = judgeOperationCall({ flags: call.flags, input, controlFlags: readControls(call.op) });
+
+      for (const flag of unknown) {
+        errors.push({
+          message:
+            `operation call passes a flag \`${call.op}\` does not declare (#3253): ${file}:${call.line} passes `
+            + `\`--${flag}\`, which is neither a declared input nor a CLI control flag — the run would be refused. `
+            + `Declared inputs: ${Object.keys(input).sort().join(', ') || '(none)'}. This is the RENAME class: `
+            + 'the raw homes spell flags in kebab-case (`--workitem`, `--blocked-by`, `--graduated-to`) where the '
+            + 'operations declare them camelCase, and a mismatch does not fail loudly — it drops the value. '
+            + 'NOTE: this gate proves the call is WELL-FORMED, never that it preserves the raw home\'s behaviour.',
+          descriptor: { kind: 'operation-call-unknown-flag', file, line: call.line, operation: call.op, flag },
+        });
+      }
+
+    }
+  }
+  return { errors, warnings };
+}
