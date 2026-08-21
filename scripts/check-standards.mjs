@@ -73,9 +73,14 @@ import {
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 // #3224 — the skill/operation wiring scan, and the map of what each operation declares over.
-import { findSkillsNamingUndelegatedHomes } from './lib/skill-operation-wiring.mjs';
+// #3253 adds the call-site scan beside it: same subject, one module.
+import { findSkillsNamingUndelegatedHomes, findMalformedOperationCalls } from './lib/skill-operation-wiring.mjs';
 import { DECLARED_HOMES } from './operations/declared-homes.mjs';
 import { parseDeclaredHome } from './operations/registry.mjs';
+// The operation table and the CLI's own control-flag list, IMPORTED not restated (#2644): a second copy of
+// either is a second answer to "what may a call site pass", and the gate would drift from the CLI it judges.
+import { OPERATIONS, resolveOperation } from './operations/run.mjs';
+import { CONTROL_FLAGS } from './operations/cli-adapter.mjs';
 import {
   buildAnchorOwners, findAnchorRulingMismatches, findDanglingLoci, findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
@@ -2179,6 +2184,38 @@ try {
   const wiring = findSkillsNamingUndelegatedHomes(skills, operations, homeSources);
   for (const e of wiring.errors) err(e.message, e.descriptor);
   for (const w of wiring.warnings) warn(w.message, w.descriptor);
+
+  // ── #3253 — the CALL SITE, judged against the operation's own declared `input` ──────────────────────────
+  // Scans `docs/` as well as `skills-src/`, because the #3224 walk above is `skills-src/**/*.md` only and a
+  // doc telling an agent to run a malformed command is exactly as wrong as a skill doing it.
+  //
+  // A SCHEMA THAT WOULD NOT BUILD IS OMITTED, NOT GUESSED. `resolveOperation` constructs the declaration's io
+  // (readers, sinks), and one of those can legitimately refuse on this host — a missing credential, an absent
+  // path. An operation we could not load is left out of the map, and the scan treats absence as "no finding".
+  // Inventing findings out of our own inability to look is the failure this whole file argues against.
+  const docs = [...skills];
+  const walkDocsMd = (dir, rel) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP.has(ent.name)) continue;
+      const abs = join(dir, ent.name);
+      const relPath = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) walkDocsMd(abs, relPath);
+      else if (ent.name.endsWith('.md')) docs.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+    }
+  };
+  if (existsSync(join(ROOT, 'docs'))) walkDocsMd(join(ROOT, 'docs'), 'docs');
+
+  const schemas = new Map();
+  for (const name of Object.keys(OPERATIONS)) {
+    try {
+      const { declaration } = resolveOperation(name);
+      if (declaration?.input) schemas.set(name, declaration.input);
+    } catch { /* unbuildable on this host — stays unknown, which never produces a finding */ }
+  }
+
+  const calls = findMalformedOperationCalls(docs, schemas, CONTROL_FLAGS);
+  for (const e of calls.errors) err(e.message, e.descriptor);
+  for (const w of calls.warnings) warn(w.message, w.descriptor);
 } catch (e) {
   warn(`Skill/operation wiring scan failed: ${e.message}`);
 }

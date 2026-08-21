@@ -219,3 +219,161 @@ export function findSkillsNamingUndelegatedHomes(skills = [], operations = [], h
   }
   return { errors: [], warnings };
 }
+
+// ── #3253: THE CALL SITE ITSELF, NOT JUST THE NAME ──────────────────────────────────────────────────────────
+//
+// The scan above answers "does this skill instruct a raw home the operation owns". It cannot answer the
+// question that actually bit, three times in one session: does the operation invocation DO what the raw one
+// did. `verify` dropped the gate flag; `open-pr` dropped sha/requireVerified/dryRun; PR #1523 rewired a
+// dry-run preview to a different mode than the real call. Every one was caught by a human or a juror reading
+// two commands side by side, and every one passed the #3224 gate green.
+//
+// WHAT IS MECHANIZABLE, AND WHAT IS NOT — the fork #3253 asked, answered as BOTH, split on a property that is
+// itself checkable. Argv equivalence against the home is reachable only where the operation SHELLS that home,
+// because a pure exported argv builder exists there by convention (`verify-io.mjs`: "PURE, and exported so a
+// test can assert the exact command with no subprocess"; also `planOpen`, `listArgv`, `checksArgv`). It is
+// STRUCTURALLY impossible elsewhere, for reasons no gate can paper over: `claim`'s home delegates INTO the
+// operation, so the arrow points the other way; `dispatch-lane` consumes `planTick`'s decisions and refuses
+// to re-derive the tick; `scaffold`/`suggest-next`/`stage-pr-view` shell nothing.
+//
+// SO THIS SCAN CLAIMS THE SMALLER THING IT CAN ACTUALLY PROVE: the call site is WELL-FORMED against the
+// operation's own declared `input` — every flag it passes is a real one, and the inputs the operation requires
+// are supplied. That is the failure mode blocking the backfill, and it is silent: the ~26 `scaffold`/`resolve`
+// sites each need a flag RENAME (`--workitem`→`--workItem`, `--blocked-by`→`--blockedBy`,
+// `--graduated-to`→`--graduatedTo`, `resolve <NNN>` positional→`--ref=`), and a case mismatch does not fail
+// loudly — it lands a card with no `workItem`, which the readiness loader then mis-tiers.
+//
+// IT DOES NOT CLAIM EQUIVALENCE, and says so in its own finding text. A well-formed invocation can still be
+// the wrong one: #1523's rehearsal was well-formed and previewed the wrong mode. A green here must never read
+// as "the rewire is safe", so the limit is stated rather than left for a reader to infer.
+
+/**
+ * A `run.mjs <op> …` invocation. The `node ` prefix is load-bearing for the same reason it is in
+ * `HOME_MENTION`: prose ABOUT an operation ("the `open-pr` operation now takes `--mode`") is not a call site,
+ * and treating it as one would report findings against documentation of the very rule being followed.
+ *
+ * The operation name is `[a-z][a-z0-9-]*`, which also excludes the generic `run.mjs <operation>` in usage
+ * text — a placeholder is not an invocation and has no schema to judge against.
+ */
+const OPERATION_CALL = /(?:^|[\s`$(])node\s+(?:[a-z][a-z0-9-]*:)?scripts\/operations\/run\.mjs\s+([a-z][a-z0-9-]*)([^\n`]*)/g;
+
+/** Flag names on one invocation's tail. Values are ignored — this judges the SHAPE, never the content. */
+const FLAG_IN_TAIL = /--([A-Za-z][A-Za-z0-9-]*)/g;
+
+/**
+ * A line that is nothing but a continuation of the invocation above it.
+ *
+ * FOUND BY RUNNING THIS SCAN AGAINST THE LIVE TREE BEFORE SHIPPING IT. `we:skills-src/next-backlog-item/SKILL.md`
+ * wraps a `scaffold` call so `--title` lands on the NEXT line, and a single-line read reported that required
+ * input as missing — a false finding, from the gate, about a call site that is correct.
+ *
+ * There is no continuation marker to key on: the prose simply wraps. So the rule is structural — a line
+ * consisting ONLY of flags (and their values) continues the command. Anything else on the line ends it, so
+ * this cannot swallow the paragraph that follows a fenced command.
+ */
+const CONTINUATION_LINE = /^\s*--[A-Za-z][A-Za-z0-9-]*(?:[=\s].*)?$/;
+
+/**
+ * Find every operation invocation in one body, with its line, flags and exemption state. PURE.
+ *
+ * @param {string} content - the skill or doc markdown
+ * @returns {Array<{op: string, flags: string[], line: number, exempt: boolean}>}
+ */
+export function extractOperationCalls(content) {
+  const lines = String(content ?? '').split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const exempt = exemptAt(lines, i);
+    for (const m of lines[i].matchAll(OPERATION_CALL)) {
+      const flags = [...String(m[2] ?? '').matchAll(FLAG_IN_TAIL)].map((f) => f[1]);
+      for (let j = i + 1; j < lines.length && CONTINUATION_LINE.test(lines[j]); j += 1) {
+        for (const f of lines[j].matchAll(FLAG_IN_TAIL)) flags.push(f[1]);
+      }
+      out.push({ op: m[1], flags, line: i + 1, exempt });
+    }
+  }
+  return out;
+}
+
+/**
+ * Judge ONE invocation against one operation's declared input schema. PURE.
+ *
+ * `unknown` is the error case and `missing` is the warning case, and the asymmetry is deliberate. An
+ * undeclared flag is unambiguous — it is a typo, a stale name, or a flag that moved — and the CLI would refuse
+ * it at runtime, so reporting it costs nothing and catches the rename class outright. A missing required input
+ * is NOT unambiguous: skill prose legitimately shows abbreviated invocations, and erroring on those would
+ * train readers to ignore the gate, which is how a gate dies.
+ *
+ * @param {{flags: string[], input: object, controlFlags: readonly string[]}} o
+ * @returns {{unknown: string[], missing: string[]}}
+ */
+export function judgeOperationCall({ flags = [], input = {}, controlFlags = [] } = {}) {
+  const declared = new Set(Object.keys(input || {}));
+  const control = new Set(controlFlags || []);
+  const passed = new Set(flags || []);
+
+  // A `--resume` CARRIES NO INPUTS, AND REQUIRING THEM IS THE GATE'S OWN BUG. The CLI's second usage line is
+  // `run.mjs <op> --resume=<run-id> [--answer=<option>] [--json]` — the inputs were supplied on the ORIGINAL
+  // call and live in the run record, so a resume that repeated them would be redundant at best. Found the
+  // same way as `CONTINUATION_LINE`: running this against the live tree reported all three of
+  // `we:skills-src/review/SKILL.md`'s resume lines as missing `--pr` and `--repo`, which is correct prose and
+  // a wrong finding. Unknown flags are still judged on a resume — a typo is a typo either way.
+  const resuming = passed.has('resume');
+
+  return {
+    unknown: [...passed].filter((f) => !declared.has(f) && !control.has(f)),
+    missing: resuming ? [] : [...declared].filter((f) => input[f]?.required === true && !passed.has(f)),
+  };
+}
+
+/**
+ * THE SCAN. Pure — every input is passed in.
+ *
+ * AN OPERATION ABSENT FROM `schemas` PRODUCES NO FINDING, the same line the wiring scan draws around a home
+ * whose source could not be read. A declaration that failed to construct (its io wanted an env var, a
+ * credential, a path) is UNKNOWN, and judging a call site against a schema we could not load would invent
+ * findings out of our own inability to look.
+ *
+ * @param {Array<{file: string, content: string}>} docs
+ * @param {Map<string, object>|object} schemas - operation name → its declared `input` object
+ * @param {readonly string[]} controlFlags - the CLI adapter's own flags, PASSED not restated (#2644)
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: Array<{message: string, descriptor: object}>}}
+ */
+export function findMalformedOperationCalls(docs = [], schemas = new Map(), controlFlags = []) {
+  const readSchema = (n) => (schemas instanceof Map ? schemas.get(n) : schemas?.[n]);
+  const errors = [];
+  const warnings = [];
+
+  for (const { file, content } of docs || []) {
+    for (const call of extractOperationCalls(content)) {
+      if (call.exempt) continue;
+      const input = readSchema(call.op);
+      if (input === undefined) continue; // unknown operation — never a finding
+      const { unknown, missing } = judgeOperationCall({ flags: call.flags, input, controlFlags });
+
+      for (const flag of unknown) {
+        errors.push({
+          message:
+            `operation call passes a flag \`${call.op}\` does not declare (#3253): ${file}:${call.line} passes `
+            + `\`--${flag}\`, which is neither a declared input nor a CLI control flag — the run would be refused. `
+            + `Declared inputs: ${Object.keys(input).sort().join(', ') || '(none)'}. This is the RENAME class: `
+            + 'the raw homes spell flags in kebab-case (`--workitem`, `--blocked-by`, `--graduated-to`) where the '
+            + 'operations declare them camelCase, and a mismatch does not fail loudly — it drops the value. '
+            + 'NOTE: this gate proves the call is WELL-FORMED, never that it preserves the raw home\'s behaviour.',
+          descriptor: { kind: 'operation-call-unknown-flag', file, line: call.line, operation: call.op, flag },
+        });
+      }
+
+      for (const flag of missing) {
+        warnings.push({
+          message:
+            `operation call omits a required input (#3253): ${file}:${call.line} invokes \`${call.op}\` without `
+            + `\`--${flag}\`, which the operation declares \`required: true\`. If this line is an abbreviated `
+            + 'illustration rather than a command to run, put `@operation-home-ok: <reason>` on it.',
+          descriptor: { kind: 'operation-call-missing-required', file, line: call.line, operation: call.op, flag },
+        });
+      }
+    }
+  }
+  return { errors, warnings };
+}
