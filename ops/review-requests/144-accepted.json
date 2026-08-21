@@ -1,0 +1,8 @@
+{
+  "repo": "chalbert/plateau-app",
+  "pr": 144,
+  "to": "accepted",
+  "actor": "claude-review-pr",
+  "body": "## Human review verdict — chalbert/plateau-app#144\n\n**Verdict:** ✅ pass — no blocking findings\n\n### Panel verdicts\n\n| lens | weight | verdict |\n| --- | --- | --- |\n| correctness | mandatory | accept |\n\n### Findings (0)\n\n_No findings._\n\n---\n\n**Decision:** `accept` — recorded by operator.\n**Lens:** `correctness` — a SINGLE-LENS run. One `judge` step, one juror, one lens; the table above lists only the lens that judged. The other 3 panel lenses (security, simplicity, standards-conformance) did NOT run and are not reported as unjudged.\nNet basis: `c050cca09a92a00d6827c5f6924544e38aa648ad..42580f0918f27ce7cd84c4958948a56bcd174c0a` (rev `origin/lane/2859-argv-guard` at review time) — 3 net changed file(s) vs current main (#2450), not `gh pr diff`'s three-dot list.\n\n_Recorded through the declared `review-pr` operation (#3035)._",
+  "sessionId": "ef04148a-2a82-898b-af04-d54ff188a317"
+}
