@@ -1,7 +1,8 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateResolved: "2026-08-21"
 tags: []
 ---
 
@@ -41,17 +42,32 @@ overstates its coverage is worse than one that admits its limits.
 3. If the scan is deliberately left out, the checker's own output states which gates it does not run — silence
    is what made this cost two cycles.
 
-## Confirmed from the other side, 2026-08-21
+## ALREADY FIXED — resolved 2026-08-21, unbuilt
 
-Filing nine cards in one sitting, `scaffold`'s **digest-time** locus scan refused three times
-(`xk8l1ks`, and the first cuts of `xnjm6y6` / `xv8hlrl`) — fail-closed, nothing written, the exact
-message needed to fix it. That is the half this card says already works, and it worked.
+**This card was stale when it was rescued, and the rescue nearly shipped a false claim.**
+`we:scripts/check-backlog-item.mjs` DOES run the #883 locus scan on the body. **#3201** closed this gap,
+citing the same evidence this card was filed on (four cycles across 2026-08-19, #1479/#1480), and it calls
+`scanRepoLocusPrefixes` — deliberately *"the same function the other two callers use, never a second copy —
+a per-item check that could DISAGREE with the gate would be worse than one that merely omitted it."*
 
-It is evidence *for* the card rather than against it: the scan clearly exists and is cheap enough to
-run at authoring time. What still has no such moment is the **body** appended after scaffold returns,
-which is the half `we:scripts/check-backlog-item.mjs` is the natural home for. The asymmetry is the bug — one
-half of the same file is scanned at authoring time and the other half only in CI.
+Verified empirically before resolving, rather than read off the comment: scaffolded a throwaway card,
+appended a bare `<repo>`-less path to its **body** (the half this card said was unscanned),
+and ran the per-item checker:
 
-**A fourth occurrence, in this very card.** The paragraph above was appended by hand and named
-`we:scripts/check-backlog-item.mjs` bare; `check:standards` rejected it. Nothing between the append and CI would
-have caught it — which is the card's whole claim, demonstrated inside the card that makes it.
+```
+error  Backlog item "…" has 1 bare code-path ref(s) lacking a <repo>: prefix (#883;
+       e.g. the bare path → its we:-prefixed form)
+✗ 1 error(s)
+```
+
+**The withdrawn "confirmation".** An earlier revision of this card claimed four fresh 2026-08-21
+occurrences as evidence *for* it. The occurrences were real but they prove nothing here: every one came
+from `scaffold`'s digest-time scan or from `check:standards` directly, and **`we:scripts/check-backlog-item.mjs` was
+never run at any point**. It was evidence that the rule exists, restated as evidence that this tool omits
+it — the tool under accusation was the one thing never tested. Recorded rather than deleted, because
+reaching for nearby evidence that does not bear on the claim is the more useful failure to be able to
+recognise later.
+
+Also worth keeping: #3201 already documents what a clean per-item run does NOT mean (it sees one file, so
+every cross-entity check is out of reach), which is the honest version of the concern this card raised.
+
