@@ -17,9 +17,12 @@ import { describe, it, expect } from 'vitest';
 import { GH_ARGV, PR_STATE_FIELDS, createGhProvider, writeOrder } from '../review-label-provider.mjs';
 
 describe('GH_ARGV is byte-identical to the pre-port inline calls', () => {
-  it('reads PR state with the same five --json fields', () => {
+  it('reads PR state in ONE call, with every field the label arc needs', () => {
+    // The field list grows only when a field RIDES THIS CALL rather than costing a hop — `body` (#2844),
+    // `state` (#2953), `createdAt` (#3067). This assertion is what makes each addition deliberate: it fails
+    // on any change, so a field cannot appear here without someone deciding it should.
     expect(GH_ARGV.readPrState('o/n', 7)).toEqual([
-      'pr', 'view', '7', '--repo', 'o/n', '--json', 'labels,headRefOid,headRefName,state,body',
+      'pr', 'view', '7', '--repo', 'o/n', '--json', 'labels,headRefOid,headRefName,state,body,createdAt',
     ]);
   });
 
@@ -47,7 +50,7 @@ describe('GH_ARGV is byte-identical to the pre-port inline calls', () => {
   });
 
   it('names the state fields once, so a stub cannot drift from the real read', () => {
-    expect(PR_STATE_FIELDS).toEqual(['labels', 'headRefOid', 'headRefName', 'state', 'body']);
+    expect(PR_STATE_FIELDS).toEqual(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt']);
   });
 });
 
