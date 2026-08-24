@@ -260,7 +260,27 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
       ? {
           id: 'lanes',
           title: 'lane pool',
-          skip: 'ephemeral host: no branch guard to work around, shallow clones share nothing via --reference, and the box is reclaimed on idle — a pool costs npm ci per lane and buys nothing',
+          // STILL SKIPPED, but for a different reason and with a different message — the old one was wrong on
+          // every clause and, being the first thing a cloud session reads, it was actively misleading.
+          //
+          // It said: no branch guard to work around, shallow clones share nothing via `--reference`, a pool
+          // buys nothing. In fact `guard-lane.mjs` ships in the COMMITTED `.claude/settings.json` PreToolUse
+          // hooks, so it denies every write to a primary checkout here exactly as on a laptop — which means a
+          // session that believes this message has NO writable surface at all and cannot make the edit it was
+          // opened to make. (`--reference` on a shallow clone was also fatal rather than merely useless; both
+          // that and the pool-root derivation are fixed in `lane-pool.mjs` as of #3265, so provisioning now
+          // works here with no env override and no manual `fetch --unshallow`.)
+          //
+          // Why still a SKIP and not a provision: this runs as a `SessionStart` hook, and provisioning clones
+          // two lanes plus their siblings and installs deps — minutes of blocking before the operator can type
+          // anything, on every session, including the many that only read. The cost is real and the command is
+          // one line, so the honest trade is to state it rather than pay it unasked. What was broken was never
+          // that the step skipped; it was that it said the wrong thing about why.
+          skip: 'ephemeral host: the pool is NOT provisioned for you (a SessionStart hook must not block for '
+            + 'minutes), but you DO need one — the committed guard-lane.mjs hook denies every Edit/Write to a '
+            + 'primary checkout here, so a lane is the only writable surface. Run: '
+            + '`node scripts/lane-pool.mjs provision --count=2` (two: review-pr\'s juror refuses the lane you '
+            + 'drive from, #3151). See docs/agent/vm-sessions.md.',
         }
       : {
           id: 'lanes',
@@ -271,7 +291,11 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
 
   steps.push(
     ephemeral
-      ? { id: 'guard', title: 'lane guard', skip: 'ephemeral host: the guard pushes edits into a lane, and there is no pool here' }
+      // The USER-LEVEL guard installer (#3074) is what is skipped — never the guard itself, which ships in the
+      // committed `.claude/settings.json` and is already enforcing here. The old wording ("there is no pool
+      // here") implied the opposite and paired with the `lanes` message above to tell a cloud session it could
+      // edit the primary. It cannot.
+      ? { id: 'guard', title: 'lane guard', skip: 'ephemeral host: no USER-level install needed — the committed project hook already enforces lane isolation here' }
       : { id: 'guard', title: 'lane guard', info: 'check with `node scripts/guard-lane-install.mjs status`' },
   );
 

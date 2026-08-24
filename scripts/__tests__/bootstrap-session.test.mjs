@@ -70,11 +70,20 @@ describe('planSteps', () => {
     expect(step(planSteps({ ephemeral: false }), 'skills').argv).toEqual([]);
   });
 
-  // The pool exists to dodge a branch guard, share objects via --reference and persist between batches.
-  // A cloud VM has none of those, so provisioning one costs an `npm ci` per lane for nothing.
-  it('skips the lane pool on an ephemeral host, with the reason attached', () => {
+  // The step still SKIPS — a SessionStart hook must not block for minutes cloning two lanes and their
+  // siblings — but the old reason ("no guard to dodge … a pool buys nothing") was wrong on every clause, and
+  // being the first thing a cloud session reads it left agents believing the primary was writable. It is not:
+  // guard-lane.mjs ships in the COMMITTED settings. So the message must carry the ACTION, not a rationale.
+  it('skips the lane pool on an ephemeral host — but tells you to provision one, and how', () => {
     const lanes = step(planSteps({ ephemeral: true }), 'lanes');
-    expect(lanes.skip).toMatch(/reclaimed on idle/);
+    expect(lanes.skip).toMatch(/lane-pool\.mjs provision --count=2/);   // the runnable command
+    expect(lanes.skip).toMatch(/only writable surface/);                 // why it is not optional
+  });
+
+  it('never tells an ephemeral host that a pool buys nothing', () => {
+    // The regression guard proper: any of these clauses coming back means the misleading rationale returned.
+    const lanes = step(planSteps({ ephemeral: true }), 'lanes');
+    expect(lanes.skip).not.toMatch(/buys nothing|no branch guard to work around|reclaimed on idle/);
   });
 
   it('never plans to install the guard on an ephemeral host', () => {
