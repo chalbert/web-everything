@@ -112,6 +112,12 @@ export function recordVerdictOperation({ readRun } = {}, { validateRequest, appl
       actor: { type: 'string', required: false, default: 'claude-review-pr' },
       // Required by the applier for `clear-human` and refused on anything else — its rule, enforced there.
       operatorInstruction: { type: 'string', required: false },
+      // #3261 — WHICH CHECKOUT carries the target repo's transport branch. Each repo owns its own notes, so a
+      // verdict for a sibling repo must be staged on THAT repo's board; this names the checkout to push from.
+      // Optional: omitted means the driver's own checkout, which is right for the common same-repo case. The
+      // sink REFUSES a mismatch either way, so a wrong or absent value fails loudly rather than landing a
+      // verdict where no applier with the right token will ever see it.
+      repoRoot: { type: 'string', required: false, default: '' },
     },
     verdictFrom: 'plan',
 
@@ -142,13 +148,23 @@ export function recordVerdictOperation({ readRun } = {}, { validateRequest, appl
     }),
 
     stage: effect({
-      reads: ['verdict'],
+      reads: ['verdict', 'input.repoRoot'],
       // ONE effect carrying bytes `plan` already computed. IDEMPOTENT: re-writing the identical request on a
       // replay is safe — the transport applies what a push added, and an identical overwrite is one delivery.
       effects: (view) => [{
         type: STAGE_REQUEST_EFFECT,
         idempotent: true,
-        payload: { path: view.verdict.path, content: `${JSON.stringify(view.verdict.request, null, 2)}\n`, pr: view.verdict.request.pr, to: view.verdict.request.to },
+        // `repo` rides the payload (#3261) so the SINK can decide which board this belongs on — each repo
+        // owns its own notes, and staging a verdict on the wrong repo's branch strands it where no applier
+        // with the right token will ever see it. The sink REFUSES a mismatch rather than defaulting.
+        payload: {
+          path: view.verdict.path,
+          content: `${JSON.stringify(view.verdict.request, null, 2)}\n`,
+          pr: view.verdict.request.pr,
+          to: view.verdict.request.to,
+          repo: view.verdict.request.repo,
+          repoRoot: view.input?.repoRoot ?? '',
+        },
       }],
     }),
   });

@@ -35,6 +35,51 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 /** The branch CI watches. `we:.github/workflows/apply-review-request.yml` triggers on a push to it. */
 export const TRANSPORT_BRANCH = 'ops/review-requests';
 
+/**
+ * Which checkout carries the transport branch for `repo`, and a REFUSAL when it is not this one (#3261).
+ *
+ * THE RULING: each repo owns its own notes. A verdict for `owner/x` is staged on `owner/x`'s OWN
+ * `ops/review-requests` branch, applied by that repo's own workflow with its own repo-scoped token. Ruled on a
+ * scaling test — at 100 repos a central board is not merely large, it is structurally wrong: every applier
+ * would need cross-repo READ on a branch none of them owns.
+ *
+ * WHY THIS FUNCTION REFUSES RATHER THAN DEFAULTS. Before the ruling, a verdict for a sibling repo was pushed
+ * onto THIS repo's branch and the applier failed with a raw `Could not resolve to a Repository` — the token is
+ * repo-scoped (#3261's own evidence: one failure in fifty applier runs, and it was the only cross-repo
+ * request). Defaulting to the local checkout would put a plateau-app verdict on web-everything's board again,
+ * where the right applier will never see it and the wrong one cannot act on it. So a mismatch is an ERROR that
+ * names both repos, never a silent push to the wrong board.
+ *
+ * `originRepo` is INJECTED so this is testable with no git, and so a caller that already knows the checkout
+ * (the conveyor, a test) can say so instead of being probed.
+ *
+ * @param {{repo: string, root?: string, repoRoot?: string, originRepo?: Function}} o
+ * @returns {string} the checkout whose `origin` is `repo`
+ */
+export function resolveTransportRoot({ repo, root = REPO_ROOT, repoRoot = '', originRepo = defaultOriginRepo } = {}) {
+  const want = String(repo ?? '').trim();
+  if (!want) throw new Error('record-verdict: no `repo` on the request — cannot decide which board it belongs on');
+  const candidate = String(repoRoot ?? '').trim() || root;
+  const have = originRepo(candidate);
+  if (have === want) return candidate;
+  throw new Error(
+    `record-verdict: refusing to stage a verdict for ${want} on ${have || '(unknown)'}'s transport branch (#3261). `
+    + 'Each repo owns its own notes: the request must be pushed to that repo\'s own `ops/review-requests`, where '
+    + 'ITS applier — holding ITS repo-scoped token — can act on it. A request left on the wrong board is picked '
+    + 'up by an applier that cannot resolve the repository, which is how plateau-app#144 was stranded. '
+    + `Pass \`--repoRoot=<path to a ${want} checkout>\`.`,
+  );
+}
+
+/** `owner/name` of a checkout's `origin`, or '' when it cannot be read. Probing must never throw. */
+export function defaultOriginRepo(cwd) {
+  try {
+    const url = String(execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', cwd })).trim();
+    const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
 /** The write-up file name `review-pr` stages, per its own `prViewFileName`-style convention. */
 export function writeUpName(repo, pr) {
   return `${String(repo).replace('/', '-')}-${pr}-verdict.md`;
@@ -74,6 +119,8 @@ export function createRunReader({ root = REPO_ROOT, store = createFileRunStore()
  */
 export function createRecordVerdictSinks({
   root = REPO_ROOT,
+  repoRoot = '',
+  originRepo = defaultOriginRepo,
   run = defaultGit,
   now = () => Date.now(),
   mkdir = mkdirSync,
@@ -82,13 +129,19 @@ export function createRecordVerdictSinks({
 } = {}) {
   return {
     [STAGE_REQUEST_EFFECT]: async (payload) => {
-      const wt = join(root, '.operations', 'transport', `wt-${now()}`);
+      // #3261 — WHICH BOARD, decided before anything is written. Refuses rather than defaulting; see
+      // `resolveTransportRoot`.
+      // The PAYLOAD's `repoRoot` wins over the constructor's: sinks are built before any input is
+      // parsed, so a CLI caller can only reach this through the payload. The constructor arg stays for
+      // a programmatic caller (and for tests) that knows the checkout up front.
+      const board = resolveTransportRoot({ repo: payload.repo, root, repoRoot: payload.repoRoot || repoRoot, originRepo });
+      const wt = join(board, '.operations', 'transport', `wt-${now()}`);
       mkdir(dirname(wt), { recursive: true });
       try {
-        run(['fetch', '--quiet', 'origin', TRANSPORT_BRANCH], { cwd: root });
+        run(['fetch', '--quiet', 'origin', TRANSPORT_BRANCH], { cwd: board });
         // `--force` on the worktree add is about the DIRECTORY, not the branch: a leftover registration from a
         // killed run must not stop this one. The branch itself is taken from the freshly fetched remote tip.
-        run(['worktree', 'add', '--force', '--detach', wt, `origin/${TRANSPORT_BRANCH}`], { cwd: root });
+        run(['worktree', 'add', '--force', '--detach', wt, `origin/${TRANSPORT_BRANCH}`], { cwd: board });
         run(['checkout', '-B', TRANSPORT_BRANCH, `origin/${TRANSPORT_BRANCH}`], { cwd: wt });
 
         const abs = join(wt, payload.path);
@@ -110,7 +163,10 @@ export function createRecordVerdictSinks({
         // makes the next `worktree add` on the same branch fail, which would turn one bad run into every
         // subsequent one failing.
         try { rm(wt, { recursive: true, force: true }); } catch { /* already gone */ }
-        try { run(['worktree', 'prune'], { cwd: root }); } catch { /* best effort */ }
+        // PRUNED IN `board`, NOT `root` (#3261). The worktree was registered in the board's checkout, so
+        // pruning the driver's would leave a stale registration in the target repo and wedge its NEXT
+        // stage on the same branch — the failure this finally block exists to prevent, relocated.
+        try { run(['worktree', 'prune'], { cwd: board }); } catch { /* best effort */ }
       }
     },
   };
