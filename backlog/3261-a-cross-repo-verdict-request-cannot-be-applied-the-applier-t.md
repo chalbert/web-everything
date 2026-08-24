@@ -53,3 +53,37 @@ This one is the only one that fails LOUDLY, which is the good news: the review i
 1. **Executable** — a verdict request naming a repo other than the applier's own is applied successfully, or refused with a reason that names the token scope rather than a raw GraphQL error.
 2. `plateau-app#144`'s accepted verdict is recorded by whichever route is chosen.
 3. The choice is reconciled with #3257 — request naming and request routing are the same decision seen twice.
+
+## THE CALL (operator, 2026-08-24): each repo owns its own notes
+
+Ruled on a **scaling test**: *"if we had 100 repos, I cannot imagine all would be in one repo — seems better to have each repo own the notes."*
+
+The verdict request goes to the **target repo's own `ops/review-requests` branch**, applied by that repo's own workflow with its own repo-scoped token. Not a wider key on one central applier, and not per-repo appliers reading a foreign repo's branch.
+
+### Why the scaling test is decisive
+
+A central board does not merely get large at N repos — it gets **structurally wrong**. Repo #57's approvals would live in `web-everything` for no reason other than that it was first, and every one of the 100 appliers would need cross-repo READ on a branch it does not own. The per-repo form needs no cross-repo authority anywhere: each side touches only itself.
+
+### It dissolves #3257 rather than deferring it
+
+`#3257` (the request filename is keyed by PR number alone, so two repos collide) exists **only because one board holds several repos' notes**. Give each repo its own board and PR numbers are unique within it: a request named for PR 144 is unambiguous, no rename is needed, and the transition problem that card describes — a collector that must read both names until the branch drains — never arises. Two defects, one decision.
+
+### Feasibility, checked rather than assumed
+
+- **The writer can reach a sibling repo.** `git push --dry-run origin HEAD:refs/heads/ops/review-requests` against `plateau-app` succeeds from this credential-less host. `git push` is credentialed here even though `gh` is not — which is the whole reason the file transport exists.
+- **A multi-repo consumer is the existing shape.** `we:scripts/merge-ai-prs.mjs` already *"sweeps ALL 3 constellation repos BY DEFAULT"* in one blockedBy cascade, so a drain reading N boards is not a new burden.
+
+### The cost, stated
+
+N repos means N workflow files. A reusable/called workflow keeps that to one definition and N one-line callers, which is the same shape the per-repo applier would have needed anyway. This is a real cost and it is the one the ruling accepts.
+
+### One interaction to settle with #3255, NOT silently
+
+`#3214` ruled the verdict **ledger** onto *"the `ops/review-requests` branch"* — phrased when there was only one such branch. If notes are per-repo, the ledger's home has to be decided explicitly: per-repo boards too (consistent with this ruling, and the drain already reads N repos), or one designated board (consistent with a single merge authority). `#3255` is the build that answers it, and it must not pick one by accident.
+
+## Done when
+
+1. **Executable** — a verdict request for a PR in repo X is staged onto **X's own** `ops/review-requests` branch and applied by X's own workflow. Red today (it goes to web-everything's branch and 403s), green after.
+2. **Executable** — the request filename needs no repo component, because per-board PR numbers are unique. `#3257` is closed as dissolved rather than fixed.
+3. The applier workflow is defined once and called per repo, not copied N times.
+4. `#3255` states which home the ledger takes, with this ruling cited either way.
