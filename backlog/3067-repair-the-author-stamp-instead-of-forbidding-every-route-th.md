@@ -89,3 +89,39 @@ trade `we:scripts/lib/review-independence.mjs` documents as impossible today.
 **Not done — making the clear REFUSE on `stamp-lost`.** This is the half that turns detection into enforcement, and it needs a call first. `we:scripts/review-set-label.mjs` refuses only `SELF_CLEAR`; adding `STAMP_LOST` would block **every PR opened outside `pr-land`** — which on a credential-less host is all of them, because `pr-land` needs `gh` and the MCP connector does not stamp. Those PRs are correctly `stamp-lost` (no authorship evidence exists, so tolerating them was never safe), but blocking them with no alternative stamping route strands the whole credential-less workflow. The refusal should land together with a route that stamps a PR opened without `pr-land`, not before it.
 
 **Next.** Decide the pairing above; and check whether `we:scripts/pr-body-edit.mjs --repair` should run automatically from the drain (the card's second Done-when) rather than only by hand.
+
+## The gap runs BOTH ways — demonstrated live, on two PRs, an hour apart
+
+The case above is the permissive direction: no stamp, so a real self-clear cannot be proven and is not
+refused. That is only half of it. The same missing stamp also produces the **accusatory** direction —
+a genuinely independent clearance recorded as though it were not one.
+
+Both happened on 2026-08-24, through the same code path, within an hour:
+
+| PR | who cleared it | what the record says |
+| --- | --- | --- |
+| `plateau-app#145` | the PR's **own author** (`cleared-by-actor: f1f14019…`) | ⚠️ "Independence NOT established" — and **not refused**, because a missing stamp cannot prove `SELF_CLEAR` |
+| `plateau-app#144` | a **different session** (`cleared-by-actor: ef04148a…`, the reviewing session, ≠ the author) | ⚠️ "Independence NOT established … This record does not show that a party other than the author cleared it" |
+
+The second line is simply **false about what happened**. #144 *was* cleared by a party other than its
+author — the request JSON carried that session id and the applier stamped it into the comment — yet the
+comment asserts the opposite in the same sentence that carries the contradicting marker.
+
+## Why this matters more than the permissive direction
+
+A permissive miss is a hole someone could exploit. An accusatory miss is worse in ordinary operation,
+because it is **routine and it trains the reader to ignore the warning**. Every PR opened outside
+`we:scripts/pr-land.mjs` carries no stamp, so every such clearance — independent or not — renders the
+identical ⚠️. Once the warning fires on the honest case as often as the dishonest one, it stops
+distinguishing them, and #2844's record degrades from a signal into boilerplate. That is the failure
+mode where the permissive hole actually gets exploited: not because the guard was absent, but because
+its output had already been tuned out.
+
+So the repair below is not only about refusing the right things. It is about the warning **meaning
+something** when it does fire — which requires it to stay silent when independence genuinely held.
+
+### Done when (addition)
+
+3. **Executable** — a case where the clearer's session id differs from a *restored* author stamp asserts
+   the comment carries **no** ⚠️ independence line. It must RED today, where the absent stamp forces the
+   warning regardless of who actually cleared it.
