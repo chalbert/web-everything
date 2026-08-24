@@ -14,6 +14,7 @@ import {
   planSteps,
   selfKey,
   siblingsFor,
+  aliasesFor,
   lanePool,
   primaryCheckout,
   withPrimaryGitDir,
@@ -138,6 +139,33 @@ describe('relocation', () => {
   it('resolves a sibling at whichever directory name it actually occupies', () => {
     const exists = (p) => p === '/ws/webeverything';
     expect(siblingsFor('/ws/plateau-app', exists).find((s) => s.name === 'we')).toMatchObject({ path: '/ws/webeverything', present: true });
+  });
+});
+
+/**
+ * The `siblings` step answers "does the directory exist", which is NOT the question the other two repos ask.
+ * Their build configs resolve WE by a hard-coded `../webeverything`, so a slug-named clone (`web-everything`,
+ * what every cloud VM gets) leaves them unable to load their own Vite config — while `siblings` reports `ok`.
+ */
+describe('aliasesFor — the basename a peer resolves, not the one it was cloned as', () => {
+  it('flags the alias a cloud clone is missing', () => {
+    const exists = (p) => p === '/ws/web-everything';
+    const we = aliasesFor('/ws/frontierui', exists).find((a) => a.name === 'webeverything');
+    expect(we).toMatchObject({ path: '/ws/webeverything', target: '/ws/web-everything', present: false });
+  });
+
+  it('is satisfied once the alias exists', () => {
+    const exists = (p) => p === '/ws/web-everything' || p === '/ws/webeverything';
+    expect(aliasesFor('/ws/frontierui', exists).every((a) => a.present)).toBe(true);
+  });
+
+  it('never proposes an alias for a member that is not here — that is the siblings step', () => {
+    expect(aliasesFor('/ws/frontierui', () => false)).toEqual([]);
+  });
+
+  it('proposes no alias for a single-name member', () => {
+    const exists = (p) => p === '/ws/frontierui';
+    expect(aliasesFor('/ws/frontierui', exists).map((a) => a.name)).not.toContain('frontierui');
   });
 });
 
@@ -584,12 +612,13 @@ describe('the post-merge hook is consent-preserving', () => {
 describe('main() — the installer orchestration', () => {
   const spyIo = (over = {}) => {
     const io = {
-      lines: [], writes: [], skills: [], hooks: [],
+      lines: [], writes: [], skills: [], hooks: [], links: [],
       readSettings: () => ({}),
       writeSettings: (next) => io.writes.push(next),
       installHook: () => { io.hooks.push('install'); return 'registered'; },
       uninstallHook: () => { io.hooks.push('uninstall'); return 'removed'; },
       runSkills: (script, argv, opts) => { io.skills.push({ script, argv, ...opts }); return { ok: true, out: 'in sync' }; },
+      symlink: (target, path) => io.links.push({ target, path }),
       exists: () => true,
       env: {},
       out: (line) => io.lines.push(line),
@@ -602,6 +631,61 @@ describe('main() — the installer orchestration', () => {
   const report = (io) => JSON.parse(io.lines.join('\n'));
 
   const run = (argv, env, over = {}) => { const io = spyIo({ env, ...over }); const code = main(argv, io); return { io, code }; };
+
+  /**
+   * The `aliases` step's WRITE branch. The first cut of this PR tested only the pure `aliasesFor`, and the
+   * review proved the gap by mutation: inverting `io.symlink(target, path)` to create every link backwards,
+   * and forcing the consent gate to never write, BOTH still passed the whole suite. `exists: () => true` in
+   * the stub above makes every alias trivially present, so the branch was unreachable even incidentally.
+   */
+  describe('the aliases step', () => {
+    // WE resolves as `web-everything`; its `webeverything` alias is the one thing absent.
+    const NO_ALIAS = (p) => !String(p).endsWith('webeverything');
+    const aliasStep = (io) => report(io).steps.find((s) => s.id === 'aliases');
+
+    it('creates the missing alias on a host it may write to, target first', () => {
+      const { io } = run(['--json'], VM, { exists: NO_ALIAS });
+      expect(io.links.length).toBeGreaterThan(0);
+      for (const { target, path } of io.links) {
+        expect(path.endsWith('webeverything')).toBe(true);        // the LINK is the alias…
+        expect(target.endsWith('web-everything')).toBe(true);     // …pointing AT the real checkout
+      }
+      expect(aliasStep(io).status).toBe('ok');
+    });
+
+    it('links the alias beside the checkout it names, never across parents', () => {
+      const { io } = run(['--json'], VM, { exists: NO_ALIAS });
+      for (const { target, path } of io.links) {
+        expect(path.slice(0, path.lastIndexOf('/'))).toBe(target.slice(0, target.lastIndexOf('/')));
+      }
+    });
+
+    it('reports drift and writes NOTHING on a durable host', () => {
+      const { io } = run(['--json'], LAPTOP, { exists: NO_ALIAS });
+      expect(io.links).toEqual([]);
+      expect(aliasStep(io).status).toBe('drift');
+    });
+
+    it('plans without writing under --dry-run', () => {
+      const { io } = run(['--json', '--dry-run'], VM, { exists: NO_ALIAS });
+      expect(io.links).toEqual([]);
+      expect(aliasStep(io).status).toBe('planned');
+    });
+
+    it('a failing symlink is reported, never thrown — this runs as a SessionStart hook', () => {
+      const boom = () => { const e = new Error('nope'); e.code = 'EACCES'; throw e; };
+      const { io, code } = run(['--json'], VM, { exists: NO_ALIAS, symlink: boom });
+      expect(code).toBe(0);
+      expect(aliasStep(io).status).toBe('drift');
+      expect(aliasStep(io).detail).toContain('EACCES');
+    });
+
+    it('is satisfied — and writes nothing — when the alias already exists', () => {
+      const { io } = run(['--json'], VM);
+      expect(io.links).toEqual([]);
+      expect(aliasStep(io).status).toBe('ok');
+    });
+  });
 
   it('reports the host it detected and the checkout it is in', () => {
     const vm = run(['--json'], VM);

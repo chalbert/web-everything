@@ -45,7 +45,7 @@
  *   node scripts/bootstrap-session.mjs install     # apply on ANY host (the explicit opt-in)
  *   node scripts/bootstrap-session.mjs uninstall   # drop the SessionStart registration
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -119,12 +119,62 @@ export function selfKey(root = REPO_ROOT) {
  * primary-relative one, because that is where an operator should put it.
  */
 export function siblingsFor(root = REPO_ROOT, exists = existsSync) {
-  const parents = [...new Set([dirname(primaryCheckout(root, exists)), dirname(root)])];
+  const parents = constellationParents(root, exists);
   return siblingKeys(selfKey(root)).map((key) => {
     const dirs = CONSTELLATION_REPOS[key].dirs;
     const found = parents.flatMap((parent) => dirs.map((d) => join(parent, d))).find((p) => exists(p));
     return { name: key, path: found ?? join(parents[0], dirs[0]), present: Boolean(found) };
   });
+}
+
+/** The parents a constellation member may sit under — see {@link siblingsFor} for why there are two. PURE. */
+function constellationParents(root = REPO_ROOT, exists = existsSync) {
+  return [...new Set([dirname(primaryCheckout(root, exists)), dirname(root)])];
+}
+
+/**
+ * The basename ALIASES a constellation member is missing — the directory names its peers resolve it by, that
+ * do not exist beside it.
+ *
+ * WHY THIS IS NOT COSMETIC. `constellation-repos.mjs` records that WE answers to two directory names
+ * (`web-everything` from the clone slug, `webeverything` on the laptop) precisely because both are in live
+ * use. That table is consulted by TOOLING; the BUILD CONFIGS of the other two repos resolve their peers by a
+ * hard-coded basename instead — `frontierui/vite.config.mts` does `resolve(__dirname, '../webeverything')`,
+ * and plateau-app's tsconfig `paths` and FUI's intent-resolver plugin do the same. A cloud VM clones from the
+ * slug, so WE lands at `web-everything` and every one of those resolutions misses.
+ *
+ * The failure is not subtle and it is not deferred: `vite.config.mts` cannot LOAD, so plateau-app's dev server
+ * dies at config load with `Could not resolve "../../../webeverything/webtraits/intentProfileResolver"` before
+ * serving a module. It is the #1202 cold-start class of bug, one repo over.
+ *
+ * The `siblings` step above cannot see any of this — it asks whether a DIRECTORY EXISTS, answers yes for a
+ * checkout whose configs cannot resolve their peers, and reports `ok`. That false green is what this step
+ * exists to close (observed 2026-08-24: `ok siblings frontierui, plateau-app` on a VM where plateau-app's
+ * cold start was broken).
+ *
+ * Reported as `drift`, not `missing`: unlike an absent sibling — which needs the harness's `add_repo` and so
+ * is the operator's move — an alias is machine state this script can compute and create, which is the same
+ * conclusion #3074 reached for the guard path. PURE over `exists`.
+ */
+export function aliasesFor(root = REPO_ROOT, exists = existsSync) {
+  return constellationParents(root, exists).flatMap((parent) =>
+    Object.values(CONSTELLATION_REPOS).flatMap(({ dirs }) => {
+      // PER-PARENT, and the target is only ever a checkout in the SAME directory as the link. The first cut
+      // searched the parents in priority order for one target and then linked it beside whichever parent won
+      // — so with a lane, whose two parents diverge, the alias landed beside the primary while the sibling
+      // that needed it sat in the pool directory, and the step still reported `ok`. That is the very
+      // false-green this file is fixing, reintroduced one level down (PR #1537 correctness juror).
+      const target = dirs.map((d) => join(parent, d)).find((p) => exists(p));
+      // Nothing here to alias. Deliberately NOT resolved from another parent: a `webeverything` in the pool
+      // directory pointed at the primary checkout — or at one arbitrary lane — would silently cross a
+      // sibling's build over into a tree it does not belong to, which is worse than the missing link. A pool
+      // whose own sibling clones cannot resolve their peers is `lane-pool.mjs`'s provisioning to fix.
+      if (!target) return [];
+      return dirs
+        .map((d) => join(parent, d))
+        .filter((p) => p !== target)
+        .map((path) => ({ name: basename(path), path, target, present: exists(path) }));
+    }));
 }
 
 /**
@@ -194,6 +244,15 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
     id: 'siblings',
     title: 'report constellation siblings',
     verify: () => siblingsFor(root, exists),
+  });
+
+  // Basename aliases. UNLIKE the siblings above this one is APPLIED, because it is machine state this script
+  // can compute rather than a repo only the harness can fetch — see {@link aliasesFor}. It rides the same
+  // `write` consent as every other effect here: reported on a durable host, applied on an ephemeral one.
+  steps.push({
+    id: 'aliases',
+    title: 'reconcile constellation basename aliases',
+    verify: () => aliasesFor(root, exists),
   });
 
   steps.push(
@@ -516,6 +575,7 @@ export function defaultIo() {
   return {
     readSettings, writeSettings, installHook, uninstallHook, runSkills,
     exists: existsSync,
+    symlink: (target, path) => symlinkSync(target, path, 'dir'),
     env: process.env,
     out: (line) => writeLineSync(1, line),
   };
@@ -557,6 +617,30 @@ export function main(argv, io = defaultIo()) {
       continue;
     }
     const v = step.verify();
+    // Aliases are the one `verify`-shaped step with an EFFECT. It is a symlink beside a checkout, not a write
+    // into the user tree, but it rides the same `write` consent anyway: a durable host that already resolves
+    // its peers must not have a second name for one of them appear unasked.
+    if (step.id === 'aliases') {
+      const absent = v.filter((a) => !a.present);
+      if (!absent.length) { report.steps.push({ id: step.id, status: 'ok', detail: v }); continue; }
+      if (!write || has('--dry-run')) {
+        report.steps.push({
+          id: step.id,
+          status: has('--dry-run') ? 'planned' : 'drift',
+          detail: absent.map((a) => `${a.path} → ${a.target} (NOT linked — run \`npm run bootstrap:install\`)`).join(', '),
+        });
+        continue;
+      }
+      const done = [];
+      for (const a of absent) {
+        // A failure here is REPORTED, never thrown: the bootstrap runs as a SessionStart hook, and a session
+        // that refuses to start because a convenience symlink could not be made is worse than the missing link.
+        try { io.symlink(a.target, a.path); done.push(`${a.path} → ${a.target}`); }
+        catch (e) { done.push(`${a.path} FAILED (${e.code ?? e.message})`); }
+      }
+      report.steps.push({ id: step.id, status: done.some((d) => d.includes('FAILED')) ? 'drift' : 'ok', detail: done.join(', ') });
+      continue;
+    }
     const ok = step.id === 'memory' ? Boolean(v) : v.every((s) => s.present);
     report.steps.push({ id: step.id, status: ok ? 'ok' : step.id === 'siblings' ? 'missing' : 'drift', detail: v });
   }
