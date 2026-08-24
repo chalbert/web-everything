@@ -50,13 +50,21 @@ export function workspaceFor(path) {
  * (`~/workspace/webeverything` → `~/workspace/.lanes`), so a laptop sees no change. `LANE_POOL_ROOT` remains
  * the explicit override and still expands `~`.
  *
- * @param {string} cwd - the checkout (or lane) the caller is standing in.
+ * **`checkoutRoot` MUST be a checkout ROOT, not an arbitrary cwd** — the caller resolves it (`git rev-parse
+ * --show-toplevel`). This function cannot: it is pure, and "is this path the repo root or three levels inside
+ * it?" is not answerable from the string. Handed `<checkout>/scripts` it would return the CHECKOUT as the
+ * workspace and put the pool at `<checkout>/.lanes` — inside the repo the pool is meant to sit beside. The
+ * pre-#3265 `homedir()` default was wrong about the host but at least cwd-INDEPENDENT; deriving without
+ * normalising first trades one bug for another (#1539 reviewer, round 2). A lane path needs no normalising —
+ * `workspaceFor` strips at `.lanes` from any depth — but the root is still the honest input.
+ *
+ * @param {string} checkoutRoot - the checkout (or lane) ROOT the caller is in.
  * @param {object} env - environment bag; reads `LANE_POOL_ROOT` and `HOME`.
  * @returns {string} the pool root.
  */
-export function defaultPoolRoot(cwd = process.cwd(), env = process.env) {
+export function defaultPoolRoot(checkoutRoot = process.cwd(), env = process.env) {
   const home = env.HOME || homedir();
-  return expandHome(env.LANE_POOL_ROOT, home) || join(workspaceFor(cwd), '.lanes');
+  return expandHome(env.LANE_POOL_ROOT, home) || join(workspaceFor(checkoutRoot), '.lanes');
 }
 
 /**

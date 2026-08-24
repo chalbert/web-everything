@@ -82,4 +82,23 @@ describe('defaultPoolRoot — derived from the checkout, never from $HOME', () =
   it('never returns a path under $HOME merely because $HOME exists', () => {
     expect(defaultPoolRoot('/srv/checkouts/web-everything', { HOME: '/root' }).startsWith('/root')).toBe(false);
   });
+
+  it('never puts the pool INSIDE the checkout — the contract is a checkout ROOT', () => {
+    // The round-2 regression: handed `<checkout>/scripts` this returned `<checkout>/.lanes`, i.e. a pool
+    // nested in the very repo it is meant to sit beside. The CALLER resolves the root (`rev-parse
+    // --show-toplevel`); a pure function cannot tell a root from a subdirectory. This pins the contract:
+    // given the root, the pool is always a SIBLING of the checkout.
+    const root = '/home/user/web-everything';
+    expect(defaultPoolRoot(root, { HOME: '/root' })).toBe('/home/user/.lanes');
+    expect(defaultPoolRoot(root, { HOME: '/root' }).startsWith(`${root}/`)).toBe(false);
+  });
+
+  it('resolves a lane from ANY depth without normalising — .lanes is the anchor', () => {
+    const env = { HOME: '/root' };
+    for (const p of [
+      '/home/user/.lanes/web-everything/lane-1',
+      '/home/user/.lanes/web-everything/lane-1/scripts',
+      '/home/user/.lanes/web-everything/lane-1/scripts/__tests__',
+    ]) expect(defaultPoolRoot(p, env)).toBe('/home/user/.lanes');
+  });
 });

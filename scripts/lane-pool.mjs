@@ -138,7 +138,12 @@ const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) 
 // #3265 — the pool root is DERIVED from the checkout, not assumed from `$HOME`. Pure core + its
 // rationale live in `./lib/lane-pool-paths.mjs` (this file runs its CLI at import, so nothing here is
 // unit-testable by importing it).
-const POOL_ROOT = defaultPoolRoot();
+// The checkout ROOT, not the cwd: `defaultPoolRoot` is pure and cannot tell `<checkout>/scripts` from
+// `<checkout>`, so handing it a subdirectory would put the pool INSIDE the repo (#1539 reviewer, round 2).
+// A lane needs no normalising — `workspaceFor` strips at `.lanes` from any depth — but this is the honest
+// input either way. Falls back to the cwd outside a git repo, where there is nothing better to say.
+const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd()) || process.cwd();
+const POOL_ROOT = defaultPoolRoot(CHECKOUT_ROOT);
 
 // ── repo descriptor resolution ──────────────────────────────────────────────────────────────────────
 function resolveRepo() {
