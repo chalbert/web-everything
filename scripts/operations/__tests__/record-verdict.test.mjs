@@ -15,7 +15,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import { recordVerdictOperation, factsFromRun, buildRequest, RECORD_VERDICT_OP, STAGE_REQUEST_EFFECT } from '../record-verdict.mjs';
-import { writeUpName, TRANSPORT_BRANCH, createRecordVerdictSinks, resolveTransportRoot } from '../record-verdict-io.mjs';
+import {
+  writeUpName, TRANSPORT_BRANCH, createRecordVerdictSinks, resolveTransportRoot,
+  APPLIER_WORKFLOW, BOARD_SOURCE_BRANCH, trackingRefspec,
+} from '../record-verdict-io.mjs';
 import { validateRequest, APPLIABLE_TARGETS } from '../../apply-review-request.mjs';
 
 const run = (over = {}) => ({
@@ -152,6 +155,22 @@ describe('the stage effect', () => {
   });
 });
 
+/**
+ * The two PROBES #3264 added, answered as a HEALTHY board would answer them: the branch exists on `origin`,
+ * and its tree carries the applier workflow.
+ *
+ * Shared by the stubs of the tests that are about something ELSE, and answered rather than left to fall
+ * through to `''` — because '' is not "don't care" for either verb. An empty `ls-remote` means "no board",
+ * which would send every one of those tests down the genesis path; an empty `ls-tree` means "no applier",
+ * which would make every one of them refuse. Both would still be green for tests asserting a throw, and
+ * green for the wrong reason, which is the failure mode this file already fought once over the empty diff.
+ */
+const healthyBoard = (args) => {
+  if (args[0] === 'ls-remote') return `sha\trefs/heads/${TRANSPORT_BRANCH}\n`;
+  if (args[0] === 'ls-tree') return `${APPLIER_WORKFLOW}\n`;
+  return undefined;
+};
+
 describe('the sink — a worktree, never a branch switch in the caller\'s lane', () => {
   /**
    * EVERY side effect is stubbed, filesystem included, and that is not belt-and-braces.
@@ -175,6 +194,8 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
     run: (args, opts) => {
       calls.push({ args, cwd: opts?.cwd });
       if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      const healthy = healthyBoard(args);
+      if (healthy !== undefined) return healthy;
       return over[args[0]] ?? '';
     },
     mkdir: (p, o) => calls.push({ fs: 'mkdir', path: p, opts: o }),
@@ -305,6 +326,8 @@ describe('#3261 — the sink runs its git against the BOARD, not the driver', ()
     run: (args, opts) => {
       calls.push({ args, cwd: opts?.cwd });
       if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      const healthy = healthyBoard(args);
+      if (healthy !== undefined) return healthy;
       // A NON-EMPTY staged diff, so these drive the FULL path through commit+push. Returning '' here makes the
       // sink take its "identical request already staged" early return, and the assertions below would then be
       // testing a branch that never pushes — passing for the wrong reason.
@@ -343,5 +366,197 @@ describe('#3261 — the sink runs its git against the BOARD, not the driver', ()
     // The strongest form: not "the board was used somewhere" but "the driver was used nowhere".
     const calls = []; await build(calls)(payload);
     expect(calls.filter((c) => c.cwd === '/driver')).toEqual([]);
+  });
+});
+
+// ── #3264: a repo onboarding to the transport, and a board that cannot apply ─────────────────────────────────
+//
+// THESE DRIVE A FIXTURE ORIGIN, not a stub that says yes to everything, and that is the whole reason they are
+// worth having. Every one of the three failures on this card is a DISAGREEMENT between what the sink assumed
+// git would do and what git does — so a `run` that returns `''` for any verb and never throws cannot express
+// them, and a test written against one would have passed on the broken sink.
+//
+// The fixture therefore models the three behaviours that actually bit, live, onboarding plateau-app:
+//   · `fetch` of a ref the remote does not have FAILS, which is failure (1): the first verdict for a repo with
+//     no board died right there;
+//   · `fetch origin <name>` creates NO remote-tracking ref, and `worktree add origin/<name>` then fails with
+//     `invalid reference` — failure (3), the narrow-clone geometry the sink read as universal;
+//   · the board's tree is a real set of paths, so a board without the applier can be asked about — failure (2),
+//     which git itself never reports because a push to a board with no workflow SUCCEEDS and does nothing.
+describe('#3264 — board genesis, and a board that cannot apply is REFUSED', () => {
+  const BOARD = '/board-checkout';
+  const REPO = 'o/onboarding';
+  const BOARD_REF = `refs/heads/${TRANSPORT_BRANCH}`;
+  const MAIN_REF = `refs/heads/${BOARD_SOURCE_BRANCH}`;
+
+  /**
+   * A fake `origin` plus a fake clone geometry. `heads` is what the remote carries; `tracking` is what THIS
+   * clone has under `refs/remotes/`, which starts EMPTY — a narrow clone, the case the sink got wrong.
+   */
+  const fixture = ({ heads = [MAIN_REF], tree = [APPLIER_WORKFLOW], calls, onRun } = {}) => {
+    const remote = new Set(heads);
+    const tracking = new Set();
+    const git = (args, opts) => {
+      calls.push({ args, cwd: opts?.cwd });
+      if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      const last = args[args.length - 1];
+      switch (args[0]) {
+        case 'ls-remote': {
+          // `--heads origin <pat>…`, printed as git prints it: `<sha>\t<ref>`, absent refs simply not listed.
+          // The patterns match a ref's TAIL, as git's do — so `ops/review-requests` also answers for
+          // `refs/heads/legacy/ops/review-requests`, and reading the raw output by substring would call that
+          // "the board exists". Modelled rather than idealised so that distinction is testable.
+          const pats = args.slice(3);
+          const hit = (ref) => pats.some((p) => ref === `refs/heads/${p}` || ref.endsWith(`/${p}`));
+          return [...remote].filter(hit).map((ref) => `sha\t${ref}\n`).join('');
+        }
+        case 'fetch': {
+          const [src, dst] = last.replace(/^\+/, '').split(':');
+          if (!remote.has(src)) throw new Error(`fatal: couldn't find remote ref ${src}`);
+          // THE NARROW-CLONE TRUTH: the remote-tracking ref appears only when the refspec NAMES it. A bare
+          // `fetch origin <branch>` writes FETCH_HEAD and leaves `refs/remotes/origin/<branch>` absent.
+          if (dst) tracking.add(dst);
+          return '';
+        }
+        case 'push': {
+          const [src, dst] = last.split(':');
+          if (src.startsWith('refs/remotes/') && !tracking.has(src)) throw new Error(`error: src refspec ${src} does not match any`);
+          remote.add(dst.startsWith('refs/') ? dst : `refs/heads/${dst}`);
+          return '';
+        }
+        case 'worktree':
+          if (args[1] === 'add' && !tracking.has(`refs/remotes/${last}`)) throw new Error(`fatal: invalid reference: ${last}`);
+          return '';
+        case 'ls-tree':
+          return tree.includes(last) ? `${last}\n` : '';
+        // A NON-EMPTY staged diff, so every one of these runs the FULL path through commit+push rather than
+        // the "identical request already staged" early return — the same trap #3261's block documents.
+        case 'diff': return `${payload.path}\n`;
+        default: return '';
+      }
+    };
+    return { git, remote, tracking };
+  };
+
+  const payload = { path: 'ops/review-requests/7-accepted.json', content: '{}\n', pr: 7, to: 'accepted', repo: REPO, repoRoot: BOARD };
+  const sinkOver = (git) => createRecordVerdictSinks({
+    root: '/driver', originRepo: () => REPO, now: () => 111, run: git,
+    mkdir: () => {}, write: () => {}, rm: () => {},
+  })[STAGE_REQUEST_EFFECT];
+  const drive = (opts = {}) => {
+    const calls = [];
+    const f = fixture({ ...opts, calls });
+    return { calls, ...f, stage: sinkOver(f.git) };
+  };
+  const pushes = (calls) => calls.filter((c) => c.args?.[0] === 'push').map((c) => c.args[c.args.length - 1]);
+
+  // ── Failure 1: the genesis fetch had no genesis case ──
+  it('creates the board from main when origin carries no ops/review-requests, then stages onto it', async () => {
+    // RED before this card: the sink fetched the board unconditionally and this died on `couldn't find remote
+    // ref` — the first verdict for EVERY newly-onboarded repo, which #3261 made the normal path.
+    const d = drive({ heads: [MAIN_REF] });
+    const out = await d.stage(payload);
+    expect(pushes(d.calls)).toContain(`refs/remotes/origin/${BOARD_SOURCE_BRANCH}:${BOARD_REF}`);
+    expect(d.remote.has(BOARD_REF)).toBe(true);
+    // …and it did not merely create the branch: the verdict it was called for went out too.
+    expect(out).toMatchObject({ pushed: true, path: payload.path });
+  });
+
+  it('cuts the board from the REMOTE main tip, fetched by refspec — never from the local checkout', async () => {
+    // Pushing local `main` would publish whatever the checkout is sitting on (stale, or a lane), and in a
+    // narrow clone `refs/remotes/origin/main` does not exist until something asks for it by name. The fixture
+    // fails the push when it is not there, so this pins the fetch as well as the source.
+    const d = drive({ heads: [MAIN_REF] });
+    await d.stage(payload);
+    const fetches = d.calls.filter((c) => c.args?.[0] === 'fetch').map((c) => c.args[c.args.length - 1]);
+    expect(fetches).toContain(trackingRefspec(BOARD_SOURCE_BRANCH));
+    expect(pushes(d.calls).some((s) => s.startsWith(`${BOARD_SOURCE_BRANCH}:`))).toBe(false);
+  });
+
+  it('refuses, naming the onboarding step, when the board cannot be created', async () => {
+    const d = drive({ heads: [MAIN_REF], onRun: (a) => { if (a[0] === 'push') throw new Error('denied'); } });
+    await expect(d.stage(payload)).rejects.toThrow(
+      new RegExp(`git push origin origin/${BOARD_SOURCE_BRANCH}:refs/heads/${TRANSPORT_BRANCH}`),
+    );
+    // The underlying git failure survives into the message; a refusal that swallowed it would send the reader
+    // hunting for a permissions problem the sink already knew about.
+    await expect(drive({ heads: [MAIN_REF], onRun: (a) => { if (a[0] === 'push') throw new Error('denied'); } }).stage(payload))
+      .rejects.toThrow(/denied/);
+  });
+
+  it('refuses when origin has no main to cut the board from', async () => {
+    const d = drive({ heads: [] });
+    await expect(d.stage(payload)).rejects.toThrow(/carries no `ops\/review-requests` board and no `main`/);
+    await expect(drive({ heads: [] }).stage(payload)).rejects.toThrow(new RegExp(REPO.replace('/', '\\/')));
+  });
+
+  it('leaves an existing board alone — genesis runs once, not on every verdict', async () => {
+    // The other half of the branch: a board that already exists must not be re-cut from `main`, which would
+    // throw away every request on it and, worse, is a force-push shape nothing here should ever reach for.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF] });
+    await d.stage(payload);
+    expect(pushes(d.calls)).not.toContain(`refs/remotes/origin/${BOARD_SOURCE_BRANCH}:${BOARD_REF}`);
+    expect(pushes(d.calls)).toEqual([`HEAD:${TRANSPORT_BRANCH}`]);
+  });
+
+  it('a similarly-named branch is NOT the board — a non-empty ls-remote is not an answer', async () => {
+    // `git ls-remote --heads origin ops/review-requests main` matches a ref's TAIL, so it also lists
+    // `refs/heads/legacy/ops/review-requests` — and it lists `main` in every healthy case anyway. So the
+    // probe's output is non-empty far more often than the board exists, and the two shortcuts that invite
+    // themselves here — "output is non-empty" and "some ref came back" — would both skip genesis and hand the
+    // caller back the original `couldn't find remote ref`, which is the failure this card exists to close.
+    // (A `.includes()` on the raw output is NOT among the shortcuts this can catch: git's own tail-matching
+    // never returns a ref that contains the board's full name as a substring without BEING it.)
+    const d = drive({ heads: [MAIN_REF, `refs/heads/legacy/${TRANSPORT_BRANCH}`] });
+    await d.stage(payload);
+    expect(pushes(d.calls)).toContain(`refs/remotes/origin/${BOARD_SOURCE_BRANCH}:${BOARD_REF}`);
+  });
+
+  // ── Failure 3: `fetch origin <branch>` does not create `origin/<branch>` ──
+  it('fetches the board by an EXPLICIT refspec, so a narrow clone can worktree-add it', async () => {
+    // RED before this card, and hit live: the bare fetch SUCCEEDED, wrote only FETCH_HEAD, and the next line
+    // died `fatal: invalid reference: origin/ops/review-requests`. The fixture reproduces exactly that, so
+    // this test cannot be satisfied by anything but naming the destination ref.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF] });
+    await d.stage(payload);
+    const fetches = d.calls.filter((c) => c.args?.[0] === 'fetch').map((c) => c.args[c.args.length - 1]);
+    expect(fetches).toContain(trackingRefspec(TRANSPORT_BRANCH));
+    expect(d.tracking.has(`refs/remotes/origin/${TRANSPORT_BRANCH}`)).toBe(true);
+  });
+
+  // ── Failure 2: the board that accepts the push and applies nothing ──
+  it('refuses to stage onto a board whose tree lacks the applier workflow', async () => {
+    // The fail-SILENT turned loud. git reports nothing here — the push succeeds and no workflow is defined on
+    // the pushed ref — so the only place this can be caught is a deliberate look at the board's own tree.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF], tree: [] });
+    await expect(d.stage(payload)).rejects.toThrow(/does not carry `\.github\/workflows\/apply-review-request\.yml`/);
+    await expect(drive({ heads: [MAIN_REF, BOARD_REF], tree: [] }).stage(payload)).rejects.toThrow(/ON THE PUSHED REF/);
+  });
+
+  it('pushes NOTHING when it refuses a board that cannot apply', async () => {
+    // A refusal after the push would be decoration: the dead request would already be on the board. This is
+    // the assertion that makes the check worth having rather than merely present.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF], tree: [] });
+    await d.stage(payload).catch(() => {});
+    expect(pushes(d.calls)).toEqual([]);
+    expect(d.calls.some((c) => c.args?.[0] === 'commit')).toBe(false);
+  });
+
+  it('reads the applier from the BOARD\'s worktree, not from the driver checkout', async () => {
+    // The driver having the applier on `main` says nothing about what rides the branch being pushed to —
+    // conflating the two is precisely the assumption that let a dead board look healthy.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF] });
+    await d.stage(payload);
+    const look = d.calls.find((c) => c.args?.[0] === 'ls-tree');
+    expect(look.args).toContain(APPLIER_WORKFLOW);
+    expect(look.cwd.startsWith(`${BOARD}/.operations/transport`)).toBe(true);
+  });
+
+  it('still prunes the board worktree when the applier check refuses', async () => {
+    // The refusal is thrown from inside the `try`, so the existing `finally` has to cover it too — a check
+    // that leaked a worktree would wedge every subsequent stage on that board.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF], tree: [] });
+    await d.stage(payload).catch(() => {});
+    expect(d.calls.some((c) => c.args?.[0] === 'worktree' && c.args?.[1] === 'prune' && c.cwd === BOARD)).toBe(true);
   });
 });

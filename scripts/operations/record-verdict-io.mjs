@@ -18,6 +18,11 @@
  * lane you are working in is on a feature branch with your own uncommitted work. Checking the transport branch
  * out over that lane would destroy it — I did the equivalent by hand earlier in the session and it disrupted a
  * running juror. So the sink writes through a dedicated worktree, leaving the caller's checkout untouched.
+ *
+ * ONBOARDING A REPO IS PART OF THE SINK'S JOB, not a paragraph someone has to find (#3264). Since #3261 each
+ * repo owns its own board, so the common case is now a repo that has never carried a verdict. `ensureBoardBranch`
+ * cuts the board from `main` on first use, `assertApplierRidesBoard` refuses a board that cannot apply, and
+ * `trackingRefspec` names the destination ref so none of it depends on how the checkout was cloned.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -34,6 +39,22 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 
 /** The branch CI watches. `we:.github/workflows/apply-review-request.yml` triggers on a push to it. */
 export const TRANSPORT_BRANCH = 'ops/review-requests';
+
+/**
+ * The applier definition that MUST RIDE THE BOARD ITSELF, and the reason the board is a full branch (#3264).
+ *
+ * GitHub runs a `push`-triggered workflow from the definition ON THE PUSHED REF, not from `main`. So a board
+ * that does not carry this file accepts every push and applies nothing: the verdict looks staged, the run
+ * reports `pushed: true`, and no label ever moves. That is a FAIL-SILENT — the direction this transport can
+ * least afford, because the only signal a verdict was applied is the label itself.
+ *
+ * `we:` board works because it happens to be a full branch off `main`. That was an accident of how it was
+ * first made by hand; `assertApplierRidesBoard` is what turns it into a checked requirement.
+ */
+export const APPLIER_WORKFLOW = '.github/workflows/apply-review-request.yml';
+
+/** Where a board is BORN from — the branch that carries the applier. Never an orphan; see `APPLIER_WORKFLOW`. */
+export const BOARD_SOURCE_BRANCH = 'main';
 
 /**
  * Which checkout carries the transport branch for `repo`, and a REFUSAL when it is not this one (#3261).
@@ -78,6 +99,104 @@ export function defaultOriginRepo(cwd) {
     const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
     return m ? m[1] : '';
   } catch { return ''; }
+}
+
+/**
+ * An EXPLICIT refspec, because `git fetch origin <branch>` does not create `origin/<branch>` (#3264).
+ *
+ * Hit live onboarding plateau-app: the fetch succeeded, wrote `FETCH_HEAD` and nothing else, and the very next
+ * line died with `fatal: invalid reference: origin/ops/review-requests`. A bare `fetch origin <branch>` updates
+ * the remote-tracking ref only when the CLONE'S CONFIGURED REFSPEC covers it — a full clone carries
+ * `+refs/heads/*:refs/remotes/origin/*` and so it does, which is why `we:` never saw this, but a narrow or
+ * single-branch clone does not, and the cloud session's checkouts are of that kind. Naming the destination
+ * makes the ref appear regardless of the clone's geometry, which is the whole point: this sink must not read
+ * one repo's clone as universal.
+ */
+export function trackingRefspec(branch) {
+  return `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
+}
+
+/**
+ * BOARD GENESIS: on a repo that has never carried a verdict, create `ops/review-requests` from `main` (#3264).
+ *
+ * WHY THIS EXISTS AT ALL. The sink used to fetch the board unconditionally, so the FIRST verdict for every
+ * newly-onboarded repo failed on a raw `couldn't find remote ref`. #3261 made per-repo boards the standard,
+ * which turned that from a one-time curiosity into the normal onboarding path — plateau-app hit it, and was
+ * onboarded BY HAND with `git push origin origin/main:refs/heads/ops/review-requests`, a step that lived
+ * nowhere but in a backlog paragraph. This is that step, made code.
+ *
+ * WHY FROM `main` AND NOT AN ORPHAN. See `APPLIER_WORKFLOW`: the workflow must ride the board or nothing
+ * applies. Branching from `main` is what puts it there — and it also encodes the ordering the human had to
+ * get right by judgement, since a board cut from a `main` predating the applier would silently apply nothing.
+ * `assertApplierRidesBoard` catches that case rather than trusting the ordering.
+ *
+ * WHY IT PUSHES FROM `refs/remotes/origin/main` AND FETCHES IT FIRST. Same failure as (3) above, one ref over:
+ * the remote-tracking ref for `main` is not guaranteed to exist in a narrow clone either, and pushing from the
+ * LOCAL `main` would publish whatever that checkout happens to be sitting on — stale, or a lane. The remote tip
+ * is the only honest source.
+ *
+ * @param {{run: Function, board: string, repo?: string, sourceBranch?: string}} o
+ * @returns {{created: boolean}} whether this call is the one that brought the board into existence
+ */
+export function ensureBoardBranch({ run, board, repo = '', sourceBranch = BOARD_SOURCE_BRANCH }) {
+  // ONE probe for both refs, read as a SET OF EXACT REF NAMES rather than as a yes/no on the output. Two
+  // things make the looser reading wrong: this asks for `main` in the same breath, so the output is non-empty
+  // in every healthy case including the one where no board exists; and `ls-remote` patterns match a ref's
+  // TAIL, so `ops/review-requests` also answers for `refs/heads/legacy/ops/review-requests`. Either shortcut
+  // would conclude "the board exists", skip genesis, and hand the caller back the raw fetch failure this
+  // whole function is here to prevent.
+  const listed = String(run(['ls-remote', '--heads', 'origin', TRANSPORT_BRANCH, sourceBranch], { cwd: board }) ?? '');
+  const refs = new Set(listed.split('\n').map((line) => line.split('\t')[1]?.trim()).filter(Boolean));
+  if (refs.has(`refs/heads/${TRANSPORT_BRANCH}`)) return { created: false };
+
+  const onboarding = `git push origin origin/${sourceBranch}:refs/heads/${TRANSPORT_BRANCH}`;
+  const subject = repo ? `${repo}'s` : 'this repo\'s';
+  if (!refs.has(`refs/heads/${sourceBranch}`)) {
+    throw new Error(
+      `record-verdict: ${subject} \`origin\` carries no \`${TRANSPORT_BRANCH}\` board and no \`${sourceBranch}\` `
+      + `to cut one from (#3264). The board must be a full branch off \`${sourceBranch}\` so that `
+      + `\`${APPLIER_WORKFLOW}\` rides it — an orphan branch accepts the push and applies nothing. Onboard the `
+      + `repo by hand once its default branch carries the applier: \`${onboarding}\`.`,
+    );
+  }
+  try {
+    run(['fetch', '--quiet', 'origin', trackingRefspec(sourceBranch)], { cwd: board });
+    run(['push', '--quiet', 'origin', `refs/remotes/origin/${sourceBranch}:refs/heads/${TRANSPORT_BRANCH}`], { cwd: board });
+  } catch (cause) {
+    throw new Error(
+      `record-verdict: ${subject} \`${TRANSPORT_BRANCH}\` board does not exist and could not be created from `
+      + `\`${sourceBranch}\` (#3264): ${cause?.message || cause}. The onboarding step is \`${onboarding}\`, run `
+      + `in a checkout of that repo by someone who can push to it.`,
+      { cause },
+    );
+  }
+  return { created: true };
+}
+
+/**
+ * REFUSE to stage onto a board that cannot apply — the loud half of #3264's fix.
+ *
+ * A board missing `APPLIER_WORKFLOW` is not a broken push, it is a push that WORKS and does nothing: GitHub
+ * accepts it, no workflow is defined on the pushed ref, and the verdict sits there looking staged forever.
+ * Checked from the board's OWN TREE (`ls-tree HEAD`), never from the driver's checkout — the driver having the
+ * applier on `main` says nothing about what rides the branch being pushed to, and conflating the two is the
+ * exact assumption that made this silent in the first place.
+ *
+ * `ls-tree` rather than `cat-file -e` because a missing path must be an ANSWER (empty output), not a thrown
+ * git error this would then have to tell apart from a real failure.
+ */
+export function assertApplierRidesBoard({ run, wt, repo = '' }) {
+  const found = String(run(['ls-tree', '--name-only', 'HEAD', '--', APPLIER_WORKFLOW], { cwd: wt }) ?? '').trim();
+  if (found) return;
+  const subject = repo ? `${repo}'s` : 'this repo\'s';
+  throw new Error(
+    `record-verdict: refusing to stage onto ${subject} \`${TRANSPORT_BRANCH}\` — its tree does not carry `
+    + `\`${APPLIER_WORKFLOW}\` (#3264). GitHub runs a push-triggered workflow from the definition ON THE PUSHED `
+    + 'REF, so this board would accept the request and apply nothing: the verdict would look staged and no label '
+    + `would ever move. Re-cut the board from a \`${BOARD_SOURCE_BRANCH}\` that carries the applier: `
+    + `\`git push --force origin origin/${BOARD_SOURCE_BRANCH}:refs/heads/${TRANSPORT_BRANCH}\` (it carries no `
+    + 'history worth keeping — every request on it has already been applied).',
+  );
 }
 
 /** The write-up file name `review-pr` stages, per its own `prViewFileName`-style convention. */
@@ -135,14 +254,25 @@ export function createRecordVerdictSinks({
       // parsed, so a CLI caller can only reach this through the payload. The constructor arg stays for
       // a programmatic caller (and for tests) that knows the checkout up front.
       const board = resolveTransportRoot({ repo: payload.repo, root, repoRoot: payload.repoRoot || repoRoot, originRepo });
+      // #3264 — GENESIS, before anything assumes the board exists. A repo onboarding to the transport has never
+      // carried a verdict, so its board has to be born here or the first verdict for it fails on a raw git
+      // error. Outside the `try` deliberately: no worktree exists yet, so there is nothing for the `finally` to
+      // clean up, and a genesis failure must reach the caller as its own refusal rather than as a cleanup.
+      ensureBoardBranch({ run, board, repo: payload.repo });
       const wt = join(board, '.operations', 'transport', `wt-${now()}`);
       mkdir(dirname(wt), { recursive: true });
       try {
-        run(['fetch', '--quiet', 'origin', TRANSPORT_BRANCH], { cwd: board });
+        // The refspec is EXPLICIT because a bare `fetch origin <branch>` leaves no `origin/<branch>` in a narrow
+        // clone, and the `worktree add` below then dies on `invalid reference`. See `trackingRefspec`.
+        run(['fetch', '--quiet', 'origin', trackingRefspec(TRANSPORT_BRANCH)], { cwd: board });
         // `--force` on the worktree add is about the DIRECTORY, not the branch: a leftover registration from a
         // killed run must not stop this one. The branch itself is taken from the freshly fetched remote tip.
         run(['worktree', 'add', '--force', '--detach', wt, `origin/${TRANSPORT_BRANCH}`], { cwd: board });
         run(['checkout', '-B', TRANSPORT_BRANCH, `origin/${TRANSPORT_BRANCH}`], { cwd: wt });
+        // #3264 — and only NOW is the board's own tree readable, which is the only place the question can be
+        // asked. A board without the applier accepts the push and applies nothing; refusing here is what keeps
+        // that from being silent. Before the write, so a dead board never gets a commit it cannot act on.
+        assertApplierRidesBoard({ run, wt, repo: payload.repo });
 
         const abs = join(wt, payload.path);
         mkdir(dirname(abs), { recursive: true });
