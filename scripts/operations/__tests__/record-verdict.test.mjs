@@ -15,7 +15,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import { recordVerdictOperation, factsFromRun, buildRequest, RECORD_VERDICT_OP, STAGE_REQUEST_EFFECT } from '../record-verdict.mjs';
-import { writeUpName, TRANSPORT_BRANCH, createRecordVerdictSinks } from '../record-verdict-io.mjs';
+import { writeUpName, TRANSPORT_BRANCH, createRecordVerdictSinks, resolveTransportRoot } from '../record-verdict-io.mjs';
 import { validateRequest, APPLIABLE_TARGETS } from '../../apply-review-request.mjs';
 
 const run = (over = {}) => ({
@@ -39,7 +39,7 @@ describe('the declaration', () => {
   it('takes a run id and NOT a PR number — the subject is read, never retyped', () => {
     const decl = ops(() => ({ record: run(), body: 'x' }));
     expect(decl.name).toBe(RECORD_VERDICT_OP);
-    expect(Object.keys(decl.input)).toEqual(['runId', 'to', 'actor', 'operatorInstruction']);
+    expect(Object.keys(decl.input)).toEqual(['runId', 'to', 'actor', 'operatorInstruction', 'repoRoot']);
     expect(Object.keys(decl.input)).not.toContain('pr');
     expect(Object.keys(decl.input)).not.toContain('repo');
   });
@@ -145,7 +145,7 @@ describe('the read step refuses a verdict with nothing to say', () => {
 describe('the stage effect', () => {
   it('declares one idempotent effect carrying bytes the plan already computed', () => {
     const decl = ops(() => ({ record: run(), body: 'x' }));
-    const effects = step(decl, 'stage').effects({ verdict: { path: 'ops/review-requests/1496-accepted.json', request: { pr: 1496, to: 'accepted' } } });
+    const effects = step(decl, 'stage').effects({ verdict: { path: 'ops/review-requests/1496-accepted.json', request: { pr: 1496, to: 'accepted', repo: 'chalbert/web-everything' } } });
     expect(effects).toHaveLength(1);
     expect(effects[0]).toMatchObject({ type: STAGE_REQUEST_EFFECT, idempotent: true });
     expect(JSON.parse(effects[0].payload.content)).toMatchObject({ pr: 1496 });
@@ -167,6 +167,10 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
    */
   const stub = (calls, over = {}, onRun) => createRecordVerdictSinks({
     root: '/repo',
+    // #3261 — the board is chosen by matching the checkout's origin to the request's repo, and a mismatch is
+    // REFUSED rather than defaulted. These stubs push for `chalbert/web-everything`, so the fixture checkout
+    // claims to be that repo. Injected, so no test shells `git remote`.
+    originRepo: () => 'chalbert/web-everything',
     now: () => 111,
     run: (args, opts) => {
       calls.push({ args, cwd: opts?.cwd });
@@ -186,7 +190,7 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
    */
   it('takes its filesystem calls as injected parameters, so a test never writes for real', async () => {
     const calls = [];
-    await sink(calls, { diff: '' })({ path: 'ops/review-requests/1-accepted.json', content: '{}\n', pr: 1, to: 'accepted' });
+    await sink(calls, { diff: '' })({ path: 'ops/review-requests/1-accepted.json', content: '{}\n', pr: 1, to: 'accepted', repo: 'chalbert/web-everything' });
     const writes = calls.filter((c) => c.fs);
     expect(writes.length).toBeGreaterThan(0);
     // …and every path it touched is under the worktree it created, never the caller's root itself.
@@ -200,7 +204,7 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
    */
   it('never runs a checkout in the caller\'s root — only inside its own worktree', async () => {
     const calls = [];
-    await sink(calls, { diff: 'ops/review-requests/1496-accepted.json' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' })
+    await sink(calls, { diff: 'ops/review-requests/1496-accepted.json' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted', repo: 'chalbert/web-everything' })
       .catch(() => {});
     const checkouts = calls.filter((c) => c.args?.[0] === 'checkout');
     expect(checkouts.length).toBeGreaterThan(0);
@@ -213,7 +217,7 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
       if (args[0] === 'push') throw new Error('network');
       return undefined;
     });
-    await expect(sinks[STAGE_REQUEST_EFFECT]({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' })).rejects.toThrow(/network/);
+    await expect(sinks[STAGE_REQUEST_EFFECT]({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted', repo: 'chalbert/web-everything' })).rejects.toThrow(/network/);
     expect(calls.some((c) => c.args?.[0] === 'worktree' && c.args?.[1] === 'prune')).toBe(true);
     // The DIRECTORY removal too, not just the registration prune — a `finally` that dropped one of the two
     // would still pass a check for the other.
@@ -224,14 +228,14 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
   // being kept rather than an error to report.
   it('treats "nothing to commit" as success, not failure', async () => {
     const calls = [];
-    const out = await sink(calls, { diff: '' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' });
+    const out = await sink(calls, { diff: '' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted', repo: 'chalbert/web-everything' });
     expect(out).toMatchObject({ pushed: false });
     expect(calls.some((c) => c.args?.[0] === 'push')).toBe(false);
   });
 
   it('pushes to the branch CI actually watches', async () => {
     const calls = [];
-    await sink(calls, { diff: 'x' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted' });
+    await sink(calls, { diff: 'x' })({ path: 'ops/review-requests/1496-accepted.json', content: '{}\n', pr: 1496, to: 'accepted', repo: 'chalbert/web-everything' });
     const push = calls.find((c) => c.args?.[0] === 'push');
     expect(push.args).toContain(`HEAD:${TRANSPORT_BRANCH}`);
   });
@@ -240,5 +244,104 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
 describe('the write-up name matches what review-pr stages', () => {
   it('is repo-and-pr keyed, with the slash flattened', () => {
     expect(writeUpName('chalbert/web-everything', 1496)).toBe('chalbert-web-everything-1496-verdict.md');
+  });
+});
+
+// ── #3261: each repo owns its own notes, and the wrong board is REFUSED ──────────────────────────────────────
+describe('#3261 — resolveTransportRoot picks the board, and refuses the wrong one', () => {
+  it('returns the checkout whose origin IS the request repo', () => {
+    expect(resolveTransportRoot({ repo: 'o/x', root: '/co', originRepo: () => 'o/x' })).toBe('/co');
+  });
+
+  it('REFUSES a verdict for another repo rather than defaulting to this checkout', () => {
+    // THE WHOLE POINT. Before the ruling this pushed a plateau-app verdict onto web-everything's board, where
+    // the applier's repo-scoped token could not resolve the repository — one failure in fifty applier runs,
+    // and it was the only cross-repo request. Defaulting is what stranded it; refusing names both repos.
+    expect(() => resolveTransportRoot({ repo: 'o/other', root: '/co', originRepo: () => 'o/x' }))
+      .toThrow(/refusing to stage a verdict for o\/other on o\/x's transport branch/);
+  });
+
+  it('the refusal names the flag that fixes it', () => {
+    expect(() => resolveTransportRoot({ repo: 'o/other', root: '/co', originRepo: () => 'o/x' }))
+      .toThrow(/--repoRoot=<path to a o\/other checkout>/);
+  });
+
+  it('an explicit repoRoot wins over the driver checkout', () => {
+    const seen = [];
+    const got = resolveTransportRoot({
+      repo: 'o/other', root: '/driver', repoRoot: '/sibling',
+      originRepo: (cwd) => { seen.push(cwd); return cwd === '/sibling' ? 'o/other' : 'o/x'; },
+    });
+    expect(got).toBe('/sibling');
+    expect(seen).toEqual(['/sibling']); // it never probes the driver when told where to look
+  });
+
+  it('refuses a request with no repo at all — no board can be chosen', () => {
+    expect(() => resolveTransportRoot({ repo: '', root: '/co' })).toThrow(/no `repo` on the request/);
+  });
+
+  it('an unreadable origin refuses rather than guessing', () => {
+    // `defaultOriginRepo` returns '' when git cannot answer. That must not compare equal to anything.
+    expect(() => resolveTransportRoot({ repo: 'o/x', root: '/co', originRepo: () => '' }))
+      .toThrow(/refusing to stage a verdict for o\/x on \(unknown\)/);
+  });
+});
+
+// ── #3261: the sink must USE the board it resolved, not merely resolve it (PR #1533 juror) ───────────────────
+//
+// The six tests above pin `resolveTransportRoot`'s DECISION. They say nothing about whether the sink acts on
+// it — and the PR #1533 correctness juror proved that gap by mutation: reverting the sink's three git call
+// sites back to the driver's `root` left the whole suite green. A decision nothing consumes is a vacuous
+// guard, which is exactly the failure this whole card is about, one layer in.
+//
+// So these drive the sink with `board` DIFFERENT from `root` and assert every git call lands on the board.
+describe('#3261 — the sink runs its git against the BOARD, not the driver', () => {
+  const OTHER = '/sibling-checkout';
+  const build = (calls, onRun) => createRecordVerdictSinks({
+    root: '/driver',
+    // The driver is web-everything; the board is the sibling whose origin IS the request's repo.
+    originRepo: (cwd) => (cwd === OTHER ? 'o/other' : 'chalbert/web-everything'),
+    now: () => 111,
+    run: (args, opts) => {
+      calls.push({ args, cwd: opts?.cwd });
+      if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      // A NON-EMPTY staged diff, so these drive the FULL path through commit+push. Returning '' here makes the
+      // sink take its "identical request already staged" early return, and the assertions below would then be
+      // testing a branch that never pushes — passing for the wrong reason.
+      return args[0] === 'diff' ? `${'ops/review-requests/144-accepted.json'}\n` : '';
+    },
+    mkdir: () => {}, write: () => {}, rm: () => {},
+  })[STAGE_REQUEST_EFFECT];
+
+  const payload = { path: 'ops/review-requests/144-accepted.json', content: '{}\n', pr: 144, to: 'accepted', repo: 'o/other', repoRoot: OTHER };
+  const cwdOf = (calls, verb, sub) => calls.find((c) => c.args?.[0] === verb && (sub === undefined || c.args?.[1] === sub))?.cwd;
+
+  it('fetches the transport branch in the BOARD', async () => {
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'fetch')).toBe(OTHER);
+  });
+
+  it('adds the worktree from the BOARD', async () => {
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'worktree', 'add')).toBe(OTHER);
+  });
+
+  it('PRUNES in the board too — a stale registration in the target repo wedges its next stage', async () => {
+    // The sibling of the two above, and the one that was wrong first: the prune kept the driver's cwd while
+    // the worktree moved. Pinned separately so fixing two of three cannot pass.
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'worktree', 'prune')).toBe(OTHER);
+  });
+
+  it('prunes in the board even when the push FAILS', async () => {
+    const calls = [];
+    await expect(build(calls, (a) => { if (a[0] === 'push') throw new Error('network'); })(payload)).rejects.toThrow(/network/);
+    expect(cwdOf(calls, 'worktree', 'prune')).toBe(OTHER);
+  });
+
+  it('never touches the driver checkout at all', async () => {
+    // The strongest form: not "the board was used somewhere" but "the driver was used nowhere".
+    const calls = []; await build(calls)(payload);
+    expect(calls.filter((c) => c.cwd === '/driver')).toEqual([]);
   });
 });
