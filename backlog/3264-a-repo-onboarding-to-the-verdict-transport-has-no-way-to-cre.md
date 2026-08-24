@@ -52,3 +52,40 @@ staged and is never applied.
 2. **Executable** — an onboarding path (operation or documented step) that creates the board from
    `main` so the workflow definition rides it, plus a check that refuses to stage onto a board whose
    tree lacks the applier workflow — turning failure (2) from silent into loud.
+
+### 3. `fetch origin <branch>` does not create `origin/<branch>` — hit live
+
+Onboarding plateau-app, the sink's own two-line sequence failed at the second line:
+
+```
+$ git fetch --quiet origin ops/review-requests   # succeeds, writes FETCH_HEAD only
+$ git worktree add --force --detach $WT origin/ops/review-requests
+fatal: invalid reference: origin/ops/review-requests
+```
+
+`git fetch origin <branch>` writes `FETCH_HEAD`; it creates the remote-tracking ref
+`refs/remotes/origin/<branch>` only when the clone's configured fetch refspec covers it. A full clone
+carries `+refs/heads/*:refs/remotes/origin/*` and so it does — which is why this has never been seen
+in `we:` — but a narrow or single-branch clone does not, and the cloud session's checkouts are of that
+kind. The fix is an explicit refspec (`origin ops/review-requests:refs/remotes/origin/ops/review-requests`)
+or using `FETCH_HEAD` directly.
+
+This makes (1) and (3) the same shape of assumption: the sink was written against one repo's clone
+geometry and reads it as universal. Worth covering in the same change.
+
+### Status update — plateau-app was onboarded BY HAND
+
+The evidence above ("plateau-app has no `ops/*` branch") was true at filing. The board now exists,
+created manually after #145 merged:
+
+```
+git push origin origin/main:refs/heads/ops/review-requests
+```
+
+That is the whole onboarding step, and it lives nowhere but in this paragraph — which is precisely
+the gap. It had to be pushed from `main` *after* the applier landed there, or the board would have
+carried a `main` predating the workflow and silently applied nothing (failure 2). Getting that
+ordering right was a judgement a human made, not something any code enforces.
+
+It worked: the relocated `plateau-app:ops/review-requests/144-accepted.json` triggered plateau-app's applier on its first run and the
+label was applied through the real path. So the mechanism is proven — only its onboarding is manual.
