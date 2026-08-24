@@ -44,10 +44,13 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
   carries the rule (e.g. `docs/agent/platform-decisions.md#constellation-placement`), **or** the
   sentinel `one-off` for a narrow call that establishes no reusable rule (the analogue of
   `graduatedTo: none`).
-- **Hard gate at resolve.** `node scripts/backlog.mjs resolve <NNN>` **refuses a `type: decision`
-  that has no `codifiedIn`** — pass `--codified-to=<doc#anchor>` (the CLI stamps the field) or
-  `--codified-to=one-off`. You cannot resolve a decision and walk away from its rule; the orientation
-  is captured at the moment the deliberation is freshest, not in a later sweep.
+- **Hard gate at resolve.** `node scripts/operations/run.mjs resolve --ref=<NNN>` **refuses a
+  `type: decision` that has no `codifiedIn`**, and names the refusal `uncodified-decision` — pass
+  `--codifiedTo=<doc#anchor>` (the operation stamps the field) or `--codifiedTo=one-off`. Mind the
+  shape: the item is a `--ref=` flag rather than a positional, and the flag is camelCase where the raw
+  `we:scripts/backlog.mjs resolve <NNN> --codified-to=…` spells it kebab-case. You cannot resolve a
+  decision and walk away from its rule; the orientation is captured at the moment the deliberation is
+  freshest, not in a later sweep.
 - **`check:health` (`scripts/audit-backlog-health.mjs`) flag G6** is now the catch-up pool for the
   **legacy** decisions resolved *before* the gate existed. The count is the un-promoted backlog; it
   should only ever shrink. (New decisions can't add to it — the gate blocks them.)

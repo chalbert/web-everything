@@ -13,8 +13,9 @@ Always write the report `reports/<date>-backlog-split-analysis.md` listing **cou
 slices + DAG) and **could not split** (which condition failed + the action that would unblock a future
 split) — even when nothing splits. Present the proposed splits and get **one "go"** before mutating the
 backlog; never auto-split. On approval, convert each original in place to a storied epic and scaffold
-the slices (`node scripts/backlog.mjs scaffold … --parent=<NNN> --blocked-by=…`), gating on
-`npm run check:standards`.
+the slices through the declared operation
+(`node scripts/operations/run.mjs scaffold --parent=<NNN> --blockedBy=… --title='…' --digest='…' --json`
+— camelCase flags, not the raw CLI's `--blocked-by`), gating on `npm run check:standards`.
 
 A bare `/split` sweeps the whole candidate set and reports. A `NNN` or `NNN-slug` focuses one item.
 `/slice` is an alias for this command.

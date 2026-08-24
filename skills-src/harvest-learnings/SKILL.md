@@ -126,8 +126,10 @@ node scripts/lane-pool.mjs release --lane=<lane> --session=<harvest-session-slug
 you by a concurrent agent, and `acquire` runs `git checkout -B --force` + `git clean -fd` on the clone — which
 destroys the uncommitted routing work mid-run (this is item **#2955**).
 
-- **Backlog** — scaffold the item in the lane (`node scripts/backlog.mjs scaffold …`) with a real ≤100-word
-  digest. `kind: friction | missing-convention` with a concrete fix usually lands here.
+- **Backlog** — scaffold the item in the lane through the declared operation
+  (`node scripts/operations/run.mjs scaffold --kind=<kind> --title='…' --digest='…' --json`; **single
+  quotes** — a pooled observation is verbatim operator text and a double-quoted value still runs `` ` `` /
+  `$(…)` through bash) with a real ≤100-word digest. `kind: friction | missing-convention` with a concrete fix usually lands here.
 - **Memory** — write the file + its index pointer line, per the memory-management policy. Only for a
   candidate that cleared the **Grounding** filter with a named artifact; cite that artifact in the entry.
 - Then `we:scripts/pr-land.mjs` from the lane.
