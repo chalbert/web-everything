@@ -59,6 +59,73 @@ different is that `gh` has no credential here, so `open-pr` and `review-pr` halt
 effects and hand back a plan — submit it through whatever channel does hold one, and re-apply the park label
 by hand, per the `/pr` skill's fallback (it is two calls, and the second is not optional).
 
+## Landing work from a VM — the whole arc
+
+The pieces are documented separately (`/pr`, `/review`, [delivery-loop.md](delivery-loop.md)) and each is
+correct; what nobody had written down is the ORDER, and which steps behave differently here. Every step below
+is the declared operation — never a hand-rolled `gh pr create`, never the connector as a first move.
+
+```bash
+# 1. Work in a lane, commit there, publish to a lane/* ref (NEVER a local branch — the #1934 carve-out).
+git push origin HEAD:refs/heads/lane/<slug>
+
+# 2. Decide the PR through the operation. It HALTS at `submit` (no gh credential) and returns its plan.
+node scripts/operations/run.mjs open-pr --ref=lane/<slug> --title="…" --bodyFile=<path> --json
+
+# 3. Submit that plan's argv, unedited, through the channel that holds a credential. See the losses below.
+# 4. Review it. `--cwd` is a lane of the juror's OWN — never the one you are driving from (#3151).
+node scripts/operations/run.mjs stage-pr-view --pr=<N> --repo=<owner/name> --from=<payload.json> --dir="$WE_PR_VIEW_DIR"
+node scripts/operations/run.mjs review-pr --pr=<N> --repo=<owner/name> --cwd=<the OTHER lane> --json
+```
+
+**The `confirm` step is addressed to you.** `review-pr` stops with `"of": "agent"` and three options
+(`accept | changes | abstain`); answering it via `--resume=<run-id> --answer=<option>` is the flow working, not
+an overreach. What the operation never does is MERGE — `#2290` makes the drain the sole writer to `main` — so
+running a review is always in bounds. Whether YOUR accept may release the PR is the separate question below.
+
+### What the credential-less fallback silently drops
+
+`pr-land.mjs` does two things besides calling `gh`, and a connector-created PR gets neither. The first is
+documented in the `/pr` skill; the second is not, and it is the one that matters.
+
+1. **The park label.** `--park=review:pending` is in the plan's argv, but a create-PR API call has no label
+   parameter. Apply it as a SECOND call and re-read the PR to confirm it stuck, per PR, as each is created.
+2. **The `authored-by-actor` stamp** (`pr-land.mjs#withAuthorStamp`, #2844) — and, through it, the whole
+   guarded label path. The stamp is the INPUT to the self-clear refusal:
+   `we:scripts/lib/review-independence.mjs` compares the clearer's `CLAUDE_CODE_SESSION_ID` against it.
+
+   A stampless PR is **not** merely tolerated: since #3067, `we:scripts/review-set-label.mjs` passes
+   `prCreatedAt` / `stampLostMarked` into `decideClearerIndependence`, so a PR opened after the stamp-regime
+   start resolves to `STAMP_LOST` and is REFUSED. The guard is armed.
+
+   The problem is that on this host it never runs. `record`'s label swap goes through
+   `we:scripts/review-set-label.mjs` — the single home (#2644) that owns the independence check, the
+   `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the #2964 write ordering — and that
+   call needs `gh`. Swapping the label through the connector instead does not weaken one guard; it steps
+   around **all of them at once**. The refusal that would have fired never gets the chance to.
+
+   So treat a hand-applied label as unguarded by construction, not as a check that happened to pass. Prefer a
+   genuinely independent verdict — `review-pr` mints its juror a fresh session id, which is what independence
+   means here ([delivery-loop.md](delivery-loop.md#spawning-a-reviewer-that-is-actually-independent) — *a
+   subagent is not a second actor; a headless process is*) — and say plainly, when you record it, that the
+   swap bypassed the single home. #3267 is the fix.
+
+### When an effect halts with its outcome UNKNOWN
+
+`record`'s `review.label-swap` calls `gh`, so it fails here mid-step. It is not declared idempotent, so the
+engine REFUSES to replay it rather than risk a double-apply:
+
+```
+effect …#4#1 (review.label-swap) was attempted and its outcome is UNKNOWN — it is not declared
+idempotent, so replaying it could double-apply. Refusing. Resolve it by hand … and re-run.
+```
+
+That refusal is correct and the recovery is manual: read the PR to establish what actually happened, perform
+the effect through the channel that works, then mark that entry on the run record
+(`.operations/runs/<id>.json`) `applied` — with a `result` saying it was done by the fallback, so the record
+does not imply `gh` did it — and re-run `--resume=<run-id>`. Never mark an effect applied you have not
+verified against GitHub.
+
 **Unshallow before any history work.** `git log`, `blame`, `bisect`, and anything that walks back past
 HEAD need `git fetch --unshallow` first. Cheap to do, silently wrong to skip.
 
