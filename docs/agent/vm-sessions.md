@@ -90,18 +90,25 @@ documented in the `/pr` skill; the second is not, and it is the one that matters
 
 1. **The park label.** `--park=review:pending` is in the plan's argv, but a create-PR API call has no label
    parameter. Apply it as a SECOND call and re-read the PR to confirm it stuck, per PR, as each is created.
-2. **The `authored-by-actor` stamp** (`pr-land.mjs#withAuthorStamp`, #2844). This is the INPUT to the
-   self-clear refusal: `we:scripts/lib/review-independence.mjs` compares the clearer's
-   `CLAUDE_CODE_SESSION_ID` against the stamp in the PR BODY, and `review-set-label.mjs` refuses the match.
-   A body with no stamp resolves to `''` — `unknown-author` — which is TOLERATED, not refused. So a
-   connector-opened PR is **exempt from the guard that stops an author clearing their own review**, silently,
-   by omission. Nothing warns you; the refusal simply never fires.
+2. **The `authored-by-actor` stamp** (`pr-land.mjs#withAuthorStamp`, #2844) — and, through it, the whole
+   guarded label path. The stamp is the INPUT to the self-clear refusal:
+   `we:scripts/lib/review-independence.mjs` compares the clearer's `CLAUDE_CODE_SESSION_ID` against it.
 
-   Until `open-pr` carries the stamp through the fallback, treat it as owed by hand: an author clearing their
-   own connector-opened PR is on their honour, not on the guard. Prefer a genuinely independent verdict —
-   `review-pr` mints its juror a fresh session id, which is what independence means here
-   ([delivery-loop.md](delivery-loop.md#spawning-a-reviewer-that-is-actually-independent) — *a subagent is not
-   a second actor; a headless process is*) — and say plainly, when you record it, that the PR carries no stamp.
+   A stampless PR is **not** merely tolerated: since #3067, `we:scripts/review-set-label.mjs` passes
+   `prCreatedAt` / `stampLostMarked` into `decideClearerIndependence`, so a PR opened after the stamp-regime
+   start resolves to `STAMP_LOST` and is REFUSED. The guard is armed.
+
+   The problem is that on this host it never runs. `record`'s label swap goes through
+   `we:scripts/review-set-label.mjs` — the single home (#2644) that owns the independence check, the
+   `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the #2964 write ordering — and that
+   call needs `gh`. Swapping the label through the connector instead does not weaken one guard; it steps
+   around **all of them at once**. The refusal that would have fired never gets the chance to.
+
+   So treat a hand-applied label as unguarded by construction, not as a check that happened to pass. Prefer a
+   genuinely independent verdict — `review-pr` mints its juror a fresh session id, which is what independence
+   means here ([delivery-loop.md](delivery-loop.md#spawning-a-reviewer-that-is-actually-independent) — *a
+   subagent is not a second actor; a headless process is*) — and say plainly, when you record it, that the
+   swap bypassed the single home. #3267 is the fix.
 
 ### When an effect halts with its outcome UNKNOWN
 
