@@ -78,24 +78,10 @@ node scripts/operations/run.mjs stage-pr-view --pr=<N> --repo=<owner/name> --fro
 node scripts/operations/run.mjs review-pr --pr=<N> --repo=<owner/name> --cwd=<the OTHER lane> --json
 ```
 
-**The `confirm` step is NOT yours to answer.** `review-pr` judges, reduces to a verdict, and then *suspends* —
-it writes nothing on that invocation. Per the `/review` skill: present its `verdict`, its `findings.read`, its
-`spend` (the dollar figure, never omitted — the operator is on a constrained model budget) and its
-`pending.asks` **to the operator, then stop**. Only `--resume=<run-id> --answer=<option>` on the operator's
-explicit decision proceeds.
-
-`pending.of` does NOT license you to answer. It is
-`humanRequired ? 'human' : 'agent'` — it names which *tier of actor is owed*, separating a gate-self PR (which
-needs the distinct `review-set-label.mjs --to=clear-human` ceremony, #2895) from an ordinary one. `"of":
-"agent"` means "no human ceremony is required here", not "decide it yourself".
-
-**Why this matters more on a VM, not less.** `accept` swaps the label to `review:accepted`, which releases the
-PR to the drain — and the drain merges. Read as an agent-addressed prompt, that is a self-service path from
-your own PR to `main`. Worse, `record`'s `actor` defaults to `'operator'`, so the durable verdict comment
-("recorded by operator") and the `verdict-ledger` row (`declared: 'operator'`) both name a human who never
-decided. The ledger is the merge authority; a row that misattributes the decider corrupts exactly what it
-exists to vouch for. Observed 2026-08-24: an agent answered its own `confirm`, `review:accepted` landed, and
-the drain merged the PR 60 seconds later.
+**The `confirm` step is addressed to you.** `review-pr` stops with `"of": "agent"` and three options
+(`accept | changes | abstain`); answering it via `--resume=<run-id> --answer=<option>` is the flow working, not
+an overreach. What the operation never does is MERGE — `#2290` makes the drain the sole writer to `main` — so
+running a review is always in bounds. Whether YOUR accept may release the PR is the separate question below.
 
 ### What the credential-less fallback silently drops
 
