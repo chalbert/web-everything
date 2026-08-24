@@ -16,8 +16,9 @@ container does it unasked; on a workstation it only reports (see *Installing on 
 |---|---|---|
 | Clones | full history | **`--depth 1` shallow** (`rev-parse --is-shallow-repository` → `true`) |
 | Sibling repos | already siblings on disk | arrive via the harness `add_repo` tool, then a clone |
-| Lanes | the clone pool is the unit of work | **no pool — work the checkout directly** |
-| Branch guard | installed at user level (#3074) | not installed |
+| Lanes | the clone pool is the unit of work | **still the unit of work — provision one, with the two overrides below** |
+| Branch guard | installed at user level (#3074) | user-level one not installed; the **committed** `guard-lane.mjs` hook fires regardless |
+| `$HOME` vs checkouts | both under `~/workspace` | **`$HOME=/root`, checkouts under `/home/user`** — `LANE_POOL_ROOT` must be set |
 | Skills | `~/.claude/skills` synced, scoped | deployed with `--all` (nothing else lives there) |
 | Memory | reserved lane → user-level dir (#2350) | in-repo `.claude/agent-memory` |
 | Uncommitted work | survives indefinitely | **lost when the VM is reclaimed** |
@@ -30,11 +31,33 @@ learned about lanes being wiped mid-work ([[shared-pool-lane-unsafe-for-manual-w
 [[lane-refresh-wipes-unmapped-lanes]]) applies here with a blunter cause: there is no refresher to blame,
 the whole box goes. A WIP commit pushed to a `lane/*` ref is durable; a working tree is not.
 
-**Do not provision a lane pool.** `lane-pool.mjs` exists to dodge the user-global branch guard, to share
-git objects with a primary checkout via `--reference`, and to persist between batches. A cloud VM has no
-guard to dodge, no full object store to reference (the clones are shallow), and no "between batches" — so
-a pool costs an `npm ci` per lane and returns nothing. Edit the checkout, commit, push a `lane/*` ref.
-The convergence half is unchanged: the transport to `main` is still the PR (`/pr`, `/drain`).
+**You still work in a lane here — provision one.** This page used to say the opposite ("no guard to dodge,
+so a pool buys nothing"), and that was wrong in a way that DEADLOCKS the box: `guard-lane.mjs` is registered
+in the **committed** `.claude/settings.json` `PreToolUse` hooks, so it ships with the repo and denies every
+`Edit`/`Write` to a primary checkout on a VM exactly as on a laptop. With no pool there is then no writable
+surface at all — the primary is guarded and no lane exists. `#primary-read-only-lanes-only` is not relaxed
+here; only the *reasons* the laptop provisions a pool are.
+
+Two things must be overridden first, and neither is optional:
+
+```bash
+# 1. `--reference` against a `--depth 1` clone is FATAL, not merely useless:
+#    `fatal: reference repository '<path>' is shallow`. Unshallow every repo the pool will clone or reference.
+git -C <each constellation checkout> fetch --unshallow
+
+# 2. The pool root defaults to `~/workspace/.lanes`, but `$HOME` is `/root` here while the harness clones
+#    into `/home/user` — so the default resolves to a directory that does not exist.
+export LANE_POOL_ROOT=/home/user/.lanes
+node scripts/lane-pool.mjs provision --count=2 --repo=/home/user/web-everything
+```
+
+Two lanes, not one: `review-pr`'s juror is tool-bearing and `assertLaneCwd` refuses to spawn it into the
+lane you are driving from (#3151), so a review needs a second one.
+
+The convergence half is unchanged: the transport to `main` is still the PR (`/pr`, `/drain`). What IS
+different is that `gh` has no credential here, so `open-pr` and `review-pr` halt at their `submit`/`record`
+effects and hand back a plan — submit it through whatever channel does hold one, and re-apply the park label
+by hand, per the `/pr` skill's fallback (it is two calls, and the second is not optional).
 
 **Unshallow before any history work.** `git log`, `blame`, `bisect`, and anything that walks back past
 HEAD need `git fetch --unshallow` first. Cheap to do, silently wrong to skip.

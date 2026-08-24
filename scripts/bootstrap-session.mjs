@@ -157,16 +157,24 @@ function constellationParents(root = REPO_ROOT, exists = existsSync) {
  * conclusion #3074 reached for the guard path. PURE over `exists`.
  */
 export function aliasesFor(root = REPO_ROOT, exists = existsSync) {
-  const parents = constellationParents(root, exists);
-  return Object.values(CONSTELLATION_REPOS).flatMap(({ dirs }) => {
-    // Only a member that is actually HERE can be aliased; an absent one is the `siblings` step's business.
-    const target = parents.flatMap((parent) => dirs.map((d) => join(parent, d))).find((p) => exists(p));
-    if (!target) return [];
-    return dirs
-      .map((d) => join(dirname(target), d))
-      .filter((p) => p !== target)
-      .map((path) => ({ name: basename(path), path, target, present: exists(path) }));
-  });
+  return constellationParents(root, exists).flatMap((parent) =>
+    Object.values(CONSTELLATION_REPOS).flatMap(({ dirs }) => {
+      // PER-PARENT, and the target is only ever a checkout in the SAME directory as the link. The first cut
+      // searched the parents in priority order for one target and then linked it beside whichever parent won
+      // — so with a lane, whose two parents diverge, the alias landed beside the primary while the sibling
+      // that needed it sat in the pool directory, and the step still reported `ok`. That is the very
+      // false-green this file is fixing, reintroduced one level down (PR #1537 correctness juror).
+      const target = dirs.map((d) => join(parent, d)).find((p) => exists(p));
+      // Nothing here to alias. Deliberately NOT resolved from another parent: a `webeverything` in the pool
+      // directory pointed at the primary checkout — or at one arbitrary lane — would silently cross a
+      // sibling's build over into a tree it does not belong to, which is worse than the missing link. A pool
+      // whose own sibling clones cannot resolve their peers is `lane-pool.mjs`'s provisioning to fix.
+      if (!target) return [];
+      return dirs
+        .map((d) => join(parent, d))
+        .filter((p) => p !== target)
+        .map((path) => ({ name: basename(path), path, target, present: exists(path) }));
+    }));
 }
 
 /**
