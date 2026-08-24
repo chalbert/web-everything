@@ -286,3 +286,62 @@ describe('#3261 — resolveTransportRoot picks the board, and refuses the wrong 
       .toThrow(/refusing to stage a verdict for o\/x on \(unknown\)/);
   });
 });
+
+// ── #3261: the sink must USE the board it resolved, not merely resolve it (PR #1533 juror) ───────────────────
+//
+// The six tests above pin `resolveTransportRoot`'s DECISION. They say nothing about whether the sink acts on
+// it — and the PR #1533 correctness juror proved that gap by mutation: reverting the sink's three git call
+// sites back to the driver's `root` left the whole suite green. A decision nothing consumes is a vacuous
+// guard, which is exactly the failure this whole card is about, one layer in.
+//
+// So these drive the sink with `board` DIFFERENT from `root` and assert every git call lands on the board.
+describe('#3261 — the sink runs its git against the BOARD, not the driver', () => {
+  const OTHER = '/sibling-checkout';
+  const build = (calls, onRun) => createRecordVerdictSinks({
+    root: '/driver',
+    // The driver is web-everything; the board is the sibling whose origin IS the request's repo.
+    originRepo: (cwd) => (cwd === OTHER ? 'o/other' : 'chalbert/web-everything'),
+    now: () => 111,
+    run: (args, opts) => {
+      calls.push({ args, cwd: opts?.cwd });
+      if (onRun) { const r = onRun(args); if (r !== undefined) return r; }
+      // A NON-EMPTY staged diff, so these drive the FULL path through commit+push. Returning '' here makes the
+      // sink take its "identical request already staged" early return, and the assertions below would then be
+      // testing a branch that never pushes — passing for the wrong reason.
+      return args[0] === 'diff' ? `${'ops/review-requests/144-accepted.json'}\n` : '';
+    },
+    mkdir: () => {}, write: () => {}, rm: () => {},
+  })[STAGE_REQUEST_EFFECT];
+
+  const payload = { path: 'ops/review-requests/144-accepted.json', content: '{}\n', pr: 144, to: 'accepted', repo: 'o/other', repoRoot: OTHER };
+  const cwdOf = (calls, verb, sub) => calls.find((c) => c.args?.[0] === verb && (sub === undefined || c.args?.[1] === sub))?.cwd;
+
+  it('fetches the transport branch in the BOARD', async () => {
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'fetch')).toBe(OTHER);
+  });
+
+  it('adds the worktree from the BOARD', async () => {
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'worktree', 'add')).toBe(OTHER);
+  });
+
+  it('PRUNES in the board too — a stale registration in the target repo wedges its next stage', async () => {
+    // The sibling of the two above, and the one that was wrong first: the prune kept the driver's cwd while
+    // the worktree moved. Pinned separately so fixing two of three cannot pass.
+    const calls = []; await build(calls)(payload);
+    expect(cwdOf(calls, 'worktree', 'prune')).toBe(OTHER);
+  });
+
+  it('prunes in the board even when the push FAILS', async () => {
+    const calls = [];
+    await expect(build(calls, (a) => { if (a[0] === 'push') throw new Error('network'); })(payload)).rejects.toThrow(/network/);
+    expect(cwdOf(calls, 'worktree', 'prune')).toBe(OTHER);
+  });
+
+  it('never touches the driver checkout at all', async () => {
+    // The strongest form: not "the board was used somewhere" but "the driver was used nowhere".
+    const calls = []; await build(calls)(payload);
+    expect(calls.filter((c) => c.cwd === '/driver')).toEqual([]);
+  });
+});
