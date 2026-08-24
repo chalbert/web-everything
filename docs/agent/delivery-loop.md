@@ -14,6 +14,46 @@ Two steps in that chain are the ones people skip, and they are the two that catc
 **spawn**. Mutation discipline is written up on its own elsewhere; **spawn** is the one documented
 nowhere but here, and it is the one whose wrong version looks right.
 
+## You drive it to merged. The human is not a step in this loop.
+
+**An approved item means build it, review it, and land it.** Every step above is yours, including the
+verdict. Stopping mid-loop to ask "may I record this?" is not caution — it strands the item and it is the
+failure this section exists to prevent. Which items reach a human is **script-decided, at PR-open**, by the
+escalation rubric — never by how consequential the change feels to you:
+
+```js
+// we:scripts/lib/review-escalation.mjs#producerReviewLabel
+if (humanRequired) return REVIEW_LABELS.human;    // gate-self / statute — a HUMAN clears it
+if (escalate)      return REVIEW_LABELS.pending;  // an independent review is owed — YOU are the actor
+return null;                                      // no park at all; it lands
+```
+
+`humanRequired` is `leashFiles.length > 0 || statuteFiles.length > 0` — the declarative-leash and statute
+touches, nothing else. `escalate` is the ordinary blast-radius / size / cross-repo / dismissed-findings
+signals. So **`review:pending` is not "waiting for the operator"** — it is *"an independent verdict is owed,
+and you are entitled to record it"*. `review-pr`'s confirm step says the same thing structurally:
+`of: humanRequired ? HUMAN : AGENT`. `"of": "agent"` means **no human ceremony is required here**, not
+"ask anyway".
+
+What you may never do is **merge**: `#2290` makes the drain the sole writer to `main`. That is the real
+containment, and it is what makes recording a verdict safe rather than final — an accept releases the PR to
+a serialized writer, it does not push anything.
+
+Only two things genuinely stop and wait for a person:
+
+1. **`review:human` (gate-self / statute).** `--answer=accept` is REFUSED on it, by design. The one route is
+   the `--to=clear-human` ceremony (#2895), which needs an operator instruction quoted verbatim as
+   `--reason` — judgment, not a declared input. No instruction naming that PR: hand over the command line
+   and stop.
+2. **A genuine fork in the work itself** — two readings of the request that lead to materially different
+   diffs. Ask about *that*, not about permission to run the loop.
+
+> **Observed 2026-08-24, both directions in one session.** An agent recorded `accept` on its own
+> `review:pending` PR (correct — that is this rule), then talked itself out of it, wrote the *inverse* rule
+> into `vm-sessions.md`, and began asking the operator to clear every PR. The rule was in
+> `review-escalation.mjs` and in a #2851 anchor, and in neither place a driver reads mid-loop — so it was
+> re-derived from feel, twice, wrongly. It is stated here because *here* is where the driver is.
+
 ## Spawning a reviewer that is actually independent
 
 **A subagent is not a second actor.** It inherits the parent's `CLAUDE_CODE_SESSION_ID`, so the repo's
