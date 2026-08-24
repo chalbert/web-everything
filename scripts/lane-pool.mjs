@@ -74,6 +74,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname } from 'node:path';
+import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -133,7 +134,11 @@ const tryGit = (args, cwd, opts = {}) => {
 };
 
 const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p);
-const POOL_ROOT = expandHome(process.env.LANE_POOL_ROOT) || join(homedir(), 'workspace', '.lanes');
+
+// #3265 — the pool root is DERIVED from the checkout, not assumed from `$HOME`. Pure core + its
+// rationale live in `./lib/lane-pool-paths.mjs` (this file runs its CLI at import, so nothing here is
+// unit-testable by importing it).
+const POOL_ROOT = defaultPoolRoot();
 
 // ── repo descriptor resolution ──────────────────────────────────────────────────────────────────────
 function resolveRepo() {
@@ -160,6 +165,30 @@ function resolveRepo() {
 }
 
 const laneDir = (repo, n) => join(repo.poolDir, `lane-${n}`);
+
+/**
+ * Is this checkout a shallow clone? `null`/unknown reads as NOT shallow, so an unreadable path degrades to
+ * today's behaviour rather than silently dropping object sharing on every clone.
+ */
+const isShallowRepo = (dir) => tryGit(['rev-parse', '--is-shallow-repository'], dir) === 'true';
+
+/**
+ * The `--reference` argv for a clone — EMPTY when the reference repo is shallow.
+ *
+ * `git clone --reference <shallow>` is **fatal**, not a lost optimisation: `fatal: reference repository
+ * '<path>' is shallow`, and `cloneLane` died on the raw `execFileSync` throw. Every cloud-VM checkout arrives
+ * `--depth 1`, so on that host NO lane could be cloned at all and the sibling clones failed the same way
+ * (warned, leaving a lane with no `frontierui`/`plateau-app` beside it). `docs/agent/vm-sessions.md` described
+ * shallow clones as merely "sharing nothing via `--reference`", which reads as a missed saving rather than a
+ * hard stop (#3265).
+ *
+ * Dropping the flag is the right degradation: `--reference` is a disk/bandwidth optimisation, and a plain
+ * clone is correct in every case where it cannot apply. `--reference-if-able` would also work, but it makes
+ * the CALLER unable to tell whether sharing happened — the log line here says which one you got.
+ */
+function referenceArgs(referencePath) {
+  return isShallowRepo(referencePath) ? [] : ['--reference', referencePath];
+}
 
 // ── per-lane dev-server ports (#1997, per #1996 Fork 2) ──────────────────────────────────────────────
 // A lane boots its own `npm run dev` on a deterministic per-index port pair, so N clones never collide.
@@ -295,9 +324,10 @@ function ensureOneSibling(repo, name, { force = false } = {}) {
       );
       return;
     }
-    log(`  clone ${name} sibling ← ${originUrl} (--reference ${primary}) …`);
+    const ref = referenceArgs(primary);
+    log(`  clone ${name} sibling ← ${originUrl} ${ref.length ? `(--reference ${primary})` : '(no --reference: shallow)'} …`);
     try {
-      gitQuiet(['clone', '--quiet', '--reference', primary, originUrl, dest]);
+      gitQuiet(['clone', '--quiet', ...ref, originUrl, dest]);
     } catch (e) {
       // Unlike the old symlink (pure filesystem, no network), this is a real `git clone` of `originUrl` —
       // best-effort: a network blip / auth failure / moved remote must WARN and move on, not crash the
@@ -524,8 +554,9 @@ function cloneLane(repo, n) {
   if (!repo.originUrl) {
     fail(`could not determine an origin URL for pool "${repo.name}" — --pool selects an existing pool for read/release only; to clone/acquire a lane pass --repo=<checkout> or --origin=<url>`);
   }
-  log(`  clone lane-${n} ← ${repo.originUrl} (--reference ${repo.referencePath}) …`);
-  gitQuiet(['clone', '--quiet', '--reference', repo.referencePath, repo.originUrl, dest]);
+  const ref = referenceArgs(repo.referencePath);
+  log(`  clone lane-${n} ← ${repo.originUrl} ${ref.length ? `(--reference ${repo.referencePath})` : '(no --reference: shallow)'} …`);
+  gitQuiet(['clone', '--quiet', ...ref, repo.originUrl, dest]);
   // Pin a stable local default branch so refresh's hard-reset target is unambiguous.
   tryGit(['checkout', '--quiet', '-B', repo.branch, `origin/${repo.branch}`], dest);
 }
