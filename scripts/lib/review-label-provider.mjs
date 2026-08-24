@@ -36,7 +36,12 @@ import { join } from 'node:path';
 
 /** The `--json` fields the label arc reads about a PR. Named once so a second adapter supplies the same shape
  *  rather than guessing at it, and so a stub in a test cannot drift from what the real one returns. */
-export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body']);
+export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt']);
+// `createdAt` (#3067) rides the SAME call — one more json field, no extra hop, the pattern #2844 used for
+// `body` and #2953 for `state`. It is what turns a MISSING `authored-by-actor` stamp from an assumption into a
+// checkable comparison: a PR opened after `STAMP_REGIME_START` and now lacking a stamp had one STRIPPED, while
+// an older one simply never had it. Without this field `decideClearerIndependence` cannot tell the two apart
+// and tolerates both as `unknown-author` — the tolerance #3067 exists to bound.
 
 /**
  * The argv a `gh` adapter runs for each operation. PURE, and exported SEPARATELY from the adapter so a test can
