@@ -14,6 +14,7 @@ import {
   planSteps,
   selfKey,
   siblingsFor,
+  aliasesFor,
   lanePool,
   primaryCheckout,
   withPrimaryGitDir,
@@ -138,6 +139,33 @@ describe('relocation', () => {
   it('resolves a sibling at whichever directory name it actually occupies', () => {
     const exists = (p) => p === '/ws/webeverything';
     expect(siblingsFor('/ws/plateau-app', exists).find((s) => s.name === 'we')).toMatchObject({ path: '/ws/webeverything', present: true });
+  });
+});
+
+/**
+ * The `siblings` step answers "does the directory exist", which is NOT the question the other two repos ask.
+ * Their build configs resolve WE by a hard-coded `../webeverything`, so a slug-named clone (`web-everything`,
+ * what every cloud VM gets) leaves them unable to load their own Vite config — while `siblings` reports `ok`.
+ */
+describe('aliasesFor — the basename a peer resolves, not the one it was cloned as', () => {
+  it('flags the alias a cloud clone is missing', () => {
+    const exists = (p) => p === '/ws/web-everything';
+    const we = aliasesFor('/ws/frontierui', exists).find((a) => a.name === 'webeverything');
+    expect(we).toMatchObject({ path: '/ws/webeverything', target: '/ws/web-everything', present: false });
+  });
+
+  it('is satisfied once the alias exists', () => {
+    const exists = (p) => p === '/ws/web-everything' || p === '/ws/webeverything';
+    expect(aliasesFor('/ws/frontierui', exists).every((a) => a.present)).toBe(true);
+  });
+
+  it('never proposes an alias for a member that is not here — that is the siblings step', () => {
+    expect(aliasesFor('/ws/frontierui', () => false)).toEqual([]);
+  });
+
+  it('proposes no alias for a single-name member', () => {
+    const exists = (p) => p === '/ws/frontierui';
+    expect(aliasesFor('/ws/frontierui', exists).map((a) => a.name)).not.toContain('frontierui');
   });
 });
 
