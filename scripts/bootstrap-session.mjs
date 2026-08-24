@@ -13,9 +13,18 @@
  * HOST-AWARE, because the right setup differs. On the LAPTOP the lane pool, the reserved memory lane and
  * the user-level guard are the environment, and a skills deploy is deliberately scoped so a WE-specific
  * orchestration skill never leaks into an unrelated repo (see sync-skills-deploy.mjs). On an EPHEMERAL VM
- * none of that holds: there are no unrelated repos, the box is reclaimed on idle, `--reference` has no
- * full object store to share (cloud clones are `--depth 1`), and the branch guard that FORCED clone-based
- * lanes is not installed — so provisioning a pool costs an `npm ci` per lane and buys nothing.
+ * none of that holds: there are no unrelated repos and the box is reclaimed on idle, so this script writes
+ * freely rather than asking consent about state nothing outlives.
+ *
+ * WHAT IS *NOT* DIFFERENT — and this paragraph used to say the opposite. It claimed the branch guard "is not
+ * installed", so "provisioning a pool costs an `npm ci` per lane and buys nothing". Both halves are false.
+ * The USER-LEVEL installer (#3074) is skipped, but `guard-lane.mjs` itself ships in the COMMITTED
+ * `.claude/settings.json` `PreToolUse` hooks and denies every `Edit`/`Write` to a primary checkout here
+ * exactly as on a laptop — so a lane is the ONLY writable surface, and a pool is required rather than
+ * pointless. (`--reference` against the `--depth 1` clones was also *fatal* rather than merely unhelpful,
+ * and the pool root mis-derived from `$HOME`; both fixed in `lane-pool.mjs` by #3265.) The `lanes` step below
+ * still SKIPS — a `SessionStart` hook must not block for minutes cloning lanes — but it now names the
+ * command instead of explaining why you do not need one.
  *
  * WHERE THIS LIVES IS NOT WHERE IT STAYS. The lane and delivery machinery this sets up is Plateau's
  * product; WE is a PUBLIC peer that happens to dogfood it, not the constellation's hub. So nothing here

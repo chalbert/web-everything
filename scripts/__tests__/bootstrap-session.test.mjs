@@ -90,6 +90,15 @@ describe('planSteps', () => {
     expect(step(planSteps({ ephemeral: true }), 'guard').skip).toBeTruthy();
   });
 
+  // `toBeTruthy()` above passes for ANY non-empty string, so it never noticed that this message said
+  // "there is no pool here" — which reads as "the guard is absent", pairs with the `lanes` message, and
+  // together told a cloud session it could edit the primary. Assert the CONTENT, and guard the regression.
+  it('says the guard is already enforcing here — only its USER-level install is skipped', () => {
+    const guard = step(planSteps({ ephemeral: true }), 'guard').skip;
+    expect(guard).toMatch(/already enforces|already enforcing/);
+    expect(guard).not.toMatch(/no pool here|not installed/);
+  });
+
   it('resolves memory to the in-repo copy when the user-level dir is absent', () => {
     const exists = (p) => p.endsWith('/.claude/agent-memory');
     const found = step(planSteps({ ephemeral: true, root: '/workspace/web-everything', home: '/root', exists }), 'memory').verify();
