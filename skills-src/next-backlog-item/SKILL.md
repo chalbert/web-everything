@@ -257,10 +257,15 @@ an item*). The backlog file is the durable, resumable record — the item body *
    is false (PR #1511 juror). What IS preserved is the legacy kind PRECEDENCE over the values: an explicit
    `--kind` wins, else `--type=decision` wins, else `--workItem`. `we:scripts/backlog.mjs scaffold` is
    unchanged and still takes the lowercase spelling, so existing invocations of THAT keep working (**single quotes** — item text in a double-quoted value
-   still runs `` ` `` / `$(…)` through bash; *backlog-workflow.md → Authoring an item → The quoting rule*)
-   — it allocates the next free `NNN` atomically and writes
-   a `check:standards`-shaped skeleton (or author by hand: re-`ls backlog/` right before writing, yield to
-   the next free number on collision). **Never renumber an existing item** — `NNN` is immutable for life
+   still runs `` ` `` / `$(…)` through bash; *backlog-workflow.md → Authoring an item → The quoting rule*).
+   **Both front doors mint the SAME id, and it is not a number.** Under JIT numbering (#2288) a new item is
+   born `backlog/xNNNNNN-<slug>.md` — a collision-free **hash** — and the drain, the sole serial writer to
+   `main` (#2290), assigns the real sequential `NNN` at land. Neither the operation nor the CLI allocates
+   `max+1` at birth; that race is exactly what #2288 removed, so **you never hand-pick a number** and a
+   hand-authored file is born hash-keyed too (the "re-`ls backlog/`, yield to the next free number on
+   collision" ritual is the demoted #2291 collision-heal backstop, not the birth rule). Either way you get
+   a `check:standards`-shaped skeleton that validates green pre-merge.
+   **Never renumber an existing item** — `NNN` is immutable for life
    (*backlog-workflow.md → Adding an item* / *Rules*). Each new item needs a `workItem` (story/epic/task)
    and, if a story or unstoried epic, a Fibonacci `size` (*backlog-workflow.md → Agile sizing*); set its
    `blockedBy` correctly (*backlog-workflow.md → Keep the blocker DAG honest*) so it doesn't enter as a
