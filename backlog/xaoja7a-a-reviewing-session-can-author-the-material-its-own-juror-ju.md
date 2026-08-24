@@ -48,11 +48,35 @@ Every review run from a cloud session therefore routes the PR's own text through
 
 ## Options
 
-- **a — verify the transcription.** `stage-pr-view` records a digest over `body + comments + headRefOid`; the applier side, which holds a real token, recomputes it against the live PR and refuses a verdict whose staged view does not match. Catches paraphrase and fabrication alike, and needs no new read path on the judging host.
-- **b — stage from CI.** The view is produced by a workflow with a token and pushed to the transport branch; the session may read it but never author it. Strongest, and the largest change.
-- **c — bound what the session may supply.** Accept `files` and `headRefOid` from the session (mechanically derivable from git, and checkable), but require `body`/`comments` to be absent or digest-verified. A juror reading no body is honest; a juror reading an invented one is not.
+- **a — verify the transcription.** `stage-pr-view` records a digest over `body + comments + headRefOid`; a credentialed side recomputes it against the live PR and refuses a mismatch. Detects the defect *after* the session has already authored the material.
+- **b — stage from CI, over the transport that already exists.** The session pushes a *request* (`{repo, pr}`) to an ops branch; a workflow holding a token runs `gh pr view --json` and commits the view back; the session reads it out of the fetched ref. The session never authors the material at all.
+- **c — bound what the session may supply.** Accept `files`/`headRefOid` (mechanically derivable from git, and checkable), require `body`/`comments` absent or verified. A juror reading no body is honest; one reading an invented body is not.
 
-**Recommended: (a)**, then (b) if the transport moves to CI anyway. (c) is a cheap partial and composes with either.
+**Recommended: (b).** This was first costed as "the largest change", which was wrong — the operator pointed out the mechanism is already built. `we:.github/workflows/apply-review-request.yml` is exactly this shape in the write direction: a credential-less session pushes a file to `ops/review-requests`, and a workflow with a token acts on it. It is proven — plateau-app's own copy applied a verdict on its first live run today (#3261). Extending the same pattern to the READ direction is a sibling workflow, not a new architecture.
+
+### What (b) actually costs — the one real objection
+
+The applier is deliberately `contents: read`:
+
+```yaml
+permissions:
+  pull-requests: write   # the label swap
+  issues: write          # a PR's comments are issue comments
+  contents: read         # never pushes — see the "only what this push added" note above
+```
+
+A read-flow must **commit the view back**, so it needs `contents: write`. That is a genuine privilege increase and must not be waved through. Two things bound it:
+
+- **A separate workflow on a separate branch** (`ops/pr-views`), so the label applier keeps `contents: read` untouched. The two flows share a pattern, not a token.
+- **The write is strictly weaker than what the existing boundary already grants.** The applier's own header states that anyone who can push to `ops/review-requests` can move a review label, including clearing `review:human`. Committing PR *metadata* to a branch nothing else watches is less powerful than that, not more.
+
+### The subtlety that makes or breaks (b)
+
+CI producing the view is not sufficient on its own. If `stage-pr-view` still reads `--from=<local path>`, the session can fetch the CI-produced view and edit it before staging — the same hole, one step further back.
+
+So the view must be read **out of the fetched ref**, not off the filesystem: `git show origin/ops/pr-views:views/<repo>-<pr>.json`, with no session-writable path in between. That is what turns "CI produced it" into "the session could not have authored it".
+
+(a) remains worth having as defence in depth — it is the check that survives if someone later re-introduces a local path.
 
 ## Done when
 
