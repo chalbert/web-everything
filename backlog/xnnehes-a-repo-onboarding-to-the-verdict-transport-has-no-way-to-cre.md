@@ -51,3 +51,23 @@ staged and is never applied.
 2. **Executable** — an onboarding path (operation or documented step) that creates the board from
    `main` so the workflow definition rides it, plus a check that refuses to stage onto a board whose
    tree lacks the applier workflow — turning failure (2) from silent into loud.
+
+### 3. `fetch origin <branch>` does not create `origin/<branch>` — hit live
+
+Onboarding plateau-app, the sink's own two-line sequence failed at the second line:
+
+```
+$ git fetch --quiet origin ops/review-requests   # succeeds, writes FETCH_HEAD only
+$ git worktree add --force --detach $WT origin/ops/review-requests
+fatal: invalid reference: origin/ops/review-requests
+```
+
+`git fetch origin <branch>` writes `FETCH_HEAD`; it creates the remote-tracking ref
+`refs/remotes/origin/<branch>` only when the clone's configured fetch refspec covers it. A full clone
+carries `+refs/heads/*:refs/remotes/origin/*` and so it does — which is why this has never been seen
+in `we:` — but a narrow or single-branch clone does not, and the cloud session's checkouts are of that
+kind. The fix is an explicit refspec (`origin ops/review-requests:refs/remotes/origin/ops/review-requests`)
+or using `FETCH_HEAD` directly.
+
+This makes (1) and (3) the same shape of assumption: the sink was written against one repo's clone
+geometry and reads it as universal. Worth covering in the same change.
