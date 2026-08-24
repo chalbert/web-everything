@@ -74,6 +74,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname } from 'node:path';
+import { defaultPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -133,7 +134,16 @@ const tryGit = (args, cwd, opts = {}) => {
 };
 
 const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p);
-const POOL_ROOT = expandHome(process.env.LANE_POOL_ROOT) || join(homedir(), 'workspace', '.lanes');
+
+// #3265 — the pool root is DERIVED from the checkout, not assumed from `$HOME`. Pure core + its
+// rationale live in `./lib/lane-pool-paths.mjs` (this file runs its CLI at import, so nothing here is
+// unit-testable by importing it).
+// The checkout ROOT, not the cwd: `defaultPoolRoot` is pure and cannot tell `<checkout>/scripts` from
+// `<checkout>`, so handing it a subdirectory would put the pool INSIDE the repo (#1539 reviewer, round 2).
+// A lane needs no normalising — `workspaceFor` strips at `.lanes` from any depth — but this is the honest
+// input either way. Falls back to the cwd outside a git repo, where there is nothing better to say.
+const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd()) || process.cwd();
+const POOL_ROOT = defaultPoolRoot(CHECKOUT_ROOT);
 
 // ── repo descriptor resolution ──────────────────────────────────────────────────────────────────────
 function resolveRepo() {
@@ -160,6 +170,18 @@ function resolveRepo() {
 }
 
 const laneDir = (repo, n) => join(repo.poolDir, `lane-${n}`);
+
+/**
+ * Is this checkout a shallow clone? Returns `null` when the probe itself fails, which `referenceArgs` reads as
+ * "not proven shallow" — degrading to today's behaviour rather than dropping object sharing on a failed `git`.
+ */
+const isShallowRepo = (dir) => {
+  const out = tryGit(['rev-parse', '--is-shallow-repository'], dir);
+  return out === null ? null : out === 'true';
+};
+
+/** #3265 — the DECISION is pure and lives in `./lib/lane-pool-paths.mjs`; this just supplies the probe. */
+const cloneReferenceArgs = (p) => referenceArgs(p, isShallowRepo(p));
 
 // ── per-lane dev-server ports (#1997, per #1996 Fork 2) ──────────────────────────────────────────────
 // A lane boots its own `npm run dev` on a deterministic per-index port pair, so N clones never collide.
@@ -295,9 +317,10 @@ function ensureOneSibling(repo, name, { force = false } = {}) {
       );
       return;
     }
-    log(`  clone ${name} sibling ← ${originUrl} (--reference ${primary}) …`);
+    const ref = cloneReferenceArgs(primary);
+    log(`  clone ${name} sibling ← ${originUrl} ${ref.length ? `(--reference ${primary})` : '(no --reference: shallow)'} …`);
     try {
-      gitQuiet(['clone', '--quiet', '--reference', primary, originUrl, dest]);
+      gitQuiet(['clone', '--quiet', ...ref, originUrl, dest]);
     } catch (e) {
       // Unlike the old symlink (pure filesystem, no network), this is a real `git clone` of `originUrl` —
       // best-effort: a network blip / auth failure / moved remote must WARN and move on, not crash the
@@ -524,8 +547,9 @@ function cloneLane(repo, n) {
   if (!repo.originUrl) {
     fail(`could not determine an origin URL for pool "${repo.name}" — --pool selects an existing pool for read/release only; to clone/acquire a lane pass --repo=<checkout> or --origin=<url>`);
   }
-  log(`  clone lane-${n} ← ${repo.originUrl} (--reference ${repo.referencePath}) …`);
-  gitQuiet(['clone', '--quiet', '--reference', repo.referencePath, repo.originUrl, dest]);
+  const ref = cloneReferenceArgs(repo.referencePath);
+  log(`  clone lane-${n} ← ${repo.originUrl} ${ref.length ? `(--reference ${repo.referencePath})` : '(no --reference: shallow)'} …`);
+  gitQuiet(['clone', '--quiet', ...ref, repo.originUrl, dest]);
   // Pin a stable local default branch so refresh's hard-reset target is unambiguous.
   tryGit(['checkout', '--quiet', '-B', repo.branch, `origin/${repo.branch}`], dest);
 }
