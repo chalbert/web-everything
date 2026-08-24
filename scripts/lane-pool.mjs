@@ -74,7 +74,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname } from 'node:path';
-import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
+import { defaultPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -167,28 +167,16 @@ function resolveRepo() {
 const laneDir = (repo, n) => join(repo.poolDir, `lane-${n}`);
 
 /**
- * Is this checkout a shallow clone? `null`/unknown reads as NOT shallow, so an unreadable path degrades to
- * today's behaviour rather than silently dropping object sharing on every clone.
+ * Is this checkout a shallow clone? Returns `null` when the probe itself fails, which `referenceArgs` reads as
+ * "not proven shallow" — degrading to today's behaviour rather than dropping object sharing on a failed `git`.
  */
-const isShallowRepo = (dir) => tryGit(['rev-parse', '--is-shallow-repository'], dir) === 'true';
+const isShallowRepo = (dir) => {
+  const out = tryGit(['rev-parse', '--is-shallow-repository'], dir);
+  return out === null ? null : out === 'true';
+};
 
-/**
- * The `--reference` argv for a clone — EMPTY when the reference repo is shallow.
- *
- * `git clone --reference <shallow>` is **fatal**, not a lost optimisation: `fatal: reference repository
- * '<path>' is shallow`, and `cloneLane` died on the raw `execFileSync` throw. Every cloud-VM checkout arrives
- * `--depth 1`, so on that host NO lane could be cloned at all and the sibling clones failed the same way
- * (warned, leaving a lane with no `frontierui`/`plateau-app` beside it). `docs/agent/vm-sessions.md` described
- * shallow clones as merely "sharing nothing via `--reference`", which reads as a missed saving rather than a
- * hard stop (#3265).
- *
- * Dropping the flag is the right degradation: `--reference` is a disk/bandwidth optimisation, and a plain
- * clone is correct in every case where it cannot apply. `--reference-if-able` would also work, but it makes
- * the CALLER unable to tell whether sharing happened — the log line here says which one you got.
- */
-function referenceArgs(referencePath) {
-  return isShallowRepo(referencePath) ? [] : ['--reference', referencePath];
-}
+/** #3265 — the DECISION is pure and lives in `./lib/lane-pool-paths.mjs`; this just supplies the probe. */
+const cloneReferenceArgs = (p) => referenceArgs(p, isShallowRepo(p));
 
 // ── per-lane dev-server ports (#1997, per #1996 Fork 2) ──────────────────────────────────────────────
 // A lane boots its own `npm run dev` on a deterministic per-index port pair, so N clones never collide.
@@ -324,7 +312,7 @@ function ensureOneSibling(repo, name, { force = false } = {}) {
       );
       return;
     }
-    const ref = referenceArgs(primary);
+    const ref = cloneReferenceArgs(primary);
     log(`  clone ${name} sibling ← ${originUrl} ${ref.length ? `(--reference ${primary})` : '(no --reference: shallow)'} …`);
     try {
       gitQuiet(['clone', '--quiet', ...ref, originUrl, dest]);
@@ -554,7 +542,7 @@ function cloneLane(repo, n) {
   if (!repo.originUrl) {
     fail(`could not determine an origin URL for pool "${repo.name}" — --pool selects an existing pool for read/release only; to clone/acquire a lane pass --repo=<checkout> or --origin=<url>`);
   }
-  const ref = referenceArgs(repo.referencePath);
+  const ref = cloneReferenceArgs(repo.referencePath);
   log(`  clone lane-${n} ← ${repo.originUrl} ${ref.length ? `(--reference ${repo.referencePath})` : '(no --reference: shallow)'} …`);
   gitQuiet(['clone', '--quiet', ...ref, repo.originUrl, dest]);
   // Pin a stable local default branch so refresh's hard-reset target is unambiguous.

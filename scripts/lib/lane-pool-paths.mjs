@@ -58,3 +58,31 @@ export function defaultPoolRoot(cwd = process.cwd(), env = process.env) {
   const home = env.HOME || homedir();
   return expandHome(env.LANE_POOL_ROOT, home) || join(workspaceFor(cwd), '.lanes');
 }
+
+/**
+ * The `--reference` argv for a clone — EMPTY when the reference repo is shallow. PURE: the caller does the
+ * `rev-parse --is-shallow-repository` probe and passes the answer, so the DECISION is testable without a
+ * filesystem (the shape the #1539 reviewer's mutation showed was missing).
+ *
+ * `git clone --reference <shallow>` is **fatal**, not a lost optimisation: `fatal: reference repository
+ * '<path>' is shallow`, and `cloneLane` died on the raw `execFileSync` throw. Every cloud-VM checkout arrives
+ * `--depth 1`, so on that host NO lane could be cloned at all, and the sibling clones failed the same way —
+ * warned, leaving a lane with no `frontierui`/`plateau-app` beside it. `docs/agent/vm-sessions.md` described
+ * shallow clones as merely "sharing nothing via `--reference`", which reads as a missed saving rather than a
+ * hard stop (#3265).
+ *
+ * Dropping the flag is the right degradation: `--reference` is a disk/bandwidth optimisation and a plain clone
+ * is correct wherever it cannot apply. `--reference-if-able` would also avoid the fatal, but it makes the
+ * CALLER unable to tell whether sharing happened — returning the argv lets the caller log which one it got.
+ *
+ * `isShallow` is compared strictly against `true`, so an UNKNOWN probe (a `null` from an unreadable path)
+ * keeps `--reference` — degrading to today's behaviour rather than silently dropping object sharing on every
+ * clone because one `git` call failed.
+ *
+ * @param {string} referencePath - the repo to share objects with.
+ * @param {boolean|null} isShallow - result of `git rev-parse --is-shallow-repository` on that path.
+ * @returns {string[]} argv fragment, empty when the reference is unusable.
+ */
+export function referenceArgs(referencePath, isShallow) {
+  return isShallow === true ? [] : ['--reference', referencePath];
+}

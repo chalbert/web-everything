@@ -6,7 +6,33 @@
  */
 import { describe, it, expect } from 'vitest';
 import { join, sep } from 'node:path';
-import { workspaceFor, defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
+import { workspaceFor, defaultPoolRoot, referenceArgs } from '../lib/lane-pool-paths.mjs';
+
+describe('referenceArgs — a shallow reference is FATAL, not a lost optimisation', () => {
+  it('omits --reference when the reference repo is shallow', () => {
+    // `git clone --reference <shallow>` exits 128 with `fatal: reference repository '<path>' is shallow`.
+    // Every cloud checkout arrives --depth 1, so passing the flag meant NO lane could ever clone.
+    expect(referenceArgs('/home/user/web-everything', true)).toEqual([]);
+  });
+
+  it('keeps --reference when the reference repo is full', () => {
+    expect(referenceArgs('/ws/webeverything', false)).toEqual(['--reference', '/ws/webeverything']);
+  });
+
+  it('keeps --reference when the probe could not answer', () => {
+    // null = `git rev-parse` failed. Unknown must NOT read as shallow, or one failed probe silently
+    // drops object sharing on every clone thereafter.
+    expect(referenceArgs('/ws/webeverything', null)).toEqual(['--reference', '/ws/webeverything']);
+    expect(referenceArgs('/ws/webeverything', undefined)).toEqual(['--reference', '/ws/webeverything']);
+  });
+
+  it('treats only a strict `true` as shallow, never a truthy string', () => {
+    // Guards the seam: the probe returns a STRING from git; a caller passing it raw must not
+    // accidentally read 'false' (truthy!) as shallow.
+    expect(referenceArgs('/ws/x', 'false')).toEqual(['--reference', '/ws/x']);
+    expect(referenceArgs('/ws/x', 'true')).toEqual(['--reference', '/ws/x']);
+  });
+});
 
 describe('workspaceFor — where the siblings and the pool actually sit', () => {
   it('is the parent of a primary checkout', () => {
