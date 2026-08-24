@@ -75,6 +75,20 @@ still made by the operation; only the execution moved.
 >
 > Until step 2 lands, the PR is a candidate for the drain on its next green sweep. Do not batch step 2 to
 > the end of a run of PRs — apply it per-PR, as each one is created.
+>
+> **The label is not the only casualty — the AUTHOR STAMP goes too, and that one has no step 2.**
+> `we:scripts/pr-land.mjs#withAuthorStamp` appends the #2844 `authored-by-actor` marker to the body, and that
+> marker is the INPUT to the self-clear refusal: `we:scripts/lib/review-independence.mjs` compares the
+> clearer's `CLAUDE_CODE_SESSION_ID` against it, and `we:scripts/review-set-label.mjs` refuses when they
+> match. A body with no stamp resolves to `''` — `unknown-author` — which is **tolerated, not refused**. So a
+> PR opened around `pr-land` is silently EXEMPT from the guard that stops an author clearing their own
+> review. Nothing warns you and nothing fails; the refusal simply never fires.
+>
+> Do not hand-write the marker to paper over this — a stamp asserting a session identity the operation did
+> not observe is worse than an absent one. Instead: prefer a genuinely independent verdict (`review-pr` mints
+> its juror a fresh session id), and when you record a verdict on such a PR, SAY that it carries no stamp so
+> the reader knows the guard was not in play. Observed 2026-08-24 on a credential-less cloud VM; carrying the
+> stamp through the fallback plan is #3267.
 
 It parks by default (`review:pending` — an independent review is owed), because an agent PR marching to
 `ready-to-merge` unreviewed is what park exists to stop. `--mode=` chooses otherwise, deliberately.
