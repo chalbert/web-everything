@@ -24,15 +24,37 @@
  * second run posts a second comment). That is deliberate. Over-applying is LOUD: a duplicate comment on a PR,
  * seen immediately. Under-applying is SILENT, and silent is what the review caught.
  *
+ * PARAMETERISED OVER THE DIRECTORY (#xaoja7a), because a SECOND transport arrived with the identical problem.
+ * `we:.github/workflows/stage-pr-view.yml` collects PR-VIEW requests from `ops/pr-views/requests`, and both
+ * silent drops above — the genesis push and git's rename heuristic — are properties of git and of GitHub's push
+ * payload, not of which directory is being watched. Re-implementing the diff in that workflow's shell would
+ * have re-earned both, in a place no unit test can reach. So the directory is an argument and the LOGIC has one
+ * home. `REQUEST_DIR` stays the default so every existing caller is byte-identical.
+ *
  * Usage:
- *   node scripts/collect-review-requests.mjs --before=<sha|zeros> --after=<sha>
+ *   node scripts/collect-review-requests.mjs --before=<sha|zeros> --after=<sha> [--dir=<path>]
  * Prints one repo-relative path per line, in git's order; prints nothing when the push added no request.
  */
 import { execFileSync } from 'node:child_process';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 
-/** The one directory a request may live in. Anything outside it is not a request, whatever it is named. */
+/** The one directory a review-verdict request may live in. Anything outside it is not a request, whatever it
+ *  is named. It is the DEFAULT of the `dir` parameter below, not the only value — see the header. */
 export const REQUEST_DIR = 'ops/review-requests';
+
+/**
+ * A watched directory must be a plain repo-relative path. Checked rather than trusted because this string goes
+ * into a git PATHSPEC and into a `RegExp`: a `..` segment would collect files outside the transport directory,
+ * and an unescaped regex metacharacter in {@link parseNames} would silently widen or narrow the filter with no
+ * error anywhere.
+ */
+function assertDir(dir) {
+  const d = String(dir ?? '').trim();
+  if (!d || !/^[\w.-]+(?:\/[\w.-]+)*$/.test(d) || d.split('/').includes('..')) {
+    throw new TypeError(`\`dir\` must be a plain repo-relative path, got ${JSON.stringify(dir)}`);
+  }
+  return d;
+}
 
 /** What GitHub sends as `before` when the push created the ref. */
 export const NO_PARENT_SHA = '0'.repeat(40);
@@ -52,14 +74,15 @@ export function isGenesisPush(before) {
  * The git argv to run. PURE, and exported so a test can assert the exact command without a repository —
  * the same discipline `we:scripts/lib/review-label-provider.mjs` applies to its `gh` argv.
  */
-export function collectArgv({ before, after } = {}) {
+export function collectArgv({ before, after, dir = REQUEST_DIR } = {}) {
   if (typeof after !== 'string' || !/^[0-9a-f]{7,40}$/i.test(after.trim())) {
     throw new TypeError(`\`after\` must be a commit sha, got ${JSON.stringify(after)}`);
   }
+  const watched = assertDir(dir);
   const head = after.trim();
   if (isGenesisPush(before)) {
     // No earlier state exists. Everything in the directory at `head` arrived with the push that made the branch.
-    return ['ls-tree', '-r', '--name-only', head, '--', REQUEST_DIR];
+    return ['ls-tree', '-r', '--name-only', head, '--', watched];
   }
   // A (dded) or M (odified) only: a request DELETED by this push is not a verdict to carry out.
   //
@@ -69,7 +92,7 @@ export function collectArgv({ before, after } = {}) {
   // having applied nothing. Measured live: `--diff-filter=AM` returned zero files for a push whose four
   // request files were all new. Similarity, not intent, decides whether git calls something a rename, so the
   // heuristic must simply be off here: a path that did not exist before and holds a request now IS one.
-  return ['diff', '--name-only', '--diff-filter=AM', '--no-renames', before.trim(), head, '--', REQUEST_DIR];
+  return ['diff', '--name-only', '--diff-filter=AM', '--no-renames', before.trim(), head, '--', watched];
 }
 
 /**
@@ -77,16 +100,17 @@ export function collectArgv({ before, after } = {}) {
  * one testable predicate instead of git's fnmatch dialect — and `ls-tree` on a directory returns everything
  * under it, including a README somebody adds later.
  */
-export function parseNames(stdout) {
+export function parseNames(stdout, dir = REQUEST_DIR) {
+  const watched = assertDir(dir);
   return String(stdout ?? '')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => new RegExp(`^${REQUEST_DIR}/[^/]+\\.json$`).test(line));
+    .filter((line) => new RegExp(`^${watched}/[^/]+\\.json$`).test(line));
 }
 
 /** IO shell: run the command `collectArgv` chose. `exec` is injected so the whole path stays testable. */
-export function collectRequests({ before, after, exec = defaultExec } = {}) {
-  return parseNames(exec(collectArgv({ before, after })));
+export function collectRequests({ before, after, dir = REQUEST_DIR, exec = defaultExec } = {}) {
+  return parseNames(exec(collectArgv({ before, after, dir })), dir);
 }
 
 function defaultExec(argv) {
@@ -101,7 +125,8 @@ function flag(argv, name) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const argv = process.argv.slice(2);
-    for (const name of collectRequests({ before: flag(argv, 'before'), after: flag(argv, 'after') })) {
+    const dir = flag(argv, 'dir');
+    for (const name of collectRequests({ before: flag(argv, 'before'), after: flag(argv, 'after'), ...(dir === undefined ? {} : { dir }) })) {
       writeLineSync(1, name);
     }
   } catch (e) {

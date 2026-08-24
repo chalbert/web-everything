@@ -193,9 +193,14 @@ export const OPERATIONS = Object.freeze({
   // THE FIELD LIST AND THE FILENAME ARE THE READER'S OWN, injected here rather than restated in the
   // declaration — the same single-home wiring `record-verdict` uses for the applier's validator. A second
   // namer would send the review to a different file than the one staged (#1466).
+  //
+  // #xaoja7a — THE READER ALSO GETS `prViewFileName`, for the same single-home reason the declaration does.
+  // The CI transport reads `ops/pr-views/views/<name>.json` and the staging step writes `<dir>/<name>.json`;
+  // if those two names could disagree, `--fromTransport` would wait forever on a file CI had already published
+  // under the other spelling. One namer, two consumers.
   [STAGE_PR_VIEW_OP]: () => ({
     declaration: stagePrViewOperation(
-      { readPayload: createPayloadReader() },
+      { readPayload: createPayloadReader({ viewFileName: prViewFileName }) },
       { fields: PR_VIEW_FIELDS, viewFileName: prViewFileName, defaultDir: defaultViewDir() },
     ),
     sinks: createStagePrViewSinks(),

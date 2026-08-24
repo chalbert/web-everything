@@ -100,7 +100,11 @@ node scripts/operations/run.mjs open-pr --ref=lane/<slug> --title="…" --bodyFi
 
 # 3. Submit that plan's argv, unedited, through the channel that holds a credential. See the losses below.
 # 4. Review it. `--cwd` is a lane of the juror's OWN — never the one you are driving from (#3151).
-node scripts/operations/run.mjs stage-pr-view --pr=<N> --repo=<owner/name> --from=<payload.json> --dir="$WE_PR_VIEW_DIR"
+#    The view comes from CI, NOT from this session (#xaoja7a): `--fromTransport` pushes a {repo, pr} request to
+#    `ops/pr-views`, waits ~1-2 min for the `Stage PR view` workflow to commit the `gh pr view --json` answer
+#    back, and reads it out of the fetched ref. `--from=<file>` is REFUSED here — a session that supplies the
+#    view supplies the evidence its own juror reads, which is how PR #1542 got a fabricated OWNER comment.
+node scripts/operations/run.mjs stage-pr-view --pr=<N> --repo=<owner/name> --fromTransport --dir="$WE_PR_VIEW_DIR"
 node scripts/operations/run.mjs review-pr --pr=<N> --repo=<owner/name> --cwd=<the OTHER lane> --json
 ```
 
