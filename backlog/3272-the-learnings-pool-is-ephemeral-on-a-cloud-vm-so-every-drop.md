@@ -1,4 +1,5 @@
 ---
+bornAs: xq6420r
 kind: story
 size: 3
 status: open
