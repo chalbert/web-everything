@@ -43,14 +43,20 @@ that phrase returns **five** cards: **#3100, #1637, #3183, #3238, #3103**.
 **(2) Which cards WARN at the gate?** Only four, and it is a different set, because
 `we:scripts/check-standards-rules.mjs:811` warns only when `item.batchable === true`:
 
+**Line numbers below are FILE-relative** (1-based from the frontmatter's opening `---`), which is what
+`grep -n` reports. The gate's own warnings quote a *body*-relative number, so the two differ by the
+frontmatter length — round 1's table mixed the two bases and two of its four cited lines resolved to the
+wrong place. Stating the basis because getting this wrong is the same class of defect the table exists to
+correct.
+
 | item | carries the renderer line? | warns? | why |
 | --- | --- | --- | --- |
-| #3100 | **yes** — body line 140 | yes | the only true instance of this defect |
-| #1637 | **yes** — body line 78, put there by the `review-prep` run that landed as PR #1270 | no | `status: parked`, so not batchable |
-| #3183 | **yes** — body line 122 | no | carries `blockedBy: ["3194"]` |
-| #3238 | no — *quotes* the phrase in its own problem statement | yes | quoting it is enough to trip the regex |
-| #3103 | no — the row that *defines* the phrase in the risk enum | yes | ditto |
-| #2717 | no — line 11 reads `verify before claim`, a different phrase about a stale `blockedBy` | yes | unrelated to `review-prep` entirely |
+| #3100 | **yes** — file line 161 | yes | the only true instance of this defect |
+| #1637 | **yes** — file line 78, put there by the `review-prep` run that landed as PR #1270 | no | `status: parked`, so not batchable |
+| #3183 | **yes** — file line 122 | no | carries `blockedBy: ["3194"]` |
+| #3103 | no — file line 29 is the row that *defines* the phrase in the risk enum | yes | defining it trips the regex |
+| #2717 | no — file line 22 reads `verify before claim`, a different phrase about a stale `blockedBy` | yes | unrelated to `review-prep` entirely |
+| #3238 | no — this card *quotes* the phrase in its own problem statement | yes | quoting it is enough to trip the regex |
 
 **So #1637 was the right item all along.** The original card had the correct item and a wrong filename; the
 first correction turned that into a wrong item. #1637 carries the defect and is silent only because the gate
@@ -97,11 +103,14 @@ were wrong, and an independent reviewer showed why.**
   `we:scripts/operations/explore-io.mjs`. The first states the rule outright at its line 21: *never a bare
   `writeFileSync`*. `we:scripts/operations/review-prep-io.mjs:195` is the **lone bare `writeFileSync`** on a
   card in that directory. This card is not adding a guard; it is bringing the one straggler into line.
-- **Round 1 dropped half the guard, and it is the dangerous half.** `assertPublishableContent` runs
-  `scrubPublish` (secrets) **and** `scanRepoLocusPrefixes` (locus). Round 1 covered only locus. So today a
-  juror's prose containing a credential goes straight into a committed-and-pushed card. This card's own
-  history is the proof: authoring it through the Edit tool was refused **twice** — once for a personal email
-  address, once for bare code-path refs. Both gates fired on this very content; round 1's design caught one.
+- **Round 1 dropped part of the guard, and it is the dangerous part.** `writeBacklogMd` runs **three**
+  refusals, not the two round 2 described: `laneGuardDecision`
+  (`we:scripts/backlog/guarded-write.mjs:56` — lane ownership, no override), then `scrubPublish` (`:113` —
+  secrets), then `scanRepoLocusPrefixes` (`:121` — locus). Round 1 covered only locus, so today a juror's
+  prose containing a credential goes straight into a committed-and-pushed card. This card's own history is
+  the proof: authoring it through the Edit tool was refused **twice** — once for a personal email address,
+  once for bare code-path refs. Both content gates fired on this very content; round 1's design caught one,
+  and neither round mentioned the lane guard at all.
 
 **So (a) becomes: route `record`'s card write through `we:scripts/backlog/guarded-write.mjs#writeBacklogMd`.**
 No new detector, no new module, no `bareRefs` plumbing — the writer throws, and the throw already carries
@@ -112,10 +121,14 @@ change in the renderer, plus rewording the three cards that carry the emitted li
 
 ## Interfaces
 
-- `recordPrepVerdict` calls `writeBacklogMd` instead of a bare write. On a guard violation the writer
-  **throws** before any mutation; `record` catches it and returns
-  `{recorded: false, reason: 'guarded-write', detail: <the writer's message>}` — a determinate third
-  outcome, the same shape #3230 gives a failed verification, so the operation never reports a bare success.
+- `recordPrepVerdict` calls `writeBacklogMd` instead of a bare write. On a violation the writer **throws**
+  before any mutation; `record` catches it and returns a determinate third outcome — the same shape #3230
+  gives a failed verification, so the operation never reports a bare success.
+- **`reason` distinguishes the three gates**, because they have different causes and different remedies:
+  `'lane-guard'` (wrong tree — the caller must move, and there is no override), `'secret'` (the juror's
+  prose carries a credential — it must be rewritten, and the value rotated), `'locus'` (bare code-path refs
+  — prefixable). Collapsing them into one `'guarded-write'` would tell a caller a write failed and nothing
+  about what to do, which is the failure mode this whole card is about.
 - `renderPrepReviewSection` is **unchanged**. Round 1's second return form is dropped: the guard belongs at
   the write, not in the renderer, which is the whole point of a single card-writer.
 
@@ -164,10 +177,12 @@ renderer, so if it lands separately it should land **after** #3233 to avoid a te
    `we:backlog/*.md`: this test's purpose is "the reworded text no longer trips the marker", not "the repo
    currently contains that text", so unrelated edits must not redden it.
 3. **Executable** — a case asserting `recordPrepVerdict` routes its write through `writeBacklogMd`: a note
-   containing a bare code path makes it return `{recorded: false, reason: 'guarded-write'}` and leaves the
-   card on disk **unchanged**. Fails today (the bare write accepts it).
-4. **Executable** — the same, for a note containing a **secret-shaped** string. This is the half round 1's
-   design missed entirely, so it gets its own case rather than riding on case 3.
+   containing a bare code path makes it return `{recorded: false, reason: 'locus'}` and leaves the card on
+   disk **unchanged**. Fails today (the bare write accepts it).
+4. **Executable** — the same, for a note containing a **secret-shaped** string, asserting `reason: 'secret'`.
+   This is the half round 1's design missed entirely, so it gets its own case rather than riding on case 3.
+4b. **Executable** — the same for a write attempted from a tree the lane guard refuses, asserting
+   `reason: 'lane-guard'`. Three cases, three reasons: a single shared `reason` fails all three.
 5. **Executable** — a case asserting a clean note records normally, so the guard cannot be satisfied by
    always refusing.
 6. **Mutation** — reverting to the bare write reddens cases 3 **and** 4 by name; reverting the reworded

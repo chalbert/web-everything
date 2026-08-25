@@ -107,10 +107,13 @@ served instead of blocked.
 - **Default (`land: true`), credentialed** returns
   `{recorded: true, aborted: false, path, actor, verified: true, sha, ref, pushed: true, landed: true, clean, disposition, land}`
   — today's shape plus `verified`/`pushed`, so the merged-nine path is preserved intact.
-- **Downgraded (no credential) or explicit `land: false`** returns the same minus `{clean, disposition, land}`,
+- **Downgraded (no credential) or explicit `land: false`** returns the same minus `{disposition, land}`,
   with `landed: false` and `followUp: string[]` — the argv a credentialed host should run to land the pushed
   ref. It is a real field, not advice in a log line, so a caller can act on it. When the downgrade fired
-  rather than the caller asking, `reason: 'no-credential'` says so.
+  rather than the caller asking, `reason: 'no-credential'` says so. **`clean` is retained** on this branch:
+  it is computed by `isCleanPrepReview` from the verdict itself, not from what the land did, so dropping it
+  would hide the verdict's own shape from exactly the caller who has to act on `followUp`. (Round 4 dropped
+  it with no reason given.)
 - **Push failed** returns `{recorded: true, verified: true, pushed: false, landed: false, sha, followUp}`.
   The commit stands; the push is owed and reported.
 - **`verified`** is the #3230 half, checked against the **staged** content. See #3230 for why the ordering
@@ -144,19 +147,24 @@ the merged result, leaving the builder to compose three diffs by hand. It is sta
    downgrade to `false` with `reason: 'no-credential'`. Decided FIRST, before any mutation (#3233).
 1. Pre-write content-hash check (existing; unchanged).
 2. Render the section.
-3. Write the card via `we:scripts/backlog/guarded-write.mjs#writeBacklogMd`, which runs the secret scrub and
-   the locus scan and **throws before writing** on a violation ⇒ return the `guarded-write` outcome (#3238).
+3. Write the card via `we:scripts/backlog/guarded-write.mjs#writeBacklogMd`, which throws before writing on
+   a violation ⇒ return the `guarded-write` outcome (#3238). It runs **three** gates, in this order:
+   `laneGuardDecision` (`we:scripts/backlog/guarded-write.mjs:56`), `scrubPublish` (`:113`), then
+   `scanRepoLocusPrefixes` (`:121`). The first is a lane-ownership refusal with no override and a different
+   cause from the other two, so the returned `reason` must distinguish it rather than collapse all three.
 4. `git add` the card path.
 5. **Verify the STAGED content** contains the section. Absent ⇒ return the #3230 third outcome; nothing is
    committed (#3230).
 6. `git commit` the card path only.
-7. **Push** that single commit to `lane/review-prep-<item>-<sha8>`. Failure ⇒ return `pushed: false` with
-   the commit intact and `followUp` owed (#3233).
-8. If effective `land` ⇒ stage the PR body file (retained from today — `we:scripts/pr-land.mjs` refuses a
-   bodyless PR) and shell it. Else ⇒ return `followUp`.
+7. **If NOT landing**, push that single commit to `lane/review-prep-<item>-<sha8>`. Failure ⇒ return
+   `pushed: false` with the commit intact and `followUp` owed.
+8. **If landing**, stage the PR body file and shell `we:scripts/pr-land.mjs`, which does the push itself
+   (`we:scripts/pr-land.mjs:574`) — so the default path pushes exactly once, through the same transport as
+   today, and step 7 is the branch that makes a non-landing verdict durable.
 
-Step 0 sits first so the whole run is decided before anything is touched. Step 3 carries the guard because
-the writer owns it — there is no separate refuse-then-write pair to keep in order.
+Step 0 sits first so the whole run is decided before anything is touched. Steps 7 and 8 are **exclusive**:
+round 4 had both firing on the default path, which would have pushed twice and made "pushes once"
+untestable. Step 3 carries the content guards because the writer owns them.
 
 ## Migration — three consumer classes, and only the static one was originally checked
 
@@ -166,24 +174,31 @@ HTTP adapter via `REVIEW_PREP_OP`, its own `-io` module, and its two test files
 `we:scripts/operations/__tests__/review-prep-io.test.mjs`). Stating the unit because round 1 wrote "exactly
 four consumers" while itemising five files — the `premise` juror flagged the ambiguity.
 
-**In-flight suspended runs — the gap round 1 missed entirely.** `record` is declared `idempotent: false`,
-and the engine suspends at the `judge` step while the juror spawns. A run started under today's
-land-always contract and resumed after this ships would silently default to `land: false` and give its
-caller neither a land nor an error. Handled explicitly rather than by hoping: the run record gains a
-contract version, and resuming a `review-prep` run recorded under the old one **refuses** with a message
-naming the change and telling the caller to re-run. Blast radius is nil today (six `review-prep` run
-records exist on this machine, all for #3100, all complete) but the refusal is what makes that a fact
-rather than a bet.
+**In-flight suspended runs — real, and the fix is one operator, not a subsystem.** Verified rather than
+argued this time: `validateInput` is called **only** in `startRun` (`we:scripts/operations/engine.mjs:131`),
+which stores the defaulted input into the run record; `resolvePending` and the resume path
+(`we:scripts/operations/engine.mjs:236`, `:348`) never re-validate, so declaration defaults are **never
+re-applied on resume**. A run record written before `land` existed therefore has no `land` key at all, and
+`view.input.land` reads `undefined` — not `true`.
 
-**HTTP-adapter network callers: undiscoverable by grep, so DETECTED rather than assumed.** The operation is
-exposed over the generated HTTP adapter, whose callers are by nature not in the import graph. Round 2
-labelled this a residual risk and stopped, which a juror rightly called "labelling a gap is not closing
-one." Closed instead by the cheapest thing that produces evidence: the `record` effect **logs one line
-whenever it runs with `land` absent from its input entirely** (as opposed to explicitly `false`), naming
-the caller channel. Absent-vs-false distinguishes an old-contract caller from a new one. If that line never
-appears, the population is empirically empty; if it does, we learn who they are before anything else
-changes. Nothing in this repo starts that adapter as a service and no doc points a client at it, so the
-expectation is silence — but that becomes a measurement rather than a hope.
+Rounds 2 and 3 proposed a contract-version stamp plus a resume refusal for this. Round 4 deleted them on the
+reasoning that the ruling made the default harmless; **that reasoning was wrong**, and an independent review
+caught it. The stamp is not the right answer either. The read site takes the default explicitly:
+
+```js
+const land = view.input.land ?? true;   // absent key (pre-#3233 run record) === today's behaviour
+```
+
+An old run resumes into exactly what it would have done before this change. No version field, no refusal, no
+new machinery — and unlike the previous two answers, this one is checkable in a test rather than defended in
+a paragraph.
+
+**HTTP-adapter network callers.** The operation is exposed over the generated HTTP adapter, whose callers
+are not in the import graph, so no grep settles the population. With `land` defaulting to `true` and the
+`?? true` read above, an old caller that never passes the field gets today's behaviour — so there is nothing
+for such a caller to observe, whoever they are. That is a stronger answer than the instrumentation round 3
+proposed, which round 4 specified as an absent-vs-`false` log line that could not have worked anyway: the
+defaulted value is stored at `startRun`, so "absent" is not distinguishable downstream.
 
 **No skill invokes it** — grepping `we:skills-src/` for the operation name returns nothing, itself a gap
 tracked by #3225.
@@ -209,14 +224,13 @@ card exists for, got nothing.
    sitting next to the land.
 2. **The PR body file is retained** — step 8 stages it exactly as today, because `we:scripts/pr-land.mjs`
    refuses a bodyless PR. Round 3's order dropped it silently; a case now covers it.
-3. **The absent-vs-`false` detection is dropped as specified and replaced.** It could not work: the
-   declaration applies defaults before a step reads `view.input.*` (visible in the sibling `actor` field in
-   the same file), so an absent `land` is already `false` by then. With the default now `true`, the
-   distinction is moot anyway — nothing changes for an old caller, so there is nothing to detect. The HTTP
-   consumer class is genuinely unaffected by this change, which is a stronger answer than instrumentation.
-4. **The contract check is dropped entirely, and this is the honest consequence of the ruling.** It existed
-   to stop an in-flight run silently acquiring a new default. With the default preserving today's behaviour,
-   a resumed run gets what it always would have. No version stamp, no resume refusal, no new machinery.
+3. **The absent-vs-`false` detection is dropped, not respecified.** It could not work: defaults are applied
+   and stored at `startRun`, so "absent" is not observable downstream. With the `?? true` read, an old
+   caller gets today's behaviour and has nothing to observe — which removes the need to detect them at all.
+4. **The contract check is replaced by a `?? true` read, not deleted on an argument.** Round 4 removed it
+   claiming the ruling made it unnecessary; an independent review showed that was false — defaults are
+   applied once at `startRun` and never re-applied on resume, so an old run record reads `land` as
+   `undefined`. See the Migration section for the verified mechanism and the one-line answer.
 5. **A failed `push` is decided**: it returns `{recorded: true, verified: true, pushed: false, followUp}`
    with the local commit intact. Determinate, not a throw — the verdict is committed and recoverable, and
    the caller is told the push is owed. This is the one branch where committed-but-unpushed is acceptable,
@@ -251,25 +265,30 @@ stated above. No branch needed.
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep-io.test.mjs` passes a case
-   asserting the **default** `record` on a credentialed host **commits once, pushes once, and shells
-   `we:scripts/pr-land.mjs` exactly once** — today's end-to-end behaviour, preserved. It fails today only on
-   the push assertion, which is the point of the change.
-2. **Executable** — the same case asserts the push refspec names the recorded `sha` rather than a branch
-   tip, so the pushed ref carries **exactly one** commit. This is the "six commits under one item's ref"
-   defect; a test asserting only that a push happened would pass on the buggy code.
-3. **Executable** — a case with an explicit `land: false` asserts pr-land is shelled **zero** times and a
-   `followUp` array is returned whose first element names `we:scripts/pr-land.mjs`.
-4. **Executable** — a case with the default `land` on a **stubbed credential-less host** asserts the run
-   **downgrades rather than refuses**: the write, stage, commit and push spies each fire, pr-land is shelled
-   zero times, and the result carries `{landed: false, reason: 'no-credential', followUp}`. This is the
+   asserting the **default** `record` on a credentialed host commits once, shells `we:scripts/pr-land.mjs`
+   exactly once, and issues **no `git push` of its own** — pr-land owns the push on this path. Byte-identical
+   to today's behaviour, which is what makes the default flip safe.
+2. **Executable** — a case with an explicit `land: false` asserts pr-land is shelled **zero** times, exactly
+   one `git push` is issued, and its **refspec names the recorded `sha`** rather than a branch tip — so the
+   pushed ref carries one commit, not the caller's accumulated stack. This is the "six commits under one
+   item's ref" defect; asserting only that a push happened would pass on the buggy code. Fails today.
+3. **Executable** — a case with the default `land` on a **stubbed credential-less host** asserts the run
+   **downgrades rather than refuses**: write, stage, commit and push each fire, pr-land is shelled zero
+   times, and the result carries `{landed: false, reason: 'no-credential', clean, followUp}`. This is the
    cloud-VM case the card exists for, so it must serve it, not block it.
-5. **Executable** — a case where the push command fails asserts
-   `{recorded: true, verified: true, pushed: false}` with the commit intact and `followUp` returned — and
-   that it does **not** throw.
-6. **Executable** — a case asserting the **file header** (lines 1–31) no longer describes landing as
-   automatic *and* that `recordPrepVerdict`'s JSDoc no longer contains `"LANDS OR PARKS"`. Both blocks are
-   asserted positively — that they describe the credential downgrade — because a bare string-absence check
-   is green today for the header and would be decorative.
-7. **Mutation** — deleting the push reddens case 1; deleting step 0's credential resolution reddens case 4;
-   deleting the push-failure branch reddens case 5. Each by name.
-8. `npm run check:standards` shows no new warnings against the 0-error / 1435-warning baseline.
+4. **Executable** — a case resuming a run record with **no `land` key** asserts the run **lands** — the
+   `?? true` read giving an old record today's behaviour. Fails against a plain `view.input.land` read,
+   which yields `undefined` and takes the push-only branch.
+5. **Executable** — a case where the push fails asserts `{recorded: true, verified: true, pushed: false}`
+   with the commit intact and `followUp` returned — and that it does **not** throw.
+6. **Executable** — three cases, one per gate in `writeBacklogMd`, asserting the returned `reason`
+   distinguishes a lane-ownership refusal from a secret-scrub refusal from a locus refusal. A single
+   `reason: 'guarded-write'` for all three fails this.
+7. **Executable** — a case asserting the **file header** (lines 1–31) no longer describes landing as
+   automatic *and* that `recordPrepVerdict`'s JSDoc no longer contains `"LANDS OR PARKS"`. Both asserted
+   positively — that they describe the credential downgrade — because a bare string-absence check is green
+   today for the header and would be decorative.
+8. **Mutation** — deleting step 7's push reddens case 2; deleting step 0's credential resolution reddens
+   case 3; changing `?? true` to a plain read reddens case 4; deleting the push-failure branch reddens
+   case 5. Each by name.
+9. `npm run check:standards` shows no new warnings against the 0-error / 1435-warning baseline.
