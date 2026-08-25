@@ -4,13 +4,12 @@ kind: story
 size: 5
 parent: "2612"
 status: open
-relatedTo: ["3037", "3029", "3225"]
-blockedBy: ["3165"]
+relatedTo: ["3037", "3029", "3225", "3096", "3239", "3161"]
+blockedBy: ["3118", "3165"]
 dateOpened: "2026-08-16"
 preparedDate: "2026-08-25"
 scope:
   - we:skills-src/conveyor/SKILL.md
-  - we:skills-src/conveyor/runner.mjs
 tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 ---
 
@@ -72,6 +71,23 @@ Per this card's own instruction, the gap is filed rather than absorbed: **#3165*
 is `blockedBy` it. That keeps #3147 what it says it is — a skill rewiring — instead of quietly growing an
 operation change inside it.
 
+### Two open siblings already scope the build half — settle this before starting
+
+**#3096** (*Route the conveyor's build dispatch through the declared dispatch-lane operation*) and **#3239**
+(*the conveyor tick executes spawnBuilds by hand instead of through dispatch-lane*) are both open and both
+name exactly the step-3 rewiring described here. `we:skills-src/conveyor/SKILL.md` even carries a `#3239`
+annotation saying *"routing the spawnBuilds half through the operation is its own item."* Neither is blocked
+by #3165, so either could land the build half independently — and whichever lands second either conflicts
+with the other's edits or discovers the work already done.
+
+**So this card's unique contribution is the step-3b PREPARE half, not step 3.** It should either absorb
+#3096/#3239 explicitly or narrow to 3b. That is the first decision for whoever picks it up, and it is why
+all three are now `relatedTo`.
+
+It also weakens this card's own blocking rationale. The *Not in scope* section permanently leaves fix,
+CI-heal, decision and panel spawns hand-spawned — so "two dispatch mechanisms live in one skill" is already
+an accepted end state for the other kinds, not the unconditional harm the argument treats it as.
+
 **Consequence for sequencing:** #3165 lands first and makes step 3b callable; #3147 then rewires both steps
 in one pass. Doing #3147 first would mean wiring step 3 to the operation and leaving step 3b hand-spawned —
 a half-migration with two dispatch mechanisms live in one skill, which is worse than either end state.
@@ -95,19 +111,22 @@ node we:scripts/operations/run.mjs dispatch-lane --num=<NNN> [--bookkeepingFile=
 `we:scripts/conveyor/tick-core.mjs`, resolve the item, fill the brief and compute the guard entry, so the
 skill passes the item number and nothing else — it must not re-derive the plan or pre-fill a brief.
 
-**Which entry point:** `we:skills-src/conveyor/runner.mjs` is a node process, so it can `import` the
-operation rather than shelling a CLI. Prefer the import — shelling from inside the runner adds a subprocess
-per dispatch and loses the thrown error. The `we:skills-src/conveyor/SKILL.md` prose still names the CLI
-form, because a human or an agent reading the skill invokes it that way.
+**The runner is OUT of this card's scope, and an earlier draft was wrong to name it.** That draft told a
+builder to *"point `we:skills-src/conveyor/runner.mjs`'s dispatch site at the operation."* There is no such
+site: the runner only normalises the tick's decisions and emits them (`tickSurface`, and `runLoop`'s injected
+`emit`). Creating one would make the headless runner spawn agents itself — which is exactly the question
+**#3118** leaves open and unratified. A card that instructs it would pre-empt that decision inside a skill
+rewiring. Hence `blockedBy: ["3118", "3165"]` and a scope of the skill file alone.
 
 ## Tasks
 
 1. Rewrite `we:skills-src/conveyor/SKILL.md` steps 3 and 3b to name the operation instead of describing the
    spawn.
-2. Point `we:skills-src/conveyor/runner.mjs`'s dispatch site at the operation.
-3. Delete the now-dead brief-filling and `Agent`-spawn prose from those two steps — leaving it would give a
+2. Delete the now-dead brief-filling and `Agent`-spawn prose from those two steps — leaving it would give a
    reader two contradictory instructions.
-4. Leave steps 3c–3e and step 4's panel spawns alone (see *Not in scope*).
+3. Leave every other spawn site alone: steps 3c and 3c-ci (fix and CI-heal), 3d, 3e, 3f, and step 4's panel
+   spawns. *(An earlier draft said "steps 3c–3e", a range that does not exist — the skill's steps are 1, 2,
+   3, 3b, 3c, 3c-ci, 3d, 3e, 3f, 4, 5, 6, 7, 8.)*
 
 ## Delivery shape
 
@@ -118,11 +137,12 @@ step 3b later would leave two dispatch mechanisms live inside one skill.
 
 1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits in **both**
    step 3 and step 3b. It returns nothing today, in any skill.
-2. **Executable** — grepping the same file for the hand-spawn prose (`Spawn it as one background Agent`, and
-   the brief-fill instruction) returns **zero** hits within steps 3 and 3b, proving the superseded prose was
-   removed rather than left beside the new instruction.
-3. **Executable** — a test asserting `we:skills-src/conveyor/runner.mjs`'s dispatch path invokes the
-   operation: with a stubbed operation entry point, a tick yielding one build and one prepare-scope spawn
-   calls it **twice**, and the raw spawn path **zero** times.
-4. **Mutation** — reverting either step's prose to the hand-spawn form reddens case 1 or 2 by name.
+2. **Executable** — the hand-spawn prose is gone from steps 3 and 3b. The literal string to match is
+   ``Spawn it as **one background `Agent`**`` — bold and backticked, as it is actually written at lines 251
+   and 279. *(An earlier draft specified `Spawn it as one background Agent`, which matches **zero** times in
+   the file today, before any change — a criterion that would have "passed" while the prose sat untouched.)*
+   The count must fall from 4 occurrences to 2: the two inside steps 3 and 3b go, and the two at lines 521
+   and 680 — the fix and decision spawns, explicitly out of scope — must remain. Asserting a whole-file count
+   of zero would wrongly demand deleting those.
+3. **Mutation** — restoring either step's prose reddens case 2 by name, and the count returns to 4.
 5. `npm run check:standards` — no new errors and no new warnings against the 0-error / 1435-warning baseline.
