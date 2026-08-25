@@ -107,6 +107,127 @@ const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|sc
 /** Does this segment INVOKE a backlog item-mutation subcommand? Pure (unit-tested). */
 export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String(segment || '')); }
 
+// An IDENTITY OVERRIDE on a commit: `git -c user.email=… commit`, `git commit --author=…`, or the env pair
+// `GIT_AUTHOR_EMAIL=`/`GIT_COMMITTER_EMAIL=`. `-c` may appear before the subcommand (git's own placement) and
+// the value may be quoted, so this matches the FLAG rather than a position. The `--author` form is included
+// because it forges the same field by a different door.
+//
+// WHY DENY RATHER THAN CORRECT. The container already ships the right identity — `noreply@anthropic.com` at
+// `--global`. Nothing here is misconfigured, so no bootstrap step and no `git config` write can help: the only
+// way to get the wrong author is for the session to OVERRIDE a correct default, which is precisely what
+// happened on 2026-08-24 (four commits landed on `main` attributed to the operator, for work the operator did
+// not write). That is a rule, not machine state, and #51's hookable-vs-judgment statute puts a
+// script-decidable rule in a deterministic hook.
+//
+// NOT REPLACEABLE BY AN OPERATION. There is no `commit` operation today, and one would not close this: an
+// operation offers a correct path, it cannot stop a raw `git commit` beside it. The repo already runs both
+// patterns together — `open-pr` exists AND this file still denies direct pushes.
+/**
+ * Does this segment commit under a HAND-SET identity? Pure (unit-tested).
+ *
+ * TOKEN-POSITIONAL, NOT A REGEX OVER THE RAW TEXT — the same lesson the `pkill` arm above already paid for.
+ * A regex reading the whole segment denies `git commit -m "docs: never pass -c user.email=foo"`, i.e. the
+ * commit that DOCUMENTS this rule (caught by probe while writing this arm). `shellTokens` is quote-aware, so a
+ * message body is ONE token and cannot be mistaken for argv.
+ *
+ * Deliberately narrow: fires on the override, never on `git commit` itself, and never on a `git config` write
+ * — setting the machine's identity is legitimate; smuggling one past it for a single commit is not.
+ */
+export function isCommitIdentityOverride(segment) {
+  // `shellTokens` yields {text, quoted, op} records, not strings — read `.text`.
+  //
+  // QUOTED-NESS IS NOT THE DISCRIMINATOR, and the first cut's use of it was a REAL BYPASS (#1550 correctness
+  // juror, confirmed by probe): shell quoting is invisible to git, so `git -c user.email=x "commit"`,
+  // `git "-c" user.email=x commit` and `GIT_AUTHOR_EMAIL="a@b" git commit` all override authorship while
+  // reading as "quoted, therefore prose". Requiring unquoted tokens made the arm trivially evadable.
+  //
+  // The only place prose legitimately appears in a commit's argv is the VALUE OF A MESSAGE FLAG, so that is
+  // what is skipped — precisely, by position. Everything else is argv and is checked regardless of quoting.
+  // This still lets `git commit -m "docs: never pass -c user.email=foo"` through, which is the false positive
+  // the token walk exists to avoid.
+  const tokens = shellTokens(String(segment || '')).filter((t) => !t.op);
+  const MESSAGE_FLAG = /^(?:-m|--message|-F|--file|-t|--template)$/;
+  // A flag that CARRIES its value (`-mmsg`, `--message=…`) consumes no following token.
+  const CARRIES_VALUE = /^(?:-m.|--message=|--file=|--template=)/;
+  const isValue = new Array(tokens.length).fill(false);
+  for (let i = 0; i < tokens.length; i++) {
+    if (MESSAGE_FLAG.test(tokens[i].text) && i + 1 < tokens.length) isValue[i + 1] = true;
+  }
+  const argv = tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
+  // It must be GIT that is committing. Checking only for a `commit` token denied any tool whose argv happens
+  // to carry the same shapes — `npm run commit -- --author=me`, `my-tool commit --author=x` (#1550 juror r4,
+  // confirmed by probe). `canonicalCommand` peels wrappers and path-qualification, so `/usr/bin/git` and
+  // `env git` still resolve.
+  if (programWord(segment) !== 'git') return false;
+  if (!argv.some((t) => t.text === 'commit')) return false;
+  // CASE-INSENSITIVE, because git's own config parsing is: section and variable names fold, so
+  // `-c User.Email=…` and `-c USER.NAME=…` set the identity exactly as the lowercase spellings do. Verified
+  // against real git — `git -c User.Email=case@test.invalid commit` records that address (#1550 juror r2).
+  // The `-c` flag itself stays case-SENSITIVE: `-C` is git's change-directory flag, a different thing
+  // entirely, and folding it would deny an innocent `git -C <path> commit`.
+  const isIdentityConfig = (v) => /^user\.(?:email|name)=/i.test(v);
+  for (let i = 0; i < argv.length; i++) {
+    const text = argv[i].text;
+    // `-c user.email=…` (separate) and `-cuser.email=…` (glued) — git accepts both.
+    if (text === '-c' && isIdentityConfig(argv[i + 1]?.text || '')) return true;
+    if (text.startsWith('-c') && isIdentityConfig(text.slice(2))) return true;
+    // `--author=…` / `--author …` forges the same field by another door.
+    if (text === '--author' || text.startsWith('--author=')) return true;
+    // The env pair, as its own leading token (`GIT_AUTHOR_EMAIL=a@b git commit …`).
+    if (/^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(text)) return true;
+  }
+  return false;
+}
+
+/**
+ * The PROGRAM WORD of a segment. `canonicalCommand` returns the whole canonicalized command string, not the
+ * head — reading its result as the program name denied nothing and allowed everything (caught by probe).
+ */
+function programWord(seg) {
+  return String(canonicalCommand(String(seg || '')) || '').trim().split(/\s+/)[0] || '';
+}
+
+/** Is this segment GIT committing? Pure. `programWord` peels wrappers, so `/usr/bin/git` resolves. */
+function isGitCommitSegment(seg) {
+  if (programWord(seg) !== 'git') return false;
+  return shellTokens(String(seg || '')).some((t) => !t.op && t.text === 'commit');
+}
+
+/**
+ * The WHOLE-COMMAND half of the identity arm: an override established in one segment and consumed by a
+ * `git commit` in another. Pure (unit-tested).
+ *
+ * `reason` sees one segment at a time, so `export GIT_AUTHOR_EMAIL=x && git commit -m hi` slips through —
+ * neither segment alone both sets the identity and commits (#1550 juror r3, confirmed by probe). The shape of
+ * the fix is precedented: `backgroundedVerificationReason` is likewise whole-command, for the same reason
+ * (backgrounding is a property of the command, not a segment).
+ *
+ * Covers the env pair set by `export` or bare assignment, and a `git config user.{email,name}` write in the
+ * same command as a commit. The latter is the one deliberate widening: a standalone `git config` write is
+ * legitimate and stays allowed — the machine's identity is the operator's to set — but chaining it to a
+ * commit in one breath is an override for that commit wearing a different hat.
+ */
+export function commitIdentityCommandReason(command) {
+  const text = String(command || '');
+  if (/\bCOMMIT_IDENTITY_OK=1\b/.test(text)) return null;
+  const segs = parseSegments(text).segments;
+  if (segs.length < 2) return null;                       // single segment is `reason`'s business
+  if (!segs.some((s) => isGitCommitSegment(s))) return null;
+  const setsIdentity = segs.some((s) => {
+    const toks = shellTokens(s).filter((t) => !t.op).map((t) => t.text);
+    if (toks.some((t) => /^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(t))) return true;
+    // `git config [--global] user.email <VALUE>` — a WRITE only. A bare `git config user.email` is a READ
+    // and changes nothing, so denying it was pure over-reach (#1550 juror r4, confirmed by probe). The write
+    // is distinguished structurally: the key must be followed by a non-flag token, its value.
+    if (programWord(s) !== 'git' || !toks.includes('config')) return false;
+    const key = toks.findIndex((t) => /^user\.(?:email|name)$/i.test(t));
+    if (key < 0) return false;
+    return toks.slice(key + 1).some((t) => !t.startsWith('-'));
+  });
+  if (!setsIdentity) return null;
+  return 'This command sets the git author/committer identity in one segment and commits in another (`export GIT_AUTHOR_EMAIL=… && git commit`, or a `git config user.email` write chained to a commit). The machine already has the right identity configured, so this can only mis-attribute the commit — and unsigned commits in someone else\'s name land on `main` and stay there. Commit with the ambient identity instead. Sanctioned override (rare — replaying another author\'s patch, a `--reset-author` repair): prefix `COMMIT_IDENTITY_OK=1`.';
+}
+
 // #2833 finding 3 — the VERIFICATION set that must never be backgrounded. The whole point of #2833 is that a
 // build subagent BACKGROUNDED its long verification and then yielded mid-run — the lane sat mid-flight, produced
 // nothing, and never errored, so nothing reclaimed it. The delivery brief only asks for this in PROSE; this hook
@@ -1275,6 +1396,14 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   if (!primaryCwd && staleBehind > 0 && isBacklogMutation(s) && !/\bSTALE_LANE_OK=1\b/.test(s))
     return `This lane clone is ${staleBehind} commit(s) behind origin/main — a mutation here would run STALE scripts/ against a STALE backlog view and can mint a colliding/wrong NNN (#2323). Refresh first: \`git fetch origin --prune && git reset --hard origin/main && git clean -fd\`. Sanctioned override (rare): prefix \`STALE_LANE_OK=1\`.`;
 
+  // A commit under a HAND-SET identity. The box already ships the correct one (`noreply@anthropic.com` at
+  // `--global`), so an override can only make authorship WRONG — and it lands in history, on `main`, past
+  // review, attributing an agent's work to a human who did not write it and cannot have signed it. Observed
+  // 2026-08-24: four such commits merged before the tip-commit check noticed. Escape: `COMMIT_IDENTITY_OK=1`,
+  // for the rare legitimate re-attribution (replaying someone else's patch, a `--reset-author` repair).
+  if (isCommitIdentityOverride(s) && !/\bCOMMIT_IDENTITY_OK=1\b/.test(s))
+    return 'This commit sets the author/committer identity by hand (`-c user.email=`, `--author=`, or `GIT_*_EMAIL=`). The machine already has the right identity configured, so an override can only mis-attribute the commit — and unsigned commits in someone else\'s name land on `main` and stay there. Drop the override and commit with the ambient identity (`git config user.email` shows what it is). Sanctioned override (rare — replaying another author\'s patch, a `--reset-author` repair): prefix `COMMIT_IDENTITY_OK=1`.';
+
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
@@ -1533,6 +1662,10 @@ export function decide(command, ctx = {}) {
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
+  // #1550 r3 — the identity override can also straddle segments (`export GIT_AUTHOR_EMAIL=… && git commit`),
+  // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
+  const ident = commitIdentityCommandReason(command);
+  if (ident) return ident;
   // #2994 — QUOTE-AWARE split: tokenize quotes first, cut only on UNQUOTED separators.
   const parsed = parseSegments(command);
   // #2994 review r3 — FAIL CLOSED on a command the parser cannot represent. Every loosening signature this
