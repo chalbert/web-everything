@@ -13,9 +13,10 @@ DAG with real independence or incremental delivery · every slice leaves a valid
 write the report `reports/<date>-backlog-split-analysis.md` listing **could split** (proposed slices +
 DAG) and **could not split** (which condition failed + the unblocking action) — even when nothing
 splits. Present the proposed slices and get **one "go"** before mutating the backlog; never auto-split.
-On approval, scaffold the slices under the epic/story (`node scripts/backlog.mjs scaffold …
---parent=<NNN> --blocked-by=…`) — converting a story to a storied epic first, or leaving an already-epic
-in place — gating on `npm run check:standards`.
+On approval, scaffold the slices under the epic/story through the declared operation
+(`node scripts/operations/run.mjs scaffold --parent=<NNN> --blockedBy=… --title='…' --digest='…' --json`
+— camelCase flags, not the raw CLI's `--blocked-by`) — converting a story to a storied epic first, or
+leaving an already-epic in place — gating on `npm run check:standards`.
 
 A bare `/slice` sweeps the whole candidate set and reports. A `NNN` or `NNN-slug` focuses one item.
 

@@ -46,8 +46,10 @@ as *left apart* with the unblocking action, and move on.
 
 A single "go" authorizes the clusters you presented (*→ Executing a consolidation*):
 
-1. **Umbrella:** `node scripts/backlog.mjs scaffold --kind=epic --title="…" --digest="…"` — **no `--size`**
-   and **no `--scope`** (an epic is sliced, never built directly). Then set `parent:` on each member and trim
+1. **Umbrella:** `node scripts/operations/run.mjs scaffold --kind=epic --title='…' --digest='…' --json` —
+   **no `--size`** and **no `--scope`** (an epic is sliced, never built directly). **Single quotes** — a
+   cluster title assembled from member text still runs `` ` `` / `$(…)` through bash inside *double* quotes
+   (*backlog-workflow.md → Authoring an item → The quoting rule*). Then set `parent:` on each member and trim
    any member digest that now reads as the whole job. **Reuse** an existing epic that already covers the
    cluster instead of minting a sibling umbrella.
 2. **Pack:** add only the `blockedBy` edges the investigation proved real — a "see also" is a `crossRef`,

@@ -146,8 +146,16 @@ your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same sui
 ```bash
 # The DECLARED form — one answer, three values, and the same marker `pr-land` gates on:
 node scripts/operations/run.mjs verify --checkout="$PWD" --json     # FOREGROUND, blocking; never `&`
-node scripts/backlog.mjs resolve {{ITEM_NUM}}
+node scripts/operations/run.mjs resolve --ref={{ITEM_NUM}} --json   # --ref= is a FLAG, not a positional
 ```
+
+**`resolve` is declared too, and its shape differs from the raw CLI's.** `we:scripts/backlog.mjs resolve`
+takes the item as a positional and spells its options kebab-case (`--graduated-to`, `--codified-to`); the
+operation takes `--ref=<NNN>` and camelCase (`--graduatedTo`, `--codifiedTo`), and refuses an unknown flag
+rather than dropping it. Both run the same four refusals — `open-children` (#658), `uncodified-decision`
+(#911), `scope-drift` (#2803), `not-in-flight` — but the operation *names* the one that fired in
+`verdict`, so a delivery agent branches on a value instead of parsing stderr, and a `--force=true` that
+steps over one is recorded rather than warned about.
 
 **Read `verdict.ok`, and read `verdict.unrun` before you believe a green.** The operation shells
 `we:scripts/verify-lane.mjs` and maps its exit codes and marker vocabulary onto three outcomes: `pass`, `fail`,
