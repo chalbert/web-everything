@@ -20,7 +20,7 @@
  * in-memory `write` cannot answer it.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createMutationProbe } from '../mutation-check-io.mjs';
@@ -72,21 +72,21 @@ describe('the mutate → run → restore transaction on a real checkout', () => 
   });
 
   /**
-   * ★ THE FAILURE THE `finally` EXISTS FOR, made real. The runner THROWS while the mutant is on disk — the
-   * stand-in for the killed process / container restart the header describes. The tree must still come back
-   * clean, and `git status` is the witness a person would actually use.
+   * A RUNNER THAT DIES is the ordinary case, and it must not cost the tree anything either. `runSuite`
+   * SWALLOWS the runner's exception by design — a non-zero exit is the normal path for a red suite — so the
+   * probe returns rather than throwing, and the restore happens on the happy path.
    *
-   * Moving the restore out of the `finally` and onto the try's happy path reddens this and nothing else.
+   * NOTE FOR THE NEXT AUTHOR, learnt the hard way here: an `expect` inside the injected runner is VACUOUS
+   * for exactly that reason — `runSuite`'s `catch` eats the AssertionError and the test passes regardless.
+   * So the runner only RECORDS what it saw, and the assertion happens out here where it can actually fail.
    */
-  it('restores the tree even when the runner throws mid-transaction', async () => {
+  it('a runner that dies leaves the tree clean, and the mutant really was on disk while it ran', async () => {
     await withTarget(async (ctx) => {
-      let calls = 0;
+      const seen = [];
       const probe = createMutationProbe({
         run: (_c, _a, opts) => {
-          calls += 1;
-          if (calls === 1) return 'Tests  3 passed (3)\n';
-          // The mutant is on disk RIGHT NOW — assert it, then die the way a killed runner dies.
-          expect(readFileSync(join(opts.cwd, TARGET), 'utf8')).toBe(ORIGINAL.replace(FIND, REPLACE));
+          seen.push(readFileSync(join(opts.cwd, TARGET), 'utf8'));
+          if (seen.length === 1) return 'Tests  3 passed (3)\n';
           const e = new Error('the runner was killed');
           e.stdout = '';
           e.stderr = '';
@@ -96,9 +96,44 @@ describe('the mutate → run → restore transaction on a real checkout', () => 
 
       const out = probe({ cwd: ctx.root, target: TARGET, find: FIND, replace: REPLACE, suite: 'any' });
 
+      expect(seen).toEqual([ORIGINAL, ORIGINAL.replace(FIND, REPLACE)]);
       expect(readFileSync(ctx.abs, 'utf8')).toBe(ORIGINAL);
       expect(ctx.porcelain()).toBe('');
-      expect(out.restored).toBe(true);
+      expect(out).toMatchObject({ restored: true, mutantRan: false, mutantGreen: false });
+    });
+  });
+
+  /**
+   * ★ THE FAILURE THE `finally` ACTUALLY EXISTS FOR, and the one case that can prove it is load-bearing.
+   *
+   * `runSuite` catches everything the RUNNER throws, so a dying runner never reaches the `finally` as an
+   * exception — the test above passes with the restore on the happy path. The `finally` earns its keep on
+   * the OTHER throw: the mutant WRITE itself tearing part-way (ENOSPC, a killed process between two
+   * `write(2)`s), which propagates straight out of the `try`. That is the `python`-heredoc failure the
+   * module's header describes: the run dies in between, and the mutant stays in the tree to be diagnosed
+   * for an hour as a real bug.
+   *
+   * Verified: moving the restore out of the `finally` and onto the try's last line leaves this test — and
+   * only this test — red, with the torn mutant still on disk.
+   */
+  it('a torn mutant write still leaves the tree clean — the `finally` is load-bearing', async () => {
+    await withTarget(async (ctx) => {
+      let writes = 0;
+      const probe = createMutationProbe({
+        run: () => 'Tests  3 passed (3)\n',
+        write: (p, s) => {
+          writes += 1;
+          if (writes !== 1) { writeFileSync(p, s); return; }
+          writeFileSync(p, s.slice(0, 12));            // part of the mutant lands …
+          throw new Error('ENOSPC: no space left on device'); // … and then the write dies
+        },
+      });
+
+      expect(() => probe({ cwd: ctx.root, target: TARGET, find: FIND, replace: REPLACE, suite: 'any' }))
+        .toThrow(/ENOSPC/);
+
+      expect(readFileSync(ctx.abs, 'utf8')).toBe(ORIGINAL);
+      expect(ctx.porcelain()).toBe('');
     });
   });
 
@@ -162,25 +197,19 @@ describe('the mutate → run → restore transaction on a real checkout', () => 
   });
 
   /**
-   * `restored` IS THE RE-READ, NOT THE ATTEMPT. Here the restoring write is made to fail, so the tree really
-   * is left dirty — and the caller has to be TOLD, because a dirty checkout the caller does not know about is
-   * the hour-long misdiagnosis this whole operation is a correction for.
+   * A RESTORE THAT THROWS leaves the tree dirty, and the caller has to be TOLD — a dirty checkout nobody
+   * knows about is the hour-long misdiagnosis this whole operation is a correction for.
    *
    * The failure is injected on the `write` seam rather than by chmod, because these suites run as root in CI
-   * and a read-only file would not stop the write there — a fixture that only fails on some machines is worse
-   * than no fixture.
+   * and a read-only file would not stop the write there — a fixture that only fails on some machines is
+   * worse than no fixture. Everything else stays real, so `git status` can be asked what actually happened.
    */
-  it('reports restored: false — and the tree really is dirty — when the restoring write fails', async () => {
+  it('reports restored: false — and the tree really is dirty — when the restoring write throws', async () => {
     await withTarget(async (ctx) => {
-      const { writeFileSync } = await import('node:fs');
       let writes = 0;
       const probe = createMutationProbe({
         run: () => 'Tests  3 passed (3)\n',
-        write: (p, s) => {
-          writes += 1;
-          if (writes === 2) throw new Error('disk full'); // the RESTORE write
-          writeFileSync(p, s);
-        },
+        write: (p, s) => { writes += 1; if (writes === 2) throw new Error('disk full'); writeFileSync(p, s); },
       });
 
       const out = probe({ cwd: ctx.root, target: TARGET, find: FIND, replace: REPLACE, suite: 'any' });
@@ -188,6 +217,33 @@ describe('the mutate → run → restore transaction on a real checkout', () => 
       expect(out.restored).toBe(false);
       expect(readFileSync(ctx.abs, 'utf8')).toBe(ORIGINAL.replace(FIND, REPLACE));
       expect(ctx.porcelain()).toBe(`M ${TARGET}`); // porcelain's leading status column, trimmed by the helper
+    });
+  });
+
+  /**
+   * ★ `restored` IS THE RE-READ, NOT THE ATTEMPT — and this is the case that can tell the two apart, because
+   * here the restoring write SUCCEEDS and still leaves the wrong bytes. The docblock names exactly this:
+   * *"a write that throws OR HALF-SUCCEEDS is precisely when the caller most needs to be told the tree is
+   * dirty"*. A throwing write is caught by the `catch`; a half-succeeding one is caught only by reading the
+   * file back.
+   *
+   * Replacing `restored = read(abs) === original` with `restored = true` reddens this and NOTHING else — the
+   * throwing case above passes under that mutation, because it never reaches that line.
+   */
+  it('a restoring write that silently half-succeeds still reports restored: false', async () => {
+    await withTarget(async (ctx) => {
+      let writes = 0;
+      const probe = createMutationProbe({
+        run: () => 'Tests  3 passed (3)\n',
+        // The RESTORE write returns normally but lands truncated bytes — a torn write, not an exception.
+        write: (p, s) => { writes += 1; writeFileSync(p, writes === 2 ? s.slice(0, 10) : s); },
+      });
+
+      const out = probe({ cwd: ctx.root, target: TARGET, find: FIND, replace: REPLACE, suite: 'any' });
+
+      expect(out.restored).toBe(false);
+      expect(readFileSync(ctx.abs, 'utf8')).toBe(ORIGINAL.slice(0, 10));
+      expect(ctx.porcelain()).toBe(`M ${TARGET}`);
     });
   });
 });
