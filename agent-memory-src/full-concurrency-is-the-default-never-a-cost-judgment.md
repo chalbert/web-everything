@@ -18,8 +18,9 @@ Three things made it wrong, not merely over-cautious:
 1. **It was not my decision to make.** Spend is the operator's budget and their call. Silently trading their
    throughput for their money — without saying so, and while they were waiting — substitutes my judgment for
    theirs on a question they had already settled.
-2. **The stated reason was false.** Asked whether it was a file conflict, it was not: the two reviews touched
-   entirely disjoint cards in different lanes. "Cost" was the real reason and it was unexamined.
+2. **The real reason only surfaced when challenged.** Asked whether it was a file conflict, it was not — the
+   two reviews touched entirely disjoint cards in different lanes. Cost *was* the actual reason; it just was
+   not said until asked, and it had not been examined.
 3. **The repo's own guidance says the opposite.** `we:docs/agent/delivery-loop.md` → *Parallelism and lane
    hygiene*: run tracks concurrently on disjoint files. The gate is the bottleneck, so wall-clock per track
    degrades while **total throughput improves**. Serializing disjoint work buys a slower answer and nothing
@@ -28,7 +29,14 @@ Three things made it wrong, not merely over-cautious:
 **How to apply:** before starting an independent piece of work, ask ONLY *"does this share files, a lane, or
 another exclusive resource with something already running?"* If no → start it now, in parallel. Do not wait
 for an in-flight job to return, do not stagger spawns, and do not reason about token or dollar cost at all.
-Applies to review spawns, prepare/build dispatches, panels, and lane work alike.
+Applies to review spawns, prepare/build dispatches, and lane work alike.
+
+**This rule is about INDEPENDENT WORK — not about extra seats on ONE question, which is a different axis and
+a different rule.** Widening a panel, adding a second opinion on the same subject, or stacking jurors is
+governed by [[right-size-the-panel-count-not-model-tier]]: default zero, a rung to EARN, ask before climbing.
+Nothing here relaxes that. Two reviews of two different PRs are two pieces of work and run together; two
+jurors on the same PR are one piece of work and the count is asked for. Reading this rule as licence to
+spawn wide panels inverts the one that already covers them.
 
 If concurrency ever does need bounding for a real reason — a genuine resource limit, a rate limit, an
 exhausted lane pool — **say so and name the resource**, rather than quietly running fewer things. And if
