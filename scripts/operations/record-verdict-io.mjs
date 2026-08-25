@@ -193,9 +193,12 @@ export function assertApplierRidesBoard({ run, wt, repo = '' }) {
     `record-verdict: refusing to stage onto ${subject} \`${TRANSPORT_BRANCH}\` — its tree does not carry `
     + `\`${APPLIER_WORKFLOW}\` (#3264). GitHub runs a push-triggered workflow from the definition ON THE PUSHED `
     + 'REF, so this board would accept the request and apply nothing: the verdict would look staged and no label '
-    + `would ever move. Re-cut the board from a \`${BOARD_SOURCE_BRANCH}\` that carries the applier: `
-    + `\`git push --force origin origin/${BOARD_SOURCE_BRANCH}:refs/heads/${TRANSPORT_BRANCH}\` (it carries no `
-    + 'history worth keeping — every request on it has already been applied).',
+    + 'would ever move. INSPECT THE BOARD BEFORE RE-CUTTING IT. This refusal fires exactly when no applier '
+    + 'rode the board, which means the push-triggered workflow never ran on it — so any request sitting there '
+    + 'was NEVER applied, and a force-push discards it with no other record. Read `git log` and '
+    + `\`git ls-tree\` on \`origin/${TRANSPORT_BRANCH}\` first, apply or re-stage anything outstanding, and only `
+    + `then re-cut from a \`${BOARD_SOURCE_BRANCH}\` that carries the applier: `
+    + `\`git push --force origin origin/${BOARD_SOURCE_BRANCH}:refs/heads/${TRANSPORT_BRANCH}\`.`,
   );
 }
 

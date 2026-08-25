@@ -533,6 +533,21 @@ describe('#3264 — board genesis, and a board that cannot apply is REFUSED', ()
     await expect(drive({ heads: [MAIN_REF, BOARD_REF], tree: [] }).stage(payload)).rejects.toThrow(/ON THE PUSHED REF/);
   });
 
+  it('does NOT tell the reader their unapplied requests are safe to discard', async () => {
+    // The refusal recommends a `--force` re-cut, and its first draft justified that with "every request on it
+    // has already been applied". That is exactly BACKWARDS: this refusal fires only when no applier rode the
+    // board, so the push-triggered workflow never ran on it, so anything sitting there was never applied. A
+    // maintainer trusting that sentence would force-push away the only record of those verdicts.
+    // Found by the PR #1544 correctness juror. The message must justify itself with what the check PROVED.
+    const d = drive({ heads: [MAIN_REF, BOARD_REF], tree: [] });
+    const err = await d.stage(payload).then(() => null, (e) => e);
+    expect(err).toBeTruthy();
+    expect(err.message).not.toMatch(/already been applied/);
+    expect(err.message).toMatch(/NEVER applied/);
+    // …and it must say to look before destroying, not merely omit the false reassurance.
+    expect(err.message).toMatch(/INSPECT THE BOARD BEFORE RE-CUTTING IT/);
+  });
+
   it('pushes NOTHING when it refuses a board that cannot apply', async () => {
     // A refusal after the push would be decoration: the dead request would already be on the board. This is
     // the assertion that makes the check worth having rather than merely present.
