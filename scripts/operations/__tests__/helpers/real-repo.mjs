@@ -78,12 +78,21 @@ const IDENTITY_FLAGS = [
  * silently is worse than no fixture — this whole module exists to make git's real complaints visible.
  *
  * @param {string[]} args
- * @param {{cwd: string}} opts
+ * @param {{cwd: string, env?: object, input?: string}} opts
  * @returns {string} stdout
  */
-export function git(args, { cwd }) {
+export function git(args, { cwd, env = undefined, input = undefined }) {
   try {
-    return String(execFileSync('git', [...IDENTITY_FLAGS, ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    return String(execFileSync('git', [...IDENTITY_FLAGS, ...args], {
+      cwd,
+      encoding: 'utf8',
+      // stdin is only opened when there is something to feed it — `hash-object --stdin` is the one caller
+      // that needs it, and leaving it `ignore` everywhere else keeps a git that decides to prompt from
+      // hanging the suite instead of failing it.
+      stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      ...(env ? { env } : {}),
+      ...(input === undefined ? {} : { input }),
+    }));
   } catch (cause) {
     const stderr = String(cause?.stderr ?? '').trim();
     throw new Error(`real-repo: git ${args.join(' ')} (in ${cwd}) failed: ${stderr || cause?.message || cause}`, { cause });
@@ -165,6 +174,7 @@ export async function withRealRepo(fn) {
  */
 async function withClone({ prefix, cloneArgs, narrow }, fn) {
   const tmp = scratch(prefix);
+  let seedCounter = 0;
   // Detail (2): the SLUG comes from the directory name. `<tmp>/chalbert/web-everything.git` reads as
   // `chalbert/web-everything` through `defaultOriginRepo`'s regex and resolves to nothing off this machine.
   const origin = join(tmp, ...FIXTURE_SLUG.split('/'));
@@ -173,15 +183,44 @@ async function withClone({ prefix, cloneArgs, narrow }, fn) {
   const originDir = `${origin}.git`;
   writeLocalIdentity(originDir);
 
-  // The origin needs a `main` to clone, so it is seeded through a THROWAWAY checkout rather than by
-  // hand-writing objects: seeding via real `commit` + `push` is the only way the fixture's own history is
-  // the same shape as a real one.
-  const seed = join(tmp, 'seed');
-  git(['clone', '--quiet', originDir, seed], { cwd: tmp });
-  writeLocalIdentity(seed);
-  commitFiles(seed, { 'README.md': '# fixture origin\n' }, 'fixture: initial commit');
-  git(['push', '--quiet', 'origin', `HEAD:refs/heads/${DEFAULT_BRANCH}`], { cwd: seed });
-  rmSync(seed, { recursive: true, force: true });
+  /**
+   * Create or advance `branch` ON THE ORIGIN at `from`, optionally adding `files`.
+   *
+   * BUILT WITH PLUMBING, no clone and no working tree. The obvious implementation — clone the origin,
+   * commit, push, delete the clone — is correct but costs a clone per seeded branch, and these suites seed
+   * two or three per test on top of the fixture's own. `hash-object` → `update-index` → `write-tree` →
+   * `commit-tree` → `update-ref` produces the same objects at a fraction of the cost, against a scratch
+   * `GIT_INDEX_FILE` so the origin's own index (a bare repo has none) is never involved.
+   *
+   * With no `files`, the branch is simply POINTED at `from` — no empty commit, so "was this branch re-cut"
+   * stays a question about history rather than about how the fixture built it.
+   */
+  const seedBranch = (branch, files = {}, from = DEFAULT_BRANCH) => {
+    let parent = '';
+    try { parent = git(['rev-parse', '--verify', `${from}^{commit}`], { cwd: originDir }).trim(); } catch { parent = ''; }
+    const names = Object.keys(files);
+    if (!names.length) {
+      if (!parent) throw new Error(`real-repo: seedOriginBranch(${branch}) has no files and no \`${from}\` to point at`);
+      git(['update-ref', `refs/heads/${branch}`, parent], { cwd: originDir });
+      return;
+    }
+    const index = join(tmp, `seed-index-${branch.replace(/[^a-z0-9]+/gi, '-')}-${seedCounter++}`);
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    if (parent) git(['read-tree', parent], { cwd: originDir, env });
+    for (const rel of names) {
+      const blob = git(['hash-object', '-w', '--stdin'], { cwd: originDir, input: files[rel] }).trim();
+      git(['update-index', '--add', '--cacheinfo', `100644,${blob},${rel}`], { cwd: originDir, env });
+    }
+    const tree = git(['write-tree'], { cwd: originDir, env }).trim();
+    const commitArgs = ['commit-tree', tree, '-m', `fixture: seed ${branch}`];
+    if (parent) commitArgs.push('-p', parent);
+    const commit = git(commitArgs, { cwd: originDir, env }).trim();
+    git(['update-ref', `refs/heads/${branch}`, commit], { cwd: originDir });
+    rmSync(index, { force: true });
+  };
+
+  // The origin needs a `main` before anything can clone it, built the same plumbing way.
+  seedBranch(DEFAULT_BRANCH, { 'README.md': '# fixture origin\n' }, '(root)');
 
   const clone = join(tmp, 'clone');
   git(['clone', '--quiet', ...cloneArgs, originDir, clone], { cwd: tmp });
@@ -201,15 +240,10 @@ async function withClone({ prefix, cloneArgs, narrow }, fn) {
     originBranches: () => git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { cwd: originDir }).split('\n').map((s) => s.trim()).filter(Boolean),
     /** File content as it exists ON THE ORIGIN, never through the clone's working tree. */
     showOnOrigin: (branch, path) => git(['show', `${branch}:${path}`], { cwd: originDir }),
-    /** Create `branch` on the origin at `from`, e.g. to pre-exist a board that genesis must then NOT re-cut. */
-    seedOriginBranch: (branch, files = {}, from = DEFAULT_BRANCH) => {
-      const work = join(tmp, `seed-${branch.replace(/[^a-z0-9]+/gi, '-')}-${Date.now()}`);
-      git(['clone', '--quiet', '--branch', from, originDir, work], { cwd: tmp });
-      writeLocalIdentity(work);
-      if (Object.keys(files).length) commitFiles(work, files, `fixture: seed ${branch}`);
-      git(['push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`], { cwd: work });
-      rmSync(work, { recursive: true, force: true });
-    },
+    /** Create or advance `branch` ON THE ORIGIN at `from`, optionally adding `files`. See `seedBranch`. */
+    seedOriginBranch: seedBranch,
+    /** Point the origin's HEAD elsewhere, so a fixture may delete the branch HEAD currently names. */
+    setOriginHead: (branch) => git(['symbolic-ref', 'HEAD', `refs/heads/${branch}`], { cwd: originDir }),
   };
   return within(tmp, ctx, fn);
 }
