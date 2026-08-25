@@ -1514,3 +1514,46 @@ describe('guard-bash — the wrapper-peeled command word reaches every anchored 
     expect(decide('grep -rn "git push origin main" docs/', {})).toBeNull();
   });
 });
+
+/**
+ * A commit under a HAND-SET identity. The box already ships the correct identity at `--global`, so an
+ * override can only make authorship WRONG — and unsigned commits in a human's name land on `main` and stay
+ * there. Observed 2026-08-24: four merged before the tip-commit check noticed.
+ *
+ * The arm is TOKEN-POSITIONAL rather than a regex over the raw text, and the false-positive cases below are
+ * why: the first cut denied `git commit -m "docs: never pass -c user.email=foo"` — the commit that documents
+ * this very rule. Same lesson the `pkill` arm already paid for.
+ */
+describe('commit identity override (#3269)', () => {
+  it('denies every door onto the author/committer fields', () => {
+    for (const cmd of [
+      'git -c user.email=x@y.com commit -m hi',
+      'git -c user.email=x -c user.name=Z commit -q -F -',
+      'git -cuser.email=x@y commit -m hi',          // glued form — git accepts it
+      'git commit --author="A <a@b.c>" -m hi',
+      'git commit --author "A <a@b.c>" -m hi',
+      'GIT_AUTHOR_EMAIL=a@b.c git commit -m hi',
+      'GIT_COMMITTER_NAME=Z git commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it('leaves an ordinary commit, a config write, and an unrelated -c alone', () => {
+    for (const cmd of [
+      'git commit -m hi',
+      'git config user.email noreply@anthropic.com',   // setting the MACHINE's identity is legitimate
+      'git -c core.pager=cat log',
+      'git -c core.pager=cat commit -m ok',            // a non-identity -c on a commit
+      'git push origin HEAD:refs/heads/lane/x',
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('never fires on a MESSAGE that merely mentions the flags', () => {
+    // The regression that caught the first cut: prose is one quoted token, never argv.
+    expect(decide('git commit -m "docs: never pass -c user.email=foo"', {})).toBeNull();
+    expect(decide('git commit -m "note about --author= forms"', {})).toBeNull();
+  });
+
+  it('honours the sanctioned escape for a deliberate re-attribution', () => {
+    expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
+  });
+});
