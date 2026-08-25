@@ -33,6 +33,19 @@ the set comparison is trivial.
 **It must not read `main`.** Whether the card is *good* is a review question. This asks only whether the PR
 that claims to have written it, wrote it.
 
+**It must not fire on a RETRACTION.** This is the one that would have sunk it, found by the review of the PR
+that filed this card. When #1556's body was corrected, the fix did not delete the false sentence — it quoted
+it, in order to say it was wrong:
+
+> *An earlier draft said "#3160 now carries the operation's contract, recorded verbatim on the card." … the
+> net diff touches no `backlog/3160-*.md` file.*
+
+The claim string is still present, still next to a claim verb, still with no `backlog/3160-*.md` in the diff.
+A rule that only pattern-matches would flag the **corrected** body — a false positive on its own motivating
+case, and worse, one that punishes the honest fix and rewards silently deleting the error instead. So the
+predicate must be negated by a nearby retraction marker (*an earlier draft*, *was wrong*, *not prepared by
+this PR*, a blockquote), and case 4 below exists to hold that.
+
 ## Interfaces
 
 A rule in `we:scripts/check-standards-rules.mjs` taking `{ body, changedFiles }` and returning findings, so it
@@ -43,9 +56,16 @@ is pure and testable without a network call. Wiring it to a PR context is the ca
 1. **Executable** — a case where a body says *"#3160 now carries the operation's contract, recorded verbatim
    on the card"* and `changedFiles` contains only `backlog/3233-*.md`, `backlog/3230-*.md`,
    `backlog/3238-*.md` returns exactly one finding naming `3160`. That is PR #1556's real input.
-2. **Executable** — a case where the same body's changed files DO include `backlog/3160-*.md` returns none.
+2. **Executable** — the same body with `backlog/3160-*.md` added to `changedFiles` returns none. This is a
+   **constructed** variant, not a replay: #1556's real correction changed the *body* and never touched its
+   file set, so no such input ever existed. An earlier draft of this criterion called it "its corrected
+   input", which was false and mattered — believing the replay existed is what hid criterion 4 below.
 3. **Executable** — a body that merely cites ids without a claim verb (`relatedTo`-style prose, *"blocked by
    #3165"*, *"see #2678"*) returns none, so the rule does not fire on ordinary cross-references.
-4. **Mutation** — dropping the claim-verb predicate reddens case 3 by name; dropping the set comparison
-   reddens case 1.
-5. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
+4. **Executable** — **#1556's ACTUAL corrected body returns none.** It still contains the claim string, still
+   beside claim verbs, still with no `backlog/3160-*.md` in the diff — because the correction *quotes* the
+   false sentence to retract it. A rule that flags this is a rule that penalises the honest fix. This is the
+   one case that must be taken from the real PR rather than constructed.
+5. **Mutation** — dropping the claim-verb predicate reddens case 3 by name; dropping the set comparison
+   reddens case 1; dropping the retraction negation reddens case 4 **and nothing else**.
+6. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.

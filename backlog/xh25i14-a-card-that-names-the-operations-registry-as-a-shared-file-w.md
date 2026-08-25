@@ -11,15 +11,24 @@ tags: [prevention, operations, gate, scope]
 
 # A card that names the operations registry as a shared file without naming the declared-homes map beside it
 
-Adding an operation touches two shared files, not one: the registry line in `we:scripts/operations/run.mjs` and the entry in `we:scripts/operations/declared-homes.mjs` that `we:scripts/check-standards.mjs:2171` reads for the `#3224` scan. `declaresOver` is optional in `we:scripts/operations/registry.mjs` and defaults to `[]`, so a missing entry breaks nothing mechanically — it just leaves the raw call sites the operation was built to replace permanently un-flagged. A planning card that names only the registry therefore teaches its readers to ship half the wiring, silently. This is the prevention owed by a CONFIRMED finding on PR #1562, against `#3273`.
+An operation that REPLACES a raw call site touches two shared files, not one: the registry line in `we:scripts/operations/run.mjs` and the entry in `we:scripts/operations/declared-homes.mjs` that `we:scripts/check-standards.mjs:2171` reads for the `#3224` scan. `declaresOver` is optional and defaults to `[]`, so a missing entry breaks nothing mechanically — it just leaves those call sites permanently un-flagged. A planning card naming only the registry teaches readers to ship half the wiring. Prevention owed by a CONFIRMED finding on PR #1562, against `#3273`.
 
 ## Why the two are already coupled in code
 
 `we:scripts/operations/registry.mjs`'s `RESERVED_DECLARATION_KEYS` includes `declaresOver`, and
-`we:scripts/check-standards.mjs:2171` consumes `DECLARED_HOMES` to run the `#3224` scan. The existing
-operations follow the pattern — `we:scripts/operations/claim.mjs`, `we:scripts/operations/verify.mjs`,
-`we:scripts/operations/dispatch-lane.mjs`, `we:scripts/operations/open-pr.mjs` all carry entries. The two
-files are one step in practice and two files on disk, which is exactly the shape a doc drifts on.
+`we:scripts/check-standards.mjs:2171` consumes `DECLARED_HOMES` to run the `#3224` scan.
+
+**Not every operation belongs in that map, and the card must not imply otherwise.** Counted:
+`DECLARED_HOMES` has **4** entries — `verify`, `claim`, `open-pr`, `dispatch-lane` — against **15** declared
+operations. That is not 11 missing entries. `we:scripts/operations/declared-homes.mjs`'s own docstring rules
+on it:
+
+> *Fewer correct entries beat more guessed ones — an operation missing from this map costs a finding nobody
+> gets, while a wrong one costs the gate's credibility.*
+
+So the pair is one step **for an operation that replaces a documented raw call site**, and one file for an
+operation that has none. The rule this item encodes is therefore conditional, and a lint that demanded the
+second file unconditionally would be pushing exactly the guessed entries that docstring refuses.
 
 ## Honest about what this can and cannot check
 
