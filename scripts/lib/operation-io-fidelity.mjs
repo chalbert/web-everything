@@ -158,10 +158,29 @@ const esc = (s) => String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * a subdirectory writes `../helpers/real-repo.mjs`; one elsewhere in the tree writes the rooted path. All three
  * reach the same module, and pinning one spelling would make the rule a style check.
  */
-const HELPER_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*['"][^'"]*helpers\/real-repo\.mjs['"]/;
+// DERIVED FROM `REAL_REPO_HELPER`, not written out again (#2644). The two were separate literals; a move of
+// the harness would have updated one and left the other matching a path that no longer exists — the gate then
+// either names a path it does not check, or stops recognising the real helper entirely.
+const HELPER_PATH_TAIL = REAL_REPO_HELPER.split('/').slice(-2).join('/');
+const HELPER_IMPORT = new RegExp(`(?:\\bfrom|\\bimport)\\s*\\(?\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`);
+
+// THE NAMES the helper exports. A test satisfies the fidelity rule only by USING one of them — see
+// `importsRealRepoHelper` for why importing is not enough.
+const HELPER_EXPORTS = ['withRealRepo', 'withBareOrigin', 'withNarrowClone'];
 
 export function importsRealRepoHelper(content) {
-  return HELPER_IMPORT.test(String(content ?? ''));
+  const src = String(content ?? '');
+  if (!HELPER_IMPORT.test(src)) return false;
+  // AND ACTUALLY USES IT. Importing alone is not evidence of anything: a decorative
+  // `import { withRealRepo } from './helpers/real-repo.mjs';` with no call site satisfies a
+  // presence check while the tests below it stay entirely stubbed — which is #3264's own vacuity
+  // reproduced one level up, in the gate built to catch it. Found by the PR #1549 correctness juror.
+  //
+  // The check is deliberately crude: at least one exported name appears somewhere OTHER than inside an
+  // import statement. It cannot tell a real fixture from a call in dead code, and it is not trying to —
+  // it closes the zero-effort bypass, and anything past that is a judgement a juror makes, not a regex.
+  const withoutImports = src.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
+  return HELPER_EXPORTS.some((name) => new RegExp(`\\b${name}\\b`).test(withoutImports));
 }
 
 /**

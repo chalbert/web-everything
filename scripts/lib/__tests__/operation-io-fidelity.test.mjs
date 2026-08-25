@@ -37,7 +37,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const fidelityTest = (name, file = `${name}-io.real.test.mjs`) => ({
   file: `scripts/operations/__tests__/${file}`,
   content:
-    "import { withNarrowClone } from './helpers/real-repo.mjs';\n"
+    "import { withNarrowClone } from './helpers/real-repo.mjs';\nit('real', () => withNarrowClone(() => {}));\n"
     + `import { createSinks } from '../${name}-io.mjs';\n`,
 });
 
@@ -164,9 +164,18 @@ describe('property 3 — the allowlist cannot GROW (new code is held to the rule
 
 describe('importsRealRepoHelper — the import, not the mention', () => {
   it('matches static and dynamic imports at any relative depth', () => {
-    expect(importsRealRepoHelper("import { withRealRepo } from './helpers/real-repo.mjs';")).toBe(true);
-    expect(importsRealRepoHelper("import { withBareOrigin } from '../helpers/real-repo.mjs';")).toBe(true);
-    expect(importsRealRepoHelper(`const h = await import('../../${REAL_REPO_HELPER}');`)).toBe(true);
+    // Each case carries a CALL SITE, because an import alone no longer satisfies the rule — see the
+    // "importing is not using" block below for why. The axis under test here is still the import form
+    // (static / dynamic) and the relative depth, not the usage.
+    expect(importsRealRepoHelper(
+      "import { withRealRepo } from './helpers/real-repo.mjs';\nit('x', () => withRealRepo(() => {}));",
+    )).toBe(true);
+    expect(importsRealRepoHelper(
+      "import { withBareOrigin } from '../helpers/real-repo.mjs';\nit('x', () => withBareOrigin(() => {}));",
+    )).toBe(true);
+    expect(importsRealRepoHelper(
+      `const h = await import('../../${REAL_REPO_HELPER}');\nit('x', () => h.withNarrowClone(() => {}));`,
+    )).toBe(true);
   });
 
   it('a COMMENT naming the helper proves nothing', () => {
@@ -174,6 +183,36 @@ describe('importsRealRepoHelper — the import, not the mention', () => {
     // is the one somebody reaches for first.
     expect(importsRealRepoHelper('// TODO: port this to helpers/real-repo.mjs once the harness lands')).toBe(false);
     expect(importsRealRepoHelper('describe("real-repo", () => {});')).toBe(false);
+  });
+});
+
+describe('importsRealRepoHelper — importing is not using (PR #1549 juror)', () => {
+  const IMPORT_LINE = "import { withRealRepo } from '../helpers/real-repo.mjs';\n";
+
+  it('REFUSES a decorative import with no call site — the #3264 vacuity, one level up', () => {
+    // THE FINDING. A presence check is satisfied by an import nobody calls, so a suite could import the
+    // harness, stay entirely stubbed, and satisfy the gate built to stop exactly that. The gate would then be
+    // vacuous in the same way the criterion it enforces exists to forbid.
+    const decorative = `${IMPORT_LINE}\nit('stubbed', () => { const run = () => ''; expect(run()).toBe(''); });\n`;
+    expect(importsRealRepoHelper(decorative)).toBe(false);
+  });
+
+  it('accepts an import that is actually used', () => {
+    const real = `${IMPORT_LINE}\nit('real', async () => { await withRealRepo((root) => { expect(root).toBeTruthy(); }); });\n`;
+    expect(importsRealRepoHelper(real)).toBe(true);
+  });
+
+  it('accepts any of the three harness entry points, not just the first', () => {
+    for (const name of ['withRealRepo', 'withBareOrigin', 'withNarrowClone']) {
+      const src = `import { ${name} } from '../helpers/real-repo.mjs';\nit('x', () => ${name}(() => {}));\n`;
+      expect(importsRealRepoHelper(src)).toBe(true);
+    }
+  });
+
+  it('still refuses a file that uses the names but never imports the helper', () => {
+    // The other direction: a local function called `withRealRepo` is not the harness.
+    const impostor = "const withRealRepo = (f) => f('/tmp');\nit('x', () => withRealRepo(() => {}));\n";
+    expect(importsRealRepoHelper(impostor)).toBe(false);
   });
 });
 
@@ -244,7 +283,7 @@ describe('the fs shell, against a REAL directory tree (this rule obeying its own
   it('a real-repo test found by the walk clears the module', () => {
     write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
     write('scripts/operations/__tests__/alpha.test.mjs',
-      "import { withRealRepo } from './helpers/real-repo.mjs';\nimport { a } from '../alpha-io.mjs';\n");
+      "import { withRealRepo } from './helpers/real-repo.mjs';\nimport { a } from '../alpha-io.mjs';\nit('real', () => withRealRepo(() => a()));\n");
     expect(scanOperationIoFidelity(root, EMPTY).errors).toEqual([]);
   });
 
@@ -253,7 +292,7 @@ describe('the fs shell, against a REAL directory tree (this rule obeying its own
     // name is not `*.test.mjs`. A shallow walk, or a `.test.mjs`-only filter, reports this module untested.
     write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
     write('scripts/operations/__tests__/fixtures/alpha-real.mjs',
-      "import { withBareOrigin } from '../helpers/real-repo.mjs';\nimport { a } from '../../alpha-io.mjs';\n");
+      "import { withBareOrigin } from '../helpers/real-repo.mjs';\nimport { a } from '../../alpha-io.mjs';\nit('real', () => withBareOrigin(() => a()));\n");
     expect(scanOperationIoFidelity(root, EMPTY).errors).toEqual([]);
   });
 
