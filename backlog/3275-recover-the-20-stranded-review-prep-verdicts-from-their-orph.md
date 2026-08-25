@@ -1,4 +1,5 @@
 ---
+bornAs: xal2gqe
 kind: story
 size: 3
 parent: "3029"
