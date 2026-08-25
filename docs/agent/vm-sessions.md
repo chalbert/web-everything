@@ -16,9 +16,9 @@ container does it unasked; on a workstation it only reports (see *Installing on 
 |---|---|---|
 | Clones | full history | **`--depth 1` shallow** (`rev-parse --is-shallow-repository` → `true`) |
 | Sibling repos | already siblings on disk | arrive via the harness `add_repo` tool, then a clone |
-| Lanes | the clone pool is the unit of work | **still the unit of work — provision one, with the two overrides below** |
+| Lanes | the clone pool is the unit of work | **still the unit of work — provision one; no overrides needed since #3265** |
 | Branch guard | installed at user level (#3074) | user-level one not installed; the **committed** `guard-lane.mjs` hook fires regardless |
-| `$HOME` vs checkouts | both under `~/workspace` | **`$HOME=/root`, checkouts under `/home/user`** — `LANE_POOL_ROOT` must be set |
+| `$HOME` vs checkouts | both under `~/workspace` | **`$HOME=/root`, checkouts under `/home/user`** — derived from the checkout, not `$HOME` |
 | Skills | `~/.claude/skills` synced, scoped | deployed with `--all` (nothing else lives there) |
 | Memory | reserved lane → user-level dir (#2350) | in-repo `.claude/agent-memory` |
 | Uncommitted work | survives indefinitely | **lost when the VM is reclaimed** |
@@ -59,21 +59,26 @@ in the **committed** `.claude/settings.json` `PreToolUse` hooks, so it ships wit
 surface at all — the primary is guarded and no lane exists. `#primary-read-only-lanes-only` is not relaxed
 here; only the *reasons* the laptop provisions a pool are.
 
-Two things must be overridden first, and neither is optional:
+One command, no overrides, no environment to export:
 
 ```bash
-# 1. `--reference` against a `--depth 1` clone is FATAL, not merely useless:
-#    `fatal: reference repository '<path>' is shallow`. Unshallow every repo the pool will clone or reference.
-git -C <each constellation checkout> fetch --unshallow
-
-# 2. The pool root defaults to `~/workspace/.lanes`, but `$HOME` is `/root` here while the harness clones
-#    into `/home/user` — so the default resolves to a directory that does not exist.
-export LANE_POOL_ROOT=/home/user/.lanes
-node scripts/lane-pool.mjs provision --count=2 --repo=/home/user/web-everything
+node scripts/lane-pool.mjs provision --count=2
 ```
 
 Two lanes, not one: `review-pr`'s juror is tool-bearing and `assertLaneCwd` refuses to spawn it into the
 lane you are driving from (#3151), so a review needs a second one.
+
+**This block used to prescribe two hand-overrides — `fetch --unshallow` on every checkout, and an
+`export LANE_POOL_ROOT=…`. Both are gone; do not do either.** They were the box-local unblocks from the
+2026-08-24 session, and #3265 moved them into `lane-pool.mjs` where the table above says they belong:
+
+- the pool root now derives from `git rev-parse --show-toplevel`, not from `$HOME`, so the `/root` vs
+  `/home/user` split resolves correctly with nothing set;
+- `--reference` is DROPPED when the source clone is shallow, rather than passed and killing the clone with
+  `fatal: reference repository '<path>' is shallow`.
+
+Unshallowing still has its own reason to happen — see *Unshallow before any history work* below — but it is
+no longer a precondition for provisioning a pool, and paying for it up front on every VM was waste.
 
 The convergence half is unchanged: the transport to `main` is still the PR (`/pr`, `/drain`). What IS
 different is that `gh` has no credential here, so `open-pr` and `review-pr` halt at their `submit`/`record`
