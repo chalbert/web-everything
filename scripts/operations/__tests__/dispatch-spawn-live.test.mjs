@@ -130,7 +130,32 @@ describe('dispatching an agent, against a real process', () => {
     spawnVia(fake, buildAgentArgv({ sessionId: 'r', payload: { num: '5', prompt: '# brief' } }), work);
     const background = Date.now() - bgStart;
 
+    // COMPARATIVE, not an absolute bound. The property is "one waits for the session and the other does not",
+    // and this file already runs beside 37 other suites — an absolute `background < 1_000` is a flake waiting
+    // for a loaded machine, and one measured ~0.8s against it. Comparing the two runs of the SAME shim in the
+    // SAME process cancels the load out.
     expect(foreground).toBeGreaterThanOrEqual(1_400);
-    expect(background).toBeLessThan(1_000);
+    expect(background).toBeLessThan(foreground / 2);
+  });
+
+  /**
+   * `assertWins` is the guard on every other case in this file, and a guard nothing exercises is a comment.
+   * This is what it prevents: an env WITHOUT the fake's `PATH` resolves the real `claude` on this machine,
+   * and a `--bg` argv would then launch a real background agent from a test file whose headline promise is
+   * that no model runs.
+   */
+  it('refuses to spawn when the fake did NOT win PATH, rather than reaching the real CLI', () => {
+    fake = withFakeClaude();
+
+    // The GUARD ITSELF: an env without the fake's PATH resolves the real binary.
+    expect(() => fake.assertWins({ ...process.env })).toThrow(/did not win PATH/);
+    // …and it passes for the env every other case uses, so it is not simply always-throwing.
+    expect(() => fake.assertWins({ ...process.env, ...fake.env })).not.toThrow();
+
+    // THE CALL SITE, which is the half a test of the function alone leaves uncovered — deleting
+    // `fake.assertWins(env)` from `spawnVia` would otherwise redden nothing. The message must be the
+    // GUARD'S, not a spawn failure: the point is that it stops BEFORE the process starts.
+    const argv = buildAgentArgv({ sessionId: 's', payload: { num: '3', prompt: '# brief' } });
+    expect(() => spawnVia(fake, argv, { PATH: process.env.PATH })).toThrow(/did not win PATH/);
   });
 });

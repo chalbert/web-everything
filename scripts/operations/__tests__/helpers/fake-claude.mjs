@@ -113,15 +113,18 @@ process.exit(0);
 /**
  * Stand up a fake `claude` on disk.
  *
- * The returned surface is exactly what a consumer uses and no more — an earlier cut also handed back
- * `pathPrefix`, `dir` and `sessions()`, none of which anything imported. `assertWins` is the one addition
- * with no current failure behind it, and it is here on purpose: this fixture exists to be extended, and a
- * call that forgets `env` reaches the REAL `claude` on this machine. For a `--bg` argv that means launching a
- * real background agent, against a file whose headline promise is that no model runs.
+ * The returned surface is exactly what a consumer uses and no more. Two rounds of review were needed to make
+ * that sentence true: the first cut also handed back `pathPrefix`, `dir` and `sessions()`; the cut that
+ * removed them kept `calls()`, which nothing imported either — so the sentence certifying the dead surface
+ * gone was itself an instance of the dead surface. `lastArgv` is the only reader anything uses.
+ *
+ * `assertWins` is the one member with no failure of its own in production use, and it is here on purpose:
+ * this fixture exists to be extended, and a call that forgets `env` reaches the REAL `claude` on this
+ * machine. For a `--bg` argv that means launching a real background agent, against a file whose headline
+ * promise is that no model runs. Its refusal IS exercised — see the case that calls it without the override.
  *
  * @returns {{
  *   env: Record<string,string>,
- *   calls: () => Array<{argv: string[], cwd: string}>,
  *   lastArgv: () => string[] | null,
  *   assertWins: (env: Record<string,string>) => void,
  *   cleanup: () => void,
@@ -139,7 +142,6 @@ export function withFakeClaude() {
 
   return {
     env: { PATH: `${dir}:${process.env.PATH}`, FAKE_CLAUDE_LOG: log },
-    calls: () => read().calls,
     lastArgv: () => {
       const c = read().calls;
       return c.length ? c[c.length - 1].argv : null;
