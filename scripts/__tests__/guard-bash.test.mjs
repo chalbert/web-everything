@@ -1553,6 +1553,23 @@ describe('commit identity override (#3269)', () => {
     expect(decide('git commit -m "note about --author= forms"', {})).toBeNull();
   });
 
+  it('is not defeated by shell quoting — quoting is invisible to git (#1550 juror)', () => {
+    // The first cut required the flag/subcommand token to be UNQUOTED, which made the arm trivially
+    // evadable: all three of these override authorship while reading as "quoted, therefore prose".
+    for (const cmd of [
+      'git -c user.email=x@y "commit" -m hi',
+      'git "-c" user.email=x@y commit -m hi',
+      'GIT_AUTHOR_EMAIL="a@b.c" git commit -m hi',
+      'git -c "user.email=x@y" commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it('skips a message VALUE by position, not by quoting', () => {
+    // Prose only ever appears as the value of a message flag, so that is what is exempt — precisely.
+    expect(decide('git commit -mquick', {})).toBeNull();          // glued -m
+    expect(decide('git commit -F /tmp/msg.txt', {})).toBeNull();  // -F takes a path
+  });
+
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
   });

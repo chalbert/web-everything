@@ -134,22 +134,37 @@ export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String
  * — setting the machine's identity is legitimate; smuggling one past it for a single commit is not.
  */
 export function isCommitIdentityOverride(segment) {
-  // `shellTokens` yields {text, quoted, op} records, not strings — read `.text`, and use `.quoted` as the
-  // argv-vs-prose discriminator it exists to be. A `-m` message body arrives as ONE token whose text is the
-  // prose, so `git commit -m "never pass -c user.email=x"` cannot reach the `-c` arm. `--author="N <e>"` is
-  // also quoted (the VALUE was), so that arm accepts quoted tokens and relies on the `--author` prefix.
+  // `shellTokens` yields {text, quoted, op} records, not strings — read `.text`.
+  //
+  // QUOTED-NESS IS NOT THE DISCRIMINATOR, and the first cut's use of it was a REAL BYPASS (#1550 correctness
+  // juror, confirmed by probe): shell quoting is invisible to git, so `git -c user.email=x "commit"`,
+  // `git "-c" user.email=x commit` and `GIT_AUTHOR_EMAIL="a@b" git commit` all override authorship while
+  // reading as "quoted, therefore prose". Requiring unquoted tokens made the arm trivially evadable.
+  //
+  // The only place prose legitimately appears in a commit's argv is the VALUE OF A MESSAGE FLAG, so that is
+  // what is skipped — precisely, by position. Everything else is argv and is checked regardless of quoting.
+  // This still lets `git commit -m "docs: never pass -c user.email=foo"` through, which is the false positive
+  // the token walk exists to avoid.
   const tokens = shellTokens(String(segment || '')).filter((t) => !t.op);
-  if (!tokens.some((t) => t.text === 'commit' && !t.quoted)) return false;
-  const isIdentityConfig = (v) => /^user\.(?:email|name)=/.test(v);
+  const MESSAGE_FLAG = /^(?:-m|--message|-F|--file|-t|--template)$/;
+  // A flag that CARRIES its value (`-mmsg`, `--message=…`) consumes no following token.
+  const CARRIES_VALUE = /^(?:-m.|--message=|--file=|--template=)/;
+  const isValue = new Array(tokens.length).fill(false);
   for (let i = 0; i < tokens.length; i++) {
-    const { text, quoted } = tokens[i];
-    // `-c user.email=…` (separate) and `-cuser.email=…` (glued) — git accepts both. Unquoted only.
-    if (!quoted && text === '-c' && isIdentityConfig(tokens[i + 1]?.text || '')) return true;
-    if (!quoted && text.startsWith('-c') && isIdentityConfig(text.slice(2))) return true;
+    if (MESSAGE_FLAG.test(tokens[i].text) && i + 1 < tokens.length) isValue[i + 1] = true;
+  }
+  const argv = tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
+  if (!argv.some((t) => t.text === 'commit')) return false;
+  const isIdentityConfig = (v) => /^user\.(?:email|name)=/.test(v);
+  for (let i = 0; i < argv.length; i++) {
+    const text = argv[i].text;
+    // `-c user.email=…` (separate) and `-cuser.email=…` (glued) — git accepts both.
+    if (text === '-c' && isIdentityConfig(argv[i + 1]?.text || '')) return true;
+    if (text.startsWith('-c') && isIdentityConfig(text.slice(2))) return true;
     // `--author=…` / `--author …` forges the same field by another door.
     if (text === '--author' || text.startsWith('--author=')) return true;
     // The env pair, as its own leading token (`GIT_AUTHOR_EMAIL=a@b git commit …`).
-    if (!quoted && /^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(text)) return true;
+    if (/^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(text)) return true;
   }
   return false;
 }
