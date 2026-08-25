@@ -89,7 +89,6 @@ describe('claim — the dirty-file probe against a real `git status`', () => {
 
       expect(createClaimReader({ root: bare })({ ref: '042' })).toMatchObject({ found: true, dirty: false });
     });
-  });
 });
 
 describe('claim + scaffold — the guarded write, on a real filesystem', () => {
@@ -255,17 +254,27 @@ describe('resolve — the scope reconciliation\'s git reads, for real (#2803)', 
   });
 
   /**
-   * THE REFUSAL, reached with a real remote that yields no usable slug. `observedFilesForResolve` throws
-   * rather than returning an empty set, and `createResolveReader` turns a throw into `scopeDeclared: false`
-   * — i.e. "could not check", which is a DIFFERENT answer from "checked clean". Collapsing those two is the
-   * bug that made #2803's guard inert once already.
+   * THE REFUSAL, driven through the `exec` SEAM — because real git cannot reach it, and this file should say
+   * so rather than pretend otherwise.
+   *
+   * `observedFilesForResolve` throws instead of returning an empty set when the origin yields no repo key,
+   * and `createResolveReader` turns that throw into `scopeDeclared: false` — "could not check", which is a
+   * DIFFERENT answer from "checked clean". Collapsing the two is the bug that made #2803's guard inert once
+   * already, so the branch is worth pinning.
+   *
+   * WHY NOT WITH A REAL REMOTE. `repoKeyFromSlug` returns null only for a falsy slug, and the slug is only
+   * falsy when `git remote get-url origin` prints nothing — which git never does for a defined remote:
+   *   · `set-url origin ''` is REFUSED by git >= 2.55 (it is tolerated by 2.43, which is the ONLY reason the
+   *     first version of this test passed locally while failing on the runner);
+   *   · `git config --unset remote.origin.url` leaves `get-url` printing the remote's NAME, `origin`, which
+   *     is a perfectly good non-empty slug.
+   * So `!repoKey` is a DEFENSIVE branch, unreachable through a real remote today. Pinning it through the seam
+   * is honest; pinning it through a git quirk that one version happens to allow is how the first version of
+   * this test managed to be green locally and red in CI while testing neither thing.
    */
-  it('throws rather than answering when the origin yields no repo key', async () => {
-    await withBareOrigin(async (ctx) => {
-      buildLane(ctx);
-      ctx.git(['remote', 'set-url', 'origin', '']);
-
-      expect(() => observedFilesForResolve({ root: ctx.clone, exec: execFileSync })).toThrow();
-    });
+  it('throws rather than answering when the origin yields no repo key', () => {
+    const exec = (_cmd, args) => (args[0] === 'remote' ? '' : 'unused');
+    expect(() => observedFilesForResolve({ root: '/anywhere', exec })).toThrow(/yields no repo key/);
+  });
   });
 });
