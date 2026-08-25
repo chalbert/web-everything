@@ -181,6 +181,40 @@ expectation is silence — but that becomes a measurement rather than a hope.
 **No skill invokes it** — grepping `we:skills-src/` for the operation name returns nothing, itself a gap
 tracked by #3225.
 
+## OPEN — round 3 findings, not yet addressed. This card is NOT build-ready.
+
+Recorded rather than carried in a session, because the backlog is the tracker. Round 3's panel accepted the
+inverted model ("well-argued, closes the round-1/round-2 defects") but returned one **blocking** finding and
+five narrow seams. A builder must not start until these are answered.
+
+**BLOCKING — the default flip breaks every existing caller, and may GROW the orphan pile.** The red-team
+juror: `land` did not exist before, so *every* current caller invokes without it. Post-ship, every laptop
+review that used to land itself stops at pushed-not-landed. Since `followUp` has no enforcement, the pile of
+pushed-unlanded refs is plausibly **larger** than the 21 that motivated the card. Two ways out, and the card
+must pick one rather than assume: (a) default `land` to **true** and let the credential pre-check downgrade
+it to push-only where landing cannot work — making the VM the exception rather than everyone; or (b) own the
+flip as a breaking change with a task updating every caller. **(a) is the likely answer** — it preserves
+today's laptop behaviour exactly and changes only the host that was already failing — but it is a real fork
+and is stated here rather than silently taken.
+
+**Seams (all narrow, all additive):**
+
+1. The composed order has **no step for the credential pre-check**, yet Done-when 4 requires it to fire
+   before write/stage/commit/push. Read literally, a builder puts it at step 8 and contradicts the test.
+2. Step 8 **drops the PR body file** the current code stages (`we:scripts/pr-land.mjs` refuses a bodyless
+   PR). No step re-establishes it and no case would catch its loss.
+3. The absent-vs-`false` detection (HTTP callers) **cannot work as specified**: the declaration applies
+   defaults before a step reads `view.input.*` — visible in the sibling `actor` field in the same file — so
+   an absent `land` is already `false` by then. Needs the raw input, or a different signal.
+4. The contract check's **call site is unnamed**. "At `--resume`, before any effect advances" is a
+   lifecycle point neither file in scope shows; cite it by `file:line` or the builder searches the engine.
+5. **No outcome is decided for a `push` that fails** (transient network, laptop). Ironic, since push is now
+   the mechanism the whole fix rests on, and committed-but-unpushed is precisely this card's failure mode.
+
+Round 3 also noted `followUp` and the detection log are both **passive**: nothing consumes either. That is a
+real residual, and the honest scope answer is that closing it belongs to a reconciliation pass over
+pushed-unlanded refs, not to this card — but the card should say so rather than imply the loop is closed.
+
 ## Tasks
 
 1. Declare `land` in the operation's `input` (boolean, default false); read it in `reduce` into the `record`
