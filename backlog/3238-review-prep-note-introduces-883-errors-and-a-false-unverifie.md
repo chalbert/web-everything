@@ -66,13 +66,29 @@ string change in the renderer; the four already-affected cards are reworded as p
 - `recordPrepVerdict` refuses with `{recorded: false, reason: 'bare-refs', bareRefs}` when the array is
   non-empty — a determinate third outcome, consistent with #3230's.
 
+## The marker is a named regex — the criterion can assert on it directly
+
+The check is not a fuzzy scan. `we:scripts/check-standards-rules.mjs` exports `findNonBatchableMarkers`,
+whose `unverified prerequisite` entry is the regex
+`/\b(verify|unverified|unconfirmed)\b[^.\n]{0,60}\bbefore\s+(claim|build)/i`. The renderer's risk-strategy
+sentence puts "verify" within sixty characters of "before build", which is the whole of the false positive.
+
+That matters for acceptance: because the rule is an exported pure function, the criterion can call it
+instead of eyeballing gate output. Round 1 wrote "`npm run check:standards` fails before and passes after",
+which the `acceptance` juror correctly refuted — the gate exits **0** both before and after (all four are
+warnings against a 0-error baseline), so exit code proves nothing and the criterion was unfalsifiable as
+written.
+
 ## Tasks
 
-1. Reword the risk-strategy sentence in the renderer; re-run the gate and confirm the count drops from four.
-2. Reword the four live instances (#3238, #3100, #3103, #2717).
-3. Wire the citation check into the renderer; return `bareRefs`.
-4. Refuse in `record` on a non-empty `bareRefs`.
-5. Tests for both.
+1. Reword the risk-strategy sentence in the renderer so it no longer satisfies that regex.
+2. **Grep the repo for the exact phrase being changed before changing it** — other cards may quote it as an
+   example, a doc may describe the marker, a fixture may assert it. Round 1 called this "purely a string
+   change" without checking; the `blast-radius` juror flagged the omission.
+3. Reword the four live instances (#3238, #3100, #3103, #2717).
+4. Wire the citation check into the renderer; return `bareRefs`.
+5. Refuse in `record` on a non-empty `bareRefs`.
+6. Tests for all of it.
 
 ## Delivery shape
 
@@ -81,14 +97,21 @@ renderer, so if it lands separately it should land **after** #3233 to avoid a te
 
 ## Done when
 
-1. **Executable** — `npm run check:standards` reports the non-batchable marker on **zero** of #3238, #3100,
-   #3103, #2717. It reports four today, so the command fails before and passes after.
-2. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep.test.mjs` passes a case
+1. **Executable** — a vitest case imports `findNonBatchableMarkers` from
+   `we:scripts/check-standards-rules.mjs`, feeds it the output of `renderPrepReviewSection` for a
+   representative verdict, and asserts the returned array is **empty**. It is non-empty today, so this fails
+   before and passes after — by assertion, not by exit code.
+2. **Executable** — a second case runs the same function over the on-disk bodies of #3238, #3100, #3103 and
+   #2717 and asserts zero `unverified prerequisite` hits across all four.
+3. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep.test.mjs` passes a case
    feeding the renderer a `note` containing a bare code path and asserting `bareRefs` is non-empty and names
    that path.
-3. **Executable** — a case asserting `recordPrepVerdict` returns `{recorded: false, reason: 'bare-refs'}` for
+4. **Executable** — a case asserting `recordPrepVerdict` returns `{recorded: false, reason: 'bare-refs'}` for
    that input, and that the card on disk is **unchanged**.
-4. **Executable** — a case asserting a note whose paths are all properly prefixed yields `bareRefs: []` and
+5. **Executable** — a case asserting a note whose paths are all properly prefixed yields `bareRefs: []` and
    records normally, so the check cannot be satisfied by always refusing.
-5. **Mutation** — removing the `bareRefs` wiring reddens case 2 by name; reverting the reworded sentence
-   reddens case 1.
+6. **Mutation** — removing the `bareRefs` wiring reddens case 3 by name; reverting the reworded sentence
+   reddens case 1 by name.
+7. `npm run check:standards` shows no NEW warnings against the 0-error / 1435-warning baseline, and its
+   `unverified prerequisite` count drops by four. (Stated as a count delta, not as pass/fail — the gate is
+   green either way.)

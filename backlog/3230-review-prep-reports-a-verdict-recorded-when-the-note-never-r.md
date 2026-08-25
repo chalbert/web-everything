@@ -31,8 +31,19 @@ present, which is a direct observation rather than an inference about who else h
 
 ## The decided design
 
-After the write, re-read the file and search it for the rendered section. Present ⇒ `verified: true`.
-Absent ⇒ return `{recorded: false, verified: false, path}` and take no further action — no commit, no land.
+After the write, re-read and search for the rendered section. Present ⇒ `verified: true`. Absent ⇒ return
+`{recorded: false, verified: false, path}` and take no further action.
+
+**Verify the STAGED content, not an in-memory read — round 2, forced by an independent panel (2026-08-25).**
+Round 1 said "re-read the file after writing." The `no-op` juror showed that leaves a second window open:
+`recordPrepVerdict` would verify by reading the file into memory, and then `git add` reads the file *again*
+from disk. A concurrent writer landing between those two reads gets committed under a report that already
+said `verified: true` — the same defect, one step later in the pipeline.
+
+So the order is: write → `git add` → verify what is **staged** (`git show :<path>`) → commit. Verifying the
+index rather than the working tree means the bytes checked are exactly the bytes committed, and there is no
+remaining gap for a racing writer to slip through. This is a strictly cheaper fix than locking, and it is
+the reason the check moved after the stage rather than before it.
 
 **A third outcome, not a throw.** A throw would be indistinguishable from the operation crashing, and the
 engine's replay rules then treat it as UNKNOWN and refuse to retry. A returned `recorded: false` is a
@@ -48,9 +59,9 @@ being verified is the whole of what `record` promises. They land in one PR; each
 ## Tasks
 
 1. Extract the rendered section's presence test into a small predicate so the test can assert on it directly.
-2. Re-read after write; branch on presence.
-3. Return the third outcome; ensure the commit/land block is skipped on it.
-4. Test via a stubbed reader that returns the pre-write text.
+2. Reorder to write → stage → verify-the-index → commit.
+3. Return the third outcome; ensure the commit and push blocks are skipped on it.
+4. Test via a stubbed index reader that returns the pre-write text.
 
 ## Delivery shape
 
@@ -59,12 +70,18 @@ Incremental behind `main`, in #3233's PR. No branch.
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep-io.test.mjs` passes a case
-   that stubs the post-write read-back to return the card's pre-write text, and asserts the returned object
-   is `{recorded: false, verified: false}` — asserting explicitly that it does **not** throw.
-2. **Executable** — the same case asserts the commit spy and the pr-land spy were each called **zero** times,
-   proving the false-success path takes no downstream action.
-3. **Executable** — the happy path asserts `verified: true` is present on the success return, so the field
+   that stubs the **staged**-content read to return the card's pre-write text, and asserts the returned
+   object is `{recorded: false, verified: false}` — asserting explicitly that it does **not** throw.
+2. **Executable** — the same case asserts the `commit` spy and the pr-land spy were each called **zero**
+   times, proving the false-success path takes no downstream action. (The `add` spy IS called once — staging
+   precedes verification by design; asserting `add` at zero would encode the wrong order.)
+3. **Executable** — a case asserting the verification reads the **index**, not the working tree: the working
+   tree is mutated after staging and the run still reports `verified: true`, because the staged bytes are
+   the ones that get committed. This is the case that distinguishes round 2's design from round 1's, and it
+   passes only if the check sits after the stage.
+4. **Executable** — the happy path asserts `verified: true` is present on the success return, so the field
    cannot be quietly dropped.
-4. **Mutation** — deleting the read-back branch reddens case 1 by name. (Case 3 alone would stay green with
-   the branch deleted, which is why case 1 is the mutation target and not case 3.)
-5. `npm run check:standards` passes.
+5. **Mutation** — deleting the verification branch reddens case 1 by name; moving the check back to before
+   the stage reddens case 3 by name. (Case 4 alone would stay green under both, which is why it is not the
+   mutation target.)
+6. `npm run check:standards` passes.
