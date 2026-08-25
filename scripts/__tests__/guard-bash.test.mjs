@@ -1514,3 +1514,112 @@ describe('guard-bash — the wrapper-peeled command word reaches every anchored 
     expect(decide('grep -rn "git push origin main" docs/', {})).toBeNull();
   });
 });
+
+/**
+ * A commit under a HAND-SET identity. The box already ships the correct identity at `--global`, so an
+ * override can only make authorship WRONG — and unsigned commits in a human's name land on `main` and stay
+ * there. Observed 2026-08-24: four merged before the tip-commit check noticed.
+ *
+ * The arm is TOKEN-POSITIONAL rather than a regex over the raw text, and the false-positive cases below are
+ * why: the first cut denied `git commit -m "docs: never pass -c user.email=foo"` — the commit that documents
+ * this very rule. Same lesson the `pkill` arm already paid for.
+ */
+describe('commit identity override (#3269)', () => {
+  it('denies every door onto the author/committer fields', () => {
+    for (const cmd of [
+      'git -c user.email=x@y.com commit -m hi',
+      'git -c user.email=x -c user.name=Z commit -q -F -',
+      'git -cuser.email=x@y commit -m hi',          // glued form — git accepts it
+      'git commit --author="A <a@b.c>" -m hi',
+      'git commit --author "A <a@b.c>" -m hi',
+      'GIT_AUTHOR_EMAIL=a@b.c git commit -m hi',
+      'GIT_COMMITTER_NAME=Z git commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it('leaves an ordinary commit, a config write, and an unrelated -c alone', () => {
+    for (const cmd of [
+      'git commit -m hi',
+      'git config user.email noreply@anthropic.com',   // setting the MACHINE's identity is legitimate
+      'git -c core.pager=cat log',
+      'git -c core.pager=cat commit -m ok',            // a non-identity -c on a commit
+      'git push origin HEAD:refs/heads/lane/x',
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('never fires on a MESSAGE that merely mentions the flags', () => {
+    // The regression that caught the first cut: prose is one quoted token, never argv.
+    expect(decide('git commit -m "docs: never pass -c user.email=foo"', {})).toBeNull();
+    expect(decide('git commit -m "note about --author= forms"', {})).toBeNull();
+  });
+
+  it('is not defeated by shell quoting — quoting is invisible to git (#1550 juror)', () => {
+    // The first cut required the flag/subcommand token to be UNQUOTED, which made the arm trivially
+    // evadable: all three of these override authorship while reading as "quoted, therefore prose".
+    for (const cmd of [
+      'git -c user.email=x@y "commit" -m hi',
+      'git "-c" user.email=x@y commit -m hi',
+      'GIT_AUTHOR_EMAIL="a@b.c" git commit -m hi',
+      'git -c "user.email=x@y" commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it('skips a message VALUE by position, not by quoting', () => {
+    // Prose only ever appears as the value of a message flag, so that is what is exempt — precisely.
+    expect(decide('git commit -mquick', {})).toBeNull();          // glued -m
+    expect(decide('git commit -F /tmp/msg.txt', {})).toBeNull();  // -F takes a path
+  });
+
+  it("folds case the way git's own config parser does (#1550 juror r2)", () => {
+    // Verified against real git: `git -c User.Email=case@test.invalid commit` RECORDS that address.
+    // Section and variable names fold, so a case-sensitive match was a bypass.
+    for (const cmd of [
+      'git -c User.Email=x@y commit -m hi',
+      'git -c USER.NAME=Z commit -m hi',
+      'git -c user.EMAIL=x@y commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it("does not fold the FLAG — -C is git's change-directory, a different thing", () => {
+    expect(decide('git -C /some/path commit -m hi', {})).toBeNull();
+  });
+
+  it('catches an override that STRADDLES segments (#1550 juror r3)', () => {
+    // `reason` sees one segment at a time, so neither half of `export GIT_AUTHOR_EMAIL=x && git commit`
+    // trips it alone. Whole-command, same shape as backgroundedVerificationReason.
+    for (const cmd of [
+      'export GIT_AUTHOR_EMAIL=x@y.com && git commit -m hi',
+      'GIT_COMMITTER_EMAIL=x@y; git commit -m hi',
+      'git config user.email x@y.com && git commit -m hi',
+      'git config --global User.Email x@y && git commit -m hi',   // key folds here too
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity/);
+  });
+
+  it('leaves an ordinary chained commit, and a standalone config write, alone', () => {
+    // A `git config` write on its own is legitimate — the machine's identity is the operator's to set.
+    for (const cmd of [
+      'git add -A && git commit -m hi',
+      'npm test && git commit -m ok',
+      'git config user.email noreply@anthropic.com',
+      'git config user.email x@y && git log',
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('does not over-reach — it must be GIT committing, and a config READ is not a write (#1550 juror r4)', () => {
+    for (const cmd of [
+      'git config user.email && echo commit',   // a READ, plus an unrelated word "commit"
+      'git config user.email',                  // a READ on its own
+      'npm run commit -- --author=me',          // not git
+      'my-tool commit --author=x',              // not git
+      'git -C /some/path commit -m hi',         // -C is change-directory
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('still resolves git through a path or wrapper', () => {
+    expect(decide('/usr/bin/git -c user.email=x commit -m hi', {})).toMatch(/identity by hand/);
+  });
+
+  it('honours the sanctioned escape for a deliberate re-attribution', () => {
+    expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
+  });
+});
