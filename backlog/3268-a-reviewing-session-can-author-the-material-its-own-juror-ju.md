@@ -11,10 +11,6 @@ tags: []
 
 we:scripts/operations/stage-pr-view.mjs takes the PR body, comments and file list from a session-supplied file, because this host has no mechanical read path — gh REST answers 403 GitHub access is not enabled and GraphQL serves only the pinned review set. So the session transcribes the PR into the view, and NOTHING verifies that transcription against the real PR. Observed live on PR #1542: the staged view carried a paraphrased body plus a comment authored by the reviewing session and stamped authorAssociation OWNER that does not exist on the PR at all. The real PR had one comment, the drain park notice. A juror weights OWNER differently by design, so this is not merely framing — it is putting words in the operator mouth inside the evidence the juror reads. review-pr itself is mechanical and deriveVerdict is rule-based; the hole is entirely upstream, in what gets staged.
 
-## Done when
-
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
-
 ## How it was found
 
 The operator asked, plainly: *"I thought the point of having operations was to avoid the session being biased — I thought it would run mechanically without framing from the main session."*
@@ -81,6 +77,16 @@ So the view must be read **out of the fetched ref**, not off the filesystem: `gi
 
 ## Done when
 
-1. **Executable** — a test stages a view whose `body` differs from the live PR's and asserts the verdict is REFUSED, naming the mismatch. It must RED today, where any string is accepted.
-2. **Executable** — a test stages a view carrying a comment absent from the live PR and asserts the same refusal. Fabrication and paraphrase are the same defect and must both be covered.
-3. **Non-vacuous** — reverting the check must redden both named tests.
+### These clauses were written for option (a) and are NOT what (b) delivers — stated rather than quietly dropped
+
+The clauses first written here were *"a test stages a view whose `body` differs from the live PR's and asserts the verdict is REFUSED"* and the same for a fabricated comment. Both describe **(a) — verify the transcription**: they presuppose that the session still authors the material and that something later compares it against the real PR. Under **(b)**, ruled, there is nothing to compare: the session never supplies a body or a comment at all, so a test that stages a "wrong body" would have to fabricate the very path the fix removes. Writing one anyway would be a test of a code path that no longer exists — worse than no test, because it reads as coverage.
+
+What replaces them is the same property one step earlier: the session **cannot** be the author.
+
+1. **Executable** — `chooseViewSource` refuses when neither `--fromTransport` nor `--from=` is given, and refuses when both are. Neither is a default, so the weaker path is never reachable by omission. (`we:scripts/operations/__tests__/stage-pr-view.test.mjs` → *"exactly one view source, chosen in writing"*.)
+2. **Executable** — `checkViewProvenance` REFUSES a hand-supplied view on any repo whose `ops/pr-views` branch exists on origin. This is the clause that carries the item: without it, a session fetches the CI-produced view, edits it, and stages the edit through `--from=` — the same fabrication, one step back. (*"a hand-supplied view is REFUSED wherever CI can serve — the structural half"*.)
+3. **Executable** — the transport read is `git show origin/ops/pr-views:<path>` with no filesystem seam anywhere on the path, asserted by driving the reader with a booby-trapped `read` and proving it is never called. A future "fetch it into `/tmp` and read it back" breaks that test.
+4. **Executable** — `checkViewFreshness` refuses a view whose `headRefOid` is not the head `origin/<headRefName>` now points at, and refuses (rather than skipping) when that head cannot be resolved at all.
+5. **Non-vacuous** — each of the above was mutation-tested: reverting the refusal reddens the named test.
+
+(a) remains worth having as defence in depth, and is NOT delivered here. What is delivered towards it is the `_stagedFrom` provenance stamp written into every staged view — the artefact now records whether its bytes came out of CI or off a session's disk, which is what a later digest check would compare against.

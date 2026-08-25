@@ -53,7 +53,11 @@ describe('stage-pr-view against a real filesystem', () => {
       const path = join(ctx.tmp, 'views', '1496.json');
       await createStagePrViewSinks()[WRITE_VIEW_EFFECT]({ path, content: JSON.stringify(VIEW) });
 
-      expect(createPayloadReader()({ from: path })).toEqual(VIEW);
+      // #1548 changed this reader's contract: the source is named explicitly (there are two now, file and
+      // transport, and neither is a default), and it returns `{ view, provenance }` rather than the bare view
+      // so the caller can see WHERE the bytes came from. This file was written against the older single-source
+      // shape, on a main that did not yet carry that change.
+      expect(createPayloadReader()({ source: 'file', from: path }).view).toEqual(VIEW);
     });
   });
 
@@ -67,8 +71,8 @@ describe('stage-pr-view against a real filesystem', () => {
     await withRealRepo(async (ctx) => {
       const missing = join(ctx.tmp, 'nothing-here.json');
 
-      expect(() => createPayloadReader()({ from: missing })).toThrow(/could not read the payload/);
-      expect(() => createPayloadReader()({ from: missing })).toThrow(/ENOENT/);
+      expect(() => createPayloadReader()({ source: 'file', from: missing })).toThrow(/could not read the payload/);
+      expect(() => createPayloadReader()({ source: 'file', from: missing })).toThrow(/ENOENT/);
     });
   });
 
@@ -79,8 +83,8 @@ describe('stage-pr-view against a real filesystem', () => {
       const path = join(ctx.tmp, 'torn.json');
       writeFileSync(path, '{"number": 1496, "title": "half a pas');
 
-      expect(() => createPayloadReader()({ from: path })).toThrow(/is not valid JSON/);
-      expect(() => createPayloadReader()({ from: path })).not.toThrow(/could not read the payload/);
+      expect(() => createPayloadReader()({ source: 'file', from: path })).toThrow(/is not valid JSON/);
+      expect(() => createPayloadReader()({ source: 'file', from: path })).not.toThrow(/could not read the payload/);
     });
   });
 });

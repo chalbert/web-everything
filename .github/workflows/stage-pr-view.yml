@@ -1,0 +1,174 @@
+# Stage a PR view for review (#xaoja7a).
+#
+# WHY: a REVIEWING host is not always a READING host. A Claude Code cloud VM can run the whole `review-pr`
+# operation, but it cannot read the PR it is reviewing: `gh api` answers `403 GitHub access is not enabled` and
+# GraphQL serves only the pinned set of review operations. Until now the reviewing session supplied the PR's
+# body, comments and file list itself, from whatever channel it had — and nothing verified the transcription.
+# On PR #1542 the staged view carried a paraphrase of the body in the session's own voice PLUS a comment the
+# session had written, stamped `authorAssociation: OWNER`, that does not exist on the PR at all. That field
+# exists so a juror can weight an owner's word above a drive-by comment; synthesizing one puts words in the
+# operator's mouth inside the evidence the juror reads.
+#
+# So the session pushes a REQUEST — `{repo, pr}` — and this workflow, which has `gh` and a token, produces the
+# view and commits it back. The session reads it out of the fetched ref and never authors the material.
+#
+# THIS IS `apply-review-request.yml` POINTED AT READ. That workflow is the same shape in the write direction and
+# is proven in production. Every safety property below is copied from it deliberately, with the reason kept:
+#
+#   · THE SCRIPTS COME FROM `main`, never from the branch carrying the request — otherwise a pushed request
+#     could ship its own `produce-pr-view.mjs` beside itself and be processed by it, inside a job holding a
+#     write token. Deliberately NOT `pull_request_target`, and it never checks out a fork's ref: both are the
+#     classic routes to running untrusted code with a credential.
+#   · ONLY WHAT THIS PUSH ADDED is acted on, and WHICH FILES those are is decided in a TESTED script
+#     (`we:scripts/collect-review-requests.mjs`, parameterised over the directory for this flow) rather than in
+#     shell. Shell in a workflow cannot be unit-tested, and this exact step got it wrong twice when it was:
+#     the genesis push (an all-zero `before`) silently dropped every request but the tip commit's, and git's
+#     rename heuristic reported four brand-new request files as renames so `--diff-filter=AM` collected none.
+#     Both failures were SILENT and both went green. That script's header records them; this workflow calls it.
+#   · SERIALISED (`concurrency`, `cancel-in-progress: false`). Two runs producing views race on the push to
+#     `ops/pr-views`, and a cancelled run can stop between producing a view and committing it — leaving a
+#     request answered by nothing while the session that pushed it polls until it times out.
+#
+# ── THE ONE GENUINE PRIVILEGE INCREASE, STATED RATHER THAN WAVED THROUGH ─────────────────────────────────────
+#
+# `apply-review-request.yml` is deliberately `contents: read` — "never pushes". A READ flow must commit the view
+# back, so this job needs `contents: write`. Two things bound it, and neither is a formality:
+#
+#   · IT IS A WORKFLOW OF ITS OWN ON A BRANCH OF ITS OWN. The label applier keeps `contents: read` untouched.
+#     The two flows share a PATTERN, not a token: nothing here can move a label, and nothing there can push.
+#   · THE WRITE IS STRICTLY WEAKER THAN THE BOUNDARY THAT ALREADY EXISTS. The applier's own header states that
+#     anyone who can push to `ops/review-requests` can move a review label — including clearing `review:human`.
+#     Committing PR METADATA to a branch nothing else watches is less authority than that, not more. What this
+#     job can write is one JSON file under `ops/pr-views/views/`, on a branch no build, no deploy and no gate
+#     reads. It cannot touch `main`.
+#
+# TRUST BOUNDARY, stated as the applier states its own: anyone who can push to `ops/pr-views` can ask this job
+# to fetch any PR THIS repo's token can see, and can also write bytes under `views/` directly. The second is why
+# the reading side does NOT treat the branch as authenticated evidence on its own — it re-checks the view's
+# subject, its completeness and its `headRefOid` freshness before staging (see
+# `we:scripts/operations/stage-pr-view.mjs`). On a solo repo this is the same authority as pushing the code.
+# It would need revisiting BEFORE a second writer exists.
+name: Stage PR view
+
+on:
+  push:
+    branches: [ops/pr-views]
+    # REQUESTS ONLY. The view this job commits back lands under `ops/pr-views/views/`, so the workflow's own
+    # push cannot re-trigger it. A single flat directory would have made this an infinite loop.
+    paths: ['ops/pr-views/requests/*.json']
+
+permissions:
+  contents: write   # commits the produced view back to `ops/pr-views` — see the header for what bounds this
+  pull-requests: read # `gh pr view` on a PR in this repo; nothing here writes to a PR
+
+concurrency:
+  group: stage-pr-view
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      # `main`, never the request branch. See the header — this is the property that stops a pushed request
+      # from shipping the code that processes it.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `--ignore-scripts` because this job holds a write token and its actual work is "run one `gh pr view`
+      # and commit the answer". Running every package's install hooks is a wider surface than the task needs.
+      # Unlike the applier, nothing on this path imports a markdown parser, so `--omit=dev` would very nearly
+      # work — it is not used only because `cache: npm` above is keyed on the full lockfile install.
+      - run: npm ci --ignore-scripts
+
+      - name: Collect the requests THIS push added
+        id: collect
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$AFTER"
+          # Harmless and expected to fail on the push that CREATES the branch, where `before` is all zeros.
+          git fetch --quiet origin "$BEFORE" || true
+          node scripts/collect-review-requests.mjs \
+            --before="$BEFORE" --after="$AFTER" --dir=ops/pr-views/requests > /tmp/view-requests.txt
+          echo "count=$(wc -l < /tmp/view-requests.txt)" >> "$GITHUB_OUTPUT"
+          cat /tmp/view-requests.txt
+
+      - name: Produce a view for each request
+        id: produce
+        if: steps.collect.outputs.count != '0'
+        env:
+          # `gh` is preinstalled on the runner; this is what it authenticates with. It acts as
+          # github-actions[bot], and it AUTHORS nothing — every byte it writes came out of `gh pr view --json`.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/produced
+          failed=0
+          while read -r req; do
+            [ -n "$req" ] || continue
+            echo "::group::$req"
+            # Read the request out of the pushed COMMIT rather than checking the branch out — the working tree
+            # stays main's, so the scripts that run are main's.
+            git show "$AFTER:$req" > /tmp/view-request.json
+            node scripts/produce-pr-view.mjs /tmp/view-request.json --out=/tmp/produced || failed=1
+            echo "::endgroup::"
+          done < /tmp/view-requests.txt
+          # `tr -d` because `wc -l` pads on some platforms and this value is compared as a STRING in the `if:`
+          # below — a padded "  2" is not "0" but is also not what a later `!= ''` reader expects.
+          echo "produced=$(find /tmp/produced -name '*.json' | wc -l | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+          exit $failed
+
+      # ONE COMMIT FOR THE WHOLE PUSH, in a WORKTREE. Checking `ops/pr-views` out over the job's tree would
+      # replace the scripts that just ran with the branch's own — the property the `ref: main` checkout exists
+      # for, given away at the last step. `always()` so views produced before a later request failed are still
+      # published: a session waiting on a view it can have must not time out because a sibling request was bad.
+      - name: Commit the views back to ops/pr-views
+        if: always() && steps.produce.outputs.produced != '0' && steps.produce.outputs.produced != ''
+        run: |
+          set -euo pipefail
+          # THE EXPLICIT REFSPEC, not a bare `git fetch origin ops/pr-views`. `actions/checkout` configures
+          # `remote.origin.fetch` for the ref it checked out, so a bare fetch can leave the result in
+          # `FETCH_HEAD` without updating `origin/ops/pr-views` — and the worktree below would then be built
+          # from a tracking ref that is stale or absent. Same reason `fetchTransportArgv` in
+          # `we:scripts/lib/pr-view-transport.mjs` spells its refspec out.
+          git fetch --quiet origin '+refs/heads/ops/pr-views:refs/remotes/origin/ops/pr-views'
+          git worktree add --detach /tmp/views-wt origin/ops/pr-views
+          mkdir -p /tmp/views-wt/ops/pr-views/views
+          cp /tmp/produced/*.json /tmp/views-wt/ops/pr-views/views/
+          cd /tmp/views-wt
+          git add -- ops/pr-views/views
+          # NOTHING TO COMMIT IS A SUCCESS: the PR has not changed since the last produce, so the view already
+          # on the branch is the one the requester asked for. `produce-pr-view.mjs` writes no timestamp
+          # precisely so this stays true and the branch does not grow a commit per poll.
+          if git diff --cached --quiet; then
+            echo "views unchanged — nothing to publish"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet -m "pr-view: stage views for $GITHUB_SHA"
+          # A BOUNDED RETRY, because a session pushing a REQUEST while this job pushes a VIEW loses the race and
+          # git rejects the non-fast-forward. The two touch disjoint directories, so the rebase is always clean;
+          # three attempts, then fail loudly rather than looping. Everything the retry decides is mechanical —
+          # the DECISIONS (which requests, what bytes) are in tested node scripts above, which is what keeps
+          # this the only untestable shell in the flow.
+          for attempt in 1 2 3; do
+            if git push --quiet origin HEAD:ops/pr-views; then
+              echo "published on attempt $attempt"
+              exit 0
+            fi
+            git fetch --quiet origin '+refs/heads/ops/pr-views:refs/remotes/origin/ops/pr-views'
+            git rebase origin/ops/pr-views
+          done
+          echo "could not publish views after 3 attempts" >&2
+          exit 1

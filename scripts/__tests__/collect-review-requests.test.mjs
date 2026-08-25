@@ -96,6 +96,50 @@ describe('refusals', () => {
 });
 
 /**
+ * #xaoja7a — THE SECOND TRANSPORT. `we:.github/workflows/stage-pr-view.yml` collects PR-VIEW requests from
+ * `ops/pr-views/requests`, and both silent drops this file exists for — the genesis push and git's rename
+ * heuristic — are properties of git and of GitHub's push payload, not of which directory is watched.
+ * Re-implementing the diff in that workflow's shell would have re-earned both, where no unit test can reach.
+ */
+describe('a second watched directory reuses the logic rather than re-earning its bugs', () => {
+  const VIEWS = 'ops/pr-views/requests';
+
+  it('carries the directory into both git argv shapes', () => {
+    expect(collectArgv({ before: NO_PARENT_SHA, after: AFTER, dir: VIEWS }))
+      .toEqual(['ls-tree', '-r', '--name-only', AFTER, '--', VIEWS]);
+    expect(collectArgv({ before: BEFORE, after: AFTER, dir: VIEWS }))
+      .toEqual(['diff', '--name-only', '--diff-filter=AM', '--no-renames', BEFORE, AFTER, '--', VIEWS]);
+  });
+
+  // The genesis-push and rename guards are properties of the ARGV, so a second directory inherits both.
+  it('keeps `--no-renames` and the genesis `ls-tree` for the second directory too', () => {
+    expect(collectArgv({ before: BEFORE, after: AFTER, dir: VIEWS })).toContain('--no-renames');
+    expect(collectArgv({ before: '', after: AFTER, dir: VIEWS })[0]).toBe('ls-tree');
+  });
+
+  it('filters on the directory it was given, not on the default', () => {
+    const out = [`${VIEWS}/a.json`, `${REQUEST_DIR}/b.json`, `${VIEWS}/nested/c.json`, `${VIEWS}/README.md`].join('\n');
+    expect(parseNames(out, VIEWS)).toEqual([`${VIEWS}/a.json`]);
+    expect(parseNames(out)).toEqual([`${REQUEST_DIR}/b.json`]);
+  });
+
+  it('defaults to the review-request directory, so every existing caller is unchanged', () => {
+    expect(collectArgv({ before: BEFORE, after: AFTER })).toEqual(collectArgv({ before: BEFORE, after: AFTER, dir: REQUEST_DIR }));
+  });
+
+  /**
+   * The string goes into a git PATHSPEC and into a `RegExp`. A `..` segment would collect files outside the
+   * transport directory; an unescaped metacharacter would silently widen or narrow the filter with no error.
+   */
+  it('refuses a directory that is not a plain repo-relative path', () => {
+    for (const bad of ['', '   ', '../etc', 'ops/../../x', 'ops/pr-views/*', '/abs/path', 'a b']) {
+      expect(() => collectArgv({ before: BEFORE, after: AFTER, dir: bad })).toThrow(/plain repo-relative path/);
+      expect(() => parseNames('x', bad)).toThrow(/plain repo-relative path/);
+    }
+  });
+});
+
+/**
  * THE RENAME TRAP, pinned against REAL GIT because a stub cannot reproduce it: the defect is git's own
  * similarity heuristic, not our argv handling. A push that adds `1463-accepted-retry1.json` while deleting
  * `1463-accepted.json` is reported as ONE `R099` rename, and `R` is not in `AM` — so the new request was
@@ -149,5 +193,20 @@ describe('git’s rename detection must not swallow a request', () => {
     git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'withdrawn');
     const after = git(dir, 'rev-parse', 'HEAD');
     expect(collectRequests({ before, after, exec: (argv) => git(dir, ...argv) })).toEqual([]);
+  });
+});
+
+describe('#1548 r4 — the watched dir is ESCAPED, not merely allowlisted', () => {
+  it('a dot in the directory name is literal, not "any character"', () => {
+    // `assertDir` legitimately permits `.` in a segment — a directory may be named `ops.v2`. Splicing that
+    // straight into a RegExp made the dot match ANY character, so `opsXv2/` was accepted too. The function's
+    // own header claimed it prevented exactly this class of silent widening; it did not.
+    const out = 'ops.v2/a.json\nopsXv2/b.json';
+    expect(parseNames(out, 'ops.v2')).toEqual(['ops.v2/a.json']);
+  });
+
+  it('the ordinary directory is unaffected', () => {
+    expect(parseNames('ops/review-requests/7-accepted.json', 'ops/review-requests'))
+      .toEqual(['ops/review-requests/7-accepted.json']);
   });
 });

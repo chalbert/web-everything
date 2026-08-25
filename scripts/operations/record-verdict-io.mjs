@@ -26,9 +26,16 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stageOnTransportBranch, trackingRefspec } from '../lib/git-transport-branch.mjs';
+
+// RE-EXPORTED, not re-declared (#2644). `trackingRefspec` moved to `we:scripts/lib/git-transport-branch.mjs`
+// when the worktree dance was extracted there — it is a fact about git's refspec grammar, true of every
+// transport branch, and that module is the one every transport shares. Kept exported from here because tests
+// and #3264's own prose reference it at this path, and a moved symbol should not break its callers silently.
+export { trackingRefspec };
 import { createFileRunStore } from './run-store.mjs';
 import { reviewBodyPath } from './review-pr-io.mjs';
 import { STAGE_REQUEST_EFFECT } from './record-verdict.mjs';
@@ -74,18 +81,32 @@ export const BOARD_SOURCE_BRANCH = 'main';
  * `originRepo` is INJECTED so this is testable with no git, and so a caller that already knows the checkout
  * (the conveyor, a test) can say so instead of being probed.
  *
- * @param {{repo: string, root?: string, repoRoot?: string, originRepo?: Function}} o
+ * THE RULING IS BROADER THAN THIS ONE TRANSPORT, so the wording is parameterised (#xaoja7a). `stage-pr-view`
+ * pushes a VIEW request to `ops/pr-views` and needs the identical decision — same repo-scoped token, same
+ * stranding failure if it lands on the wrong board. Copying the function to say "a view request" instead of
+ * "a verdict" would be a second answer to which board a repo's notes live on. The defaults reproduce
+ * `record-verdict`'s own message byte for byte, so nothing that reads it changes.
+ *
+ * @param {{repo: string, root?: string, repoRoot?: string, originRepo?: Function, who?: string, what?: string, branch?: string}} o
  * @returns {string} the checkout whose `origin` is `repo`
  */
-export function resolveTransportRoot({ repo, root = REPO_ROOT, repoRoot = '', originRepo = defaultOriginRepo } = {}) {
+export function resolveTransportRoot({
+  repo,
+  root = REPO_ROOT,
+  repoRoot = '',
+  originRepo = defaultOriginRepo,
+  who = 'record-verdict',
+  what = 'a verdict',
+  branch = TRANSPORT_BRANCH,
+} = {}) {
   const want = String(repo ?? '').trim();
-  if (!want) throw new Error('record-verdict: no `repo` on the request — cannot decide which board it belongs on');
+  if (!want) throw new Error(`${who}: no \`repo\` on the request — cannot decide which board it belongs on`);
   const candidate = String(repoRoot ?? '').trim() || root;
   const have = originRepo(candidate);
   if (have === want) return candidate;
   throw new Error(
-    `record-verdict: refusing to stage a verdict for ${want} on ${have || '(unknown)'}'s transport branch (#3261). `
-    + 'Each repo owns its own notes: the request must be pushed to that repo\'s own `ops/review-requests`, where '
+    `${who}: refusing to stage ${what} for ${want} on ${have || '(unknown)'}'s transport branch (#3261). `
+    + `Each repo owns its own notes: the request must be pushed to that repo's own \`${branch}\`, where `
     + 'ITS applier — holding ITS repo-scoped token — can act on it. A request left on the wrong board is picked '
     + 'up by an applier that cannot resolve the repository, which is how plateau-app#144 was stranded. '
     + `Pass \`--repoRoot=<path to a ${want} checkout>\`.`,
@@ -101,20 +122,6 @@ export function defaultOriginRepo(cwd) {
   } catch { return ''; }
 }
 
-/**
- * An EXPLICIT refspec, because `git fetch origin <branch>` does not create `origin/<branch>` (#3264).
- *
- * Hit live onboarding plateau-app: the fetch succeeded, wrote `FETCH_HEAD` and nothing else, and the very next
- * line died with `fatal: invalid reference: origin/ops/review-requests`. A bare `fetch origin <branch>` updates
- * the remote-tracking ref only when the CLONE'S CONFIGURED REFSPEC covers it — a full clone carries
- * `+refs/heads/*:refs/remotes/origin/*` and so it does, which is why `we:` never saw this, but a narrow or
- * single-branch clone does not, and the cloud session's checkouts are of that kind. Naming the destination
- * makes the ref appear regardless of the clone's geometry, which is the whole point: this sink must not read
- * one repo's clone as universal.
- */
-export function trackingRefspec(branch) {
-  return `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
-}
 
 /**
  * BOARD GENESIS: on a repo that has never carried a verdict, create `ops/review-requests` from `main` (#3264).
@@ -227,17 +234,18 @@ export function createRunReader({ root = REPO_ROOT, store = createFileRunStore()
 /**
  * Stage the request on the transport branch and push it.
  *
- * A DEDICATED WORKTREE, not a branch switch. The caller is standing in a lane with its own work; checking
- * `ops/review-requests` out over it would take that work with it. `git worktree` gives the transport branch its
- * own directory, so the caller's tree is never touched — and the worktree is removed afterwards whether the
- * push succeeded or not, because a stranded worktree wedges the next run on the same branch.
+ * THE WORKTREE DANCE ITSELF NOW LIVES IN `we:scripts/lib/git-transport-branch.mjs` (#xaoja7a), because a
+ * SECOND transport needed it: `stage-pr-view` pushes a view REQUEST to `ops/pr-views` the same way this pushes
+ * a verdict request to `ops/review-requests`. The hazards that dance encodes — never switching the caller's
+ * lane onto the transport branch, always removing the worktree AND pruning its registration, injecting the
+ * filesystem calls as well as `git`, treating "nothing to commit" as success — are not obvious, and a second
+ * copy would have re-earned each of them one at a time. That header records what each one cost.
  *
- * EVERY SIDE EFFECT IS INJECTED — `git` AND the three filesystem calls. `git` alone was not enough, and CI
- * caught it: a suite that injected only `run` still executed the real `mkdirSync` against its fixture root of
- * `/repo`. As root that SUCCEEDED, silently creating a directory at the filesystem root and leaving the tests
- * green over a sink that had genuinely written outside its checkout; as an ordinary CI user it failed `EACCES`
- * and reddened four tests. The green run was the worse outcome of the two, and a partially-injected sink is
- * what allowed it — so `mkdir`/`write`/`rm` are parameters here for the same reason `run` always was.
+ * WHAT STAYS HERE is the DECISION: which checkout the request belongs on (`resolveTransportRoot`, #3261),
+ * which refuses a cross-repo push rather than defaulting to the local clone.
+ *
+ * The injected `run`/`mkdir`/`write`/`rm` are passed straight through, so this sink is still exercisable with
+ * no git and no filesystem at all.
  */
 export function createRecordVerdictSinks({
   root = REPO_ROOT,
@@ -258,49 +266,28 @@ export function createRecordVerdictSinks({
       // a programmatic caller (and for tests) that knows the checkout up front.
       const board = resolveTransportRoot({ repo: payload.repo, root, repoRoot: payload.repoRoot || repoRoot, originRepo });
       // #3264 — GENESIS, before anything assumes the board exists. A repo onboarding to the transport has never
-      // carried a verdict, so its board has to be born here or the first verdict for it fails on a raw git
-      // error. Outside the `try` deliberately: no worktree exists yet, so there is nothing for the `finally` to
-      // clean up, and a genesis failure must reach the caller as its own refusal rather than as a cleanup.
+      // carried a verdict, so its board has to be born here or the first verdict for it fails on a raw git error.
+      // OUTSIDE the staging call deliberately: no worktree exists yet, so there is nothing to clean up, and a
+      // genesis failure must reach the caller as its own refusal rather than as a cleanup.
       ensureBoardBranch({ run, board, repo: payload.repo });
-      const wt = join(board, '.operations', 'transport', `wt-${now()}`);
-      mkdir(dirname(wt), { recursive: true });
-      try {
-        // The refspec is EXPLICIT because a bare `fetch origin <branch>` leaves no `origin/<branch>` in a narrow
-        // clone, and the `worktree add` below then dies on `invalid reference`. See `trackingRefspec`.
-        run(['fetch', '--quiet', 'origin', trackingRefspec(TRANSPORT_BRANCH)], { cwd: board });
-        // `--force` on the worktree add is about the DIRECTORY, not the branch: a leftover registration from a
-        // killed run must not stop this one. The branch itself is taken from the freshly fetched remote tip.
-        run(['worktree', 'add', '--force', '--detach', wt, `origin/${TRANSPORT_BRANCH}`], { cwd: board });
-        run(['checkout', '-B', TRANSPORT_BRANCH, `origin/${TRANSPORT_BRANCH}`], { cwd: wt });
-        // #3264 — and only NOW is the board's own tree readable, which is the only place the question can be
-        // asked. A board without the applier accepts the push and applies nothing; refusing here is what keeps
-        // that from being silent. Before the write, so a dead board never gets a commit it cannot act on.
-        assertApplierRidesBoard({ run, wt, repo: payload.repo });
-
-        const abs = join(wt, payload.path);
-        mkdir(dirname(abs), { recursive: true });
-        write(abs, payload.content);
-
-        run(['add', '--', payload.path], { cwd: wt });
-        // NOTHING TO COMMIT IS A SUCCESS, not a failure: the identical request is already staged, which is
-        // exactly what `idempotent: true` promises on replay. Committing nothing and pushing nothing leaves
-        // the transport in the state the caller asked for.
-        const staged = run(['diff', '--cached', '--name-only'], { cwd: wt }).trim();
-        if (!staged) return { path: payload.path, pushed: false, reason: 'identical request already staged' };
-
-        run(['commit', '--quiet', '-m', `review: #${payload.pr} → ${payload.to} (via record-verdict)`], { cwd: wt });
-        run(['push', '--quiet', 'origin', `HEAD:${TRANSPORT_BRANCH}`], { cwd: wt });
-        return { path: payload.path, pushed: true };
-      } finally {
-        // ALWAYS, and in this order: remove the directory, then prune the registration. A worktree left behind
-        // makes the next `worktree add` on the same branch fail, which would turn one bad run into every
-        // subsequent one failing.
-        try { rm(wt, { recursive: true, force: true }); } catch { /* already gone */ }
-        // PRUNED IN `board`, NOT `root` (#3261). The worktree was registered in the board's checkout, so
-        // pruning the driver's would leave a stale registration in the target repo and wedge its NEXT
-        // stage on the same branch — the failure this finally block exists to prevent, relocated.
-        try { run(['worktree', 'prune'], { cwd: board }); } catch { /* best effort */ }
-      }
+      const out = stageOnTransportBranch({
+        board,
+        branch: TRANSPORT_BRANCH,
+        files: [{ path: payload.path, content: payload.content }],
+        message: `review: #${payload.pr} → ${payload.to} (via record-verdict)`,
+        // #3264 — the applier check rides the extraction's `assertReady` seam rather than being inlined here,
+        // because it can only be asked once the worktree exists and that now happens inside the helper. It stays
+        // THIS operation's business: a board that must carry the applier is a fact about the review-request
+        // transport, not about transport branches in general.
+        assertReady: ({ run: r, wt }) => assertApplierRidesBoard({ run: r, wt, repo: payload.repo }),
+        run, mkdir, write, rm, now,
+      });
+      // NOTHING TO COMMIT IS A SUCCESS, not a failure: the identical request is already staged, which is
+      // exactly what `idempotent: true` promises on replay. The wording stays this operation's own — an
+      // operator reading it is looking at a review request, not at "content".
+      return out.pushed
+        ? { path: payload.path, pushed: true }
+        : { path: payload.path, pushed: false, reason: 'identical request already staged' };
     },
   };
 }
