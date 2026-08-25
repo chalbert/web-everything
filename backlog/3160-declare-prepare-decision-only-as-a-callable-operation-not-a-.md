@@ -1,13 +1,23 @@
 ---
 bornAs: x8fsi8b
-kind: task
+kind: story
+size: 8
 status: open
 parent: "3029"
-relatedTo: ["3152", "3146"]
+relatedTo: ["3152", "3146", "3147", "3159"]
 tier: pinned
-dateOpened: "2026-08-17"
+dateOpened: "2026-08-25"
 preparedDate: "2026-08-25"
 tags: [operations, epic-3029, orchestration-load, prepare]
+scope:
+  - we:scripts/operations/prepare.mjs
+  - we:scripts/operations/prepare-io.mjs
+  - we:scripts/operations/__tests__/prepare.test.mjs
+  - we:scripts/operations/__tests__/prepare-io.test.mjs
+  - we:scripts/operations/run.mjs
+  - we:scripts/operations/run-record.mjs
+  - we:scripts/lib/judge-panel.mjs
+  - we:skills-src/prepare-decision-item/SKILL.md
 ---
 
 # Declare 'prepare' (decision-only) as a callable operation, not a hand-dispatched skill invocation
@@ -92,6 +102,64 @@ Reuse, do not reinvent:
 **The editor is not a juror** (`we:docs/agent/delivery-loop.md`): the round that applies findings authors,
 so it must be a different actor from every seat that judged it. Headless jurors make that true by
 construction; #3159 tracks giving the editor its own tool-bearing headless spawn.
+
+## Size, and why it is not the task it started as
+
+**`size: 8`, retyped from `task` to `story`.** It was filed as an unsized task meaning "wrap the existing
+skill". The operator contract above widened it to owning a loop that is observable, terminal and resumable,
+and an unsized task is the wrong shape for that. 8 is the top of the batchable range and is deliberate: the
+checklist says anything above 8 must be sliced rather than forced into a number.
+
+**The seam if it does need slicing**, named now so nobody has to invent it later: *(i)* the operation that
+runs prepare + panel + apply + re-panel and returns a terminal verdict, against a lane, stopping short of
+the PR; *(ii)* the transport half — open, land, and report. (i) is the judgment machinery and carries all
+the risk; (ii) is the same lane→PR→drain path four sibling operations already use. They split cleanly
+because (i) returns a prepared card in a lane and (ii) does not care how it got there.
+
+## Interfaces and protocol
+
+**The per-round state lives on the existing run record**, not in a new store. `we:scripts/operations/run-record.mjs`
+defines a record as `{ id, op, input, cursor, findings, verdict, effects, telemetry }` with
+`RUN_RECORD_VERSION = 1` (`we:scripts/operations/run-record.mjs:31`, `:86`). Two consequences worth pinning
+because Done-when 4 rests on them:
+
+- **Rounds go in `findings`, keyed by round.** `findings` is already the per-step compute output map, and a
+  round IS a compute step's output. Shape per entry:
+  `{ round: number, seats: number, findings: number, converged: boolean, costUsd: number }`.
+- **Observability is a read of that file, not a new channel.** The record is written as the run advances, so
+  "surface progress while suspended" and "`--resume` continues" are the same mechanism. This is the reason
+  the card does not propose a progress socket or a status endpoint.
+- `newRunRecord` starts `cursor: 0` and `telemetry: []`; juror spend normalises through
+  `normalizeJudgeTelemetry` (`:133`), which already exists and must be reused rather than re-summed.
+
+**The panel call** is `we:skills-src/jury/panel-fanout.mjs` with `--depth`, `--max-depth` and
+`--max-total-budget-usd` all supplied — they fail closed and must never be defaulted.
+
+**The round cap and the stand-down rule come from `we:docs/agent/delivery-loop.md`** — three rounds on one
+defect *class* without convergence — and from `/converge`, which already owns "how many jurors a care band
+earns, which lenses are mandatory, how verdicts reduce, the round cap". This card **imports** that cap; it
+does not invent a number.
+
+**Terminal shape:** `{ outcome: 'landed' | 'failed', reason?: string, rounds: number, item, pr?: number }`.
+`failed` reasons are at least `'round-cap'` and `'gate-red'`.
+
+## Tasks
+
+1. Declare the operation: `input` = `{ item, repo?, cwd?, model?, maxRounds? }`, steps
+   `read → prepare → panel → apply → (loop) → open-pr → land`.
+2. Acquire a lane for the work; the panel's jurors get their own, never the driver's (`assertLaneCwd`).
+3. Drive the existing decision-prep logic from `we:skills-src/prepare-decision-item/SKILL.md` rather than
+   re-authoring its rubric.
+4. Loop: panel → apply findings → re-panel, writing a round entry to `findings` each pass.
+5. Stop on convergence or the imported cap; return the terminal shape.
+6. Hand off to the lane→PR→drain transport the sibling operations already use.
+7. Tests, including the resume and the cap.
+
+## Delivery shape
+
+Lands incrementally behind `main` — a new operation is additive, and nothing calls it until it exists, so
+there is no migration and no branch. It should land **after** the #3233/#3230/#3238 cluster, because it will
+call `review-prep`-shaped machinery and should not be built against the version being fixed.
 
 ## Done when
 

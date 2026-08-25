@@ -84,4 +84,6 @@ Incremental behind `main`, in #3233's PR. No branch.
 5. **Mutation** — deleting the verification branch reddens case 1 by name; moving the check back to before
    the stage reddens case 3 by name. (Case 4 alone would stay green under both, which is why it is not the
    mutation target.)
-6. `npm run check:standards` passes.
+6. `npm run check:standards` shows **no new warnings** against the 0-error / 1435-warning baseline. Stated
+   as a delta, not as "passes": the gate exits 0 both before and after, so an exit-code assertion would be
+   decorative — the same defect #3238 refutes in this PR, which this criterion originally reproduced.
