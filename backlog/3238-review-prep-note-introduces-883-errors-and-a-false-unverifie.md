@@ -98,11 +98,16 @@ renderer, so if it lands separately it should land **after** #3233 to avoid a te
 ## Done when
 
 1. **Executable** — a vitest case imports `findNonBatchableMarkers` from
-   `we:scripts/check-standards-rules.mjs`, feeds it the output of `renderPrepReviewSection` for a
-   representative verdict, and asserts the returned array is **empty**. It is non-empty today, so this fails
-   before and passes after — by assertion, not by exit code.
-2. **Executable** — a second case runs the same function over the on-disk bodies of #3238, #3100, #3103 and
-   #2717 and asserts zero `unverified prerequisite` hits across all four.
+   `we:scripts/check-standards-rules.mjs`, feeds it the output of `renderPrepReviewSection` for a verdict
+   **whose risks include a PREMISE entry with `addressed: false`**, and asserts the returned array is
+   **empty**. The fixture shape is named rather than left as "a representative verdict": the PREMISE risk's
+   strategy text is the only thing that trips the regex, so a verdict omitting it would pass trivially both
+   before and after and prove nothing (red-team finding). It is non-empty today, so this fails before and
+   passes after — by assertion, not by exit code.
+2. **Executable** — a second case asserts the same over a **frozen fixture** copy of the four affected card
+   bodies, checked in beside the test. Deliberately not a live read of `we:backlog/*.md`: this test's
+   purpose is "the reworded text no longer trips the marker", not "the repo currently contains that text",
+   and coupling it to four cards outside this change's scope would let unrelated edits redden it.
 3. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep.test.mjs` passes a case
    feeding the renderer a `note` containing a bare code path and asserting `bareRefs` is non-empty and names
    that path.

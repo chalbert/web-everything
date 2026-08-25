@@ -38,42 +38,118 @@ caller's branch, and the verdict is stranded on a ref nobody reads.
 That is the argument for the split, and it is stronger than "callers must squash commits they did not
 make": **an operation that bundles recording with landing cannot record on a host that cannot land.**
 
-## The decided design — the seam is push, NOT commit
+## The decided design — round 3 INVERTS rounds 1 and 2: `record` always pushes
 
-**Round 2, after an independent panel (2026-08-25) refuted round 1.** Round 1 said `record` should append
-and stop, committing nothing. The `no-op` juror showed that is **worse than the bug** for the exact
-population this card diagnoses: on a cloud VM, an uncommitted working-tree edit dies when the box is
-reclaimed, whereas today's orphan ref at least persists on origin and is recoverable — as this card's own
-forensic section proves by diffing one back. Round 1 would have traded a discoverable failure for a silent
-one. That finding is why the design below is not the design the title implies.
+Two panels killed two designs on the same test, and the second kill was the useful one.
 
-**The seam is between what is local and durable, and what needs a credential:**
+- **Round 1** — "append and stop, commit nothing." Refuted: an uncommitted working-tree edit dies when a
+  cloud VM is reclaimed.
+- **Round 2** — "commit locally, push only behind `--land`." Refuted harder, by two independent jurors: an
+  **unpushed local commit dies with the box exactly the same way**, so round 2 restated round 1's defect in
+  git-object form. The red-team juror added the half that settles it: the `--land: true` path *reproduces
+  the original bug verbatim* — on a VM the push succeeds and `gh` fails, producing precisely the orphan ref
+  this card exists to stop. **Neither setting of round 2's flag closed the loop.**
 
-- `record` appends, **verifies**, and **commits locally**. A commit is free, needs no credential, works
-  identically on a VM and a laptop, and makes the verdict durable in git the moment it exists.
-- `--land` (default OFF) additionally **pushes the ref and shells `we:scripts/pr-land.mjs`**. This is the
-  half that requires GitHub and the half that fails on a VM.
+Rounds 1 and 2 were the same idea twice ("push less"). Rather than take a third swing at it — the point at
+which `we:docs/agent/delivery-loop.md` says to stand down because the model is wrong — the model is what
+changes here, and the evidence forces the direction:
 
-This keeps the card's actual complaint — no branch pushes, no delivery work under a review name, no
-`lane/review-prep-*` accumulation — while removing the failure mode round 1 would have introduced. It also
-keeps #2138's single-transport rule: when `--land` IS passed, landing still goes through
+> **The 21 orphan refs are not the failure. They are the only reason those 20 verdicts still exist.** Every
+> verdict that reached a durable place got there *by being pushed*. Every design that pushes less loses
+> them. The push is the durability mechanism, and this card's title is wrong to call it a side effect
+> nobody asked for.
+
+**So `record` appends, verifies, commits, and PUSHES — always, on every host.** A push needs only the git
+transport, which is credentialed everywhere including a cloud VM
+(`we:agent-memory-src/workflow-cloud-vm-github-api-boundary.md`). What moves behind `--land` (default OFF)
+is only `we:scripts/pr-land.mjs` — the PR-open, which is the GitHub-API half that genuinely cannot work on
+a VM and must not be attempted there.
+
+**What was actually broken, then, is the HAND-BACK.** Twenty verdicts sat on origin for four days because
+nothing reported that they existed and needed landing. So the operation's contract gains the missing half:
+when it pushes without landing, it **returns the ref and the exact follow-up** — the argv a credentialed
+host should run — instead of throwing "outcome UNKNOWN" and leaving no trace. That is what turns an orphan
+ref into a hand-off.
+
+**The original complaint survives and is answered precisely.** "Six commits on one lane" was real, and its
+cause was pushing the caller's whole accumulated stack under one item's ref. `record` now pushes **only its
+own commit**, onto a ref named for the item it reviewed. Six reviews produce six one-commit refs, not one
+six-commit ref misattributed to whichever item happened to be last.
+
+#2138's single-transport rule is untouched: when `--land` IS passed, landing still goes through
 `we:scripts/pr-land.mjs`, so no second route to `main` appears.
 
-The card's original "6 commits on one lane" objection survives this and is answered by it: six reviews in a
-lane producing six commits is correct. What was wrong was pushing each accumulated stack as its own ref.
+### The failure trace, per setting — required because this section answers a `worseThanBase` finding
+
+| host | `--land` off (default) | `--land` on |
+| --- | --- | --- |
+| laptop | verdict pushed, ref + follow-up argv returned; operator or drain lands it | pushed and PR opened, as the merged nine did |
+| cloud VM | verdict pushed and **survives reclaim**; ref + follow-up returned for a credentialed host | refused up front — see below |
+
+On a VM, `--land: true` is **refused before the push**, naming the boundary, rather than attempted and
+failed halfway. Detection is the same probe the memory note documents: `gh auth status` resolving to the
+`prox…` sentinel rather than a credential. A refusal that happens *before* any mutation is the difference
+between a hand-off and today's stranding.
 
 ## Interfaces at the seam
 
 `recordPrepVerdict` (`we:scripts/operations/review-prep-io.mjs`) today returns
 `{recorded, aborted, path, sha, ref, clean, disposition, actor, land}`.
 
-- **Default (`land: false`)** returns `{recorded: true, aborted: false, path, actor, verified: true, sha, landed: false}`.
-  Commit happens; no push, no pr-land shell-out, no `ref`.
-- **With `land: true`** it additionally returns `{ref, clean, disposition, land}` — the remaining keys of
-  today's shape, so the merged-nine path is preserved intact.
-- **`verified`** is the #3230 half. Note the ordering fix that panel finding forced: verification happens
-  **against the staged content**, not against an in-memory read taken before the stage. See #3230.
-- **CLI**: `we:scripts/operations/run.mjs review-prep … [--land]`. Boolean, absent ⇒ false.
+- **Default (`land: false`)** returns
+  `{recorded: true, aborted: false, path, actor, verified: true, sha, ref, pushed: true, landed: false, followUp: string[]}`.
+  `followUp` is the argv a credentialed host should run to land the pushed ref — the hand-back that was
+  missing. It is a real field, not advice in a log line, so a caller can act on it.
+- **With `land: true`** it additionally returns `{clean, disposition, land}` — the remaining keys of today's
+  shape, so the merged-nine path is preserved intact, and `followUp` is absent.
+- **`verified`** is the #3230 half, checked against the **staged** content. See #3230 for why the ordering
+  matters.
+
+**The `--land` flag is a DECLARED INPUT, not just an effect payload key.** Round 2 wrote "CLI: `… [--land]`"
+while its task list only threaded `land` into the `record` payload — but per the statute quoted in
+`we:scripts/operations/review-prep.mjs`'s own header (*operations declared once, callers generated*), the
+CLI adapter derives its flags from the operation's declared `input`. A flag that is not declared cannot
+exist. So:
+
+```js
+// we:scripts/operations/review-prep.mjs — the op() declaration's `input` object
+land: { type: 'boolean', required: false, default: false }
+```
+
+and the `reduce` step reads `view.input.land` into the `record` effect's payload. Named because the `fresh`
+juror found this seam left for the builder to invent.
+
+**The contract-version stamp — field, home, and shape, all pinned.** Round 2 said "the run record gains a
+contract version" and stopped there; a juror correctly refused that as undecided.
+
+- **Field**: `contract` on the run record written by `we:scripts/operations/run-record.mjs`, an integer.
+  `review-prep`'s current contract is `1`; this change makes it `2`.
+- **Read**: at `--resume`, before any effect advances.
+- **Shape**: a **returned refusal**, not a throw — `{resumed: false, reason: 'contract-changed', was: 1, now: 2}`
+  plus a message naming `land`. #3230 argues a throw is the wrong shape because the engine reads it as
+  UNKNOWN and refuses replay; the same argument applies here, and round 2 contradicted itself by pinning the
+  shape in one card and not the other.
+- A run record with **no** `contract` key is treated as `1` (every record written before this change).
+
+## The composed step order — one place, because three cards edit one function
+
+#3233, #3230 and #3238 all restructure `recordPrepVerdict` and land in one PR. A juror noted no card states
+the merged result, leaving the builder to compose three diffs by hand. It is stated here, and this order
+**is** the acceptance target:
+
+1. Pre-write content-hash check (existing; unchanged).
+2. Render the section → `{section, bareRefs}`. **If `bareRefs` is non-empty, refuse now** — before any
+   mutation (#3238).
+3. `writeFileSync` the card.
+4. `git add` the card path.
+5. **Verify the STAGED content** contains the section. Absent ⇒ return the #3230 third outcome; nothing is
+   committed (#3230).
+6. `git commit` the card path only.
+7. **Push** the single commit to `lane/review-prep-<item>-<sha8>` (#3233).
+8. If `land` ⇒ shell `we:scripts/pr-land.mjs`. Else ⇒ return `followUp`.
+
+Step 2 sits before the write deliberately: refusing after writing would leave the card dirty with prose the
+operation just rejected.
 
 ## Migration — three consumer classes, and only the static one was originally checked
 
@@ -92,43 +168,60 @@ naming the change and telling the caller to re-run. Blast radius is nil today (s
 records exist on this machine, all for #3100, all complete) but the refusal is what makes that a fact
 rather than a bet.
 
-**HTTP-adapter network callers: unknown, and stated as unknown.** The operation is exposed over the
-generated HTTP adapter, whose callers are by nature not in the import graph. No grep can settle this. What
-is known: nothing in this repo starts that adapter as a service, and no doc points a client at it. Recorded
-as a residual risk rather than claimed clear.
+**HTTP-adapter network callers: undiscoverable by grep, so DETECTED rather than assumed.** The operation is
+exposed over the generated HTTP adapter, whose callers are by nature not in the import graph. Round 2
+labelled this a residual risk and stopped, which a juror rightly called "labelling a gap is not closing
+one." Closed instead by the cheapest thing that produces evidence: the `record` effect **logs one line
+whenever it runs with `land` absent from its input entirely** (as opposed to explicitly `false`), naming
+the caller channel. Absent-vs-false distinguishes an old-contract caller from a new one. If that line never
+appears, the population is empirically empty; if it does, we learn who they are before anything else
+changes. Nothing in this repo starts that adapter as a service and no doc points a client at it, so the
+expectation is silence — but that becomes a measurement rather than a hope.
 
 **No skill invokes it** — grepping `we:skills-src/` for the operation name returns nothing, itself a gap
 tracked by #3225.
 
 ## Tasks
 
-1. Thread a `land` boolean through the `record` effect's payload; default false in the declaration.
-2. Split `recordPrepVerdict` into append + verify + commit, then a guarded push/land block.
-3. Add the contract-version stamp and the resume refusal for runs recorded under the old contract.
-4. **Update the file-header JSDoc of `we:scripts/operations/review-prep-io.mjs`**, which currently states
-   "LANDS OR PARKS (never both)" and describes commit+land as automatic — it sits directly above the code it
-   would now contradict. (Panel finding; round 1's task list omitted it.)
-5. Unit-test every branch.
-6. Leave the 21 existing orphan refs alone — recovering them is its own card, not this one.
+1. Declare `land` in the operation's `input` (boolean, default false); read it in `reduce` into the `record`
+   payload. The CLI flag is generated from the declaration, never hand-added.
+2. Restructure `recordPrepVerdict` to the composed order above: refuse-on-bare-refs → write → stage →
+   verify-index → commit → push-own-commit → optional land.
+3. Return `followUp` (the argv for a credentialed host) whenever the push happens without a land.
+4. Refuse `land: true` up front on a host with no GitHub credential, before any mutation.
+5. Add the `contract: 2` stamp and the resume refusal; treat a missing key as `1`.
+6. Log the absent-vs-false `land` input once per run, for the HTTP-caller detection above.
+7. **Rewrite the file-header JSDoc of `we:scripts/operations/review-prep-io.mjs`** — it currently states
+   "LANDS OR PARKS (never both)" and describes commit+land as automatic, directly above the code it would
+   now contradict.
+8. Unit-test every branch.
+9. Leave the 21 existing orphan refs alone — recovering them is its own card, not this one.
 
 ## Delivery shape
 
-Lands incrementally behind `main` in one PR — no branch needed. The two halves cannot sensibly land apart:
-verifying a write that is still bundled with a push would report `verified: true` on a run whose verdict
-still strands.
+Lands incrementally behind `main` in one PR with #3230 and #3238 — one function, three diffs, composed order
+stated above. No branch needed.
 
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-prep-io.test.mjs` passes a case
-   asserting that a default `record` (no `--land`) **commits exactly once** and performs **zero** pushes and
-   **zero** pr-land invocations: the `runNode` spy is called 0 times, the `exec` spy shows a `commit` and no
-   `push`, and the card on disk carries the section. Fails today (the current code always shells pr-land).
-2. **Executable** — a second case passes `land: true` and asserts `{sha, ref, disposition}` are returned and
-   `we:scripts/pr-land.mjs` was shelled exactly once.
-3. **Executable** — a third case resumes a run record stamped with the old contract version and asserts the
-   operation **refuses** with a message naming `land`, rather than proceeding with the new default.
-4. **Executable** — a case asserting the file-header JSDoc no longer contains the string
-   "LANDS OR PARKS", so task 4 cannot be silently skipped.
-5. **Mutation** — deleting the `land` guard (making the push unconditional again) reddens case 1 by name;
-   deleting the resume-version check reddens case 3 by name.
-6. `npm run check:standards` passes with no new warnings against the baseline of 0 errors / 1435 warnings.
+   asserting a default `record` (no `land`) **commits once and pushes once**, shells pr-land **zero** times,
+   and returns a `followUp` array whose first element names `we:scripts/pr-land.mjs`. Fails today (the
+   current code always shells pr-land and returns no `followUp`).
+2. **Executable** — the same case asserts the pushed ref contains **exactly one** commit — the review's own —
+   by asserting the push refspec names the recorded `sha` rather than a branch tip. This is the "six commits
+   under one item's ref" defect; a test asserting only that a push happened would pass on the buggy code.
+3. **Executable** — a case with `land: true` asserts `{sha, ref, disposition}` are returned, pr-land was
+   shelled exactly once, and `followUp` is **absent**.
+4. **Executable** — a case with `land: true` on a stubbed credential-less host asserts the operation refuses
+   **before** any write: the write, stage, commit and push spies are each called **zero** times.
+5. **Executable** — a case resuming a run record with `contract: 1` asserts a **returned**
+   `{resumed: false, reason: 'contract-changed'}` naming `land` — asserting explicitly that it does not
+   throw. A second case with no `contract` key at all asserts the same, proving the missing-key default.
+6. **Executable** — the file-header JSDoc case asserts the block **describes the new behaviour**: it
+   contains both `land` and a statement that landing is opt-in, and does not contain "LANDS OR PARKS". A
+   bare string-absence assertion is insufficient — it would pass on a minimal deletion that left the rest of
+   the paragraph describing the old automatic path (red-team finding).
+7. **Mutation** — deleting the push reddens case 1 by name; deleting the credential pre-check reddens case 4
+   by name; deleting the contract check reddens case 5 by name.
+8. `npm run check:standards` shows no new warnings against the 0-error / 1435-warning baseline.
