@@ -9,7 +9,7 @@ tags: []
 
 # Declare an operation that dispatches an independent review to a fresh session
 
-review-pr cannot be invoked by the PR's author: the self-clear guard refuses the authoring session, and a subagent inherits its id. So something must spawn a NON-author session, and nothing declares it. Measured 2026-08-25: ten review mandates hand-written in one session, the largest single source of repeated orchestration that day — the same evidence and the same shape that got #3160 filed for prepare. A caller restricted to declared operations cannot get its own work reviewed at all.
+An author can RUN review-pr; what they cannot do is record the acceptance. `we:scripts/review-set-label.mjs:586` refuses only `--to=accepted`, and only on a proven self-clear. So a bounce needs no separate session and an ACCEPT always does — and a subagent inherits its parent's id, so a panel spawned from the authoring session is still one actor. Something must spawn a non-author session and nothing declares it: `dispatch-lane` takes `--num` and never takes a lane, so it cannot serve this. Measured 2026-08-25: ten review mandates hand-written in one session, the largest single source of repeated orchestration that day.
 
 ## Done when
 
