@@ -209,13 +209,36 @@ export function importsRealRepoHelper(content) {
       if (local && HELPER_EXPORTS.includes(exported)) locals.add(local);
     }
   }
-  // Dynamic `await import(...)` binds nothing statically; the namespace variable is the use, and the
-  // HELPER_IMPORT test above already proved the module is reached.
-  if (/import\s*\(/.test(withoutComments) && !/import\s+[^;]+?\s+from/.test(withoutComments)) return true;
+  // DYNAMIC IMPORTS BIND TOO, and the round-2 shortcut here was wrong in both directions (round-3 juror):
+  // it returned true for ANY file containing `import(` with no static `from`, so a decorative
+  // `await import('…/real-repo.mjs')` with no call site passed; and it required NO static import anywhere, so
+  // a realistic test file — which always imports vitest — fell through and was falsely rejected.
+  //
+  // A dynamic import binds whatever it is assigned to, so the rule is the same as the static one: find the
+  // binding, then require it used. `const h = await import(…)` binds `h`; `const { withRealRepo } =
+  // await import(…)` binds the destructured names.
+  const dynRe = new RegExp(
+    `(?:const|let|var)\\s+(\\{[^}]*\\}|[A-Za-z_$][\\w$]*)\\s*=\\s*(?:await\\s+)?import\\s*\\(\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`,
+    'g',
+  );
+  for (const m of withoutComments.matchAll(dynRe)) {
+    const bound = m[1].trim();
+    if (!bound.startsWith('{')) { locals.add(bound); continue; }
+    for (const part of bound.slice(1, -1).split(',')) {
+      const [exported, alias] = part.split(/:|\s+as\s+/).map((x) => x.trim());
+      const local = alias || exported;
+      if (local && HELPER_EXPORTS.includes(exported)) locals.add(local);
+    }
+  }
 
   if (locals.size === 0) return false;
 
-  const withoutImports = withoutComments.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
+  // Strip BOTH import forms before looking for a use. The static one was already stripped; the dynamic
+  // assignment must be too, or the binding line counts as its own usage and `const h = await import(…)` with
+  // nothing after it passes — the decorative case, back again through the other door.
+  const withoutImports = withoutComments
+    .replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '')
+    .replace(/(?:const|let|var)\s+(?:\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?import\s*\([^)]*\)\s*;?/g, '');
   return [...locals].some((name) => new RegExp(`\\b${esc(name)}\\b`).test(withoutImports));
 }
 

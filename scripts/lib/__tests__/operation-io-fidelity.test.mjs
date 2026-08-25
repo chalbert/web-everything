@@ -357,3 +357,32 @@ describe('importsRealRepoHelper — the two edge cases, which fail in opposite d
     expect(importsRealRepoHelper(src)).toBe(false);
   });
 });
+
+describe('importsRealRepoHelper — dynamic imports bind too (PR #1549 r3)', () => {
+  const H = "'../helpers/real-repo.mjs'";
+  // Every fixture carries a vitest import, because a real test file always does — and the round-2 shortcut
+  // required NO static import anywhere, so it fell over on exactly the files it was meant to judge.
+  const V = "import { it, expect } from 'vitest';\n";
+
+  it('a decorative `await import(...)` with no call site is NOT usage', () => {
+    expect(importsRealRepoHelper(`${V}const h = await import(${H});\nit('x', () => {});\n`)).toBe(false);
+  });
+
+  it('a namespace binding used through the namespace counts', () => {
+    expect(importsRealRepoHelper(`${V}const h = await import(${H});\nit('x', () => h.withRealRepo(() => {}));\n`)).toBe(true);
+  });
+
+  it('a destructured dynamic import counts when used', () => {
+    expect(importsRealRepoHelper(`${V}const { withNarrowClone } = await import(${H});\nit('x', () => withNarrowClone(() => {}));\n`)).toBe(true);
+  });
+
+  it('…and does not when it is not', () => {
+    expect(importsRealRepoHelper(`${V}const { withNarrowClone } = await import(${H});\nit('x', () => {});\n`)).toBe(false);
+  });
+
+  it('a STATIC helper import still counts in a file that also imports vitest', () => {
+    // The round-2 branch returned early on "no static import anywhere", so a realistic file — which always
+    // imports vitest — was falsely rejected. This is the regression guard for that.
+    expect(importsRealRepoHelper(`${V}import { withRealRepo } from ${H};\nit('x', () => withRealRepo(() => {}));\n`)).toBe(true);
+  });
+});
