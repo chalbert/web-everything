@@ -145,15 +145,7 @@ export function isCommitIdentityOverride(segment) {
   // what is skipped — precisely, by position. Everything else is argv and is checked regardless of quoting.
   // This still lets `git commit -m "docs: never pass -c user.email=foo"` through, which is the false positive
   // the token walk exists to avoid.
-  const tokens = shellTokens(String(segment || '')).filter((t) => !t.op);
-  const MESSAGE_FLAG = /^(?:-m|--message|-F|--file|-t|--template)$/;
-  // A flag that CARRIES its value (`-mmsg`, `--message=…`) consumes no following token.
-  const CARRIES_VALUE = /^(?:-m.|--message=|--file=|--template=)/;
-  const isValue = new Array(tokens.length).fill(false);
-  for (let i = 0; i < tokens.length; i++) {
-    if (MESSAGE_FLAG.test(tokens[i].text) && i + 1 < tokens.length) isValue[i + 1] = true;
-  }
-  const argv = tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
+  const argv = argvTokens(segment);
   // It must be GIT that is committing. Checking only for a `commit` token denied any tool whose argv happens
   // to carry the same shapes — `npm run commit -- --author=me`, `my-tool commit --author=x` (#1550 juror r4,
   // confirmed by probe). `canonicalCommand` peels wrappers and path-qualification, so `/usr/bin/git` and
@@ -177,6 +169,32 @@ export function isCommitIdentityOverride(segment) {
     if (/^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(text)) return true;
   }
   return false;
+}
+
+/**
+ * A segment's ARGV tokens with message VALUES removed — the one view both halves of the identity arm must
+ * read. Prose only ever reaches argv as the value of a message flag, so exempting those by POSITION is what
+ * separates "the command does X" from "the command mentions X".
+ *
+ * Extracted because three separate raw-text reads each re-learned this the hard way: the `-c` match (r1), the
+ * cross-segment `setsIdentity` scan and the sanctioned-escape test (both #1551 juror). The last was a real
+ * BYPASS — `git -c user.email=evil commit -m "COMMIT_IDENTITY_OK=1"` spoofed the escape and was allowed.
+ */
+function argvTokens(seg) {
+  const tokens = shellTokens(String(seg || '')).filter((t) => !t.op);
+  const MESSAGE_FLAG = /^(?:-m|--message|-F|--file|-t|--template)$/;
+  const CARRIES_VALUE = /^(?:-m.|--message=|--file=|--template=)/;
+  const isValue = new Array(tokens.length).fill(false);
+  for (let i = 0; i < tokens.length; i++) {
+    if (MESSAGE_FLAG.test(tokens[i].text) && i + 1 < tokens.length) isValue[i + 1] = true;
+  }
+  return tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
+}
+
+/** Is the sanctioned escape genuinely SET here — not merely quoted inside a commit message? Pure. */
+function hasIdentityEscape(text) {
+  return parseSegments(String(text || '')).segments
+    .some((seg) => argvTokens(seg).some((t) => t.text === 'COMMIT_IDENTITY_OK=1'));
 }
 
 /**
@@ -209,12 +227,12 @@ function isGitCommitSegment(seg) {
  */
 export function commitIdentityCommandReason(command) {
   const text = String(command || '');
-  if (/\bCOMMIT_IDENTITY_OK=1\b/.test(text)) return null;
+  if (hasIdentityEscape(text)) return null;
   const segs = parseSegments(text).segments;
   if (segs.length < 2) return null;                       // single segment is `reason`'s business
   if (!segs.some((s) => isGitCommitSegment(s))) return null;
   const setsIdentity = segs.some((s) => {
-    const toks = shellTokens(s).filter((t) => !t.op).map((t) => t.text);
+    const toks = argvTokens(s).map((t) => t.text);
     if (toks.some((t) => /^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(t))) return true;
     // `git config [--global] user.email <VALUE>` — a WRITE only. A bare `git config user.email` is a READ
     // and changes nothing, so denying it was pure over-reach (#1550 juror r4, confirmed by probe). The write
@@ -1401,7 +1419,7 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // review, attributing an agent's work to a human who did not write it and cannot have signed it. Observed
   // 2026-08-24: four such commits merged before the tip-commit check noticed. Escape: `COMMIT_IDENTITY_OK=1`,
   // for the rare legitimate re-attribution (replaying someone else's patch, a `--reset-author` repair).
-  if (isCommitIdentityOverride(s) && !/\bCOMMIT_IDENTITY_OK=1\b/.test(s))
+  if (isCommitIdentityOverride(s) && !hasIdentityEscape(s))
     return 'This commit sets the author/committer identity by hand (`-c user.email=`, `--author=`, or `GIT_*_EMAIL=`). The machine already has the right identity configured, so an override can only mis-attribute the commit — and unsigned commits in someone else\'s name land on `main` and stay there. Drop the override and commit with the ambient identity (`git config user.email` shows what it is). Sanctioned override (rare — replaying another author\'s patch, a `--reset-author` repair): prefix `COMMIT_IDENTITY_OK=1`.';
 
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match

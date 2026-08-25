@@ -53,10 +53,32 @@ shell-string matching is the wrong shape for this rule — see the note below.
    does, and a test pins `git tag -m commit` as not-a-commit. The two halves share one definition rather
    than each carrying their own.
 
-## Note — the shape question, if this recurs
+## The shape question — the threshold has been crossed, so this is now the ask
 
-A shell-string guard can only ever enumerate spellings, and git offers many (`-c`, `--author`, env pairs,
-`git config`, per-segment and cross-segment, folded case, quoted, glued). The structural alternative is to
-check the RESULT rather than the invocation: a `post-commit` hook, or a push-time check that refuses a
-commit whose author does not match the configured identity. That closes every spelling at once and cannot
-be evaded by a new one. Out of scope here; worth ruling if a fourth defect class appears.
+The original wording here said the shape should be ruled "if a fourth defect class appears". It has, twice
+over. The running tally on ~40 lines:
+
+| round | defect | kind |
+| --- | --- | --- |
+| #1550 r1 | shell quoting evades the arm | bypass |
+| #1550 r2 | git folds config-key case (`-c User.Email=`) | bypass |
+| #1550 r3 | override straddling `;`/`&&` segments | coverage gap |
+| #1550 r4 | config READ read as a write; non-git `commit` denied | over-reach ×2 |
+| — | (self-inflicted while fixing r4: `canonicalCommand` misread, arm briefly denied nothing) | regression |
+| #1551 r1 | the escape spoofable from the commit MESSAGE | **bypass** |
+| #1551 r1 | env-var NAME in a message read as an assignment | over-reach |
+
+Seven real defects, five rounds, every one found by a panel and none by the author. Three of them were
+bypasses in an arm whose whole value is that it cannot be bypassed. The r1 escape spoof
+(`git -c user.email=evil commit -m "COMMIT_IDENTITY_OK=1"`) is the clearest statement of the problem: a
+guard that reads a shell string can always be argued with by another shell string.
+
+**So the ask is no longer "worth ruling if…" — it is: rule it.** A shell-string guard can only enumerate
+spellings, and git offers many (`-c`, `--author`, env pairs, `git config`, per-segment and cross-segment,
+folded case, quoted, glued, and whatever is next). The structural alternative checks the RESULT rather than
+the invocation — a `post-commit` hook, or a push-time refusal when a commit's author does not match the
+configured identity. One check, every spelling, no evasion by a new one.
+
+The arm as it stands is worth keeping in the meantime: it denies every spelling now known, its escape is no
+longer spoofable, and it no longer over-reaches. But its defect curve has not flattened, and the next
+spelling is a matter of time.
