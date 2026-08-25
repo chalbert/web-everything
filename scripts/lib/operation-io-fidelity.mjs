@@ -159,7 +159,10 @@ const esc = (s) => String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // the harness would have updated one and left the other matching a path that no longer exists — the gate then
 // either names a path it does not check, or stops recognising the real helper entirely.
 const HELPER_PATH_TAIL = REAL_REPO_HELPER.split('/').slice(-2).join('/');
-const HELPER_IMPORT = new RegExp(`(?:\\bfrom|\\bimport)\\s*\\(?\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`);
+// THE ONE FORM THIS CHECK JUDGES: a STATIC import of the harness. Deliberately narrow — see
+// `importsRealRepoHelper`. A dynamic import is recognised separately, and REFUSED rather than guessed at.
+const HELPER_STATIC_IMPORT = new RegExp(`\\bfrom\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`);
+const HELPER_DYNAMIC_IMPORT = new RegExp(`\\bimport\\s*\\(\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`);
 
 // THE NAMES the helper exports. A test satisfies the fidelity rule only by USING one of them — see
 // `importsRealRepoHelper` for why importing is not enough.
@@ -167,79 +170,68 @@ const HELPER_EXPORTS = ['withRealRepo', 'withBareOrigin', 'withNarrowClone'];
 
 export function importsRealRepoHelper(content) {
   const src = String(content ?? '');
-  if (!HELPER_IMPORT.test(src)) return false;
+  if (!HELPER_STATIC_IMPORT.test(src)) return false;
 
-  // AND ACTUALLY USES IT. Importing alone is not evidence of anything: a decorative
-  // `import { withRealRepo } from './helpers/real-repo.mjs';` with no call site satisfies a presence check
-  // while every test below it stays stubbed — #3264's own vacuity reproduced one level up, inside the gate
-  // built to catch it. (PR #1549 round 1.)
+  // JUDGES ONE FORM, ON PURPOSE — a static named import whose binding is then used.
   //
-  // TWO EDGE CASES the first cut got wrong, both found by the round-2 juror, and they fail in OPPOSITE
-  // directions — which is why neither could be dismissed as pedantry:
+  // This started as "does the file import the harness", which a decorative import satisfied while every test
+  // below it stayed stubbed — #3264's vacuity inside the gate built to catch it. Three review rounds followed,
+  // each finding a real defect in the previous fix: comments counted as usage; aliased imports were rejected;
+  // and the dynamic-import branch both passed a decorative `await import(…)` and rejected any realistic file,
+  // because a real test file always imports vitest.
   //
-  //   · a COMMENT naming an export counted as usage. `// TODO: use withRealRepo here` passed the gate with
-  //     nothing real behind it — the same false pass, one layer further in.
-  //   · an ALIASED import was rejected. `import { withRealRepo as withRepo }` binds `withRepo`, so the
-  //     exported name never appears again and genuinely-real work was failed loudly.
+  // The lesson is not that the third patch was nearly right. It is that deciding "is this identifier used"
+  // from a regex is a PARSER'S JOB, and each round only fixed the forms someone had thought of. So the scope
+  // is now what a regex can actually own: `import { name } from '…real-repo.mjs'` — aliases included —
+  // followed by a use of the bound name outside imports and comments.
   //
-  // Both are fixed by asking the right question. Not "does an EXPORTED name appear somewhere" but "is the
-  // LOCAL BINDING this file actually chose used outside its own import, in code rather than prose".
+  // A dynamic import is NOT silently failed here. `dynamicallyImportsRealRepoHelper` recognises it and the
+  // scan raises a NAMED refusal telling the author to convert it, because a check that cannot judge something
+  // should say so rather than answer anyway. Same call as the `!repoKey` branch in `observedFilesForResolve`:
+  // when the honest answer is "this cannot be reached reliably", write that down instead of approximating.
   const withoutComments = src
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
-  // The local names the helper import binds here: `{ a, b as c }` and `* as ns` both handled. An alias binds
-  // its right-hand side; a namespace import binds the namespace, and `ns.withRealRepo(...)` then reads as a
-  // use of `ns`.
   const locals = new Set();
   const importRe = new RegExp(
     `import\\s+([^;]+?)\\s+from\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`, 'g',
   );
   for (const m of withoutComments.matchAll(importRe)) {
-    const clause = m[1].trim();
-    const ns = clause.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)/);
-    if (ns) { locals.add(ns[1]); continue; }
-    const named = clause.match(/\{([^}]*)\}/);
+    const named = m[1].trim().match(/\{([^}]*)\}/);
     if (!named) continue;
     for (const part of named[1].split(',')) {
       const [exported, alias] = part.split(/\s+as\s+/).map((x) => x.trim());
       const local = alias || exported;
-      // Only names the harness actually exports count — a file importing something else from the same
-      // module has not shown it drives a real repo.
+      // Only names the harness actually exports count: importing `FIXTURE_SLUG` is not evidence that a real
+      // repo is driven.
       if (local && HELPER_EXPORTS.includes(exported)) locals.add(local);
     }
   }
-  // DYNAMIC IMPORTS BIND TOO, and the round-2 shortcut here was wrong in both directions (round-3 juror):
-  // it returned true for ANY file containing `import(` with no static `from`, so a decorative
-  // `await import('…/real-repo.mjs')` with no call site passed; and it required NO static import anywhere, so
-  // a realistic test file — which always imports vitest — fell through and was falsely rejected.
-  //
-  // A dynamic import binds whatever it is assigned to, so the rule is the same as the static one: find the
-  // binding, then require it used. `const h = await import(…)` binds `h`; `const { withRealRepo } =
-  // await import(…)` binds the destructured names.
-  const dynRe = new RegExp(
-    `(?:const|let|var)\\s+(\\{[^}]*\\}|[A-Za-z_$][\\w$]*)\\s*=\\s*(?:await\\s+)?import\\s*\\(\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`,
-    'g',
-  );
-  for (const m of withoutComments.matchAll(dynRe)) {
-    const bound = m[1].trim();
-    if (!bound.startsWith('{')) { locals.add(bound); continue; }
-    for (const part of bound.slice(1, -1).split(',')) {
-      const [exported, alias] = part.split(/:|\s+as\s+/).map((x) => x.trim());
-      const local = alias || exported;
-      if (local && HELPER_EXPORTS.includes(exported)) locals.add(local);
-    }
-  }
-
   if (locals.size === 0) return false;
 
-  // Strip BOTH import forms before looking for a use. The static one was already stripped; the dynamic
-  // assignment must be too, or the binding line counts as its own usage and `const h = await import(…)` with
-  // nothing after it passes — the decorative case, back again through the other door.
-  const withoutImports = withoutComments
-    .replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '')
-    .replace(/(?:const|let|var)\s+(?:\{[^}]*\}|[A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?import\s*\([^)]*\)\s*;?/g, '');
+  const withoutImports = withoutComments.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
   return [...locals].some((name) => new RegExp(`\\b${esc(name)}\\b`).test(withoutImports));
+}
+
+/**
+ * Does this test source reach the harness through a form this check cannot judge? Returns the form name
+ * (`'dynamic'` | `'namespace'`) or `''`. PURE.
+ *
+ * Not a second way to satisfy the rule — a way to REFUSE loudly. `importsRealRepoHelper` judges static named
+ * imports only, so a file that reaches the harness dynamically would otherwise be silently reported as having
+ * no fidelity test, which is a wrong answer wearing the same face as a right one.
+ */
+export function unjudgeableHelperImport(content) {
+  const src = String(content ?? '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  if (HELPER_DYNAMIC_IMPORT.test(src)) return 'dynamic';
+  // A namespace import binds the module object, so "is an export used" becomes "is a property of this
+  // object read" — the same parser question, one indirection further. Refused for the same reason.
+  const ns = new RegExp(`import\\s+\\*\\s+as\\s+[A-Za-z_$][\\w$]*\\s+from\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`);
+  if (ns.test(src)) return 'namespace';
+  return '';
 }
 
 /**
@@ -301,6 +293,27 @@ export function findIoModulesWithoutFidelityTest({
   // Filter to the tests that could prove anything ONCE, not per module: a test with no helper import can never
   // satisfy this rule regardless of which module it covers.
   const fidelityTests = (tests || []).filter((t) => importsRealRepoHelper(t?.content));
+
+  // A DYNAMIC helper import is REFUSED, not guessed at. `importsRealRepoHelper` judges static named imports
+  // only — deliberately, after three rounds proved that deciding "is this identifier used" from a regex is a
+  // parser's job. A file reaching the harness dynamically would otherwise be reported as having no fidelity
+  // test at all: a wrong answer wearing the same face as a right one. So it becomes its own named error,
+  // pointing at the one-line change that makes the file judgeable.
+  for (const t of tests || []) {
+    if (importsRealRepoHelper(t?.content)) continue;
+    const form = unjudgeableHelperImport(t?.content);
+    if (!form) continue;
+    errors.push({
+      message:
+        `${t.file} reaches we:${REAL_REPO_HELPER} through a ${form.toUpperCase()} import, which the #2949 fidelity check `
+        + 'does not judge. It reads static named imports only — `import { withRealRepo } from '
+        + "'…/helpers/real-repo.mjs'` — because deciding whether a binding is really used is a parser's job "
+        + 'and a regex that tries gets it wrong in both directions (it did, three times). Convert this file to '
+        + 'a static import so the check can see it, or the module it covers will read as having no '
+        + 'real-mechanism test.',
+      descriptor: { kind: 'io-fidelity-undecidable', file: t.file },
+    });
+  }
 
   for (const name of ioModules || []) {
     const file = `scripts/operations/${name}-io.mjs`;

@@ -25,6 +25,7 @@ import {
   findIoModulesWithoutFidelityTest,
   scanOperationIoFidelity,
   importsRealRepoHelper,
+  unjudgeableHelperImport,
   testCoversIoModule,
   REAL_REPO_HELPER,
   RATCHET_BASELINE,
@@ -175,7 +176,7 @@ describe('importsRealRepoHelper — the import, not the mention', () => {
     )).toBe(true);
     expect(importsRealRepoHelper(
       `const h = await import('../../${REAL_REPO_HELPER}');\nit('x', () => h.withNarrowClone(() => {}));`,
-    )).toBe(true);
+    )).toBe(false); // dynamic: not judged here, refused by the scan instead
   });
 
   it('a COMMENT naming the helper proves nothing', () => {
@@ -346,9 +347,10 @@ describe('importsRealRepoHelper — the two edge cases, which fail in opposite d
     expect(importsRealRepoHelper(src)).toBe(false);
   });
 
-  it('a namespace import used through the namespace counts', () => {
+  it('a namespace import is NOT judged here — the scan refuses it by name instead', () => {
     const src = `import * as h ${H};\nit('x', () => h.withNarrowClone(() => {}));\n`;
-    expect(importsRealRepoHelper(src)).toBe(true);
+    expect(importsRealRepoHelper(src)).toBe(false);
+    expect(unjudgeableHelperImport(src)).toBe('namespace');
   });
 
   it('importing something the harness does NOT export is not proof', () => {
@@ -358,31 +360,87 @@ describe('importsRealRepoHelper — the two edge cases, which fail in opposite d
   });
 });
 
-describe('importsRealRepoHelper — dynamic imports bind too (PR #1549 r3)', () => {
+describe('the forms this check REFUSES to judge, rather than guessing (PR #1549 r3 → option B)', () => {
   const H = "'../helpers/real-repo.mjs'";
-  // Every fixture carries a vitest import, because a real test file always does — and the round-2 shortcut
-  // required NO static import anywhere, so it fell over on exactly the files it was meant to judge.
   const V = "import { it, expect } from 'vitest';\n";
 
-  it('a decorative `await import(...)` with no call site is NOT usage', () => {
-    expect(importsRealRepoHelper(`${V}const h = await import(${H});\nit('x', () => {});\n`)).toBe(false);
+  // Three rounds each found a real defect in the previous regex: comments counted as usage, aliases were
+  // rejected, and the dynamic branch both passed a decorative `await import(…)` and rejected any realistic
+  // file. The conclusion was not "the fourth patch is right" — it was that deciding whether a binding is used
+  // is a parser's job. So the check owns ONE form and says so about the rest.
+
+  it('a dynamic import is not judged here', () => {
+    const src = `${V}const h = await import(${H});\nit('x', () => h.withRealRepo(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
   });
 
-  it('a namespace binding used through the namespace counts', () => {
-    expect(importsRealRepoHelper(`${V}const h = await import(${H});\nit('x', () => h.withRealRepo(() => {}));\n`)).toBe(true);
+  it('…and is REFUSED by name, so it cannot read as "no fidelity test"', () => {
+    // The whole point of option B. Silently answering false would be a wrong answer wearing the same face as
+    // a right one: the module would report as untested when it is in fact tested, just unreadably.
+    const src = `${V}const h = await import(${H});\nit('x', () => h.withRealRepo(() => {}));\n`;
+    expect(unjudgeableHelperImport(src)).toBe('dynamic');
   });
 
-  it('a destructured dynamic import counts when used', () => {
-    expect(importsRealRepoHelper(`${V}const { withNarrowClone } = await import(${H});\nit('x', () => withNarrowClone(() => {}));\n`)).toBe(true);
+  it('a destructured dynamic import is refused too', () => {
+    const src = `${V}const { withNarrowClone } = await import(${H});\nit('x', () => withNarrowClone(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+    expect(unjudgeableHelperImport(src)).toBe('dynamic');
   });
 
-  it('…and does not when it is not', () => {
-    expect(importsRealRepoHelper(`${V}const { withNarrowClone } = await import(${H});\nit('x', () => {});\n`)).toBe(false);
+  it('a namespace import is refused — the same parser question, one indirection further', () => {
+    const src = `${V}import * as h from ${H};\nit('x', () => h.withNarrowClone(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+    expect(unjudgeableHelperImport(src)).toBe('namespace');
   });
 
-  it('a STATIC helper import still counts in a file that also imports vitest', () => {
-    // The round-2 branch returned early on "no static import anywhere", so a realistic file — which always
-    // imports vitest — was falsely rejected. This is the regression guard for that.
-    expect(importsRealRepoHelper(`${V}import { withRealRepo } from ${H};\nit('x', () => withRealRepo(() => {}));\n`)).toBe(true);
+  it('a STATIC named import is judged, not refused — the form the check owns', () => {
+    const src = `${V}import { withRealRepo } from ${H};\nit('x', () => withRealRepo(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(true);
+    expect(unjudgeableHelperImport(src)).toBe('');
+  });
+
+  it('a DECORATIVE static import is judged and FAILED, never called undecidable', () => {
+    // The distinction that keeps the refusal from becoming an escape hatch: a form the check owns and finds
+    // wanting must fail, not be excused as unjudgeable.
+    const src = `${V}import { withRealRepo } from ${H};\nit('x', () => {});\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+    expect(unjudgeableHelperImport(src)).toBe('');
+  });
+});
+
+describe('the refusal reaches the SCAN, not just the predicate (mutation-found gap)', () => {
+  // The predicate tests above all call `unjudgeableHelperImport` directly. Disabling the refusal inside
+  // `findIoModulesWithoutFidelityTest` left every one of them green — the scan-level behaviour was untested,
+  // which is this item's own vacuity class one more time. Found by mutation, not by reading.
+  const dynamicTest = (name) => ({
+    file: `scripts/operations/__tests__/${name}-dyn.test.mjs`,
+    content:
+      `import { it } from 'vitest';\nconst h = await import('./helpers/real-repo.mjs');\n`
+      + `import { createSinks } from '../${name}-io.mjs';\n`
+      + `it('real', () => h.withNarrowClone(() => {}));\n`,
+  });
+
+  it('raises io-fidelity-undecidable for a test that reaches the harness dynamically', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [dynamicTest('record-verdict')], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).toContain('io-fidelity-undecidable');
+    expect(r.errors.find((e) => e.descriptor.kind === 'io-fidelity-undecidable').descriptor.file)
+      .toBe('scripts/operations/__tests__/record-verdict-dyn.test.mjs');
+  });
+
+  it('a judgeable file raises no undecidable error', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [fidelityTest('record-verdict')], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).not.toContain('io-fidelity-undecidable');
+  });
+
+  it('a plain stub test raises no undecidable error either — it is judged and simply fails', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [stubTest('record-verdict')], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).toContain('io-fidelity-missing');
+    expect(kinds(r)).not.toContain('io-fidelity-undecidable');
   });
 });
