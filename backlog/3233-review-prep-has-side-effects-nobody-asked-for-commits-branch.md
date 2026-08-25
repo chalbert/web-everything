@@ -129,13 +129,38 @@ exist. So:
 land: { type: 'boolean', required: false, default: true }
 ```
 
-and the `reduce` step reads `view.input.land` into the `record` effect's payload. Named because a juror
-found this seam left for the builder to invent.
+**Declaring it is not enough — it must also be READ, and at two sites.** This is the part round 5 got wrong
+and an independent review caught; both corrections are load-bearing.
 
-**No contract-version stamp, and that is a consequence of the ruling, not an omission.** Rounds 2 and 3
-specified one to stop an in-flight suspended run silently acquiring a new default. With the default now
-preserving today's behaviour, a resumed run gets what it always would have — so there is nothing to guard,
-and adding a version stamp would be machinery defending a difference that no longer exists.
+- **Not in `reduce`.** Round 5 said *"the `reduce` step reads `view.input.land`"*. It cannot: `reduce`
+  declares `reads: ['findings.read', 'findings.judge']` (`we:scripts/operations/review-prep.mjs:455`), and
+  `projectReads` (`we:scripts/operations/engine.mjs:95-113`) projects **only declared reads**, so
+  `view.input` is `undefined` there and the expression throws.
+- **`input.land` must be ADDED to the `record` effect step's `reads`.** They are currently
+  `['input.item', 'input.repo', 'input.actor', 'verdict', 'findings.read']`
+  (`we:scripts/operations/review-prep.mjs:487`). Without that entry `view.input.land` is `undefined` for
+  **every** run, new ones included — so `?? true` would make `land: false` **unreachable**, Done-when 2 and
+  3 could never pass, and Done-when 4 would pass vacuously. The flag would be inert and the tests would say
+  it worked.
+- **Two read sites, not one.** The engine calls `step.effects(view)`, materialises the payloads into
+  `run.effects`, and only then suspends (`we:scripts/operations/engine.mjs:409-418`). A run suspended
+  `awaiting-effect` before this change carries a payload with no `land` key, so `recordPrepVerdict`'s own
+  read of `payload.land` needs the same coalesce as the `view.input.land` read. Latent today rather than
+  live — all four suspended records on this machine sit at `pending: judge`, none at `effect` — but the
+  general statement has to be complete or it is wrong for the case it exists to cover.
+
+**`land` is not special, and saying so is the honest framing.** `actor` has the identical declaration shape
+(`{type:'string', required:false, default:'operator'}`, `we:scripts/operations/review-prep.mjs:417`) and the
+identical exposure. Nothing is broken today only because all six existing run records happen to carry it.
+The `?? true` here is a local instance of a property that holds for **every defaulted input on every
+operation**: a default is applied once at `startRun` and never re-applied. Fixing it generally is not this
+card's job, but pretending it is a `land`-specific accident would leave the next person to rediscover it.
+
+**Consequently there is no contract-version stamp.** Rounds 2 and 3 specified one; round 4 deleted it on the
+reasoning that the ruling made the default harmless, which was **wrong** — the ruling does not reach a run
+record that has no `land` key. What makes an old run safe is the `?? true` read above, not the ruling. The
+stamp is unnecessary because the coalesce is sufficient, which is a different claim from the one round 4
+made.
 
 ## The composed step order — one place, because three cards edit one function
 
@@ -159,7 +184,7 @@ the merged result, leaving the builder to compose three diffs by hand. It is sta
 7. **If NOT landing**, push that single commit to `lane/review-prep-<item>-<sha8>`. Failure ⇒ return
    `pushed: false` with the commit intact and `followUp` owed.
 8. **If landing**, stage the PR body file and shell `we:scripts/pr-land.mjs`, which does the push itself
-   (`we:scripts/pr-land.mjs:574`) — so the default path pushes exactly once, through the same transport as
+   (`we:scripts/pr-land.mjs:737`) — so the default path pushes exactly once, through the same transport as
    today, and step 7 is the branch that makes a non-landing verdict durable.
 
 Step 0 sits first so the whole run is decided before anything is touched. Steps 7 and 8 are **exclusive**:
@@ -251,7 +276,7 @@ card should not be read as closing the loop. It makes the loop *closable*.
    branches.
 5. **Rewrite two separate doc blocks in `we:scripts/operations/review-prep-io.mjs`**, both currently wrong
    and at different places — the round-3 card cited only one and located it in the other:
-   - the **file header, lines 13–15**, which describes commit + `pr-land` as automatic;
+   - the **file header, lines 14–17**, which describes commit + `pr-land` as automatic;
    - **`recordPrepVerdict`'s own JSDoc at line 146**, which is where the string
      `"LANDS OR PARKS (never both)"` actually lives. The file header has never contained it.
 6. Unit-test every branch.
