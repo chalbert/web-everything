@@ -1605,6 +1605,20 @@ describe('commit identity override (#3269)', () => {
     ]) expect(decide(cmd, {}), cmd).toBeNull();
   });
 
+  it('does not over-reach — it must be GIT committing, and a config READ is not a write (#1550 juror r4)', () => {
+    for (const cmd of [
+      'git config user.email && echo commit',   // a READ, plus an unrelated word "commit"
+      'git config user.email',                  // a READ on its own
+      'npm run commit -- --author=me',          // not git
+      'my-tool commit --author=x',              // not git
+      'git -C /some/path commit -m hi',         // -C is change-directory
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('still resolves git through a path or wrapper', () => {
+    expect(decide('/usr/bin/git -c user.email=x commit -m hi', {})).toMatch(/identity by hand/);
+  });
+
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
   });

@@ -154,6 +154,11 @@ export function isCommitIdentityOverride(segment) {
     if (MESSAGE_FLAG.test(tokens[i].text) && i + 1 < tokens.length) isValue[i + 1] = true;
   }
   const argv = tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
+  // It must be GIT that is committing. Checking only for a `commit` token denied any tool whose argv happens
+  // to carry the same shapes — `npm run commit -- --author=me`, `my-tool commit --author=x` (#1550 juror r4,
+  // confirmed by probe). `canonicalCommand` peels wrappers and path-qualification, so `/usr/bin/git` and
+  // `env git` still resolve.
+  if (programWord(segment) !== 'git') return false;
   if (!argv.some((t) => t.text === 'commit')) return false;
   // CASE-INSENSITIVE, because git's own config parsing is: section and variable names fold, so
   // `-c User.Email=…` and `-c USER.NAME=…` set the identity exactly as the lowercase spellings do. Verified
@@ -175,6 +180,20 @@ export function isCommitIdentityOverride(segment) {
 }
 
 /**
+ * The PROGRAM WORD of a segment. `canonicalCommand` returns the whole canonicalized command string, not the
+ * head — reading its result as the program name denied nothing and allowed everything (caught by probe).
+ */
+function programWord(seg) {
+  return String(canonicalCommand(String(seg || '')) || '').trim().split(/\s+/)[0] || '';
+}
+
+/** Is this segment GIT committing? Pure. `programWord` peels wrappers, so `/usr/bin/git` resolves. */
+function isGitCommitSegment(seg) {
+  if (programWord(seg) !== 'git') return false;
+  return shellTokens(String(seg || '')).some((t) => !t.op && t.text === 'commit');
+}
+
+/**
  * The WHOLE-COMMAND half of the identity arm: an override established in one segment and consumed by a
  * `git commit` in another. Pure (unit-tested).
  *
@@ -193,13 +212,17 @@ export function commitIdentityCommandReason(command) {
   if (/\bCOMMIT_IDENTITY_OK=1\b/.test(text)) return null;
   const segs = parseSegments(text).segments;
   if (segs.length < 2) return null;                       // single segment is `reason`'s business
-  const commits = segs.some((s) => shellTokens(s).some((t) => t.text === 'commit' && !t.op));
-  if (!commits) return null;
+  if (!segs.some((s) => isGitCommitSegment(s))) return null;
   const setsIdentity = segs.some((s) => {
     const toks = shellTokens(s).filter((t) => !t.op).map((t) => t.text);
     if (toks.some((t) => /^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(t))) return true;
-    // `git config [--global] user.email <v>` / `user.email=<v>` — key folds, as git's parser does.
-    return toks.includes('config') && toks.some((t) => /^user\.(?:email|name)\b/i.test(t));
+    // `git config [--global] user.email <VALUE>` — a WRITE only. A bare `git config user.email` is a READ
+    // and changes nothing, so denying it was pure over-reach (#1550 juror r4, confirmed by probe). The write
+    // is distinguished structurally: the key must be followed by a non-flag token, its value.
+    if (programWord(s) !== 'git' || !toks.includes('config')) return false;
+    const key = toks.findIndex((t) => /^user\.(?:email|name)$/i.test(t));
+    if (key < 0) return false;
+    return toks.slice(key + 1).some((t) => !t.startsWith('-'));
   });
   if (!setsIdentity) return null;
   return 'This command sets the git author/committer identity in one segment and commits in another (`export GIT_AUTHOR_EMAIL=… && git commit`, or a `git config user.email` write chained to a commit). The machine already has the right identity configured, so this can only mis-attribute the commit — and unsigned commits in someone else\'s name land on `main` and stay there. Commit with the ambient identity instead. Sanctioned override (rare — replaying another author\'s patch, a `--reset-author` repair): prefix `COMMIT_IDENTITY_OK=1`.';
