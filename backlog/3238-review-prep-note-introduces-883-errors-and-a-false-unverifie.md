@@ -1,7 +1,6 @@
 ---
 bornAs: xyg1k8p
 kind: task
-size: 3
 parent: "3029"
 status: open
 dateOpened: "2026-08-21"
