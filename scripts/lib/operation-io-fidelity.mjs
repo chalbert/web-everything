@@ -126,21 +126,18 @@ export const RATCHET_BASELINE = Object.freeze([
  * the list's length is a real progress number that can only go down.
  */
 export const UNCONVERTED_IO_MODULES = Object.freeze([
-  'claim',
-  'dispatch-lane',
-  'explore',
-  'gate-health',
-  'mutation-check',
-  'open-pr',
-  'pr-status',
-  'record-verdict',
-  'resolve',
-  'review-pr',
-  'review-prep',
-  'scaffold',
-  'stage-pr-view',
-  'suggest-next',
-  'verify',
+  // PAID OFF BY #1552 and deleted here, in the change that observed the payment — which is the rule this
+  // register enforces on everyone else. Nine of the original fifteen went in one landing: claim, dispatch-lane,
+  // gate-health, mutation-check, record-verdict, resolve, scaffold, stage-pr-view, verify.
+  //
+  // The six below are NOT a residue of effort. Each is here for a stated reason, and two of them can never
+  // leave by being converted:
+  'explore',      // spawns agents; no hermetic fixture drives the real effect
+  'open-pr',      // `gh` + network — the effect IS the remote call
+  'pr-status',    // `gh` + network, same shape
+  'review-pr',    // declares a `judge` step: the real mechanism needs a model, not a repo
+  'review-prep',  // declares a `judge` step, same
+  'suggest-next', // reads the board; the mechanism worth pinning is decision logic, already stub-tested
 ]);
 
 /** Escape a module name for embedding in a RegExp. */
