@@ -124,6 +124,26 @@ export function transportWaitBudget(env = process.env) {
  * exactly as long as it lasted, silently. The `probed` flag travels with the answer so the refusal can say
  * which of the two it is.
  */
+/**
+ * Does `cwd` belong to `repo`? PURE apart from the injected probe.
+ *
+ * SHARED BY BOTH READERS ON PURPOSE (PR #1548 round 3). The file reader gained this check in round 2, after a
+ * round-1 fix scoped the probe to `--repoRoot` without verifying the named checkout was the repo at all — so
+ * pointing it at any checkout lacking `ops/pr-views` re-opened `--from=`. The transport reader was left
+ * without the same check, which is the asymmetry this closes: one guarded door and one unguarded door is a
+ * guarded door with a sign on it.
+ *
+ * FAILS CLOSED at both call sites: an origin that cannot be read is not a match, and each caller treats
+ * "not a match" as the safe answer for its own path.
+ */
+export function ownsRepo({ cwd, repo, originRepo = defaultOriginRepo }) {
+  const at = String(cwd ?? '');
+  if (!at) return false;
+  const want = String(repo ?? '').trim();
+  if (!want) return false;
+  try { return originRepo(at) === want; } catch { return false; }
+}
+
 export function probeTransportBranch({ run = defaultGit, cwd = REPO_ROOT } = {}) {
   try {
     return { available: String(run(transportBranchArgv(), { cwd })).trim() !== '', probed: true };
@@ -188,6 +208,18 @@ export function createTransportReader({
   const tryGit = (argv) => { try { return git(argv).trim(); } catch { return ''; } };
 
   return ({ repo, pr, refresh = false }) => {
+    // #1548 r3 — the SAME ownership check the file reader makes, before anything touches the branch. Without
+    // it this path fetched, pushed a request into, and read a view out of whatever checkout it was handed,
+    // on the strength of a flag. `resolveTransportRoot` catches the mismatch later on the push, but only
+    // after work has happened and with a message about staging rather than about the flag that was wrong.
+    if (!ownsRepo({ cwd, repo, originRepo })) {
+      throw new Error(
+        `stage-pr-view: refusing to use ${cwd} as ${repo}'s checkout — its \`origin\` is not ${repo} `
+        + '(#1548). `--repoRoot` names the checkout that carries THAT repo\'s `ops/pr-views` branch; pointing '
+        + 'it anywhere else would fetch, push and read against a repo nobody asked about. Pass a checkout of '
+        + `${repo}, or omit \`--repoRoot\` when reviewing this repo's own PRs.`,
+      );
+    }
     const fileName = viewFileName(repo, pr);
     const path = viewPath(fileName);
 
@@ -347,7 +379,7 @@ export function createFileReader({
     // transport as PRESENT, so `--from=` stays refused. A probe that cannot answer must never be the reason a
     // weaker path opens.
     const at = String(cwd ?? '');
-    const owns = originRepo(at) === String(repo ?? '').trim();
+    const owns = ownsRepo({ cwd: at, repo, originRepo });
     const probe = owns
       ? probeTransportBranch({ run, cwd: at })
       : { available: true, probed: false, error: `checkout ${at} does not belong to ${repo}` };

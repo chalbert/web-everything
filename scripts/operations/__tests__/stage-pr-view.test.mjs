@@ -537,10 +537,23 @@ describe('the transport reader — bytes out of the fetched ref, never off a pat
     expect(() => reader(stub)({ repo: 'chalbert/web-everything', pr: 1496 })).toThrow(/is not valid JSON/);
   });
 
-  it('refuses a view request for a repo this checkout does not own (#3261)', () => {
+  it('refuses a view request for a repo this checkout does not own (#3261, #1548 r3)', () => {
+    // The refusal MOVED EARLIER in r3 and the message changed with it. It used to come from
+    // `resolveTransportRoot` at push time — correct, but only after this path had already fetched and was
+    // about to push, and phrased as a complaint about staging rather than about the flag that was wrong.
+    // The same ownership check the file reader makes now runs first, so nothing touches the branch at all.
     const stub = gitStub({ blobs: [''] });
     expect(() => reader(stub, { originRepo: () => 'chalbert/plateau-app' })({ repo: 'chalbert/web-everything', pr: 1496 }))
-      .toThrow(/refusing to stage a view request for chalbert\/web-everything/);
+      .toThrow(/refusing to use .* as chalbert\/web-everything's checkout/);
+  });
+
+  it('…and refuses BEFORE fetching, so a wrong `--repoRoot` costs nothing', () => {
+    // What moving it earlier actually buys, asserted rather than assumed.
+    const calls = [];
+    const stub = (args, opts) => { calls.push(args[0]); return ''; };
+    expect(() => reader(stub, { originRepo: () => 'chalbert/plateau-app' })({ repo: 'chalbert/web-everything', pr: 1496 }))
+      .toThrow(/refusing to use/);
+    expect(calls).toEqual([]);
   });
 
   it('requires the reader\'s own namer rather than inventing one', () => {
