@@ -70,7 +70,8 @@ serially, in a later session, under the same self-approved PR transport the prod
   slug for both calls. A `--watch` drain acquires ONCE at start and releases ONCE at exit, not per pass. If a
   release is skipped (a killed `--watch`), the lease self-reclaims after its TTL (`DEFAULT_LEASE_TTL_MINUTES`
   = 240) — a crashed drain returns its lane to the pool the same day, not never. The checkout root is
-  allocator config (`LANE_POOL_ROOT` env, default `~/workspace/.lanes`) — no skill embeds a literal
+  allocator config (`LANE_POOL_ROOT` env, else `<the checkout's workspace>/.lanes`, derived from
+  `git rev-parse --show-toplevel` rather than `$HOME` since #3265) — no skill embeds a literal
   `../we-drain-clean` or `.lanes` path.
 
   The pool already carries the render sibling every WE checkout needs: `../frontierui` at the pool root
