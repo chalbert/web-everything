@@ -718,3 +718,51 @@ describe('the dispatching reader', () => {
     expect(out.provenance).toMatchObject({ source: 'file', from: '/tmp/v.json', transportAvailable: false });
   });
 });
+
+// ── #1548 juror: reviewing a repo the CHECKOUT does not own ──────────────────────────────────────────────────
+//
+// Every read here was scoped to the checkout the tooling runs FROM, never to the repo being reviewed. Nothing
+// caught it because this PR's whole design, reasoning and test suite centred on `we` reviewing `we`'s own PRs,
+// where the two coincide. They do not always: plateau-app#144 and #145 were reviewed from a `we` checkout on
+// the day this was written. The moment `we` onboarded its own `ops/pr-views`, that stopped working — `--from=`
+// was refused with "this repo HAS the CI transport" (true of `we`, false of the target).
+describe('#1548 — the reader is scoped to the TARGET repo, not the driver checkout', () => {
+  const DRIVER = '/driver-checkout';
+  const SIBLING = '/sibling-checkout';
+
+  // The driver HAS the transport branch; the sibling does NOT. That is the exact shape that broke.
+  const probeRun = (calls) => (args, opts) => {
+    calls.push({ args, cwd: opts?.cwd });
+    if (args[0] === 'ls-remote') return opts?.cwd === DRIVER ? `sha\trefs/heads/${TRANSPORT_BRANCH}\n` : '';
+    return '';
+  };
+
+  it('probes the SIBLING for transport availability when repoRoot names it', () => {
+    const calls = [];
+    const dispatch = createPayloadReader({
+      read: () => JSON.stringify({ number: 5, headRefOid: 'abc' }),
+      run: probeRun(calls), cwd: DRIVER, viewFileName: prViewFileName,
+    });
+    dispatch({ source: 'file', from: '/tmp/payload.json', repo: 'o/sibling', pr: 5, repoRoot: SIBLING });
+    const probe = calls.find((c) => c.args?.[0] === 'ls-remote');
+    expect(probe.cwd).toBe(SIBLING);
+  });
+
+  it('reports transportAvailable for the TARGET, so the driver\'s own branch cannot refuse a sibling', () => {
+    // THE REGRESSION, at the layer that produces the signal. `checkViewProvenance` refuses `--from=` when
+    // `transportAvailable` is true; before the fix the probe ran in the driver, so reviewing a sibling from a
+    // `we` checkout reported `we`'s branch and the refusal fired about a repo that has no transport at all.
+    const calls = [];
+    const reader = () => createPayloadReader({
+      read: () => JSON.stringify({ number: 5, headRefOid: 'abc' }),
+      run: probeRun(calls), cwd: DRIVER, viewFileName: prViewFileName,
+    });
+    const sibling = reader()({ source: 'file', from: '/tmp/payload.json', repo: 'o/sibling', pr: 5, repoRoot: SIBLING });
+    expect(sibling.provenance).toMatchObject({ transportAvailable: false, probed: true });
+
+    // …and the guard is NOT weakened into "pass repoRoot to bypass it": with no repoRoot the driver IS the
+    // target, it does carry the branch, and `--from=` stays closed.
+    const own = reader()({ source: 'file', from: '/tmp/payload.json', repo: 'o/driver', pr: 5 });
+    expect(own.provenance).toMatchObject({ transportAvailable: true, probed: true });
+  });
+});

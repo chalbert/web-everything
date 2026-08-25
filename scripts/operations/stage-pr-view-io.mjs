@@ -369,11 +369,20 @@ export function createPayloadReader({
   write = writeFileSync,
   rm = rmSync,
 } = {}) {
-  const file = createFileReader({ read, run, cwd });
-  const transport = createTransportReader({ run, sleep, now, env, cwd, viewFileName, originRepo, mkdir, write, rm });
-  return ({ source, from, repo, pr, refresh = false }) => {
-    if (source === 'file') return file({ from, repo, pr });
-    if (source === 'transport') return transport({ repo, pr, refresh });
+  // BUILT PER CALL, against the checkout that carries the TARGET repo's transport (#1548 juror).
+  //
+  // These used to be constructed once here, closed over the driver's own `cwd`. Every read was therefore
+  // scoped to the checkout the tooling runs FROM rather than the repo being reviewed — so once `we` onboarded
+  // its own `ops/pr-views`, staging a view for any other repo was impossible: `--from=` refused with "this
+  // repo HAS the CI transport" (true of `we`, false of the target), and `--fromTransport` hit #3261's
+  // cross-repo guard pointing at a `--repoRoot` this operation did not declare. The readers are cheap
+  // closures; rebuilding one per call costs nothing and is what lets the caller name the checkout.
+  return ({ source, from, repo, pr, refresh = false, repoRoot = '' }) => {
+    const at = String(repoRoot || '').trim() || cwd;
+    if (source === 'file') return createFileReader({ read, run, cwd: at })({ from, repo, pr });
+    if (source === 'transport') {
+      return createTransportReader({ run, sleep, now, env, cwd: at, viewFileName, originRepo, mkdir, write, rm })({ repo, pr, refresh });
+    }
     throw new Error(`stage-pr-view: unknown view source ${JSON.stringify(source)} — nothing reads bytes for it`);
   };
 }

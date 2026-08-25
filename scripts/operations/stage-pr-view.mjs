@@ -330,6 +330,15 @@ export function stagePrViewOperation({ readPayload } = {}, { fields, viewFileNam
       // NO LONGER `required`, and no longer sufficient. It survives ONLY for a repo that has not onboarded the
       // transport; `checkViewProvenance` refuses it everywhere `ops/pr-views` exists on origin.
       from: { type: 'string', required: false, default: '' },
+      // #xaoja7a review (PR #1548 juror) — WHICH CHECKOUT carries `repo`'s transport, the same seam
+      // `record-verdict` already declares (#3261). Without it every read here was scoped to the checkout the
+      // tooling runs FROM, not the repo being reviewed — so the moment `we` onboarded its own `ops/pr-views`,
+      // staging a view for any OTHER repo became impossible: `--from=` was refused with "this repo HAS the
+      // CI transport" (true of `we`, false of the target), and `--fromTransport` was refused by the #3261
+      // cross-repo guard naming a `--repoRoot` flag this operation did not declare. Cross-repo review is not
+      // hypothetical — plateau-app#144 and #145 were reviewed exactly that way.
+      // Optional: omitted means the driver's own checkout, right for the common same-repo case.
+      repoRoot: { type: 'string', required: false, default: '' },
       // Where the transport reads from. Defaults to the same `WE_PR_VIEW_DIR` the reader resolves, so the
       // two cannot be pointed at different directories by forgetting a flag.
       dir: { type: 'string', required: false, ...(defaultDir ? { default: defaultDir } : {}) },
@@ -344,12 +353,15 @@ export function stagePrViewOperation({ readPayload } = {}, { fields, viewFileNam
     }),
 
     read: compute({
-      reads: ['input.pr', 'input.repo', 'input.refresh', 'findings.select'],
+      reads: ['input.pr', 'input.repo', 'input.refresh', 'input.repoRoot', 'findings.select'],
       fn: (view) => readPayload({
         ...view.findings.select,
         repo: view.input.repo,
         pr: view.input.pr,
         refresh: view.input.refresh,
+        // #1548 juror — the checkout that carries THIS repo's transport, not the driver's. Every read
+        // downstream (the availability probe, the request push, the `git show`) is scoped by it.
+        repoRoot: view.input.repoRoot,
       }),
     }),
 
