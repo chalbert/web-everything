@@ -320,7 +320,9 @@ export function pushViewRequest({
  * refuses these bytes wherever it is true. That refusal is what stops the #1542 fabrication from simply moving
  * one step back — fetch the CI view, edit it, stage the edit through here.
  */
-export function createFileReader({ read = readFileSync, run = defaultGit, cwd = REPO_ROOT } = {}) {
+export function createFileReader({
+  read = readFileSync, run = defaultGit, cwd = REPO_ROOT, originRepo = defaultOriginRepo,
+} = {}) {
   return ({ from, repo, pr }) => {
     let raw;
     try {
@@ -334,7 +336,21 @@ export function createFileReader({ read = readFileSync, run = defaultGit, cwd = 
     } catch (e) {
       throw new Error(`stage-pr-view: ${from} is not valid JSON (${e.message})`);
     }
-    const probe = probeTransportBranch({ run, cwd });
+    // THE CHECKOUT MUST BE THE REPO'S (PR #1548 round 2). Scoping the probe to `repoRoot` fixed reading a
+    // sibling, and opened a bypass in the same move: nothing checked that the named checkout IS the repo under
+    // review, so `--repoRoot=<any checkout without the branch>` reported "no transport here" and re-opened the
+    // hand-authored path this whole change exists to close. My own round-1 fix, and my commit message claimed
+    // the opposite — the juror proved it by trace and reproduction.
+    //
+    // Verified the way the push side already verifies it (`resolveTransportRoot`, #3261): the checkout's
+    // `origin` must BE `repo`. FAILS CLOSED — an unreadable origin, or one that does not match, reports the
+    // transport as PRESENT, so `--from=` stays refused. A probe that cannot answer must never be the reason a
+    // weaker path opens.
+    const at = String(cwd ?? '');
+    const owns = originRepo(at) === String(repo ?? '').trim();
+    const probe = owns
+      ? probeTransportBranch({ run, cwd: at })
+      : { available: true, probed: false, error: `checkout ${at} does not belong to ${repo}` };
     return {
       view,
       provenance: {
@@ -379,7 +395,7 @@ export function createPayloadReader({
   // closures; rebuilding one per call costs nothing and is what lets the caller name the checkout.
   return ({ source, from, repo, pr, refresh = false, repoRoot = '' }) => {
     const at = String(repoRoot || '').trim() || cwd;
-    if (source === 'file') return createFileReader({ read, run, cwd: at })({ from, repo, pr });
+    if (source === 'file') return createFileReader({ read, run, cwd: at, originRepo })({ from, repo, pr });
     if (source === 'transport') {
       return createTransportReader({ run, sleep, now, env, cwd: at, viewFileName, originRepo, mkdir, write, rm })({ repo, pr, refresh });
     }

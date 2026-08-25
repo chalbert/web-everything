@@ -714,6 +714,10 @@ describe('the dispatching reader', () => {
   it('reports a file read\'s provenance, weakness included', () => {
     const out = createPayloadReader({
       read: () => JSON.stringify(view()), run: () => '', viewFileName: prViewFileName, cwd: '/r',
+      // The checkout claims the repo under review, so the probe actually runs and reports its real answer
+      // (`run` returns '' → no transport). Without this the r2 guard fails closed and reports PRESENT, which
+      // is correct behaviour but not what this test is about.
+      originRepo: () => 'o/x',
     })({ source: 'file', from: '/tmp/v.json', repo: 'o/x', pr: 1 });
     expect(out.provenance).toMatchObject({ source: 'file', from: '/tmp/v.json', transportAvailable: false });
   });
@@ -742,6 +746,9 @@ describe('#1548 — the reader is scoped to the TARGET repo, not the driver chec
     const dispatch = createPayloadReader({
       read: () => JSON.stringify({ number: 5, headRefOid: 'abc' }),
       run: probeRun(calls), cwd: DRIVER, viewFileName: prViewFileName,
+      // Each checkout claims the repo it is: the guard added in r2 refuses to probe a checkout that is not
+      // the repo under review, so a fixture that omits this now (correctly) fails closed.
+      originRepo: (at) => (at === SIBLING ? 'o/sibling' : 'o/driver'),
     });
     dispatch({ source: 'file', from: '/tmp/payload.json', repo: 'o/sibling', pr: 5, repoRoot: SIBLING });
     const probe = calls.find((c) => c.args?.[0] === 'ls-remote');
@@ -756,6 +763,7 @@ describe('#1548 — the reader is scoped to the TARGET repo, not the driver chec
     const reader = () => createPayloadReader({
       read: () => JSON.stringify({ number: 5, headRefOid: 'abc' }),
       run: probeRun(calls), cwd: DRIVER, viewFileName: prViewFileName,
+      originRepo: (at) => (at === SIBLING ? 'o/sibling' : 'o/driver'),
     });
     const sibling = reader()({ source: 'file', from: '/tmp/payload.json', repo: 'o/sibling', pr: 5, repoRoot: SIBLING });
     expect(sibling.provenance).toMatchObject({ transportAvailable: false, probed: true });
@@ -764,5 +772,42 @@ describe('#1548 — the reader is scoped to the TARGET repo, not the driver chec
     // target, it does carry the branch, and `--from=` stays closed.
     const own = reader()({ source: 'file', from: '/tmp/payload.json', repo: 'o/driver', pr: 5 });
     expect(own.provenance).toMatchObject({ transportAvailable: true, probed: true });
+  });
+});
+
+// ── #1548 round 2: a repoRoot pointing anywhere is not a bypass ───────────────────────────────────────────────
+//
+// Round 1 scoped the probe to `repoRoot` so a sibling repo could be reviewed. That fix opened a hole in the
+// same move: nothing checked the named checkout actually BELONGS to the repo under review, so
+// `--repoRoot=<any checkout without the branch>` reported "no transport here" and re-opened `--from=` — the
+// hand-authored path this whole change exists to close. Found by the round-2 juror, against a commit message
+// that claimed the guard was not weakened.
+describe('#1548 r2 — the named checkout must BE the repo under review', () => {
+  const OWNED = '/owned-checkout';
+  const UNRELATED = '/unrelated-checkout';
+  const withTransport = (args) => (args[0] === 'ls-remote' ? `sha\trefs/heads/${TRANSPORT_BRANCH}\n` : '');
+
+  const reader = (originRepo) => createPayloadReader({
+    read: () => JSON.stringify({ number: 5, headRefOid: 'abc' }),
+    run: withTransport, cwd: OWNED, viewFileName: prViewFileName, originRepo,
+  });
+
+  it('reports the transport PRESENT when repoRoot names a checkout that is not the repo — fails closed', () => {
+    // THE BYPASS. The unrelated checkout has no `ops/pr-views`, so a naive probe would answer "no transport"
+    // and let the hand-authored view through for a repo that does have one.
+    const out = reader((at) => (at === OWNED ? 'o/target' : 'o/somethingelse'))(
+      { source: 'file', from: '/tmp/p.json', repo: 'o/target', pr: 5, repoRoot: UNRELATED },
+    );
+    expect(out.provenance).toMatchObject({ transportAvailable: true, probed: false });
+  });
+
+  it('still probes for real when the checkout DOES belong to the repo', () => {
+    const out = reader(() => 'o/target')({ source: 'file', from: '/tmp/p.json', repo: 'o/target', pr: 5, repoRoot: OWNED });
+    expect(out.provenance).toMatchObject({ transportAvailable: true, probed: true });
+  });
+
+  it('an unreadable origin fails closed too — an unanswerable probe never opens the weaker path', () => {
+    const out = reader(() => '')({ source: 'file', from: '/tmp/p.json', repo: 'o/target', pr: 5, repoRoot: UNRELATED });
+    expect(out.provenance).toMatchObject({ transportAvailable: true, probed: false });
   });
 });
