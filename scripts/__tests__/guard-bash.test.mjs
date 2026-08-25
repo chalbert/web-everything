@@ -1631,6 +1631,16 @@ describe('commit identity override (#3269)', () => {
     expect(decide('git commit -m "GIT_AUTHOR_EMAIL=x is an env var" && git commit -m two', {})).toBeNull();
   });
 
+  it('accepts the escape only in env-PREFIX position, where bash actually exports it (#1551 r2)', () => {
+    for (const cmd of [
+      'git -c user.email=evil@x commit -m hi -- COMMIT_IDENTITY_OK=1',  // a pathspec
+      'git -c user.email=evil@x commit COMMIT_IDENTITY_OK=1',           // a stray operand
+      'git -c user.email=evil@x commit -m "COMMIT_IDENTITY_OK=1"',      // the message (r1)
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+    // …and still honours it where it genuinely is an assignment.
+    expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m r', {})).toBeNull();
+  });
+
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
   });

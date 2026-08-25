@@ -191,10 +191,27 @@ function argvTokens(seg) {
   return tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
 }
 
-/** Is the sanctioned escape genuinely SET here — not merely quoted inside a commit message? Pure. */
+/**
+ * Is the sanctioned escape genuinely SET here — an env-assignment PREFIX, the only position in which bash
+ * actually exports it? Pure.
+ *
+ * Two earlier cuts were bypasses. The first was a raw substring test, so quoting the escape in `-m` disarmed
+ * the arm. The second exempted message values but still accepted the token ANYWHERE in argv — so
+ * `git -c user.email=evil commit -m hi -- COMMIT_IDENTITY_OK=1` (a pathspec) and
+ * `git -c user.email=evil commit COMMIT_IDENTITY_OK=1` (a stray operand) both spoofed it (#1551 juror r2).
+ *
+ * Position is what makes it real: bash only treats `NAME=value` as an environment assignment when it PRECEDES
+ * the command word. So every token before the escape must itself be an assignment, and the escape must come
+ * before the program word. `COMMIT_IDENTITY_OK=1 git … commit` passes; the same text after `commit` does not.
+ */
 function hasIdentityEscape(text) {
-  return parseSegments(String(text || '')).segments
-    .some((seg) => argvTokens(seg).some((t) => t.text === 'COMMIT_IDENTITY_OK=1'));
+  const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+  return parseSegments(String(text || '')).segments.some((seg) => {
+    const toks = argvTokens(seg).map((t) => t.text);
+    const lead = toks.findIndex((t) => !ASSIGNMENT.test(t));      // the command word, or -1 if all assignments
+    const prefix = lead < 0 ? toks : toks.slice(0, lead);
+    return prefix.includes('COMMIT_IDENTITY_OK=1');
+  });
 }
 
 /**

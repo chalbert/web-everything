@@ -67,9 +67,12 @@ over. The running tally on ~40 lines:
 | — | (self-inflicted while fixing r4: `canonicalCommand` misread, arm briefly denied nothing) | regression |
 | #1551 r1 | the escape spoofable from the commit MESSAGE | **bypass** |
 | #1551 r1 | env-var NAME in a message read as an assignment | over-reach |
+| #1551 r2 | the escape accepted ANYWHERE in argv (pathspec, stray operand) | **bypass** |
 
-Seven real defects, five rounds, every one found by a panel and none by the author. Three of them were
-bypasses in an arm whose whole value is that it cannot be bypassed. The r1 escape spoof
+EIGHT real defects, six rounds, every one found by a panel and none by the author. FOUR were bypasses in an
+arm whose whole value is that it cannot be bypassed — and two of those four were in successive repairs OF THE
+ESCAPE ITSELF: first a raw substring (spoofable from `-m`), then a position-blind token scan (spoofable from a
+pathspec). The r1 escape spoof
 (`git -c user.email=evil commit -m "COMMIT_IDENTITY_OK=1"`) is the clearest statement of the problem: a
 guard that reads a shell string can always be argued with by another shell string.
 
@@ -79,6 +82,11 @@ folded case, quoted, glued, and whatever is next). The structural alternative ch
 the invocation — a `post-commit` hook, or a push-time refusal when a commit's author does not match the
 configured identity. One check, every spelling, no evasion by a new one.
 
-The arm as it stands is worth keeping in the meantime: it denies every spelling now known, its escape is no
-longer spoofable, and it no longer over-reaches. But its defect curve has not flattened, and the next
-spelling is a matter of time.
+The arm as it stands denies every spelling now known and no longer over-reaches, so it is worth keeping while
+the alternative is built — it does stop the ACCIDENTAL misattribution that motivated it, which is the case
+that actually occurred. What it will never do is stop a determined one.
+
+**An earlier revision of this file claimed the escape "is no longer spoofable". That claim was false within
+one review round** — r2 found a second spoof, in the repair of the first. The claim is removed rather than
+re-made, because the honest statement is the one the table supports: no round has yet failed to find a
+defect here, so no assertion that this arm is now sound should be believed, including this one.
