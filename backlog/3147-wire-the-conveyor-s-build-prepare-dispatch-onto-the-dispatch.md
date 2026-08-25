@@ -17,8 +17,16 @@ tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 
 `we:skills-src/conveyor/SKILL.md` steps 3 and 3b instruct, in prose, exactly the sequence [#3037]'s
 `dispatch-lane` operation now mechanizes: call the tick core for the dispatch plan, fill the delivery-agent
-brief, and *"Spawn it as one background `Agent`"*. No skill, including conveyor's own, calls the operation
-that exists to do exactly this (`grep -rl "dispatch-lane" we:skills-src/` returns nothing).
+brief, and *"Spawn it as one background `Agent`"*. No skill, including conveyor's own, **calls** the operation
+that exists to do exactly this. Run rather than asserted: `grep -rl "dispatch-lane" we:skills-src/` returns
+**one** file — `we:skills-src/conveyor/SKILL.md` — and its single hit is the `#3239` annotation at line 77,
+which *names* the operation while explaining that routing through it is a separate item. A mention, not a
+call.
+
+*(An earlier draft said the grep "returns nothing", in this paragraph and again in Done-when 1. Round 3
+corrected the criterion and left this sentence, so the card asserted both readings at once. The correction is
+recorded here rather than silently applied because the same string standing in two places after one of them
+is fixed is the defect that has now cost this PR two rounds.)*
 
 ## The overlap is not superficial
 
@@ -84,9 +92,9 @@ with the other's edits or discovers the work already done.
 #3096/#3239 explicitly or narrow to 3b. That is the first decision for whoever picks it up, and it is why
 all three are now `relatedTo`.
 
-It also weakens this card's own blocking rationale. The *Not in scope* section permanently leaves fix,
-CI-heal, decision and panel spawns hand-spawned — so "two dispatch mechanisms live in one skill" is already
-an accepted end state for the other kinds, not the unconditional harm the argument treats it as.
+It also weakens this card's own blocking rationale. The *Not in scope* section permanently leaves the fix,
+CI-heal and decision spawns hand-spawned — so "two dispatch mechanisms live in one skill" is already an
+accepted end state for the other kinds, not the unconditional harm the argument treats it as.
 
 **Consequence for sequencing:** #3165 lands first and makes step 3b callable; #3147 then rewires both steps
 in one pass. Doing #3147 first would mean wiring step 3 to the operation and leaving step 3b hand-spawned —
@@ -94,10 +102,16 @@ a half-migration with two dispatch mechanisms live in one skill, which is worse 
 
 ## Not in scope
 
-Steps 3c–3e (fix dispatch, CI-heal dispatch) and the panel-reviewer/editor/validator spawns inside step 4 —
-those are separate prose sites, not named by `dispatch-lane`'s own scope, and the panel/validator/editor sites
-are the subject of the sibling item "subagent independent reviewers aren't independent" (relatedTo above), not
-this one.
+The three other spawn sites, enumerated from the file in Tasks 3 below rather than named as a range: **§3c**
+(fix dispatch, line 521), **§3c-ci** (CI-heal, from line 584) and **§3e** (drive a cleared decision, line
+680). They are separate prose sites and are not named by `dispatch-lane`'s own scope.
+
+*(This section is where two earlier errors originated and where they survived being corrected elsewhere. It
+said "Steps 3c–3e", a range that does not exist, and it named "the panel-reviewer/editor/validator spawns
+inside step 4" — grepping `we:skills-src/conveyor/SKILL.md` for `panel` returns **0**. Tasks 3 was corrected
+in round 3; this section, the original source of both claims, was not, so the card refuted itself by grep in
+one place and relied on the refuted claim in two others. The sibling item about subagent reviewers not being
+independent is still `relatedTo`, but it is not about spawn sites in this skill.)*
 
 ## Interfaces
 
@@ -166,4 +180,5 @@ step 3b later would leave two dispatch mechanisms live inside one skill.
    *(An earlier draft before that specified `Spawn it as one background Agent` with no markup, which matches
    **zero** times — a criterion that would have "passed" while the prose sat untouched.)*
 3. **Mutation** — restoring either step's prose reddens case 2 by name, and the count returns to 3.
-5. `npm run check:standards` — no new errors and no new warnings against the 0-error / 1435-warning baseline.
+4. `npm run check:standards` — no new errors and no new warnings against the baseline at build time. (Do not
+   hard-code a number: it moved 1435 → 1437 while this card was being prepared.)
