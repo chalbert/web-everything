@@ -210,8 +210,21 @@ export function importsRealRepoHelper(content) {
   }
   if (locals.size === 0) return false;
 
-  const withoutImports = withoutComments.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
-  return [...locals].some((name) => new RegExp(`\\b${esc(name)}\\b`).test(withoutImports));
+  // STRINGS ARE NOT CODE, and a bare name match is not a call. Round 4 found the survivor:
+  // `it('mentions withRealRepo in its title but never calls it', …)` satisfied the check with a fully stubbed
+  // body, because the name appeared *somewhere* outside the import. Same #3264 vacuity, one layer deeper than
+  // the decorative import fixed in round 2.
+  //
+  // Two narrowings, both squarely inside what a regex can own — which is the whole point of the option-B
+  // scoping above. String and template literals are removed, so prose can no longer stand in for code. And the
+  // name must appear in CALL POSITION (`name(`), not merely appear: every harness export is a function taking
+  // a callback, so being called is what "used" means here. A mention is not a use.
+  const code = withoutComments
+    .replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '')
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""');
+  return [...locals].some((name) => new RegExp(`\\b${esc(name)}\\s*\\(`).test(code));
 }
 
 /**

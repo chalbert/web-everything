@@ -444,3 +444,34 @@ describe('the refusal reaches the SCAN, not just the predicate (mutation-found g
     expect(kinds(r)).not.toContain('io-fidelity-undecidable');
   });
 });
+
+describe('a MENTION is not a USE — strings are not code (PR #1549 r4)', () => {
+  const H = "'../helpers/real-repo.mjs'";
+  const V = "import { it, expect } from 'vitest';\n";
+
+  it('a name in a test TITLE does not satisfy the check', () => {
+    // The round-4 survivor, run against the shipped code rather than a mutation of it: the harness was
+    // imported, the name appeared in the title, the body was fully stubbed, and the gate passed. Same #3264
+    // vacuity as the decorative import, one layer deeper — the name was outside the import, just not in code.
+    const src = `${V}import { withRealRepo } from ${H};\n`
+      + `import { createSinks } from '../record-verdict-io.mjs';\n`
+      + `it('mentions withRealRepo in its title but never calls it', () => { const run = () => ''; expect(run()).toBe(''); });\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+  });
+
+  it('nor in a template literal', () => {
+    expect(importsRealRepoHelper(`${V}import { withRealRepo } from ${H};\nit(\`withRealRepo() rocks\`, () => {});\n`)).toBe(false);
+  });
+
+  it('CALL POSITION is what counts — every harness export is a function taking a callback', () => {
+    expect(importsRealRepoHelper(`${V}import { withRealRepo } from ${H};\nit('x', () => withRealRepo(() => {}));\n`)).toBe(true);
+  });
+
+  it('an awaited call counts', () => {
+    expect(importsRealRepoHelper(`${V}import { withBareOrigin } from ${H};\nit('x', async () => { await withBareOrigin(() => {}); });\n`)).toBe(true);
+  });
+
+  it('an aliased call counts', () => {
+    expect(importsRealRepoHelper(`${V}import { withRealRepo as w } from ${H};\nit('x', () => w(() => {}));\n`)).toBe(true);
+  });
+});
