@@ -119,13 +119,36 @@ one-source clause forbids; only one can be *the* path the runner calls.
    the one open question of what an unscoped prepare declares as its scope.
 
 **What (c) costs, stated rather than hidden.** It makes this decision depend on #3165 landing first, where
-(a) depends on nothing. It also inherits `dispatch-lane`'s `claude --bg` backend rather than the ratified
-five-verb `spawn`/`steer`/`stop`/`resume`/`observe` contract — so `steer` and `redirect` are not available
-through it. **Whether the conveyor actually needs `steer`/`redirect` is the open question this fork now
-turns on:** if the tick loop only ever spawns and observes, (c) is strictly better; if mid-flight steering is
-required, (a)'s richer contract earns its second implementation. Nothing in `we:scripts/conveyor/tick-core.mjs`
-plans a steer today — its decisions are spawn, watch, retire — but that is an observation about the present
-tick, not a guarantee about the design's intent.
+(a) depends on nothing.
+
+**The steer question this fork turned on has been PROBED, and it does not decide the fork.** An earlier
+version of this section said (c) inherits the `claude --bg` backend rather than the ratified five-verb
+`spawn`/`steer`/`stop`/`resume`/`observe` contract, so *"`steer` and `redirect` are not available through
+it"*, and made mid-flight steering the pivot: if the conveyor needs to steer, (a)'s richer contract earns its
+second implementation.
+
+Measured 2026-08-25 rather than reasoned about — a detached `--bg` agent, stopped, then resumed:
+
+| step | result |
+| --- | --- |
+| spawn detached, stop the session | — |
+| `claude --resume <sessionId>` with new instructions | the agent answered with the sentinel planted before the stop — **context preserved** |
+| `--session-id` on a `--bg` spawn | **ignored**; the real id must be read back from `claude agents --json` |
+
+So steering IS reachable through the `--bg` backend — as stop-then-resume rather than as a `steer(text)`
+write to a live stdin. That is a coarser verb, not a missing capability, and it costs one extra round trip
+per steer. Two consequences for this fork:
+
+1. **The pivot is gone.** "Does the conveyor need to steer?" no longer separates (a) from (c), because both
+   can. What separates them is whether the conveyor needs to steer a *running* agent **without interrupting
+   it** — and nothing in `we:scripts/conveyor/tick-core.mjs` plans anything of the kind. Its decisions are
+   spawn, watch, retire.
+2. **The remaining cost of (c) is latency and granularity, not capability**, which is a much weaker reason to
+   stand up a second agent-spawning implementation.
+
+The second row is a live constraint on (c) regardless of the fork: a dispatcher that pins a session id and
+expects the background process to honour it is pinning a value the CLI discards, so the handle must be
+recovered from the listing. `we:scripts/operations/dispatch-lane-io.mjs`'s observer is where that lives.
 
 ```js
 // Fork 1 (a) — we:scripts/conveyor/agent-runner.mjs, a near-mechanical port of
