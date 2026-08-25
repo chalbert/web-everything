@@ -48,6 +48,9 @@ export const REQUEST_DIR = 'ops/review-requests';
  * and an unescaped regex metacharacter in {@link parseNames} would silently widen or narrow the filter with no
  * error anywhere.
  */
+/** Escape a string for literal use inside a RegExp. See `parseNames` for why allowlisting is not enough. */
+const escapeRegExp = (s) => String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function assertDir(dir) {
   const d = String(dir ?? '').trim();
   if (!d || !/^[\w.-]+(?:\/[\w.-]+)*$/.test(d) || d.split('/').includes('..')) {
@@ -105,7 +108,12 @@ export function parseNames(stdout, dir = REQUEST_DIR) {
   return String(stdout ?? '')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => new RegExp(`^${watched}/[^/]+\\.json$`).test(line));
+    // ESCAPED, not merely allowlisted (PR #1548 r4). `assertDir` permits `.` in a segment — legitimately, a
+    // directory may be named `ops.v2` — but splicing that straight into a RegExp makes the dot match ANY
+    // character, so `ops.v2/` would also accept `opsXv2/`. This function's own header claims it prevents
+    // exactly that class of silent widening; it did not. Allowlisting the input and escaping it are different
+    // jobs and both are needed.
+    .filter((line) => new RegExp(`^${escapeRegExp(watched)}/[^/]+\\.json$`).test(line));
 }
 
 /** IO shell: run the command `collectArgv` chose. `exec` is injected so the whole path stays testable. */

@@ -195,3 +195,18 @@ describe('git’s rename detection must not swallow a request', () => {
     expect(collectRequests({ before, after, exec: (argv) => git(dir, ...argv) })).toEqual([]);
   });
 });
+
+describe('#1548 r4 — the watched dir is ESCAPED, not merely allowlisted', () => {
+  it('a dot in the directory name is literal, not "any character"', () => {
+    // `assertDir` legitimately permits `.` in a segment — a directory may be named `ops.v2`. Splicing that
+    // straight into a RegExp made the dot match ANY character, so `opsXv2/` was accepted too. The function's
+    // own header claimed it prevented exactly this class of silent widening; it did not.
+    const out = 'ops.v2/a.json\nopsXv2/b.json';
+    expect(parseNames(out, 'ops.v2')).toEqual(['ops.v2/a.json']);
+  });
+
+  it('the ordinary directory is unaffected', () => {
+    expect(parseNames('ops/review-requests/7-accepted.json', 'ops/review-requests'))
+      .toEqual(['ops/review-requests/7-accepted.json']);
+  });
+});
