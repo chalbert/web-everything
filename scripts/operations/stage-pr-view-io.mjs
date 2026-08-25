@@ -161,6 +161,23 @@ export function probeTransportBranch({ run = defaultGit, cwd = REPO_ROOT } = {})
  * ref genuinely cannot be resolved; the DECISION about what an unresolvable head means belongs to
  * `checkViewFreshness`, not here.
  *
+ * A FAILED FETCH IS UNRESOLVABLE, and the `rev-parse` below is NOT consulted after one. This is the round-6
+ * finding, and it is worth stating why the obvious reading is wrong: "the fetch failed but `rev-parse` still
+ * answers" looks like a harmless fallback, and it is the opposite. **Git leaves a remote-tracking ref exactly
+ * where it was when a fetch fails** — it does not clear it — so on any clone that has fetched this branch
+ * before, a transient failure (network blip, rate limit) leaves `origin/<ref>` pointing at the head as of the
+ * LAST successful fetch. `rev-parse` then succeeds and returns that stale commit, `checkViewFreshness` compares
+ * a stale view's `headRefOid` against an equally stale live head, they MATCH, and the view is staged — the
+ * precise "body and diff are two reads of two moments" failure this whole check exists to refuse, reached
+ * through a failed fetch instead of a moved head. The louder the failure, the quieter the bug: a clone that had
+ * never seen the branch would have failed `rev-parse` too and refused correctly, so this only misfires on the
+ * clones that review a PR repeatedly.
+ *
+ * That is the same class of failure `probeTransportBranch` above already treats as fail-closed, and it gets the
+ * same answer here. "The branch may be gone (a merged PR)" — the case the old comment deferred to `rev-parse`
+ * for — resolves the same way and must: a deleted branch fails the fetch and leaves the same stale ref behind,
+ * so deferring never distinguished the two, it just trusted the cache in both.
+ *
  * THE REF NAME IS VALIDATED before it reaches a refspec. It comes out of a JSON file on a branch anyone who can
  * push can write, and a `headRefName` of `--upload-pack=…` or a path traversal has no business being spliced
  * into a git argument.
@@ -170,7 +187,11 @@ export function probeHeadOid({ headRefName, run = defaultGit, cwd = REPO_ROOT } 
   if (!ref || !/^[\w.][\w./-]*$/.test(ref) || ref.includes('..')) return '';
   try {
     run(['fetch', '--quiet', 'origin', `+refs/heads/${ref}:refs/remotes/origin/${ref}`], { cwd });
-  } catch { /* the branch may be gone (a merged PR); `rev-parse` below decides, not this */ }
+  } catch {
+    // Unresolvable — see the header. NOT a fall-through to `rev-parse`: the tracking ref that survives a
+    // failed fetch is the stale one, and answering with it is what let a superseded view pass as fresh.
+    return '';
+  }
   try {
     return String(run(['rev-parse', `origin/${ref}`], { cwd })).trim();
   } catch { return ''; }

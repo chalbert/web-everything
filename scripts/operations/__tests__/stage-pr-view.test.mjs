@@ -716,6 +716,45 @@ describe('the transport read against real git', () => {
     const out = realReader()({ repo: REPO, pr: 1496 });
     expect(() => runCheck(out)).toThrow(/STALE view/);
   });
+
+  /**
+   * THE ROUND-6 FINDING, and it needs real git for the same reason the forgery test above does: the thing that
+   * silently did the wrong thing IS git. A stub asserting "we called fetch" asserts our intent; what actually
+   * bites is git's behaviour AFTER a fetch fails — it leaves `refs/remotes/origin/<ref>` exactly where the last
+   * successful fetch put it rather than clearing it.
+   *
+   * So this builds the one shape neither existing `probeHeadOid` test reaches. Those two either fail every git
+   * call or fail none; this fails ONLY `fetch`, against a clone that has a real, now-stale tracking ref from an
+   * earlier successful probe. Before the fix `rev-parse` answered with that stale commit and the freshness check
+   * compared a stale view against a stale head, matched, and staged it — the failure the check exists to refuse,
+   * reached through a network blip instead of a moved head. Note the clone must have fetched the branch before:
+   * a clone that never had the ref fails `rev-parse` too and refuses correctly, which is why the bug only ever
+   * showed on the clones that review the same PR more than once.
+   */
+  it('does not answer with a stale tracking ref when only the fetch fails', () => {
+    const realRun = (argv, opts) => execFileSync('git', argv, { encoding: 'utf8', cwd: opts?.cwd ?? clone });
+    // One honest probe, so `origin/lane/verify-operation` exists locally and points at the head as of now.
+    expect(probeHeadOid({ headRefName: 'lane/verify-operation', run: realRun, cwd: clone })).toBe(headOid);
+
+    // The remote moves on. The clone is not told.
+    git(origin, 'checkout', '-q', 'lane/verify-operation');
+    writeFileSync(join(origin, 'README.md'), 'z\n');
+    git(origin, 'add', '-A'); git(origin, 'commit', '-qm', 'a commit the clone has never fetched');
+    const moved = git(origin, 'rev-parse', 'HEAD');
+    git(origin, 'checkout', '-q', 'main');
+    expect(moved).not.toBe(headOid);
+
+    // The stale ref really is still resolvable — assert the precondition, or this could pass vacuously against
+    // a clone that simply had no ref to be fooled by.
+    expect(git(clone, 'rev-parse', 'origin/lane/verify-operation')).toBe(headOid);
+
+    // Now the fetch — and ONLY the fetch — fails, as a blip or a rate limit would.
+    const blipped = (argv, opts) => {
+      if (argv[0] === 'fetch') throw new Error('could not resolve host github.com');
+      return realRun(argv, opts);
+    };
+    expect(probeHeadOid({ headRefName: 'lane/verify-operation', run: blipped, cwd: clone })).toBe('');
+  });
 });
 
 describe('the dispatching reader', () => {
