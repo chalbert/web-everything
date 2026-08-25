@@ -1,0 +1,280 @@
+/**
+ * @file operation-io-fidelity.test.mjs — the #2949 fidelity qualifier for `we:scripts/operations/*-io.mjs`.
+ *
+ * WHAT THIS FILE IS AN ANSWER TO. The rule under test exists because #3264 shipped a tier-1 acceptance
+ * criterion that passed against a stub and a production bug that did not survive contact with a narrow clone.
+ * A test suite for THAT rule which only proved the happy path — "a module with no test errors" — would be the
+ * same vacuity one level up: green, deterministic, and silent about whether the thing it guards actually
+ * ratchets. So the three ratchet properties are proven INDEPENDENTLY below, each with the counter-case that
+ * would otherwise let a trivially-wrong implementation pass:
+ *
+ *   1. on the list + HAS a test  → error ("remove it from the list")   — this is what makes the list SHRINK
+ *   2. off the list + NO test    → error                                — the ordinary rule
+ *   3. on the list + NOT in the baseline → error                        — the list cannot GROW
+ *
+ * Each property is paired with its negative (the case that must produce NOTHING), because `() => []` and
+ * `() => [everything]` are both single-property-passing implementations and neither may survive this file.
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  findIoModulesWithoutFidelityTest,
+  scanOperationIoFidelity,
+  importsRealRepoHelper,
+  testCoversIoModule,
+  REAL_REPO_HELPER,
+  RATCHET_BASELINE,
+  UNCONVERTED_IO_MODULES,
+} from '../operation-io-fidelity.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+/** A test source that imports the harness AND the module pair — i.e. real proof of fidelity. */
+const fidelityTest = (name, file = `${name}-io.real.test.mjs`) => ({
+  file: `scripts/operations/__tests__/${file}`,
+  content:
+    "import { withNarrowClone } from './helpers/real-repo.mjs';\n"
+    + `import { createSinks } from '../${name}-io.mjs';\n`,
+});
+
+/** A test source that reaches the module but drives an injected double — the #3264 shape. */
+const stubTest = (name) => ({
+  file: `scripts/operations/__tests__/${name}.test.mjs`,
+  content: `import { createSinks } from '../${name}-io.mjs';\nconst run = () => '';\n`,
+});
+
+const kinds = (r) => r.errors.map((e) => e.descriptor.kind);
+
+describe('property 2 — a module with no real-mechanism test is an ERROR (the ordinary rule)', () => {
+  it('errors when the module is neither allowlisted nor covered', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-missing']);
+    expect(r.errors[0].descriptor.file).toBe('scripts/operations/record-verdict-io.mjs');
+  });
+
+  it('a STUB test does not satisfy it — reaching the module is not exercising the mechanism', () => {
+    // The whole motivating case, in one assertion. `record-verdict.test.mjs` imports the io module and is a
+    // thorough suite; it is also the suite that was green while `git worktree add origin/<branch>` died live.
+    // If this ever stops erroring, the gate has been reduced to "is the module imported anywhere", which every
+    // module already satisfied on the day the bug shipped.
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [stubTest('record-verdict')], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-missing']);
+  });
+
+  it('the NEGATIVE — a real-mechanism test silences it', () => {
+    // Without this, "always error" passes both assertions above.
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [fidelityTest('record-verdict')], allowlist: [], baseline: [],
+    });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('the helper import alone is not enough — it must be in a test that reaches THIS module', () => {
+    // A converted `claim` test must not launder fidelity onto `verify`. Both halves of the conjunction are
+    // load-bearing and each is pinned by dropping the other.
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['verify'], tests: [fidelityTest('claim')], allowlist: [], baseline: [],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-missing']);
+  });
+});
+
+describe('property 1 — an allowlisted module that HAS a test is an ERROR (the list must shrink)', () => {
+  it('errors with "remove it from the list" when the debt is paid but the entry remains', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'],
+      tests: [fidelityTest('record-verdict')],
+      allowlist: ['record-verdict'],
+      baseline: ['record-verdict'],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-allowlist-stale']);
+    expect(r.errors[0].descriptor.test).toBe('scripts/operations/__tests__/record-verdict-io.real.test.mjs');
+    expect(r.errors[0].message).toMatch(/remove it from/i);
+  });
+
+  it('the NEGATIVE — an allowlisted module with no test is TOLERATED (this is what makes the rule landable)', () => {
+    // The half that lets the ratchet ship at all. If this ever errors, the gate cannot be merged with 15
+    // unconverted modules on the tree, and a rule nobody can land protects nothing.
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'],
+      tests: [stubTest('record-verdict')],
+      allowlist: ['record-verdict'],
+      baseline: ['record-verdict'],
+    });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('property 1 and property 2 are DIFFERENT findings on the same tree', () => {
+    // Independence, asserted rather than assumed: an implementation that collapsed the two into one condition
+    // would report the same kind twice here.
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict', 'verify'],
+      tests: [fidelityTest('record-verdict')],
+      allowlist: ['record-verdict'],
+      baseline: ['record-verdict', 'verify'],
+    });
+    expect(kinds(r).sort()).toEqual(['io-fidelity-allowlist-stale', 'io-fidelity-missing']);
+  });
+});
+
+describe('property 3 — the allowlist cannot GROW (new code is held to the rule immediately)', () => {
+  it('errors when an entry is outside the frozen day-one baseline', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['brand-new'],
+      tests: [],
+      allowlist: ['brand-new'],
+      baseline: ['record-verdict'],
+    });
+    // Note the SHAPE, not just the count: the module is silenced as far as property 2 goes (it IS listed),
+    // so without property 3 a new module would buy a permanent exemption by editing one line. The only
+    // finding must be the growth one.
+    expect(kinds(r)).toEqual(['io-fidelity-allowlist-grew']);
+    expect(r.errors[0].message).toMatch(/only ever SHRINKS/);
+  });
+
+  it('the NEGATIVE — a baseline entry is fine, so the rule is not just "any allowlist entry errors"', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: ['record-verdict'], tests: [], allowlist: ['record-verdict'], baseline: ['record-verdict'],
+    });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('a dead entry — baselined but the module is gone — is a separate finding', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: [], tests: [], allowlist: ['retired'], baseline: ['retired'],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-allowlist-dead']);
+  });
+
+  it('growth takes precedence over deadness — one entry never yields two findings', () => {
+    const r = findIoModulesWithoutFidelityTest({
+      ioModules: [], tests: [], allowlist: ['brand-new'], baseline: [],
+    });
+    expect(kinds(r)).toEqual(['io-fidelity-allowlist-grew']);
+  });
+});
+
+describe('importsRealRepoHelper — the import, not the mention', () => {
+  it('matches static and dynamic imports at any relative depth', () => {
+    expect(importsRealRepoHelper("import { withRealRepo } from './helpers/real-repo.mjs';")).toBe(true);
+    expect(importsRealRepoHelper("import { withBareOrigin } from '../helpers/real-repo.mjs';")).toBe(true);
+    expect(importsRealRepoHelper(`const h = await import('../../${REAL_REPO_HELPER}');`)).toBe(true);
+  });
+
+  it('a COMMENT naming the helper proves nothing', () => {
+    // A gate satisfied by a promise is not a gate. This is the cheapest possible way to fake the rule and it
+    // is the one somebody reaches for first.
+    expect(importsRealRepoHelper('// TODO: port this to helpers/real-repo.mjs once the harness lands')).toBe(false);
+    expect(importsRealRepoHelper('describe("real-repo", () => {});')).toBe(false);
+  });
+});
+
+describe('testCoversIoModule — derived from the import graph, not from the filename', () => {
+  it('either half of the operation pair counts', () => {
+    expect(testCoversIoModule("import x from '../record-verdict-io.mjs';", 'record-verdict')).toBe(true);
+    expect(testCoversIoModule("import x from '../record-verdict.mjs';", 'record-verdict')).toBe(true);
+  });
+
+  it('a name that is only a SUFFIX of another module does not match it', () => {
+    // The leading `/` in the pattern. Without it `verdict` is credited with `record-verdict`'s test.
+    expect(testCoversIoModule("import x from '../record-verdict-io.mjs';", 'verdict')).toBe(false);
+  });
+
+  it('a filename match without an import does not count', () => {
+    expect(testCoversIoModule('// covers record-verdict-io.mjs', 'record-verdict')).toBe(false);
+  });
+});
+
+describe('the shipped constants against the real tree (#2949 ratchet, day-one state)', () => {
+  const opsDir = join(ROOT, 'scripts', 'operations');
+  const modules = existsSync(opsDir)
+    ? readdirSync(opsDir).filter((n) => n.endsWith('-io.mjs')).map((n) => n.replace(/-io\.mjs$/, '')).sort()
+    : [];
+
+  it('RATCHET_BASELINE is the census of `-io.mjs` modules as they were when the ratchet landed', () => {
+    // Not "equals the current tree" — the baseline is FROZEN and the tree moves. What is pinned is that every
+    // baselined name was real, so the frozen list can never be a place to park a name that never existed.
+    for (const name of RATCHET_BASELINE) expect(modules, `baseline entry \`${name}\``).toContain(name);
+  });
+
+  it('the shipped allowlist never exceeds the frozen baseline', () => {
+    // The ratchet's direction, asserted against the SHIPPED constants rather than fixtures — this is the
+    // assertion that reddens if a future author appends a new module to the debt register.
+    expect([...UNCONVERTED_IO_MODULES].filter((n) => !RATCHET_BASELINE.includes(n))).toEqual([]);
+  });
+
+  it('the gate is GREEN on the tree as it stands — the ratchet is landable today', () => {
+    // The whole reason the allowlist exists, asserted through the SAME entry point check-standards calls. If
+    // this reddens, either a module was added without a fidelity test (fix the module, not this test) or the
+    // harness track converted one without deleting its entry.
+    expect(scanOperationIoFidelity(ROOT).errors.map((e) => e.message)).toEqual([]);
+  });
+});
+
+describe('the fs shell, against a REAL directory tree (this rule obeying its own rule)', () => {
+  // A stubbed `readdirSync` has no nested directories, no absent `__tests__/`, and no non-test siblings —
+  // exactly the shape of absence that made #3264 vacuous. So the walk is driven over a real tmpdir.
+  let root;
+  const EMPTY = { allowlist: [], baseline: [] };
+  const write = (rel, content) => {
+    const abs = join(root, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  };
+
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'io-fidelity-')); });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('finds the io modules and their tests, and reports the unconverted ones', () => {
+    write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
+    write('scripts/operations/__tests__/alpha.test.mjs', "import { a } from '../alpha-io.mjs';\n");
+    const r = scanOperationIoFidelity(root, EMPTY);
+    expect(r.errors.map((e) => e.descriptor.kind)).toEqual(['io-fidelity-missing']);
+    expect(r.errors[0].descriptor.file).toBe('scripts/operations/alpha-io.mjs');
+  });
+
+  it('a real-repo test found by the walk clears the module', () => {
+    write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
+    write('scripts/operations/__tests__/alpha.test.mjs',
+      "import { withRealRepo } from './helpers/real-repo.mjs';\nimport { a } from '../alpha-io.mjs';\n");
+    expect(scanOperationIoFidelity(root, EMPTY).errors).toEqual([]);
+  });
+
+  it('descends into SUBDIRECTORIES and credits non-`.test.mjs` fixture modules', () => {
+    // Both halves of the collector's contract in one tree: the proof lives in a nested helper module whose
+    // name is not `*.test.mjs`. A shallow walk, or a `.test.mjs`-only filter, reports this module untested.
+    write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
+    write('scripts/operations/__tests__/fixtures/alpha-real.mjs',
+      "import { withBareOrigin } from '../helpers/real-repo.mjs';\nimport { a } from '../../alpha-io.mjs';\n");
+    expect(scanOperationIoFidelity(root, EMPTY).errors).toEqual([]);
+  });
+
+  it('an ABSENT __tests__/ directory is an empty list, not a throw', () => {
+    // The gate runs this outside any try/catch on purpose, so a throw here would crash the whole gate.
+    write('scripts/operations/alpha-io.mjs', 'export const a = 1;\n');
+    expect(() => scanOperationIoFidelity(root, EMPTY)).not.toThrow();
+    expect(scanOperationIoFidelity(root, EMPTY).errors.map((e) => e.descriptor.kind)).toEqual(['io-fidelity-missing']);
+  });
+
+  it('an absent scripts/operations/ is no modules and no findings', () => {
+    expect(scanOperationIoFidelity(root, EMPTY).errors).toEqual([]);
+  });
+});
+
+describe('the REGISTRATION — the gate actually calls this scan', () => {
+  it('check-standards.mjs imports and invokes scanOperationIoFidelity', () => {
+    // PR #1235's lesson, applied to this rule: pinning the walk is not pinning the wiring. Deleting the call
+    // site would otherwise leave every assertion above green while the gate checked nothing.
+    const gate = readFileSync(join(ROOT, 'scripts', 'check-standards.mjs'), 'utf8');
+    expect(gate).toMatch(/import\s*\{[^}]*\bscanOperationIoFidelity\b[^}]*\}\s*from\s*'\.\/lib\/operation-io-fidelity\.mjs'/);
+    expect(gate).toMatch(/scanOperationIoFidelity\(ROOT\)/);
+  });
+});

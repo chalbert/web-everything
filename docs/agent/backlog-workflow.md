@@ -267,6 +267,44 @@ pure design judgment). That single requirement forces the author to think about 
 it is cheap and convergent, rather than at review time, when it is a negotiation. **Cap the list at 3–5**
 so this does not become its own ceremony.
 
+### The ladder measures determinism, not fidelity — tier 1 carries one qualifier (#3264)
+
+"It is green or it is not, nobody judges" is a claim about **who checks**. It is not a claim about **what was
+checked**. The two are independent axes, and a criterion can sit at the top of one and the bottom of the other.
+
+#3264 shipped exactly that. Its work carried a tier-1 criterion. The criterion passed.
+`we:scripts/operations/record-verdict-io.mjs` takes an injected `run`, so the tests drove a stub, and the stub
+answered `''` to every git call. The real code did `git fetch --quiet origin <branch>` and then
+`git worktree add --force --detach <wt> origin/<branch>`, and died live with
+`fatal: invalid reference: origin/ops/review-requests` — because `git fetch origin <branch>` writes the
+remote-tracking ref only when the clone's own refspec covers it, which is true of a full clone and false of a
+narrow one. **A stub returning `''` has no clone geometry.** There was no fixture in which those two lines
+could disagree, so the test could not have failed whatever the second one said. Fully tier 1, fully green, and
+vacuous about mechanics.
+
+So tier 1 gains a qualifier: **when an item changes code whose real behaviour is a shell-out or a filesystem
+effect, at least one tier-1 criterion must exercise the real mechanism** — a real repo, a real directory tree,
+a real process — not an injected double.
+
+**This is not "stubs are bad", and reading it that way would cost more than the bug did.** A double is the
+right tool for pinning a *decision*: which argv gets built, which branch is chosen, what the code concludes
+from a given input. Every provenance assertion in `we:scripts/operations/__tests__/record-verdict.test.mjs`
+still earns its keep — the bug was never in what the code decided. The qualifier is deliberately narrow: **one**
+criterion, on the mechanics, and only where mechanics is what the item changes. Rewriting a suite of decision
+tests as integration tests is the ceremony the 3–5 cap above exists to prevent.
+
+<!-- provenance-lint: off — the real-repo harness's three exports are a fixed cross-track contract agreed with the lane building it (#3264 follow-up). They are asserted against that agreement, not against this checkout, so they will not resolve here until that lane lands. -->
+
+`check:standards` enforces the operations half (`we:scripts/lib/operation-io-fidelity.mjs`): every
+`we:scripts/operations/*-io.mjs` needs one test that imports the real-repo harness
+(`withRealRepo` / `withBareOrigin` / `withNarrowClone`) — `withNarrowClone` exists because the narrow clone is
+precisely the geometry the stub could not have. It carries a **shrinking allowlist** of modules not yet
+converted, so a module that gains a test must leave the list in the same change, and a module written after the
+rule can never join it. Everywhere else the qualifier is on the author, and the test to apply is blunt: **if the
+criterion would still pass against a double that returns `''` for everything, it is not proving the mechanism.**
+
+<!-- provenance-lint: on -->
+
 **Author criteria at file time, in one pass — never let the implementing lane write its own.** The same
 anchoring problem the `dismissed-findings` signal exists to catch applies here: an author who sets the bar
 sets it where the work already is. Criteria live on the item, committed to git, so weakening them later is
