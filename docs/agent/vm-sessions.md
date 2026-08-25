@@ -25,6 +25,27 @@ container does it unasked; on a workstation it only reports (see *Installing on 
 
 ## The rules that only apply here
 
+**A fix that lives only on this box is not a fix.** The container is disposable, so anything you change
+*about the machine* — a `git config`, an env var, a symlink, an `npm install`, a `~/.claude` edit — is gone
+on the next session and every session after it. Doing it and moving on feels like resolution and produces
+none: the next agent hits the identical wall, with no trace that anyone met it before.
+
+So a machine-level problem is only handled when its fix is in one of three durable homes:
+
+| the fix is… | it belongs… |
+|---|---|
+| derivable by the repo's own tooling | in the tooling (`bootstrap-session.mjs`, `lane-pool.mjs`) — computed, not typed |
+| a rule an agent must follow | in a **hook** if it is script-decidable, else in the doc a reader actually opens mid-task |
+| outside every repo (`~/.claude`, the harness, GitHub settings) | a backlog item naming it as the operator's, since no PR here can reach it |
+
+The box-local change is still fine as the *immediate unblock* — take it, then land the durable half in the
+same session. What is never fine is stopping at the unblock and reporting the problem solved.
+
+Observed repeatedly on 2026-08-24: a `webeverything` symlink, a `LANE_POOL_ROOT` export, three `npm ci`s and
+a `git config user.email` were all applied by hand and all evaporated; the two that mattered
+([#3265](../../backlog/3265-lane-pool-root-and-shallow-reference-deadlock-a-cloud-vm.md), the alias) only
+stopped recurring once they moved into `lane-pool.mjs` and `bootstrap-session.mjs`.
+
 **Push early, push often — this is the one that bites.** The container is reclaimed after a period of
 inactivity and the filesystem goes with it; only the conversation is restored. Everything the laptop
 learned about lanes being wiped mid-work ([[shared-pool-lane-unsafe-for-manual-work]],
