@@ -525,10 +525,13 @@ export function isPreSpawnRefusal(error) {
  * {@link AGENT_ARGS_ENV} at the `run.mjs` binding so an operator can actually set it, rather than being a
  * parameter only a test can reach.
  *
- * NOT YET PROVEN LIVE. No test starts a `claude` process, and no dispatch has been fired end to end — the argv
- * below is asserted, the CLI's response to it is not. A background session's permission mode and the isolation
- * default are the two things a first live run has to settle; #xaibmeu, which routes the conveyor through this
- * operation, is where that happens.
+ * PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI. `./__tests__/dispatch-spawn-live.test.mjs` starts a
+ * `claude` executable — a fake first on `PATH` that parses options the way a commander-style CLI does — and
+ * asserts this argv is ACCEPTED, that `--bg` returns instead of blocking, and that the session id pinned here
+ * is the id `defaultListAgents` later reports back. What is still NOT proven: no dispatch has been fired end
+ * to end, and the REAL CLI's response to this argv remains unasserted. A background session's permission mode
+ * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
+ * conveyor through this operation, is where that happens.
  *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
@@ -880,6 +883,11 @@ export function defaultListAgents({ exec = execFileSync, env = process.env } = {
     maxBuffer: 8 * 1024 * 1024,
     timeout: listTimeoutMs(env),
     killSignal: 'SIGKILL',
+    // FORWARDED TO THE CHILD, not just read for the timeout. `defaultSpawnAgent` forwards its `env` (via
+    // `...opts`) and this did not, so the two halves of one chain resolved `claude` differently: a test that
+    // pointed `PATH` at a fake got a real spawn and a REAL listing back. The default is `process.env`, so
+    // every existing caller — all of which pass `{ exec }` alone — is byte-identical.
+    env,
   });
   return JSON.parse(String(out || '[]'));
 }

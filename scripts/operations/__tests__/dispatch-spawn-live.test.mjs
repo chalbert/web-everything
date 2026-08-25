@@ -1,9 +1,11 @@
 /**
  * @file dispatch-spawn-live.test.mjs — the first test that STARTS A PROCESS to dispatch an agent.
  *
- * `we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs` states the gap this closes, quoting
- * the sink's own docblock: *"NOT YET PROVEN LIVE. No test starts a `claude` process."* Everything about the
- * one effect the delivery loop exists to perform was asserted against stubs.
+ * The sink's own docblock in `we:scripts/operations/dispatch-lane-io.mjs` said it, and
+ * `./dispatch-lane-integration.test.mjs` repeated it as current fact: *"NOT YET PROVEN LIVE. No test starts a
+ * `claude` process."* Everything about the one effect the delivery loop exists to perform was asserted against
+ * stubs. Both of those lines are rewritten by the same change that adds this file — it is what makes them
+ * false, so leaving them would leave the repo asserting the opposite of its own suite.
  *
  * WHAT A STUB COULD NOT ANSWER, and it is not the spelling of the argv — `buildAgentArgv` is pure, exported
  * and already asserted. It is whether a CLI ACCEPTS that spelling. `dispatch-lane-io.mjs`'s own comment
@@ -11,24 +13,36 @@
  * CLI, and a wrong bet turns into a dispatch with a mangled prompt"*. A shim that parses argv the way a
  * commander-style CLI does converts that bet into an assertion.
  *
- * These tests run the REAL `defaultSpawnAgent` through the REAL `execFileSync` with `PATH` pointed at the
- * fake — no injected spawner. Overriding the high seam would replace the code under test; this exercises it,
- * the same reasoning the sink gives for separating `exec` from `runNode`.
+ * WHAT IT REMAINS HONEST ABOUT. The parser doing the accepting and the rejecting is a shim added alongside
+ * these tests, so the fidelity claim is "modelled on a commander-style CLI", not "verified against the real
+ * one". That is the same standing this repo already accepts for `real-repo.mjs`'s git geometry, and it is
+ * strictly more than a stub returning a canned value could give. The real CLI stays unasserted until a live
+ * run — which is a change of binding here, not a new harness.
  *
- * COSTS NOTHING. No model runs, no token is spent. This proves plumbing — argv accepted, `--bg` returns
- * rather than blocks, the pinned session id is the id the observer later finds, a failure surfaces as one.
- * Whether the agent then does GOOD work is a different test with a different budget; this is the harness
- * that makes that one a change of binding rather than a new build.
+ * These tests run the REAL `defaultSpawnAgent` and the REAL `defaultListAgents` through the REAL
+ * `execFileSync` with `PATH` pointed at the fake — no injected spawner. Overriding the high seam would replace
+ * the code under test; this exercises it, the same reasoning the sink gives for separating `exec` from
+ * `runNode`.
+ *
+ * COSTS NOTHING. No model runs, no token is spent.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { withFakeClaude } from './helpers/fake-claude.mjs';
-import { buildAgentArgv, defaultSpawnAgent } from '../dispatch-lane-io.mjs';
+import { buildAgentArgv, defaultSpawnAgent, defaultListAgents } from '../dispatch-lane-io.mjs';
 
-/** Spawn through the REAL default path, with the fake first on PATH. */
-function spawnVia(fake, argv) {
-  return defaultSpawnAgent(argv, { env: { ...process.env, ...fake.env } });
+/**
+ * Spawn through the REAL default path, with the fake first on PATH.
+ *
+ * `assertWins` runs FIRST, every time. Every case here passes `fake.env` today, so it never fires — but the
+ * failure it prevents is live: a case that omits the override reaches the real `claude` on this machine, and
+ * for a `--bg` argv that is a real background agent launched by a test file whose headline promise is that no
+ * model runs. Enforced rather than conventional.
+ */
+function spawnVia(fake, argv, extraEnv = {}) {
+  const env = { ...process.env, ...fake.env, ...extraEnv };
+  fake.assertWins(env);
+  return defaultSpawnAgent(argv, { env });
 }
 
 let fake = null;
@@ -53,18 +67,23 @@ describe('dispatching an agent, against a real process', () => {
     expect(seen[seen.length - 1]).toBe('# Deliver item 4242\n\nDo the thing.');
   });
 
-  it('pins the handle the observer will later look for — the spawn-to-observe round trip', () => {
+  it('the spawn-to-observe round trip, through BOTH production seams', () => {
     fake = withFakeClaude();
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const env = { ...process.env, ...fake.env };
     spawnVia(fake, buildAgentArgv({
       sessionId,
       payload: { num: '77', sessionSlug: 'conveyor-77', prompt: '# brief' },
     }));
 
-    // The observer's read, run as its own process exactly as production does it.
-    const listing = JSON.parse(execFileSync('claude', ['agents', '--json'], {
-      encoding: 'utf8', env: { ...process.env, ...fake.env },
-    }));
+    // PRODUCTION'S OBSERVER, not a re-implementation of it. An earlier cut hand-rolled
+    // `execFileSync('claude', ['agents','--json'])` here and its comment claimed that was "exactly as
+    // production does it" — it was not: `defaultListAgents` also sets `stdio`, `maxBuffer`, `timeout`,
+    // `killSignal` and an empty-listing fallback, none of which were exercised. It was hand-rolled because
+    // `defaultListAgents` COULD NOT be pointed at the fake: its `env` fed only `listTimeoutMs` and never
+    // reached the child, so it returned this machine's real sessions. That one-line passthrough is part of
+    // this change, and this case is what holds it.
+    const listing = defaultListAgents({ env });
 
     // Both ends of the chain were previously modelled. This is the one assertion that ties them: the id the
     // dispatcher pinned is the id the liveness listing reports back.
@@ -72,37 +91,46 @@ describe('dispatching an agent, against a real process', () => {
     expect(listing.find((s) => s.sessionId === sessionId).name).toBe('conveyor-77');
   });
 
-  it('a brief beginning with `-` is refused BEFORE any process starts', () => {
+  it('a leading-dash brief is refused by the dispatcher — and the parser proves the refusal is load-bearing', () => {
     fake = withFakeClaude();
-    expect(() => buildAgentArgv({
-      sessionId: 'x', payload: { num: '1', prompt: '--help me' },
-    })).toThrow(/begins with/);
-    // The refusal is worth having only because the alternative is real: a leading dash IS read as a flag.
-    expect(fake.calls()).toHaveLength(0);
-  });
 
-  it('proves the refusal is not decorative — an unguarded dash really is parsed as a flag', () => {
-    fake = withFakeClaude();
-    // Hand-built argv, bypassing the guard, to demonstrate what it prevents.
-    expect(() => spawnVia(fake, ['--bg', '--session-id', 'z', '-n', 'n', '--not-a-real-flag'])).toThrow();
-    const last = fake.calls().at(-1);
-    expect(last.argv).toContain('--not-a-real-flag');
+    // The hazard's real shape: ONE argv element that happens to begin with a dash. Not a token like
+    // `--not-a-real-flag` that is unambiguously a flag — a brief.
+    const hazard = '--help me, my first heading starts with a dash';
+
+    expect(() => buildAgentArgv({
+      sessionId: 'x', payload: { num: '1', prompt: hazard },
+    })).toThrow(/begins with/);
+
+    // Hand-built argv, bypassing the guard, to show what it prevents. Without this half the guard's value is
+    // asserted rather than demonstrated: the parser really does read that element as an unknown option and
+    // reject the whole invocation, so the dispatch would have failed rather than arriving mangled.
+    expect(() => spawnVia(fake, ['--bg', '--session-id', 'z', '-n', 'n', hazard])).toThrow();
+    expect(fake.lastArgv()).toContain(hazard);
   });
 
   it('a spawn failure surfaces as a throw rather than a silent non-dispatch', () => {
     fake = withFakeClaude();
     const argv = buildAgentArgv({ sessionId: 'q', payload: { num: '9', prompt: '# brief' } });
-    expect(() => defaultSpawnAgent(argv, {
-      env: { ...process.env, ...fake.env, FAKE_CLAUDE_FAIL: '1' },
-    })).toThrow();
+    expect(() => spawnVia(fake, argv, { FAKE_CLAUDE_FAIL: '1' })).toThrow();
   });
 
-  it('`--bg` returns instead of blocking — the property the whole dispatch model rests on', () => {
+  it('`--bg` RETURNS while the same shim, run in the foreground, blocks — the property the dispatch model rests on', () => {
     fake = withFakeClaude();
-    const started = Date.now();
-    spawnVia(fake, buildAgentArgv({ sessionId: 'r', payload: { num: '5', prompt: '# brief' } }));
-    // Generous bound: the point is that it RETURNS, not that it is fast. A blocking spawn would hit the
-    // sink's own timeout instead, which is how a wedged dispatcher would present.
-    expect(Date.now() - started).toBeLessThan(10_000);
+    // The shim sits in a real 1.5s "session" when it is NOT backgrounded. Without a slow path the assertion
+    // below is unfalsifiable — an earlier cut asserted `elapsed < 10_000` against a shim that could not block
+    // under any input, so no change to production code could ever have reddened it.
+    const work = { FAKE_CLAUDE_WORK_MS: '1500' };
+
+    const fgStart = Date.now();
+    spawnVia(fake, ['--session-id', 'fg', '-n', 'fg', '# brief'], work);
+    const foreground = Date.now() - fgStart;
+
+    const bgStart = Date.now();
+    spawnVia(fake, buildAgentArgv({ sessionId: 'r', payload: { num: '5', prompt: '# brief' } }), work);
+    const background = Date.now() - bgStart;
+
+    expect(foreground).toBeGreaterThanOrEqual(1_400);
+    expect(background).toBeLessThan(1_000);
   });
 });

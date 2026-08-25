@@ -1,10 +1,13 @@
 /**
  * @file fake-claude.mjs — a REAL `claude` executable on `PATH` that costs nothing to run.
  *
- * WHY THIS EXISTS, stated as the hole it closes. `we:scripts/operations/dispatch-lane-io.mjs`'s own
- * integration test says it outright:
+ * WHY THIS EXISTS, stated as the hole it closes. The sink's OWN docblock in
+ * `we:scripts/operations/dispatch-lane-io.mjs` said it outright, and
+ * `we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs` repeated it as current fact:
  *
  *     *"NOT YET PROVEN LIVE. No test starts a `claude` process."*
+ *
+ * Both lines are rewritten by the same change that adds this file, because this file is what makes them false.
  *
  * Starting an agent is the ONE effect this whole delivery loop is built around, and nothing exercised it.
  * `buildAgentArgv` is pure and asserted, which pins the argv's SPELLING — but the same argument
@@ -32,6 +35,7 @@
  * from `runNode`: overriding the high seam replaces the code under test, overriding the low one exercises it.
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,7 +72,9 @@ for (let i = 0; i < argv.length; i += 1) {
   if (a === '--bg') { bg = true; continue; }
   if (a === '--session-id') { sessionId = argv[i += 1]; continue; }
   if (a === '-n' || a === '--name') { name = argv[i += 1]; continue; }
-  if (a === '--') { operands.push(...argv.slice(i + 1)); break; }
+  // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
+  // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
+  // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.
   if (a.startsWith('-')) {
     process.stderr.write('error: unknown option ' + a + '\\n');
     write(state); process.exit(2);
@@ -94,6 +100,11 @@ if (bg) {
   process.exit(0);
 }
 
+// FOREGROUND BLOCKS, and that is the whole point of the branch. Without it, "\`--bg\` returns instead of
+// blocking" is unfalsifiable: with no slow path anywhere in the shim, no change to production code could ever
+// make that assertion fail. \`FAKE_CLAUDE_WORK_MS\` is the session the real CLI would sit in.
+const workMs = Number(process.env.FAKE_CLAUDE_WORK_MS || 0);
+if (workMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workMs);
 write(state);
 process.stdout.write('ok\\n');
 process.exit(0);
@@ -102,11 +113,17 @@ process.exit(0);
 /**
  * Stand up a fake `claude` on disk.
  *
+ * The returned surface is exactly what a consumer uses and no more — an earlier cut also handed back
+ * `pathPrefix`, `dir` and `sessions()`, none of which anything imported. `assertWins` is the one addition
+ * with no current failure behind it, and it is here on purpose: this fixture exists to be extended, and a
+ * call that forgets `env` reaches the REAL `claude` on this machine. For a `--bg` argv that means launching a
+ * real background agent, against a file whose headline promise is that no model runs.
+ *
  * @returns {{
- *   pathPrefix: string, dir: string, env: Record<string,string>,
+ *   env: Record<string,string>,
  *   calls: () => Array<{argv: string[], cwd: string}>,
- *   sessions: () => Array<object>,
  *   lastArgv: () => string[] | null,
+ *   assertWins: (env: Record<string,string>) => void,
  *   cleanup: () => void,
  * }}
  */
@@ -121,14 +138,22 @@ export function withFakeClaude() {
   const read = () => (existsSync(log) ? JSON.parse(readFileSync(log, 'utf8')) : { calls: [], sessions: [] });
 
   return {
-    dir,
-    pathPrefix: dir,
     env: { PATH: `${dir}:${process.env.PATH}`, FAKE_CLAUDE_LOG: log },
     calls: () => read().calls,
-    sessions: () => read().sessions,
     lastArgv: () => {
       const c = read().calls;
       return c.length ? c[c.length - 1].argv : null;
+    },
+    /**
+     * Refuse to proceed unless THIS `claude` is the one the given env would run. Resolved the way the OS
+     * resolves it, not by inspecting the `PATH` string — a check that only read `PATH` would agree with
+     * itself while the child ran something else.
+     */
+    assertWins: (env) => {
+      const resolved = execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8', env }).trim();
+      if (resolved !== bin) {
+        throw new Error(`fake-claude: the fake did not win PATH — \`claude\` resolves to ${resolved || '(nothing)'}, not ${bin}. Refusing to spawn: this would reach the real CLI.`);
+      }
     },
     cleanup: () => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } },
   };
