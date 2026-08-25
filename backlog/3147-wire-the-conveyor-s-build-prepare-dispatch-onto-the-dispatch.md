@@ -124,9 +124,20 @@ rewiring. Hence `blockedBy: ["3118", "3165"]` and a scope of the skill file alon
    spawn.
 2. Delete the now-dead brief-filling and `Agent`-spawn prose from those two steps — leaving it would give a
    reader two contradictory instructions.
-3. Leave every other spawn site alone: steps 3c and 3c-ci (fix and CI-heal), 3d, 3e, 3f, and step 4's panel
-   spawns. *(An earlier draft said "steps 3c–3e", a range that does not exist — the skill's steps are 1, 2,
-   3, 3b, 3c, 3c-ci, 3d, 3e, 3f, 4, 5, 6, 7, 8.)*
+3. Leave the other spawn sites alone. Enumerated from the file rather than from memory — there are exactly
+   **three**, and two things an earlier draft listed are not spawn sites at all:
+   - **§3c** (fix dispatch), line 521 — worded `Spawn it as ONE background \`Agent\`.`, a *different* literal
+     from the one steps 3 and 3b use.
+   - **§3c-ci** (CI-heal dispatch), from line 584.
+   - **§3e** (drive a cleared decision), line 680.
+
+   Not spawn sites: **§3d** says outright *"No guard, no spawn … this dispatches **no** agent and consumes
+   **no** lane"*; **§3f** (infra-blocked) contains no spawn or `Agent` at all; and **there are no "panel
+   spawns" in step 4** — grepping `we:skills-src/conveyor/SKILL.md` for `panel` returns **0**.
+
+   *(Two earlier drafts got this wrong in different ways: one named a range "3c–3e" that does not exist, the
+   next named §3d, §3f and panel spawns that do not spawn. Both were written from the card rather than from
+   the file.)*
 
 ## Delivery shape
 
@@ -135,14 +146,24 @@ step 3b later would leave two dispatch mechanisms live inside one skill.
 
 ## Done when
 
-1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits in **both**
-   step 3 and step 3b. It returns nothing today, in any skill.
-2. **Executable** — the hand-spawn prose is gone from steps 3 and 3b. The literal string to match is
-   ``Spawn it as **one background `Agent`**`` — bold and backticked, as it is actually written at lines 251
-   and 279. *(An earlier draft specified `Spawn it as one background Agent`, which matches **zero** times in
-   the file today, before any change — a criterion that would have "passed" while the prose sat untouched.)*
-   The count must fall from 4 occurrences to 2: the two inside steps 3 and 3b go, and the two at lines 521
-   and 680 — the fix and decision spawns, explicitly out of scope — must remain. Asserting a whole-file count
-   of zero would wrongly demand deleting those.
-3. **Mutation** — restoring either step's prose reddens case 2 by name, and the count returns to 4.
+1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits inside
+   **both** step 3 and step 3b. Counted, not assumed: the file has **1** occurrence today, at line 77 — the
+   `#3239` annotation in the tick-core table, which is neither step. So the criterion is that the count rises
+   to at least 3 *and* that the two new ones fall within those steps; a bare whole-file count would already
+   be non-zero and prove nothing.
+
+   *(An earlier draft asserted it "returns nothing today, in any skill". False — that line 77 hit is exactly
+   the annotation this card quotes as evidence elsewhere in its own body.)*
+2. **Executable** — the hand-spawn prose is gone from steps 3 and 3b. The literal to match is
+   ``Spawn it as **one background `Agent`**`` — bold and backticked, as actually written. Counted rather than
+   estimated: it occurs **3** times today, at lines **251** (step 3), **279** (step 3b) and **680** (§3e,
+   the decision spawn, out of scope). So the count must fall **3 → 1**, with line 680 the survivor.
+
+   Line 521 is **not** in that set: §3c writes `Spawn it as ONE background \`Agent\`.` — capitalised and
+   differently worded, so it never matched this literal. An earlier draft listed it as a must-remain
+   occurrence and gave the count as 4 → 2; both were wrong, and the count was never run.
+
+   *(An earlier draft before that specified `Spawn it as one background Agent` with no markup, which matches
+   **zero** times — a criterion that would have "passed" while the prose sat untouched.)*
+3. **Mutation** — restoring either step's prose reddens case 2 by name, and the count returns to 3.
 5. `npm run check:standards` — no new errors and no new warnings against the 0-error / 1435-warning baseline.
