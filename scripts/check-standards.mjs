@@ -75,6 +75,7 @@ import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
 // #3224 — the skill/operation wiring scan, and the map of what each operation declares over.
 // #3253 adds the call-site scan beside it: same subject, one module.
 import { findSkillsNamingUndelegatedHomes, findMalformedOperationCalls } from './lib/skill-operation-wiring.mjs';
+import { scanOperationIoFidelity } from './lib/operation-io-fidelity.mjs';
 import { DECLARED_HOMES } from './operations/declared-homes.mjs';
 import { parseDeclaredHome } from './operations/registry.mjs';
 // The operation table and the CLI's own control-flag list, IMPORTED not restated (#2644): a second copy of
@@ -2226,6 +2227,34 @@ try {
   for (const w of calls.warnings) warn(w.message, w.descriptor);
 } catch (e) {
   warn(`Skill/operation wiring scan failed: ${e.message}`);
+}
+
+// ── 18c. Operation IO modules with no real-mechanism test (#2949 fidelity qualifier; #3264) ────
+// THE LADDER MEASURES DETERMINISM, NOT FIDELITY. #2949's acceptance-criteria ladder sorts criteria by who
+// checks them — tier 1 is "green or not, nobody judges". That says nothing about WHAT went green. #3264's work
+// had a tier-1 criterion, it passed, and the shipped code died live on
+// `fatal: invalid reference: origin/ops/review-requests`: `record-verdict-io.mjs` takes an injected `run`, the
+// tests drove a stub, and a stub returning `''` has no clone geometry, so no fixture existed in which
+// `git fetch origin <branch>` + `git worktree add origin/<branch>` could disagree. Fully tier 1, fully green,
+// vacuous about mechanics.
+//
+// So every `-io` module — the repo's own marker for the impure half of an operation pair — needs at least ONE
+// test that imports `scripts/operations/__tests__/helpers/real-repo.mjs` (`withRealRepo`, `withBareOrigin`,
+// `withNarrowClone`, built by the harness track). The rule and its shrinking allowlist live in
+// `lib/operation-io-fidelity.mjs`; the header there argues the whole case, including why stub tests stay.
+//
+// THE WALK LIVES IN THE LIB, not here — the same correction PR #1235's review made to the mandate-fence scan
+// (section 19 below). A walk written at the call site and re-implemented in the test pins the RULE but never
+// the REGISTRATION, so deleting these three lines would leave the whole suite green. `scanOperationIoFidelity`
+// is what the test imports, so gutting it reddens, and a separate assertion pins that this call still exists.
+//
+// Runs OUTSIDE any try/catch, for the same reason section 19 does: this rule ERRORS, and a catch-all that
+// demoted a scan failure to a warning is a gate that fails OPEN. The helper's ABSENCE is fine — the scan reads
+// test sources as text and never resolves the import — so this lands green before the harness does.
+{
+  const fidelity = scanOperationIoFidelity(ROOT);
+  for (const e of fidelity.errors) err(e.message, e.descriptor);
+  for (const w of fidelity.warnings) warn(w.message, w.descriptor);
 }
 
 // ── 19. Unfenced mandate params (#2967b) ───────────────────────────────────────
