@@ -3,19 +3,24 @@ description: Resolve a backlog item (or, with no NNN / `next` / `all`, the gate'
 ---
 
 Resolve backlog item(s) per **`$ARGUMENTS`**. A leading `NNN` is one explicit item (an optional
-`--graduated-to=…` passes straight through). If `$ARGUMENTS` is **empty**, or is `next` / `all`,
-operate in **discovery mode** (step 0). This is the mechanical close-out — a status splice via
-`backlog.mjs`, then the gate. For an **epic** it additionally enforces the *no open slice* invariant so
-you never create the `resolved-epic-with-open-child` contradiction the gate would later flag.
+`--graduatedTo=…` passes straight through). If `$ARGUMENTS` is **empty**, or is `next` / `all`,
+operate in **discovery mode** (step 0). This is the mechanical close-out — a status splice via the
+declared **`resolve` operation**, then the gate. For an **epic** it additionally enforces the *no open
+slice* invariant so you never create the `resolved-epic-with-open-child` contradiction the gate would
+later flag.
 
-> **Lane note (#2123).** `resolve`'s status change is a **sanctioned frontmatter splice via
-> `we:scripts/backlog.mjs`** — exempt from `we:scripts/guard-lane.mjs`, so this specific splice is *not*
-> what forces a lane. But if you reached `resolve` as the tail of *building* an item, that build's edits
-> already had to happen in a lane clone, and the commit/land here belongs to the same lane→PR flow (direct
-> `main` writes are blocked by `we:scripts/guard-bash.mjs`, #2203) — do not run the build in the primary
-> checkout and then resolve on top of it. Per the #2219 (b) ruling (shipped #2264), the splice/commit rides
-> the lane→PR — and `resolve` is already a `we:scripts/guard-bash.mjs` backlog-mutation (blocked from a
-> primary cwd, #2302), so run it in the lane. The prepare path now gets the same guard via `prepare-stamp`.
+> **Lane note (#2123).** `resolve`'s status change is a **sanctioned frontmatter splice** — it goes
+> through `we:scripts/backlog/guarded-write.mjs` whichever front door you use, so it is exempt from
+> `we:scripts/guard-lane.mjs` and this specific splice is *not* what forces a lane. But if you reached
+> `resolve` as the tail of *building* an item, that build's edits already had to happen in a lane clone,
+> and the commit/land here belongs to the same lane→PR flow (direct `main` writes are blocked by
+> `we:scripts/guard-bash.mjs`, #2203) — do not run the build in the primary checkout and then resolve on
+> top of it. Per the #2219 (b) ruling (shipped #2264), the splice/commit rides the lane→PR, so run it in
+> the lane. **Where the primary-checkout refusal actually lives, now that this command names the
+> operation:** `we:scripts/guard-bash.mjs`'s #2302 arm matches the `node …backlog.mjs <verb>` spelling
+> only, so it does not fire on `run.mjs resolve` — what still fails closed is the guarded writer itself,
+> which raises the same lane-isolation refusal at write time with nothing spliced. The invariant holds; it
+> is enforced one layer deeper. The prepare path gets the same guard via `prepare-stamp`.
 
 Do exactly this, in order:
 
@@ -85,13 +90,14 @@ Do exactly this, in order:
      true`) to suppress the resolve cue over an uncarved tail — the fix is to **retag it as needing
      slicing, not to park or resolve it**: (1) **remove** the false `childlessReason: program` / `ongoing`
      flag; (2) **carve the next batchable wave** as child slices (run `/slice NNN`, or
-     `backlog.mjs scaffold … --parent=NNN`) so it gains open children and reads `tracking` honestly — the
+     `run.mjs scaffold --parent=NNN …`) so it gains open children and reads `tracking` honestly — the
      resolve cue stays off because real open work now sits under it, not because a flag hides it. Don't
      pre-scaffold the entire tail; one wave is enough (the rest file on pickup). The epic resolves only
      when the last wave lands. (#1442: dropped `childlessReason: program`, carved wave-2
      meter/progress/checkbox/radio → `tracking`.)
    - **Scaffold the next slice.** The remaining scope is carvable now → create the next child item
-     (`backlog.mjs scaffold … --parent=NNN`). The epic now has an open child, so it's no longer "all
+     (`node scripts/operations/run.mjs scaffold --parent=NNN --title='…' --digest='…' --json`; camelCase
+     flags — `--blockedBy`, never the raw CLI's `--blocked-by`). The epic now has an open child, so it's no longer "all
      slices done."
    - **Declare the stall (only on a LIVE edge).** The remaining scope genuinely can't be carved yet
      (blocked / untriaged, or `program` **only** for a genuine perpetual program that *passed* the
@@ -109,19 +115,24 @@ Do exactly this, in order:
    confirmed its blocker is still open — otherwise reconcile per the stale-block path. Never close on
    `--force` to clear a warning; reconcile the real state instead.
 
-2. **The no-open-slice guard is enforced by the CLI.** As of #658, `backlog.mjs resolve` itself refuses
+2. **The no-open-slice guard is enforced by `resolve` itself, not by you.** As of #658, `resolve` refuses
    to close a `workItem: epic` that still has open children — it enumerates them by the `parent:` EDGE
-   (never the body's stale "N children" prose) and dies *before* writing, listing each `#NNN — status`.
-   So you don't grep by hand. If step 3 reports the refusal, **STOP**: report that checklist, say the
-   umbrella can't close while live work sits under it, and resolve or re-parent those children first.
-   Only pass `--force` if the caller has explicitly accepted closing over open children (e.g. a
-   mid-re-parent). An epic with every child resolved (or none) resolves cleanly — the *all slices done*
+   (never the body's stale "N children" prose) and refuses *before* writing, listing each `#NNN — status`.
+   So you don't grep by hand. The operation names that refusal `open-children`, so step 3 gets a value to
+   branch on rather than stderr prose to parse. If step 3 reports it, **STOP**: report that checklist, say
+   the umbrella can't close while live work sits under it, and resolve or re-parent those children first.
+   Only pass `--force=true` if the caller has explicitly accepted closing over open children (e.g. a
+   mid-re-parent) — the verdict RECORDS that a guard was stepped over (`forced`, `steppedOver`), so a
+   forced close is visible afterwards rather than lost to a stderr warning. An epic with every child resolved (or none) resolves cleanly — the *all slices done*
    case the gate nudges you to reconcile.
 
-3. **Resolve.** Run `node scripts/backlog.mjs resolve NNN [--graduated-to=…]`. `resolve` is legal from
+3. **Resolve.** Run `node scripts/operations/run.mjs resolve --ref=NNN [--graduatedTo=…] --json` — the
+   item is a **`--ref=` flag, not a positional**, and the options are camelCase (`--graduatedTo`,
+   `--codifiedTo`) where the raw `we:scripts/backlog.mjs resolve <NNN> --graduated-to=…` takes a
+   positional and kebab-case. `resolve` is legal from
    `open` or `active`, so an open epic umbrella closes directly — no claim step. For an epic whose scope
    was delivered by its children (it spawned no single new entity of its own), pass
-   `--graduated-to=none` unless the caller named a target; for a normal item, pass the entity it became
+   `--graduatedTo=none` unless the caller named a target; for a normal item, pass the entity it became
    if there is one.
 
 4. **Verify green.** Run `npm run gen:inventory` then `npm run check:standards`. Confirm the epic/child

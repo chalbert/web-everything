@@ -80,10 +80,15 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    `size` (a mis-converted epic that kept story points double-counts once it has sized children —
    `check:standards` errors), refresh the digest only if needed, and go straight to scaffolding its child
    slices.
-2. **Scaffold each slice:** `node scripts/backlog.mjs scaffold --type=… --workitem=story|task
-   [--size=…] --title='…' --parent=<NNN> [--blocked-by=<NNN>,…] --scope=<coarse,prefix,shaped>
-   --digest='…'`. **Single quotes, always** — item-derived text in a *double*-quoted value still runs
-   `` ` `` / `$(…)` through bash, and the backlog CLI is prefix-allow-listed so nothing prompts
+2. **Scaffold each slice** through the declared operation: `node scripts/operations/run.mjs scaffold --type=… --workItem=story|task
+   [--size=…] --title='…' --parent=<NNN> [--blockedBy=<NNN>,…] --scope=<coarse,prefix,shaped>
+   --digest='…' --json`. **Mind the case** — the operation derives its flags from its declared input and
+   matches them case-sensitively, so `--workItem`/`--blockedBy`, never the raw CLI's
+   `--workitem`/`--blocked-by`; a lowercase spelling is refused as an unknown flag, and `check:standards`
+   catches it at the call site (#3253). The legacy kind PRECEDENCE is preserved over the values — an
+   explicit `--kind` wins, else `--type=decision`, else `--workItem`. **Single quotes, always** —
+   item-derived text in a *double*-quoted value still runs `` ` `` / `$(…)` through bash, and `Bash` is
+   allow-listed so nothing prompts first
    (*backlog-workflow.md → Authoring an item → The quoting rule*).
    **Author the slice's predicted `scope:` here (#2619)** — pass the touch-set you recorded
    in step-2 of *Quick path* as `--scope=` (comma-joined, repo-qualified prefixes, e.g.
@@ -91,10 +96,10 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    frontmatter so it arrives at Definition of Ready already scoped — the human reviewing the split sees each
    slice's predicted touch-set, and the conveyor dispatcher (#2609) can parallelize the slices without an
    auto-prepare round-trip. **Sub-epic slice** (roadmap
-   mode): scaffold `--workitem=epic` with **no `--size`** and **no `--scope`** (an epic is decomposed, never
+   mode): scaffold `--workItem=epic` with **no `--size`** and **no `--scope`** (an epic is decomposed, never
    built directly — the dispatcher holds it `needs-slice`, not by scope), and seed its body with the row's
    design lineage so it's a real future `/slice` candidate, not an empty shell. `--parent` rolls it under
-   the epic; `--blocked-by` lays the DAG edges; write a real per-slice digest (it's the loader's
+   the epic; `--blockedBy` lays the DAG edges; write a real per-slice digest (it's the loader's
    `summary`).
 3. **Gate:** `npm run check:standards` green (it errors on a storied epic that kept a `size`, an
    unresolvable `parent`/`blockedBy`, a cyclic edge, or a missing digest), and confirm the backlog count

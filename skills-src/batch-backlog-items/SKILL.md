@@ -77,8 +77,8 @@ the per-item chat-rename — a batch labels the session **once**.
    `npm run check:standards -- --scope=<batch-slug>` (file-keyed, #952) and `npm run check:health --
    --scope=<batch-slug>` (id-keyed, #957) both demote *concurrent* sessions' findings to non-failing notes
    and surface only your changeset, so the gate-red diagnosis below is deterministic, not a manual `grep
-   errors + git status` triage. → capture leftovers via `scaffold …` (set their `blockedBy`
-   + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit the item's files in its lane clone and open a
+   errors + git status` triage. → capture leftovers via `run.mjs scaffold …` (set their `blockedBy`
+   + a digest) → `run.mjs resolve --ref=<NNN> [--graduatedTo=…]` → **commit the item's files in its lane clone and open a
    ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
    #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
    item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --label-on-green` — which opens the PR, <!-- @operation-home-ok: #x2v3kgr — this instruction passes no body file and nothing above writes one, so the home's own #2332 guard would REFUSE it as written; the line needs fixing before it can name `open-pr`, which requires a body for a real open too. -->
@@ -323,11 +323,13 @@ const r = Workflow({
 
 **Publishing NEW items — scaffold-in-lane, NEVER scaffold+push to `main` (#2215/#2203).** A lane claims an
 item that already exists on `origin/main`, so a batch of items that **don't exist yet** must reach `main`
-first. Do **not** do that by `backlog.mjs scaffold` in the primary + a `git push` to `main` — that is the exact
-#2203 primary-write the strict lock forbids (and the guard now blocks). Instead pass each new item as a `seed`
+first. Do **not** do that by scaffolding in the primary + a `git push` to `main` — that is the exact
+#2203 primary-write the strict lock forbids (and the guard now blocks), and it is forbidden whichever front
+door you scaffold through. Instead pass each new item as a `seed`
 (`{ kind, size, title, digest, blockedBy?, parent? }`, **no `num`/`file`**); its lane scaffolds it **in its own
-clone** (`backlog.mjs scaffold --session`, born active+owned #670), works it, and it **rides that lane's own
-PR** — no pre-publish to `main` at all. Cross-lane NNN collisions are healed at land by `pr-land` (#2071/#2213,
+clone** (`node scripts/operations/run.mjs scaffold --session=<batch-slug> …`, born active+owned #670 — the
+seed's `blockedBy` maps to the operation's camelCase `--blockedBy`, not the raw CLI's `--blocked-by`), works
+it, and it **rides that lane's own PR** — no pre-publish to `main` at all. Cross-lane NNN collisions are healed at land by `pr-land` (#2071/#2213,
 the incoming file yields). *(Alternative not taken: a gated pre-publish PR that lands before dispatch — one
 extra PR-cycle of latency; the in-lane seed avoids it and keeps the primary read-only end-to-end.)*
 

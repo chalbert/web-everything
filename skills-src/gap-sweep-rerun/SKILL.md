@@ -64,8 +64,9 @@ must produce a no-op delta and open 0 new backlog items. `scripts/gap-sweep-stat
 
 6. **Gap → backlog** (phase 4), NEW gaps only. For each *newly-appeared* fileable gap (in the delta's
    `fileable gaps +[…]`, not already tracked), file a candidate story under epic #315 in the gap-# shape
-   (`node scripts/backlog.mjs scaffold --parent=315 …`). Do not re-file gaps that already exist — that's the
-   idempotency guarantee. Surface them ranked for triage; don't claim/build them.
+   (`node scripts/operations/run.mjs scaffold --parent=315 --title='…' --digest='…' --json` — the declared
+   operation, whose flags are camelCase: `--blockedBy`, not `--blocked-by`). Do not re-file gaps that already
+   exist — that's the idempotency guarantee. Surface them ranked for triage; don't claim/build them.
 
 7. **Stamp** the revision. Bump `version` + `lastSwept` on the three data files (the snapshot from step 1 is
    the preserved prior revision = history). Run `npm run check:standards` (green) — `gen:inventory` only if a
