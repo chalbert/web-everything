@@ -174,6 +174,37 @@ export function isCommitIdentityOverride(segment) {
   return false;
 }
 
+/**
+ * The WHOLE-COMMAND half of the identity arm: an override established in one segment and consumed by a
+ * `git commit` in another. Pure (unit-tested).
+ *
+ * `reason` sees one segment at a time, so `export GIT_AUTHOR_EMAIL=x && git commit -m hi` slips through —
+ * neither segment alone both sets the identity and commits (#1550 juror r3, confirmed by probe). The shape of
+ * the fix is precedented: `backgroundedVerificationReason` is likewise whole-command, for the same reason
+ * (backgrounding is a property of the command, not a segment).
+ *
+ * Covers the env pair set by `export` or bare assignment, and a `git config user.{email,name}` write in the
+ * same command as a commit. The latter is the one deliberate widening: a standalone `git config` write is
+ * legitimate and stays allowed — the machine's identity is the operator's to set — but chaining it to a
+ * commit in one breath is an override for that commit wearing a different hat.
+ */
+export function commitIdentityCommandReason(command) {
+  const text = String(command || '');
+  if (/\bCOMMIT_IDENTITY_OK=1\b/.test(text)) return null;
+  const segs = parseSegments(text).segments;
+  if (segs.length < 2) return null;                       // single segment is `reason`'s business
+  const commits = segs.some((s) => shellTokens(s).some((t) => t.text === 'commit' && !t.op));
+  if (!commits) return null;
+  const setsIdentity = segs.some((s) => {
+    const toks = shellTokens(s).filter((t) => !t.op).map((t) => t.text);
+    if (toks.some((t) => /^GIT_(?:AUTHOR|COMMITTER)_(?:EMAIL|NAME)=/.test(t))) return true;
+    // `git config [--global] user.email <v>` / `user.email=<v>` — key folds, as git's parser does.
+    return toks.includes('config') && toks.some((t) => /^user\.(?:email|name)\b/i.test(t));
+  });
+  if (!setsIdentity) return null;
+  return 'This command sets the git author/committer identity in one segment and commits in another (`export GIT_AUTHOR_EMAIL=… && git commit`, or a `git config user.email` write chained to a commit). The machine already has the right identity configured, so this can only mis-attribute the commit — and unsigned commits in someone else\'s name land on `main` and stay there. Commit with the ambient identity instead. Sanctioned override (rare — replaying another author\'s patch, a `--reset-author` repair): prefix `COMMIT_IDENTITY_OK=1`.';
+}
+
 // #2833 finding 3 — the VERIFICATION set that must never be backgrounded. The whole point of #2833 is that a
 // build subagent BACKGROUNDED its long verification and then yielded mid-run — the lane sat mid-flight, produced
 // nothing, and never errored, so nothing reclaimed it. The delivery brief only asks for this in PROSE; this hook
@@ -1608,6 +1639,10 @@ export function decide(command, ctx = {}) {
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
+  // #1550 r3 — the identity override can also straddle segments (`export GIT_AUTHOR_EMAIL=… && git commit`),
+  // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
+  const ident = commitIdentityCommandReason(command);
+  if (ident) return ident;
   // #2994 — QUOTE-AWARE split: tokenize quotes first, cut only on UNQUOTED separators.
   const parsed = parseSegments(command);
   // #2994 review r3 — FAIL CLOSED on a command the parser cannot represent. Every loosening signature this

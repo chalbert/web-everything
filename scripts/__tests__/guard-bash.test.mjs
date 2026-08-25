@@ -1584,6 +1584,27 @@ describe('commit identity override (#3269)', () => {
     expect(decide('git -C /some/path commit -m hi', {})).toBeNull();
   });
 
+  it('catches an override that STRADDLES segments (#1550 juror r3)', () => {
+    // `reason` sees one segment at a time, so neither half of `export GIT_AUTHOR_EMAIL=x && git commit`
+    // trips it alone. Whole-command, same shape as backgroundedVerificationReason.
+    for (const cmd of [
+      'export GIT_AUTHOR_EMAIL=x@y.com && git commit -m hi',
+      'GIT_COMMITTER_EMAIL=x@y; git commit -m hi',
+      'git config user.email x@y.com && git commit -m hi',
+      'git config --global User.Email x@y && git commit -m hi',   // key folds here too
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity/);
+  });
+
+  it('leaves an ordinary chained commit, and a standalone config write, alone', () => {
+    // A `git config` write on its own is legitimate — the machine's identity is the operator's to set.
+    for (const cmd of [
+      'git add -A && git commit -m hi',
+      'npm test && git commit -m ok',
+      'git config user.email noreply@anthropic.com',
+      'git config user.email x@y && git log',
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
   });
