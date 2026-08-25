@@ -168,16 +168,55 @@ const HELPER_EXPORTS = ['withRealRepo', 'withBareOrigin', 'withNarrowClone'];
 export function importsRealRepoHelper(content) {
   const src = String(content ?? '');
   if (!HELPER_IMPORT.test(src)) return false;
+
   // AND ACTUALLY USES IT. Importing alone is not evidence of anything: a decorative
-  // `import { withRealRepo } from './helpers/real-repo.mjs';` with no call site satisfies a
-  // presence check while the tests below it stay entirely stubbed — which is #3264's own vacuity
-  // reproduced one level up, in the gate built to catch it. Found by the PR #1549 correctness juror.
+  // `import { withRealRepo } from './helpers/real-repo.mjs';` with no call site satisfies a presence check
+  // while every test below it stays stubbed — #3264's own vacuity reproduced one level up, inside the gate
+  // built to catch it. (PR #1549 round 1.)
   //
-  // The check is deliberately crude: at least one exported name appears somewhere OTHER than inside an
-  // import statement. It cannot tell a real fixture from a call in dead code, and it is not trying to —
-  // it closes the zero-effort bypass, and anything past that is a judgement a juror makes, not a regex.
-  const withoutImports = src.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
-  return HELPER_EXPORTS.some((name) => new RegExp(`\\b${name}\\b`).test(withoutImports));
+  // TWO EDGE CASES the first cut got wrong, both found by the round-2 juror, and they fail in OPPOSITE
+  // directions — which is why neither could be dismissed as pedantry:
+  //
+  //   · a COMMENT naming an export counted as usage. `// TODO: use withRealRepo here` passed the gate with
+  //     nothing real behind it — the same false pass, one layer further in.
+  //   · an ALIASED import was rejected. `import { withRealRepo as withRepo }` binds `withRepo`, so the
+  //     exported name never appears again and genuinely-real work was failed loudly.
+  //
+  // Both are fixed by asking the right question. Not "does an EXPORTED name appear somewhere" but "is the
+  // LOCAL BINDING this file actually chose used outside its own import, in code rather than prose".
+  const withoutComments = src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+  // The local names the helper import binds here: `{ a, b as c }` and `* as ns` both handled. An alias binds
+  // its right-hand side; a namespace import binds the namespace, and `ns.withRealRepo(...)` then reads as a
+  // use of `ns`.
+  const locals = new Set();
+  const importRe = new RegExp(
+    `import\\s+([^;]+?)\\s+from\\s*['"][^'"]*${esc(HELPER_PATH_TAIL)}['"]`, 'g',
+  );
+  for (const m of withoutComments.matchAll(importRe)) {
+    const clause = m[1].trim();
+    const ns = clause.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)/);
+    if (ns) { locals.add(ns[1]); continue; }
+    const named = clause.match(/\{([^}]*)\}/);
+    if (!named) continue;
+    for (const part of named[1].split(',')) {
+      const [exported, alias] = part.split(/\s+as\s+/).map((x) => x.trim());
+      const local = alias || exported;
+      // Only names the harness actually exports count — a file importing something else from the same
+      // module has not shown it drives a real repo.
+      if (local && HELPER_EXPORTS.includes(exported)) locals.add(local);
+    }
+  }
+  // Dynamic `await import(...)` binds nothing statically; the namespace variable is the use, and the
+  // HELPER_IMPORT test above already proved the module is reached.
+  if (/import\s*\(/.test(withoutComments) && !/import\s+[^;]+?\s+from/.test(withoutComments)) return true;
+
+  if (locals.size === 0) return false;
+
+  const withoutImports = withoutComments.replace(/^\s*import\s[\s\S]*?from\s*['"][^'"]+['"]\s*;?/gm, '');
+  return [...locals].some((name) => new RegExp(`\\b${esc(name)}\\b`).test(withoutImports));
 }
 
 /**

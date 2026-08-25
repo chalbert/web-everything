@@ -317,3 +317,43 @@ describe('the REGISTRATION — the gate actually calls this scan', () => {
     expect(gate).toMatch(/scanOperationIoFidelity\(ROOT\)/);
   });
 });
+
+describe('importsRealRepoHelper — the two edge cases, which fail in opposite directions (PR #1549 r2)', () => {
+  const H = "from '../helpers/real-repo.mjs'";
+
+  it('a COMMENT naming an export is not usage — the false PASS', () => {
+    // The round-1 fix stripped import statements and looked for the exported name. A comment survives that,
+    // so `// TODO: use withRealRepo here` satisfied the gate with nothing real behind it — the #3264 vacuity
+    // one layer further in than where it was just closed.
+    const src = `import { withRealRepo } ${H};\n// TODO: use withRealRepo here\nit('x', () => {});\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+  });
+
+  it('a block comment naming an export is not usage either', () => {
+    const src = `import { withRealRepo } ${H};\n/* withRealRepo goes here one day */\nit('x', () => {});\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+  });
+
+  it('an ALIASED import that IS used counts — the false ERROR', () => {
+    // The other direction, and the reason neither could be waved off as pedantry: an alias binds its
+    // right-hand side, so the exported name never appears again and genuinely-real work was failed loudly.
+    const src = `import { withRealRepo as withRepo } ${H};\nit('x', () => withRepo(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(true);
+  });
+
+  it('an aliased import that is NOT used still fails', () => {
+    const src = `import { withRealRepo as withRepo } ${H};\nit('x', () => {});\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+  });
+
+  it('a namespace import used through the namespace counts', () => {
+    const src = `import * as h ${H};\nit('x', () => h.withNarrowClone(() => {}));\n`;
+    expect(importsRealRepoHelper(src)).toBe(true);
+  });
+
+  it('importing something the harness does NOT export is not proof', () => {
+    // A file can import from the module without touching any entry point that builds a real repo.
+    const src = `import { FIXTURE_SLUG } ${H};\nit('x', () => expect(FIXTURE_SLUG).toBeTruthy());\n`;
+    expect(importsRealRepoHelper(src)).toBe(false);
+  });
+});
