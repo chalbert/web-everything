@@ -107,6 +107,15 @@ jobs:
             # Read the request out of the pushed commit rather than checking the branch out — the working tree
             # stays main's, so the scripts that run are main's.
             git show "$AFTER:$req" > /tmp/request.json
+            # THE CWD OF THIS STEP IS PART OF THE VERDICT (#3263). `we:scripts/review-set-label.mjs` reads the
+            # reviewed diff from the PROCESS's own cwd, so the applier runs the CLI from the VERDICTED repo's
+            # checkout — which defaults to this one, and here that IS the judged repo, because each repo owns
+            # its own transport branch (#3261). Do NOT add a `working-directory:` to this step, and do not move
+            # the applier under a subdirectory, without passing `--repoRoot=<the judged repo's checkout>`: a
+            # sibling-checkout layout — web-everything beside the repo it judges, as in
+            # `plateau-app:.github/workflows/apply-review-request.yml` — is exactly the case that broke. The
+            # applier refuses a tree whose `origin` is not the repo the request names, so a wrong move now
+            # fails loudly here instead of stamping an empty fingerprint.
             node scripts/apply-review-request.mjs /tmp/request.json || failed=1
             echo "::endgroup::"
           done < /tmp/requests.txt
