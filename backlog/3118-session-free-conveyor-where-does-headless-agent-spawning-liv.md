@@ -4,7 +4,7 @@ kind: decision
 parent: "2753"
 status: open
 dateOpened: "2026-08-15"
-preparedDate: "2026-08-16"
+preparedDate: "2026-08-25"
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 relatedTo: ["2464", "2530", "2444", "2703", "3102", "3031"]
 tags: [plateau-loop, conveyor, agent-runner, session-free]
@@ -52,9 +52,22 @@ already emits), and `we:skills-src/conveyor/SKILL.md:29-41` (the "interim bridge
 
 ## Recommended path at a glance
 
-| Fork | The call | Default | Main alternative (excluded) | Confidence |
+| Fork | The call | Default | Main alternatives (excluded) | Confidence |
 |---|---|---|---|---|
-| 1 | Where the agent-spawn backend lives | **(a) WE-native runner** — port the contract into `we:scripts/conveyor/agent-runner.mjs`, wired in-process into the conveyor's dispatch | (b) cross-process HTTP call into `plateau-app`'s `POST /api/backlog/build` | high |
+| 1 | Where the agent-spawn backend lives | **(c) call the existing `dispatch-lane` operation** — the declared operation that already starts agents headlessly; the runner calls it per surfaced dispatch | (a) port a new WE-native `we:scripts/conveyor/agent-runner.mjs`; (b) cross-process HTTP into `plateau-app` | medium-high |
+
+> **AMENDED 2026-08-25 — the fork survey was missing an option, and it changes the default.** The original
+> preparation (2026-08-16) framed this as a two-way choice between porting a runner and calling `plateau-app`
+> over HTTP. It never surveyed `we:scripts/operations/dispatch-lane.mjs`, whose sink header states *"THE SINK
+> IS THE ONLY THING IN THIS REPO THAT STARTS AN AGENT"* and which spawns via `claude --bg` today.
+>
+> This is **not** a staleness correction: `dispatch-lane` landed **2026-08-13** (`WE #3037: declare dispatch
+> — the effect that starts rather than completes`), three days *before* this card was prepared. The survey
+> simply missed it. Recorded rather than quietly repaired, per
+> `we:agent-memory-src/grep-every-name-you-cite-in-prose.md`.
+>
+> The original (a)-vs-(b) analysis below is **kept intact and still holds** — every argument it makes against
+> (b) applies unchanged. What changes is that (a) is no longer the best of the remaining options.
 
 ## Fork 1 — where the agent-spawn backend lives
 
@@ -75,6 +88,44 @@ one-source clause forbids; only one can be *the* path the runner calls.
 - **(b) Cross-process call into `plateau-app`.** The conveyor's runner calls `plateau-app`'s existing
   `POST /api/backlog/build` (or new sibling endpoints for the other four kinds) over HTTP, reusing #2530's
   shipped code instead of porting it. *Rejected* — see Skeptic below.
+- **(c) Call the existing `dispatch-lane` operation.** *(Added 2026-08-25 — see the amendment note above.)*
+  The runner calls `we:scripts/operations/dispatch-lane.mjs` once per surfaced dispatch. Nothing is ported
+  and nothing is spawned in-process: the operation already starts a real detached agent via `claude --bg`,
+  already reads the tick core, already fills the brief, already writes a run record, and is already pollable
+  by `claude agents --json` and resumable by the waker. **NEW DEFAULT.**
+
+**Why (c) displaces (a) — the card's own principles, applied to an option it did not survey:**
+
+1. **(a) creates the second implementation this fork's own opening paragraph forbids.** That paragraph
+   rejects supporting two branches because it *"would mean two live spawn implementations behind the same
+   five-verb contract with independent failure modes, which is exactly the second-implementation shape
+   [#deterministic-core-thin-judgment]'s one-source clause forbids."* A new
+   `we:scripts/conveyor/agent-runner.mjs` sitting beside `dispatch-lane`'s existing `claude --bg` spawn **is
+   that shape** — the argument was aimed at (b) and lands just as hard on (a).
+2. **#3031 points at the declared operation, not away from it.** The card leans on
+   `we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated` to justify a WE-native
+   port. But that statute's actual content — declare an operation once, generate its callers — argues for
+   the runner becoming another *caller* of `dispatch-lane`, not for a second spawn path outside the
+   operations engine entirely.
+3. **The precedent cited for (a) is satisfied by (c) too.** The card's "local process, not HTTP" precedent
+   (`plateau-app` shelling `we:scripts/lane-pool.mjs` rather than calling over the network) is about
+   spawning a local child process. `dispatch-lane` *is* a local child process spawn. (c) keeps the precedent
+   and adds no new module.
+4. **Coverage is the same problem for both, and it is already filed.** (a)'s advantage over (b) was that it
+   covers all five dispatch kinds. `dispatch-lane` covers **builds only** today
+   (`we:scripts/operations/dispatch-lane-io.mjs:139` launches `match(decisions.spawnBuilds)`; the brief path
+   at `:52` is hardcoded). That gap is **#3165**, already prepared, and it is a smaller change than porting a
+   runner: give the brief selector and the session slug a `kind`, launch all three planned lists, and answer
+   the one open question of what an unscoped prepare declares as its scope.
+
+**What (c) costs, stated rather than hidden.** It makes this decision depend on #3165 landing first, where
+(a) depends on nothing. It also inherits `dispatch-lane`'s `claude --bg` backend rather than the ratified
+five-verb `spawn`/`steer`/`stop`/`resume`/`observe` contract — so `steer` and `redirect` are not available
+through it. **Whether the conveyor actually needs `steer`/`redirect` is the open question this fork now
+turns on:** if the tick loop only ever spawns and observes, (c) is strictly better; if mid-flight steering is
+required, (a)'s richer contract earns its second implementation. Nothing in `we:scripts/conveyor/tick-core.mjs`
+plans a steer today — its decisions are spawn, watch, retire — but that is an observation about the present
+tick, not a guarantee about the design's intent.
 
 ```js
 // Fork 1 (a) — we:scripts/conveyor/agent-runner.mjs, a near-mechanical port of
