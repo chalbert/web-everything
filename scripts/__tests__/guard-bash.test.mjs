@@ -1570,6 +1570,20 @@ describe('commit identity override (#3269)', () => {
     expect(decide('git commit -F /tmp/msg.txt', {})).toBeNull();  // -F takes a path
   });
 
+  it("folds case the way git's own config parser does (#1550 juror r2)", () => {
+    // Verified against real git: `git -c User.Email=case@test.invalid commit` RECORDS that address.
+    // Section and variable names fold, so a case-sensitive match was a bypass.
+    for (const cmd of [
+      'git -c User.Email=x@y commit -m hi',
+      'git -c USER.NAME=Z commit -m hi',
+      'git -c user.EMAIL=x@y commit -m hi',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/identity by hand/);
+  });
+
+  it("does not fold the FLAG — -C is git's change-directory, a different thing", () => {
+    expect(decide('git -C /some/path commit -m hi', {})).toBeNull();
+  });
+
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
   });

@@ -155,7 +155,12 @@ export function isCommitIdentityOverride(segment) {
   }
   const argv = tokens.filter((_, i) => !isValue[i]).filter((t) => !CARRIES_VALUE.test(t.text));
   if (!argv.some((t) => t.text === 'commit')) return false;
-  const isIdentityConfig = (v) => /^user\.(?:email|name)=/.test(v);
+  // CASE-INSENSITIVE, because git's own config parsing is: section and variable names fold, so
+  // `-c User.Email=…` and `-c USER.NAME=…` set the identity exactly as the lowercase spellings do. Verified
+  // against real git — `git -c User.Email=case@test.invalid commit` records that address (#1550 juror r2).
+  // The `-c` flag itself stays case-SENSITIVE: `-C` is git's change-directory flag, a different thing
+  // entirely, and folding it would deny an innocent `git -C <path> commit`.
+  const isIdentityConfig = (v) => /^user\.(?:email|name)=/i.test(v);
   for (let i = 0; i < argv.length; i++) {
     const text = argv[i].text;
     // `-c user.email=…` (separate) and `-cuser.email=…` (glued) — git accepts both.
