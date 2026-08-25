@@ -1,4 +1,5 @@
 ---
+bornAs: xl7gdim
 kind: epic
 parent: "3029"
 status: open
@@ -47,7 +48,7 @@ run something.
 **`claim` is NOT uncovered.** Its 4 remaining raw sites are the operation's *sanctioned front door* —
 `we:scripts/backlog.mjs` routes the verb to the declared operation via `claimViaOperation`. Rewiring
 them to `we:scripts/operations/run.mjs claim --ref=` would drop the `--stop-for-rename` behaviour and gain nothing. Filed
-separately as `x2rfz3m`; repeated here because a raw-site count is exactly what would tempt the next
+separately as `3269`; repeated here because a raw-site count is exactly what would tempt the next
 sweep to "fix" it.
 
 **A count is not a coverage number.** These are the sites a doc *tells an agent to run*. A script whose
