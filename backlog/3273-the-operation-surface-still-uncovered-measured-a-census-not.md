@@ -69,12 +69,46 @@ when a batch is actually going to be worked; do not pre-slice fifteen cards nobo
 Added 2026-08-25, because *when* to slice was written down and *how* was not — and the wrong split makes
 fifteen items that cannot run beside each other.
 
-**A new operation is naturally parallel-safe.** Its declaration, its io module and its tests are new files
-nobody else names. Two such slices collide only on the registry line in `we:scripts/operations/run.mjs`,
-which is a **false collision**: same file, different line, no semantic overlap. That is precisely the shape
-`#2678`'s small-file preference calls a throughput lock point — *"many items serialize on this one file even
-with zero real overlap between them."* So: **one operation per slice, and do not merge two just because
-both touch the registry.**
+**A new operation is MOSTLY new files, and there are TWO shared ones, not one.** Its declaration, its io
+module and its tests are new files nobody else names. But it also touches:
+
+- `we:scripts/operations/run.mjs` — the registry line, and
+- `we:scripts/operations/declared-homes.mjs` — the `Object.freeze` map keyed by operation name that
+  `we:scripts/check-standards.mjs:2171` reads for the `#3224` scan. `declaresOver` is optional in
+  `we:scripts/operations/registry.mjs` and defaults to `[]`, so **omitting the entry breaks nothing
+  mechanically** — it just means the raw call sites the new operation was built to replace go permanently
+  unflagged. Which is the rediscovery this whole epic exists to end. Follow the existing pattern
+  (`we:scripts/operations/claim.mjs`, `we:scripts/operations/verify.mjs`,
+  `we:scripts/operations/dispatch-lane.mjs`, `we:scripts/operations/open-pr.mjs`) and add the entry.
+
+**And the collision on those two is NOT false — the dispatcher really does serialize on it.** An earlier
+draft of this section called it a false collision, *"same file, different line, no semantic overlap"*, and
+concluded the slices would still build in parallel. Checked rather than assumed:
+`we:scripts/readiness/scope-lease.mjs:197` (`scopesOverlap`) matches at **file/module** granularity, not
+line granularity, and `we:scripts/readiness/dispatch-plan.mjs` holds any queued item whose scope overlaps an
+active lease or an already-launched higher-ranked rival. So two slices that both honestly name
+`we:scripts/operations/run.mjs` in `scope:` do not run beside each other; the second is held
+*"overlaps lane-N"*. The section title promised the opposite.
+
+This is exactly `#2678`'s throughput lock point — *"many items serialize on this one file even with zero
+real overlap between them"* — and the card previously quoted that definition immediately after asserting
+parallel-safety without reconciling the two. Reconciled now, and `#2678`'s own remedy applies here rather
+than being withheld:
+
+- **Preferred — split the shared files, so there is no shared file.** Give each operation its own registry
+  and declared-home entry file that `we:scripts/operations/run.mjs` and
+  `we:scripts/operations/declared-homes.mjs` compose, and the census's slices become genuinely disjoint.
+  This is the same remedy the card applies to `we:scripts/merge-ai-prs.mjs` below, and there is no
+  principled reason to withhold it from the registry.
+- **Interim, until that lands — one wiring slice.** The N implementation slices name only their own new
+  files in `scope:` and run in parallel; a single follow-up slice adds the N registry and declared-home
+  lines together. One serialization point instead of N.
+- **What NOT to do:** leave the two shared files in every slice's `scope:` and expect parallelism. That is
+  the arrangement this section was originally written to recommend, and it produces a queue that runs one
+  at a time.
+
+So: **one operation per slice — but keep the two shared files out of each slice's `scope:`, or the slices
+serialize by construction.**
 
 **A slice that edits an existing hot file is the opposite** and must be sized against real contention.
 Measured on `main` today, the files most named across queued items' `scope:`:
