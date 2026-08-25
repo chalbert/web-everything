@@ -18,12 +18,19 @@
  *
  * And one thing worth pinning about what it does NOT do: it never builds a `gh` call of its own. The argv it
  * hands over is the single home's CLI, with the single home's flags.
+ *
+ * THE ARGV WAS NOT THE WHOLE CONTRACT, and #3263 is the bill for assuming it was — see the last describe block.
+ * WHERE the child is spawned decides which tree the reviewed-diff fingerprint is read from, and a wrong tree
+ * degrades silently rather than failing, so nothing above this line could ever have caught it.
  */
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  APPLIABLE_TARGETS, REPO_ROOT, buildEnv, buildLabelArgv, validateRequest,
+  APPLIABLE_TARGETS, REPO_ROOT, REPO_ROOT_FLAG, buildEnv, buildLabelArgv, main, resolveVerdictedRoot,
+  validateRequest,
 } from '../apply-review-request.mjs';
 
 const OK = { repo: 'chalbert/web-everything', pr: 1466, to: 'accepted', actor: 'reviewer', body: '# verdict' };
@@ -163,5 +170,123 @@ describe('the session identity handed to the CLI', () => {
 
   it('refuses a present-but-empty session id rather than treating it as absent', () => {
     expect(validateRequest({ ...OK, sessionId: '' }).ok).toBe(false);
+  });
+});
+
+/**
+ * WHICH TREE THE CHILD RUNS FROM (#3263) — the half of this applier that is not argv.
+ *
+ * The suite above asserts the argv shape and nothing else, which is exactly why the defect shipped green: the
+ * applier spawned the label CLI with `cwd: REPO_ROOT`, its OWN script dirname, and that was correct for as long
+ * as the only applier lived inside the repo it verdicted. `plateau-app:.github/workflows/apply-review-request.yml`
+ * makes web-everything a SIBLING checkout beside the judged repo, so the child then ran from the wrong tree —
+ * and `we:scripts/review-set-label.mjs` fingerprints the reviewed diff from the PROCESS's own cwd (its header
+ * states that contract in capitals). Wrong tree, head ref unresolvable, `reviewedDiff` degrades to '', no
+ * marker, SHA-identity fallback, and an already-accepted PR re-parks on the next content-preserving rebase.
+ *
+ * NONE OF THAT THROWS. That is the whole reason these are here: the failure mode is a silent empty fingerprint,
+ * so the only thing that can catch it is an assertion on where the child was pinned.
+ *
+ * `spawn` and `originRepo` are injected, so this pins the behaviour with no subprocess and no second clone on
+ * disk — the same discipline `we:scripts/merge-ai-prs.mjs`'s `restampAcceptance` applies to its own spawn.
+ */
+describe('the checkout the child is pinned to', () => {
+  const PLATEAU = '/checkouts/plateau-app';
+  const ORIGINS = { [PLATEAU]: 'chalbert/plateau-app', [REPO_ROOT]: 'chalbert/web-everything' };
+  const originRepo = (dir) => ORIGINS[dir] ?? '';
+
+  /** Stage a real request file — `main` reads one from disk, so the applier is exercised end to end. */
+  function stage(request) {
+    const dir = mkdtempSync(join(tmpdir(), 'apply-review-request-test-'));
+    const path = join(dir, 'request.json');
+    writeFileSync(path, JSON.stringify(request), 'utf8');
+    return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  /** A spawn that records HOW it was called and reports the CLI's success contract. */
+  function recordingSpawn() {
+    const calls = [];
+    const spawn = (bin, argv, opts) => { calls.push({ bin, argv, opts }); return { status: 0, stdout: '', stderr: '' }; };
+    return { calls, spawn };
+  }
+
+  it('runs the child from the VERDICTED repo’s checkout, not the applier’s own REPO_ROOT', () => {
+    // The plateau-app layout: the applier's own checkout IS web-everything (that is what `REPO_ROOT` names),
+    // and the verdict belongs to a repo whose tree is somewhere else entirely.
+    const { path, cleanup } = stage({ ...OK, repo: 'chalbert/plateau-app' });
+    const { calls, spawn } = recordingSpawn();
+    try {
+      expect(main([path, `${REPO_ROOT_FLAG}${PLATEAU}`], { spawn, originRepo, cwd: REPO_ROOT })).toBe(0);
+    } finally { cleanup(); }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.cwd).toBe(PLATEAU);
+    // Stated as its own assertion because `REPO_ROOT` is the specific wrong answer this test exists to kill.
+    expect(calls[0].opts.cwd).not.toBe(REPO_ROOT);
+    // …while the CODE still comes from THIS checkout. Run our script, from their tree.
+    expect(calls[0].argv[0]).toBe(join(REPO_ROOT, 'scripts', 'review-set-label.mjs'));
+    expect(calls[0].argv).toContain('--repo=chalbert/plateau-app');
+  });
+
+  it('defaults to the process cwd — the plateau-app workflow’s layout, with no flag passed', () => {
+    // That workflow runs from the judged repo's root with web-everything checked out beneath it, so the cwd is
+    // already right. It is CHOSEN and CHECKED all the same: `REPO_ROOT` also "happened to be right" once.
+    const { path, cleanup } = stage({ ...OK, repo: 'chalbert/plateau-app', body: '' });
+    const { calls, spawn } = recordingSpawn();
+    try {
+      expect(main([path], { spawn, originRepo, cwd: PLATEAU })).toBe(0);
+    } finally { cleanup(); }
+    expect(calls[0].opts.cwd).toBe(PLATEAU);
+    expect(calls[0].opts.cwd).not.toBe(REPO_ROOT);
+  });
+
+  it('REFUSES a tree whose origin is not the repo the verdict names, instead of fingerprinting it empty', () => {
+    const { path, cleanup } = stage({ ...OK, repo: 'chalbert/plateau-app' });
+    const { calls, spawn } = recordingSpawn();
+    try {
+      // Standing in web-everything, holding a plateau-app verdict: the exact situation that used to run.
+      expect(() => main([path], { spawn, originRepo, cwd: REPO_ROOT })).toThrow(/#3263/);
+    } finally { cleanup(); }
+    // NOTHING SPAWNED. A refusal that still ran the CLI would be a comment, not a guard.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('names both repos and the flag that fixes it, so the refusal is actionable', () => {
+    const boom = () => resolveVerdictedRoot({ repo: 'chalbert/plateau-app', root: REPO_ROOT, originRepo });
+    expect(boom).toThrow(/chalbert\/plateau-app/);
+    expect(boom).toThrow(/chalbert\/web-everything/);
+    expect(boom).toThrow(new RegExp(REPO_ROOT_FLAG));
+  });
+
+  it('says "(not a checkout)" rather than nothing when the tree cannot be probed at all', () => {
+    // `defaultOriginRepo` returns '' for a directory that is not a git repo, and an error reading
+    // "…for X from 's tree" would send a reader looking for a repo called nothing.
+    expect(() => resolveVerdictedRoot({ repo: 'chalbert/plateau-app', root: '/nowhere', originRepo }))
+      .toThrow(/not a checkout/);
+  });
+
+  it('stages the body in a temp dir, so a child pinned to another tree can still read it', () => {
+    // The CLI's `--body-file` allowlist is rooted at `process.cwd()` — the trap `restampAcceptance` sidesteps by
+    // passing no body at all. A body written under the APPLIER's checkout would be refused by a child standing
+    // in the verdicted repo, so the temp path is part of the pinning, not an implementation detail.
+    const { path, cleanup } = stage({ ...OK, repo: 'chalbert/plateau-app', body: '# findings' });
+    const { calls, spawn } = recordingSpawn();
+    try {
+      main([path, `${REPO_ROOT_FLAG}${PLATEAU}`], { spawn, originRepo, cwd: REPO_ROOT });
+    } finally { cleanup(); }
+    const bodyArg = calls[0].argv.find((a) => a.startsWith('--body-file='));
+    expect(bodyArg.slice('--body-file='.length).startsWith(tmpdir())).toBe(true);
+  });
+
+  it('leaves `--check` free of the tree probe — it promises to validate and touch nothing', () => {
+    // A validate-only run legitimately happens far from the verdicted checkout (linting the staged files on
+    // `ops/review-requests`), where the sibling repo's tree need not exist at all.
+    const { path, cleanup } = stage({ ...OK, repo: 'chalbert/plateau-app' });
+    const { calls, spawn } = recordingSpawn();
+    const originExplodes = () => { throw new Error('probed the world on --check'); };
+    try {
+      expect(main([path, '--check'], { spawn, originRepo: originExplodes, cwd: REPO_ROOT })).toBe(0);
+    } finally { cleanup(); }
+    expect(calls).toHaveLength(0);
   });
 });
