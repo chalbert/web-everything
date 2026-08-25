@@ -21,11 +21,16 @@
  * never parsed back out of a comment. #3060 records what happens when a clearance is inferred from a prose
  * line, and this must not re-open it.
  *
+ * IT RUNS FROM THE VERDICTED REPO'S CHECKOUT, NOT ITS OWN (#3263). The CLI it shells fingerprints the reviewed
+ * diff through git reads that take the PROCESS'S cwd, so which tree this applier stands in is part of the
+ * verdict's correctness, not a detail of how it was launched. See `resolveVerdictedRoot`.
+ *
  * Usage:
- *   node scripts/apply-review-request.mjs <request.json>          # apply it
- *   node scripts/apply-review-request.mjs <request.json> --check  # validate only, run nothing
+ *   node scripts/apply-review-request.mjs <request.json>                  # apply it, from the cwd
+ *   node scripts/apply-review-request.mjs <request.json> --repoRoot=<dir> # apply it, from that checkout
+ *   node scripts/apply-review-request.mjs <request.json> --check          # validate only, run nothing
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -33,7 +38,19 @@ import { fileURLToPath } from 'node:url';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/**
+ * WHERE THE SCRIPTS LIVE — resolved by SCRIPT LOCATION, never cwd, so the label CLI that runs is always the one
+ * shipped beside this file. It is NOT where the child runs: that is `resolveVerdictedRoot` below, and conflating
+ * the two is the defect #3263 records.
+ */
 export const REPO_ROOT = resolve(HERE, '..');
+
+/**
+ * The flag that names the verdicted repo's checkout. Mirrors the `--repoRoot` seam
+ * `we:scripts/operations/record-verdict-io.mjs` took for the writer half (#3261), and deliberately shares its
+ * spelling: the two halves of one transport should not ask for the same thing under two names.
+ */
+export const REPO_ROOT_FLAG = '--repoRoot=';
 
 /** The verdicts this applier may carry out. */
 export const APPLIABLE_TARGETS = Object.freeze(['accepted', 'changes', 'clear-human']);
@@ -170,10 +187,89 @@ export function buildEnv(request, base = process.env) {
   return env;
 }
 
-function main(argv) {
+/**
+ * `owner/name` of a checkout's `origin`, or '' when it cannot be read. Probing must NEVER throw: a tree that is
+ * not a git repo at all has to arrive at `resolveVerdictedRoot`'s refusal, which names both repos and the flag
+ * that fixes it, rather than escaping as a raw git error that names neither.
+ *
+ * NOT IMPORTED from `we:scripts/operations/record-verdict-io.mjs`, which holds the identical probe for the
+ * writer half (#3261). That module pulls the whole `record-verdict` declaration in behind it — the run store,
+ * the review-pr IO — and this applier is the one script that has to load on a runner installed with
+ * `--ignore-scripts` (see the note in `we:.github/workflows/apply-review-request.yml` about the first live run
+ * failing at module resolution). A six-line git read is a cheaper duplicate than a dependency edge from the
+ * applier into the operations tree. Same shape on purpose, so a reader sees one rule stated twice rather than
+ * two rules; `stdio` is quieted here so a probe of a non-repo does not print git's own complaint over the
+ * applier's JSON contract on stdout's neighbour.
+ */
+export function defaultOriginRepo(cwd) {
+  try {
+    const url = String(execFileSync('git', ['remote', 'get-url', 'origin'], {
+      encoding: 'utf8', cwd, stdio: ['ignore', 'pipe', 'ignore'],
+    })).trim();
+    const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+/**
+ * WHICH CHECKOUT the label CLI runs from, and a REFUSAL when the one offered is not the verdicted repo's (#3263).
+ *
+ * WHAT WAS WRONG. This applier used to spawn the child with `cwd: REPO_ROOT` — its OWN script dirname. That was
+ * correct for exactly as long as the only applier lived inside the repo it verdicted, which was true until
+ * `plateau-app:.github/workflows/apply-review-request.yml` made web-everything a SIBLING checkout (`webeverything/`)
+ * beside the repo being judged. The child then ran from `.../plateau-app/webeverything`, and
+ * `we:scripts/review-set-label.mjs` states in capitals what that costs: its `computeNetDiffText` call takes NO
+ * explicit `cwd`, so it fetched the PR's head ref against web-everything's origin, could not resolve it, and the
+ * fail-soft `catch` degraded `reviewedDiff` to `''`. No marker, so `acceptanceCoversHead` falls back to SHA
+ * identity and a content-preserving rebase re-parks an already-accepted PR. Degradation, never a false accept —
+ * which is why PR #145 was accepted with this carved out — but a silent one.
+ *
+ * WHY THE PROCESS AND NOT THE CALL. A `cwd` on that single git read would not be enough, and the CLI says so:
+ * the `--body-file` allowlist is rooted at `process.cwd()` too, so the PROCESS'S location is the contract. That
+ * is also why this pins the child rather than threading a flag into the CLI — pinning covers every git read the
+ * CLI makes, including the ones nobody has written yet, exactly as `restampAcceptance` in
+ * `we:scripts/merge-ai-prs.mjs` pins its own child for the same reason (#3202).
+ *
+ * WHY IT REFUSES RATHER THAN DEFAULTING TO WHATEVER IT IS STANDING IN. `process.cwd()` happens to be right in
+ * both layouts today — web-everything's applier runs from the repo root, and the plateau-app workflow runs from
+ * the plateau-app root — but "happens to be right" is precisely the property that stopped holding for
+ * `REPO_ROOT`. So the value is CHOSEN and then CHECKED: if the tree's `origin` is not the repo the verdict names,
+ * that is an error naming both, not another empty fingerprint that nobody notices until a PR re-parks for the
+ * third time.
+ *
+ * `originRepo` is INJECTED so this is testable with no git, and so a caller that already knows the checkout can
+ * say so instead of being probed.
+ *
+ * @param {{repo: string, root?: string, repoRoot?: string, originRepo?: Function}} o
+ * @returns {string} the checkout whose `origin` is `repo`
+ */
+export function resolveVerdictedRoot({ repo, root = process.cwd(), repoRoot = '', originRepo = defaultOriginRepo } = {}) {
+  const want = String(repo ?? '').trim();
+  if (!want) throw new Error('apply-review-request: no `repo` on the request — cannot decide which checkout to run from');
+  const candidate = String(repoRoot ?? '').trim() || root;
+  const have = originRepo(candidate);
+  if (have === want) return candidate;
+  throw new Error(
+    `apply-review-request: refusing to record a verdict for ${want} from ${have || '(not a checkout)'}'s tree (#3263). `
+    + '`review-set-label.mjs` fingerprints the reviewed diff from the PROCESS\'s own cwd — its header states that '
+    + 'contract in capitals — so running it from the wrong tree does not fail loudly: the head ref does not '
+    + 'resolve, `reviewedDiff` degrades to empty, no `reviewed-diff` marker is stamped, and the next '
+    + 'content-preserving rebase re-parks a PR that was already accepted. '
+    + `Pass \`${REPO_ROOT_FLAG}<path to a ${want} checkout>\`, or run this applier from one.`,
+  );
+}
+
+/**
+ * @param {string[]} argv
+ * @param {{spawn?: Function, originRepo?: Function, cwd?: string}} deps - injected so the CHILD'S PINNING is
+ *   assertable without a subprocess and without a second clone on disk, the same discipline
+ *   `we:scripts/merge-ai-prs.mjs`'s `restampAcceptance` applies to its own spawn.
+ */
+export function main(argv, { spawn = spawnSync, originRepo = defaultOriginRepo, cwd = process.cwd() } = {}) {
   const path = argv.find((a) => !a.startsWith('-'));
-  if (!path) throw new Error('usage: apply-review-request.mjs <request.json> [--check]');
+  if (!path) throw new Error(`usage: apply-review-request.mjs <request.json> [${REPO_ROOT_FLAG}<dir>] [--check]`);
   const checkOnly = argv.includes('--check');
+  const repoRoot = (argv.find((a) => a.startsWith(REPO_ROOT_FLAG)) || '').slice(REPO_ROOT_FLAG.length);
 
   let parsed;
   try {
@@ -187,17 +283,34 @@ function main(argv) {
   const { request } = verdict;
 
   if (checkOnly) {
+    // DELIBERATELY NOT RESOLVED HERE. `--check` promises to validate the request and touch nothing, and
+    // `resolveVerdictedRoot` reads the world (a `git remote` probe). A validate-only run also legitimately
+    // happens far from the verdicted checkout — linting the staged files on `ops/review-requests`, where a
+    // sibling repo's tree need not exist at all — and refusing those would make the flag useless for the one
+    // job it has. The tree is the APPLY path's contract, and that is where it is enforced.
     writeLineSync(1, `ok — ${request.repo}#${request.pr} → ${request.to} (validated, nothing run)`);
     return 0;
   }
 
+  // #3263 — WHICH TREE, decided BEFORE the body is staged and before anything is spawned. A wrong tree is a
+  // refusal that names both repos, never a silent empty fingerprint; see `resolveVerdictedRoot`.
+  const verdictedRoot = resolveVerdictedRoot({ repo: request.repo, root: cwd, repoRoot, originRepo });
+
   // The body reaches the CLI by FILE for the same reason the CLI passes it to `gh` by file: it carries
   // newlines and emoji, and shell-quoting them works until one verdict does not.
+  //
+  // IT IS STAGED IN `tmpdir()`, AND THAT IS LOAD-BEARING NOW THAT THE CHILD IS PINNED ELSEWHERE (#3263). The
+  // CLI's `--body-file` allowlist is `[process.cwd(), tmpdir(), '/tmp']` — a body written under THIS checkout
+  // would be refused by a child standing in the verdicted repo, which is the trap `restampAcceptance` avoids by
+  // passing no body at all. A temp path is outside both trees and inside the allowlist either way.
   const bodyFile = request.body ? join(tmpdir(), `review-request-${request.pr}-${process.pid}.md`) : null;
   try {
     if (bodyFile) writeFileSync(bodyFile, request.body, 'utf8');
-    const r = spawnSync(process.execPath, buildLabelArgv(request, bodyFile), {
-      encoding: 'utf8', env: buildEnv(request), cwd: REPO_ROOT,
+    // `cwd` IS THE VERDICTED REPO'S CHECKOUT, NEVER `REPO_ROOT` (#3263). The SCRIPT still comes from this
+    // checkout — `buildLabelArgv` resolves it from `REPO_ROOT` — so the two are separated on purpose: run OUR
+    // code, from THEIR tree.
+    const r = spawn(process.execPath, buildLabelArgv(request, bodyFile), {
+      encoding: 'utf8', env: buildEnv(request), cwd: verdictedRoot,
     });
     // The CLI speaks the `{"error":…}` / `{"ok":true,…}` JSON contract on stdout. Pass it straight through:
     // this file adds no interpretation, so an operator reads the single home's own words.
