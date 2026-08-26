@@ -3565,6 +3565,49 @@ now applies as an explicit, general rule rather than an implicit per-anchor habi
 
 ---
 
+### A large diff earns more reviewers, never fewer lines — size never refuses a PR, and the response to size is scoped fan-out {#size-adds-reviewers-never-refuses}
+
+**Ratified 2026-08-26 by the operator (Nicolas Gilbert) (#3320).** Refines — does not alter —
+[`#blast-radius-advisory-care-not-a-gate`](#blast-radius-advisory-care-not-a-gate) (#2563), whose clause 1
+already forbids a scored signal from becoming a hard block with no reviewer. Cite both together.
+
+**The ~400-line figure is an *attention* ceiling, and attention is the one property an agent panel does not
+share with a human reviewer.** The empirical result behind it — defect-detection rate collapsing past roughly
+400 lines in one sitting — measures how much a *single* reader can hold at one altitude. It is therefore a
+proxy for "the reviewer cannot hold this," and the proxy stops measuring anything the moment the reviewer
+stops being one context. A panel is not one context, so a diff-size **refusal** is not a stricter version of
+the same finding; it is the finding applied outside its domain.
+
+**A size refusal also has exactly one escape, and that escape is the sanctioned workflow.** The only way past
+a line ceiling is to slice one change into two PRs — which the constellation already asks authors to do. So
+the ceiling never prevents a large change; it taxes the author for relabelling it, and it buys *worse*
+review than it replaced, because each half is now judged without sight of the other. A gate whose sole
+effect is to split the evidence is not a safety mechanism.
+
+**What size means instead.** Size is a care-level signal that dials review *capacity* — how many reviewers,
+how many rounds, how much rigor — never review *permission*. The correct response to a diff too large for one
+reader is **scoped fan-out**: every reviewer receives the whole diff and full repository context, and each is
+made accountable for a disjoint, named subset of it. Disjoint **accountability**, shared **context** — the
+two must not be conflated, because handing a reviewer a truncated diff reintroduces the very blindness the
+fan-out exists to remove, and reading is cheap relative to reasoning. Fan-out is lossy in two known
+directions, and both are covered by scope rather than by trimming: a defect spanning a shard boundary is
+owned by a reviewer whose scope **is** the boundaries, and a defect of *omission* has no shard at all — an
+absent test belongs to no slice by construction — so it is owned by a whole-diff pass asking only what is
+missing. Reduction over shard verdicts treats a **contradiction** between two shards as a seam signal in its
+own right, not as noise to dedup away.
+
+**Lineage:** ratified by #3320 (operator, 2026-08-26) under the Review-efficacy watch (#3318). #3320 was
+convened as a fork — refuse-versus-escalate — and dissolves as **contract-derived**: `#2563` clause 1 had
+already ruled the class, so no branch remained to weigh. The `thresholds.diffLines` entry in
+`we:scripts/lib/review-policy.contract.json` states this rule correctly today and needs no amendment; this
+anchor exists so a future reader proposing a refuse threshold finds the reasoning rather than re-deriving it.
+Composes with [`#build-lane-self-review-non-zero-floor`](#build-lane-self-review-non-zero-floor) (care scales
+depth, never existence) — this rule extends the same shape from depth to breadth. Cumulative-basis
+recomputation (#3317) is owed independently of this ruling: it makes the size *measurement* honest under
+stacked lanes, which matters for dialling capacity even though nothing refuses on it.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
