@@ -41,28 +41,79 @@ body` call, the diff is one `git diff`, and backlog frontmatter is already parse
 For each fenced-or-backticked span in the PR body matching `<key>: <value>` where `<key>` is a known backlog
 frontmatter key (`blockedBy`, `scope`, `status`, `kind`, `parent`, `relatedTo`, `size`, `tier`, …):
 
-- find the backlog item(s) the PR's diff touches;
-- read that key's value at the PR head;
-- fail when the two differ, printing both.
+- **bind the span to one item.** The sentence carrying it must resolve to exactly one backlog item — by
+  naming it (`#3147`, or its born-as hash) or by a self-reference (*"this card"*, *"this item"*, *"the
+  card"*), which resolves to the item the PR is about. Skip the span when the bound item is one the diff does
+  **not** touch, and skip it when nothing binds it.
+- **skip retractions.** Skip the span when its sentence carries a retraction marker — a closed, greppable
+  list: `an earlier draft`, `was wrong`, `is retracted`, `superseded`, `said`, `stood at`, `from round`,
+  `no longer`, `used to`, `previously`.
+- otherwise read that key's value on the bound item at the PR head, and fail when the two differ, printing
+  both.
 
-Silent when the body quotes no frontmatter key, which is the common case — so it costs nothing on a PR that
-does not make this class of claim.
+**Both filters are load-bearing, not tidiness.** This repo's convention is to retract in place, quoting the
+superseded value verbatim; without the retraction filter the check fires hardest on exactly the bodies that
+followed the convention. And a body routinely quotes a frontmatter value belonging to a *different* item
+(*"#3118 is `kind: decision, status: open`"*) — without the binding filter that is compared against the
+touched card's `kind` and reported as a disagreement.
+
+*(An earlier draft of this Sketch — the version this card was filed with, and the one `fed61bc5` left
+standing — had neither filter. It read only "find the backlog item(s) the PR's diff touches; read that key's
+value at the PR head; fail when the two differ." Implemented literally and run against the fixture this
+card's own Done-when 1 named as **green**, it exited **1** with two disagreements: the retraction quote
+`` `blockedBy: ["3118", "3165"]` `` and the about-#3118 span `` `kind: decision, status: open` ``. The
+criterion and the Sketch are both corrected here; the wrong version is quoted rather than deleted because
+that is what this card's sibling `xxzs9l7` exists to enforce.)*
+
+Silent on a body that makes no **present-tense** `key: value` claim about an item the diff touches —
+including a body that quotes such keys only to retract them, and one that quotes them about other items. The
+scoping cost of that silence is stated in *Not in scope*.
 
 ## Not in scope
+
+**Two spans the filters deliberately let through unchecked**, and the cost is accepted:
+
+- a span inside a sentence that *reads* like a retraction but is a live claim — the marker list is prose
+  matching, so a present-tense assertion phrased with the word "said" is skipped. Cheaper than the reverse
+  error, which is a hard failure on a correct body.
+- a span bound to no item at all (a sentence with neither an item reference nor a self-reference). Reported
+  as **unchecked**, never as agreement, so the count of skipped spans stays visible.
 
 Prose claims that are not `key: value` spans. Those are the sibling class, filed separately as
 "A claim corrected at one site while the same claim stands at another has no gate". This item deliberately
 takes only the mechanically-decidable half.
 
+Whether a *Done when* criterion's own named fixture actually produces the outcome it states — the defect that
+sent this card back for a round. Filed separately as "A Done-when criterion names a fixture whose stated
+outcome is wrong".
+
 ## Done when
 
-1. **Executable** — a check exists that, given PR #1560's body as it stood before the r5 push and the card at
-   `12db3256`, exits non-zero and names `blockedBy` with both values (`["3165"]` in the body,
-   `["3118", "3165"]` in the diff). Run against a body whose spans all match — #1560 at `3644b569` and after
-   — it exits 0.
-2. **Mutation** — editing the fixture body's `blockedBy` span to match the diff turns the check green;
-   editing the diff's frontmatter instead turns it red again. The check must fail on the *disagreement*, not
-   on the presence of the key.
-3. It is wired into the same place the review transport already runs, so a bounce for this class cannot be
+1. **Executable, against a fixture that is entirely in git.** The body fixture is the one sentence #1560
+   carried from round 1, held as a literal rather than fetched from a live PR description:
+
+   > Per this card's own instruction the gap is filed, not absorbed: #3165 carries it, and this card is
+   > `` `blockedBy: ["3165"]` ``.
+
+   Run against #3147's card at `12db3256` it **exits 1**, comparing one span and naming `blockedBy` with both
+   values (`["3165"]` in the body, `["3118", "3165"]` in the card). Run against the same card at `fed61bc5`
+   — where the frontmatter is `["3165"]` — the same sentence **exits 0**.
+
+   Both sides were run in the fix lane at `fed61bc5` before this criterion was written; neither is asserted.
+   The green side is a fixture whose spans genuinely agree, not a live body that merely looked green.
+2. **Mutation** — editing the fixture sentence's span to `` `blockedBy: ["3118", "3165"]` `` inverts both
+   sides: green at `12db3256`, red at `fed61bc5`. The check must fail on the *disagreement*, not on the
+   presence of the key.
+3. **Scoping, checked separately from agreement — and also in git.** The fixture is two sentences, one of
+   each skipped kind:
+
+   > The card's frontmatter said `` `blockedBy: ["3118", "3165"]` `` from round 2 onward. And #3118 is
+   > `` `kind: decision, status: open` ``.
+
+   Against #3147's card at `fed61bc5` it compares **0** spans, skips **2** — one *retraction*, one *other
+   item #3118* — and **exits 0**, printing the reason beside each skip. With both filters disabled the same
+   two sentences compare 2 and fail 2, so the criterion measures the filters and not the fixture. Both runs
+   were made before this was written.
+4. It is wired into the same place the review transport already runs, so a bounce for this class cannot be
    reached by a body nobody re-read.
-4. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
+5. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.

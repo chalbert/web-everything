@@ -19,14 +19,20 @@ tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 `dispatch-lane` operation now mechanizes: call the tick core for the dispatch plan, fill the delivery-agent
 brief, and *"Spawn it as one background `Agent`"*. No skill, including conveyor's own, **calls** the operation
 that exists to do exactly this. Run rather than asserted: `grep -rl "dispatch-lane" we:skills-src/` returns
-**one** file — `we:skills-src/conveyor/SKILL.md` — and its single hit is the `#3239` annotation at line 77,
-which *names* the operation while explaining that routing through it is a separate item. A mention, not a
+**one** file — `we:skills-src/conveyor/SKILL.md` — and its single hit is the `#xbbscm5` annotation at line
+77, which *names* the operation while explaining that routing through it is a separate item. A mention, not a
 call.
 
 *(An earlier draft said the grep "returns nothing", in this paragraph and again in Done-when 1. Round 3
 corrected the criterion and left this sentence, so the card asserted both readings at once. The correction is
 recorded here rather than silently applied because the same string standing in two places after one of them
 is fixed is the defect that has now cost this PR two rounds.)*
+
+*(Earlier rounds called line 77 "the `#3239` annotation". It is not written that way. The comment reads
+`@operation-home-ok: #xbbscm5` — the pre-JIT hash **#3239** was born as, confirmed by `bornAs: xbbscm5` in
+its own frontmatter, and `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly those two files. The
+item is the right one; only the label was wrong, so the annotation is named by the string it actually
+carries.)*
 
 ## The overlap is not superficial
 
@@ -83,14 +89,18 @@ operation change inside it.
 
 **#3096** (*Route the conveyor's build dispatch through the declared dispatch-lane operation*) and **#3239**
 (*the conveyor tick executes spawnBuilds by hand instead of through dispatch-lane*) are both open and both
-name exactly the step-3 rewiring described here. `we:skills-src/conveyor/SKILL.md` even carries a `#3239`
-annotation saying *"routing the spawnBuilds half through the operation is its own item."* Neither is blocked
-by #3165, so either could land the build half independently — and whichever lands second either conflicts
-with the other's edits or discovers the work already done.
+name exactly the step-3 rewiring described here. `we:skills-src/conveyor/SKILL.md` even carries #3239's
+annotation — written as `#xbbscm5`, its born-as hash — saying *"routing the spawnBuilds half through the
+operation is its own item."* Neither is blocked by #3165 (#3096 is blocked by #3037; #3239 by nothing), so
+either could land the build half independently — and whichever lands second either conflicts with the
+other's edits or discovers the work already done.
 
 **So this card's unique contribution is the step-3b PREPARE half, not step 3.** It should either absorb
 #3096/#3239 explicitly or narrow to 3b. That is the first decision for whoever picks it up, and it is why
-all three are now `relatedTo`.
+**both** — #3096 and #3239 — are now `relatedTo`.
+
+*(This sentence said *"all three are now `relatedTo`"* from round 2 through round 5. The paragraph names two
+items, not three, so the count had no referent; it is **two**.)*
 
 It also weakens this card's own blocking rationale. The *Not in scope* section permanently leaves the fix,
 CI-heal and decision spawns hand-spawned — so "two dispatch mechanisms live in one skill" is already an
@@ -176,7 +186,8 @@ step 3b later would leave two dispatch mechanisms live inside one skill.
 
 1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits inside
    **both** step 3 and step 3b. Counted, not assumed: the file has **1** occurrence today, at line 77 — the
-   `#3239` annotation in the tick-core table, which is neither step. So the criterion is that the count rises
+   `@operation-home-ok: #xbbscm5` annotation (#3239's born-as hash) in the tick-core table, which is neither
+   step. So the criterion is that the count rises
    to at least 3 *and* that the two new ones fall within those steps; a bare whole-file count would already
    be non-zero and prove nothing.
 
