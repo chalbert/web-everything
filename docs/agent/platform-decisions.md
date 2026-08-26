@@ -2902,7 +2902,10 @@ by `we:reports/2026-07-10-ai-code-review-best-practices.md`; the build lands und
 3. **The visual self-review floor is locus-gated, not care-gated.** It fires for UI-locus items regardless of care band (a small UI diff can still be visually wrong — the console-board failure class, #2804). Care scales its *depth*, never gates its *existence*.
 4. **Depth above the floor is a config dimension, not a fork.** How many extra adversarial rounds/lenses a build earns as care rises is tunable; default = a light floor at `none`/`low`, deepening at `elevated`/`high` (reuses the shape of the [#2567] care model, not its table). A conservative repo raises the floor or the per-band depth.
 
-**Invariants preserved:** layer separation (self-review = Layer 1 author-run #2672; independent clear = Layer 2 #2398/#2567); one shared care model (`deriveCareLevel`), only the depth *table* differs by layer. Grounded by `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`. Governs Layer 1 only; the Layer-2 panel's `none→0` mapping stays a separate concern under #2567.
+**Invariants preserved:** layer separation (self-review = Layer 1 author-run #2672; independent clear = Layer 2 #2398/#2567); one shared care model (`deriveCareLevel`), only the depth *table* differs by layer. Grounded by `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`. Governs Layer 1 only; the Layer-2 panel's `none→0` mapping stays a separate concern under #2567 — **since
+settled**, by [`#every-pr-gets-a-look-advisory-floor`](#every-pr-gets-a-look-advisory-floor) (#3313, ratified
+2026-08-26), which extends this anchor's *care scales depth, never existence* rule to Layer 2: the floor there
+is a cheap advisory pass over every PR, non-blocking, never a random sample of a few.
 
 **Lineage:** 2828 (ratified 2026-08-01 — the build-lane self-review-scope decision, under epic #2804, carved from #2819; report `we:reports/2026-08-01-risk-based-care-scaled-review-gating.md`).
 
@@ -3605,6 +3608,59 @@ Composes with [`#build-lane-self-review-non-zero-floor`](#build-lane-self-review
 depth, never existence) — this rule extends the same shape from depth to breadth. Cumulative-basis
 recomputation (#3317) is owed independently of this ruling: it makes the size *measurement* honest under
 stacked lanes, which matters for dialling capacity even though nothing refuses on it.
+
+---
+
+### Every PR gets a look — the independent floor is a cheap advisory pass over all of them, never a random sample of a few {#every-pr-gets-a-look-advisory-floor}
+
+**Ratified 2026-08-26 by the operator (Nicolas Gilbert) (#3313).** Extends
+[`#build-lane-self-review-non-zero-floor`](#build-lane-self-review-non-zero-floor) (#2828, *care scales depth,
+never existence*) from Layer 1 to Layer 2 — closing the `none → 0 reviewers` mapping that anchor explicitly
+left open as "a separate concern". Composes with
+[`#size-adds-reviewers-never-refuses`](#size-adds-reviewers-never-refuses) (#3320): that rule says size dials
+review *capacity* upward, this one says the capacity floor is never zero.
+
+**A PR that trips no escalation reason still gets an independent look — and the economizing axis is *depth*,
+never *coverage*.** The residue that reaches no reviewer is not a safe class, it is an *unmeasured* one, and
+"unmeasured" is precisely the population a floor exists for. Where budget is tight the correct response is a
+shallower pass over everything, never a deep pass over a random few.
+
+**A random sampler is the wrong instrument, for three separate reasons.** It is non-deterministic, so
+"was this PR looked at?" has no answer a reader can give. It is unauditable in aggregate, since coverage is a
+distribution rather than a fact. And it yields a trickle of recorded verdicts where full coverage yields the
+whole population — starving the very measurement a sampler is usually justified by.
+
+**Looking and blocking are separate decisions, and fusing them is what made the earlier sampler unaffordable.**
+#2631 dropped the random sampler under the throughput program (#2606) because a park *stops the merge* — a
+correct diagnosis of **blocking**, mistaken for a verdict on **looking**, only because every recorded review
+was necessarily a hold. So the floor pass records its verdict and bears on nothing: no `review:*` label, no
+`REVIEW_HOLD_LABELS` member, no path from a finding to a merge condition. A review that cannot park cannot
+cost latency.
+
+**The floor's bar is "catch the obvious", not "converge" — and this bound is load-bearing.** The floor
+replaces *no* review, so it is measured against zero, not against a full reviewer. A pass scoped to what a
+full reviewer would find *is* a full reviewer, and reintroduces the cost and latency argument the advisory
+framing exists to answer. Concretely: one tool-free juror, one round, the diff and the item card, a capped
+finding count, one question — *does this plainly not do what the card says, or plainly break something visible
+in the diff?*
+
+**Two obligations come with it, and neither is optional.** A finding must **file a follow-up item**, because a
+review nobody is required to act on decays into noise. And the floor's own cost and yield must be
+**measured and reported** to the owning program — a floor whose cost approaches a real review's has failed its
+premise, and one whose findings are never right is retired under the standing auto-disable contract, not
+deepened into the reviewer this rule declined.
+
+**The accepted cost, stated rather than hidden:** an advisory pass finds things *after* the merge, so the
+response is fixing forward. That is acceptable only for the class this floor covers — small, single-repo, no
+sensitive paths, nothing that tripped a reason — and is never a template for an escalating class.
+
+**Lineage:** ratified by #3313 (operator, 2026-08-26) under the Review-efficacy watch (#3318). Convened as a
+go/no-go on restoring the #2631 sampler; the ruling took **neither** branch, on the finding that "not yet"
+was circular (#3313 waiting on #3315, which needs the verdicts only coverage produces). Built by `#xvdhiro`
+(a non-bearing `observed` verdict — `we:scripts/lib/verdict-ledger.mjs`'s closed set had no value that neither
+clears nor holds) then `#xay586h` (the pass). Deliberately **not** blocked on #3158: `judgePanel`'s tool-free
+jurors are a cost for a deep reviewer and the specification for a diff-only one. #3315 remains owed
+independently — this rule feeds it the whole population instead of a sampled trickle; it does not build it.
 
 ---
 
