@@ -1,4 +1,5 @@
 ---
+bornAs: xlxr0lv
 kind: story
 size: 3
 parent: "3318"
@@ -17,7 +18,7 @@ guard-lane protects a lane only when its occupant was DECLARED via adopt. A cons
 
 Two sessions worked in **lane-7 at the same time**, in both directions:
 
-- A dispatched agent ran `lane-pool acquire`, was given lane-7, found an untracked `backlog/x10eju0-*.md`
+- A dispatched agent ran `lane-pool acquire`, was given lane-7, found an untracked `backlog/3350-*.md`
   already sitting there, and ran `git reset --hard origin/main` as its first act.
 - Mid-task, that agent's own commit was reset out from under it onto unrelated PR #1600 work.
 

@@ -1,4 +1,5 @@
 ---
+bornAs: x6t2z6h
 kind: story
 size: 3
 parent: "3318"
@@ -43,7 +44,7 @@ Guarded in the negative direction, which matters more than the hole:
 1. **Executable** — the fixture suite runs and is green, and its assertions fail on `origin/main`:
 
    ```
-   npx vitest run review-pr -t "#x6t2z6h" | grep -qE "Tests +[0-9]+ passed"
+   npx vitest run review-pr -t "#3351" | grep -qE "Tests +[0-9]+ passed"
    ```
 
    On `origin/main` the filter selects zero tests (the block does not exist), so the `Tests N passed` line is absent and the grep fails — which is the point of asserting the line rather than trusting vitest's exit code, since a filter matching nothing exits `0`.
