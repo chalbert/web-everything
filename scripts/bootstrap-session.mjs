@@ -648,9 +648,36 @@ export function trustStatus({ dirs = [], config, write, dryRun = false } = {}) {
 
 // ── io ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const readSettings = () => (existsSync(SETTINGS_PATH) ? JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) : {});
+// ONE GUARDED READER FOR BOTH CONFIG FILES, and the guard is the point rather than the sharing.
+//
+// This ran as a bare `JSON.parse` per call site. `~/.claude.json` is the CLI's OWN, actively-written state
+// file, and this script runs as a `SessionStart` hook on a machine where dozens of lanes start sessions
+// close together — so a read that lands mid-write throws, and the throw propagates out of `main()` and
+// takes the WHOLE bootstrap down: skills, commands, memory, siblings, aliases, gitdir and trust alike. One
+// unusable config file must cost its own step and nothing else (review finding, 2026-08-26).
+//
+// ABSENT IS `{}`; PRESENT-BUT-UNUSABLE IS `null`, and the two are deliberately different answers. `{}` says
+// "nothing here yet, build it" — the correct read of a first run. Returning `{}` for a file that IS there
+// but did not parse would say the same thing to a writer, which would then rebuild `~/.claude.json` from an
+// empty object and take the operator's every-repo CLI state with it (a `.bak` copy of a file we could not
+// parse is thin comfort). `null` says "present, unusable", and every caller below reports it and writes
+// nothing.
+export function readJsonConfig(path, exists = existsSync, read = (p) => readFileSync(p, 'utf8')) {
+  if (!exists(path)) return {};
+  let parsed;
+  try { parsed = JSON.parse(read(path)); } catch { return null; }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
 
-const readTrust = () => (existsSync(TRUST_PATH) ? JSON.parse(readFileSync(TRUST_PATH, 'utf8')) : {});
+/** What a step reports when its config file is there but unusable. Never a write. */
+export const unreadableConfig = (path) =>
+  `${path} is present but does not parse as JSON — this step read nothing and wrote nothing rather than `
+  + 'rebuilding that file from an empty object. Every other step still ran. Fix or move it aside, then '
+  + 're-run `npm run bootstrap install`.';
+
+const readSettings = () => readJsonConfig(SETTINGS_PATH);
+
+const readTrust = () => readJsonConfig(TRUST_PATH);
 
 /**
  * Write `~/.claude.json`, backing the previous copy up first.
@@ -673,6 +700,7 @@ function writeSettings(next) {
 
 function installHook() {
   const before = readSettings();
+  if (before === null) return `NOT registered — ${unreadableConfig(SETTINGS_PATH)}`;
   if (bootstrapStatus(before).some((f) => f.path === BOOTSTRAP_PATH && f.resolves)) return 'already registered';
   writeSettings(withBootstrapHook(before));
   return `registered in ${SETTINGS_PATH}`;
@@ -680,6 +708,7 @@ function installHook() {
 
 function uninstallHook() {
   const before = readSettings();
+  if (before === null) return `NOT removed — ${unreadableConfig(SETTINGS_PATH)}`;
   if (!bootstrapStatus(before).length) return `not registered in ${SETTINGS_PATH}`;
   writeSettings(withoutBootstrapHook(before));
   return `removed from ${SETTINGS_PATH} (previous saved to ${SETTINGS_PATH}.bak)`;
@@ -804,6 +833,8 @@ export function main(argv, io = defaultIo()) {
     if (step.gitDir) {
       const dryRun = has('--dry-run');
       const before = dryRun ? null : io.readSettings();
+      // `null` here is the UNUSABLE answer, not the `--dry-run` one — see `readJsonConfig`.
+      if (!dryRun && before === null) { report.steps.push({ id: step.id, status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }); continue; }
       const decision = gitDirStatus({ gitDir: step.gitDir, settings: before, write, dryRun });
       if (decision.grant) io.writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
       report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
@@ -814,6 +845,7 @@ export function main(argv, io = defaultIo()) {
       // A SEPARATE FILE from `readSettings`. `~/.claude.json` is the CLI's workspace config; `settings.json`
       // is hooks and permission rules. Reading the wrong one here reports every checkout as untrusted forever.
       const before = dryRun ? null : io.readTrust();
+      if (!dryRun && before === null) { report.steps.push({ id: step.id, status: 'drift', detail: unreadableConfig(TRUST_PATH) }); continue; }
       const decision = trustStatus({ dirs: step.trustDirs, config: before, write, dryRun });
       if (decision.grant) io.writeTrust(withTrustedDirs(before, step.trustDirs));
       report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
@@ -872,7 +904,10 @@ export function main(argv, io = defaultIo()) {
   // once for the `gitdir` step — its `gitDirStatus` returns the same `planned`/`ok`/`drift` vocabulary for
   // exactly this reason — so the second step to need it reuses the vocabulary instead of inventing one
   // (PR #1520 correctness juror).
-  report.steps.push(toolAllowStatus({ settings: io.readSettings(), write, dryRun: has('--dry-run'), apply: io.writeSettings }));
+  const allowSettings = io.readSettings();
+  report.steps.push(allowSettings === null
+    ? { id: 'pr-watch', status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }
+    : toolAllowStatus({ settings: allowSettings, write, dryRun: has('--dry-run'), apply: io.writeSettings }));
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
