@@ -676,11 +676,14 @@ describe('resolveRosterReconcile — #2635 bind + reconcile the jury roster from
   });
 
   it('a UI diff whose earned lenses EXCEED the pre-registered set → expansion re-triggers human alignment', () => {
-    // The charter pre-registered only the static lenses; the real diff moved a page file, earning a11y/visual/perf.
+    // The charter pre-registered exactly the static lenses; the real diff moved a page file, earning
+    // a11y/visual/perf. DERIVED from `PANEL_LENSES` for the same reason the no-expansion case below is: the
+    // typed four stopped being "the static lenses" when `claim-accuracy` joined them in #3035, so the literal
+    // would have made this an expansion-by-a-fifth-static-lens case wearing an earned-UI-lens test's name.
     const r = resolveRosterReconcile({
       careLevel: 'high',
       changedFiles: ['demos/loan/index.html'],
-      preRegistered: ['correctness', 'security', 'simplicity', 'standards-conformance'],
+      preRegistered: [...PANEL_LENSES],
     });
     expect(r.expanded).toBe(true);
     expect(r.added).toEqual(expect.arrayContaining(['a11y', 'visual-vs-target', 'perf']));
