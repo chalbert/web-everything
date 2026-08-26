@@ -1,4 +1,5 @@
 ---
+bornAs: x38ergj
 kind: story
 size: 3
 parent: "3318"
@@ -20,7 +21,7 @@ alone. Until this lands, #3314's ruling behaves identically to plain advisory.
 In `we:scripts/lib/jury-core.mjs`, alongside the existing prevention scan in `derivePanelVerdict`:
 
 - Export `BLOCKING_ADVISORY_LENSES` — frozen, `['claim-accuracy']`. **Explicit, never `ADVISORY_LENSES`**:
-  generalizing the bar to every advisory lens is a separate ruling (`#x2iwy8f`).
+  generalizing the bar to every advisory lens is a separate ruling (`#3338`).
 - Scan the panel's findings for `isFindingOutstanding(f)` **AND an IMPACT-ONLY bar test** whose originating
   lens is in that set → `changes`. The bar test is, verbatim:
 

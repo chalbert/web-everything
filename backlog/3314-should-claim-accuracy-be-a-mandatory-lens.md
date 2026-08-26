@@ -17,7 +17,7 @@ tags: []
 claim-accuracy finding declared `broken` or above blocks acceptance; everything below the bar advises and
 never blocks. The sub-class is the **existing** typed `impactIfUnfixed` field (`IMPACT_LEVELS` in
 `we:scripts/lib/jury-core.mjs`), not a new field and not reviewer discretion. **Nothing blocks yet** — the
-scan that makes an *outstanding* above-bar advisory finding block is `#x38ergj`; until it lands the lens is
+scan that makes an *outstanding* above-bar advisory finding block is `#3339`; until it lands the lens is
 plain advisory. Codified as `#claim-accuracy-advisory-blocks-on-impact` in
 `we:docs/agent/platform-decisions.md`.
 
@@ -76,7 +76,7 @@ the "typed field, not discretion" condition the amendment demanded, met by reuse
 > is already typed, and it is `impact`"* and *"the bar is `impact >= broken`"*. **There is no `impact` field
 > on a finding.** The field is `impactIfUnfixed` (`we:scripts/lib/jury-core.mjs:53`, normalized at `:384`,
 > read by `blocksAcceptance` at `:532`); the named constants around it — `IMPACT_LEVELS`, `IMPACT_GLOSS`,
-> `PREVENTION_IMPACT_BAR`, `impactStrictness` — were and are correct. Fixed everywhere, because `#x38ergj`
+> `PREVENTION_IMPACT_BAR`, `impactStrictness` — were and are correct. Fixed everywhere, because `#3339`
 > asks a builder to read the level off a finding and the wrong name would not resolve. Where this card still
 > says *impact* unbackticked it means the axis, not a field.
 
@@ -85,7 +85,7 @@ the "typed field, not discretion" condition the amendment demanded, met by reuse
 The panel already lets an **advisory** lens's finding block — `derivePanelVerdict` derives
 `prevention-outstanding` from the whole findings list, gated on `blocksAcceptance(f, { bar })`. But that path
 fires only for **resolved** findings owing an uncaptured guard; an *outstanding* advisory finding rides the
-accept at any impact. So this ruling is not a constant move — it needs one more scan, filed as **`#x38ergj`**.
+accept at any impact. So this ruling is not a constant move — it needs one more scan, filed as **`#3339`**.
 Until that lands, "ruled (c)" behaves on disk exactly like (b), which is why the two-stage wording above is
 part of the ruling rather than a note on it.
 
@@ -96,12 +96,12 @@ own worked example through: a juror finds a card's Done-when cites a `file:line`
 declares `impactIfUnfixed: 'broken'`, names "the `check:standards` locus gate" as the prevention and sets
 `preventionCaptured: true` because that gate already exists — captured guard, so `blocksAcceptance` returns
 `false` and an above-bar finding rides the accept. The bar this ruling states is **unconditional on
-prevention**: outstanding + `impactIfUnfixed >= PREVENTION_IMPACT_BAR`, fail-closed on undeclared. `#x38ergj`
+prevention**: outstanding + `impactIfUnfixed >= PREVENTION_IMPACT_BAR`, fail-closed on undeclared. `#3339`
 carries that predicate verbatim and a Done-when case pinning the `preventionCaptured: true` path.
 
 The blocking set is kept **explicit** (`claim-accuracy` only), not generalized to every advisory lens.
 Whether `simplicity` and `standards-conformance` should block above the same bar is a larger call this item
-does not own — filed as **`#x2iwy8f`**.
+does not own — filed as **`#3338`**.
 
 ## Retracted — the figures this call was prepared on
 
@@ -122,7 +122,7 @@ seat in [#size-adds-reviewers-never-refuses](/backlog/3320/), which is the claim
 
 ## What this does not settle
 
-- **`#x2iwy8f`** — whether the impact bar should govern every advisory lens, making the mandatory/advisory
+- **`#3338`** — whether the impact bar should govern every advisory lens, making the mandatory/advisory
   split itself largely redundant.
 - **Roster width — whether `claim-accuracy` is now *seated* by default.** Two fan-out lists deliberately stayed
   at four lenses (`REVIEW_PANEL_LENSES` in `we:scripts/lib/jury-ledger.mjs`, `LENSES` in

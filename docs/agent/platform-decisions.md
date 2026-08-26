@@ -3759,13 +3759,13 @@ plain advisory instead.
 > finding.** The typed field is **`impactIfUnfixed`** (`we:scripts/lib/jury-core.mjs:53`, normalized at
 > `:384`, read by `blocksAcceptance` at `:532`). The named constants were and are correct — `IMPACT_LEVELS`,
 > `IMPACT_GLOSS`, `PREVENTION_IMPACT_BAR`, `impactStrictness` all resolve. Corrected here, on
-> `we:backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md`, on `#x38ergj` and `#x2iwy8f`, and in the
-> `ADVISORY_LENSES` comment — the name has to be right because `#x38ergj` tells a builder to read the level
+> `we:backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md`, on `#3339` and `#3338`, and in the
+> `ADVISORY_LENSES` comment — the name has to be right because `#3339` tells a builder to read the level
 > off a finding. Unbackticked *impact* in this anchor means the axis, not a field.
 
 **A ruling that needs a build says so on its face.** `derivePanelVerdict` blocks on an advisory lens's
 findings only for **resolved** ones owing an uncaptured guard; an **outstanding** above-bar advisory finding
-still rides the accept. Until that third scan ships (`#x38ergj`), this rule's blocking half is inert and the
+still rides the accept. Until that third scan ships (`#3339`), this rule's blocking half is inert and the
 lens behaves as plain advisory. The two-stage form is part of the ruling, not a caveat on it — a decision
 recorded as if it binds while nothing enforces it is worse than one recorded as pending.
 
@@ -3776,17 +3776,17 @@ worked example above through — a wrong `file:line` declared `broken` whose pre
 `check:standards` locus gate (`preventionCaptured: true`) would ride the accept, as would any above-bar
 finding naming no guard at all. The predicate this rule requires reads impact and nothing else: outstanding
 **and** `impactStrictness(impactIfUnfixed) >= impactStrictness(bar)`, **fail-closed on an undeclared level**,
-matching `blocksAcceptance`'s own undeclared-blocks contract. `#x38ergj` carries it verbatim, with a
+matching `blocksAcceptance`'s own undeclared-blocks contract. `#3339` carries it verbatim, with a
 Done-when case that goes red on a prevention-coupled implementation.
 
 **Scope held deliberately narrow.** The blocking set is an explicit one-member set, not `ADVISORY_LENSES`.
 Whether the bar should govern every advisory lens — which would leave little of #2310's split standing — is
-`#x2iwy8f`, and generalizing it as a side effect of a single lens's promotion would reverse a ratified
+`#3338`, and generalizing it as a side effect of a single lens's promotion would reverse a ratified
 decision without convening it, the move [`#size-adds-reviewers-never-refuses`](#size-adds-reviewers-never-refuses)
 refused for size.
 
 **Lineage:** ratified by #3314 (operator, 2026-08-26) under the Review-efficacy watch (#3318); implemented by
-`#x38ergj`. The preparation argued the mandatory case from two figures since retracted (*"3 of 13"*, *"30
+`#3339`. The preparation argued the mandatory case from two figures since retracted (*"3 of 13"*, *"30
 verdicts / roughly 24"*); the measured values are **5 of 39** (12.8%) and a cross-tab of **27 of 92**, and
 both corrections strengthen the mandatory case the ruling declined. The ruling stands because it never rested
 on the backstop's recall. Nor does it rest on the two-round result on PR #1569 — one PR cannot establish a
