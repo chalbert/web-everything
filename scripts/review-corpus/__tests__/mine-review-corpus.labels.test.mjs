@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { git as fixtureGit, writeLocalIdentity } from '../../operations/__tests__/helpers/real-repo.mjs';
+import { withGitReplay } from './helpers/git-replay.mjs';
 import {
   PROVENANCE,
   buildCases,
@@ -25,6 +27,15 @@ import {
 // Every shape of the `review-pr` comment the parser depends on is pinned below by a named assertion, and
 // the golden at the bottom re-mines a committed set of real comment bodies and demands the cases come back
 // BYTE-FOR-BYTE — the idempotency the description claims, now actually tested.
+//
+// ── AND IT OWNS ITS GIT (#1571 CI heal) ─────────────────────────────────────────────────────────────────
+// The first cut of this file asked THE AMBIENT CHECKOUT for history: `git rev-parse HEAD~1` for the
+// `pathUnchangedBetween` proofs, and real reachability for the golden's shas. CI checks this repo out at
+// `fetch-depth: 1` — ONE commit — so `HEAD~1` died at collection and took all 30 tests in the file with it,
+// and behind that failure the golden would have mined ZERO cases, because every recorded sha reads as
+// unreachable in a depth-1 clone. Both were tests of the checkout, not of the code. Neither is now: the
+// git-truth tests build their own two-commit repo, and the golden replays a recorded git. Deepening the CI
+// checkout would have hidden the same dependency rather than removed it.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CORPUS = resolve(HERE, '..');
@@ -70,6 +81,44 @@ Net basis: \`${basis}\` (rev \`origin/lane/x\` at review time).
 /** One located finding bullet, em-dash separated, exactly as the template renders it. */
 const bullet = (locus, marker = '_[CONFIRMED]_', impact = 'broken') =>
   `**broken-reference** (1)\n- \`${locus}\` — The closing cross-reference does not resolve. — An agent gets a hard miss. ${marker} _[impact if unfixed: ${impact}]_`;
+
+/* ------------------------------------------------------------------ a real two-commit repo */
+
+/**
+ * A REAL repo with two real commits — `untouched.md` written in the first and never again, `edited.md`
+ * rewritten in the second. That is the whole geometry the `missedHere` proof needs: one path that changed
+ * between two heads and one that did not.
+ *
+ * Real git on purpose. A stub returning `''` would make `pathUnchangedBetween` answer "unchanged" for
+ * everything, and every assertion below would pass against a function that does nothing. The identity
+ * handling is imported from `we:scripts/operations/__tests__/helpers/real-repo.mjs` rather than rewritten
+ * here — see that file's detail (1) for why a fixture repo needs `commit.gpgsign=false` in its own config.
+ */
+function twoCommitRepo() {
+  // `realpathSync` because git reports resolved paths and macOS's `/tmp` is a symlink.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'review-corpus-git-')));
+  fixtureGit(['init', '--quiet', '-b', 'main', '.'], { cwd: root });
+  writeLocalIdentity(root);
+  writeFileSync(join(root, 'untouched.md'), 'written once, never edited\n');
+  writeFileSync(join(root, 'edited.md'), 'before\n');
+  fixtureGit(['add', '--', 'untouched.md', 'edited.md'], { cwd: root });
+  fixtureGit(['commit', '--quiet', '-m', 'fixture: round 1'], { cwd: root });
+  const parent = fixtureGit(['rev-parse', 'HEAD'], { cwd: root }).trim();
+  writeFileSync(join(root, 'edited.md'), 'after\n');
+  fixtureGit(['add', '--', 'edited.md'], { cwd: root });
+  fixtureGit(['commit', '--quiet', '-m', 'fixture: round 2'], { cwd: root });
+  const head = fixtureGit(['rev-parse', 'HEAD'], { cwd: root }).trim();
+  // ASSERT THE GEOMETRY rather than trust it: if a future git staged these differently the tests below
+  // would still pass while proving nothing, and this line is what stops that.
+  const changed = fixtureGit(['diff', '--name-only', parent, head], { cwd: root }).trim();
+  if (changed !== 'edited.md') throw new Error(`twoCommitRepo: expected only edited.md to change, got \`${changed}\``);
+  return { root, parent, head };
+}
+
+/** Built once for the whole file — the two suites that need real history share it, and neither mutates it. */
+let repo;
+beforeAll(() => { repo = twoCommitRepo(); });
+afterAll(() => { if (repo) rmSync(repo.root, { recursive: true, force: true }); });
 
 /* ------------------------------------------------------------------ verdictComments */
 
@@ -232,30 +281,26 @@ describe('parseFindings — the labels themselves', () => {
 /* ------------------------------------------------------------------ pathUnchangedBetween */
 
 describe('pathUnchangedBetween — the proof behind every `missedHere` label', () => {
-  // Real git, real commits in this repo: the whole point of the label is that it is PROVEN per finding
-  // rather than assumed, so stubbing git here would test nothing.
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  // Real git, real commits — in the fixture repo above, not in whatever checkout happens to run the suite.
+  // The whole point of the label is that it is PROVEN per finding rather than assumed, so stubbing git here
+  // would test nothing; asking the AMBIENT repo for `HEAD~1` tested the checkout's depth instead.
 
   it('is trivially true at an identical head', () => {
-    expect(pathUnchangedBetween(head, head, 'anything/at/all.md')).toBe(true);
+    expect(pathUnchangedBetween(repo.head, repo.head, 'anything/at/all.md', { cwd: repo.root })).toBe(true);
   });
 
   it('is FALSE for a file this commit actually changed', () => {
-    const changed = execFileSync('git', ['diff', '--name-only', parent, head], { cwd: ROOT, encoding: 'utf8' })
-      .split('\n').filter(Boolean)[0];
-    expect(changed).toBeTruthy();
-    expect(pathUnchangedBetween(parent, head, changed)).toBe(false);
+    expect(pathUnchangedBetween(repo.parent, repo.head, 'edited.md', { cwd: repo.root })).toBe(false);
   });
 
   it('is TRUE for a file this commit did not touch', () => {
-    expect(pathUnchangedBetween(parent, head, 'package.json')).toBe(true);
+    expect(pathUnchangedBetween(repo.parent, repo.head, 'untouched.md', { cwd: repo.root })).toBe(true);
   });
 
   it('fails CLOSED on an unreachable sha — an unprovable claim is not a proven one', () => {
     // If git errors, the answer must be "not proven", never "unchanged". The inverse would manufacture
     // `missedHere` labels out of unresolvable revisions.
-    expect(pathUnchangedBetween('0'.repeat(40), head, 'package.json')).toBe(false);
+    expect(pathUnchangedBetween('0'.repeat(40), repo.head, 'untouched.md', { cwd: repo.root })).toBe(false);
   });
 });
 
@@ -276,23 +321,18 @@ describe('buildCases — rounds, and what was findable but not found', () => {
   });
 
   it('marks a LATER finding as missed here when its file did not change in between', () => {
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    const later = { path: 'package.json', line: 3, category: 'x', impact: 'broken', verdict: 'CONFIRMED', summary: 's' };
-    const [r1, r2] = buildCases(1, [v(head), v(head, [later])]);
+    const later = { path: 'untouched.md', line: 3, category: 'x', impact: 'broken', verdict: 'CONFIRMED', summary: 's' };
+    const [r1, r2] = buildCases(1, [v(repo.parent), v(repo.head, [later])], { cwd: repo.root });
     expect(r1.missedHere).toHaveLength(1);
-    expect(r1.missedHere[0]).toMatchObject({ path: 'package.json', foundAtRound: 2 });
-    expect(r1.missedHere[0].provenBy).toMatch(/^git diff [0-9a-f]{8} [0-9a-f]{8} -- package\.json is empty$/);
+    expect(r1.missedHere[0]).toMatchObject({ path: 'untouched.md', foundAtRound: 2 });
+    expect(r1.missedHere[0].provenBy).toMatch(/^git diff [0-9a-f]{8} [0-9a-f]{8} -- untouched\.md is empty$/);
     // The LAST round has no later round to be measured against, so it can never carry a missed label.
     expect(r2.missedHere).toEqual([]);
   });
 
   it('does NOT mark a finding as missed when the file changed in between', () => {
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    const changed = execFileSync('git', ['diff', '--name-only', parent, head], { cwd: ROOT, encoding: 'utf8' })
-      .split('\n').filter(Boolean)[0];
-    const later = { path: changed, line: 1, category: 'x', impact: 'broken', verdict: 'CONFIRMED', summary: 's' };
-    const [r1] = buildCases(1, [v(parent), v(head, [later])]);
+    const later = { path: 'edited.md', line: 1, category: 'x', impact: 'broken', verdict: 'CONFIRMED', summary: 's' };
+    const [r1] = buildCases(1, [v(repo.parent), v(repo.head, [later])], { cwd: repo.root });
     expect(r1.missedHere).toEqual([]);
   });
 });
@@ -305,12 +345,20 @@ describe('GOLDEN — re-mining fixed comment bodies reproduces the committed cas
   // three PRs (trimmed to `body` only, which is all the miner reads, and 1561 truncated to the four
   // verdicts the committed corpus was mined from). Re-running the miner over them must reproduce
   // `cases/1506-r1.json`, `1559-r1..r2`, `1561-r1..r4` exactly — same bytes, no network, no `gh`.
+  //
+  // AND IT REPLAYS GIT (#1571 CI heal). The miner asks real git which of the recorded shas are reachable,
+  // what changed between them, and when each was committed. In CI's `fetch-depth: 1` checkout every one of
+  // those misses, every verdict is dropped as unreachable, and the miner writes zero cases — so the golden
+  // was reading the checkout's depth, not the miner. `withGitReplay` puts a RECORDED `git` first on the
+  // child's PATH instead, so the mining under test is the parse it claims to be. See `helpers/git-replay.mjs`.
+  const replay = withGitReplay();
+  afterAll(() => replay.cleanup());
   const out = mkdtempSync(join(tmpdir(), 'review-corpus-golden-'));
   const run = (dest) => execFileSync('node', [
     join(CORPUS, 'mine-review-corpus.mjs'),
     `--comments-dir=${FIXTURES}`,
     `--out=${dest}`,
-  ], { cwd: ROOT, encoding: 'utf8' });
+  ], { cwd: ROOT, encoding: 'utf8', env: replay.env });
 
   const mined = (() => { run(out); return out; })();
   const caseFiles = readdirSync(mined).filter((f) => /^\d+-r\d+\.json$/.test(f)).sort();
@@ -340,6 +388,15 @@ describe('GOLDEN — re-mining fixed comment bodies reproduces the committed cas
       // is stable across runs. A `new Date()` creeping in here would redden this and nothing else.
       expect(readFileSync(join(second, 'index.json'), 'utf8')).toBe(readFileSync(join(mined, 'index.json'), 'utf8'));
     } finally { rmSync(second, { recursive: true, force: true }); }
+  });
+
+  it('asked NO ambient git — every question went through the recording', () => {
+    // Both paths pass in a full checkout, so without this the PATH override could silently stop taking
+    // effect and the golden would stay green here while CI went red again. `calls()` is what the shim
+    // actually fielded, so an empty log means the miner reached the machine's own git.
+    const asked = replay.calls();
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.some((q) => q.startsWith('cat-file -e '))).toBe(true);
   });
 
   it('the fixtures carry a PLAUSIBLE label, a CONFIRMED one, and a proven-missed one', () => {
