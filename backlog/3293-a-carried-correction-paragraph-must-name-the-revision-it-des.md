@@ -1,4 +1,5 @@
 ---
+bornAs: xdbi20n
 kind: task
 status: open
 dateOpened: "2026-08-25"
@@ -11,7 +12,7 @@ A correction written as *"the previous body said X"* is true only for the revisi
 describes. Carried unchanged into the next revision, the antecedent retargets and the paragraph becomes a
 false accusation against the round that just fixed the thing. On PR #1561 three such paragraphs rotted, and
 the costliest reported a missing CI run id against a body that already carried one — the violation that PR
-filed `xnr98l3` to prevent. The rule: a correction surviving a revision must name its subject
+filed `3294` to prevent. The rule: a correction surviving a revision must name its subject
 non-deictically — a round, a revision timestamp, or a sha.
 
 ## Done when
@@ -42,5 +43,5 @@ non-deictically — a round, a revision timestamp, or a sha.
 
 Owed as prevention by the round-6 correctness review of #1561, which found the three rotted paragraphs. It is
 the fourth rule this PR files and the only one about a claim's *antecedent* rather than its measurement: the
-other three — `xvzxw4u`, `xnr98l3` and `x1arofm` — ask where a number came from, this one asks what a sentence
+other three — `3295`, `3294` and `3292` — ask where a number came from, this one asks what a sentence
 is still about after the document moves under it.
