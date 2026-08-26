@@ -16,4 +16,19 @@ tags: []
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — the drain's review-coverage reader and its announcement surface are proven:
+
+   ```sh
+   npx vitest run merge-ai-prs -t "#3308" 2>&1 | grep -qE "Tests +[0-9]+ passed"
+   ```
+
+   The `grep` is load-bearing, not decoration: `vitest -t <filter>` exits **0** on a tree where the filter
+   matches nothing (a selection of zero is a success), so the bare exit code cannot distinguish "the tests
+   pass" from "the tests do not exist". Asserting a `Tests N passed` line is what makes it fail before this
+   item lands. Observed on `origin/main`: `Tests  400 skipped (400)` ⇒ grep exit **1**. Observed after:
+   `Tests  27 passed | 400 skipped (427)` ⇒ grep exit **0**.
+
+2. **Not noisy** — a normally-reviewed PR is announced-on byte-identically to before. `reviewCoverageGaps`
+   returns an empty list for a PR whose latest verdict seats a mandatory lens against the tree being merged,
+   and the drain posts nothing when the list is empty (pinned by the "reports NOTHING for a panel-reviewed
+   PR" case).
