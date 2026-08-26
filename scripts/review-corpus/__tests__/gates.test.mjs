@@ -94,6 +94,69 @@ describe('vacuousExecutableCriterion', () => {
   });
 });
 
+// ── #3340: the gate modelled ONE shape of vacuity (absence) and missed the common one ─────────────────
+// A criterion whose command is a test-runner invocation under a name filter is green before the work
+// exists: `vitest … -t "#NNNN"` on a tree with no matching test is a selection of ZERO, and vitest exits
+// 0 on an empty selection. The specimen below is the pre-fix #3319 criterion, quoted VERBATIM from
+// `backlog/3340-…md`. It is quoted rather than cited by sha on purpose: the two commits that
+// introduced and then fixed it never landed on `main`, so a sha would not resolve for anyone.
+describe('vacuousExecutableCriterion — #3340 the empty-selection shape', () => {
+  const read = () => 'nothing relevant here\n';
+  const fire = (body) => vacuousExecutableCriterion(card(`## Done when\n\n${body}\n`), { path: 'backlog/x.md', read });
+
+  /** The #3319 criterion as it was written before its own fix, verbatim. */
+  const PRE_FIX_3319 = '1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-pr.test.mjs -t "#3319"` (drop the\n'
+    + '   `we:` prefix when actually running it). Fails before this item lands — no `judgeSecurity` step exists and\n'
+    + '   the run reaches `confirm` after ONE judge suspend — and passes after.';
+
+  it('#3340 flags the pre-fix #3319 criterion exactly once', () => {
+    const out = fire(PRE_FIX_3319);
+    expect(out.filter((f) => f.gate === 'vacuous-executable-criterion')).toHaveLength(1);
+    expect(out).toHaveLength(1);
+    expect(out[0].subject).toBe('-t "#3319"');
+    expect(out[0].message).toMatch(/selection of zero/i);
+  });
+
+  it('#3340 does NOT flag the fixed form, which asserts the run actually ran tests', () => {
+    // This is #3319's own landed fix, and the shape the repo treats as correct. A gate that flags this
+    // is a gate people route around, after which it protects nothing.
+    expect(fire('1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-pr.test.mjs -t "#3319" | grep -qE "Tests +[0-9]+ passed"`.\n   Fails before this item lands and passes after.')).toEqual([]);
+    // Same assertion stated in prose rather than piped.
+    expect(fire('1. **Executable** — `npx vitest run gates -t "#3340"`; the run reports `Tests  2 passed` after, and 0 before.')).toEqual([]);
+    // And the runner flag that turns an empty selection into a failure.
+    expect(fire('1. **Executable** — `npx vitest run gates -t "#3340" --passWithNoTests=false`.')).toEqual([]);
+  });
+
+  it('#3340 does NOT flag an unfiltered run, which fails honestly on an empty tree', () => {
+    expect(fire('1. **Executable** — `npx vitest run we:scripts/review-corpus/__tests__/gates.test.mjs` is green.')).toEqual([]);
+    expect(fire('1. **Executable** — `npm run check:standards` reports 0 errors.')).toEqual([]);
+  });
+
+  it('#3340 keeps the absence predicate beside the new one, not in place of it', () => {
+    const out = fire('1. **Executable** — grepping `we:a/b.md` for `Spawn it as one background Agent` returns zero hits.');
+    expect(out).toHaveLength(1);
+    expect(out[0].message).toMatch(/already matches zero times/);
+  });
+
+  it('#3340 catches --testNamePattern, the long spelling of the same filter', () => {
+    const out = fire('1. **Executable** — `npx vitest run gates --testNamePattern "#1234"`.');
+    expect(out).toHaveLength(1);
+    expect(out[0].subject).toBe('--testNamePattern "#1234"');
+  });
+
+  it('#3340 emits a subject the default matcher can score on', () => {
+    for (const f of fire(PRE_FIX_3319)) {
+      expect(f.subject.trim().length).toBeGreaterThanOrEqual(3);
+      expect(covers({ ...f }, { path: f.path, line: f.line, summary: f.subject }, 3, 'content')).toBe(true);
+    }
+  });
+
+  it('#3340 the gate header states the general rule the shapes are instances of', () => {
+    // Naming the rule is what stops the next shape being filed as a third unrelated card.
+    expect(GATES_SOURCE).toMatch(/a criterion is vacuous when its success\s+\*?\s*\*?is independent of the work/i);
+  });
+});
+
 describe('danglingWikilink', () => {
   const list = () => ['agent-memory-src/104-feedback_commit_to_default_branch_ok.md'];
   it('flags a wikilink that resolves to nothing', () => {
