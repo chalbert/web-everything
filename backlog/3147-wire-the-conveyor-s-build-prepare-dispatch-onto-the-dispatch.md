@@ -35,22 +35,31 @@ string it actually carries.)*
 
 *(The round-6 cut of that note ended **"and `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly
 those two files"**. **That was wrong the moment it was written, and it is retracted.** The same commit put
-`xbbscm5` on five lines of this card, so this card became the grep's third hit — a stated command with a
-stated result that does not reproduce at the head that states it, in a paragraph whose stated virtue is
-"Run rather than asserted". Re-run in this lane at this head:*
+`xbbscm5` on five lines of this card, so this card became a third hit — a stated command with a stated result
+that does not reproduce at the head that states it, in a paragraph whose stated virtue is "Run rather than
+asserted".*
+
+*Round 7 corrected that to a **three**-file listing — this card, #3239's card and
+`we:skills-src/conveyor/SKILL.md` — and **that correction is retracted too, for the same reason one round
+later.** The commit that wrote it, `50bcc3f6`, also put `xbbscm5` into `we:backlog/x6uyq86-…md`, the very card
+filed to prevent this, making a fourth hit. A count corrected without re-running the command at the commit
+that carries the correction is not a correction. Re-run in this lane at the head that states it:*
 
 ```
 $ grep -rl xbbscm5 backlog/ skills-src/
 backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
 backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
+backlog/x6uyq86-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
 skills-src/conveyor/SKILL.md
 ```
 
-*The identity claim never depended on the count — `bornAs: xbbscm5` in #3239's own frontmatter establishes
-it alone. `we:skills-src/conveyor/SKILL.md:77` and #3239's frontmatter are the two sites that **carry** the
-annotation and its born-as declaration; this card is the third hit and only discusses them. A quoted
-invocation carrying a quoted result that nobody re-ran is its own defect class, and the prevention for it is
-`x6uyq86`, widened in this same push to cover it.)*
+*The identity claim never depended on the count — `bornAs: xbbscm5` in #3239's own frontmatter establishes it
+alone. Of the four hits, **two carry** the annotation and its born-as declaration —
+`we:skills-src/conveyor/SKILL.md:77` and #3239's frontmatter — and **two only discuss it**: this card and
+`x6uyq86`. (Round 7's sentence here read "this card is the third hit and only discusses them"; there are four
+hits and two discussers, so it is retracted with the count above.) A quoted invocation carrying a quoted
+result that nobody re-ran is its own defect class, and the prevention for it is `x6uyq86` — widened in the
+previous push to cover it, and now carrying this round's repeat as its second founding fixture.)*
 
 ## The overlap is not superficial
 
@@ -184,7 +193,8 @@ semicolon that closes the clause (line 152 continues *"; and"* into the second c
 
 **(a) is no longer #3118's default, and the sentence is retracted rather than edited away.** It was true at
 this branch's old merge base `60acbe5f`. It is false on the `main` this card lands on: PR #1565 (merged
-`b71595f9`) amended #3118, and at `origin/main` `e6db8cf5` its *Recommended path at a glance* row reads
+`b71595f9`) amended #3118, and at `origin/main` `14cd7c60` — byte-identical to `e6db8cf5` for this card, so
+the retraction has not gone stale behind main a second time — its *Recommended path at a glance* row reads
 
 > **(c) call the existing `dispatch-lane` operation** — the declared operation that already starts agents
 > headlessly; the runner calls it per surfaced dispatch

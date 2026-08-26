@@ -63,6 +63,26 @@ This one **carries** its command — so the original scope, which only asked tha
 invocation, would have passed it. The gate that catches it is one step further on: run the quoted command
 and compare. Both instances then reduce to one rule, which is why this is a widening and not a fourth card.
 
+## The repeat — the defect recurring inside the card filed to prevent it
+
+Round 7 of #1560 fixed the sentence above by replacing *"two files"* with a three-file listing. `50bcc3f6`,
+**the commit that wrote that correction**, put `xbbscm5` into **this card** (the block quoted above), making a
+fourth hit. The corrected count was falsified by the act of correcting it — the same shape, one round later,
+in the card filed to stop it:
+
+```
+$ grep -rl xbbscm5 backlog/ skills-src/          # at 50bcc3f6, bb914a00 and 77f69705 — four files at all three
+backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
+backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
+backlog/x6uyq86-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
+skills-src/conveyor/SKILL.md
+```
+
+This is the strongest fixture the card will get, and it is the argument for Half A being **executed** rather
+than reviewed: three consecutive rounds of human and juror review read the corrected count and none re-ran it.
+The operative rule the repeat adds is *which head to run at* — **the commit that carries the correction**, not
+the commit the fix started from. A correction re-run at the pre-fix head passes and still ships wrong.
+
 ## Why this is its own class
 
 The three siblings cover the neighbouring shapes and none reaches this one:
@@ -135,9 +155,18 @@ staled-by-another-lane half is `xeh31dn`.
 4. **Half A, executable** — given #3147's card as it stood at `13f2da58`, the check re-runs the quoted
    `grep -rl xbbscm5 …` and **errors**: the card states two files, the command returns three. Fixture in git
    with `git show 13f2da58:<#3147's card>`.
-5. **Half A, mutation** — against the same card at this PR's head, where the sentence is retracted and the
-   three-file result is quoted from a run, the same check is **silent**. The check must key on the
-   *disagreement between the stated and the actual result*, not on the presence of a command.
+5. **Half A, mutation** — take that same `13f2da58` card and change only the stated result to the three files
+   the command actually returned at that sha (the listing in *The widening* above, reproducible with
+   `git show 13f2da58:<#3147's card>` plus `grep -rl xbbscm5 backlog/ skills-src/` at `13f2da58`); the same
+   check is then **silent**. The check must key on the *disagreement between the stated and the actual
+   result*, not on the presence of a command.
+
+   *(An earlier cut of this criterion read **"against the same card at this PR's head, where the sentence is
+   retracted and the three-file result is quoted from a run, the same check is silent"**. **That was red where
+   it promised green, and it is retracted.** At the head it named, `50bcc3f6` had just added `xbbscm5` to this
+   card, so the grep returned **four** files against a stated three and Half A errors — see *The repeat*
+   above. Re-pinned to a mutation of the `13f2da58` fixture, which is fixed in git and cannot move out from
+   under the criterion the way a moving head did.)*
 6. **Half A, bounded** — a span quoting `npm run check:standards` with a result is **not** re-run, because
    `npm run` is off the closed verb list. Verified against this card's own criterion 8.
 7. **Half B, silent where it should be** — no flag on a *Done when* whose criteria name no fixture, verified
