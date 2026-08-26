@@ -90,6 +90,19 @@ export const VIEW_FIELD_TYPES = Object.freeze({
   // field while it can still be re-staged, instead of surfacing three steps later as a liveness error about
   // a PR that is in fact perfectly open.
   state: 'string',
+  // #xwk0tzu (#3322) — `createdAt` is what tells a STRIPPED `authored-by-actor` stamp from one that never
+  // existed (#3067's date comparison against `STAMP_REGIME_START`). It is a `string` and not a `number`
+  // because `gh` reports an ISO-8601 instant, which is the shape `Date.parse` in
+  // `distinguishMissingAuthorStamp` expects.
+  //
+  // AN ABSENT ONE IS REFUSED HERE, on purpose, and it is a real behaviour change for the staged-view path: a
+  // view staged before this field existed no longer passes and must be re-staged. That is the right side to
+  // fail on. The reader DEFAULTS it to `''`, which `distinguishMissingAuthorStamp` reads as NEVER_STAMPED —
+  // so a silently-absent one turns every stripped stamp on this host back into the tolerated
+  // `unknown-author`, which is precisely the hole #3067 exists to close. Naming the field at staging time,
+  // while the operator can still re-run `gh pr view`, beats a review hours later that is quietly weaker than
+  // the same review through `gh`.
+  createdAt: 'string',
 });
 
 const kindOf = (v) => (Array.isArray(v) ? 'array' : typeof v);

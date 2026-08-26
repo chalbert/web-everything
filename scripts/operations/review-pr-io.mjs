@@ -101,6 +101,13 @@ export const PR_VIEW_FIELDS = Object.freeze([
   // both used). Without it `review-pr` could not tell a live PR from a merged one, so it paid a juror to
   // review PRs that had already landed. Consumed by `shapeReadFinding`'s liveness refusal.
   'state',
+  // #xwk0tzu (#3322) — `createdAt` rides that SAME call, one more json field and no extra hop, for the same
+  // reason `state` does. It is #3067's stamp-regime date input: a PR opened at/after `STAMP_REGIME_START`
+  // that carries no `authored-by-actor` stamp had one STRIPPED, where an older one simply never had one.
+  // `we:scripts/review-set-label.mjs` already reads it on its own `gh pr view`; the read side reads it here
+  // so both sides feed `decideClearerIndependence` the SAME four inputs and cannot compute different
+  // statuses for one PR (#2644).
+  'createdAt',
 ]);
 
 /**
@@ -238,6 +245,18 @@ export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT, readView = reso
     // the io shell fetches, the declaration decides, which is what keeps the refusal testable with no `gh`.
     state: typeof view.state === 'string' ? view.state : '',
     body: typeof view.body === 'string' ? view.body : '',
+    // #xwk0tzu (#3322) — THE TWO HALVES OF THE INDEPENDENCE COMPARISON, carried up for the SAME reason
+    // `state` is: read here, judged in the PURE `shapeReadFinding`. The author half is already in `body`
+    // above (the `authored-by-actor` stamp `we:scripts/pr-land.mjs` writes at open), so only these two are
+    // new — `createdAt`, which tells a STRIPPED stamp from one that never existed (#3067), and the CLEARING
+    // actor, which is this process's own harness session id and is therefore the one thing the declaration
+    // cannot read for itself without becoming impure.
+    //
+    // NOTHING IS DECIDED HERE. `parseAuthorActorId` / `hasStampLostMarker` are pure functions of `body`, so
+    // they run on the declaration side beside the refusal they feed; duplicating them here would put the
+    // same predicate in two places, which is the drift #2644 forbids.
+    createdAt: typeof view.createdAt === 'string' ? view.createdAt : '',
+    clearerId: currentActorId(),
     // PIN THE REV. `computeNetDiffPaths` reports `rev` as the candidate it resolved — `origin/<headRefName>`,
     // a MUTABLE ref — so the recorded basis stopped describing the judged diff as soon as the lane pushed
     // again. Resolve it here, in the io shell, where the git call belongs; `shapeReadFinding` keeps both the
