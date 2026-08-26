@@ -4,7 +4,7 @@ kind: decision
 parent: "2753"
 status: open
 dateOpened: "2026-08-15"
-preparedDate: "2026-08-16"
+preparedDate: "2026-08-25"
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 relatedTo: ["2464", "2530", "2444", "2703", "3102", "3031"]
 tags: [plateau-loop, conveyor, agent-runner, session-free]
@@ -52,9 +52,30 @@ already emits), and `we:skills-src/conveyor/SKILL.md:29-41` (the "interim bridge
 
 ## Recommended path at a glance
 
-| Fork | The call | Default | Main alternative (excluded) | Confidence |
+| Fork | The call | Default | Main alternatives (excluded) | Confidence |
 |---|---|---|---|---|
-| 1 | Where the agent-spawn backend lives | **(a) WE-native runner** — port the contract into `we:scripts/conveyor/agent-runner.mjs`, wired in-process into the conveyor's dispatch | (b) cross-process HTTP call into `plateau-app`'s `POST /api/backlog/build` | high |
+| 1 | Where the agent-spawn backend lives | **(c) call the existing `dispatch-lane` operation** — the declared operation that already starts agents headlessly; the runner calls it per surfaced dispatch | (a) port a new WE-native `we:scripts/conveyor/agent-runner.mjs`; (b) cross-process HTTP into `plateau-app` | medium-high |
+
+> **AMENDED 2026-08-25 — the fork survey was missing an option, and it changes the default.** The original
+> preparation (2026-08-16) framed this as a two-way choice between porting a runner and calling `plateau-app`
+> over HTTP. It never surveyed `we:scripts/operations/dispatch-lane.mjs`, whose sink header states *"THE SINK
+> IS THE ONLY THING IN THIS REPO THAT STARTS AN AGENT"* and which spawns via `claude --bg` today.
+>
+> This is **not** a staleness correction: `dispatch-lane` landed **2026-08-13** (`WE #3037: declare dispatch
+> — the effect that starts rather than completes`), three days *before* this card was prepared. The survey
+> simply missed it. Recorded rather than quietly repaired, per
+> `we:agent-memory-src/grep-every-name-you-cite-in-prose.md`.
+>
+> The original (a)-vs-(b) **analysis** below is kept intact and still holds — every argument it makes against
+> (b) applies unchanged. What changes is that (a) is no longer the best of the remaining options.
+>
+> **That disclaimer covers the analysis and nothing else.** The first two cuts of this amendment let it cover
+> the card's *operative* passages too, and for two review rounds this card named **two defaults** — the table
+> above said (c) while the option-(a) bullet, the recommendation line, the `codifiedIn` sentence and the
+> pre-registered jury's touch-set all still said (a). Corrected 2026-08-25 (PR #1565 round 2, finding F2):
+> each of those four now carries its own quoted retraction in place. A recommendation, a ratification text and
+> a jury binding are not analysis. Prevention filed: **#xu4ddw5** (a `check:standards` rule counting default
+> markers per fork).
 
 ## Fork 1 — where the agent-spawn backend lives
 
@@ -71,10 +92,136 @@ one-source clause forbids; only one can be *the* path the runner calls.
   ops. Wired directly into `we:skills-src/conveyor/runner.mjs`'s existing dispatch surface (`tickSurface()`,
   `we:skills-src/conveyor/runner.mjs:81-95`, which already emits `{ builds, prepareScope, prepareDecision, fixes, ciHeals }`)
   so the headless runner spawns agents itself, in-process, for **all five** dispatch kinds. No runtime
-  dependency on `plateau-app`'s dev server being up. **DEFAULT.**
+  dependency on `plateau-app`'s dev server being up. **SUPERSEDED DEFAULT (was the default until the
+  2026-08-25 amendment; displaced by (c) — see below).**
 - **(b) Cross-process call into `plateau-app`.** The conveyor's runner calls `plateau-app`'s existing
   `POST /api/backlog/build` (or new sibling endpoints for the other four kinds) over HTTP, reusing #2530's
   shipped code instead of porting it. *Rejected* — see Skeptic below.
+- **(c) Call the existing `dispatch-lane` operation.** *(Added 2026-08-25 — see the amendment note above.)*
+  The runner calls `we:scripts/operations/dispatch-lane.mjs` once per surfaced dispatch. Nothing is ported
+  and nothing is spawned in-process: the operation already starts a real detached agent via `claude --bg`,
+  already reads the tick core, already fills the brief, already writes a run record, and is already pollable
+  by `claude agents --json` and resumable by the waker. **NEW DEFAULT.**
+
+**Why (c) displaces (a) — the card's own principles, applied to an option it did not survey:**
+
+1. **(a) creates the second implementation this fork's own opening paragraph forbids.** That paragraph
+   rejects supporting two branches because it *"would mean two live spawn implementations behind the same
+   five-verb contract with independent failure modes, which is exactly the second-implementation shape
+   [#deterministic-core-thin-judgment]'s one-source clause forbids."* A new
+   `we:scripts/conveyor/agent-runner.mjs` sitting beside `dispatch-lane`'s existing `claude --bg` spawn **is
+   that shape** — the argument was aimed at (b) and lands just as hard on (a).
+2. **#3031 points at the declared operation, not away from it.** The card leans on
+   `we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated` to justify a WE-native
+   port. But that statute's actual content — declare an operation once, generate its callers — argues for
+   the runner becoming another *caller* of `dispatch-lane`, not for a second spawn path outside the
+   operations engine entirely.
+3. **The precedent cited for (a) is satisfied by (c) too.** The card's "local process, not HTTP" precedent
+   (`plateau-app` shelling `we:scripts/lane-pool.mjs` rather than calling over the network) is about
+   spawning a local child process. `dispatch-lane` *is* a local child process spawn. (c) keeps the precedent
+   and adds no new module.
+4. **Coverage is the same problem for both. Most of it is filed; the rest is not.** (a)'s advantage over (b)
+   was that it covers all five dispatch kinds — `we:scripts/conveyor/tick-core.mjs:856-861` returns
+   `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision`, `spawnFixes`, `spawnCiHeals`.
+   `dispatch-lane` covers **builds only** today (`we:scripts/operations/dispatch-lane-io.mjs:139` launches
+   `match(decisions.spawnBuilds)`; `briefPath` at `:52` takes no `kind`). **#3165** closes **three of the
+   five** — its design, tasks and "Done when" cover `build` + `prepare-scope` + `prepare-decision`, and
+   `spawnFixes` / `spawnCiHeals` appear nowhere in that card (grepped: zero occurrences). It is a smaller
+   change than porting a runner — give the brief selector and the session slug a `kind`, and launch all three
+   planned lists. **The remaining two kinds (`fix`, `CI-heal`) are not filed anywhere**, and closing them is a
+   cost of (c) that no card carries yet.
+
+   **RETRACTED 2026-08-25 (PR #1565 review round 2, driver finding F4).** This point previously ended:
+
+   > *"That gap is **#3165**, already prepared, and it is a smaller change than porting a runner: give the
+   > brief selector and the session slug a `kind`, launch all three planned lists, and answer the one open
+   > question of what an unscoped prepare declares as its scope."*
+
+   Two things were **wrong**. It called the five-kind gap "#3165" and then, in the same sentence, described
+   #3165 as launching *"all **three** planned lists"* — so it contradicted itself and overstated the coverage
+   #3165 buys. And there is no *"one open question"* left: `#3165` in this very tree says at `:85` *"There is
+   nothing to research"*, at `:87` *"the lane scope is already decided, shipped, and running — it is not this
+   card's to choose"*, at `:97` *"Recorded as the existing ruling, not as a pick"*, and at `:99` records that
+   *"an earlier round replaced a false confident claim with a manufactured open question."* That round-3
+   correction (`3f27271f`) is an ancestor of this branch's head — this card was re-asserting the manufactured
+   question one file away from the card that retracts it.
+
+**What (c) costs, stated rather than hidden.** Three things, where (a) depends on nothing:
+
+1. It makes this decision depend on #3165 landing first — which buys three of the five dispatch kinds
+   (`build`, `prepare-scope`, `prepare-decision`), not all five. *(This line previously read "the five-kind
+   coverage gap above", which was **wrong** — #3165 is a three-kind card. See the F4 retraction in point 4.)*
+2. The other two kinds — `spawnFixes` and `spawnCiHeals` — have **no card at all**. Filing and building that
+   coverage is (c)'s cost, and it is the part of (a)'s five-kind advantage that survives the amendment.
+3. It inherits `dispatch-lane`'s **unproven handle assumption** — and, if the measurement recorded below
+   holds, an open defect in the observer that has to be closed before the conveyor can trust it. See the
+   retraction under the probe table; this cost was **wrongly described as already-handled** in the first cut
+   of this amendment.
+
+**The steer question this fork turned on has been PROBED, and it does not decide the fork.** An earlier
+version of this section said (c) inherits the `claude --bg` backend rather than the ratified five-verb
+`spawn`/`steer`/`stop`/`resume`/`observe` contract, so *"`steer` and `redirect` are not available through
+it"*, and made mid-flight steering the pivot: if the conveyor needs to steer, (a)'s richer contract earns its
+second implementation.
+
+Measured 2026-08-25 rather than reasoned about — a detached `--bg` agent, stopped, then resumed:
+
+| step | result |
+| --- | --- |
+| spawn detached, stop the session | — |
+| `claude --resume <sessionId>` with new instructions | the agent answered with the sentinel planted before the stop — **context preserved** |
+| `--session-id` on a `--bg` spawn | **ignored** in this one manual run — no test defends it either way. If it holds, reading the real id back from `claude agents --json` is work that **does not exist yet** (see the retraction below) |
+
+So steering IS reachable through the `--bg` backend — as stop-then-resume rather than as a `steer(text)`
+write to a live stdin. That is a coarser verb, not a missing capability, and it costs one extra round trip
+per steer. Two consequences for this fork:
+
+1. **The pivot is gone.** "Does the conveyor need to steer?" no longer separates (a) from (c), because both
+   can. What separates them is whether the conveyor needs to steer a *running* agent **without interrupting
+   it** — and nothing in `we:scripts/conveyor/tick-core.mjs` plans anything of the kind. Its decisions are
+   spawn, watch, retire.
+2. **The remaining cost of (c) is latency and granularity, not capability**, which is a much weaker reason to
+   stand up a second agent-spawning implementation.
+
+**RETRACTED 2026-08-25 (PR #1565 review, `correctness` lens).** The first cut of this paragraph said, in
+full:
+
+> *"The second row is a live constraint on (c) regardless of the fork: a dispatcher that pins a session id
+> and expects the background process to honour it is pinning a value the CLI discards, so the handle must be
+> recovered from the listing. `we:scripts/operations/dispatch-lane-io.mjs`'s observer is where that lives."*
+
+The last sentence was **wrong**, and wrong in the direction that under-scopes the work: it read as
+*dispatch-lane already recovers the handle*, and nothing there does. The observer never re-derives an id
+from the listing. It compares against the very id the sink minted:
+
+- `createDispatchSinks` mints the handle itself — `const sessionId = String(mintSessionId())`
+  (`we:scripts/operations/dispatch-lane-io.mjs:555`) — and passes it to `buildAgentArgv`, which emits
+  `'--session-id', String(sessionId)` (`:618`).
+- `createDispatchObservers` then does `sessions.find((s) => s && String(s.sessionId) === handle)`
+  (`:735`), where `handle` is that same minted value read back off the run entry (`:690`).
+- The sink's own header says so in as many words: *"THE HANDLE IS MINTED, NOT DISCOVERED... the dispatcher
+  CHOOSES the id"* (`:507-514`).
+
+**The correction, and it is a finding rather than a wording fix.** If the measured row above holds — if
+`claude --bg` ignores `--session-id` — then that comparison at `:735` can never match a live session, and
+`dispatch-lane`'s observer reports every real dispatch as `unresolved` ("no longer listed") the moment the
+`LISTING_GRACE_MS` window (`:67`) closes. That is not a constraint (c) inherits already-handled; it is an
+open defect in the operation (c) proposes to call, and closing it is part of (c)'s cost alongside #3165.
+
+**How strongly the measurement is held.** Weakly, and it should stay that way until something defends it.
+No test in this repo starts a real `claude` process. The nearest one,
+`we:scripts/operations/__tests__/dispatch-lane.test.mjs:645` (*"pins the handle with --session-id instead of
+racing to discover it"*), asserts the **argv shape** and nothing about the CLI's response to it, and the
+sink's own comment concedes the path is *"NOT YET PROVEN LIVE... the argv below is asserted, the CLI's
+response to it is not"* (`:528`). So the honest reading of the row is: a one-off manual observation that
+**contradicts an assumption dispatch-lane is built on**, which makes settling it — a live end-to-end
+dispatch, per the `#xaibmeu` pointer the same comment gives — a prerequisite of routing the conveyor
+through (c), not a detail to note in passing.
+
+*Prevention for the generator, filed rather than promised:* **#x17op72** — every name in the retracted
+sentence grepped clean, so the existing name-resolution discipline could not have caught it. The clause it
+adds to the `correctness` lens is that an "already handles this" claim must line-cite the code doing the
+handling.
 
 ```js
 // Fork 1 (a) — we:scripts/conveyor/agent-runner.mjs, a near-mechanical port of
@@ -107,7 +254,22 @@ already "spawn/shell a local process," not "call a service" — (a) extends that
 conveyor's own need, (b) would introduce the first instance of the opposite pattern into the critical
 delivery path.
 
-**Recommended default: (a).** Three independent reasons converge, not one:
+**Recommended default: (c) — call the existing `dispatch-lane` operation.**
+
+**RETRACTED 2026-08-25 (PR #1565 review round 2, driver finding F2).** This line previously read, in full:
+
+> *"**Recommended default: (a).** Three independent reasons converge, not one:"*
+
+It was **wrong to leave standing** after the amendment at the top of this card moved the default to (c). For
+two review rounds the card named two defaults — this line said (a), the glance table said (c) — so a ruler
+reading only one of them would have ratified the option the amendment displaced. The recommendation is now
+**(c)**, for the four reasons under *"Why (c) displaces (a)"* above.
+
+The three reasons below are **kept, and they still hold — as the case for (a) over (b)**, which is what they
+were written to be. None of them argues against (c): reason 1 asks for a self-contained WE-side mechanism and
+`dispatch-lane` is one; reason 2 is a coverage argument against (b)'s single HTTP endpoint, and (c)'s own
+coverage gap is #3165 plus the two unfiled kinds (see point 4 above); reason 3's statute argues for calling
+the declared operation, which is exactly what (c) does. Read them as *why not (b)*, not as *why (a)*:
 
 1. **The conveyor's own statute.** `we:docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent`
    (#2701, ratified 2026-07-27) frames the per-lane cycle as driven by "a headless runner over the tested
@@ -126,6 +288,12 @@ delivery path.
    clone') and on the session-free direction of #2701/#2703."* #2701/#2703 are this item's own governing
    statute and its own immediate predecessor story — #3031's authors were writing with this exact context in
    view, not by coincidence.
+
+> **Scope of the two skeptic/screen passes below (2026-08-16), stated so they are not misread as operative.**
+> Both ran against a survey that contained only (a) and (b). Where they say "the default", they mean **(a)**,
+> and "the default survives" means *(a) survives (b)* — the only comparison they were given. **Neither pass
+> saw (c), so neither is evidence for or against the amended default.** A fresh skeptic pass over (a)-vs-(c)
+> has not been run and is owed at the decision turn.
 
 `Skeptic: SURVIVES-WITH-AMENDMENT.` Attacked on four axes (agent-spawn concurrency was globally saturated
 during this prep session — every subagent launch hit the environment's concurrency cap and errored before
@@ -183,7 +351,15 @@ exactly, with no fabrications found: `plateau-app:src/build-runner/build-action.
 is independent corroboration of the original self-run skeptic/screen pass's conclusions above — not a
 supersession of them.
 
-**Duplication sub-call (folded into the default, not left open).** (a) does mean the CLI-spawn logic exists
+**Duplication sub-call — MOOT under the amended default (c), kept as the record of the (a)-vs-(b) weighing.**
+This sub-call priced the duplication (a) would create. Under (c) there is nothing to price: nothing is ported,
+so no second copy of the CLI-spawn logic is written, and the sub-call's "accept the duplication as-is"
+recommendation has no subject. It survives here because it is part of why (a) beat (b), not as a live
+recommendation. Its heading previously read *"(folded into the default, not left open)"*, which was **wrong to
+leave standing** once (c) became the default — (a) is not the default any more, so nothing is folded into it.
+The original text follows unchanged:
+
+(a) does mean the CLI-spawn logic exists
 in two repos (`plateau-app:src/build-runner/`, and the new `we:scripts/conveyor/agent-runner.mjs`) rather
 than one shared module. No shared-package/monorepo-workspace tooling exists between WE and `plateau-app`
 today (checked: no npm workspace, no submodule, no publish pipeline) — building one now is out of scope
@@ -194,17 +370,45 @@ pain — not spent now against a hypothetical one. (Moving the conveyor's own ru
 outright, dissolving the duplication the other way, stays out of scope here as the original filing noted —
 it is the #2445/#2527 product question, a much bigger call.)
 
-On ratify, `codifiedIn` would record the runner-backend module + a `we:docs/agent/platform-decisions.md`
-anchor for "the conveyor's headless dispatch spawns agents via an in-process CLI-backend runner, never a
-cross-process call into a sibling repo's dev server" — composing with, not competing against,
+**RETRACTED 2026-08-25 (PR #1565 review round 2, driver finding F2).** The ratification text below previously
+read, in full:
+
+> *"On ratify, `codifiedIn` would record the runner-backend module + a `we:docs/agent/platform-decisions.md`
+> anchor for "the conveyor's headless dispatch spawns agents via an **in-process CLI-backend runner**, never a
+> cross-process call into a sibling repo's dev server"..."*
+
+That was **wrong to leave standing** after the default moved to (c): "the runner-backend module" and
+"in-process CLI-backend runner" are (a)'s shape. (c) writes no module and spawns nothing in-process — it is a
+detached child process started through a declared operation. Ratifying from the old sentence would have
+codified the option this amendment displaced. Corrected:
+
+On ratify, `codifiedIn` would record **no new module** — `we:scripts/operations/dispatch-lane.mjs` gains the
+conveyor's runner as a caller — plus a `we:docs/agent/platform-decisions.md` anchor for "the conveyor's
+headless dispatch starts agents by calling the declared `dispatch-lane` operation, never by a second spawn
+implementation and never by a cross-process call into a sibling repo's dev server" — composing with, not
+competing against,
 [#conveyor-orchestration-mechanics-not-per-lane-agent](/docs/agent/platform-decisions.md#conveyor-orchestration-mechanics-not-per-lane-agent)
 and [#operations-declared-once-callers-generated](/docs/agent/platform-decisions.md#operations-declared-once-callers-generated).
 
 ### Review jury (provisional — pre-registered #2638)
 
 Care level: `elevated` (blast-radius signal — this touches the conveyor's dispatch core, system machinery).
-Predicted touch-set for the buildable child this fork's default would spawn: `we:scripts/conveyor/agent-runner.mjs`
-(new), `we:skills-src/conveyor/runner.mjs`, `we:skills-src/conveyor/SKILL.md`. This jury binds against that
+**RETRACTED 2026-08-25 (PR #1565 review round 2, driver finding F2).** The predicted touch-set previously read,
+in full:
+
+> *"Predicted touch-set for the buildable child **this fork's default** would spawn:
+> `we:scripts/conveyor/agent-runner.mjs` (new), `we:skills-src/conveyor/runner.mjs`,
+> `we:skills-src/conveyor/SKILL.md`."*
+
+That was **wrong to leave standing** after the default moved to (c). It bound this pre-registered jury to
+(a)'s scope, and said in words that it was "this fork's default" — but under (c),
+`we:scripts/conveyor/agent-runner.mjs` never gets written. Corrected:
+
+Predicted touch-set for the buildable child the amended default (c) would spawn: **no new module** —
+`we:skills-src/conveyor/runner.mjs` (calls `dispatch-lane` per surfaced dispatch),
+`we:scripts/operations/dispatch-lane.mjs` and `we:scripts/operations/dispatch-lane-io.mjs` (the three-kind
+coverage from #3165, the two unfiled kinds, and the observer defect retracted above),
+`we:skills-src/conveyor/SKILL.md` (retire the "interim bridge" section). This jury binds against that
 predicted scope and is re-checked against the real diff at PR open.
 
 | juror | lens | grounding method | pre-registered expectation |
