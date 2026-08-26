@@ -16,7 +16,16 @@ import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
   checkBodyFileLocation, bodyFileRoots,
+  // #3334 — re-exported by the single home from `we:scripts/lib/reasonless-bounce.mjs`; imported from HERE on
+  // purpose, so this suite proves the home actually exposes the rule its `decideSetLabel` enforces.
+  REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, bounceEvidenceFromWriteUp,
 } from '../review-set-label.mjs';
+// #3334, routes 2 and 3 — asserted through the OTHER two sanctioned paths' own entry points, because a shared
+// core one caller forgets to ask is the defect this item closes.
+import { isPreWriteRefusal } from '../operations/review-pr-io.mjs';
+import { factsFromRun, buildRequest } from '../operations/record-verdict.mjs';
+import { validateRequest } from '../apply-review-request.mjs';
+import { importGraph } from '../operations/__tests__/import-graph.mjs';
 import {
   parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
   normalizeDiffFingerprint, normalizeContributionFingerprint, parseOperatorClearance,
@@ -2117,5 +2126,380 @@ describe('checkBodyFileLocation (#2897)', () => {
     const out = checkBodyFileLocation('/nowhere/v.md', [TMP, '/definitely-not-here']);
     expect(out.ok).toBe(false);
     expect(out.roots).toEqual([TMP]);
+  });
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * #3334 — THE REASONLESS-BOUNCE REFUSAL, IN THE SINGLE HOME AND REACHABLE ON EVERY ROUTE.
+ *
+ * WHAT WENT WRONG. #1572's refusal — a `changes` verdict with zero juror findings and no stated reason is
+ * unpublishable — was implemented in ONE caller, `we:scripts/operations/review-pr.mjs`'s `record` step. Two other
+ * sanctioned write paths carried no such check, and a real reasonless bounce landed on PR #1593: "✅ pass — no
+ * blocking findings … Findings (0) … _No findings._" directly above "Decision: `changes`", no reason anywhere.
+ *
+ * WHY THE ASSERTIONS ARE PER ROUTE, NOT ONE CORE TEST. A shared helper that one caller forgets to invoke is
+ * EXACTLY the defect being fixed, so "the core refuses it" proves nothing about the route that never asks the
+ * core. Each of the three sanctioned paths is exercised through its own entry point below.
+ *
+ * AND WHY HALF OF THEM ASSERT THE NEGATIVE DIRECTION. A guard that also blocks legitimate bounces is worse than
+ * the hole it closes: it makes the sanctioned path unusable and pushes reviewers back to a raw `gh` label edit,
+ * which is the attribution loss the single home exists to prevent.
+ * ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ */
+
+/** A write-up in the exact shape `renderVerdictWriteUp` emits for a PASSING panel with N findings. */
+const writeUp = ({ findings = 0, reason = '' } = {}) => [
+  '## Human review verdict — o/n#1593',
+  '',
+  findings ? '**Verdict:** ⚠️ changes requested' : '**Verdict:** ✅ pass — no blocking findings',
+  '',
+  '### Panel verdicts',
+  '',
+  '| lens | required | verdict |',
+  '| --- | --- | --- |',
+  '| correctness | mandatory | accept |',
+  '',
+  `### Findings (${findings})`,
+  '',
+  ...(findings
+    ? ['**correctness** (1)', '- the isolation claim is false: nothing sets cwd to a lane']
+    : ['_No findings._']),
+  '',
+  '---',
+  '',
+  '**Decision:** `changes` — recorded by operator.',
+  ...(reason ? ['', '**Why this was overridden.** The operator gave this reason:', '', `> ${reason}`, ''] : []),
+  '**Lenses:** `correctness` — 1 juror(s).',
+  'Net basis: `a..b` — 3 net changed file(s) vs current main (#2450).',
+].join('\n');
+
+describe('#3334 — the pure core refuses a reasonless bounce, and NOTHING else', () => {
+  const decide = (o) => decideSetLabel({ to: 'changes', currentLabels: pending, ...o });
+
+  it('REFUSES `changes` with zero findings and no reason — the PR #1593 case, in the home beside INVARIANT 2', () => {
+    const d = decide({ findingCount: 0, reason: '' });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe(REASONLESS_BOUNCE_REFUSAL);
+    // A refusal that still named a swap would be worse than none — a caller reading `addLabel` would apply it.
+    expect(d.addLabel).toBe('');
+    expect(d.removeLabels).toEqual([]);
+  });
+
+  // ── THE NEGATIVE DIRECTION ────────────────────────────────────────────────────────────────────────────────
+  it('ALLOWS a bounce carrying findings — the findings ARE the reason, and they are already rendered', () => {
+    const d = decide({ findingCount: 1, reason: '' });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.changes);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL]);
+  });
+
+  it('ALLOWS a bounce carrying a stated reason over zero findings — the operator override the guard is FOR', () => {
+    const d = decide({ findingCount: 0, reason: 'the lane guard is asserted on the wrong process' });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.changes);
+  });
+
+  it('ALLOWS an UNKNOWN finding count — absence of a count is not evidence of an empty one', () => {
+    expect(decide({}).allowed).toBe(true);
+    expect(decide({ findingCount: null }).allowed).toBe(true);
+    expect(decide({ findingCount: undefined, reason: '' }).allowed).toBe(true);
+    expect(decide({ findingCount: 'not a number' }).allowed).toBe(true);
+  });
+
+  it('treats a whitespace-only reason as no reason — the author still learns nothing', () => {
+    expect(decide({ findingCount: 0, reason: '  \n\t ' }).allowed).toBe(false);
+  });
+
+  it('leaves review:human standing on a refusal, exactly as an allowed bounce does', () => {
+    expect(decideSetLabel({ to: 'changes', currentLabels: human, findingCount: 0 }).keepsHuman).toBe(true);
+  });
+
+  // TOTALITY: the guard binds ONE target. Every other member of the closed set is untouched by the new inputs,
+  // asserted here rather than assumed, because the inputs now reach every branch of the decider.
+  it('touches NO target but `changes`, over the whole closed set and every starting label', () => {
+    for (const to of REVIEW_LABEL_TARGETS) {
+      if (to === 'changes') continue;
+      for (const currentLabels of [human, pending, accepted, neither, []]) {
+        const withInputs = decideSetLabel({ to, currentLabels, findingCount: 0, reason: '' });
+        const without = decideSetLabel({ to, currentLabels });
+        expect(withInputs).toEqual(without);
+        expect(withInputs.reason).not.toBe(REASONLESS_BOUNCE_REFUSAL);
+      }
+    }
+  });
+
+  it('the predicate itself is exported and answers only about `changes` (#3334)', () => {
+    expect(isReasonlessBounce({ to: 'changes', findingCount: 0, reason: '' })).toBe(true);
+    expect(isReasonlessBounce({ to: 'changes', findingCount: 0, reason: 'x' })).toBe(false);
+    expect(isReasonlessBounce({ to: 'changes', findingCount: 2, reason: '' })).toBe(false);
+    expect(isReasonlessBounce({ to: 'changes' })).toBe(false);
+    expect(isReasonlessBounce({ to: 'accepted', findingCount: 0, reason: '' })).toBe(false);
+    expect(isReasonlessBounce()).toBe(false);
+  });
+});
+
+describe('#3334 — bounceEvidenceFromWriteUp reads both inputs off the body that will be published', () => {
+  it('reads the rendered finding count', () => {
+    expect(bounceEvidenceFromWriteUp(writeUp({ findings: 0 })).findingCount).toBe(0);
+    expect(bounceEvidenceFromWriteUp(writeUp({ findings: 1 })).findingCount).toBe(1);
+  });
+
+  it('reads the operator reason out of the write-up — the label sink passes NO --reason flag', () => {
+    const ev = bounceEvidenceFromWriteUp(writeUp({ findings: 0, reason: 'the lane guard is asserted wrong' }));
+    expect(ev.findingCount).toBe(0);
+    expect(ev.reason).toMatch(/the lane guard is asserted wrong/);
+  });
+
+  // A HAND-WRITTEN BODY IS UNKNOWN, NEVER ZERO. Only a rendered write-up can assert "zero findings"; prose IS
+  // the statement of what to fix, and #xd6moh1 already refuses an empty one.
+  it('reports an UNKNOWN count for a body with no rendered heading', () => {
+    expect(bounceEvidenceFromWriteUp('fix the guard: it asserts on the wrong process').findingCount).toBe(null);
+    expect(bounceEvidenceFromWriteUp('').findingCount).toBe(null);
+    expect(bounceEvidenceFromWriteUp(undefined).findingCount).toBe(null);
+  });
+
+  it('does not mistake the panel table or a finding bullet for a reason', () => {
+    expect(bounceEvidenceFromWriteUp(writeUp({ findings: 1 })).reason).toBe('');
+    expect(bounceEvidenceFromWriteUp(writeUp({ findings: 0 })).reason).toBe('');
+  });
+});
+
+/**
+ * ROUTE 1 of 3 — THE DIRECT CLI (`we:scripts/review-set-label.mjs`), through the real `runReviewLabelCli` with a
+ * stub provider. The refusal has to precede the provider entirely: a bounce that posted its comment and then
+ * refused the swap would leave a durable "Decision: `changes`" on a PR carrying no `review:changes`.
+ */
+describe('#3334 route 1/3 — the direct CLI refuses a reasonless bounce and writes NOTHING', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => '# verdict body',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  function stubProvider({ labels = ['review:pending'] } = {}) {
+    const calls = [];
+    return {
+      calls,
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      readPrState: () => {
+        calls.push('readPrState');
+        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' };
+      },
+      readLabels: () => labels.map((name) => ({ name })),
+      setLabels: () => { calls.push('setLabels'); },
+      postComment: () => { calls.push('postComment'); },
+    };
+  }
+
+  function run({ provider, argv, verdictBody }) {
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv, verdictBody }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  const ARGV = ['1593', '--repo=o/n', '--to=changes', '--actor=op'];
+
+  it('REFUSES the PR #1593 body — 0 findings, no reason — before the provider is touched', () => {
+    const p = stubProvider();
+    const { exitCode, payload } = run({ provider: p, argv: ARGV, verdictBody: writeUp({ findings: 0 }) });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toBe(REASONLESS_BOUNCE_REFUSAL);
+    expect(p.calls).not.toContain('setLabels');
+    expect(p.calls).not.toContain('postComment');
+  });
+
+  it('ALLOWS the same bounce once --reason states one — and the swap actually lands', () => {
+    const p = stubProvider();
+    const { exitCode, payload } = run({
+      provider: p,
+      argv: [...ARGV, '--reason=the lane guard is asserted on the wrong process'],
+      verdictBody: writeUp({ findings: 0 }),
+    });
+    expect(exitCode).toBe(0);
+    expect(payload.ok).toBe(true);
+    expect(p.calls).toContain('setLabels');
+  });
+
+  it('ALLOWS a bounce whose write-up carries findings, with no --reason at all', () => {
+    const p = stubProvider();
+    const { exitCode } = run({ provider: p, argv: ARGV, verdictBody: writeUp({ findings: 1 }) });
+    expect(exitCode).toBe(0);
+    expect(p.calls).toContain('setLabels');
+  });
+
+  it('ALLOWS a hand-written prose bounce — an unknown count is not an empty one', () => {
+    const p = stubProvider();
+    const { exitCode } = run({ provider: p, argv: ARGV, verdictBody: 'the guard asserts on the wrong process' });
+    expect(exitCode).toBe(0);
+    expect(p.calls).toContain('setLabels');
+  });
+
+  it('does not touch --to=accepted, whose write-up also renders `Findings (0)` on a clean pass', () => {
+    const p = stubProvider();
+    const { exitCode } = run({
+      provider: p, argv: ['1593', '--repo=o/n', '--to=accepted', '--actor=op'], verdictBody: writeUp({ findings: 0 }),
+    });
+    expect(exitCode).toBe(0);
+    expect(p.calls).toContain('setLabels');
+  });
+
+  it('does not touch the conveyor rearm target, which carries no findings by design', () => {
+    const p = stubProvider({ labels: ['review:changes'] });
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try {
+      runReviewLabelCli({
+        ...CFG, emit: (l) => chunks.push(String(l)), provider: p, argv: ['1593', '--repo=o/n'], fixedTo: 'rearm',
+      });
+    } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    expect(exitCode).toBe(0);
+    expect(p.calls).toContain('setLabels');
+  });
+});
+
+/**
+ * ROUTE 2 of 3 — `we:scripts/operations/review-pr.mjs`'s `record` step. That step SHELLS this CLI
+ * (`we:scripts/operations/review-pr-io.mjs`'s label sink builds the argv), so its enforcement point is the CLI
+ * above — but with one property that route alone has: the sink passes `--body-file=` and NO `--reason`, because
+ * `renderVerdictWriteUp` renders the operator's reason INTO the body. A guard reading only the flag would refuse
+ * every reasoned bounce recorded through the declared operation. That is asserted here, on this route's own argv.
+ *
+ * The sink's other half is `isPreWriteRefusal`: a refusal it recognises marks the effect entry `failed` (retried),
+ * and one it does not is INDETERMINATE and costs a person. The refusal is decided by the pure core before the
+ * provider exists, so it is provably pre-write and must be on that list.
+ */
+describe('#3334 route 2/3 — review-pr\'s record step, whose argv carries the reason in the BODY', () => {
+  const CFG = {
+    defaultActor: 'test',
+    usage: 'usage: test',
+    buildComment: () => '# verdict body',
+    successResult: (o) => ({ ok: true, ...o }),
+    refusalResult: ({ decision }) => ({ error: decision.reason }),
+  };
+
+  function runSinkArgv({ verdictBody, labels = ['review:pending'] }) {
+    const calls = [];
+    const provider = {
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      readPrState: () => ({ labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' }),
+      readLabels: () => labels.map((name) => ({ name })),
+      setLabels: () => { calls.push('setLabels'); },
+      postComment: () => { calls.push('postComment'); },
+    };
+    // The EXACT flag set `createReviewPrSinks`'s LABEL sink builds: pr, --repo, --to, --actor, --body-file.
+    // There is deliberately no `--reason` — that is the property under test.
+    const argv = ['1593', '--repo=o/n', '--to=changes', '--actor=claude-review-pr', '--body-file=/tmp/x.md'];
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv, verdictBody }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}'), calls };
+  }
+
+  it('REFUSES the reasonless write-up the record step would post', () => {
+    const { exitCode, payload, calls } = runSinkArgv({ verdictBody: writeUp({ findings: 0 }) });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toBe(REASONLESS_BOUNCE_REFUSAL);
+    expect(calls).toEqual([]);
+  });
+
+  // THE NEGATIVE DIRECTION, AND THE ONE THIS ROUTE COULD HAVE GOT WRONG: a reasoned override arrives with the
+  // reason inside the body and no `--reason` flag anywhere in the argv.
+  it('ALLOWS an operator override whose reason rides the BODY, with no --reason flag in the argv', () => {
+    const body = writeUp({ findings: 0, reason: 'the isolation claim is unproven; assert the juror cwd' });
+    const { exitCode, calls } = runSinkArgv({ verdictBody: body });
+    expect(exitCode).toBe(0);
+    expect(calls).toContain('setLabels');
+  });
+
+  it('ALLOWS a juror-findings bounce recorded through the same argv', () => {
+    const { exitCode, calls } = runSinkArgv({ verdictBody: writeUp({ findings: 1 }) });
+    expect(exitCode).toBe(0);
+    expect(calls).toContain('setLabels');
+  });
+
+  it('the refusal is classified PRE-WRITE, so the sink marks the effect failed rather than indeterminate', () => {
+    expect(isPreWriteRefusal(REASONLESS_BOUNCE_REFUSAL)).toBe(true);
+  });
+});
+
+/**
+ * ROUTE 3 of 3 — `we:scripts/operations/record-verdict.mjs`, the transport for a host that cannot authenticate to
+ * GitHub (on a cloud runner, every host). It never calls `decideSetLabel`: it stages a request FILE that a CI job
+ * later applies by running the single home. The applier's run would refuse — minutes later, in a workflow log
+ * nobody is watching, with the operator's context gone. So the refusal has to be reachable on this route, at the
+ * moment of the decision, and it is asserted here through the operation's own pure builder.
+ */
+describe('#3334 route 3/3 — the credential-less transport refuses before a request file exists', () => {
+  const facts = (over = {}) => ({
+    pr: 1593, repo: 'chalbert/web-everything', sessionId: 'sess-1', reduced: 'accept', findingCount: 0, ...over,
+  });
+
+  it('REFUSES staging a reasonless `changes` request', () => {
+    expect(() => buildRequest(
+      { facts: facts(), to: 'changes', body: writeUp({ findings: 0 }), actor: 'op' }, validateRequest,
+    )).toThrow(/reasonless bounce:/);
+  });
+
+  it('reads the finding count out of the RUN RECORD, never retyped — and null when the verdict has none', () => {
+    const record = (verdict) => ({
+      id: 'r', op: 'review-pr', input: { pr: 1593, repo: 'o/n' }, verdict, telemetry: [],
+    });
+    expect(factsFromRun(record({ verdict: 'accept', findings: [] })).findingCount).toBe(0);
+    expect(factsFromRun(record({ verdict: 'changes', findings: [{ summary: 'x' }] })).findingCount).toBe(1);
+    // UNKNOWN, not zero: fabricating a 0 from an absent array turns "we did not look" into "the juror found
+    // nothing", which is the one direction this guard must not get wrong.
+    expect(factsFromRun(record({ verdict: 'accept' })).findingCount).toBe(null);
+  });
+
+  // ── THE NEGATIVE DIRECTION ────────────────────────────────────────────────────────────────────────────────
+  it('ALLOWS a bounce whose staged write-up carries the operator reason', () => {
+    const out = buildRequest(
+      { facts: facts(), to: 'changes', body: writeUp({ findings: 0, reason: 'assert the juror cwd' }), actor: 'op' },
+      validateRequest,
+    );
+    expect(out.request.to).toBe('changes');
+    expect(out.path).toBe('ops/review-requests/1593-changes.json');
+  });
+
+  it('ALLOWS a bounce carrying juror findings', () => {
+    expect(buildRequest(
+      { facts: facts({ findingCount: 2 }), to: 'changes', body: writeUp({ findings: 2 }), actor: 'op' }, validateRequest,
+    ).request.to).toBe('changes');
+  });
+
+  it('ALLOWS a run whose finding count is unknown', () => {
+    expect(buildRequest(
+      { facts: facts({ findingCount: null }), to: 'changes', body: 'fix the guard', actor: 'op' }, validateRequest,
+    ).request.to).toBe('changes');
+  });
+
+  it('does not touch an `accepted` request over a zero-finding write-up', () => {
+    expect(buildRequest(
+      { facts: facts(), to: 'accepted', body: writeUp({ findings: 0 }), actor: 'op' }, validateRequest,
+    ).request.to).toBe('accepted');
+  });
+
+  // The capability guarantee the split module exists to preserve: this declaration must not be able to act.
+  it('still imports nothing that can act — the rule came in through a LEAF, not through the single home', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    expect(importGraph(resolve(here, '..', 'operations', 'record-verdict.mjs')).external).toEqual([]);
+    expect(importGraph(resolve(here, '..', 'lib', 'reasonless-bounce.mjs')).external).toEqual([]);
   });
 });

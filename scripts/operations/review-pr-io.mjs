@@ -341,6 +341,11 @@ const PRE_WRITE_REFUSALS = Object.freeze([
   'no review:changes label',
   ', not OPEN',
   'nothing was changed (#2844)',
+  // #3334 — `decideSetLabel`'s reasonless-bounce refusal. It is decided by the PURE core, which runs before the
+  // provider is touched at all, so a run that reports it PROVABLY wrote nothing. The literal is the head of
+  // `REASONLESS_BOUNCE_REFUSAL` in `we:scripts/review-set-label.mjs`, asserted against that constant in the
+  // #3334 tests so the two cannot drift into a refusal this list no longer recognises.
+  'reasonless bounce:',
 ]);
 
 /** Is this CLI error text one we can PROVE happened before any write? */

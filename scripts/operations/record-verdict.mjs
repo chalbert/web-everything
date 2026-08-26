@@ -27,6 +27,17 @@
  */
 import { op } from './registry.mjs';
 import { compute, effect } from './step-kinds.mjs';
+// #3334 — the reasonless-bounce rule, IMPORTED and not restated. This transport never calls `decideSetLabel` —
+// it stages a request file for a CI job that will — so the refusal has to be reachable here on its own, or a
+// cloud runner's bounce is only caught minutes later in a workflow log nobody reads. Importing the predicate is
+// what makes this a second enforcement point rather than a second ANSWER; a second answer is what drifts.
+//
+// FROM THE LEAF, NOT FROM THE SINGLE HOME. `we:scripts/review-set-label.mjs` re-exports these and would be the
+// obvious source, but it reaches `node:child_process` through `computeNetDiffText`, and this file's suite
+// asserts `importGraph(...).external` is EMPTY — a declaration that can shell out could stage-and-push straight
+// from a `compute` step, where no effect ledger would ever show it happened. The rule is shareable without that
+// trade: `we:scripts/lib/reasonless-bounce.mjs` imports nothing at all.
+import { isReasonlessBounce, bounceEvidenceFromWriteUp, REASONLESS_BOUNCE_REFUSAL } from '../lib/reasonless-bounce.mjs';
 
 export const RECORD_VERDICT_OP = 'record-verdict';
 
@@ -61,7 +72,12 @@ export function factsFromRun(record, { runId } = {}) {
   // OPTIONAL, and its absence is honest rather than fatal: without it the durable comment records independence
   // as UNPROVEN, which is the truth. Fabricating one would be worse.
   const sessionId = (record.telemetry ?? []).map((t) => t?.sessionId).find((s) => typeof s === 'string' && s.trim()) || undefined;
-  return { pr, repo, sessionId, lens: record?.input?.lens ?? '', reduced: record.verdict.verdict ?? '' };
+  // #3334 — HOW MANY FINDINGS THE JUROR ACTUALLY RAISED, read off the same run record every other fact here
+  // comes from. Tri-state on purpose: a record whose verdict carries no `findings` array at all leaves this
+  // `null` (UNKNOWN), which never refuses. Fabricating a `0` from an absent array would turn "we did not look"
+  // into "the juror found nothing", and that is the one direction this guard must not get wrong.
+  const findingCount = Array.isArray(record.verdict.findings) ? record.verdict.findings.length : null;
+  return { pr, repo, sessionId, findingCount, lens: record?.input?.lens ?? '', reduced: record.verdict.verdict ?? '' };
 }
 
 /**
@@ -74,6 +90,24 @@ export function factsFromRun(record, { runId } = {}) {
  * than hiding it.
  */
 export function buildRequest({ facts, to, body, operatorInstruction, actor }, validate) {
+  // ── THE #3334 REFUSAL, ON THIS ROUTE, BEFORE A REQUEST FILE EXISTS ──────────────────────────────────────────
+  // The applier WILL run the single home and the single home WILL refuse this — but that happens in CI, after a
+  // push, on a host the operator is not watching. Refusing here means the operator learns at the moment of the
+  // decision, with the context to state a reason, instead of finding a stranded request file later. Same rule,
+  // same predicate, same text: `isReasonlessBounce` is imported, so this cannot drift from the home's answer.
+  //
+  // The reason can only come from the BODY on this route. `record-verdict` has no `--reason` input, and its one
+  // free-text field, `operatorInstruction`, is the applier's `clear-human` clearance and is REFUSED on anything
+  // else — so it is not a reason channel and must not be read as one.
+  const bounceEvidence = bounceEvidenceFromWriteUp(body);
+  if (isReasonlessBounce({ to, findingCount: facts?.findingCount ?? null, reason: bounceEvidence.reason })) {
+    throw new Error(
+      `record-verdict: refusing to stage a \`changes\` request for ${facts?.repo}#${facts?.pr} — `
+      + `${REASONLESS_BOUNCE_REFUSAL} The applier's own run of the single home would refuse this too `
+      + '(`we:scripts/review-set-label.mjs`); refusing here means you hear it now rather than in a CI log. '
+      + 'Re-run the review so the write-up carries the findings, or record the operator reason into it.',
+    );
+  }
   const request = {
     repo: facts.repo,
     pr: facts.pr,
