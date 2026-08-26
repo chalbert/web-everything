@@ -1,16 +1,16 @@
 ---
 bornAs: xaibmeu
 kind: story
-size: 8
+size: 3
 parent: "3029"
 status: open
 dateOpened: "2026-08-13"
 preparedDate: "2026-08-25"
+blockedBy: ["x3gvcun"]
 relatedTo: ["3037", "3095", "3097", "3118", "3147", "3165", "3239", "3331", "3332", "2612"]
 scope:
-  - we:skills-src/conveyor/
-  - we:scripts/operations/
-scopeRationale: "Switches the conveyor SKILL's dispatch bridge — BOTH the step-3 build half and the step-3b prepare half, the latter absorbed from #3147 — to call the already-declared operation, and (per the round-3 review of #1211) hardens stampLiveness/assertHandleNotLive/createDispatchObservers in scripts/operations/ against an unverified claude agents --json shape before the first live dispatch."
+  - we:skills-src/conveyor/SKILL.md
+scopeRationale: "Switches the conveyor SKILL's dispatch bridge — BOTH the step-3 build half and the step-3b prepare half, the latter absorbed from #3147 — to call the already-declared operation. ONE file, and `scope:` now names it at FILE level rather than the directory, so this slice is provably disjoint from #x3gvcun's. The scripts/operations/ half (five liveness hardenings + the first live dispatch) was split out to #x3gvcun on 2026-08-26 and is no longer in this card's touch-set."
 tags: [plateau-loop, delivery, operations, conveyor, dispatch]
 ---
 
@@ -21,6 +21,68 @@ surfaces `decisions.spawnBuilds` and the main-session bridge spawns each one wit
 (`we:skills-src/conveyor/SKILL.md` §3). Two dispatch paths now exist and only one records a durable handle, so a
 restart still loses a build the bridge launched. Switch the bridge to call the operation per surfaced launch and
 delete the hand-spawn prose.
+
+## Split 2026-08-26 — this card is now the SKILL half only
+
+The reconciliation the day before (PR #1599) left this card at `size: 8`, ON the split bar, carrying two
+unrelated bodies of work behind its two `scope:` entries. It has been sliced along exactly that seam. **The
+seam was verified in the code before cutting, not taken from this card's word for it** — steps 3 and 3b are
+entirely prose in one file (`we:skills-src/conveyor/SKILL.md`, lines 251 and 279), and the five hardenings are
+entirely code in another directory (`we:scripts/operations/`), with no shared symbol between them.
+
+| slice | scope | size | carries |
+| --- | --- | --- | --- |
+| **#3096** (this card) | `we:skills-src/conveyor/` | **3** | steps 3 + 3b rewired onto the operation; the hand-spawn prose deleted |
+| **#x3gvcun** | `we:scripts/operations/` | **5** | the five liveness hardenings from PR #1211's round-3 review + the first live dispatch |
+
+`3 + 5 = 8` — the points are conserved, not laundered. Neither slice was resolved and nothing was renumbered.
+
+**This card is `blockedBy: ["x3gvcun"]`, and that edge is the whole safety argument.** Today the conveyor
+hand-spawns and never consults the dispatch guard at all, so the un-hardened liveness read is unreachable. The
+moment THIS card lands, the conveyor's next tick routes through the operation — which is the first real
+dispatch, straight into the guard #x3gvcun exists to harden. Landing this half first would fire the exact
+double-dispatch the other half prevents. The other half ships valid on its own (a hardened guard, a real
+payload fixture and a proven live dispatch are all wanted regardless of what the skill says), so this is
+incremental delivery, not a chain that delivers nothing until the end.
+
+### Where each of the 16 inbound citations now points — NOTHING was repointed
+
+**No citing file was edited.** Every existing `#3096` reference still resolves to this card, which is why the
+number stayed here even though most inbound citations want the OTHER half: this card's title and slug name the
+routing, they are frozen in its filename, and rewriting 16 files' citations while slicing is the precise move
+the reconciliation refused (it would change what those citations resolve to mid-flight) — and one of the 16 is
+`we:docs/agent/platform-decisions.md`, a statute. So the citations were preserved by **keeping the card and
+adding this map**, not by touching them. A reader arriving from any of them is routed in one hop:
+
+| citer | what it cites #3096 for | now carried by |
+| --- | --- | --- |
+| `we:skills-src/conveyor/SKILL.md:77` (`@operation-home-ok` marker) | "routing the spawnBuilds and spawnPrepareScope halves through the operation is its own item" | **#3096** — the marker gets *more* accurate, so it is left untouched |
+| `we:backlog/3037-*.md:150` | "Routing the bridge through it is #3096" | **#3096** |
+| `we:backlog/3037-*.md:173,180` | the reassigned "a lane IS dispatched … scope-lease arbitration" clause | **#x3gvcun** |
+| `we:backlog/3095-*.md:34,209` | "#3096 is what changes that" / "until #3096 lands real dispatch" | **#x3gvcun** |
+| `we:backlog/3097-*.md:86` | H1 of #3096 (the false docblock claims) | **#x3gvcun** |
+| `we:backlog/3102-*.md:78` | "gone" collapsing *finished cleanly* and *died* | **#x3gvcun** |
+| `we:backlog/3110-*.md:48` | "real dispatch hasn't [happened] per #3096" | **#x3gvcun** |
+| `we:backlog/3118-*.md:241` | "a prerequisite of routing the conveyor" | **#3096** |
+| `we:backlog/3118-*.md:559-561,608` | "the first end-to-end live dispatch" | **#x3gvcun** |
+| `we:audits/backlog-health-audit.md:571` | the dangling `we:scripts/operations/__fixtures__/claude-agents-payload.json` path | **#x3gvcun** |
+| `we:backlog/3331-*.md` | the probe against the handle-match assumption | **#x3gvcun** (`relatedTo`, still not a blocker) |
+| `we:backlog/3332-*.md` | the remaining two launch kinds' skill-side routing | **#3096** |
+| `we:backlog/3147-*.md`, `we:backlog/3239-*.md` | `graduatedTo: "3096"` on both collapsed duplicates | **#3096** — still true; the fold landed here and this card still holds both halves' history |
+| `we:backlog/3288-*.md`, `we:backlog/3289-*.md` | fixtures for the stale-claim / stale-locus prevention cards | **#3096** — and this split adds two more, below |
+| `we:docs/agent/platform-decisions.md:3172` | the statute's build pointer | **#3096** — deliberately NOT edited (a statute edit is out of scope) |
+
+### Two more of this card's own claims were wrong and are corrected in #x3gvcun
+
+Re-read at `origin/main` `c8d92db7` while cutting the seam. Recorded here because #3288/#3289 already cite this
+card as a fixture for exactly this failure mode, and because a reader of the text below meets the old claims:
+
+- **"no `__fixtures__/` directory exists under `we:scripts/operations/`" is FALSE**, and was false when
+  written. The directory has existed since `b1c154ee` (2026-08-14). Only the *file*
+  `we:scripts/operations/__fixtures__/claude-agents-payload.json` is missing — which is what `we:audits/backlog-health-audit.md:571` reports.
+- **"all four compare sites" mis-counted.** Three call sites were enumerated; the "fourth" was the `listed`
+  Set path, a different shape. A genuine unnoticed fourth *file* exists —
+  `we:scripts/operations/explore-io.mjs:822` — and is named out of scope in #x3gvcun with its reason.
 
 ## Reconciled 2026-08-26 — this card is the survivor of a THREE-way duplicate
 
@@ -54,6 +116,10 @@ and 3b) versus *liveness hardening + first live run* (`we:scripts/operations/`),
 scope entries above. Splitting was deliberately NOT done here: this reconciliation's job is to make the
 duplicate set honest, and slicing the survivor in the same pass would have changed what the citations above
 resolve to while they were being repointed.
+
+> **That split HAPPENED on 2026-08-26, in its own pass, and the seam was where this paragraph predicted — see
+> *Split 2026-08-26* above.** The size is now `3`, not `8`, and the sentences below that say "this card
+> carries the hardenings and the live run" are true of the pre-split card only. #x3gvcun carries them now.
 
 ### What was folded in
 
@@ -130,9 +196,11 @@ cannot launch, which is a different thing from splitting one kind's migration ac
   or the read runs guard-less (`guardsFrom: 'none'` on the verdict). Note that the operation forwards only the
   `bookkeeping` key — `config` and `signals` are dropped and reported as `droppedBookkeeping`, so a runner using
   non-default TTLs gets the shipped ones instead; check that before switching.
-- **The first LIVE dispatch happens here.** #3037 asserted the `claude --bg --session-id …` argv and never fired
-  it. This item settles what a background session's permission mode and isolation default have to be
-  (`WE_DISPATCH_AGENT_ARGS` is the knob), and whether the brief's step 1 works from a background agent.
+- **~~The first LIVE dispatch happens here.~~ MOVED to #x3gvcun in the 2026-08-26 split.** It settles what a
+  background session's permission mode and isolation default have to be (`WE_DISPATCH_AGENT_ARGS` is the knob)
+  and whether the brief's step 1 works from a background agent. Kept struck rather than deleted because the
+  ordering it implies is now this card's `blockedBy` edge: by the time this card is claimed, the live run has
+  already happened and its answers are settled facts, not open questions for the builder here.
 - **The agent-runner CLI backend ruling**
   ([#agent-runner-cli-backend](../docs/agent/platform-decisions.md#agent-runner-cli-backend)) may want to own the
   spawn instead. This item is where the two designs meet; if the ruling wins, the operation becomes its caller.
@@ -143,105 +211,25 @@ cannot launch, which is a different thing from splitting one kind's migration ac
 - **`blockedBy: ["3037"]` was cleared on 2026-08-26.** #3037 is `status: resolved`; the declaration it was
   waiting on exists. The frontmatter was stale, not load-bearing — every prose statement of this card's own
   ordering already treated #3037 as done.
-- **`#3331` is a live PROBE against this card's central assumption, and it should answer before the first
-  dispatch.** It asks whether `claude --bg` honours `--session-id` at all. If it does not, the minted handle
-  can never match a listing and every hardening below is guarding a comparison that structurally cannot
-  succeed. That is a different defect from the five here (which assume the match CAN work and harden how a
-  failed read is interpreted), so #3331 is `relatedTo`, not absorbed — but do not spend the live run before
-  reading its answer.
+- **~~`#3331` is a live PROBE … do not spend the live run before reading its answer.~~ MOVED to #x3gvcun.**
+  The probe guards the live run, and the live run is no longer this card's. #3331 stays `relatedTo` on both
+  slices — its answer still tells a reader here whether the operation this card routes to can match a handle at
+  all — but the "do not spend the live run first" constraint is #x3gvcun's to honour.
 
-## It carries the other half of #3037's acceptance
+## Moved to #x3gvcun in the 2026-08-26 split — the `scripts/operations/` half
 
-Ruled by the independent review of PR #1211, and written into #3037's own acceptance rather than left in a
-footnote: **the clause "a lane IS dispatched through the declared operation … with the same scope-lease
-arbitration … verified against a real queue" is REASSIGNED here.** #3037 delivered the declaration, the
-structural holds and the durable handle; nothing has ever been dispatched, and the lease is taken by the agent
-running `lane-pool acquire` from the brief — a path that has not executed. This item is where that clause is
-met, so #3037 is not fully accepted until this one is.
+Two sections that stood here are now the body of
+[#x3gvcun](x3gvcun-harden-the-three-claude-agents-liveness-readings-then-make-t.md), moved verbatim with their
+line numbers re-read at `c8d92db7` and the two false claims above corrected:
 
-Named classes of defect only a live run can catch (from the same review, so they are checked here and not
-rediscovered): a background session's permission mode (the agent's first act is `bash` inside a `$( … )`, and a
-prompt there stalls it holding a handle that reads `running` forever); whether `--session-id` really pins the id
-that `claude agents` reports back; whether `-n` is the session-name flag; what the child inherits from a
-conveyor runner's environment (`spawnAgent` passes no `env`); and the agent's lane acquisition racing the
-parent's assignment, which is the entire reason the in-flight guard exists.
+- **"It carries the other half of #3037's acceptance"** — the reassigned "a lane IS dispatched … verified
+  against a real queue" clause from PR #1211's review, and the named classes of defect only a live run can
+  catch. **#3037 is still not fully accepted until that clause is met** — it is met in #x3gvcun now, not here.
+- **"Carried from PR #1211's round-3 review"** — the five liveness-reading hardenings to `stampLiveness`,
+  `assertHandleNotLive` and `createDispatchObservers`, with the risk statement (a bad listing read looks like
+  the strong guard, not a degraded one) and the `DISPATCH_LISTING_GRACE_MINUTES` docblock conflict.
 
-## Carried from PR #1211's round-3 review — must land before the first live dispatch
-
-The round-3 independent review of #3037's PR **accepted with a named residual**: `stampLiveness` and its two
-siblings trust the *shape* of `claude agents --json` on a surface nothing in the repo has ever observed. The
-review ruled this could not be fixed honestly blind (a fourth guess at an unverified CLI surface) and reassigned
-it here, where the payload becomes real. Full finding: H1/H2 of the round-3 review on PR #1211.
-
-**The risk, stated plainly:** if the liveness listing ever comes back in a shape the code does not expect, the
-guard reads it as "the agent is dead" and dispatches a SECOND agent onto the same lane about two minutes later
-— while the verdict still reports `dispatchLiveness: 'claude-agents'`, the label for "checked against a real
-listing and found clear." The failure looks like the strong guard, not like a degraded one.
-
-**Every line number below was RE-READ in this lane at `origin/main` `9f9cb310` on 2026-08-26, and every one of
-them had moved.** The originals were written against the tree at PR #1211 and had drifted by 60-180 lines as
-`#3095` and `#3165` landed. None of the five fixes has landed — that was checked too, by grepping for the
-identifiers each one would introduce: `lastSeenLiveAt` returns **0** hits under `we:scripts/`, no
-`DISPATCH_GUARD_LISTING_GRACE_MINUTES` exists, no `__fixtures__/` directory exists under
-`we:scripts/operations/`, and all four compare sites still do a bare `String(x) === handle`. The work is
-entirely outstanding; only the coordinates changed.
-
-1. **Capture one real `claude agents --json` payload during this item's own live run and pin the field name to a
-   fixture.** Everything below rests on `sessionId` being the right key — the `#3030` spike's account of it, per
-   `stampLiveness`'s docblock at
-   [we:scripts/operations/dispatch-lane-io.mjs:326](scripts/operations/dispatch-lane-io.mjs), was narrower than
-   the CLI in the one place it mattered, and no code path in the repo has ever run `claude --bg --session-id …`
-   and then listed it back. Land the fixture (e.g.
-   `we:scripts/operations/__fixtures__/claude-agents-payload.json`) before touching the three functions below, so
-   their fix is checked against something real rather than another guess.
-
-2. **A non-empty listing that yields zero usable ids must read as `unreadable`, not as "everyone is gone."**
-   Three call sites share the exact-match assumption and must all change together:
-   - [we:scripts/operations/dispatch-lane-io.mjs:326-347](scripts/operations/dispatch-lane-io.mjs) — `stampLiveness`.
-     Line **340** builds `listed` from `sessions.map((s) => String(s?.sessionId ?? '')).filter(Boolean)`; if
-     `sessions` is a non-empty array but `listed.size === 0` after that filter (every element lacked a usable id),
-     return the `unreadable` branch (currently we:scripts/operations/dispatch-lane-io.mjs lines **337-339**) instead
-     of falling through to line **342**'s `listed.has(...)` comparison, which stamps `live: false` on every row.
-   - [we:scripts/operations/wake.mjs:319-346](scripts/operations/wake.mjs) — `assertHandleNotLive`. Same shape:
-     `sessions` is checked for `Array.isArray` (we:scripts/operations/wake.mjs lines **334-339**) but never for
-     "parsed fine, yielded nothing matchable" before the `.some()` compare at line **340**. A non-empty-but-unmatchable
-     listing must throw the same "could not be told" refusal as the not-an-array branch, not fall
-     through to "not listed, therefore safe to close out."
-   - [we:scripts/operations/dispatch-lane-io.mjs:753-825](scripts/operations/dispatch-lane-io.mjs) —
-     `createDispatchObservers`. Line **811**'s `sessions.find((s) => s && String(s.sessionId) === handle)` has the
-     same hole; a non-empty, no-match listing must report an observer error (like the `!Array.isArray` throw at
-     lines **809-810** of we:scripts/operations/dispatch-lane-io.mjs) rather than falling into the `unresolved`
-     branch at lines **819-824**.
-3. **Compare session ids case- and whitespace-tolerantly**, or state in each docblock why an exact match is
-   deliberate. All the exact-match sites above
-   (we:scripts/operations/dispatch-lane-io.mjs lines 340/342 and 811, we:scripts/operations/wake.mjs line 340)
-   currently do `String(x) === handle`; normalize both sides (e.g. `.trim().toLowerCase()`) before comparing,
-   since a CLI that echoes the id in a different case turns every dispatch into a double-dispatch under the
-   current exact match.
-4. **Age `live: false` from `lastSeenLiveAt`, not `startedAt`.** `dispatchStillHolds`
-   ([we:scripts/operations/dispatch-lane.mjs:344-374](scripts/operations/dispatch-lane.mjs), the `entry?.live ===
-   false` branch at lines **358-363**) currently has nothing but `startedAt` plus the listing grace
-   to decide how long a `live:false` reading is trusted. Persist a `lastSeenLiveAt` timestamp on the run's
-   effect entry the first time a listing read confirms `live: true` for it (the natural write point is wherever
-   the observer or the guard read next stamps the entry back to the run store), and use that field — falling back
-   to `startedAt` only when it was never set — as the anchor for the listing-grace comparison. This means a single
-   bad read right after a real "seen alive" cannot release the item; two consecutive bad reads, spaced by the
-   grace window, can.
-5. **Give the guard its own listing grace, larger than the observer's.** Today both readers share one constant:
-   `DISPATCH_LISTING_GRACE_MINUTES = 2` at [we:scripts/operations/dispatch-lane.mjs:131](scripts/operations/dispatch-lane.mjs),
-   consumed directly as the guard's default (`listingGraceMinutes = DISPATCH_LISTING_GRACE_MINUTES` at
-   we:scripts/operations/dispatch-lane.mjs line **347**, re-read at line **360**) and re-derived as
-   `LISTING_GRACE_MS` for the observer at
-   [we:scripts/operations/dispatch-lane-io.mjs:115](scripts/operations/dispatch-lane-io.mjs). Their costs of being
-   wrong differ by roughly 100x: the observer's wrong answer (`unresolved`) writes nothing, while the guard's
-   wrong answer starts a second agent in the same lane clone. Add a distinct, larger constant (e.g.
-   `DISPATCH_GUARD_LISTING_GRACE_MINUTES`) and pass it as `dispatchStillHolds`'s default for `listingGraceMinutes`
-   instead of reusing the observer's constant, with a docblock stating why the two differ.
-
-   *(Note the docblock at we:scripts/operations/dispatch-lane.mjs:129 argues the opposite — that the observer
-   should derive from this constant "rather than carrying a second number that could drift from it." That
-   reasoning is sound for drift and wrong for asymmetric cost. Whichever way this lands, the docblock has to
-   change with it; do not leave it asserting a rule the code no longer follows.)*
+Nothing was dropped. This card no longer touches `we:scripts/operations/` at all.
 
 ## Interfaces (absorbed from #3147)
 
@@ -278,6 +266,11 @@ that fork: what it asks the skill to do IS the ruling's direction. The runner sp
 
 ## Not in scope (absorbed from #3147)
 
+**Added by the 2026-08-26 split, and named first because it is the largest thing this card no longer does:**
+everything under `we:scripts/operations/` — the five liveness hardenings and the first live dispatch. That is
+#x3gvcun. This card touches **exactly one file**, `we:skills-src/conveyor/SKILL.md`; a diff here that reaches
+into `scripts/operations/` has crossed the split seam.
+
 The three other spawn sites in the skill, enumerated from the file rather than named as a range: **§3c** (fix
 dispatch, line 521), **§3c-ci** (CI-heal, from line 584) and **§3e** (drive a cleared decision, line 680).
 They are separate prose sites, and `dispatch-lane` cannot launch two of their kinds at all — `spawnFixes` and
@@ -293,13 +286,19 @@ than from the file. Carried here so the same mistake is not made a third time.)*
 
 ## Acceptance
 
-The conveyor dispatches builds **and prepare-scope launches** only through the declared operation, one live
-dispatch has been observed end to end (agent started, handle recorded, run resumable after a restart), the
-scope-lease arbitration has been exercised by that live agent's own `acquire`, the SKILL no longer instructs a
-hand-rolled `Agent` spawn for either, and the five liveness-reading hardenings above are landed and each
-covered by a test that reddens when the fix is reverted.
+The conveyor dispatches builds **and prepare-scope launches** only through the declared operation, and the
+SKILL no longer instructs a hand-rolled `Agent` spawn for either. Both steps move together — a half-migration
+leaves two dispatch mechanisms live inside one skill for the SAME kind of work, which is worse than either end
+state.
 
-## Done when (absorbed from #3147 — counts RE-RUN at `origin/main` `9f9cb310`, not copied)
+**The live run and the liveness hardenings are NOT part of this card's acceptance any more** — they are
+#x3gvcun's, and this card is `blockedBy` it, so they will already have landed when this one is claimed.
+
+## Done when (absorbed from #3147 — counts RE-RUN at `origin/main` `c8d92db7` on 2026-08-26, not copied)
+
+Criteria 4 and 5 of the pre-split list (the live dispatch, and the mutation tests for the five hardenings)
+moved to #x3gvcun with the work. What remains is the skill half, and **all three code criteria below fail
+today** — re-run at `c8d92db7`, the counts are unchanged from `9f9cb310`:
 
 1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits inside **both**
    step 3 and step 3b. Counted, not assumed — run from the repo root:
@@ -335,15 +334,8 @@ covered by a test that reddens when the fix is reverted.
 
 3. **Mutation** — restoring either step's prose reddens case 2 by name, and the count returns to 3.
 
-4. **Executable** — a live dispatch through the operation records a run entry whose handle is found again by
-   `stampLiveness`, and the run resumes after the dispatching process is killed. This is the clause reassigned
-   from #3037 above; it is the one criterion here that cannot be met without actually starting an agent, and it
-   should not be attempted before `#3331`'s probe answers.
-
-5. **Mutation** — each of the five hardenings has a test that reddens when the fix is reverted, including the
-   one that matters most: a non-empty `claude agents --json` listing yielding zero usable ids must read as
-   `unreadable` and NOT release the guard.
-
-6. `npm run check:standards` — no new errors and no new warnings against the baseline measured at build time.
-   (Do not hard-code a number. It was 1 error / 1436 warnings at `9f9cb310` on 2026-08-26, and it moves most
-   days; the one error there is a pre-existing stranded-hash card unrelated to this item.)
+4. `npm run check:standards` — no new errors and no new warnings against the baseline measured at build time.
+   (Do not hard-code a number. It was **1 error / 1438 warnings** at `c8d92db7` on 2026-08-26 — measured twice,
+   identical both runs — and it moves most days; the one error there is the pre-existing stranded-hash card
+   `backlog/x10eju0-*.md`, unrelated to this item. Run it **twice** and compare: the loader is
+   non-deterministic in the presence of any malformed card.)
