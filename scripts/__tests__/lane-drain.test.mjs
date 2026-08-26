@@ -14,6 +14,7 @@ import {
   CONVERGENCE_LOOP_DEFAULT_ENABLED, REQUIRED_CHECK_FAIL_CONCLUSIONS,
 } from '../lane-drain.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
+import { resolveVerifyOptions, verifyGateDecision } from '../lib/lane-verify.mjs';
 
 const queued = (...nums) => ({ queued: nums.map((n) => ({ num: String(n).padStart(3, '0'), at: null })) });
 
@@ -90,7 +91,7 @@ describe('lane-drain planDrain (#2172 / #2162)', () => {
 describe('lane-drain buildPrLandArgs (#2172)', () => {
   it('builds a WE (primary) pr-land call — no --repo, --json by default', () => {
     expect(buildPrLandArgs({ ref: 'lane/2172-we' }))
-      .toEqual(['scripts/pr-land.mjs', '--ref=lane/2172-we', '--json']);
+      .toEqual(['scripts/pr-land.mjs', '--ref=lane/2172-we', '--json', '--no-require-verified']);
   });
   it('adds --repo for a non-primary repo and forwards a body file + dry-run', () => {
     const args = buildPrLandArgs({ ref: 'lane/x-fui', repoPath: '/home/u/workspace/frontierui', bodyFile: '/tmp/b.md', dryRun: true });
@@ -98,6 +99,56 @@ describe('lane-drain buildPrLandArgs (#2172)', () => {
     expect(args).toContain('--body-file=/tmp/b.md');
     expect(args).toContain('--dry-run');
     expect(args[0]).toBe('scripts/pr-land.mjs');
+  });
+
+  // #3321 — the argv MUST carry the verification opt-out, on every repo shape. The drain lands WE from the
+  // PRIMARY checkout while the lane it lands is a separate clone, so the lane's `.git/.lane-verify` marker is
+  // structurally unreachable from the git dir pr-land reads. #3321 made `requireVerified` default TRUE, so a
+  // flag-free argv here is a gate that can only ever fail — every queued couple would land on `unverified`.
+  it('carries --no-require-verified on every repo shape (#3321 — the drain is the CI-gated caller)', () => {
+    for (const args of [
+      buildPrLandArgs({ ref: 'lane/3321-we' }),
+      buildPrLandArgs({ ref: 'lane/3321-fui', repoPath: '/home/u/workspace/frontierui' }),
+      buildPrLandArgs({ ref: 'lane/3321-we', bodyFile: '/tmp/b.md', dryRun: true }),
+    ]) expect(args).toContain('--no-require-verified');
+  });
+
+  // The coverage gap that let the wedge through review: no test crossed buildPrLandArgs INTO the gate it feeds,
+  // so the argv could be asserted "correct" while being fatal at run time. Parse the real argv with pr-land's own
+  // parser shape, resolve it, and run the gate on the marker state the drain ACTUALLY sees (absent — the lane's
+  // marker lives in another clone). This fails if the flag is dropped from the argv OR if the resolver stops
+  // honouring it.
+  it('the built argv, fed through pr-land\'s resolver, lets an ABSENT marker land (#3321 end-to-end)', () => {
+    const flags = {};
+    for (const a of buildPrLandArgs({ ref: 'lane/3321-we' })) {
+      const m = a.match(/^--([^=]+)(?:=(.*))?$/);
+      if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+    }
+    const opts = resolveVerifyOptions({ flags, env: {} });
+    expect(opts).toEqual({ requireVerified: false, breakGlass: false });
+
+    // The drain's real marker state: none, because the marker is in the lane clone, not the primary.
+    const gate = verifyGateDecision({ record: null, headSha: 'a'.repeat(40), requireVerified: opts.requireVerified, breakGlass: opts.breakGlass });
+    expect(gate.ok).toBe(true);
+    expect(gate.reason).toBe('untracked');
+
+    // ...and the SAME absent marker without the flag is exactly the wedge — proving the flag is load-bearing
+    // rather than decorative.
+    expect(verifyGateDecision({ record: null, headSha: 'a'.repeat(40) }))
+      .toMatchObject({ ok: false, reason: 'unverified' });
+  });
+
+  // The opt-out is the NARROW one, not the break-glass: a half-run verification the drain CAN see is still
+  // refused. If this ever passes, `--no-require-verified` has been widened into `WE_LAND_UNVERIFIED=1`.
+  it('the drain\'s opt-out still refuses a stalled/corrupt marker (#2833\'s stall stays caught)', () => {
+    const flags = { 'no-require-verified': true };
+    const { requireVerified } = resolveVerifyOptions({ flags, env: {} });
+    const head = 'a'.repeat(40);
+    const nowMs = 1_000_000;
+    expect(verifyGateDecision({ record: { sha: head, status: 'running', startedAt: new Date(nowMs).toISOString() }, headSha: head, nowMs, requireVerified }))
+      .toMatchObject({ ok: false, reason: 'verify-unfinished' });
+    expect(verifyGateDecision({ record: { corrupt: true }, headSha: head, requireVerified }))
+      .toMatchObject({ ok: false, reason: 'verify-corrupt' });
   });
 });
 

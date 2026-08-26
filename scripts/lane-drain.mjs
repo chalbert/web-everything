@@ -205,9 +205,25 @@ export function planDrain(manifest, queuedState) {
  * Build the `node scripts/pr-land.mjs …` argv for one repo's ref. Pure. `--no-ff` merge history is pr-land's
  * default; `--repo` is passed only for a non-primary (non-WE) repo (WE lands in the drain's cwd). A body
  * file (the #2170 dismissals PR body) is forwarded when supplied. `--json` so the drain reads the result.
+ *
+ * #3321 — `--no-require-verified` IS MANDATORY ON THIS ARGV, and it is not a weakening of that item's gate; it is
+ * the one call site that item's opt-out exists for. #3321 flipped `resolveVerifyOptions`'s default to "verification
+ * required", which is right for a lane session landing its OWN clone — the clone is where `verify-lane.mjs` writes
+ * `.git/.lane-verify`, so the marker is reachable and demanding it is meaningful. The drain is the opposite shape on
+ * BOTH counts, so a flag-free argv here is a gate that can only ever fail:
+ *   - it lands WE from the PRIMARY checkout (`DRAIN_REPOS.we.path = null` ⇒ cwd, above), and the lane it is landing
+ *     is a SEPARATE CLONE. A lane's `.git/.lane-verify` can therefore NEVER appear in the git dir pr-land reads, so
+ *     the marker is not merely missing-this-time but structurally unreachable — the gate would return `unverified`
+ *     for every queued couple, forever, and `reopenStrandedItem` would send each item back to `open`.
+ *   - the drain does not need it: the PR's required GitHub check is the per-repo landing authority (#1937, stated
+ *     on `DRAIN_REPOS` above), and a couple only reaches here already labelled `ready-to-merge` — i.e. green.
+ * This is exactly the "verifies elsewhere" caller #3321's opt-out was written for, and the standing #2833 contract
+ * ("the CI-gated drain / parallel-workflow paths verify via the required GitHub check") says so. It is the NARROW
+ * opt-out, never the `WE_LAND_UNVERIFIED=1` break-glass: a fresh `running` marker (the #2833 stall) and a corrupt
+ * marker still refuse under it, so a genuinely half-run verification is still caught here.
  */
 export function buildPrLandArgs({ ref, repoPath = null, bodyFile = null, dryRun = false } = {}) {
-  const args = ['scripts/pr-land.mjs', `--ref=${ref}`, '--json'];
+  const args = ['scripts/pr-land.mjs', `--ref=${ref}`, '--json', '--no-require-verified'];
   if (repoPath) args.push(`--repo=${repoPath}`);
   if (bodyFile) args.push(`--body-file=${bodyFile}`);
   if (dryRun) args.push('--dry-run');
