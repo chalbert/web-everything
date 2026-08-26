@@ -112,6 +112,41 @@ So the rule is stronger than filed: the discriminator is not "identical duration
 elapsed**, and the wrong action is not just "send a fixer" — it is "wait". A `startup_failure` needs a **re-run**,
 and grep finds no `gh run rerun` anywhere in `scripts/` or `skills-src/`.
 
+### 7 — Acceptance is not the end state: an accepted PR carrying `ci:failed` needs a HEAL, not a "done"
+
+The prototype loop printed `#1571 ACCEPTED … — landable` **twice** while that PR's required check was red. It
+reads the `review:accepted` label, runs its landability steps and stops; it never reads check state. A human
+looking at the checks is the only reason the red was found. Measured on `#1571` today: `review:accepted` **and**
+`ready-to-merge` **and** `ci:failed` all live at once, `mergeStateStatus: BLOCKED`. Its label timeline
+(`gh api .../issues/1571/timeline`) says how an honest accept ends up wrong — `review:accepted` `17:06:19Z`,
+`ready-to-merge` `17:07:05Z`, `ci:failed` `17:14:31Z`: the red landed **seven minutes after** the accept.
+
+Nothing in the tree retracts it. The drain's ci-lifecycle reconcile owns exactly
+`[checking, ci:failed, blocked]` (`we:scripts/merge-ai-prs.mjs:2793`) and touches no `review:*` label, and
+`:3583-3585` rules it outright — retracting an acceptance is *"a REVIEWER action"*,
+`we:scripts/review-set-label.mjs --to=changes`. So the red is stamped, the accept stands, and nothing is
+dispatched. The PR sits accepted and unlandable, and a loop that treats `accepted` as terminal reports it as
+finished every pass.
+
+The failure was real code, and specific. On `#1571`'s branch — not in this checkout, so no locus resolves here —
+`we:scripts/review-corpus/__tests__/mine-review-corpus.labels.test.mjs` (line 238 at head `61c76971`) calls
+`execFileSync('git', ['rev-parse', 'HEAD~1'])` in a `describe` body, so the suite dies at **collection** —
+`0 test`, `Failed Suites 1`, `fatal: ambiguous argument 'HEAD~1'`. It passes locally and *cannot* pass on CI:
+the `test-shard` job's checkout (`we:.github/workflows/ci.yml:86-89`) sets no `fetch-depth`, and that job's log
+for run `32992486174` shows the resulting fetch verbatim — `--depth=1`, one commit, so `HEAD~1` does not exist.
+Only `test-selection-measure` asks for full history (`we:.github/workflows/ci.yml:304-309`, `fetch-depth: 0`).
+The run is unambiguously a real red: eight jobs, one failing shard, 92 other test files green, and 4m34s of
+wall-clock (`17:09:40Z` → `17:14:14Z`).
+
+That is where rule 6 gets its counterpart, and `#1571` carries **both** shapes on one branch today: a
+`startup_failure` at `15:09:18Z` (run `32984219345`, zero jobs, `created_at == updated_at`) and this real red at
+`17:09:40Z` (run `32992486174`, eight jobs). `ci:failed` names a failing *conclusion*, never a cause —
+`startup_failure` is itself in `FAILING_CONCLUSIONS` (`we:scripts/operations/pr-status.mjs:96`), so a visible
+infra failure reduces to the same `red` as a broken test. Red therefore does not pick the action. Rule 6's
+zero-jobs test is the discriminator and must run first: zero jobs ⇒ `rerun-ci`; a job that ran and failed ⇒ heal,
+dispatch a fixer against the named failing check. An accepted PR is where getting this wrong costs most, because
+the loop's very next step is to call it done.
+
 ## Design constraints, not refusals
 
 - **The round cap must survive a restart**, or escalation means nothing. `NEGOTIATION_ROUND_CAP = 5`
@@ -211,6 +246,13 @@ converges nothing in production.
     - read the round count from the in-process tally → reddens case 8 only.
 12. `npm run check:standards` — 0 errors and no more than 1437 warnings, the base measured in this lane at filing
     time (3296 backlog items).
+13. **Executable — refusal 6 (an accepted PR that is red is not done).** `#1571`'s measured shape — `{ labels:
+    ['review:accepted','ready-to-merge','ci:failed'], checkState: 'red', mergeStateStatus: 'BLOCKED', failingRun:
+    { conclusion: 'failure', jobsTotal: 8, failedJobs: ['test-shard (2)'] } }` — returns exactly one action
+    `dispatch-fix` naming the failing check, and **no** terminal/landable result: `review:accepted` must never
+    short-circuit the check read. The result records that the acceptance is left standing here, because
+    retracting it is a reviewer action (`we:scripts/merge-ai-prs.mjs:3583-3585`). The **same** labels over case
+    6's zero-job startup fixture return `rerun-ci` and never `dispatch-fix` — the accept changes neither answer.
 
 ## Watch for
 
