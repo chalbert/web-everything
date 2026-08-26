@@ -175,13 +175,15 @@ agrees.)*
 
 ### The Fork 1 premise, re-read against live #3118
 
-**The round-6 cut of the paragraph above said `#3118`'s Fork 1 default was *"(a) … a WE-native in-process
-runner, and `we:scripts/operations/dispatch-lane-io.mjs` already shells `claude --bg` locally — no
-cross-process call into `plateau-app` anywhere in the file — so naming the operation in prose sits on the
-default side of the fork"*. **That is no longer #3118's default, and the sentence is retracted rather than
-edited away.** It was true at this branch's old merge base `60acbe5f`. It is false on the `main` this card
-lands on: PR #1565 (merged `b71595f9`) amended #3118, and at `origin/main` `e6db8cf5` its *Recommended path
-at a glance* row reads
+**The round-6 cut of the paragraph above read, verbatim at `13f2da58`:**
+
+> #3118's Fork 1 default (a) is a WE-native in-process runner, and `we:scripts/operations/dispatch-lane-io.mjs`
+> already shells `claude --bg` locally — no cross-process call into `plateau-app` anywhere in the file — so
+> naming the operation in prose sits on the default side of the fork and pre-empts neither branch
+
+**(a) is no longer #3118's default, and the sentence is retracted rather than edited away.** It was true at
+this branch's old merge base `60acbe5f`. It is false on the `main` this card lands on: PR #1565 (merged
+`b71595f9`) amended #3118, and at `origin/main` `e6db8cf5` its *Recommended path at a glance* row reads
 
 > **(c) call the existing `dispatch-lane` operation** — the declared operation that already starts agents
 > headlessly; the runner calls it per surfaced dispatch
