@@ -667,16 +667,18 @@ export const MANDATE_LENSES = Object.freeze({
   CORRECTNESS: 'correctness',
   SECURITY: 'security',
   // #3035 — DOES THE WRITING MATCH WHAT IT POINTS AT. Added on measured evidence, not taste. Counted over the
-  // replay corpus (`we:scripts/review-corpus/cases` — NOT ON `main` YET: it lands with PR #1571, the sibling
-  // slice of this same work; 92 cases across PRs #1456–#1567; re-counted 2026-08-26):
+  // replay corpus (`we:scripts/review-corpus/cases` — ON `main` since PR #1571, the sibling slice of this
+  // same work, merged 2026-08-26; 92 cases across PRs #1456–#1567; re-counted 2026-08-26. RETRACTED: this
+  // parenthetical used to read "NOT ON `main` YET: it lands with PR #1571" — true when written, stale once
+  // #1571 merged):
   // 86 cases carry a `correctness` row and the juror ACCEPTED 79 of them, while the operator recorded `changes`
   // on 37 of the 92. The number that matters is the cross-tab, which needs no subtraction: in 27 cases the
   // correctness juror accepted and the operator bounced anyway — an operator raising something no lens was
   // looking for. Nearly all of it was one class — a citation, count, grep literal or claimed change that does
   // not hold against the thing it names. `correctness` does not cover it (the code is fine; the PROSE about the
   // code is wrong), and the deterministic-gate attempt at the class caught 5 of 39 confirmed labels (12.8%,
-  // `node we:scripts/review-corpus/replay-gates.mjs`, lands with #1571) — of which only 3 survived
-  // hand-inspection — which is the evidence it needs judgment rather than a lint.
+  // `node we:scripts/review-corpus/replay-gates.mjs`, runnable on `main` since #1571 merged) — of which only
+  // 3 survived hand-inspection — which is the evidence it needs judgment rather than a lint.
   //
   // RETRACTED — this comment used to read *"across PRs #1428–#1567 the correctness juror accepted 80 of 86 lens
   // rows, yet 30 of 84 verdicts recorded `changes`, so roughly 24 bounces were an operator raising something no
@@ -702,23 +704,33 @@ export const ADVISORY_LENSES = Object.freeze([
   // `we:docs/agent/platform-decisions.md#claim-accuracy-advisory-blocks-on-impact`. It is NOT here because
   // #2310's criterion ("a genuine invariant with no other backstop") failed: the deterministic backstop for
   // this class was measured at 5 of 39 confirmed labels — 12.8%, of which 3 survived hand-inspection (`node
-  // we:scripts/review-corpus/replay-gates.mjs`; RETRACTED: this line used to say "caught 3 of 13", a
-  // population the replay does not report) — so on that criterion alone it would qualify. It is advisory for
-  // a STRUCTURAL reason: this lens judges the writing ABOUT the repo, so its finding population is dominated
-  // by low-impact prose BY CONSTRUCTION, and mandatory means unanimity — a wrong figure in a paragraph
-  // nobody depends on would stop a land. That is review PERMISSION scaling with a signal (#2563 clause 1).
-  // The argument does not improve if the lens does; do not re-open it on hit-rate evidence.
+  // we:scripts/review-corpus/replay-gates.mjs`, RUNNABLE ON `main` since PR #1571 merged 2026-08-26;
+  // re-run 2026-08-26 and it still prints `recall over all confirmed labels: 5/39 = 12.8%` over 92 cases.
+  // RETRACTED: this line used to say "caught 3 of 13", a population the replay does not report) — so on
+  // that criterion alone it would qualify. It is advisory for a STRUCTURAL reason: this lens judges the
+  // writing ABOUT the repo, so its finding population is dominated by low-impact prose BY CONSTRUCTION, and
+  // mandatory means unanimity — a wrong figure in a paragraph nobody depends on would stop a land. That is
+  // review PERMISSION scaling with a signal — the same principle #2563 clause 1 applies to SCORED signals
+  // (blast-radius, size, dismissed-findings, cross-repo, sampling), EXTENDED here to a lens's mandate, which
+  // is not a scored signal (RETRACTED: this line used to say "(#2563 clause 1)" as a bare cite and the
+  // statute said clause 1 "already forbids" it — it does not reach a lens's mandate; the argument stands on
+  // its own). The argument does not improve if the lens does; do not re-open it on hit-rate evidence.
   //
-  // WHAT BLOCKS INSTEAD IS `impact`, NOT THE LENS: a claim-accuracy finding at `PREVENTION_IMPACT_BAR`
-  // (`broken`) or above blocks; below it advises. A wrong acceptance criterion or a wrong `file:line` a card
-  // directs work to is `broken`; a wrong figure no criterion depends on is `cosmetic`. Deliberately the
-  // EXISTING typed field — a sometimes-blocking advisory lens is "mandatory with extra steps" unless the
-  // sub-class is typed rather than reviewer discretion.
+  // WHAT BLOCKS INSTEAD IS `impactIfUnfixed`, NOT THE LENS: a claim-accuracy finding at
+  // `PREVENTION_IMPACT_BAR` (`broken`) or above blocks; below it advises. A wrong acceptance criterion or a
+  // wrong `file:line` a card directs work to is `broken`; a wrong figure no criterion depends on is
+  // `cosmetic`. Deliberately the EXISTING typed field — a sometimes-blocking advisory lens is "mandatory
+  // with extra steps" unless the sub-class is typed rather than reviewer discretion. (RETRACTED: this
+  // paragraph used to name the field `impact`. There is no `impact` field on a finding — it is
+  // `impactIfUnfixed`, the `@property` at the top of this file and the key `blocksAcceptance` reads.)
   //
   // NOT YET WIRED: `derivePanelVerdict` blocks on an advisory lens's findings only for RESOLVED ones owing an
   // uncaptured guard, so an OUTSTANDING above-bar finding still rides the accept — this lens therefore
   // behaves as plain advisory until `#x38ergj` adds that scan behind an explicit one-member
-  // `BLOCKING_ADVISORY_LENSES`. Generalizing the bar to every advisory lens is a separate call (`#x2iwy8f`).
+  // `BLOCKING_ADVISORY_LENSES`. That scan must test IMPACT ALONE (outstanding + `impactIfUnfixed` at or above
+  // the bar, fail-closed on undeclared) — NOT `blocksAcceptance`, which short-circuits on
+  // `hasUncapturedPrevention` and so would let an above-bar finding whose guard is already captured, or which
+  // names none, ride the accept. Generalizing the bar to every advisory lens is a separate call (`#x2iwy8f`).
   // Nothing binds meanwhile regardless: `review-pr` runs ONE lens chosen by the caller, so the split only
   // starts binding when the panel (`we:scripts/lib/judge-panel.mjs`, #3050) is wired.
   MANDATE_LENSES.CLAIM_ACCURACY,

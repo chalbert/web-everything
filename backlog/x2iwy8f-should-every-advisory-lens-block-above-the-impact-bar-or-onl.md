@@ -8,10 +8,10 @@ tags: []
 
 # Should every advisory lens block above the impact bar, or only claim-accuracy
 
-#3314 ruled that what blocks is `impact`, not the lens — but scoped the blocking set to `claim-accuracy`
+#3314 ruled that what blocks is impact, not the lens — but scoped the blocking set to `claim-accuracy`
 alone rather than take the general form. The general form is the obvious next question: if
-`impact >= broken` is the right reason to block a land, why does a `broken` finding from `simplicity` or
-`standards-conformance` ride the accept? Taking it would make the mandatory/advisory split of
+`impactIfUnfixed >= broken` is the right reason to block a land, why does a `broken` finding from
+`simplicity` or `standards-conformance` ride the accept? Taking it would make the mandatory/advisory split of
 [#2310](/backlog/2310/) largely redundant — the mandatory pair would become "lenses whose findings are
 usually above the bar" rather than a separate mechanism. Not prepared; not ready to rule.
 

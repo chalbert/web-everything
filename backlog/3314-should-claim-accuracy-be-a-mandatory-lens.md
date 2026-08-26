@@ -13,9 +13,9 @@ tags: []
 
 # Should claim-accuracy be a mandatory lens
 
-**Ruled 2026-08-26: no — it stays advisory, and what blocks is `impact`, not the lens.** A
+**Ruled 2026-08-26: no — it stays advisory, and what blocks is impact, not the lens.** A
 claim-accuracy finding declared `broken` or above blocks acceptance; everything below the bar advises and
-never blocks. The sub-class is the **existing** typed `impact` field (`IMPACT_LEVELS` in
+never blocks. The sub-class is the **existing** typed `impactIfUnfixed` field (`IMPACT_LEVELS` in
 `we:scripts/lib/jury-core.mjs`), not a new field and not reviewer discretion. **Nothing blocks yet** — the
 scan that makes an *outstanding* above-bar advisory finding block is `#x38ergj`; until it lands the lens is
 plain advisory. Codified as `#claim-accuracy-advisory-blocks-on-impact` in
@@ -44,14 +44,17 @@ prose.** That is not a claim about how the lens happened to behave on some sampl
 lens *is*. Its subject is the writing about the repo: card bodies, Done-when criteria, docs, agent-memory
 notes, code comments, PR descriptions. A lens pointed at prose will return mostly prose findings, and
 promoting it wholesale makes a wrong figure in a paragraph nobody depends on sufficient to stop a land.
-That contradicts the reviewer bar this constellation is converging on
+That runs against the reviewer bar this constellation is converging on
 ([#blast-radius-advisory-care-not-a-gate](/backlog/2563/)): review capacity scales, review *permission*
-does not.
+does not. **This is an extension of that principle, not a derivation from it** — #2563 clause 1 governs
+*scored signals* (blast-radius, size, dismissed-findings, cross-repo, sampling) and a lens's mandate is not
+one, so the anchor does not already forbid the promotion. It supplies the direction; the argument above
+carries the weight.
 
 The distinction that matters is therefore **not** which lens found it but **what shipping it costs** — which
 is already a first-class typed field, and already the thing every other blocking decision in the panel reads.
 
-## Why the sub-class is `impact`, not a new field
+## Why the sub-class is `impactIfUnfixed`, not a new field
 
 The skeptic's attack on (c) was *"an advisory lens whose findings sometimes block is a mandatory lens with
 extra steps"* — which holds unless the sub-class is definable without judgement. It is, and the definition
@@ -62,10 +65,20 @@ already exists. `IMPACT_GLOSS` maps the intended sub-class almost exactly:
 | a wrong acceptance criterion, a wrong `file:line` a card directs work to, a "this already handles X" that stops someone building X | `broken` — *"real work is lost, duplicated, or silently skipped — recoverable, but only by someone noticing"* |
 | a wrong figure in prose that no criterion depends on | `cosmetic` — *"nothing breaks; a later reader might be mildly misled"* |
 
-So the bar is `impact >= broken` (`PREVENTION_IMPACT_BAR`, the same constant the prevention guard already
-dials), requiring **zero** schema change. `impact` is enum-constrained, null-prototype, fail-loud and total —
-a level with no rank crashes the import rather than comparing as `undefined`. That is the "typed field, not
-discretion" condition the amendment demanded, met by reuse.
+So the bar is `impactIfUnfixed >= broken` (`PREVENTION_IMPACT_BAR`, the same constant the prevention guard
+already dials), requiring **zero** schema change. `impactIfUnfixed` is enum-constrained, null-prototype,
+fail-loud and total — a level with no rank crashes the import rather than comparing as `undefined`. That is
+the "typed field, not discretion" condition the amendment demanded, met by reuse.
+
+> **Retracted — the field name.** This section, the heading above it, the ruling line at the top of this
+> card, the anchor in `we:docs/agent/platform-decisions.md` and the `ADVISORY_LENSES` comment in
+> `we:scripts/lib/jury-core.mjs` all used to name the typed field **`` `impact` ``** — as in *"the right axis
+> is already typed, and it is `impact`"* and *"the bar is `impact >= broken`"*. **There is no `impact` field
+> on a finding.** The field is `impactIfUnfixed` (`we:scripts/lib/jury-core.mjs:53`, normalized at `:384`,
+> read by `blocksAcceptance` at `:532`); the named constants around it — `IMPACT_LEVELS`, `IMPACT_GLOSS`,
+> `PREVENTION_IMPACT_BAR`, `impactStrictness` — were and are correct. Fixed everywhere, because `#x38ergj`
+> asks a builder to read the level off a finding and the wrong name would not resolve. Where this card still
+> says *impact* unbackticked it means the axis, not a field.
 
 ## What still has to be built
 
@@ -75,6 +88,16 @@ fires only for **resolved** findings owing an uncaptured guard; an *outstanding*
 accept at any impact. So this ruling is not a constant move — it needs one more scan, filed as **`#x38ergj`**.
 Until that lands, "ruled (c)" behaves on disk exactly like (b), which is why the two-stage wording above is
 part of the ruling rather than a note on it.
+
+**That new scan must NOT reuse `blocksAcceptance`, and the ruling means it.** `blocksAcceptance`
+(`we:scripts/lib/jury-core.mjs:530`) opens with `if (!hasUncapturedPrevention(finding)) return false;` — it
+is a *prevention* predicate that consults impact, not an impact predicate. Reusing it would let this card's
+own worked example through: a juror finds a card's Done-when cites a `file:line` that does not exist,
+declares `impactIfUnfixed: 'broken'`, names "the `check:standards` locus gate" as the prevention and sets
+`preventionCaptured: true` because that gate already exists — captured guard, so `blocksAcceptance` returns
+`false` and an above-bar finding rides the accept. The bar this ruling states is **unconditional on
+prevention**: outstanding + `impactIfUnfixed >= PREVENTION_IMPACT_BAR`, fail-closed on undeclared. `#x38ergj`
+carries that predicate verbatim and a Done-when case pinning the `preventionCaptured: true` path.
 
 The blocking set is kept **explicit** (`claim-accuracy` only), not generalized to every advisory lens.
 Whether `simplicity` and `standards-conformance` should block above the same bar is a larger call this item
