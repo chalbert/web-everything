@@ -13,15 +13,23 @@
  *
  * ```js
  * export const reviewPr = op('review-pr', {
- *   input:       { pr: 'number', reason: { type: 'string', required: false } },
+ *   input:       { pr: 'number', aim: { type: 'string', required: false },
+ *                  reason: { type: 'string', required: false, atConfirm: true } },
  *   verdictFrom: 'panel',                                   // optional: which step's finding IS the verdict
  *   diff:    compute({ reads: ['input.pr'],       fn: (v) => … }),
  *   panel:   judge({   reads: ['findings.diff'],  request: (v) => ({ mandate, input, shape }) }),
  *   humanOk: confirm({ reads: ['verdict'], asks: 'Accept this verdict?', of: 'operator',
  *                      options: ['accept', 'changes'] }),
- *   record:  effect({  reads: ['verdict'],        effects: (v) => [{ type: 'ledger.append', payload: v }] }),
+ *   record:  effect({  reads: ['verdict', 'input.reason'],
+ *                      effects: (v) => [{ type: 'ledger.append', payload: v }] }),
  * });
  * ```
+ *
+ * RETRACTED — this example used to show `reason: { type: 'string', required: false }`, an ORDINARY optional
+ * input. That was wrong, and it was the shape PR #1569 shipped and PR #1572 had to undo: an ordinary input can
+ * only ride the initial call, and a reason for overriding the juror is only knowable AFTER the juror returns.
+ * The `atConfirm: true` marker above is what makes it suppliable at the moment it is decided — see
+ * {@link normalizeInputSchema}.
  *
  * Step ORDER is the object's key order — JavaScript preserves insertion order for string keys, so the
  * declaration reads top-to-bottom as the run executes. `input` and `verdictFrom` are the ONLY reserved keys;
@@ -91,9 +99,31 @@ function isPlainObject(v) {
  * Only `string` and `number` may carry one — a closed set of objects/arrays is a schema, not an enum, and
  * pretending otherwise would invite deep-equality membership tests the CLI's `--flag=value` parse cannot serve.
  *
+ * `atConfirm` — WHEN THE FIELD IS SUPPLIED, not what it holds (#3035). An ordinary input field may ride exactly
+ * one call: the one that STARTS the run. That is the right rule for everything that describes the SUBJECT (which
+ * PR, which lens, which aim) — all of it is known before a step has run. It is the wrong rule for a value that
+ * qualifies a DECISION, because the decision does not exist until the run has suspended and asked for it. The
+ * field this marker was built for is `review-pr`'s `reason`: it says why an operator is overriding the juror, and
+ * nobody can know an override is needed until `judge` has returned. Shipped as an ordinary input (PR #1569) the
+ * flag was reachable ONLY before the fact it describes existed — `--resume` refuses input flags, correctly, since
+ * the run record already holds them — so the guard that reads it could never be satisfied on the one path that
+ * binds it.
+ *
+ * WHAT THE MARKER BUYS, and why it is here rather than in the adapter. The field stays a declared input, so a
+ * step may name it in `reads` and `projectReads` will hand it over — that is the whole point, and it is exactly
+ * what an adapter-only "control flag" could not give (the second bug PR #1572 fixed: the flag parsed, merged onto
+ * the run record, and was then stripped by `projectReads` because the declaration did not name it). What changes
+ * is WHEN it may be supplied: {@link validateInput} refuses it at start, and the CLI adapter accepts it only
+ * alongside a `--answer`, merging it onto the run record there.
+ *
+ * It therefore cannot be `required` (nothing supplies it at the moment `required` is checked) and cannot carry a
+ * `default` (a default is written at start, which would silently satisfy the very guard the field exists to feed
+ * — a reasonless override wearing a canned reason). Both are refused below.
+ *
  * @param {object|undefined} schema
  * @param {string} name - operation name, for error text.
- * @returns {Readonly<Record<string, {type: string, required: boolean, default: *, enum: (readonly *[]|null)}>>}
+ * @returns {Readonly<Record<string, {type: string, required: boolean, default: *, enum: (readonly *[]|null),
+ *                                    atConfirm: boolean}>>}
  */
 export function normalizeInputSchema(schema, name = '<anonymous>') {
   if (schema == null) return Object.freeze({});
@@ -115,6 +145,23 @@ export function normalizeInputSchema(schema, name = '<anonymous>') {
     if (required && s.default !== undefined) {
       throw new TypeError(`operations: \`${name}\` — input field \`${field}\` is required and cannot also carry a \`default\``);
     }
+    if (s.atConfirm !== undefined && typeof s.atConfirm !== 'boolean') {
+      throw new TypeError(`operations: \`${name}\` — input field \`${field}\`'s \`atConfirm\` must be a boolean`);
+    }
+    const atConfirm = s.atConfirm === true;
+    if (atConfirm && required) {
+      throw new TypeError(
+        `operations: \`${name}\` — input field \`${field}\` is \`atConfirm\` and cannot also be \`required\`: `
+        + 'nothing can supply it at the moment `required` is checked, so every run would die on its own schema.',
+      );
+    }
+    if (atConfirm && s.default !== undefined) {
+      throw new TypeError(
+        `operations: \`${name}\` — input field \`${field}\` is \`atConfirm\` and cannot carry a \`default\`: the `
+        + 'default would be written at START, so a step that reads the field to check whether the operator said '
+        + 'anything would read the canned answer instead of nothing.',
+      );
+    }
     const members = normalizeEnum(s.enum, name, field, s.type);
     if (members && s.default !== undefined && !members.includes(s.default)) {
       throw new TypeError(
@@ -123,7 +170,7 @@ export function normalizeInputSchema(schema, name = '<anonymous>') {
         + 'dies on its own schema.',
       );
     }
-    out[field] = Object.freeze({ type: s.type, required, default: s.default, enum: members });
+    out[field] = Object.freeze({ type: s.type, required, default: s.default, enum: members, atConfirm });
   }
   return Object.freeze(out);
 }
@@ -168,6 +215,12 @@ function typeOf(value) {
  * Validate a run's input against a normalized schema. FAILS CLOSED in both directions: a missing required
  * field AND an **unknown** field are both errors, so a caller can never smuggle state past the declaration.
  *
+ * THIS IS THE START GATE, AND ONLY THE START GATE. `startRun` is its one caller, so "may this value be here"
+ * is asked exactly once, at the moment the run record is minted. That is why an `atConfirm` field (see
+ * {@link normalizeInputSchema}) is REFUSED here rather than ignored: the field is legal on the record and
+ * illegal at this instant, and a caller that passes it at start has mistaken a decision for a subject. The
+ * adapter writes it onto the record later, at the confirm, where it belongs.
+ *
  * @param {object} schema - a normalized schema from {@link normalizeInputSchema}.
  * @param {object} input
  * @returns {{ok: boolean, value: object, errors: string[]}}
@@ -183,6 +236,16 @@ export function validateInput(schema, input) {
     if (given === undefined) {
       if (spec.required) errors.push(`missing required input field \`${field}\` (${spec.type})`);
       else if (spec.default !== undefined) value[field] = spec.default;
+      continue;
+    }
+    // A CONFIRM-TIME FIELD AT START IS A REFUSAL, not a silent pass-through. It carries a value that qualifies
+    // a decision no step has reached yet, so accepting it here would record an answer to an unasked question.
+    if (spec.atConfirm) {
+      errors.push(
+        `input field \`${field}\` is supplied at confirm time, not at start — pass it alongside the answer it `
+        + 'qualifies (the CLI spells that `--resume=<run-id> --answer=<option> --'
+        + `${field}=<value>\`), not on the call that starts the run.`,
+      );
       continue;
     }
     const actual = typeOf(given);

@@ -336,9 +336,17 @@ export function renderJudgeInput(read) {
  * claim of disagreement where there was none. The reason is the operator's, but the *disagreement* is a fact
  * about two verdicts, and only this predicate may assert it.
  *
- * It is the GENERAL form of the reasonless-bounce refusal in `record`: that guard binds `changes` over zero
- * juror findings, and zero findings is exactly `deriveVerdict`'s `accept`, so every case it refuses is a case
- * this returns true for. `abstain` writes nothing at all, so it can never be an override.
+ * WHAT IT IS *NOT*: co-extensive with the reasonless-bounce refusal in `record`. RETRACTED — this docblock used
+ * to claim *"zero findings is exactly `deriveVerdict`'s `accept`, so every case it refuses is a case this returns
+ * true for."* That is false, and the two predicates ask genuinely different questions:
+ *   - `record`'s guard binds on the JUROR'S FINDING COUNT being zero;
+ *   - this binds on the JUROR'S VERDICT.
+ * `deriveVerdict` returns `needs-human` on `humanRequired` BEFORE it looks at findings at all, and
+ * `prevention-outstanding` on a finding that blocks acceptance without earning a round. Either can come back
+ * with zero outstanding findings, so a `changes` there is refused without a reason (the author lane still has
+ * nothing to read) and is still NOT captioned an override — the juror did not say accept, so there is no
+ * disagreement to claim. That asymmetry is deliberate: the guard protects the AUTHOR, this predicate protects
+ * the RECORD. `abstain` writes nothing at all, so it can never be an override.
  *
  * @param {{verdict?: {verdict?: string}, answer?: string}} o the juror's verdict and the operator's answer.
  * @returns {boolean} true iff the operator's answer departs from what the juror's verdict called for.
@@ -472,9 +480,24 @@ export function reviewPrOperation({ readPr } = {}) {
       // juror only inside the mandate TEXT and inside a #2438 data fence — never a flag position in argv (the
       // `JUDGE_MODEL` note above is the general form of that property).
       aim: { type: 'string', required: false },
-      // (The `reason` field that carried this rationale is NOT an input — see `record`'s guard. It is a
-      //  CONFIRM-TIME control flag, because an override is only knowable after `judge` returns, and an
-      //  input flag may ride only the initial call. The counted evidence below is why the guard exists.)
+      // A CONFIRM-TIME INPUT (`atConfirm`, #3035) — a declared field of this operation, but one that rides the
+      // `--resume` that answers the confirm rather than the call that starts the run. Every other field here
+      // describes the SUBJECT and is known before a step has run; this one qualifies the operator's DECISION,
+      // which does not exist until `judge` has returned and `confirm` has asked. See `atConfirm` in
+      // `we:scripts/operations/registry.mjs` for the marker, and `record`'s `reads` below for the half that
+      // makes it visible to the step that needs it.
+      //
+      // RETRACTED, TWICE, because each attempt shipped and each was unreachable:
+      //   1. PR #1569 declared it `{ type: 'string', required: false }` — an ORDINARY input. `--resume` refuses
+      //      input flags (correctly: the run record already holds them), so the flag could only ride the
+      //      opening call, before the override it describes was knowable. The SKILL documented a command that
+      //      errored.
+      //   2. PR #1572's first attempt removed it from the schema entirely and made `--reason` an adapter
+      //      CONTROL flag, merged onto `run.input` at resume. That parsed — and `record` still never saw it,
+      //      because `projectReads` builds `view.input` from the leaves a step NAMES in `reads`, and a step may
+      //      only name a declared field. The comment that stood here read *"The `reason` field … is NOT an
+      //      input … It is a CONFIRM-TIME control flag"*; the second half was the bug and the first half was
+      //      the reason the bug could not be fixed without putting the field back.
       //
       // THE REASON THIS INPUT EXISTS. `confirm` records one of a closed answer set and nothing else, so an
       // operator who bounces a PR the juror ACCEPTED had no channel to say why. The write-up is composed from
@@ -483,23 +506,34 @@ export function reviewPrOperation({ readPr } = {}) {
       // lane was bounced with no stated reason. A bounce the author cannot act on buys another round by
       // construction, which is why this is the cheapest round to delete.
       //
-      // HOW OFTEN, COUNTED. Sweeping every structured verdict comment on PRs #1428–#1567 (108 of them, across
-      // 62 PRs; counted 2026-08-26 from the live comments, which is a wider population than the replay corpus,
-      // since the corpus drops a verdict whose net basis it cannot reconstruct):
-      //   - 45 recorded `changes`;
-      //   - 17 of those, across 8 PRs (#1556–#1567), recorded `changes` over ZERO juror findings — the exact
-      //     case the guard below refuses;
-      //   - 33, across 11 PRs (#1556–#1567), recorded `changes` while the juror's own verdict line read
-      //     "✅ pass — no blocking findings" — the wider set, since a `pass` can carry cosmetic findings.
+      // HOW OFTEN, COUNTED. Swept 2026-08-26 over PRs #1428–#1567 (140 PRs, 479 issue comments), matching the
+      // shape `renderVerdictWriteUp` emits and nothing else — the line `**Decision:** `x` — recorded by`:
+      //   - 106 structured verdict comments, across 59 PRs. None below #1456: the operation did not exist
+      //     yet, so the swept window is wider than the window that can contain a hit.
+      //   - 44 of the 106 recorded `changes`, across 15 PRs;
+      //   - 18 of those 44, across 8 PRs (#1556–#1567), recorded `changes` over `### Findings (0)` — ZERO
+      //     juror findings, the exact case the guard below refuses;
+      //   - 34, across 11 PRs (#1556–#1567), recorded `changes` under the juror's own verdict line
+      //     "✅ pass — no blocking findings" — the wider reading, since a `pass` can carry cosmetic findings.
       //
-      // RETRACTED — this comment used to read *"Across PRs #1428–#1567 that happened ELEVEN times."* Wrong on
-      // both halves. Eleven is the count of PRs in the wider set, not of occurrences (33), and neither set
-      // reaches below #1556, so quoting the range as #1428–#1567 implied 128 PRs of history that contain none
-      // of them. The corpus replay it cited does not support 11 either: it holds 13 such cases, because it
-      // sees fewer verdicts than the live sweep above.
+      // RETRACTED — every number in this block has been wrong at least once, so here is what it said and why
+      // each was wrong. All three corrections come from re-running the sweep, not from re-reading a card.
+      //   - *"Across PRs #1428–#1567 that happened ELEVEN times."* Eleven was the count of PRs in the WIDER
+      //     set, not of occurrences; and neither set reaches below #1556, so quoting the whole range implied
+      //     128 PRs of history that contain none of them.
+      //   - *"(108 of them, across 62 PRs) … 45 recorded `changes` … 17 of those … 33, across 11 PRs."* The
+      //     true figures are 106 / 59 / 44 / 18 / 34. The 108 came from a looser match that also swept up 7
+      //     HAND-WRITTEN operator comments carrying a `**Decision:**` line with no `— recorded by` — those are
+      //     an operator's prose, not this operation's output, and counting them inflated the denominator.
+      //   - *"The corpus replay it cited does not support 11 either: it holds 13 such cases"*, and the guard
+      //     below pointed a reader at `we:scripts/review-corpus/` for corroboration. THAT PATH DOES NOT EXIST
+      //     in this repo — `ls` finds no such directory and nothing under `we:scripts/` imports one — so the
+      //     figure was uncheckable and the citation sent the reader nowhere. Both are dropped rather than
+      //     re-derived: the live sweep above is the whole basis, and it is reproducible from `gh` alone.
       //
       // It is free text with no `enum` for the same reason `aim` is: stating a reason cannot be a closed
       // vocabulary. `record` REFUSES a reasonless override — see the guard there — so this is not advisory.
+      reason: { type: 'string', required: false, atConfirm: true },
       // Who the durable comment is attributed to. Free text, exactly like `review-set-label.mjs --actor`.
       actor: { type: 'string', required: false, default: 'operator' },
     },
@@ -626,7 +660,13 @@ export function reviewPrOperation({ readPr } = {}) {
     //     authority is NOT inert, so it must never precede the label it vouches for,
     //   3 reports to the operator last, when there is something true to report.
     record: effectStep({
-      reads: ['input.pr', 'input.repo', 'input.actor', 'verdict', 'findings.read', 'findings.confirm'],
+      // `input.reason` IS NAMED HERE OR THE GUARD BELOW CANNOT FIRE (PR #1572 round 5, the blocking finding).
+      // `projectReads` builds `view.input` from exactly these leaves — "an undeclared path is absent, so the
+      // declaration is the actual boundary" — so a `reason` sitting on the run record under a name this array
+      // omits is stripped before `effects` runs, and the guard refuses a correctly-supplied reason as though
+      // none had been given. RETRACTED: this array used to end `…, 'findings.confirm'],` with no
+      // `input.reason`, which made the entire feature unreachable through the documented CLI.
+      reads: ['input.pr', 'input.repo', 'input.actor', 'input.reason', 'verdict', 'findings.read', 'findings.confirm'],
       effects: (view) => {
         const answer = view.findings.confirm;
         // THE NON-MUTATING EXIT. The operator looked and chose not to record: zero effects, which the engine
@@ -664,9 +704,9 @@ export function reviewPrOperation({ readPr } = {}) {
             `review-pr.record: refusing to record \`changes\` on ${repo}#${pr} with no stated reason — the `
             + `\`${verdict.lens}\` juror returned 0 findings, so this is an OPERATOR OVERRIDE and the write-up `
             + 'would post "no blocking findings" above "Decision: `changes`". The author lane cannot act on '
-            + 'that, so it buys another round. Pass `--reason="<what must change>"`, or record `abstain` to '
-            + 'write nothing. (17 bounces across 8 PRs, #1556–#1567, were reasonless in exactly this way — see '
-            + 'the count and its retraction at the `reason` input above, and `we:scripts/review-corpus/`.)',
+            + 'that, so it buys another round. Pass `--reason="<what must change>"` on this same --resume, or '
+            + 'record `abstain` to write nothing. (18 bounces across 8 PRs, #1556–#1567, were reasonless in '
+            + 'exactly this way — see the counted sweep and its retractions at the `reason` input above.)',
           );
         }
 
