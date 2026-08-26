@@ -175,7 +175,8 @@ agrees.)*
 
 ### The Fork 1 premise, re-read against live #3118
 
-**The round-6 cut of the paragraph above read, verbatim at `13f2da58`:**
+**The round-6 cut of the paragraph above read as follows — `13f2da58`, card lines 150–152, quoted to the
+semicolon that closes the clause (line 152 continues *"; and"* into the second check, which still stands):**
 
 > #3118's Fork 1 default (a) is a WE-native in-process runner, and `we:scripts/operations/dispatch-lane-io.mjs`
 > already shells `claude --bg` locally — no cross-process call into `plateau-app` anywhere in the file — so
