@@ -144,9 +144,12 @@ const REVIEW_PENDING = 'review:pending';
 //
 // FOUR, NOT FIVE, AND ON PURPOSE (#3035). `jury-core.PANEL_LENSES` is five since `claim-accuracy` landed; this
 // literal stays at four. It is not a mirror that fell behind — it is this workflow's FAN-OUT WIDTH, and every
-// entry costs one fresh-context reviewer per parked PR per round. `claim-accuracy` is advisory pending its own
-// ruling, so spending a juror on it here would pre-empt that call by making it bind in the one loop that
-// actually spawns the panel. Widen this list when the promotion is ratified, not before.
+// entry costs one fresh-context reviewer per parked PR per round.
+//
+// THE OLD TRIGGER IS SPENT — do not widen on it. This used to read "widen when the promotion is ratified".
+// #3314 ruled 2026-08-26 and the answer was `claim-accuracy` **advisory on merit**, so that promotion will
+// never come. Fan-out WIDTH was not what #3314 ruled: the two seated advisories argue by parity for seating
+// this one, at the cost of a juror per parked PR per round. See #3314's "What this does not settle".
 const LENSES = ['correctness', 'security', 'simplicity', 'standards-conformance'];
 const MANDATORY_LENSES = ['correctness', 'security'];
 
