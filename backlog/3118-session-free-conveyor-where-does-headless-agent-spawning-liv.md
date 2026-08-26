@@ -118,8 +118,13 @@ one-source clause forbids; only one can be *the* path the runner calls.
    runner: give the brief selector and the session slug a `kind`, launch all three planned lists, and answer
    the one open question of what an unscoped prepare declares as its scope.
 
-**What (c) costs, stated rather than hidden.** It makes this decision depend on #3165 landing first, where
-(a) depends on nothing.
+**What (c) costs, stated rather than hidden.** Two things, where (a) depends on nothing:
+
+1. It makes this decision depend on #3165 landing first (the five-kind coverage gap above).
+2. It inherits `dispatch-lane`'s **unproven handle assumption** — and, if the measurement recorded below
+   holds, an open defect in the observer that has to be closed before the conveyor can trust it. See the
+   retraction under the probe table; this cost was **wrongly described as already-handled** in the first cut
+   of this amendment.
 
 **The steer question this fork turned on has been PROBED, and it does not decide the fork.** An earlier
 version of this section said (c) inherits the `claude --bg` backend rather than the ratified five-verb
@@ -133,7 +138,7 @@ Measured 2026-08-25 rather than reasoned about — a detached `--bg` agent, stop
 | --- | --- |
 | spawn detached, stop the session | — |
 | `claude --resume <sessionId>` with new instructions | the agent answered with the sentinel planted before the stop — **context preserved** |
-| `--session-id` on a `--bg` spawn | **ignored**; the real id must be read back from `claude agents --json` |
+| `--session-id` on a `--bg` spawn | **ignored** in this one manual run — no test defends it either way. If it holds, reading the real id back from `claude agents --json` is work that **does not exist yet** (see the retraction below) |
 
 So steering IS reachable through the `--bg` backend — as stop-then-resume rather than as a `steer(text)`
 write to a live stdin. That is a coarser verb, not a missing capability, and it costs one extra round trip
@@ -146,9 +151,45 @@ per steer. Two consequences for this fork:
 2. **The remaining cost of (c) is latency and granularity, not capability**, which is a much weaker reason to
    stand up a second agent-spawning implementation.
 
-The second row is a live constraint on (c) regardless of the fork: a dispatcher that pins a session id and
-expects the background process to honour it is pinning a value the CLI discards, so the handle must be
-recovered from the listing. `we:scripts/operations/dispatch-lane-io.mjs`'s observer is where that lives.
+**RETRACTED 2026-08-25 (PR #1565 review, `correctness` lens).** The first cut of this paragraph said, in
+full:
+
+> *"The second row is a live constraint on (c) regardless of the fork: a dispatcher that pins a session id
+> and expects the background process to honour it is pinning a value the CLI discards, so the handle must be
+> recovered from the listing. `we:scripts/operations/dispatch-lane-io.mjs`'s observer is where that lives."*
+
+The last sentence was **wrong**, and wrong in the direction that under-scopes the work: it read as
+*dispatch-lane already recovers the handle*, and nothing there does. The observer never re-derives an id
+from the listing. It compares against the very id the sink minted:
+
+- `createDispatchSinks` mints the handle itself — `const sessionId = String(mintSessionId())`
+  (`we:scripts/operations/dispatch-lane-io.mjs:555`) — and passes it to `buildAgentArgv`, which emits
+  `'--session-id', String(sessionId)` (`:618`).
+- `createDispatchObservers` then does `sessions.find((s) => s && String(s.sessionId) === handle)`
+  (`:735`), where `handle` is that same minted value read back off the run entry (`:690`).
+- The sink's own header says so in as many words: *"THE HANDLE IS MINTED, NOT DISCOVERED... the dispatcher
+  CHOOSES the id"* (`:507-514`).
+
+**The correction, and it is a finding rather than a wording fix.** If the measured row above holds — if
+`claude --bg` ignores `--session-id` — then that comparison at `:735` can never match a live session, and
+`dispatch-lane`'s observer reports every real dispatch as `unresolved` ("no longer listed") the moment the
+`LISTING_GRACE_MS` window (`:67`) closes. That is not a constraint (c) inherits already-handled; it is an
+open defect in the operation (c) proposes to call, and closing it is part of (c)'s cost alongside #3165.
+
+**How strongly the measurement is held.** Weakly, and it should stay that way until something defends it.
+No test in this repo starts a real `claude` process. The nearest one,
+`we:scripts/operations/__tests__/dispatch-lane.test.mjs:645` (*"pins the handle with --session-id instead of
+racing to discover it"*), asserts the **argv shape** and nothing about the CLI's response to it, and the
+sink's own comment concedes the path is *"NOT YET PROVEN LIVE... the argv below is asserted, the CLI's
+response to it is not"* (`:528`). So the honest reading of the row is: a one-off manual observation that
+**contradicts an assumption dispatch-lane is built on**, which makes settling it — a live end-to-end
+dispatch, per the `#xaibmeu` pointer the same comment gives — a prerequisite of routing the conveyor
+through (c), not a detail to note in passing.
+
+*Prevention for the generator, filed rather than promised:* **#x17op72** — every name in the retracted
+sentence grepped clean, so the existing name-resolution discipline could not have caught it. The clause it
+adds to the `correctness` lens is that an "already handles this" claim must line-cite the code doing the
+handling.
 
 ```js
 // Fork 1 (a) — we:scripts/conveyor/agent-runner.mjs, a near-mechanical port of
