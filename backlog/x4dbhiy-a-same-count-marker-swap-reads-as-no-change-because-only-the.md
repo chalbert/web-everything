@@ -59,15 +59,16 @@ Measured on the real case rather than argued, and pinned to two commits rather t
 Running `findNonBatchableMarkers` over the **item body** of `backlog/3238-…md` — frontmatter stripped, which
 is what the loader passes it — at `60acbe5f`, a `main` commit predating PR #1556's merge, and at that PR's
 **merged head** `74c1c9f0`. Run against the raw file instead and every line below shifts by that file's
-frontmatter length (8 lines at the base, 19 at the head), which is why the input is named. The marker sets
-are fenced because this card would otherwise trip the very lint it is about:
+frontmatter length (8 lines on the pre-merge side, 19 at the merged head), which is why the input is named.
+The marker sets are fenced because this card would otherwise trip the very lint it is about, and each side is
+labelled by its sha rather than by a role word, for the reason the third retraction below gives:
 
 ```text
-base 60acbe5f  [{"line":4,"marker":"unverified prerequisite"}]
-head 74c1c9f0  [{"line":21,"marker":"unverified prerequisite"},
-                {"line":36,"marker":"not batchable"},
-                {"line":39,"marker":"unverified prerequisite"},
-                {"line":127,"marker":"unverified prerequisite"}]
+60acbe5f (pre-merge `main`)   [{"line":4,"marker":"unverified prerequisite"}]
+74c1c9f0 (#1556's head)       [{"line":21,"marker":"unverified prerequisite"},
+                               {"line":36,"marker":"not batchable"},
+                               {"line":39,"marker":"unverified prerequisite"},
+                               {"line":127,"marker":"unverified prerequisite"}]
 ```
 
 One warning on each side. The set turned over completely; the number a body would quote did not move.
@@ -109,11 +110,29 @@ e6db8cf5  [{"line":4,"marker":"unverified prerequisite"}]
 
 *This is the third distinct wrong* **(sha, role)** *pair in this PR, after `5289202` and `ee6e5a98`, and the
 first whose role word is* **merge-base** *rather than* **head**. *Traced in git, not recalled:*
-`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` *returns exactly* `6954693e` — *the round-5 commit that
-corrected `5289202` wrote this pair and the `ee6e5a98` pair together. Round 6 then corrected `ee6e5a98` in
-all three of its places and left this one standing two lines above the paragraph it was editing. That is
-precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected claim, and why its
-role-word list names* merge-base *alongside* head.*)*
+`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` *ends at* `6954693e` — *its oldest entry, the round-5 commit
+that introduced the string and wrote this pair and the `ee6e5a98` pair together. Round 6 then corrected
+`ee6e5a98` in all three of its places and left this one standing two lines above the paragraph it was
+editing. That is precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected
+claim, and why its role-word list names* merge-base *alongside* head.*)*
+
+*(Retracted, not deleted — a third time, on the same block, and the reason the fence above is now labelled by
+sha. The marker-set fence read* `base 60acbe5f` *and* `head 74c1c9f0` *from round 5 until this round.* ***The
+`base` label was wrong***, *and wrong in exactly the way this file has now been wrong three times: a role
+word beside a sha for a PR named two lines above it.* `gh pr view 1556 --json baseRefOid` *returns*
+`e9aa38f6`, *not* `60acbe5f`, *so a reader who resolved the label instead of reading the sha measured a
+different tree — the failure* `x3v6tn6` *is filed for, and* base *is a role word its list already names. The
+adjacent* `head 74c1c9f0` *label was correct —* `headRefOid` *is* `74c1c9f0` — *which is why only one of the
+two lines was false.*
+
+*This is the* **fourth** *distinct wrong* **(sha, role)** *pair in this PR, and the second on this sha:*
+`60acbe5f` *as* base *here, and as* merge-base *in the two prose places corrected one retraction above.*
+`git log -S'base 60acbe5f' -- 'backlog/x4dbhiy*'` *ends at* `6954693e` *as well — the same commit wrote the
+fenced label and the prose label together. Round 6 swept for* head*, round 7 swept for* merge-base*, and both
+swept prose: the fenced label carried a third role word inside a code block and survived both. That is the
+argument for a rule that resolves the* **role** *over an author who greps the word a review quoted, and it is
+why the pin never moved — the sets fenced above are identical at* `e9aa38f6`, `e7ab2833`, `60acbe5f` *and*
+`e6db8cf5`, *as the block above this one measures.)*
 
 ## What it must not do
 
@@ -138,12 +157,12 @@ A pure function in `we:scripts/check-standards-rules.mjs` over two `Map<itemId, 
 
 ## Done when
 
-1. **Executable** — the two marker sets fenced above, base against head, report exactly the markers `#3238`
-   gained and nothing removed. That pair is the real file either side of PR #1556 — `60acbe5f`, a `main`
-   commit predating that PR's merge, against its merged head `74c1c9f0` — measured, not constructed, and
-   pinned to commit ids so the fixture cannot rot as `main` moves under it. Which pre-merge commit is used
-   does not matter: `e9aa38f6`, `e7ab2833`, `60acbe5f` and `e6db8cf5` all return the same single hit, so this
-   criterion never depended on the role label retracted above.
+1. **Executable** — the two marker sets fenced above, pre-merge against merged head, report exactly the
+   markers `#3238` gained and nothing removed. That pair is the real file either side of PR #1556 —
+   `60acbe5f`, a `main` commit predating that PR's merge, against its merged head `74c1c9f0` — measured, not
+   constructed, and pinned to commit ids so the fixture cannot rot as `main` moves under it. Which pre-merge
+   commit is used does not matter: `e9aa38f6`, `e7ab2833`, `60acbe5f` and `e6db8cf5` all return the same
+   single hit, so this criterion never depended on either of the role labels retracted above.
 2. **Executable** — a swap that leaves the count flat is still reported: base `{A: [x]}` against head
    `{B: [x]}` reports one removal on `A` and one addition on `B`. This is the case the aggregate cannot see
    and the whole reason for the item.

@@ -44,8 +44,8 @@ for. `5289202` and `ee6e5a98` share no string, so the second instance carries no
 class is the wrong sha in the same **role**, and only resolving the role finds it.
 
 **The round that filed this card committed a third pair, and the review caught it rather than the author.**
-`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` returns exactly `6954693e` — the same commit that corrected
-`5289202` wrote *both* remaining pairs, and the round after it corrected `ee6e5a98` in all three of its
+`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` ends at `6954693e` — its oldest entry, the commit that corrected
+`5289202` and wrote *both* remaining pairs, and the round after it corrected `ee6e5a98` in all three of its
 places while leaving `60acbe5f` labelled *"PR #1556's merge-base"* two lines above the paragraph it was
 editing — `x4dbhiy` twice and the description once. `60acbe5f` is a `drain` commit on `main`:
 `baseRefOid` is `e9aa38f6`, the merge-base at the merged head is `e6db8cf5`, and at the pre-rebase head
@@ -53,11 +53,30 @@ editing — `x4dbhiy` twice and the description once. `60acbe5f` is a `drain` co
 — an author fixing one role word does not think to re-resolve a different one, and a rule that resolves the
 role finds both without being told which word to worry about.
 
+**The round that corrected that one missed a fourth, on the same sha, in the same file.** `x4dbhiy`'s
+marker-set fence was labelled `base 60acbe5f` / `head 74c1c9f0` from `6954693e` until round 8. `head` was
+right; `base` was not — `baseRefOid` resolves to `e9aa38f6`. Round 6 swept for *head*, round 7 swept for
+*merge-base*, and **both swept prose**: the third role word sat inside a fenced result block and neither
+grep for a quoted word reached it. Three consecutive rounds each fixed the instance a review quoted and left
+the next one standing a few lines away — at `87d5823d` the untouched `base` label sat six lines below the
+`merge-base` label round 7 rewrote.
+
 Counted under this card's own predicate — a sha sitting beside a role word for a **named** PR — one PR
-produced three pairs across **eight** places: `5289202` as *head* in `x4dbhiy` and the description (2),
+produced four pairs across **nine** places: `5289202` as *head* in `x4dbhiy` and the description (2),
 `ee6e5a98` as *head* in `xv92hju`, `xo5pueh` and the description (3), `60acbe5f` as *merge-base* in
-`x4dbhiy` twice and the description (3). 2 + 3 + 3 = 8. Two of the three pairs were written by the
-very commit that corrected the one before it. That is the case for a gate rather than a more careful author.
+`x4dbhiy` twice and the description (3), and `60acbe5f` as *base* in `x4dbhiy`'s fence (1).
+2 + 3 + 3 + 1 = 9. Three of the four pairs were written by the very commit that corrected the one before it.
+That is the case for a gate rather than a more careful author.
+
+*(Retracted, not deleted. This paragraph, written in round 7 (`1090ac22`) together with the same count in
+the PR description, said* **three** *pairs across* **eight** *places.* ***That undercounted by one pair and
+one place***, *and it undercounted in the direction the card is about: the missing pair is the one no prose
+grep could see. The card-side figures are re-read from git, not recalled.*
+`git show 87d5823d:backlog/x4dbhiy-….md | grep -n '60acbe5f'` *returns lines* **60**, **66** *and* **110**:
+*60 and 110 are the two* merge-base *places — 110 holds the sha and its role word ends the wrapped line 109
+above it — and 66 is the fenced* `base` *label. Three places on one sha in one file, and the round-7 fix
+reached two of them.)*
+
 (Anaphoric back-references — `xo5pueh`'s round-5 *"at the same head"*, twice — are not counted here: they
 carry no sha, so the predicate does not reach them. They still have to move when the label they point at
 moves, which is a reason the finding is reported against the label rather than each mention.)
@@ -74,9 +93,15 @@ testable. For a **merged** PR the answer is the merge commit's second parent, wh
 not the rule — owns that branch.
 
 **It must not flag a sha that is merely named.** *"measured at `60acbe5f`"*, *"landed in `14cd7c60`"*, a sha
-in a fenced command are orientation, not a claim about a role. Only a sha carrying a **role word** for a
-named PR — *head*, *tip*, *merge commit*, *base*, *merge-base* — is in scope. The role word is the
-predicate, not the hex.
+appearing as an **argument** in a fenced command are orientation, not a claim about a role. Only a sha
+carrying a **role word** for a named PR — *head*, *tip*, *merge commit*, *base*, *merge-base* — is in scope.
+The role word is the predicate, not the hex.
+
+**Being inside a fence is not itself a defence.** The scope above is the role word, so a fenced *label* — a
+role word standing beside a sha in a result block, as `x4dbhiy`'s `base 60acbe5f` did — is in scope, while a
+fenced *command* that merely passes the sha to `git` or `gh` is not. That distinction is the whole reason
+the fourth pair survived two rounds of grepping: it was a role word a reader reads as a claim and a grep for
+prose skipped as code.
 
 **It must not demand the pin change.** The fix for the motivating case was to correct the **label** and keep
 the sha, because the fixture was right. A rule that pushed the author toward re-pinning to the real head
@@ -101,19 +126,29 @@ this item; resolving `#N` + role to a sha is the caller's.
    commit rather than the head — reports none. The pin was never the defect.
 3. **Executable** — a sha named with no role word (*"measured at `60acbe5f`"*, a sha inside a fenced
    command) reports none, so the rule does not fire on ordinary pinning.
-4. **Executable** — **this card's own body reports none**, and so does `x4dbhiy`'s corrected retraction.
-   Both still contain a sha beside *"#1556's head"*, because both quote the wrong label to retract it. Taken
-   from the real files, not constructed.
+4. **Executable** — **this card's own body reports none**, and so do `x4dbhiy`'s corrected retractions.
+   Both files still carry a sha beside *"#1556's head"* and beside `base`, because both quote the wrong
+   labels in order to retract them. Taken from the real files, not constructed.
 5. **Executable** — a **second role word**, on real input, at the head this card was filed from:
    `x4dbhiy`'s round-6 line 60, *"at PR #1556's **merge-base** `60acbe5f` and at its **merged head**
    `74c1c9f0`"*, against a resolver answering `e6db8cf5` for `{pr: 1556, role: 'merge-base'}` and `74c1c9f0`
    for `{pr: 1556, role: 'head'}`, reports **exactly one** finding — on the `merge-base` half, not the
-   `head` half, which is correct in the same sentence. This is the instance the round-6 review caught: it
+   `head` half, which is correct in the same sentence. This is the instance the round-7 review caught: it
    sits **outside** the retraction that case 4 covers, so case 4 alone does not reach it. Its corrected form
    — *"at `60acbe5f`, a `main` commit predating PR #1556's merge"* — reports none, because no role word is
    claimed for the PR.
-6. **Mutation** — dropping the role-word predicate reddens case 3 by name; hard-coding the role word to
-   *head* reddens case 5 and nothing else; dropping the retraction negation reddens case 4 and nothing else;
-   comparing on the *label text* instead of the resolved sha reddens case 1, where the sha is a real commit
-   on the right branch.
-7. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
+6. **Executable** — a **third role word, inside a fence**, on real input: `x4dbhiy`'s round-7 marker-set
+   block, whose two label lines read `base 60acbe5f` and `head 74c1c9f0` under a paragraph naming PR #1556,
+   against a resolver answering `e9aa38f6` for `{pr: 1556, role: 'base'}` and `74c1c9f0` for
+   `{pr: 1556, role: 'head'}`, reports **exactly one** finding — on the `base` line, not the `head` line,
+   which is correct. Its round-8 corrected form, the same block with the sides labelled `60acbe5f (pre-merge
+   main)` and `74c1c9f0 (#1556's head)`, reports **none**: the surviving role claim resolves true and the
+   other side no longer claims a role. This is the case that says a fenced label is a claim — cases 1 and 5
+   are both prose, so a rule that skipped fenced text would stay green on every other case here and still
+   miss this one.
+7. **Mutation** — dropping the role-word predicate reddens case 3 by name; hard-coding the role word to
+   *head* reddens case 5 and nothing else; hard-coding it to *head* **or** *merge-base* reddens case 6 and
+   nothing else; skipping fenced text reddens case 6 and nothing else; dropping the retraction negation
+   reddens case 4 and nothing else; comparing on the *label text* instead of the resolved sha reddens case 1,
+   where the sha is a real commit on the right branch.
+8. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
