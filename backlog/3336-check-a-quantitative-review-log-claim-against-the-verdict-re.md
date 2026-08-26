@@ -20,4 +20,23 @@ Adjacent but not this: #3314 asks whether `claim-accuracy` should be mandatory �
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run review-log-claims -t "#3336" | grep -qE "Tests +[0-9]+ passed"` passes on
+   this branch and fails on `origin/main`, where neither `we:scripts/lib/review-log-claims.mjs` nor its suite
+   exists and vitest finds no test file at all.
+2. **The author's command exists** — `node we:scripts/lib/review-log-claims.mjs derive <pr>...` prints, per
+   PR, the recorded review rounds with each round's decision, finding count (and per-category breakdown), net
+   changed file count and lens, read from `gh pr view <n> --json comments`. Re-stamps and `review:human`
+   clearances are listed separately and are **not** counted as rounds.
+3. **A written figure can be pinned to the record** — a claim MARKED as
+   `<!-- claim: rounds(1572)=5 -->` is verified by `node we:scripts/lib/review-log-claims.mjs check <card>`,
+   which exits 1 when the record contradicts the figure *or* when the marker has drifted from the number in
+   the sentence it annotates.
+4. **It fires on nothing it was not asked to check** — run over every `we:backlog/`, `we:docs/agent/` and
+   `we:AGENTS.md` markdown file in the tree (3344 files) it reports `0` markers, `0` errors. Nothing is
+   sniffed out of prose.
+
+**Deliberately not checked**, so the boundary is on the record: durations and spend; whether a finding is
+right; comparisons, adjectives and universal quantifiers; distributive claims ("one round *each*" — multiple
+PR arguments sum, so mark each row separately); and a zero-count under a named category, which is *refused*
+rather than answered because a free-text category cannot distinguish "no such finding" from "tagged
+differently" — the exact shape of this entry's own *"no test finding at all"*.
