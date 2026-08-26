@@ -401,6 +401,18 @@ export function decideHoldReadyStrip(verdictLabel, currentLabels, { labelApplied
   return { held, strip };
 }
 
+/**
+ * #3342 — build the flags for the #2331 producer locus-prefix sweep. `--root` is the load-bearing one: this
+ * script resolves the linter off its OWN location, and the linter used to sweep whatever clone it was found
+ * in. pr-land almost always runs from the PRIMARY checkout against a LANE clone (`--repo=<lane>`), so the
+ * range named a commit the primary had never fetched, git exited 128, and the sweep was skipped — with a
+ * reassuring "CI still backstops it" — on essentially every lane-opened PR. Passing the repo we are landing
+ * FROM points the sweep at the clone that actually holds the commits. Pure — returns the argv tail.
+ */
+export function buildLocusLintArgs({ root, range } = {}) {
+  return [`--root=${root}`, `--range=${range}`];
+}
+
 /** Build the argv for the post-land id-collision heal (#2071). Passes `--onto-ref=<pre-merge-main sha>` when
  *  known (#2213): the files already published on the branch being landed ONTO are immutable keepers, so the
  *  INCOMING lane's newly-created file is the only legitimate yielder. WITHOUT it the heal yields the highest
@@ -672,7 +684,7 @@ function runCli() {
     emit({
       repo: REPO, merged: false, reason: 'dry-run', ref: REF, base: BASE, method: METHOD,
       plan: [
-        `node scripts/lint-locus-prefix.mjs --range=${REMOTE}/${BASE}..${refSha}   # #2331 producer locus-prefix re-check (fail fast on the #2170 review-append leak) — CI is not the first to catch it`,
+        `node scripts/lint-locus-prefix.mjs ${buildLocusLintArgs({ root: REPO, range: `${REMOTE}/${BASE}..${refSha}` }).join(' ')}   # #2331 producer locus-prefix re-check (fail fast on the #2170 review-append leak) — swept in --root, the clone holding the commits (#3342)`,
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         prCreateBodyGuard(BODY).ok ? `gh ${createArgs.join(' ')}` : `REFUSE (if no PR exists yet): ${prCreateBodyGuard(BODY).reason}  # #2332 fail-fast — an existing PR for this head is exempt`,
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)'
@@ -732,11 +744,23 @@ function runCli() {
   //     OWN committed corpus changes (${REMOTE}/${BASE}..SRC) before publishing, so the producer fails fast,
   //     never CI. A real leak (linter exit 2) is a hard stop; any other failure (git/node infra) is
   //     best-effort — CI still backstops it — never a false block.
+  //
+  //     #3342 — the sweep is anchored with `--root=REPO`, the clone being landed FROM. `LOCUS_LINT` resolves
+  //     off THIS script's location, and the linter used to read whichever clone it was found in; since
+  //     pr-land normally runs from the primary checkout against a lane clone, the range named a commit the
+  //     primary had never fetched and the sweep was skipped on essentially every lane-opened PR. It stays
+  //     NON-fatal when it cannot run (an unreachable base / missing git must not block a build that CI still
+  //     gates) — but no longer INVISIBLE: a completed sweep now says so on stderr, so "no line" means "did
+  //     not run" instead of being indistinguishable from a pass, and the skip line names the swept root.
   const LOCUS_LINT = resolve(fileURLToPath(new URL('./lint-locus-prefix.mjs', import.meta.url)));
-  try { execFileSync('node', [LOCUS_LINT, `--range=${REMOTE}/${BASE}..${refSha}`], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] }); }
+  const LOCUS_RANGE = `${REMOTE}/${BASE}..${refSha}`;
+  try {
+    execFileSync('node', [LOCUS_LINT, ...buildLocusLintArgs({ root: REPO, range: LOCUS_RANGE })], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] });
+    if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · locus-prefix range sweep ran and is clean (${LOCUS_RANGE})\n`);
+  }
   catch (e) {
     if (e && e.status === 2) emit({ repo: REPO, merged: false, reason: 'locus-prefix', detail: `bare code-path ref(s) without a <repo>: prefix in this lane's corpus changes (#883/#2331 — the #2170 review-append leak) — prefix them (e.g. "foo.ts" → "we:foo.ts"), \`git commit --amend\`, and re-run; refusing to open a PR CI would fail` }, 3);
-    if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · locus-prefix range sweep could not run (${String(e.message || e).split('\n')[0]}) — CI still backstops it\n`);
+    if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · locus-prefix range sweep DID NOT RUN over ${LOCUS_RANGE} in ${REPO} — this lane's corpus changes were NOT checked here (${String(e.message || e).split('\n')[0]}); CI still backstops it\n`);
   }
 
   // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.

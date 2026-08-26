@@ -20,6 +20,11 @@
  *     introduced by `cat >>` / heredoc body-appends that bypass the Edit/Write hooks entirely.
  *     `npm run lint:locus`.
  *   • `--all` — lint the whole backlog/ + reports/ corpus (CI / one-shot audit).
+ *   • `--range=<gitrange>` — the #2331 producer sweep (pr-land), see below.
+ *
+ * `--root=<path>` (#3342) picks the CLONE every sweep reads — git enumeration and the file reads both.
+ * Default: the clone this script lives in. `pr-land` must pass it, because it runs from the primary
+ * checkout while the commits it is landing exist only in a lane clone.
  *
  * Path match accepts BOTH absolute (hook) and relative (manual / staged) paths (#1389 — the
  * old `/(backlog|reports)/` required a leading slash, so a relative `backlog/x.md` no-op'd).
@@ -27,13 +32,26 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Absolute OR relative: anchor the corpus dir to a path start or a slash (#1389).
 const CORPUS_RE = /(?:^|\/)(?:backlog|reports)\/[^/]+\.md$/;
+
+// #3342 — WHICH CLONE THE SWEEP READS. Every sweep mode (git enumeration + the file reads) is anchored to
+// ONE root. It used to be `SCRIPT_ROOT` unconditionally — the clone this file happens to live in — which is
+// wrong for the only caller that matters: `pr-land` runs out of the PRIMARY checkout and lands a commit that
+// exists only in a LANE clone, so `--range=origin/main..<lane sha>` named a revision the primary had never
+// fetched, git exited 128, and the producer sweep was skipped on essentially every lane-opened PR. `--root=`
+// makes the target clone explicit and caller-chosen; with no flag the old script-relative default stands, so
+// the hook / `--staged` / `--all` call sites are unchanged.
+const argv = process.argv.slice(2);
+const rootFlag = argv.find((a) => a === '--root' || a.startsWith('--root='));
+const ROOT = rootFlag
+  ? resolve((rootFlag.includes('=') ? rootFlag.slice('--root='.length) : argv[argv.indexOf('--root') + 1]) || SCRIPT_ROOT)
+  : SCRIPT_ROOT;
 
 /** Read a repo file (path relative to root); null if unreadable (deleted/renamed away). */
 function readDoc(file) {
@@ -70,10 +88,23 @@ function stagedCorpusFiles() {
  *  gate ran, via a route the PostToolUse hook does not see — so the producer (pr-land) re-lints the lane's OWN
  *  committed corpus changes before opening the PR, catching a bare ref that would otherwise only go red in CI. */
 function rangeCorpusFiles(range) {
-  const out = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', range], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  });
+  let out;
+  try {
+    out = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', range], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    // #3342 — a range git cannot resolve IN THIS ROOT is the exact shape of the old bug (the commit lives in
+    // another clone). Exit 3, distinct from the 2 that means "found a bare ref", and NAME the root that was
+    // swept — the missing fact that let the failure read as noise for months.
+    process.stderr.write(
+      `locus-prefix: could not enumerate range "${range}" in ${ROOT} — nothing was linted (#3342; ` +
+        `pass --root=<the clone holding the commits>). git said: ${String(e?.stderr || e?.message || e).split('\n')[0]}\n`,
+    );
+    process.exit(3);
+  }
   return out.split('\n').map((s) => s.trim()).filter((f) => f && CORPUS_RE.test(f));
 }
 
@@ -83,8 +114,6 @@ function allCorpusFiles() {
     .filter((d) => existsSync(join(ROOT, d)))
     .flatMap((d) => readdirSync(join(ROOT, d)).filter((n) => n.endsWith('.md')).map((n) => `${d}/${n}`));
 }
-
-const argv = process.argv.slice(2);
 
 // ── Pre-write GATE — the PreToolUse(Edit|Write) path: scan the PROPOSED content, deny on a bare ref ──
 if (argv.includes('--pre')) {
@@ -129,6 +158,7 @@ if (argv.includes('--staged') || argv.includes('--all')) {
 // ── Range mode — the #2331 producer sweep: lint the corpus files a commit range changed ──────────
 // `--range=<gitrange>` (e.g. `--range=origin/main..HEAD`). pr-land runs this before opening the PR so the
 // #2170 review-append leak is caught by the producer, not CI. Clean range (no corpus change) → exit 0.
+// The range is read in `--root` (#3342) — the clone that HOLDS those commits — not in this script's clone.
 const rangeFlag = argv.find((a) => a === '--range' || a.startsWith('--range='));
 if (rangeFlag) {
   const range = rangeFlag.includes('=') ? rangeFlag.slice('--range='.length) : argv[argv.indexOf('--range') + 1];
