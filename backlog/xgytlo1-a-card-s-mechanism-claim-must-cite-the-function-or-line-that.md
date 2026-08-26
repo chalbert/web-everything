@@ -1,0 +1,66 @@
+---
+kind: story
+size: 3
+parent: "3318"
+status: open
+scope: ["we:scripts/review-corpus/gates.mjs"]
+dateOpened: "2026-08-26"
+tags: []
+---
+
+# A card's mechanism claim must cite the function or line that backs it
+
+A card that asserts "component X does Y by mechanism Z" and cites nothing costs a build round when Z turns out to be wrong: the builder greps for Z, finds the opposite, and either resolves the card as already-fixed or hardens an already-hardened path. Require the citation, and gate what can be gated.
+
+## Where this came from
+
+The OWED prevention on the confirmed correctness finding against
+[#1596](https://github.com/chalbert/web-everything/pull/1596). The `xvkn1jd` card in that PR opened with
+
+> pr-land derives the review label from GitHub's three-dot file list
+
+and concluded that *"the producer-side label derivation in `we:scripts/pr-land.mjs` did not get the same
+treatment"* as the review side. Both false, and the second exactly backwards: `we:scripts/pr-land.mjs:839`
+scores off a local `computeNetDiffSignals(...)`, and `resolveNetDiffBasis`
+(`we:scripts/merge-ai-prs.mjs:2060`) has narrowed the diff to `merge-base(origin/main, head)` since #2404,
+with a named regression test. The symptom the card described was real; the mechanism was invented.
+
+Neither the card's author nor its first reviewer caught it. It took a reviewer who went and read
+`we:scripts/pr-land.mjs`. **That reading is the whole check**, and today nothing asks for it.
+
+## What is gateable and what is not
+
+The juror's own framing was that no deterministic gate can verify a card's causal narrative against source,
+so the guard has to be a review convention. That is right about the *narrative* and too pessimistic about the
+*shape*. Two separable pieces:
+
+**Gateable — an uncited mechanism claim.** `citation-line-content`
+(`we:scripts/review-corpus/gates.mjs:406`) already checks that a `file:line` citation is consistent with the
+identifiers named around it. It only fires on citations that **exist**. The complementary detector is the
+missing one: a sentence that asserts a named repo module *does* something — "`X` derives / computes / reads /
+calls …" where `X` resolves to a real file in `scope:` or in the body — and carries no `file:line`, no
+function name, and no quoted source. That is a text shape, checkable without judgment.
+
+**Not gateable — whether the cited line actually says what the sentence claims.** That stays a review
+convention: whoever files or reviews a card checks the citation before the card is scoped to a fix. Write the
+convention down where reviewers will meet it rather than leaving it as folklore.
+
+The split matters because a gate that tried to judge the narrative would be exactly the failure the sibling
+card `xaevzg4` describes — a detector whose real aperture is invisible from its name.
+
+## Prior art in this PR
+
+All three cards `#1596` revised this round now carry `file:line` citations for every mechanism claim, and the
+retraction convention (quote the wrong sentence, then correct it) is already the repo's practice. This item is
+about making the first half checkable rather than remembered.
+
+## Done when
+
+1. **Executable** — a new gate in `we:scripts/review-corpus/gates.mjs`, registered in `GATES`, reports the
+   `xvkn1jd` card's original opening sentence (quoted above, naming `pr-land` with no citation) and reports
+   nothing on the revised card, which cites `we:scripts/pr-land.mjs:839`. Run through `runGates(text, { path,
+   read })` — the registry's real calling convention — so the gate is exercised as it will be in production.
+2. The replay harness (`we:scripts/review-corpus/replay-gates.mjs`) scores the new gate against the recorded
+   corpus, and the score is recorded on this card: a detector that fires on most existing cards is a warning,
+   not a hard failure, and that decision is part of the work rather than an afterthought.
+3. `npm run check:standards` — 0 errors.

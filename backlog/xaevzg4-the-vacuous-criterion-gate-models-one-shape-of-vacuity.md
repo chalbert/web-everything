@@ -26,9 +26,10 @@ if (!/^backlog\//.test(path || '') || typeof read !== 'function') return [];
 ```
 
 (`we:scripts/review-corpus/gates.mjs:270`.) Backlog cards are the **only** thing it runs against. Re-verified
-here by driving the gate's `fn` directly over both revisions of the #3319 card — the one carrying the vacuous
-criterion and the one that fixed it — with a `read` that resolves files at that same revision: **both return
-`[]`**. So the failure was never about direction.
+here by calling the gate as the registry does — `fn(text, { path, read })` — over both revisions of the #3319
+card, the one carrying the vacuous criterion and the one that fixed it, with a `read` resolving files at that
+same revision: **both return `[]`**. `runGates` over the whole eight-gate registry finds nothing on either
+revision. So the failure was never about direction.
 
 ## The real gap
 

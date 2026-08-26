@@ -38,8 +38,9 @@ source in this lane:
   `we:scripts/merge-ai-prs.mjs:2082` names it: *"a head that's behind an advanced base would otherwise have
   every upstream-only commit swept in as if the PR touched it"* (#2404). There is a named regression test at
   `we:scripts/__tests__/merge-ai-prs.test.mjs:1460`.
-- `scoreEscalation`'s statute term (`we:scripts/lib/review-escalation.mjs:571`) reads that merge-base-narrowed
-  `humanBasisFiles` (`we:scripts/lib/review-escalation.mjs:568`), not any GitHub file list.
+- The statute term inside `scoreEscalation` reads that merge-base-narrowed basis, not any GitHub file list:
+  `gateBasis` comes from `humanBasisFiles` at `we:scripts/lib/review-escalation.mjs:568`, and `statuteFiles`
+  filters it at `we:scripts/lib/review-escalation.mjs:571`.
 - The `gh pr view --json files` read the retracted text described exists ONLY in the drain's separate no-clone
   fallback, `we:scripts/merge-ai-prs.mjs:3298` — and the drain did not apply this label. #1595's timeline is
   `ready-to-merge` → `review:human` → `ready-to-merge` stripped within six seconds of open, the producer
@@ -63,10 +64,9 @@ ways against a pinned main tip (`7ef6d9e4`):
 | `merge-base(main, head)` = `08953e25` — what #2404 does | **3** — the three cards, no statute file |
 | `main` tip = `7ef6d9e4` — the fallback | **12**, including `we:docs/agent/platform-decisions.md` |
 
-`we:docs/agent/platform-decisions.md` is a statute path (`STATUTE_PATHS`,
-`we:scripts/lib/review-escalation.mjs:70`), and any statute touch forces `humanRequired`
-(`we:scripts/lib/review-escalation.mjs:574`). So the inflated basis — and **only** the inflated basis —
-reproduces the label that actually fired.
+That file is a statute path — `STATUTE_PATHS` at `we:scripts/lib/review-escalation.mjs:70`.
+Any statute touch forces `humanRequired` at `we:scripts/lib/review-escalation.mjs:574`.
+So the inflated basis — and **only** the inflated basis — reproduces the label that actually fired.
 
 ## The real mechanism
 
