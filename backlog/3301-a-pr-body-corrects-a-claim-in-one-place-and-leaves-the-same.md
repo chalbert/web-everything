@@ -1,4 +1,5 @@
 ---
+bornAs: xfgjxyf
 kind: story
 size: 2
 parent: "3029"
@@ -21,14 +22,14 @@ document contradicts itself, and a contradiction between two strings in one file
 about wording — which is the test for what belongs in a script rather than in a reviewer's attention.
 
 The correction sentence also hands over the quoted claim for free. Bodies in this repo retract by quoting —
-that convention is `x4ongaj`'s criterion 4 — so the retraction *contains* the text to search for. There is
+that convention is `3299`'s criterion 4 — so the retraction *contains* the text to search for. There is
 nothing to infer.
 
 ## What it must not do
 
 **It must not fire on the retraction itself.** The correction quotes the claim; that occurrence is the
 correction, not a survival of it. Only occurrences outside the retraction's own neighbourhood count. This is
-the same negation `x4ongaj` needs, applied to a different document, and getting it wrong turns the check into
+the same negation `3299` needs, applied to a different document, and getting it wrong turns the check into
 a penalty on the honest fix.
 
 **It must not try to decide whether the correction is correct.** Whether the new claim is true is a review
@@ -41,10 +42,10 @@ occurrence carrying its own retraction marker is clean.
 **It must not be mistaken for a check on the underlying claim.** Keying on the corrected claim's own string
 is what makes this rule free of judgment, and it is also its boundary: a body that fixes one instance of an
 error and commits the *same kind* of error with different text elsewhere passes clean. That happened inside
-this card's own PR — `x4dbhiy`'s *"#1556's head (`5289202`)"* was corrected while *"#1556's head
-`ee6e5a98`"* stood in two sibling cards, and the two share no string. `x3v6tn6` is filed for that class.
+this card's own PR — `3298`'s *"#1556's head (`5289202`)"* was corrected while *"#1556's head
+`ee6e5a98`"* stood in two sibling cards, and the two share no string. `3297` is filed for that class.
 *(Retracted, not deleted: this sentence used to say the correction was made* **in the very commit that
-wrote** *the second label. That per-commit attribution is withdrawn in full on* `x3v6tn6` — `git log -S`
+wrote** *the second label. That per-commit attribution is withdrawn in full on* `3297` — `git log -S`
 *counts removals as well as additions and cannot settle it. The two labels, and the fact that they share no
 string, are all this negation needs and are unchanged.)* Widening this rule to catch it would mean asking
 what a claim *means*, which is the line this card exists on the safe side of.
@@ -52,7 +53,7 @@ what a claim *means*, which is the line this card exists on the safe side of.
 ## Interfaces
 
 A pure function in `we:scripts/check-standards-rules.mjs` taking a body string and returning findings, with
-the retraction-marker vocabulary shared with `x4ongaj` rather than copied. Two copies of that phrase list
+the retraction-marker vocabulary shared with `3299` rather than copied. Two copies of that phrase list
 drifting apart would make one rule fire where the other negates.
 
 ## Done when

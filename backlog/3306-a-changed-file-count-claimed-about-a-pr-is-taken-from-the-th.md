@@ -1,4 +1,5 @@
 ---
+bornAs: xxfv35j
 kind: story
 size: 3
 parent: "3029"
@@ -36,7 +37,7 @@ exactly when the reader is least able to check it by eye.
 
 ## Why the direction matters
 
-A `changedFiles` set is the **denominator** of other checks — `x4ongaj` compares the ids a body claims
+A `changedFiles` set is the **denominator** of other checks — `3299` compares the ids a body claims
 against the `backlog/<id>-*.md` paths in the diff. Seeding that from the three-dot list adds cards the PR
 never touched, so a claim about a sibling lane's card silently passes. Over-counting the diff under-reports
 the finding.
@@ -53,12 +54,12 @@ already exists; a second implementation here would drift from the drain's and re
 
 **It must not demand the number be recomputed.** A claim that names the basis it was measured on
 (*"3 on the net basis"*, *"13 on `gh pr view`'s three-dot list"*) is the required form and must stay green.
-Anchored is honest; bare is not. This is `xo5pueh`'s rule for warning counts, applied to file counts.
+Anchored is honest; bare is not. This is `3304`'s rule for warning counts, applied to file counts.
 
 **It must not fire on a RETRACTION or a quoted fixture.** This card quotes *"13 changed files"* above in
-order to say it was wrong, and the card it is filed alongside — `x4ongaj` — carries a retraction that quotes
+order to say it was wrong, and the card it is filed alongside — `3299` — carries a retraction that quotes
 the same figure. Flagging the cards that document the defect is the false positive that gets the rule
-deleted. The same negation `x4ongaj` criterion 4, `xv92hju` criterion 4 and `xo5pueh` criterion 4 all need.
+deleted. The same negation `3299` criterion 4, `3305` criterion 4 and `3304` criterion 4 all need.
 
 ## Interfaces
 
@@ -75,7 +76,7 @@ filesystem, no git, no network — the input is text.
    preference: the defect is the missing methodology, not the number.
 3. **Executable** — a count of files with no PR reference nearby (a `scope:` length, *"this item touches two
    files"*) reports none, so the rule does not fire on ordinary prose.
-4. **Executable** — **this card's own body reports none**, and so does `x4ongaj`'s corrected criterion 1.
+4. **Executable** — **this card's own body reports none**, and so does `3299`'s corrected criterion 1.
    Both still contain *"13"* beside *"changed files"* and beside `#1556`, because both quote the wrong figure
    in order to retract it. Taken from the real files, not constructed.
 5. **Mutation** — dropping the basis-named exclusion reddens case 2; dropping the PR-reference predicate

@@ -1,4 +1,5 @@
 ---
+bornAs: x70498i
 kind: story
 size: 2
 parent: "3029"

@@ -1,4 +1,5 @@
 ---
+bornAs: x4ongaj
 kind: story
 size: 3
 parent: "3029"
@@ -86,7 +87,7 @@ is pure and testable without a network call. Wiring it to a PR context is the ca
    `3273`, `3277`–`3281` — reached `main` through #1558, #1562, #1565 or a `drain: JIT-number … at land`
    commit, not through #1556. So the undated sentence was thin, but the three-file set was correct then and
    is correct now; only the missing basis label needed adding. Sourcing `changedFiles` from `gh pr view` is
-   the exact over-count this rule's own denominator cannot afford, and `xxfv35j` is filed for it — owed by
+   the exact over-count this rule's own denominator cannot afford, and `3306` is filed for it — owed by
    the review that caught this retraction.)*
 2. **Executable** — the same body with `backlog/3160-*.md` added to `changedFiles` returns none. This is a
    **constructed** variant, not a replay: #1556's real correction changed the *body* and never touched its

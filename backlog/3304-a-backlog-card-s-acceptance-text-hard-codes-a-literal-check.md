@@ -1,4 +1,5 @@
 ---
+bornAs: xo5pueh
 kind: story
 size: 3
 parent: "3029"
@@ -31,7 +32,7 @@ Done-when 8, at `ee6e5a98` — the `prep r7` commit on #1556's branch, **not** i
 DW6 are already in the delta form and the `1435` literal survives only inside a retraction, which this card's
 own "must not fire on a RETRACTION" negation says must report **none**. A builder who resolved the label
 instead of the sha would have got the opposite of the stated expectation and concluded their rule was broken.
-`x3v6tn6` is filed for exactly this — owed by the review that caught it.)*
+`3297` is filed for exactly this — owed by the review that caught it.)*
 
 Two sibling cards prepared in the same PR, by the same author, in the same sitting, hard-coded **1435**
 anyway. A round-7 edit removed the literal from one card and left it in two — so the cluster ended up handing
@@ -64,7 +65,7 @@ the rule forbids the thing it is trying to encourage.
 named the tree it measured, so a reader can tell staleness from error. Anchored is honest; bare is not.
 
 **It must not fire on a RETRACTION or on a quoted fixture.** This card quotes `0-error / 1435-warning` above
-in order to say it was wrong, and this is the same negation `x4ongaj` criterion 4 and `xv92hju` criterion 4
+in order to say it was wrong, and this is the same negation `3299` criterion 4 and `3305` criterion 4
 both need. Flagging the card that documents the defect is the false positive that gets the rule deleted.
 
 ## Interfaces

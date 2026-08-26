@@ -1,4 +1,5 @@
 ---
+bornAs: x4dbhiy
 kind: story
 size: 3
 parent: "3029"
@@ -32,7 +33,7 @@ citation was never correct on any tree its author could have measured.*
 wrong** — `d898a879` is four file-touching commits later; it inherited 814 rather than establishing it, and
 it was named only because that walk sampled the last fifteen commits instead of all 81. The corrected claim
 above is from the full walk. This is the second wrong citation in the same paragraph, which is the argument
-for `xv92hju` — the citation-verification card owed by PR #1556 — checking a citation against the tree it
+for `3305` — the citation-verification card owed by PR #1556 — checking a citation against the tree it
 runs on rather than trying to date a drift.*
 
 *The same version added that `:812` lands* **"inside the `if (markerHits.length) {` guard"**. ***That was
@@ -49,7 +50,7 @@ files this card:*
 ```
 
 *Three wrong citations in one paragraph, each caught by a reviewer opening the file, is the whole argument
-for `xv92hju` reading the cited line rather than trusting prose about it.)*
+for `3305` reading the cited line rather than trusting prose about it.)*
 
 So an item with one marker and the same item with four produce **one** warning either way. The aggregate at
 `we:scripts/check-standards.mjs:2373` is a count of warnings, so a swap inside one item is invisible to it
@@ -77,7 +78,7 @@ One warning on each side. The set turned over completely; the number a body woul
 **"PR #1556's head (`5289202`)"**, and gave the fourth head-side hit at line **121**. All three are now
 wrong, and two of them were wrong the moment they were written. PR #1556 **merged** on 2026-08-26, so `main`
 now carries the head-side set — naming a branch as a fixture side made the card decay the instant its own
-subject landed, which is the failure `xo5pueh` is filed for, committed here in the card that measures it.
+subject landed, which is the failure `3304` is filed for, committed here in the card that measures it.
 `5289202` was an intermediate rebase commit, not the head that merged; at the real head `74c1c9f0` the
 fourth hit is at **127**, not 121. And the frontmatter figure "8 lines on `main`" now reads 19 on `main` for
 the same reason. Both sides are pinned to commit ids above so that a later reader measures what this card
@@ -97,7 +98,7 @@ git merge-base 60acbe5f 5289202         → e7ab2833   (18:33:10 — merge-base 
 *`60acbe5f` is none of those three. It is a `main` commit that landed* **between** *`e7ab2833` and
 `e6db8cf5` — an ancestor of `e6db8cf5`, and of neither of the other two.*
 
-*The* **pin stays**, *for the reason `x3v6tn6` states as a negation: the fixture was never the defect, and a
+*The* **pin stays**, *for the reason `3297` states as a negation: the fixture was never the defect, and a
 rule that pushed the author to re-pin would break a working one. Re-measured in this lane, the base-side
 result is identical at every candidate, so nothing the card asserts moves:*
 
@@ -111,7 +112,7 @@ e6db8cf5  [{"line":4,"marker":"unverified prerequisite"}]
 *This is the third distinct wrong* **(sha, role)** *pair in this PR, after `5289202` and `ee6e5a98`, and the
 first whose role word is* **merge-base** *rather than* **head**. *The round that corrected `ee6e5a98` in
 all three of its places left this one standing two lines above the paragraph it was editing. That is
-precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected claim, and why its
+precisely why `3297` resolves the* **role** *rather than string-matching a corrected claim, and why its
 role-word list names* merge-base *alongside* head.*)*
 
 *(Retracted, not deleted — a third time, on the same block, and the reason the fence above is now labelled by
@@ -119,7 +120,7 @@ sha. The marker-set fence read* `base 60acbe5f` *and* `head 74c1c9f0` *until thi
 `base` label was wrong***, *and wrong in exactly the way this file has now been wrong three times: a role
 word beside a sha for a PR named two lines above it.* `gh pr view 1556 --json baseRefOid` *returns*
 `e9aa38f6`, *not* `60acbe5f`, *so a reader who resolved the label instead of reading the sha measured a
-different tree — the failure* `x3v6tn6` *is filed for, and* base *is a role word its list already names. The
+different tree — the failure* `3297` *is filed for, and* base *is a role word its list already names. The
 adjacent* `head 74c1c9f0` *label was correct —* `headRefOid` *is* `74c1c9f0` — *which is why only one of the
 two lines was false.*
 
@@ -135,7 +136,7 @@ why the pin never moved — the sets fenced above are identical at* `e9aa38f6`, 
 `6954693e` *as the commit that wrote these labels, citing* `git log -S'60acbe5f'` *and*
 `git log -S'base 60acbe5f'`*. Both clauses are withdrawn:* `git log -S` *counts removals as well as
 additions, so the same command supported two incompatible readings in two different rounds. Withdrawn in
-full on* `x3v6tn6`, *which carries the reasoning. Nothing here rests on it — the wrong* **(sha, role)**
+full on* `3297`, *which carries the reasoning. Nothing here rests on it — the wrong* **(sha, role)**
 *pairs, their places and the corrections are all read from the files themselves and are unchanged.)*
 
 ## What it must not do

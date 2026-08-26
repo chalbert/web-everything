@@ -1,4 +1,5 @@
 ---
+bornAs: xnzi6hv
 kind: story
 size: 3
 parent: "3029"
@@ -31,7 +32,7 @@ what the author did not have was a re-run at the moment of the claim. A gate run
 read, not when it was written.
 
 That is the signature of work that belongs in a script: a set comparison whose sets are tedious to enumerate
-and trivial to enumerate mechanically. It is the review-layer sibling of `x4ongaj` — that one checks a body's
+and trivial to enumerate mechanically. It is the review-layer sibling of `3299` — that one checks a body's
 claim about a card against the diff; this one checks a body's claim about a *review* against the diff.
 
 ## What it must not do
@@ -42,21 +43,21 @@ it would be wrong. A self-disclaiming marker is out of the denominator, and reco
 match, not a judgment.
 
 **It must not guess which PRs are named.** The body says which PRs its claim covers. Ids not carrying the
-claim are out of scope, exactly as in `x4ongaj`.
+claim are out of scope, exactly as in `3299`.
 
 **It must not judge whether the filed card is the RIGHT card.** Whether a card actually prevents the thing
 its marker described is a review question. This asks only whether a card exists for each owed marker — the
-same line `x4ongaj` draws when it refuses to read `main`.
+same line `3299` draws when it refuses to read `main`.
 
 **It must not fire when the shortfall is disclosed.** A body that says a marker is knowingly deferred, and
-names where it is tracked, has not made a false claim. This is the same retraction-negation `x4ongaj`'s
+names where it is tracked, has not made a false claim. This is the same retraction-negation `3299`'s
 criterion 4 needs, and it is the same shape: the honest fix must not be punished.
 
 ## Interfaces
 
 A pure function in `we:scripts/check-standards-rules.mjs` taking `{ body, reviewComments, changedFiles }` and
 returning findings. Fetching the comments is the caller's job, so the rule stays testable without a network
-call — the same split `x4ongaj` uses.
+call — the same split `3299` uses.
 
 ## Done when
 

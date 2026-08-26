@@ -1,4 +1,5 @@
 ---
+bornAs: xv92hju
 kind: story
 size: 3
 parent: "3029"
@@ -13,7 +14,7 @@ tags: [prevention, gate, backlog, citation]
 
 # A backlog card cites a path:line, and the cited line no longer contains the token it quotes
 
-A backlog card can cite `path:line` beside a quoted snippet, and the line drifts as the file moves beneath it, so a reader who jumps to the citation lands on the wrong statement. Both halves already live on the card: the path, the line, and the token it quotes. Owed by two CONFIRMED findings on PR #1556, where `#3233` cited `:455` and `:487` for statements at 456 and 486, and by a third on PR #1563 itself, whose `x4dbhiy` cited `we:scripts/check-standards-rules.mjs:812` for a statement at 814. Ground truth is mechanical: read the cited line, look for the token.
+A backlog card can cite `path:line` beside a quoted snippet, and the line drifts as the file moves beneath it, so a reader who jumps to the citation lands on the wrong statement. Both halves already live on the card: the path, the line, and the token it quotes. Owed by two CONFIRMED findings on PR #1556, where `#3233` cited `:455` and `:487` for statements at 456 and 486, and by a third on PR #1563 itself, whose `3298` cited `we:scripts/check-standards-rules.mjs:812` for a statement at 814. Ground truth is mechanical: read the cited line, look for the token.
 
 ## Why a gate rather than a careful author
 
@@ -26,7 +27,7 @@ re-verified**, while the file it points into keeps moving. Two of the three even
 correctly elsewhere in the same card: `#3233` writes `:455`/`:487` in its Interfaces section and `:456`/`:486`
 in its Tasks section, four sections apart. Nothing compares them, because nothing reads either.
 
-**One correction to the record.** The review that raised this on PR #1563 called `x4dbhiy`'s `:812` a
+**One correction to the record.** The review that raised this on PR #1563 called `3298`'s `:812` a
 *"locator drift (main moved between when the card was authored and when it was measured here)"*. That is
 wrong, and the difference matters for what this card must do. Walking **all 81** commits that have touched
 `we:scripts/check-standards-rules.mjs`, `const markers = [...new Set(markerHits…` reached line **814** at
@@ -50,8 +51,8 @@ orientation pointer far more often than it quotes from it. Only a citation with 
 blockquote, an inline code span, a fenced line — is checkable. Everything else is out of the denominator,
 not a finding.
 
-**It must not fire on a RETRACTION.** This is the same negation `x4ongaj` criterion 4 needs, and this card's
-own motivating fix commits the pattern immediately: correcting `x4dbhiy` means **quoting `:812` in order to
+**It must not fire on a RETRACTION.** This is the same negation `3299` criterion 4 needs, and this card's
+own motivating fix commits the pattern immediately: correcting `3298` means **quoting `:812` in order to
 say it was wrong**, so the corrected card contains a citation whose line does not hold the token *by design*.
 A rule that flags the corrected card punishes the honest fix and rewards deleting the error silently. The
 predicate must be negated by a nearby retraction marker, and criterion 4 below is taken from the real
@@ -74,7 +75,7 @@ a filesystem.
 
 ## Done when
 
-1. **Executable** — `x4dbhiy`'s pre-fix citation — path `we:scripts/check-standards-rules.mjs`, line 812,
+1. **Executable** — `3298`'s pre-fix citation — path `we:scripts/check-standards-rules.mjs`, line 812,
    token `const markers = [...new Set(markerHits.map((h) => h.marker))]` — against the live file reports
    exactly one finding, and the finding names **814** as the line that does hold the token. Real input, from
    this card's own PR.
@@ -91,17 +92,17 @@ a filesystem.
    `ee6e5a98` is the intermediate `prep r7` commit, superseded by `6250a0a2` (`prep r9`) before this card was
    authored. The **pin is right and stays** — the fixture reproduces at `ee6e5a98`, verified — but the label
    moves the correct-citation half: at `74c1c9f0` those two lines are **279** and **284**, not 274 and 279,
-   because later prep rounds inserted text above them. This is the same error `x4dbhiy` retracts one round
+   because later prep rounds inserted text above them. This is the same error `3298` retracts one round
    earlier over `5289202` — corrected there, and left standing here. *(Retracted, not deleted: this clause
    used to read* **"written into this card in the same commit"**. *That per-commit attribution is withdrawn
-   in full on* `x3v6tn6`*;* `git log -S` *counts removals as well as additions and cannot settle it.)* It is
-   the `xfgjxyf` shape but not something `xfgjxyf` catches: that rule matches on the corrected claim's own
+   in full on* `3297`*;* `git log -S` *counts removals as well as additions and cannot settle it.)* It is
+   the `3301` shape but not something `3301` catches: that rule matches on the corrected claim's own
    string, and a
-   different sha carries none of it. `x3v6tn6` is filed for the head-label class itself, owed by the review
+   different sha carries none of it. `3297` is filed for the head-label class itself, owed by the review
    that caught this.)*
-4. **Executable** — **`x4dbhiy`'s ACTUAL corrected body reports none.** It still contains the string
+4. **Executable** — **`3298`'s ACTUAL corrected body reports none.** It still contains the string
    `we:scripts/check-standards-rules.mjs:812` beside the quoted token, because the fix quotes the wrong
-   citation to retract it. Taken from the real file, not constructed — the same requirement `x4ongaj`
+   citation to retract it. Taken from the real file, not constructed — the same requirement `3299`
    criterion 4 sets.
 5. **Executable** — a citation with no quoted token nearby reports none, and a `path:line-line` range whose
    quoted token falls anywhere inside the range reports none.
