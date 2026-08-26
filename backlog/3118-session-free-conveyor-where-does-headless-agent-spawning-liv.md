@@ -186,6 +186,19 @@ So steering IS reachable through the `--bg` backend — as stop-then-resume rath
 write to a live stdin. That is a coarser verb, not a missing capability, and it costs one extra round trip
 per steer. Two consequences for this fork:
 
+> **NARROWED 2026-08-26 (PR #1583 review).** *"Steering IS reachable"* is the **mechanism** being reachable,
+> not the conveyor being able to reach it. The third row of the same table is a **precondition** of the
+> second, and this paragraph originally read as though the two rows were independent findings, which was
+> **wrong**: `claude --resume` takes a session **id**, so if `--bg` discards `--session-id` the dispatcher has
+> no id to resume with. Read row 2 as *"resume preserves context once you can address the session"* — and row
+> 3 as the open question of whether it can. `#xhmktct` owns it; see the correction under
+> [THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation)'s reason 2.
+> The two consequences below still hold, but with the dependency named. Unlike (c), **(a) would not need
+> id-addressing at all** — it holds the live child in-process, so its `steer(text)` is a write to that child's
+> stdin (see (a) above). So a negative probe does not restore (a)'s *capability* advantage — `#xhmktct`'s
+> `Done when` #3 is a remedy, not a rebuild — but it does add a prerequisite to (c) that (a) does not carry,
+> which is why clause 3 revisits on it.
+
 1. **The pivot is gone.** "Does the conveyor need to steer?" no longer separates (a) from (c), because both
    can. What separates them is whether the conveyor needs to steer a *running* agent **without interrupting
    it** — and nothing in `we:scripts/conveyor/tick-core.mjs` plans anything of the kind. Its decisions are
@@ -448,24 +461,54 @@ existing `claude --bg` spawn **is that shape**. The argument was aimed at (b) an
 This is the reason the amendment's author wrote first, and it is the reason the ruling rests on: the card
 argued itself out of its own original default.
 
-**2. The steer question the fork originally turned on was PROBED, not argued.** An earlier version of this
-card made mid-flight steering the pivot — if the conveyor needs to steer, (a)'s richer
-`spawn/steer/stop/resume/observe` contract earns its second implementation. That was settled by measurement
-on 2026-08-25, not by reasoning: a detached `--bg` agent was stopped, then resumed with
-`claude --resume <sessionId>` and new instructions, and answered with a sentinel planted before the stop —
-**context preserved**. So "steer while keeping the work" is reachable under (c), as stop-then-resume rather
-than as a `steer(text)` write to a live stdin. That is a coarser verb, not a missing capability. The pivot
-the fork turned on is gone.
+**2. The steer question the fork originally turned on was PROBED, not argued — on one run, and that run cuts
+both ways.** An earlier version of this card made mid-flight steering the pivot — if the conveyor needs to
+steer, (a)'s richer `spawn/steer/stop/resume/observe` contract earns its second implementation. That was
+addressed by measurement on 2026-08-25, not by reasoning: a detached `--bg` agent was stopped, then resumed
+with `claude --resume <sessionId>` and new instructions, and answered with a sentinel planted before the
+stop — **context preserved, in that one run**. So "steer while keeping the work" is reachable under (c) *as a
+mechanism*, as stop-then-resume rather than as a `steer(text)` write to a live stdin. That is a coarser verb,
+not a missing capability, and the pivot the fork turned on is gone.
+
+> **CORRECTED 2026-08-26 (PR #1583 review, `correctness` lens, operator override).** The paragraph above
+> originally ended at *"**context preserved**. So 'steer while keeping the work' is reachable under (c)"* and
+> asserted it as settled fact. **That was wrong in one specific way, and the wrongness was an asymmetry
+> inside this card**: the very same manual run produced a second row — `--session-id` **ignored** on a `--bg`
+> spawn (the probe table above, third row) — which this card treats as untrustworthy, files `#xhmktct` over,
+> and demands be *"repeated at least three times"* before it is believed. Same table, same run, opposite
+> evidentiary standard.
+>
+> Worse than asymmetry, **the two rows are coupled and this card never said so**. `claude --resume` addresses
+> a session **by its id**. If `--bg` discards `--session-id`, the dispatcher does not know the id of the agent
+> it started, so it cannot resume it — and reading the real id back is, by this card's own probe-table note,
+> *"work that does not exist yet"*. So row 2 is reachable only if row 3 turns out false, or after `#xhmktct`'s
+> remedy is built. Re-verified at this branch's head `3447eb27`:
+> `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
+> `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**.
+>
+> **What is not retracted:** the operator's ruling that context-preserving stop-then-resume is a *sufficient*
+> requirement. That is a judgment call and it stands. What is corrected is the separate **factual** claim that
+> the conveyor can reach the mechanism — that is unverified, and it now has an owner (`#xhmktct`) and a
+> revisit trigger (clause 3, trigger (ii)).
 
 **3. The hinge — the one capability (c) can never reach, and the operator ruled on it directly.** (c) cannot
 steer a **running** agent **without interrupting it**. Stop-then-resume, by construction, interrupts. The
 operator was asked this question directly and ruled that **context-preserving stop-then-resume satisfies the
 requirement**. That is the load-bearing acceptance of this whole decision.
 
-**If the requirement ever changes from "steer while keeping the work" to "steer without ever interrupting",
-this ruling is the thing that has to be revisited** — no stop-then-resume backend can reach that, and the
-case for a second spawn implementation would have to be re-argued from the start. Recorded here explicitly so
-a later reader does not have to reconstruct it, and carried into the statute as clause 3.
+**Two things revisit this ruling, not one.** Both are carried into the statute as clause 3's triggers:
+
+1. **If the requirement ever changes from "steer while keeping the work" to "steer without ever
+   interrupting"** — no stop-then-resume backend can reach that, and the case for a second spawn
+   implementation would have to be re-argued from the start. *Hypothetical: nothing has asked for it.*
+2. **If `#xhmktct`'s probe comes back negative** — if `claude --bg` really does discard `--session-id`, the
+   dispatcher cannot address the session it started, and stop-then-resume is not reachable as designed until
+   `#xhmktct`'s `Done when` #3 remedy (read the real id back off `claude agents --json`) is built. *Live
+   today: that is exactly what the one manual run reported.*
+
+*(Trigger 2 added 2026-08-26 on the PR #1583 review. This section originally named trigger 1 as the only one,
+which was **wrong** — it made the hinge revisitable only on a change that has not happened, while the
+condition that could actually undercut it is open right now. See the correction under reason 2.)*
 
 **4. (c)'s costs are ACCEPTED, not waived.** Four of them, each named rather than smoothed over:
 
@@ -483,6 +526,10 @@ a later reader does not have to reconstruct it, and carried into the statute as 
   session id (`we:scripts/operations/dispatch-lane-io.mjs:558`) and pins it with `--session-id` (`:621`); the
   observer matches on that same minted value (`:738`). A single manual run suggested `claude --bg` ignores
   `--session-id`. `#xhmktct` probes it before anything is fixed, because one observation is not evidence.
+  **`#xhmktct` owns two things, not one** *(added 2026-08-26, PR #1583 review — this bullet originally named
+  only the observer, which under-stated it)*: reason 3's hinge rests on the **same** unproven fact, because
+  `claude --resume` addresses a session by its id. If the probe comes back negative, the observer cannot see
+  its agents **and** the dispatcher cannot resume them.
 
 ### Corrections this ruling makes to the card above it
 
@@ -539,11 +586,20 @@ remaining critical-path decision #2753 (Phase B, item 1) and #3102 (Phase B) bot
 
 ## Successors
 
-The ruling accepts three costs; each has an owner now, so none of them lives only in this card's prose:
+The ruling accepts costs rather than waiving them. **Five rows, each with an owner**, so none of them lives
+only in this card's prose:
 
 | what | where it is carried |
 | --- | --- |
 | three of five dispatch kinds routed through the operation | `#3165` (open) |
 | the other two kinds — `spawnFixes`, `spawnCiHeals` | **`#xj86df4`** (filed 2026-08-26 by this ruling) |
 | the unproven `--session-id` handle assumption the observer rests on | **`#xhmktct`** (filed 2026-08-26 by this ruling) |
+| **the ruling's hinge — stop-then-resume presupposes addressing the session by its id, the same unproven fact** | **`#xhmktct`** (scope widened 2026-08-26 on the PR #1583 review) |
 | the first end-to-end live dispatch through the operation | `#3096` (open, `bornAs: xaibmeu`) |
+
+*(**CORRECTED 2026-08-26, PR #1583 review.** This paragraph read **"The ruling accepts three costs; each has
+an owner now, so none of them lives only in this card's prose"** over a four-row table. Both halves were
+wrong. The count was wrong — the table listed four. And the claim itself was wrong in the way that mattered:
+the hinge, the ruling's own load-bearing acceptance, **was** a cost living only in this card's prose, with no
+owner, because nobody had noticed it rests on the same unproven `--session-id` fact `#xhmktct` was already
+filed over. It is row 4 now.)*
