@@ -3,8 +3,10 @@ bornAs: xi6608w
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/lib/review-escalation.mjs
   - we:scripts/merge-ai-prs.mjs
@@ -39,3 +41,25 @@ they had already resolved — no extra subprocess. Without that thread the size 
    selection is a success — it reports `Tests N skipped`), so the criterion would be green BEFORE the work.
    `Tests N passed` appears only when the filter actually selected something. On `origin/main` the command
    exits 1 (`Tests 308 skipped`); with this item landed it exits 0 (`Tests 14 passed | 308 skipped`).
+
+## What shipped
+
+Landed on `origin/main` as **PR #1592** (merge commit `89812fd5`, 2026-08-26). Resolved by bookkeeping
+reconciliation after the fact — the card was left `open` at land.
+
+- `we:scripts/lib/review-escalation.mjs` — `scoreEscalation` now scores **every** signal over one basis floored
+  at the cumulative `mergeBase(origin/main, head)…head` measurement. Files come from a new internal `unionPaths`
+  helper (`basisFiles` = the union of the cumulative `humanBasisFiles` and the declared own-delta `changedFiles`,
+  first-seen order, non-strings dropped); lines come from `max(diffLines, cumulativeDiffLines)`. Blast-radius,
+  gate-self, gate-derivation and statute all read `basisFiles`; `size` reads the maxed line count. The stated
+  invariant is that a self-declared `baseRev` may only ever **add** to a signal.
+- `diffHunksBasisFiles` was deliberately **not** widened — it stays on `cumulativeFiles`, because it is a pairing
+  contract with the hunk text rather than a signal. `basisFiles` is now returned on the verdict so a downstream
+  roster recompute can select over the same honest basis.
+- Producers — `we:scripts/merge-ai-prs.mjs` (`computeNetDiffSignals` publishes `cumulativeDiffLines` off the
+  already-resolved `basis.humanBasis`, so no extra subprocess) and `we:scripts/pr-land.mjs` both thread it in.
+- Tests — `we:scripts/lib/__tests__/review-escalation.test.mjs` (+126 lines) and
+  `we:scripts/__tests__/merge-ai-prs.test.mjs` (+31 lines).
+
+No threshold was added or relaxed: measurement only, per `#size-adds-reviewers-never-refuses` (#3320), and
+`size`'s contract clearance stays `agent`.
