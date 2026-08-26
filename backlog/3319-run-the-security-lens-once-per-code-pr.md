@@ -43,9 +43,28 @@ Of the 92 replayed cases, 87 recorded a lens row and **86 of those 87 were `corr
 >
 > This is `vacuous-executable-criterion`, one of the eight candidate gates in
 > [we:scripts/review-corpus/gates.mjs](../scripts/review-corpus/gates.mjs) — written for the replay harness by
-> the same session that then shipped the defect it detects. The gate scores a **corpus of past reviews** and
-> never runs against a backlog card, so it could not fire here. A detector pointed only backwards catches
-> nobody. Filed as its own gap; not fixed in this item.
+> the same session that then shipped the defect it detects.
+>
+> **Retracted — the two sentences that diagnosed why the gate stayed silent were both wrong**, and so was the
+> claim that the gap had been filed. They read: *"The gate scores a **corpus of past reviews** and never runs
+> against a backlog card, so it could not fire here. A detector pointed only backwards catches nobody. Filed
+> as its own gap; not fixed in this item."*
+>
+> **It runs against backlog cards and nothing else.** `vacuousExecutableCriterion`'s first statement is
+> `if (!/^backlog\//.test(path || '') || typeof read !== 'function') return [];`, and its registry entry reads
+> `{ name: 'vacuous-executable-criterion', fn: vacuousExecutableCriterion, targets: 'backlog card' }`. It did
+> see this card. Run directly against the pre-fix text — this file at commit `d2f8b77a`, `path` set to itself —
+> it returns `[]`. So "point the detector forward" was a fix for a defect that does not exist, and would have
+> closed nothing.
+>
+> **The real gap is the detector's *shape*.** It models one kind of vacuity only — a criterion demanding a
+> named literal be **absent** — and bails at its `demandsAbsence` regex before reading any file. This card's
+> vacuity was a different shape: a `-t` filter that selected **zero tests**, where an empty selection exits 0.
+> Checked: that regex returns `false` against the pre-fix criterion text.
+>
+> **Now actually filed**, naming that shape:
+> [#xac2c78](/backlog/xac2c78-vacuous-executable-criterion-only-models-absence-so-an-empty/). Not fixed in this
+> item.
 
 ## What shipped
 
