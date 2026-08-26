@@ -4,8 +4,8 @@ kind: story
 size: 5
 parent: "2612"
 status: open
-relatedTo: ["3037", "3029", "3225", "3096", "3239", "3161"]
-blockedBy: ["3118", "3165"]
+relatedTo: ["3037", "3029", "3225", "3096", "3239", "3161", "3118"]
+blockedBy: ["3165"]
 dateOpened: "2026-08-16"
 preparedDate: "2026-08-25"
 scope:
@@ -130,7 +130,21 @@ builder to *"point `we:skills-src/conveyor/runner.mjs`'s dispatch site at the op
 site: the runner only normalises the tick's decisions and emits them (`tickSurface`, and `runLoop`'s injected
 `emit`). Creating one would make the headless runner spawn agents itself — which is exactly the question
 **#3118** leaves open and unratified. A card that instructs it would pre-empt that decision inside a skill
-rewiring. Hence `blockedBy: ["3118", "3165"]` and a scope of the skill file alone.
+rewiring. Hence the scope of the skill file alone.
+
+*(An earlier draft ended that paragraph **"Hence `blockedBy: ["3118", "3165"]` and a scope of the skill file
+alone"** — and the frontmatter carried `blockedBy: ["3118", "3165"]` from round 2 through round 4. **The
+`#3118` half was wrong and is retracted.** The premise above supports the scope, not the blocker: declining
+to create a runner spawn site is precisely what stops this card pre-empting #3118, and a card that avoids a
+question is not blocked by it. Two further checks, both run in this lane rather than reasoned from the card:
+#3118's Fork 1 default (a) is a WE-native in-process runner, and `we:scripts/operations/dispatch-lane-io.mjs`
+already shells `claude --bg` locally — no cross-process call into `plateau-app` anywhere in the file — so
+naming the operation in prose sits on the default side of the fork and pre-empts neither branch; and
+`we:scripts/readiness/dispatch-plan.mjs:165` records that `isReady requires every blockedBy resolved`, so an
+open `kind: decision` in `blockedBy` would have made this card undispatchable until a human ratifies — the
+exact opposite of what preparing it is for. `#3118` is now `relatedTo`. The card's other two statements of
+its own ordering — *Consequence for sequencing* and *Delivery shape* — always said `#3165` alone; the
+frontmatter is what disagreed with them, and it now agrees.)*
 
 ## Tasks
 
