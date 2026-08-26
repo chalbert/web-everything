@@ -57,10 +57,10 @@ So an item with one marker and the same item with four produce **one** warning e
 
 Measured on the real case rather than argued, and pinned to two commits rather than to a moving branch.
 Running `findNonBatchableMarkers` over the **item body** of `backlog/3238-…md` — frontmatter stripped, which
-is what the loader passes it — at PR #1556's **merge-base** `60acbe5f` and at its **merged head** `74c1c9f0`.
-Run against the raw file instead and every line below shifts by that file's frontmatter length (8 lines at
-the base, 19 at the head), which is why the input is named. The marker sets are fenced because this card
-would otherwise trip the very lint it is about:
+is what the loader passes it — at `60acbe5f`, a `main` commit predating PR #1556's merge, and at that PR's
+**merged head** `74c1c9f0`. Run against the raw file instead and every line below shifts by that file's
+frontmatter length (8 lines at the base, 19 at the head), which is why the input is named. The marker sets
+are fenced because this card would otherwise trip the very lint it is about:
 
 ```text
 base 60acbe5f  [{"line":4,"marker":"unverified prerequisite"}]
@@ -81,6 +81,39 @@ subject landed, which is the failure `xo5pueh` is filed for, committed here in t
 fourth hit is at **127**, not 121. And the frontmatter figure "8 lines on `main`" now reads 19 on `main` for
 the same reason. Both sides are pinned to commit ids above so that a later reader measures what this card
 measured.)*
+
+*(Retracted, not deleted — a second time, on the same block. The paragraph above and Done-when 1 both called
+`60acbe5f`* **"PR #1556's merge-base"**. ***That was wrong***, *and it is a wrong* **role**, *not a wrong
+pin. `60acbe5f` is a `drain: JIT-number … at land (#2288)` commit on `main`, authored 2026-08-25 20:35:05
+-0400, and it holds that role under no reading of the PR:*
+
+```text
+gh pr view 1556 --json baseRefOid       → e9aa38f6   (2026-08-25 14:37:55 -0400)
+git merge-base 14cd7c60^1 74c1c9f0      → e6db8cf5   (21:16:24 — merge-base at the merged head)
+git merge-base 60acbe5f 5289202         → e7ab2833   (18:33:10 — merge-base at the pre-rebase head)
+```
+
+*`60acbe5f` is none of those three. It is a `main` commit that landed* **between** *`e7ab2833` and
+`e6db8cf5` — an ancestor of `e6db8cf5`, and of neither of the other two.*
+
+*The* **pin stays**, *for the reason `x3v6tn6` states as a negation: the fixture was never the defect, and a
+rule that pushed the author to re-pin would break a working one. Re-measured in this lane, the base-side
+result is identical at every candidate, so nothing the card asserts moves:*
+
+```text
+e9aa38f6  [{"line":4,"marker":"unverified prerequisite"}]
+e7ab2833  [{"line":4,"marker":"unverified prerequisite"}]
+60acbe5f  [{"line":4,"marker":"unverified prerequisite"}]
+e6db8cf5  [{"line":4,"marker":"unverified prerequisite"}]
+```
+
+*This is the third distinct wrong* **(sha, role)** *pair in this PR, after `5289202` and `ee6e5a98`, and the
+first whose role word is* **merge-base** *rather than* **head**. *Traced in git, not recalled:*
+`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` *returns exactly* `6954693e` — *the round-5 commit that
+corrected `5289202` wrote this pair and the `ee6e5a98` pair together. Round 6 then corrected `ee6e5a98` in
+all three of its places and left this one standing two lines above the paragraph it was editing. That is
+precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected claim, and why its
+role-word list names* merge-base *alongside* head.*)*
 
 ## What it must not do
 
@@ -106,9 +139,11 @@ A pure function in `we:scripts/check-standards-rules.mjs` over two `Map<itemId, 
 ## Done when
 
 1. **Executable** — the two marker sets fenced above, base against head, report exactly the markers `#3238`
-   gained and nothing removed. That pair is the real file either side of PR #1556 — its merge-base
-   `60acbe5f` against its merged head `74c1c9f0` — measured, not constructed, and pinned to commit ids so
-   the fixture cannot rot as `main` moves under it.
+   gained and nothing removed. That pair is the real file either side of PR #1556 — `60acbe5f`, a `main`
+   commit predating that PR's merge, against its merged head `74c1c9f0` — measured, not constructed, and
+   pinned to commit ids so the fixture cannot rot as `main` moves under it. Which pre-merge commit is used
+   does not matter: `e9aa38f6`, `e7ab2833`, `60acbe5f` and `e6db8cf5` all return the same single hit, so this
+   criterion never depended on the role label retracted above.
 2. **Executable** — a swap that leaves the count flat is still reported: base `{A: [x]}` against head
    `{B: [x]}` reports one removal on `A` and one addition on `B`. This is the case the aggregate cannot see
    and the whole reason for the item.

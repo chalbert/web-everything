@@ -43,6 +43,25 @@ That rule keys on the **corrected claim's own string**, which is how it hands a 
 for. `5289202` and `ee6e5a98` share no string, so the second instance carries nothing for it to match. The
 class is the wrong sha in the same **role**, and only resolving the role finds it.
 
+**The round that filed this card committed a third pair, and the review caught it rather than the author.**
+`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` returns exactly `6954693e` — the same commit that corrected
+`5289202` wrote *both* remaining pairs, and the round after it corrected `ee6e5a98` in all three of its
+places while leaving `60acbe5f` labelled *"PR #1556's merge-base"* two lines above the paragraph it was
+editing — `x4dbhiy` twice and the description once. `60acbe5f` is a `drain` commit on `main`:
+`baseRefOid` is `e9aa38f6`, the merge-base at the merged head is `e6db8cf5`, and at the pre-rebase head
+`e7ab2833`. It is none of the three. That instance is the reason the role-word list below is not just *head*
+— an author fixing one role word does not think to re-resolve a different one, and a rule that resolves the
+role finds both without being told which word to worry about.
+
+Counted under this card's own predicate — a sha sitting beside a role word for a **named** PR — one PR
+produced three pairs across **eight** places: `5289202` as *head* in `x4dbhiy` and the description (2),
+`ee6e5a98` as *head* in `xv92hju`, `xo5pueh` and the description (3), `60acbe5f` as *merge-base* in
+`x4dbhiy` twice and the description (3). 2 + 3 + 3 = 8. Two of the three pairs were written by the
+very commit that corrected the one before it. That is the case for a gate rather than a more careful author.
+(Anaphoric back-references — `xo5pueh`'s round-5 *"at the same head"*, twice — are not counted here: they
+carry no sha, so the predicate does not reach them. They still have to move when the label they point at
+moves, which is a reason the finding is reported against the label rather than each mention.)
+
 `xv92hju` is adjacent too, and also does not cover it. That rule reads a cited **line** and looks for a quoted token;
 here the citation is a **sha** and a role, the token is fine, and the file is not the thing being cited. A
 different sha with the same shape passes `xv92hju` untouched.
@@ -85,7 +104,16 @@ this item; resolving `#N` + role to a sha is the caller's.
 4. **Executable** — **this card's own body reports none**, and so does `x4dbhiy`'s corrected retraction.
    Both still contain a sha beside *"#1556's head"*, because both quote the wrong label to retract it. Taken
    from the real files, not constructed.
-5. **Mutation** — dropping the role-word predicate reddens case 3 by name; dropping the retraction negation
-   reddens case 4 and nothing else; comparing on the *label text* instead of the resolved sha reddens
-   case 1, where the sha is a real commit on the right branch.
-6. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
+5. **Executable** — a **second role word**, on real input, at the head this card was filed from:
+   `x4dbhiy`'s round-6 line 60, *"at PR #1556's **merge-base** `60acbe5f` and at its **merged head**
+   `74c1c9f0`"*, against a resolver answering `e6db8cf5` for `{pr: 1556, role: 'merge-base'}` and `74c1c9f0`
+   for `{pr: 1556, role: 'head'}`, reports **exactly one** finding — on the `merge-base` half, not the
+   `head` half, which is correct in the same sentence. This is the instance the round-6 review caught: it
+   sits **outside** the retraction that case 4 covers, so case 4 alone does not reach it. Its corrected form
+   — *"at `60acbe5f`, a `main` commit predating PR #1556's merge"* — reports none, because no role word is
+   claimed for the PR.
+6. **Mutation** — dropping the role-word predicate reddens case 3 by name; hard-coding the role word to
+   *head* reddens case 5 and nothing else; dropping the retraction negation reddens case 4 and nothing else;
+   comparing on the *label text* instead of the resolved sha reddens case 1, where the sha is a real commit
+   on the right branch.
+7. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
