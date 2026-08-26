@@ -83,14 +83,14 @@ now names a live item rather than a resolved duplicate.
 
 - **#3147 claimed the marker reads `@operation-home-ok: #3239` and that #3239's frontmatter reads
   `bornAs: 3239`.** Both are false here. Re-read in this lane: the marker reads
-  `@operation-home-ok: #xbbscm5`, and
-  `we:backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md:2` reads `bornAs: xbbscm5`.
+  `@operation-home-ok: #3239`, and
+  `we:backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md:2` reads `bornAs: 3239`.
   The *identity* claim was right — the marker does point at #3239 — but every string it was stated in was
   wrong.
 - **#3147's quoted grep block** listed `grep -rl 3239 backlog/ skills-src/` as returning this card, #3239's
   own card, `3286` and `we:skills-src/conveyor/SKILL.md`. Re-run at `origin/main` `9f9cb310` it returns four
   files, but a **different** four: `3147`, `3286`, `3288`, `3289`. Neither #3239's own card nor the SKILL
-  contains the literal `3239` at all — both spell it `xbbscm5`. This is the third retraction in that block's
+  contains the literal `3239` at all — both spell it `3239`. This is the third retraction in that block's
   history, and the reason is the same each time: the count was corrected without re-running the command at the
   commit carrying the correction. `#3286` is the prevention card for exactly this and now has a fourth fixture.
 

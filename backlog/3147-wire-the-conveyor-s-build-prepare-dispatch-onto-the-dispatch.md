@@ -29,7 +29,7 @@ tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 >
 > **Two claims below are FALSE at `origin/main` `9f9cb310` — flagged here because a reader who opens this file
 > will meet them before the corrections.** (1) The marker at `we:skills-src/conveyor/SKILL.md:77` reads
-> `@operation-home-ok: #xbbscm5`, **not** `#3239`, and #3239's frontmatter reads `bornAs: xbbscm5`, **not**
+> `@operation-home-ok: #3239`, **not** `#3239`, and #3239's frontmatter reads `bornAs: 3239`, **not**
 > `bornAs: 3239`. (2) The quoted four-file grep result below does not reproduce: `grep -rl 3239` now returns
 > `3147`, `3286`, `3288`, `3289` — neither #3239's own card nor the SKILL contains the literal `3239` at all.
 > Both corrections are recorded on #3096, which is the file anyone will actually open again.

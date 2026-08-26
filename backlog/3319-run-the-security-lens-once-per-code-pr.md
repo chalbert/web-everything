@@ -70,7 +70,7 @@ Of the 92 replayed cases, 87 recorded a lens row and **86 of those 87 were `corr
 > Checked: that regex returns `false` against the pre-fix criterion text.
 >
 > **Now actually filed**, naming that shape:
-> [#xac2c78](/backlog/xac2c78-vacuous-executable-criterion-only-models-absence-so-an-empty/). Not fixed in this
+> [#3346](/backlog/3346-vacuous-executable-criterion-only-models-absence-so-an-empty/). Not fixed in this
 > item.
 
 ## What shipped
