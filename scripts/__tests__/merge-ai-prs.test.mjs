@@ -4030,7 +4030,7 @@ const verdictRecord = ({ rows = [['correctness', 'mandatory', 'accept'], ['secur
     panelTable(rows), '',
     single ? '**Lens:** `correctness` — a SINGLE-LENS run. One `judge` step, one juror, one lens.' : '',
     basis ? `Net basis: \`${BASE_SHA}..${head}\` (rev \`origin/lane/x\` at review time)` : ''].join('\n') });
-const cleanPr = { comments: [verdictRecord()], headSha: HEAD_SHA };
+const cleanPr = { comments: [verdictRecord()] };
 
 describe('#3308 — reviewRecordKind / recordedReviewRecords', () => {
   it('recognizes each of the four durable review-record headlines', () => {
@@ -4058,11 +4058,18 @@ describe('#3308 — reviewRecordKind / recordedReviewRecords', () => {
 });
 
 describe('#3308 — readReviewRecord', () => {
-  it('pulls the examined revision range, the panel rows and the single-lens self-declaration', () => {
-    const r = readReviewRecord(verdictRecord({ single: true, rows: [['correctness', 'mandatory', 'accept']] }).body);
+  it('pulls the examined revision range and the panel rows', () => {
+    const r = readReviewRecord(verdictRecord({ rows: [['correctness', 'mandatory', 'accept']] }).body);
     expect(r.basis).toEqual({ base: BASE_SHA, head: HEAD_SHA });
     expect(r.lensRows).toEqual([{ lens: 'correctness', weight: 'mandatory', verdict: 'accept' }]);
-    expect(r.singleLens).toBe(true);
+  });
+  // `renderPanelVerdictTable` renders an unjudged seat as the literal `(no verdict)`. A tight verdict-cell
+  // pattern skips that row, and the skip is not neutral: a run whose only MANDATORY seat rendered
+  // `(no verdict)` would read as having no mandatory row at all — the right alarm for the wrong reason.
+  it('captures a seat rendered `(no verdict)`, so the weight column is what decides', () => {
+    expect(readReviewRecord(verdictRecord({ rows: [['security', 'mandatory', '(no verdict)']] }).body).lensRows)
+      .toEqual([{ lens: 'security', weight: 'mandatory', verdict: '(no verdict)' }]);
+    expect(reviewCoverageGaps({ comments: [verdictRecord({ rows: [['security', 'mandatory', '(no verdict)'], ['simplicity', 'advisory', 'accept']] })] })).toEqual([]);
   });
   // The corpus miner's `parseVerdict` returns null here (corpus policy: no range ⇒ not replayable ⇒ exclude).
   // Excluding is exactly wrong for this reader — a record naming no range is the thing being announced, so it
@@ -4082,7 +4089,7 @@ describe('#3308 — reviewCoverageGaps: the degraded set', () => {
     expect(reviewCoverageGaps(cleanPr)).toEqual([]);
   });
   it('announces a PR landing with no recorded review at all — the 22.5% case', () => {
-    expect(reviewCoverageGaps({ comments: [{ body: 'looks good to me' }], headSha: HEAD_SHA }).map((g) => g.code))
+    expect(reviewCoverageGaps({ comments: [{ body: 'looks good to me' }] }).map((g) => g.code))
       .toEqual(['no-recorded-review']);
   });
   // The `--lens=<advisory>` unseating: the run completes, the table renders, and every seat in it is advisory,
@@ -4091,21 +4098,45 @@ describe('#3308 — reviewCoverageGaps: the degraded set', () => {
     const gaps = reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ rows: [['simplicity', 'advisory', 'accept']] })] });
     expect(gaps.map((g) => g.code)).toEqual(['unseated-mandatory-lens']);
   });
-  it('announces a verdict that declares itself a single-lens run', () => {
+  // MEASURED 21/60 (35%) of recent merges, and such a record already says so IN BOLD in its own body. At that
+  // rate it is the operating norm, not a departure — announcing it is how this channel gets tuned out. #3319
+  // has since retired the sentence from the renderer, settling it twice over. What survives is the sharp
+  // half: a single-lens run seating an ADVISORY lens still fires `unseated-mandatory-lens`.
+  it('does NOT announce a single-lens run that still seated a mandatory lens', () => {
     const gaps = reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ single: true, rows: [['correctness', 'mandatory', 'accept']] })] });
-    expect(gaps.map((g) => g.code)).toEqual(['single-lens']);
+    expect(gaps).toEqual([]);
   });
-  it('announces a verdict recorded against a different tree than the one merging', () => {
+  it('DOES announce a single-lens run that seated only an advisory lens — no blocking floor', () => {
+    const gaps = reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ single: true, rows: [['simplicity', 'advisory', 'accept']] })] });
+    expect(gaps.map((g) => g.code)).toEqual(['unseated-mandatory-lens']);
+  });
+  // MEASURED 12/60 (20%) of recent merges — and every one a FALSE positive. The drain already refuses to
+  // merge a PR whose acceptance does not cover its head (#2409), and reviewed-diff/reviewed-contribution
+  // deliberately keep an acceptance valid across a content-preserving rebase — which the drain's own
+  // manifest-drop pass causes on nearly every lane. A sha difference that survives to the merge cascade is
+  // therefore PROOF the staleness gate ran and cleared it, not evidence of a skipped review.
+  it('does NOT announce a moved head — a stale acceptance never reaches the merge cascade (#2409)', () => {
     const gaps = reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ head: '1111111111111111111111111111111111111111' })] });
-    expect(gaps.map((g) => g.code)).toEqual(['stale-basis']);
+    expect(gaps).toEqual([]);
   });
   it('announces a verdict that names no revision range — unknown coverage, not clean coverage', () => {
     const gaps = reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ basis: false })] });
     expect(gaps.map((g) => g.code)).toEqual(['unstated-basis']);
   });
-  it('announces a re-stamped acceptance, and does not ALSO report the facts a re-stamp structurally lacks', () => {
-    const gaps = reviewCoverageGaps({ headSha: HEAD_SHA, comments: [verdictRecord(), { body: '📌 review — acceptance re-stamped after a rebase (no new review)' }] });
-    expect(gaps.map((g) => g.code)).toEqual(['restamped-acceptance']);
+  // MEASURED 31/60 (52%) of recent merges. The re-stamp is the drain's OWN rebase mechanism, granted only
+  // after the reviewed-contribution markers show the contribution unchanged — evidence the staleness gate
+  // RAN. Announcing it would put a notice on half of all merges.
+  it('does NOT announce a re-stamped acceptance — the drain\'s own routine rebase path', () => {
+    const gaps = reviewCoverageGaps({ comments: [verdictRecord(), { body: '📌 review — acceptance re-stamped after a rebase (no new review)' }] });
+    expect(gaps).toEqual([]);
+  });
+  // ...and a terminal record must STOP the analysis, not fall through. Neither a re-stamp nor a clearance
+  // carries a panel table or a `Net basis`, so reading either as an accept would manufacture
+  // `unstated-basis` on that same 53% — the identical noise, arriving by a different door.
+  it('a terminal record does not fall through into basis checks it structurally cannot satisfy', () => {
+    for (const body of ['📌 review — acceptance re-stamped after a rebase (no new review)', '✅ review — `review:human` cleared via the sanctioned path']) {
+      expect(reviewCoverageGaps({ comments: [{ body }] })).toEqual([]);
+    }
   });
   it('announces an operator relief that waived this PR\'s review park', () => {
     expect(reviewCoverageGaps({ ...cleanPr, reliefWaived: true }).map((g) => g.code)).toEqual(['relief-waived']);
@@ -4124,10 +4155,10 @@ describe('#3308 — reviewCoverageGaps: the degraded set', () => {
   // Two expected states that already carry their own durable record. Re-announcing them here would be volume
   // without information, which is how an announcement channel gets tuned out.
   it('does NOT announce a human-ceremony clearance (its own comment states what it proves)', () => {
-    expect(reviewCoverageGaps({ headSha: HEAD_SHA, comments: [{ body: '✅ review — `review:human` cleared via the sanctioned path\n\nCleared by nic.' }] })).toEqual([]);
+    expect(reviewCoverageGaps({ comments: [{ body: '✅ review — `review:human` cleared via the sanctioned path\n\nCleared by nic.' }] })).toEqual([]);
   });
   it('judges the LATEST record, so a bounce-then-re-review is not reported on its history', () => {
-    const gaps = reviewCoverageGaps({ headSha: HEAD_SHA, comments: [{ body: '🔁 review — changes requested\n\nno panel table, no basis' }, verdictRecord()] });
+    const gaps = reviewCoverageGaps({ comments: [{ body: '🔁 review — changes requested\n\nno panel table, no basis' }, verdictRecord()] });
     expect(gaps).toEqual([]);
   });
   it('tolerates an abbreviated sha in the record rather than calling it stale', () => {
@@ -4140,8 +4171,8 @@ describe('#3308 — reviewCoverageGaps: the degraded set', () => {
     expect(reviewCoverageGaps({ comments: [verdictRecord({ head: '1111111111111111111111111111111111111111' })], headSha: null })).toEqual([]);
   });
   it('accumulates independent gaps rather than reporting only the first', () => {
-    const gaps = reviewCoverageGaps({ headSha: HEAD_SHA, reliefWaived: true, comments: [verdictRecord({ single: true, rows: [['simplicity', 'advisory', 'accept']], basis: false })] });
-    expect(gaps.map((g) => g.code).sort()).toEqual(['relief-waived', 'single-lens', 'unseated-mandatory-lens', 'unstated-basis']);
+    const gaps = reviewCoverageGaps({ reliefWaived: true, comments: [verdictRecord({ rows: [['simplicity', 'advisory', 'accept']], basis: false })] });
+    expect(gaps.map((g) => g.code).sort()).toEqual(['relief-waived', 'unseated-mandatory-lens', 'unstated-basis']);
   });
   it('every emitted gap carries the explanatory line from the meta table', () => {
     for (const code of Object.keys(REVIEW_COVERAGE_GAP_META)) expect(REVIEW_COVERAGE_GAP_META[code]).toBeTruthy();
@@ -4168,11 +4199,6 @@ describe('#3308 — the announcement surface', () => {
     expect(body).toContain('`no-recorded-review`');
     expect(body).toContain(REVIEW_COVERAGE_GAP_META['no-recorded-review']);
   });
-  it('names both shas on a stale basis so the reader can see which tree was reviewed', () => {
-    const reason = buildReviewCoverageReason(reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ head: '1111111111111111111111111111111111111111' })] }), { headSha: HEAD_SHA, basisHead: '1111111111111111111111111111111111111111' });
-    expect(reason).toContain('reviewed `111111111111`');
-    expect(reason).toContain('merging `eaa1bc906bd2`');
-  });
   it('states that nothing on the list blocked the merge — it is a record, not a gate', () => {
     expect(buildReviewCoverageReason(reviewCoverageGaps({ comments: [] }))).toContain('None of the above blocked the merge');
   });
@@ -4184,18 +4210,5 @@ describe('#3308 — the announcement surface', () => {
     expect(hasDrainReasonComment(posted, REVIEW_COVERAGE_KIND, reason)).toBe(true);
     const other = buildReviewCoverageReason(reviewCoverageGaps({ ...cleanPr, comments: [verdictRecord({ basis: false })] }));
     expect(hasDrainReasonComment(posted, REVIEW_COVERAGE_KIND, other)).toBe(false);
-  });
-});
-
-describe('#3308 — the landing head sha rides the verdict', () => {
-  // Without this the coverage reader cannot tell a review of the landing tree from one of an earlier commit.
-  // It is free: `headRefOid` is already in the sweep's `--json` field set.
-  it('attaches headRefOid from the listing, and null when the listing omitted it', () => {
-    const prsByRepo = new Map([[null, [
-      { ...aiPr({ number: 1 }), headRefName: 'lane/a', headRefOid: HEAD_SHA },
-      { ...aiPr({ number: 2 }), headRefName: 'lane/b' },
-    ]]]);
-    const vs = buildDrainVerdicts({ prsByRepo, readOf: () => ({ commits: [claudeCommit()] }), repos: [null] });
-    expect(vs.map((v) => v.headSha)).toEqual([HEAD_SHA, null]);
   });
 });

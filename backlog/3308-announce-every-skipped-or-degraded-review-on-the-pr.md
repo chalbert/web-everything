@@ -26,14 +26,27 @@ tags: []
    matches nothing (a selection of zero is a success), so the bare exit code cannot distinguish "the tests
    pass" from "the tests do not exist". Asserting a `Tests N passed` line is what makes it fail before this
    item lands. Observed on `origin/main` (`f4160eaa`): `Tests  400 skipped (400)` ⇒ grep exit **1**.
-   Observed after: `Tests  32 passed | 400 skipped (432)` ⇒ grep exit **0**.
+   Observed after: `Tests  33 passed | 400 skipped (433)` ⇒ grep exit **0**.
 
-   > **Corrected after round-1 review.** This line previously read `Tests  27 passed | 400 skipped (427)`.
-   > That was the count before the round-1 correctness fix; the fix added five cases (three driven pass-wide
-   > cases plus two gap cases), so the number was stale, not wrong when written. Both figures above were
-   > re-measured in the fix lane rather than carried forward.
+   > **Corrected twice.** This line first read `Tests  27 passed | 400 skipped (427)`, then
+   > `Tests  32 passed | 400 skipped (432)`. Neither was wrong when written — the round-1 correctness fix
+   > added five cases, and the noise measurement below then replaced six condition cases with seven
+   > exclusion cases. Every figure above was re-measured rather than carried forward.
 
-2. **Not noisy** — a normally-reviewed PR is announced-on byte-identically to before. `reviewCoverageGaps`
-   returns an empty list for a PR whose latest verdict seats a mandatory lens against the tree being merged,
-   and the drain posts nothing when the list is empty (pinned by the "reports NOTHING for a panel-reviewed
-   PR" case).
+2. **Not noisy — measured, not asserted.** Replayed over the 60 most recently merged PRs in this repo, the
+   shipped `reviewCoverageGaps` posts a notice on **8 (13.3%)**, all of them `no-recorded-review`. The
+   pre-measurement version of the same function posts on **59 of the same 60 (98.3%)**, which is the failure
+   this criterion exists to catch: an announcement on nearly every PR trains readers to skip it, recreating
+   the silence it was built to end. Four conditions were cut on that measurement, each with its rate pinned
+   in a test of its own so a later change that re-adds one has to argue with the number:
+
+   | cut condition | fired on | why it is not a departure |
+   | --- | --- | --- |
+   | self-declared single-lens run | 21/60 (35%) | the record already says so in its own body — and #3319 retired the sentence from the renderer, so a detector reads legacy records only |
+   | re-stamped acceptance | 31/60 (52%) | the drain's own content-preserving rebase path, granted only after the reviewed-contribution markers clear it |
+   | moved head sha ("stale basis") | 12/60 (20%), all false | #2409 already refuses to merge a PR whose acceptance does not cover its head, so a sha difference reaching the merge cascade is proof that gate ran |
+   | `clear-human` ceremony clearance | 1/60 | its own comment states exactly what it proves and what it does not (#2895) |
+
+   Both terminal record shapes (re-stamp, `clear-human`) stop the analysis rather than falling through to
+   the basis checks — reading either as an accept would manufacture `unstated-basis` on 53% of merges, the
+   same noise by a different door.
