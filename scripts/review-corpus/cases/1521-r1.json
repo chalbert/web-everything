@@ -1,0 +1,29 @@
+{
+  "pr": 1521,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "824ee55e120fa3c3c41ccc6f030cffac2f9dbe1d",
+  "head": "c0fb4a5ed182d499adfc9469869be8c01be12d06",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xewnork-a-pr-status-operation-three-valued-ci-state-per-open-pr-so-a.md",
+    "backlog/xo49g6l-a-juror-verdict-summary-can-carry-stray-tool-call-markup-int.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/pr-status.test.mjs",
+    "scripts/operations/pr-status-io.mjs",
+    "scripts/operations/pr-status.mjs",
+    "scripts/operations/run.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

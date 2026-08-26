@@ -1,0 +1,41 @@
+{
+  "pr": 1506,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "e7a338161e51ac0cc641075919701812b5a3a498",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/x4omld5-mutation-check-operation-prove-a-guard-fails-when-its-bug-re.md",
+    "backlog/xi3hiug-record-verdict-add-to-retracted-for-a-verdict-recorded-in-er.md",
+    "backlog/xm1y7m2-jit-numbering-does-not-sweep-prose-citations-in-docs.md",
+    "backlog/xnjm6y6-backfill-wire-the-11-declared-operations-into-the-21-skills-.md",
+    "backlog/xob418x-mutation-check-disqualifier-priority-is-asserted-nowhere-aga.md",
+    "backlog/xq94q0w-verify-add-a-suite-input-for-the-targeted-inner-loop.md",
+    "backlog/xqt8yfc-check-standards-gate-a-skill-naming-a-raw-home-that-a-declar.md",
+    "backlog/xrrpfo7-declare-the-backlog-lifecycle-siblings-scaffold-and-resolve.md",
+    "backlog/xv8hlrl-declare-the-working-tree-operations-commit-push-lane-sync.md",
+    "backlog/xwp8ioh-gate-review-pr-on-the-pr-being-open-before-the-juror-is-paid.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/x4omld5-mutation-check-operation-prove-a-guard-fails-when-its-bug-re.md",
+      "line": 27,
+      "category": "dangling-citation",
+      "impact": "cosmetic",
+      "verdict": "PLAUSIBLE",
+      "summary": "Two resolved cards (x4omld5, xwp8ioh) each cite \"#x2sqf62\" as the prior instance of the same failure mode, but no backlog item with that hash id exists anywhere in current origin/main or in this PR's own branch history."
+    }
+  ],
+  "missedHere": []
+}

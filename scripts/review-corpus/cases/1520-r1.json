@@ -1,0 +1,25 @@
+{
+  "pr": 1520,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "7e93910547e04285a8a8619877061463a7fca7e8",
+  "head": "1fbe2c9ce620c8ea072df4d4cc1b376104e0014e",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x7qpknt-bootstrap-installs-the-pr-watch-allow-rules-so-a-fresh-vm-do.md",
+    "scripts/__tests__/bootstrap-session.test.mjs",
+    "scripts/bootstrap-session.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

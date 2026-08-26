@@ -1,0 +1,33 @@
+{
+  "pr": 1504,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "3b7a2e0bd42ac486825386edd96957a86aaeaf99",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "src/_data/__tests__/backlogGraph.test.ts",
+    "src/_data/backlogGraph.js"
+  ],
+  "findings": [
+    {
+      "path": "src/_data/backlog.js",
+      "line": 895,
+      "category": "coverage",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The same NaN-producing `Number(a)-Number(b)` comparator pattern this PR fixes in backlogGraph.js still lives, unfixed, in three other files that sort the identical id space (src/_data/backlog.js:895, src/assets/js/backlog-graph.js:141/147/157, src/assets/js/backlog-active.js:277)."
+    }
+  ],
+  "missedHere": []
+}

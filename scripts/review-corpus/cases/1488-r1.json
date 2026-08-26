@@ -1,0 +1,29 @@
+{
+  "pr": 1488,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "6d3ad31e2202e8f6052bd7fd0002c771f4d813d8",
+  "head": "70ad49e86bf3b2e42a8245e14f51511cebfce31d",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3196-check-standards-does-not-flag-all-in-a-git-hook-where-it-mea.md",
+    "scripts/__tests__/check-standards-rules.test.mjs",
+    "scripts/check-standards-rules.mjs",
+    "scripts/check-standards.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/check-standards-rules.mjs",
+      "line": 3116,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "Quote state is not carried across physical lines, so an unterminated string that closes mid-way through the next physical line can make the scanner treat that whole next line as a comment, hiding a real `--all` invocation that follows the closing quote on it."
+    }
+  ],
+  "missedHere": []
+}

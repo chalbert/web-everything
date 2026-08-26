@@ -1,0 +1,31 @@
+{
+  "pr": 1516,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "19e67126d7ac13e5c11820f2b088ae6363b05b5c",
+  "head": "a5a37b22dae45c6d9a98d411212d5b022db35432",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3240-verify-has-no-gate-input-so-it-cannot-replace-the-call-sites.md",
+    "backlog/x0uj8hj-an-operation-cli-exits-0-for-a-verdict-that-did-not-pass-so-.md",
+    "scripts/operations/__tests__/verify.test.mjs",
+    "scripts/operations/verify-io.mjs",
+    "scripts/operations/verify.mjs",
+    "skills-src/conveyor/delivery-agent-brief.md"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/verify.mjs",
+      "line": 165,
+      "category": "coverage",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "The gate-forwarding wiring is verified only at the verify-io.mjs layer (verifyArgv/createChecksRunner); the operation's own `run: compute` step, which threads `view.input.gate` into the injected `runChecks()` call, has no test asserting that field actually reaches the runner."
+    }
+  ],
+  "missedHere": []
+}

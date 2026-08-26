@@ -1,0 +1,23 @@
+{
+  "pr": 1562,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "46af4a342ead1916c37b04708462c122006ca9eb",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3273-the-operation-surface-still-uncovered-measured-a-census-not.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

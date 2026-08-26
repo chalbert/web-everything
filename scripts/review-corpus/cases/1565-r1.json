@@ -1,0 +1,32 @@
+{
+  "pr": 1565,
+  "round": 1,
+  "totalRounds": 3,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "d764a84c8490448605834bbdd23908a3ef9c3629",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3118-session-free-conveyor-where-does-headless-agent-spawning-liv.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3118-session-free-conveyor-where-does-headless-agent-spawning-liv.md",
+      "line": 148,
+      "category": "correctness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The amendment claims dispatch-lane-io.mjs's observer already 'recovers the handle from the listing' when --session-id is ignored, but the actual observer code matches on the same minted UUID the sink stored, not a recovered/re-derived id"
+    }
+  ],
+  "missedHere": []
+}

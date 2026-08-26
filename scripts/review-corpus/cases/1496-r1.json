@@ -1,0 +1,31 @@
+{
+  "pr": 1496,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "d1bbf957676995d397b791293a3a2b820cb12825",
+  "head": "e81777e204e21c0c1fcce5bc849307a5a3ce35e7",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xp240uk-declare-a-verify-operation-so-the-conveyor-can-gate-a-lane-w.md",
+    "docs/agent/backlog-workflow.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/verify.test.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/verify-io.mjs",
+    "scripts/operations/verify.mjs",
+    "skills-src/conveyor/delivery-agent-brief.md",
+    "skills-src/next-backlog-item/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,25 @@
+{
+  "pr": 1487,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "f1b5ba0001f5addb649cd41c07f9ba55f7cc681c",
+  "head": "70b0d2a3ca26aa06214f0e33bb9b69d8ca4c4843",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3198-guard-lane-hook-identity-is-a-filename-substring-so-a-rename.md",
+    "scripts/__tests__/guard-lane-install.test.mjs",
+    "scripts/guard-lane-install.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,33 @@
+{
+  "pr": 1522,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "2e9ef2aa6554a9d0f67d6832d05623b5b150cee7",
+  "head": "14f3434df588723476462c299e3b2c3c365ef9e5",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3245-open-pr-requires-a-title-the-home-treats-as-optional-so-no-s.md",
+    "backlog/x1eok4q-the-3224-exemption-walk-does-not-recognise-a-multi-line-html.md",
+    "backlog/x6ry8mf-open-pr-cannot-express-pr-land-default-land-mode-nor-a-bodyl.md",
+    "scripts/operations/__tests__/open-pr.test.mjs",
+    "scripts/operations/declared-homes.mjs",
+    "scripts/operations/open-pr.mjs",
+    "skills-src/batch-backlog-items/SKILL.md",
+    "skills-src/conveyor/delivery-agent-brief.md",
+    "skills-src/conveyor/prepare-decision-agent-brief.md",
+    "skills-src/conveyor/prepare-scope-agent-brief.md",
+    "skills-src/pr/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

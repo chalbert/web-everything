@@ -1,0 +1,24 @@
+{
+  "pr": 1559,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "ba1bcc1b24a8cebebe9e1bdd40d17d3d1322db70",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "agent-memory-src/full-concurrency-is-the-default-never-a-cost-judgment.md",
+    "agent-memory-src/index-meta.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,24 @@
+{
+  "pr": 1567,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "63cef235757b0c728e753124b64a4dc072afb70a",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x3884p1-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md",
+    "backlog/x6fm4mx-gate-a-backlog-filing-that-asserts-existing-code-behaviour-m.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

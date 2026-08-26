@@ -1,0 +1,25 @@
+{
+  "pr": 1564,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "b914eca28df57b835901519abd49d04b9dbb3979",
+  "head": "80a0c46358d0dda5eed44759cb04ab893d7cc938",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x78tooj-declare-an-operation-that-publishes-and-refreshes-a-decision.md",
+    "backlog/x87qehy-declare-a-probe-operation-run-the-cheap-experiment-and-recor.md",
+    "backlog/xsc9w09-declare-an-operation-that-dispatches-an-independent-review-t.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}
