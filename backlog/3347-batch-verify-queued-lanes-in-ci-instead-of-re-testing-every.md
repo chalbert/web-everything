@@ -159,13 +159,29 @@ shared `we:.lane-manifest.json`, not by `BEHIND`. **That was wrong, twice over:*
    `we:scripts/lib/rebase-drop-manifest.mjs:189` always emits *"drop transient &lt;manifest&gt;"* regardless of
    what triggered the rebuild. Every rebase has announced a file that has not been there since #2411 landed.
 
-The rebuild guard (`we:scripts/lib/rebase-drop-manifest.mjs:172-176`) skips only when the tip is **both**
-not-behind **and** already manifest-free, and states outright that *"a genuinely BEHIND tip has
+The rebuild guard (`we:scripts/lib/rebase-drop-manifest.mjs:177-186`) skips only when the tip is **both**
+not-behind **and** already manifest-free. The comment immediately above it
+(`we:scripts/lib/rebase-drop-manifest.mjs:168-176`) states outright that *"a genuinely BEHIND tip has
 `isAncestor === false` and still gets the real rebase"*. With the manifest condition permanently satisfied,
-**every one of the 167 rebases measured over 10 days fired on `BEHIND` alone** — i.e. on `strict: true`.
+**every one of the 153 rebases measured over 10 days fired on `BEHIND` alone** — i.e. on `strict: true`.
 
-Measured cost: ~4.9 CI runs per PR, 167 `drain: rebase` commits in 10 days, ≈ **17 hours of CI** spent
-re-testing unchanged trees.
+Measured cost over the 10 days to 2026-08-26: **153** `drain: rebase` commits on `origin/main`, **~4.6** CI
+runs per PR, ≈ **15.5 hours of CI** spent re-testing unchanged trees.
+
+#### Correction to the figures above (review of PR #1611)
+
+Two numbers in the first draft of this section were wrong, and one citation pointed at the wrong lines. All
+three are retracted here rather than quietly overwritten, and every replacement was re-measured in-lane:
+
+| claim as first written | corrected to | how it was re-measured |
+|---|---|---|
+| *"167 `drain: rebase` commits in 10 days"* (stated twice) | **153** on `origin/main` (155 across all refs) | `git log origin/main --since=10.days --grep='^drain: rebase' \| wc -l`, on a freshly fetched `origin/main`; window 2026-08-16 → 2026-08-26 |
+| *"≈ **17 hours of CI**"* | **≈ 15.5 hours** | derived, not independent: 153 × mean CI wall-clock on `main` of **365 s** (median 364 s, n = 107 completed runs, via `gh run list --workflow=CI --branch=main`) = 55 845 s |
+| *"~4.9 CI runs per PR"* | **~4.6** | 930 CI runs vs 203 PRs created in the same 10-day window (`gh run list` / `gh pr list`; the run fetch's oldest entry predates the window, so the window is fully covered) |
+| the rebuild-guard citation, first written as `we:scripts/lib/rebase-drop-manifest.mjs:172-176` | **`we:scripts/lib/rebase-drop-manifest.mjs:177-186`** | `172-176` is the tail of the explanatory comment; the guard code is `const curTreeOid` (`177`) through the closing brace (`186`). The separate `we:scripts/lib/rebase-drop-manifest.mjs:189` citation for the fixed commit-subject template is **correct** and unchanged. |
+
+The ruling below is unaffected: the direction and order of magnitude are identical, and `BEHIND` remains the
+sole live trigger regardless of which of these counts is used.
 
 ### The ruling
 
