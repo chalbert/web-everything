@@ -47,7 +47,7 @@ const VALID_MATCH_KEYS = new Set(['family', 'clearance']);
 // fs/path (review-escalation → review-policy already; importing either back would cycle). The conformance suite
 // pins these literals equal to the real enums, so drift is caught mechanically rather than risked by a coupling.
 const CARE_BAND_NAMES = ['none', 'low', 'elevated', 'high'];
-const VALID_CARE_LENSES = new Set(['correctness', 'security', 'simplicity', 'standards-conformance']);
+const VALID_CARE_LENSES = new Set(['correctness', 'security', 'simplicity', 'standards-conformance', 'claim-accuracy']);
 const VALID_ROSTER_TIMING_MODES = new Set(['up-front', 'incremental']);
 
 // The disposition-config vocabulary (#2651). resolutionMode's two settings and the three knobs a per-decision

@@ -131,21 +131,21 @@
         "description": "The PR did not escalate — no panel, nothing to review. Zero jurors, zero rounds."
       },
       "low": {
-        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance", "claim-accuracy"],
         "jurorsPerLens": 1,
         "roundCap": 1,
         "validationMethods": {},
         "description": "The baseline panel a routine spot-check earns — the full lens set, one juror each, a single editor↔reviewer round."
       },
       "elevated": {
-        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance", "claim-accuracy"],
         "jurorsPerLens": 1,
         "roundCap": 2,
         "validationMethods": {},
         "description": "A system-machinery / dismissed-finding change earns a second negotiation round; still one juror per lens over the full set."
       },
       "high": {
-        "lenses": ["correctness", "security", "simplicity", "standards-conformance"],
+        "lenses": ["correctness", "security", "simplicity", "standards-conformance", "claim-accuracy"],
         "jurorsPerLens": 2,
         "roundCap": 3,
         "validationMethods": {},

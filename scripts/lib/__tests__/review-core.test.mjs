@@ -78,6 +78,8 @@ import {
   JURY_CHARTER_CARE_FLOOR,
   LENS_EXPECTATIONS,
   expectationForLens,
+  LENS_HUNT_BRIEF,
+  huntBriefForLens,
   shouldRegisterJury,
   buildJuryCharter,
   renderJuryCharter,
@@ -539,14 +541,19 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
 });
 
 describe('MANDATE_LENSES / MANDATORY_LENSES / ADVISORY_LENSES / PANEL_LENSES (#2310)', () => {
-  it('splits the four /code-review lenses into a mandatory pair and an advisory pair', () => {
+  it('keeps #2310\'s ratified mandatory pair, and carries claim-accuracy as a third advisory', () => {
+    // The mandatory pair is the #2310 RULING and is unchanged. `claim-accuracy` (#3035) lands advisory
+    // PENDING a ruling of its own — promoting it would override that decision, and nothing needs it promoted
+    // yet because `review-pr` runs one caller-chosen lens.
     expect(MANDATORY_LENSES).toEqual([MANDATE_LENSES.CORRECTNESS, MANDATE_LENSES.SECURITY]);
-    expect(ADVISORY_LENSES).toEqual([MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS]);
+    expect(ADVISORY_LENSES).toEqual([
+      MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS, MANDATE_LENSES.CLAIM_ACCURACY,
+    ]);
   });
 
   it('PANEL_LENSES is the mandatory + advisory union, mandatory first', () => {
     expect(PANEL_LENSES).toEqual([...MANDATORY_LENSES, ...ADVISORY_LENSES]);
-    expect(PANEL_LENSES).toHaveLength(4);
+    expect(PANEL_LENSES).toHaveLength(5);
   });
 });
 
@@ -686,8 +693,61 @@ describe('buildPanelMandate (#2310)', () => {
       'utf8',
     );
 
+    // THE ONE INTERPOLATED VALUE. The fixture's "full panel: …" line lists PANEL_LENSES, so growing the lens
+    // vocabulary rewrites it in every mandate — which is truthful (the panel really did grow) but is NOT the
+    // silent-clause drift this fixture exists to catch. Substituting the list keeps the guard at full strength
+    // on the prose while letting the vocabulary change: add a CLAUSE and this still reddens.
+    //
+    // THE HATCH IS A WILDCARD, so its REACH is the whole question — `[^)]*` is what decides whether a clause
+    // could hide inside the substitution. The pattern is a named constant so the test below pins the SAME
+    // regex the substitution uses; inlining it would let the two drift apart and the guard would prove nothing.
+    const PANEL_LIST_RE = /the full panel: [^)]*\)/;
+    // The panel as it stood when the fixture was captured — the exact span the hatch is licensed to rewrite.
+    const PRE_3094_PANEL = 'correctness, security, simplicity, standards-conformance';
+    const withCurrentPanel = (text) => text.replace(
+      PANEL_LIST_RE,
+      `the full panel: ${PANEL_LENSES.join(', ')})`,
+    );
+
     it('adds the mutation probe and NOTHING else when `aim` is omitted', () => {
-      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS })).toBe(`${FIXTURE} ${MUTATION_PROBE_RULE}`);
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+        .toBe(`${withCurrentPanel(FIXTURE)} ${MUTATION_PROBE_RULE}`);
+    });
+
+    // WHY THIS TEST WAS REWRITTEN (#3035 r2). The version that shipped here asserted
+    // `expect(buildPanelMandate({lens: CORRECTNESS})).not.toBe(`${withCurrentPanel(FIXTURE)} AND ONE MORE
+    // THING. ${MUTATION_PROBE_RULE}`)` — an inequality that follows trivially from the equality the test above
+    // already asserts. It passed for the real mandate, for `''`, and for a mandate that HAD gained a clause,
+    // so it could not fail under the mutation its own name describes. Verified by mutation in this lane:
+    // inserting `parts.push('AN ADDED CLAUSE NOBODY REVIEWED.')` into `buildPanelMandate` reddened the
+    // byte-identical test above and left that one green. What follows tests the hatch's REACH instead, which
+    // is the property that actually decides whether a clause can hide.
+    it('the substitution is the ONLY licence — it spans the lens list and nothing else', () => {
+      // (a) IT FIRES EXACTLY ONCE. A second match would mean the hatch rewrites prose somewhere else too.
+      const hits = FIXTURE.match(new RegExp(PANEL_LIST_RE.source, 'g'));
+      expect(hits).toHaveLength(1);
+      // (b) AND WHAT IT EATS IS THE LIST, byte for byte — no surrounding sentence is inside the wildcard's
+      //     reach. Widen `[^)]*` to something greedier and this reddens with the over-long span it swallowed.
+      expect(hits[0]).toBe(`the full panel: ${PRE_3094_PANEL})`);
+      // (c) AND WHAT IT PUTS BACK is the list and nothing else — the replacement cannot smuggle in a clause.
+      expect(withCurrentPanel(FIXTURE)).toBe(
+        FIXTURE.replace(`the full panel: ${PRE_3094_PANEL})`, `the full panel: ${PANEL_LENSES.join(', ')})`),
+      );
+    });
+
+    it('a clause added next to the lens list is NOT absorbed by the substitution', () => {
+      // The failure mode a widened `[^)]*` would create: the hatch swallowing real prose along with the list,
+      // so a mandate that gained a clause there still compares equal. Plant a clause immediately after the
+      // list — where a greedy span would reach — and the expected string must still differ from the mandate
+      // built from it. If the hatch ever grows enough to eat this, the two become equal and this reddens.
+      const expected = `${withCurrentPanel(FIXTURE)} ${MUTATION_PROBE_RULE}`;
+      const gainedAClause = FIXTURE.replace(
+        PANEL_LIST_RE,
+        (m) => `${m} AN ADDED CLAUSE NOBODY REVIEWED.`,
+      );
+      expect(gainedAClause).not.toBe(FIXTURE); // the plant landed
+      expect(`${withCurrentPanel(gainedAClause)} ${MUTATION_PROBE_RULE}`).not.toBe(expected);
+      expect(withCurrentPanel(gainedAClause)).toContain('AN ADDED CLAUSE NOBODY REVIEWED.');
     });
 
     it('the fixture really is the mandate minus the probe — no `aim` scaffolding hiding in it', () => {
@@ -1526,9 +1586,10 @@ describe('methodsForLens — band override validated against the REVIEW_METHODS 
 });
 
 describe('ROSTER_CRITIQUE_LENSES — the completeness critic\'s lens vocabulary (#2637)', () => {
-  it('is the four static lenses plus the three UI perspective lenses (concrete ids), and is frozen', () => {
+  it('is every static lens plus the three UI perspective lenses (concrete ids), and is frozen', () => {
     expect(ROSTER_CRITIQUE_LENSES).toEqual([
-      'correctness', 'security', 'simplicity', 'standards-conformance', 'a11y', 'visual-vs-target', 'perf',
+      'correctness', 'security', 'simplicity', 'standards-conformance', 'claim-accuracy',
+      'a11y', 'visual-vs-target', 'perf',
     ]);
     expect(Object.isFrozen(ROSTER_CRITIQUE_LENSES)).toBe(true);
   });
@@ -1673,6 +1734,65 @@ describe('LENS_EXPECTATIONS / expectationForLens — the pre-registered bar per 
   });
   it('is frozen — the wording is a single-sourced commitment', () => {
     expect(Object.isFrozen(LENS_EXPECTATIONS)).toBe(true);
+  });
+});
+
+// ── #3035 — THE HUNT BRIEF IS WIRED, AND ONLY WHERE IT SAYS ────────────────────────────────────────────
+//
+// WHY THIS BLOCK EXISTS. The brief shipped with ZERO tests: `grep -rn "huntBriefForLens\|LENS_HUNT_BRIEF"`
+// returned four hits, all inside `review-core.mjs` itself. Deleting the two-line wiring from
+// `buildPanelMandate` outright left all six affected suites green (697 tests), so nothing defended the
+// module's own promise that the brief is "appended only for lenses that register a brief". That is worse
+// than an ordinary coverage gap: the brief IS a juror's instructions, so a typo'd key or a refactor that
+// drops the wiring degrades `claim-accuracy` back to the bare lens name — the exact failure this lens was
+// added to fix — with nothing red to notice by.
+describe('LENS_HUNT_BRIEF / huntBriefForLens — the lens\'s own method (#3035)', () => {
+  it('is frozen, and every key is a REAL panel lens — a renamed or typo\'d key cannot go silently dead', () => {
+    expect(Object.isFrozen(LENS_HUNT_BRIEF)).toBe(true);
+    const keys = Object.keys(LENS_HUNT_BRIEF);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(PANEL_LENSES, `LENS_HUNT_BRIEF key "${key}"`).toContain(key);
+      expect(typeof LENS_HUNT_BRIEF[key]).toBe('string');
+      expect(LENS_HUNT_BRIEF[key].length).toBeGreaterThan(0);
+    }
+  });
+
+  it('claim-accuracy registers a brief; huntBriefForLens returns it verbatim', () => {
+    expect(huntBriefForLens(MANDATE_LENSES.CLAIM_ACCURACY))
+      .toBe(LENS_HUNT_BRIEF[MANDATE_LENSES.CLAIM_ACCURACY]);
+  });
+
+  it('returns `\'\'` — never undefined — for a lens with no brief and for a lens that does not exist', () => {
+    for (const lens of PANEL_LENSES.filter((l) => !(l in LENS_HUNT_BRIEF))) {
+      expect(huntBriefForLens(lens), lens).toBe('');
+    }
+    expect(huntBriefForLens('made-up-lens')).toBe('');
+    expect(huntBriefForLens(undefined)).toBe('');
+  });
+
+  // THE WIRING ITSELF — the assertion that reddens when the two lines in `buildPanelMandate` go away.
+  it('buildPanelMandate APPENDS the brief for a lens that registers one', () => {
+    const mandate = buildPanelMandate({ lens: MANDATE_LENSES.CLAIM_ACCURACY });
+    expect(mandate).toContain(LENS_HUNT_BRIEF[MANDATE_LENSES.CLAIM_ACCURACY]);
+  });
+
+  it('...and appends it to NO other lens — the "only for lenses that register a brief" promise', () => {
+    const brief = LENS_HUNT_BRIEF[MANDATE_LENSES.CLAIM_ACCURACY];
+    for (const lens of PANEL_LENSES.filter((l) => l !== MANDATE_LENSES.CLAIM_ACCURACY)) {
+      expect(buildPanelMandate({ lens }), lens).not.toContain(brief);
+      // ...and not a fragment of it either — a partial paste would be just as wrong.
+      expect(buildPanelMandate({ lens }), lens).not.toContain('YOUR LENS IS: does the WRITING match');
+    }
+  });
+
+  // The brief must ADD to the lens's instructions, not replace what every mandate already carries. It is
+  // appended before the net-set / aim / probe clauses, so those must all still be present alongside it.
+  it('does not displace the rules every mandate carries — probe and prose-imprecision still travel with it', () => {
+    const mandate = buildPanelMandate({ lens: MANDATE_LENSES.CLAIM_ACCURACY });
+    expect(mandate).toContain(MUTATION_PROBE_RULE);
+    expect(mandate).toContain(PROSE_IMPRECISION_RULE);
+    expect(mandate).toContain(`the full panel: ${PANEL_LENSES.join(', ')})`);
   });
 });
 

@@ -405,7 +405,9 @@ export function reviewPrOperation({ readPr } = {}) {
       pr: 'number',
       repo: 'string',
       // Which single lens judges. The value set is DECLARED (`enum`), so `validateInput` refuses an unknown
-      // lens before a run record exists and the derived `--help` lists the four by name instead of `<string>`.
+      // lens before a run record exists and the derived `--help` lists all five by name instead of `<string>`.
+      // (This comment said "the four" until #3035 added `claim-accuracy`; the enum is `[...PANEL_LENSES]`, so
+      // the count follows the set and the sentence has to follow the count.)
       // `buildPanelMandate` still refuses anything outside `PANEL_LENSES` in the `judge` step — belt and
       // braces, and it is the one that binds a caller who builds a run record by hand.
       // THE MULTI-LENS PANEL IS NOT THIS SLICE. A `judge` step declares ONE request; fanning it out to N

@@ -802,7 +802,10 @@ describe('the judge request is never built from unvalidated input', () => {
   it('an unknown lens dies at the schema, before a run record exists', () => {
     const { registry } = registryFor({});
     expect(() => startRun({ op: REVIEW_PR_OP, id: 'run-lens', input: { ...BASE_INPUT, lens: '--bare' }, registry }))
-      .toThrow(/must be one of correctness\|security\|simplicity\|standards-conformance/);
+      // DERIVED, AND ANCHORED. The literal list this used to spell out was unanchored, so it kept passing
+      // when `claim-accuracy` was appended to `PANEL_LENSES` — it no longer pinned the enum at all. Built from
+      // `PANEL_LENSES` and terminated at `, got`, it now reddens on any change to the set, in either direction.
+      .toThrow(new RegExp(`must be one of ${PANEL_LENSES.join('\\|')}, got`));
   });
 
   it('…and an unknown lens smuggled past the schema still dies in `buildPanelMandate`, before argv', () => {

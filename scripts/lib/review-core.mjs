@@ -1068,6 +1068,11 @@ export function buildPanelMandate({
     // FINAL VALIDATOR, an equally adversarial reader of the same diff, did not. It now lives in `buildMandate`
     // so both do; see PROSE_IMPRECISION_RULE.
   ];
+  // THE LENS'S OWN METHOD (#3035). `buildMandate` passes the lens as a bare NAME, which is enough for a lens
+  // whose job is self-evident from the word and not enough for one that is mostly knowing where to look and
+  // what settles it. Appended only for lenses that register a brief, so every existing mandate is byte-identical.
+  const brief = huntBriefForLens(lens);
+  if (brief) parts.push(brief);
   const netFiles = (Array.isArray(netChangedFiles) ? netChangedFiles : []).filter(Boolean).map(String);
   if (netFiles.length) {
     parts.push(
@@ -1846,12 +1851,52 @@ export const JURY_CHARTER_CARE_FLOOR = CARE_LEVELS.ELEVATED;
 export const LENS_EXPECTATIONS = Object.freeze({
   [MANDATE_LENSES.CORRECTNESS]: 'The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong.',
   [MANDATE_LENSES.SECURITY]: 'No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check.',
+  [MANDATE_LENSES.CLAIM_ACCURACY]: 'Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff.',
   [MANDATE_LENSES.SIMPLICITY]: 'The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction.',
   [MANDATE_LENSES.STANDARDS]: "The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule.",
   [PERSPECTIVE_LENSES.A11Y]: 'The rendered UI passes an accessibility scan and stays keyboard-reachable with correct roles and labels — no new accessibility regression.',
   [PERSPECTIVE_LENSES.VISUAL]: 'The rendered UI matches its target/baseline design in both light and dark themes — no unintended visual drift.',
   [PERSPECTIVE_LENSES.PERF]: 'The page stays within its load budget — the change adds no new render-blocking cost or hot-path regression.',
 });
+
+/**
+ * WHAT A LENS ACTUALLY HUNTS, and how it must ground a finding (#3035). `LENS_EXPECTATIONS` states the BAR;
+ * this states the METHOD — the concrete shapes to go looking for and the check that settles each one. A lens
+ * whose value is knowing where to look is close to useless without it: the mandate otherwise carries only the
+ * lens NAME, and a juror handed the bare word "claim-accuracy" invents its own reading of the job.
+ *
+ * Only lenses whose method is non-obvious carry an entry; the rest fall through to no extra text.
+ */
+export const LENS_HUNT_BRIEF = Object.freeze({
+  [MANDATE_LENSES.CLAIM_ACCURACY]: [
+    'YOUR LENS IS: does the WRITING match what it points at. The code may be perfectly correct and this lens',
+    'can still return findings — you are judging the claims made ABOUT the repo, wherever they appear: backlog',
+    'card bodies, "Done when" criteria, docs, agent-memory notes, code comments, and the PR description itself.',
+    'GO LOOKING FOR THESE SHAPES, in roughly this order of past frequency:',
+    '  1. A `path:line` citation that does not name what is at that line — the file and line resolve, but the',
+    '     function, constant or behaviour described is somewhere else. Off-by-one is common; so is a citation',
+    '     that was right when written and drifted when the file moved.',
+    '  2. An acceptance criterion written as a grep whose literal does not actually match — markup the author',
+    '     forgot (`**bold**`, backticks), a capitalisation difference, or a stated occurrence count that is wrong.',
+    '  3. A criterion that ALREADY passes before the work is done, so it proves nothing.',
+    '  4. A claim that the change records/updates/prepares something, where the diff never touches that file.',
+    '  5. An absolute gate count ("the 1435-warning baseline") hardcoded as a target, already stale.',
+    '  6. A reference that resolves to nothing — a `[[wikilink]]`, a `#id`, "clause 3 above", "option (d)".',
+    'HOW TO GROUND A FINDING — this is the lens\'s equivalent of the mutation probe, and it is REQUIRED. Do not',
+    'report a claim as wrong because it reads wrong. RESOLVE IT: run the grep, open the file at the cited line,',
+    'list the diff. Then state in the finding what you ran and what came back. A claim-accuracy finding with no',
+    'resolution behind it is exactly the error it is reporting, and will be treated as such.',
+    'SAY SO WHEN A CLAIM CHECKS OUT. If you resolved a citation and it held, that is worth one line — it tells',
+    'the reader which claims were actually verified rather than skimmed.',
+    'DO NOT report prose you merely find unclear, verbose, or badly worded. Wrong-against-the-source is the bar;',
+    'style is another lens\'s job.',
+  ].join('\n'),
+});
+
+/** The hunt brief for one lens, or `''` for a lens with none. Pure. */
+export function huntBriefForLens(lens) {
+  return LENS_HUNT_BRIEF[lens] || '';
+}
 
 /** The pre-registered expectation for one lens (#2638) — its `LENS_EXPECTATIONS` entry, or a neutral fallback for a
  *  lens with no registered bar (so `materializeRoster`'s `charterForLens` never yields an empty string). Pure. */

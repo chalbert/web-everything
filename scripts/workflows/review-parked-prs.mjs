@@ -141,6 +141,12 @@ const REVIEW_PENDING = 'review:pending';
 // accept to land): correctness, security. ADVISORY (surfaced, never blocking): simplicity, standards-conformance.
 // These are the exact tokens `review-core-cli.mjs mandate --lens=<lens>` / the panel reduction accept (the
 // standards lens is `standards-conformance`, not `standards` — the CLI validates against that spelling).
+//
+// FOUR, NOT FIVE, AND ON PURPOSE (#3035). `jury-core.PANEL_LENSES` is five since `claim-accuracy` landed; this
+// literal stays at four. It is not a mirror that fell behind — it is this workflow's FAN-OUT WIDTH, and every
+// entry costs one fresh-context reviewer per parked PR per round. `claim-accuracy` is advisory pending its own
+// ruling, so spending a juror on it here would pre-empt that call by making it bind in the one loop that
+// actually spawns the panel. Widen this list when the promotion is ratified, not before.
 const LENSES = ['correctness', 'security', 'simplicity', 'standards-conformance'];
 const MANDATORY_LENSES = ['correctness', 'security'];
 
@@ -437,7 +443,7 @@ const LENS_SCHEMA = {
       type: ['object', 'null'],
       additionalProperties: true,
       properties: {
-        lens: { type: 'string', description: 'the panel lens the discovery earns a re-judge under (correctness | security | simplicity | standards-conformance)' },
+        lens: { type: 'string', description: 'the panel lens the discovery earns a re-judge under — one of THIS workflow\'s fan-out set (correctness | security | simplicity | standards-conformance); `claim-accuracy` is a panel lens in jury-core but is deliberately not fanned out here, see LENSES above' },
         citedFinding: { type: 'string', description: 'the specific finding that grounds the invite (guardrail 1 — required; an invite with no cited finding is dropped)' },
       },
       description: 'set ONLY on a genuine cross-lens discovery — otherwise omit/null',

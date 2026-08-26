@@ -388,8 +388,10 @@ describe('materializeRoster + rosterPickedEvent — the S2 ledger bridge (#2655)
 
   it('expands each seat into jurorsPerLens jurors with unique ids and the seat method', () => {
     const jurors = materializeRoster(plan());
-    // high → 2 jurors per lens; 4 static + 1 touch-set = 5 lenses → 10 jurors
-    expect(jurors.length).toBe(10);
+    // high → 2 jurors per lens; 5 static (claim-accuracy joined in #3035) + 1 touch-set = 6 lenses → 12 jurors.
+    // Derived from PANEL_LENSES rather than typed, so the next lens does not need this number re-counted.
+    expect(jurors.length).toBe((PANEL_LENSES.length + 1) * 2);
+    expect(jurors.length).toBe(12);
     expect(new Set(jurors.map((j) => j.id)).size).toBe(jurors.length);
     const c1 = jurors.find((j) => j.id === 'correctness#1');
     expect(c1.lens).toBe('correctness');
