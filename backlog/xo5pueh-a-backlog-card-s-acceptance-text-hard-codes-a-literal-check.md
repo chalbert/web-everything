@@ -18,10 +18,20 @@ A backlog card's Done-when can hard-code a literal `check:standards` count as it
 ## Why a gate rather than a convention
 
 The convention already exists and is already written down — inside the very cluster that broke it. `#3233`'s
-Done-when 8, at PR #1556's head `ee6e5a98`, reads:
+Done-when 8, at `ee6e5a98` — the `prep r7` commit on #1556's branch, **not** its head — reads:
 
 > `npm run check:standards` shows no new errors and no new warnings **against the baseline at build time**
 > — do not hard-code a number; it has already moved twice while this card was being prepared.
+
+*(Retracted, not deleted. An earlier version of the sentence above, and of Done-when 1 and 2 below, called
+`ee6e5a98` **"PR #1556's head"**. **That was wrong.** `gh pr view 1556 --json headRefOid` returns
+`74c1c9f0`, merged as `14cd7c60`; `ee6e5a98` is the intermediate `prep r7` commit, superseded by `6250a0a2`
+(`prep r9`) before this card was authored. The **pin is right and stays** — every fixture below reproduces at
+`ee6e5a98`, verified — but the label inverted them: at the real head `74c1c9f0`, `#3238`'s DW7 and `#3230`'s
+DW6 are already in the delta form and the `1435` literal survives only inside a retraction, which this card's
+own "must not fire on a RETRACTION" negation says must report **none**. A builder who resolved the label
+instead of the sha would have got the opposite of the stated expectation and concluded their rule was broken.
+`x3v6tn6` is filed for exactly this — owed by the review that caught it.)*
 
 Two sibling cards prepared in the same PR, by the same author, in the same sitting, hard-coded **1435**
 anyway. A round-7 edit removed the literal from one card and left it in two — so the cluster ended up handing
@@ -65,9 +75,10 @@ No filesystem, no git, no gate run — the input is a string.
 ## Done when
 
 1. **Executable** — `#3238`'s Done-when 7 at `ee6e5a98` (*"no NEW warnings against the 0-error /
-   1435-warning baseline"*) reports exactly one finding, and `#3230`'s Done-when 6 at the same head reports
-   one. Real input, both.
-2. **Executable** — `#3233`'s Done-when 8 at the same head (*"against the baseline at build time — do not
+   1435-warning baseline"*) reports exactly one finding, and `#3230`'s Done-when 6 at the same commit reports
+   one. Real input, both. `ee6e5a98` is an intermediate commit on #1556's branch, not its head — pin the sha,
+   do not resolve the PR, or both fixtures invert (see the retraction above).
+2. **Executable** — `#3233`'s Done-when 8 at the same commit (*"against the baseline at build time — do not
    hard-code a number"*) reports **none**. Same cluster, same PR, same author: the pair is what makes the
    rule's boundary a fact rather than a preference.
 3. **Executable** — the rest of `#3238`'s Done-when 7, which asks for a count that *drops by one*, reports

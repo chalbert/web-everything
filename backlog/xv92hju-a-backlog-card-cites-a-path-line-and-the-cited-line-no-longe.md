@@ -79,11 +79,23 @@ a filesystem.
    exactly one finding, and the finding names **814** as the line that does hold the token. Real input, from
    this card's own PR.
 2. **Executable** — the same citation with the line corrected to 814 reports none.
-3. **Executable** — `#3233` at PR #1556's head `ee6e5a98`, whose `:137` cites
+3. **Executable** — `#3233` at `ee6e5a98`, whose `:137` cites
    `we:scripts/operations/review-prep.mjs:455` for `reads: ['findings.read', 'findings.judge']` (live line
    456) and whose `:142` cites `:487` for the `record` step's `reads` (live line 486), reports **two**
    findings — and reports them even though the same card cites both facts correctly at `:274` and `:279`. A
-   correct citation elsewhere is not a defence; this is the case that says so.
+   correct citation elsewhere is not a defence; this is the case that says so. `ee6e5a98` is an intermediate
+   commit on #1556's branch, not its head — pin the sha, do not resolve the PR.
+
+   *(Retracted, not deleted. An earlier version of this criterion called `ee6e5a98` **"PR #1556's head"**.
+   **That was wrong.** `gh pr view 1556 --json headRefOid` returns `74c1c9f0`, merged as `14cd7c60`;
+   `ee6e5a98` is the intermediate `prep r7` commit, superseded by `6250a0a2` (`prep r9`) before this card was
+   authored. The **pin is right and stays** — the fixture reproduces at `ee6e5a98`, verified — but the label
+   moves the correct-citation half: at `74c1c9f0` those two lines are **279** and **284**, not 274 and 279,
+   because later prep rounds inserted text above them. This is the same error `x4dbhiy` retracts one round
+   earlier over `5289202` — corrected there, written into this card in the same commit. It is the `xfgjxyf`
+   shape but not something `xfgjxyf` catches: that rule matches on the corrected claim's own string, and a
+   different sha carries none of it. `x3v6tn6` is filed for the head-label class itself, owed by the review
+   that caught this.)*
 4. **Executable** — **`x4dbhiy`'s ACTUAL corrected body reports none.** It still contains the string
    `we:scripts/check-standards-rules.mjs:812` beside the quoted token, because the fix quotes the wrong
    citation to retract it. Taken from the real file, not constructed — the same requirement `x4ongaj`

@@ -23,17 +23,33 @@ warning for the item, with the distinct markers and lines interpolated into the 
 
 *(Retracted, not deleted. An earlier version of this card cited that statement as
 `we:scripts/check-standards-rules.mjs:812`. **That was wrong** — the line is **814**, and `:812` lands two
-lines early, inside the `if (markerHits.length) {` guard. Nor was it drift. Walking **all 81** commits that
-have touched the file — not a sample — the quoted statement reached 814 at `5da6b548` (2026-08-15) and has
-been there in every commit since, and **812 never held it in any of the 81**. So the citation was never
-correct on any tree its author could have measured.*
+lines early, on `const markerHits = findNonBatchableMarkers(body);`. Nor was it drift. Walking **all 81**
+commits that have touched the file — not a sample — the quoted statement reached 814 at `5da6b548`
+(2026-08-15) and has been there in every commit since, and **812 never held it in any of the 81**. So the
+citation was never correct on any tree its author could have measured.*
 
 *A previous version of this retraction named `d898a879` as the commit that put it at 814. **That was also
-wrong** — `d898a879` is four commits later; it inherited 814 rather than establishing it, and it was named
-only because that walk sampled the last fifteen commits instead of all 81. The corrected claim above is from
-the full walk. This is the second wrong citation in the same paragraph, which is the argument for `xv92hju`
-— the citation-verification card owed by PR #1556 — checking a citation against the tree it runs on rather
-than trying to date a drift.)*
+wrong** — `d898a879` is four file-touching commits later; it inherited 814 rather than establishing it, and
+it was named only because that walk sampled the last fifteen commits instead of all 81. The corrected claim
+above is from the full walk. This is the second wrong citation in the same paragraph, which is the argument
+for `xv92hju` — the citation-verification card owed by PR #1556 — checking a citation against the tree it
+runs on rather than trying to date a drift.*
+
+*The same version added that `:812` lands* **"inside the `if (markerHits.length) {` guard"**. ***That was
+wrong too***, *and it makes* **three** *wrong citations inside the retraction of the first one.* **812**
+*is the guard's* **subject** *line; the guard opens at* **813**, *and the quoted statement is its first body
+line at* **814**. *The phrasing was copied from the review comment that raised the line number, without
+opening the file — in the retraction paragraph of a card about citation accuracy. Read in the lane that
+files this card:*
+
+```text
+812   const markerHits = findNonBatchableMarkers(body);
+813   if (markerHits.length) {
+814     const markers = [...new Set(markerHits.map((h) => h.marker))].join('", "');
+```
+
+*Three wrong citations in one paragraph, each caught by a reviewer opening the file, is the whole argument
+for `xv92hju` reading the cited line rather than trusting prose about it.)*
 
 So an item with one marker and the same item with four produce **one** warning either way. The aggregate at
 `we:scripts/check-standards.mjs:2373` is a count of warnings, so a swap inside one item is invisible to it

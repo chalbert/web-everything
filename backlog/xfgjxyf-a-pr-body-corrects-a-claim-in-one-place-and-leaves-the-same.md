@@ -38,6 +38,14 @@ question. This asks only whether the old one is still standing unmarked.
 repo's convention it is the *preferred* one — the rule is quote-and-retract, never silent delete. So a stale
 occurrence carrying its own retraction marker is clean.
 
+**It must not be mistaken for a check on the underlying claim.** Keying on the corrected claim's own string
+is what makes this rule free of judgment, and it is also its boundary: a body that fixes one instance of an
+error and commits the *same kind* of error with different text elsewhere passes clean. That happened inside
+this card's own PR — `x4dbhiy`'s *"#1556's head (`5289202`)"* was corrected in the very commit that wrote
+*"#1556's head `ee6e5a98`"* into two sibling cards, and the two share no string. `x3v6tn6` is filed for that
+class. Widening this rule to catch it would mean asking what a claim *means*, which is the line this card
+exists on the safe side of.
+
 ## Interfaces
 
 A pure function in `we:scripts/check-standards-rules.mjs` taking a body string and returning findings, with

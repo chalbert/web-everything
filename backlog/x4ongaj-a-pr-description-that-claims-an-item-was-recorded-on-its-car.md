@@ -58,17 +58,36 @@ is pure and testable without a network call. Wiring it to a PR context is the ca
 
 1. **Executable** — a case where a body says *"#3160 now carries the operation's contract, recorded verbatim
    on the card"* and `changedFiles` contains only `backlog/3233-*.md`, `backlog/3230-*.md`,
-   `backlog/3238-*.md` returns exactly one finding naming `3160`. That is PR #1556's real input **as it
-   stood when the finding was raised** — the three-file set an independent review re-derived on 2026-08-25.
+   `backlog/3238-*.md` returns exactly one finding naming `3160`. That is PR #1556's real input, on this
+   repo's net basis (#2450), and it is **still exactly reproducible today** — #1556 merged on 2026-08-26 as
+   `14cd7c60` and `git diff --name-only 14cd7c60^1 14cd7c60` returns those same three paths and nothing
+   else.
 
-   *(Retracted, not deleted. An earlier version of this criterion said flatly "That is PR #1556's real
-   input", with no date. **That is no longer true and the sentence needed the qualifier from the start.**
-   #1556 kept taking rounds after the finding and merged on 2026-08-26 carrying **13** changed files, not
-   three — `agent-memory-src/` entries plus `backlog/` `3118`, `3165`, `3230`, `3233`, `3238`, `3273`,
-   `3277`–`3281`. A reader who runs `gh pr view 1556 --json files` today gets 13 paths and cannot reproduce
-   this criterion's input. What has **not** changed, and is the part the criterion actually rests on, is that
-   no `backlog/3160-*.md` is in that set — not in the three-file version, not in the merged 13-file version.
-   The finding stands; only its snapshot needed dating.)*
+   *(Retracted, not deleted — twice over, and the second retraction is the one that matters. An earlier
+   version of this criterion said flatly "That is PR #1556's real input", with no basis named. A later
+   version "corrected" that by dating the set to when the finding was raised and adding:*
+
+   > *#1556 kept taking rounds after the finding and merged on 2026-08-26 carrying **13** changed files, not
+   > three … A reader who runs `gh pr view 1556 --json files` today gets 13 paths and cannot reproduce this
+   > criterion's input.*
+
+   ***That correction was itself wrong, and it retracted a fixture that was never broken.*** *`gh pr view
+   1556 --json files` returns a **three-dot** list — merge-base to head — which counts every file a sibling
+   lane landed on `main` while #1556 sat in review. On the net basis this repo actually uses for a PR diff,
+   the one the `review-pr` operation stamps its verdicts with and #1556's own review comments quote, #1556's
+   merge contributed **exactly the three files above**:*
+
+   ```text
+   git diff --name-only 14cd7c60^1 14cd7c60                        → the three paths above
+   git diff --name-only $(git merge-base 14cd7c60^1 74c1c9f0) 74c1c9f0  → the same three
+   ```
+
+   *Each of the ten extras in the 13-path list — `agent-memory-src/` entries and `backlog/` `3118`, `3165`,
+   `3273`, `3277`–`3281` — reached `main` through #1558, #1562, #1565 or a `drain: JIT-number … at land`
+   commit, not through #1556. So the undated sentence was thin, but the three-file set was correct then and
+   is correct now; only the missing basis label needed adding. Sourcing `changedFiles` from `gh pr view` is
+   the exact over-count this rule's own denominator cannot afford, and `xxfv35j` is filed for it — owed by
+   the review that caught this retraction.)*
 2. **Executable** — the same body with `backlog/3160-*.md` added to `changedFiles` returns none. This is a
    **constructed** variant, not a replay: #1556's real correction changed the *body* and never touched its
    file set, so no such input ever existed. An earlier draft of this criterion called it "its corrected
