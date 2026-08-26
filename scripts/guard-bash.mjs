@@ -78,6 +78,12 @@
  *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
  *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
  *
+ * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
+ * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
+ * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
+ * did not run either. Strictly additive to the MESSAGE — `decide` is untouched, so no allow/deny moves. See
+ * `collateralStepsNotice` for why "gate at the offending step and run the rest" was rejected.
+ *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable INPUT ENVELOPE (bad JSON on stdin — a guard bug must never wedge the agent);
  * fails CLOSED on an unparseable COMMAND (see above). The pure `reason`/`decide` are unit-tested
@@ -1171,15 +1177,27 @@ function fileOperands(args, optsWithArg = new Set()) {
   return files;
 }
 
-/** Is `segment` a shell redirect/`tee`/`sed -i`/`perl -pi` that writes a file OTHER than a `/tmp`|`/dev`
- *  scratch path? Pure. Fires if ANY written path is non-scratch (never one argument as a proxy). */
-export function isFileWriteRedirect(segment) {
+/** EVERY file path `segment` writes via a shell redirect / `tee` / an in-place editor (`sed -i`, `perl -pi`),
+ *  scratch paths INCLUDED. Pure.
+ *
+ *  #3311 — extracted verbatim out of `isFileWriteRedirect`, which is now a thin `.some(non-scratch)` over
+ *  this list, so the #2749 arm's behaviour is unchanged by construction. It is a separate function because
+ *  the two callers disagree about `/tmp` for opposite-but-both-correct reasons:
+ *    • `isFileWriteRedirect` (the primary-tree-write deny) EXCLUDES scratch — a `/tmp` write is not a write
+ *      to the shared checkout, which is the only thing that arm is about;
+ *    • `collateralStepsNotice` (the dropped-step notice) INCLUDES it — the write whose loss cost a whole
+ *      session three incidents in one day was `cat > /tmp/pr-body.md <<'EOF'`. Scratch-ness says nothing
+ *      about whether the caller will notice the file is missing; if anything a `/tmp` file is LESS likely to
+ *      be noticed, because nothing downstream is watching it.
+ *  So the scratch filter belongs at the CALL SITE, not in the path scan. */
+export function fileWriteTargets(segment) {
+  const out = [];
   const toks = shellTokens(segment);
-  if (!toks.length) return false;
+  if (!toks.length) return out;
   // Peel the same wrapper prefix the other arms peel (`env sed -i …` must not slip past). A quoted word or a
   // redirect operator can never BE a wrapper, so blank those out before measuring the prefix.
   const rest = toks.slice(wrapperPrefixLength(toks.map((t) => (t.op || t.quoted ? ' ' : t.text))));
-  if (!rest.length) return false;
+  if (!rest.length) return out;
 
   // 1) A WRITE redirect ANYWHERE in the segment (not just at its end) — `>`, `>>`, `>|`, `&>`, `2> file`.
   //    An operator ending in `&` duplicates an fd (`2>&1`, `>&2`) and writes no file.
@@ -1187,7 +1205,7 @@ export function isFileWriteRedirect(segment) {
     const t = rest[i];
     if (!t.op || !t.text.includes('>') || t.text.endsWith('&')) continue;
     const target = rest[i + 1];
-    if (target && !target.op && !isScratch(target.text)) return true;
+    if (target && !target.op) out.push(target.text);
   }
 
   // 2) An in-place editor / `tee` — every file operand, in any flag spelling.
@@ -1210,15 +1228,17 @@ export function isFileWriteRedirect(segment) {
       // (`sed -i s/x/y/ <files…>`) — either way it is NOT a written path, and everything else is.
       const scriptOpts = prog === 'perl' ? ['-e', '-E', '-f'] : ['-e', '--expression', '-f', '--file'];
       const files = fileOperands(args, new Set(scriptOpts));
-      const targets = has(...scriptOpts) ? files : files.slice(1);
-      if (targets.some((f) => !isScratch(f))) return true;
+      out.push(...(has(...scriptOpts) ? files : files.slice(1)));
     }
   }
-  if (prog === 'tee') {
-    const files = fileOperands(args, new Set(['--output-error', '-p']));
-    if (files.some((f) => !isScratch(f))) return true;
-  }
-  return false;
+  if (prog === 'tee') out.push(...fileOperands(args, new Set(['--output-error', '-p'])));
+  return out;
+}
+
+/** Is `segment` a shell redirect/`tee`/`sed -i`/`perl -pi` that writes a file OTHER than a `/tmp`|`/dev`
+ *  scratch path? Pure. Fires if ANY written path is non-scratch (never one argument as a proxy). */
+export function isFileWriteRedirect(segment) {
+  return fileWriteTargets(segment).some((f) => !isScratch(f));
 }
 
 /** The #2749 hard-tree-write deny reason for `segment` at a PRIMARY cwd, or null. Pure. Checked ONLY when
@@ -1674,6 +1694,172 @@ export function heredocScan(command) {
   return { text: kept.join('\n'), unterminated };
 }
 
+// ── #3311 — NAME THE COLLATERAL a refusal takes with it ────────────────────────────────────────────────
+// A PreToolUse deny is ALL-OR-NOTHING: the harness never runs the tool call, so a refusal aimed at ONE
+// segment of a chain also discards every other segment. That is correct and must stay correct — see the
+// design note below — but today it is INVISIBLE. The deny message names the git violation; the caller fixes
+// exactly that, retries the git command ALONE, and never learns that the `cat > file <<'EOF'` earlier in the
+// same chain also never ran. Nothing at the write site records anything, so the loss surfaces later as a
+// symptom with no stated cause.
+//
+// Three incidents in one session on 2026-08-26, all the same shape:
+//   1. a `git add -A` refusal dropped the heredoc writing a PR body; `open-pr` then refused an EMPTY body,
+//      and the caller had to trace backwards to find out why;
+//   2. the same shape dropped a `pr-body-edit` fix that was then REPORTED AS APPLIED, because the tool was
+//      pointed at a file that had never been written — a FALSE COMPLETION CLAIM, the expensive failure;
+//   3. a `--force-with-lease` push refusal dropped both a heredoc AND a commit, so a "commit and push" step
+//      silently did neither.
+// The common cost is not the retype. It is that the caller does not KNOW, so downstream steps (and the
+// caller's own report) proceed on state that does not exist.
+//
+// WHY THIS AND NOT "gate at the offending step so the unrelated ones still run". Considered and rejected on
+// three grounds, in increasing order of weight:
+//   • It is not additive. Executing part of a chain that is REFUSED TODAY is strictly more permissive than
+//     refusing it whole — it would weaken every existing arm at once, which is the one thing a
+//     security-adjacent guard may not do.
+//   • It would make the guard a shell REWRITER. To run a subset it must reconstruct a command from its OWN
+//     parse and hand that to bash. This file's history is a catalogue of places where that parse and bash
+//     disagreed (#2994's quoted pipe, r3's phantom heredoc, r5's subshell closer, the wrapper peel). Under
+//     the message-only fix a parse divergence costs an over- or under-deny; under a rewrite it costs
+//     EXECUTING A COMMAND THE CALLER NEVER WROTE. Categorically worse.
+//   • A chain the caller wrote as an atom may not be decomposable. `&&` carries ordering AND a success
+//     precondition; dropping a middle step can leave a later one running against state it was promised
+//     would exist (`rm -rf dist && npm run build`). The guard cannot tell which chains survive decomposition
+//     and which do not, and a partial execution nobody asked for is a SUBTLER failure than a whole refusal —
+//     it trades a loud, visible loss for a quiet, plausible-looking one. That is the wrong direction for a
+//     defect whose entire cost was invisibility.
+// Also considered: PERSISTING the dropped heredoc body to a scratch file so the content survives. Rejected
+// as out of proportion — it gives a PreToolUse hook a side effect and a place to spill secrets, to solve the
+// cheap half of the problem (retyping). The expensive half is not knowing, which the message solves.
+//
+// So: strictly additive to the deny MESSAGE, appended by the CLI at the deny site. `decide` is untouched —
+// it still returns exactly the reason it returned before, which is what keeps the golden corpus
+// (`scripts/golden-corpus/hook-guard-bash/*.json`, asserted byte-for-byte) and every deny/allow test honest.
+
+/** git subcommands that CHANGE state — the read set (`status`, `log`, `diff`, `show`, `rev-parse`,
+ *  `ls-files`, `describe`, …) is deliberately NOT enumerated. An explicit mutating list is the safe default
+ *  here: an unknown subcommand goes unmentioned (a missing bullet), where an "everything not on the read
+ *  list" rule would invent bullets for every new porcelain command git ships. */
+const GIT_STATE_SUBCOMMANDS = new Set([
+  'add', 'commit', 'tag', 'stash', 'apply', 'am', 'cherry-pick', 'revert', 'merge', 'rebase', 'push',
+  'mv', 'rm', 'reset', 'restore', 'checkout', 'switch', 'branch', 'worktree', 'clone', 'init',
+  'update-ref', 'notes', 'fetch', 'pull',
+]);
+
+/** Programs whose whole job is to change the filesystem. Same shape and same reasoning as the git set: a
+ *  short explicit list, not a "not on the read list" rule. */
+const FS_MUTATING_PROGRAMS = new Set([
+  'cp', 'mv', 'rm', 'rmdir', 'mkdir', 'touch', 'ln', 'install', 'rsync', 'chmod', 'chown', 'truncate', 'patch',
+]);
+
+/** git's own global flags that SWALLOW the next token, so the subcommand walk below does not mistake their
+ *  VALUE for the subcommand (`git -C /some/path add -A` → `add`, never `/some/path`). */
+const GIT_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env']);
+
+/** The git SUBCOMMAND of `segment`, or '' when it is not git. Pure. Reads the wrapper-peeled, basename-
+ *  resolved `canonicalCommand` view, so `/usr/bin/git`, `env git` and `"git"` all resolve — the same
+ *  normalization every deny arm above reads, rather than a second weaker one (the #2788 r3 lesson). */
+function gitSubcommand(segment) {
+  if (programWord(segment) !== 'git') return '';
+  const toks = shellTokens(canonicalCommand(segment)).filter((t) => !t.op).map((t) => t.text);
+  for (let i = 1; i < toks.length; i++) {
+    if (GIT_VALUE_FLAGS.has(toks[i])) { i += 1; continue; }
+    if (toks[i].startsWith('-')) continue;
+    return toks[i];
+  }
+  return '';
+}
+
+/** What STATE would this segment have produced, in a few words — or null if it produces none. Pure.
+ *
+ *  Narrow on purpose: a dropped `git status` or `ls` costs nothing and the caller does not need telling, so
+ *  naming it would only bury the bullets that matter. Five shapes, the first two being the ones that
+ *  actually cost this session:
+ *    1. a file WRITE (redirect / `tee` / `sed -i` / `perl -pi`), scratch paths included — see
+ *       `fileWriteTargets` for why `/tmp` counts here and not in the #2749 arm;
+ *    2. a HEREDOC, called out by name even with no redirect target (`git commit -F- <<'EOF'`), because its
+ *       BODY exists ONLY inside the command text that is being discarded — it is the one part of a dropped
+ *       step that the caller cannot recover by re-reading the file it was writing to;
+ *    3. a git state mutation;
+ *    4. a filesystem-mutating program;
+ *    5. a tree-writing build or an fs-writing generator/scaffold script — recognised by REUSING the #2749
+ *       predicates rather than a sixth hand-written list, so "what counts as writing the tree" has exactly
+ *       one definition in this file and the notice cannot drift from the arm that denies it.
+ */
+function statefulStepEffect(segment) {
+  const seg = String(segment || '');
+  const targets = fileWriteTargets(seg);
+  // A `<<`/`<<-` OPERATOR token — `shellTokens` only emits one at a real redirect position, so a `<<` inside
+  // a quoted argument or a comment is text, not a heredoc (the same distinction `heredocScan` draws, and the
+  // reason r3's phantom-heredoc bug is not reachable from here).
+  const heredoc = shellTokens(seg).some((t) => t.op && t.text.startsWith('<<'));
+  if (targets.length) {
+    const shown = targets.slice(0, 3).join(', ');
+    return `writes ${shown}${targets.length > 3 ? ', …' : ''}${heredoc ? ' — from a heredoc body that exists ONLY in this command text' : ''}`;
+  }
+  if (heredoc) return 'consumes a heredoc body that exists ONLY in this command text';
+  const sub = gitSubcommand(seg);
+  if (sub && GIT_STATE_SUBCOMMANDS.has(sub)) return `runs \`git ${sub}\` — a repository state change`;
+  const prog = programWord(seg);
+  if (FS_MUTATING_PROGRAMS.has(prog)) return `runs \`${prog}\` — a filesystem change`;
+  if (isGeneratorScriptRun(seg)) return 'runs an fs-writing generator/scaffold script';
+  if (isTreeWritingBuildRun(seg)) return 'runs a tree-writing build';
+  return null;
+}
+
+/** A one-line excerpt of a segment for the notice: whitespace collapsed, truncated. Pure. */
+function stepExcerpt(segment) {
+  const s = String(segment || '').replace(/\s+/g, ' ').trim();
+  return s.length > 72 ? s.slice(0, 71) + '…' : s;
+}
+
+/** How many dropped steps the notice lists before it summarises the rest — a bounded message. */
+const MAX_LISTED_STEPS = 5;
+
+/**
+ * The #3311 COLLATERAL notice for a command that is about to be DENIED: the state-producing steps in the
+ * same chain that will not run either, and that leave no trace of having been skipped. Pure. Returns '' when
+ * there is nothing to name, so the caller can concatenate it unconditionally.
+ *
+ * STRICTLY ADDITIVE — it is appended to a deny message that has ALREADY been decided. It cannot allow
+ * anything, it cannot deny anything, and it never reaches a command that was allowed. That is the whole
+ * safety argument, and it is why this lives beside `decide` rather than inside it.
+ *
+ * Deliberately silent in three cases:
+ *   • a command the parser cannot represent (an unterminated quote) — the segments would be a guess, and a
+ *     guessed list of "what you lost" is worse than no list. That command has its own deny message anyway.
+ *   • a SINGLE-segment command — there is no collateral; the refused step is the only step.
+ *   • a step that `reason` would refuse ON ITS OWN — the deny message already names it, so repeating it as
+ *     "collateral" would blur the one distinction the notice exists to draw. Note this is a best-effort
+ *     attribution, not a claim of innocence: the whole-command arms (`backgroundedVerificationReason`,
+ *     `commitIdentityCommandReason`) have no single offending segment, so under those a listed step may in
+ *     fact be part of the reason. The wording says only that the step produces state and did not run, which
+ *     is true either way.
+ */
+export function collateralStepsNotice(command, ctx = {}) {
+  try {
+    const hd = heredocScan(command);
+    if (hd.unterminated) return '';
+    const parsed = parseSegments(hd.text);
+    if (parsed.unterminated) return '';
+    const segments = parsed.segments.map((s) => s.trim()).filter(Boolean);
+    if (segments.length < 2) return '';
+    const dropped = [];
+    for (const seg of segments) {
+      if (reason(seg, ctx)) continue;                       // this step IS the refusal's subject — already named
+      const effect = statefulStepEffect(seg);
+      if (effect) dropped.push(`\n  • \`${stepExcerpt(seg)}\` — ${effect}`);
+    }
+    if (!dropped.length) return '';
+    const listed = dropped.slice(0, MAX_LISTED_STEPS).join('');
+    const rest = dropped.length > MAX_LISTED_STEPS ? `\n  • …and ${dropped.length - MAX_LISTED_STEPS} more.` : '';
+    return `\n\nCOLLATERAL (#3311): a refusal blocks the WHOLE command, so NOTHING in it ran — not just the step named above. ${dropped.length} other step(s) in this chain produce state and were discarded with it, leaving no trace at the write site:${listed}${rest}\n`
+      + 'Re-run those steps in their own Bash call BEFORE anything downstream reads what they were meant to produce — and do NOT report them as done. A heredoc body is gone with the command text; nothing on disk records that it was skipped.';
+  } catch {
+    return '';                                              // a fault in an ADVISORY note must never touch the deny
+  }
+}
+
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
  *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule, and
  *  `foreignLiveLease` for the #2367 rule). */
@@ -1861,10 +2047,17 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground });
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground };
+  const r = decide(cmd, guardCtx);
   if (r) {
+    // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed
+    // OUTSIDE `decide` (which stays byte-stable for the golden corpus) and wrapped in its own try/catch: an
+    // exception here would abort before the deny is written, turning a refusal into a SILENT ALLOW — the one
+    // way an advisory note could weaken the guard. It cannot, now.
+    let collateral = '';
+    try { collateral = collateralStepsNotice(cmd, guardCtx); } catch { collateral = ''; }
     process.stdout.write(JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r + collateral },
     }));
   }
   // #2749/#2788 — the WARN-only nudge for the un-script-decidable "should have delegated" half. Independent
