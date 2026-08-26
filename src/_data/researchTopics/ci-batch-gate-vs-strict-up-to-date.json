@@ -1,0 +1,20 @@
+{
+  "id": "ci-batch-gate-vs-strict-up-to-date",
+  "title": "CI Batch Gate vs Strict Up-To-Date Branch Protection",
+  "status": "open",
+  "summary": "Grounding for decision #xbi8dmf: main requires branches be up to date (strict: true, required contexts test + smoke), so every queued lane/* PR flips to BEHIND the instant another lands and the drain rebase-drops it and re-runs the whole required suite — N serial CI rounds for N queued couples, most re-testing lanes that share no file. Measured per-job timings across four consecutive ci.yml runs refute the intuitive fix: the required-check critical path (~6.2 min) lives entirely in the test chain (slowest vitest shard ~4.6 min + the needs: test-shard aggregator ~1.6 min), while smoke (~2.2 min) runs concurrently and finishes ~2.5 min early, so moving browser suites off per-PR saves a runner but ~0 wall-clock. The real per-PR cost is shard imbalance (shard 4 runs 3.2x shard 2) plus the serial coverage-merge + check:standards aggregator; visual is already if:false (#2232) and test-selection-measure is opt-in. Drain batch size measured over 10 days of merge commits clustered at a 10-minute idle gap: 124 passes, median 2, p75 4, p90 6, max 49 — small N, thin tail, which argues for naive per-lane re-run over bisection when a batch goes red. Prior art: Bors-NG (batch then bisect), GitHub merge queue (speculative merge groups, auto-eject the culprit, ruled OFF here by #2138 Fork 5 because it reorders cross-repo impl-first/WE-last couples), Zuul dependent pipelines (speculative execution keeps per-change attribution at the cost of N concurrent pipelines), Google TAP (affected-target presubmit + post-submit batches with an automated culprit finder), Meta (ML-ranked predictive test selection + automated bisect and auto-revert). Common thread: nobody gives up per-change attribution; they only differ in whether they spend extra runs, extra concurrency, or extra infrastructure to recover it. DECISIVE FINDING from the skeptic pass: this turf is already ruled. The #2692 statute anchor event-driven-land-is-wake-only clause 3 defers the full merge-queue build INCLUDING the batching rider behind a measured land-serialization saturation trigger (#2680's metric: k > 1 ready PRs queued behind the sole writer, sustained), with its defaults pre-attached and re-litigation explicitly closed; clause 4 requires the un-gate to surface and route through #2704 criticality routing rather than auto-execute. The tripwire that measures the trigger, #2740, is status open and was never built, so no measured trip has occurred. The gate-on-merged-tree-lane-fast-fail anchor separately ratifies the merged-tree-gate principle already, citing the Not-Rocket-Science Rule and Bors by name. So batch verification is neither novel nor open here — the live question is whether the deferral's trigger is met, and what is owed to measure it. Two further corrections the skeptic forced: strict:true was NOT an unexamined default (#2152 records it deliberately in three places, so flipping it is a reversal of a ruling), and a naive merge-tree stacking sketch is unbuildable as written (merge-tree --write-tree returns a tree not a commit; a push to a batch/* ref matches none of ci.yml's on: triggers; the FUI sibling is checked out unpinned so a WE batch ref can never verify a cross-repo couple).",
+  "dateOpened": "2026-08-26",
+  "tags": [
+    "ci",
+    "merge-queue",
+    "branch-protection",
+    "batch-verification",
+    "bisection",
+    "culprit-finding",
+    "test-selection",
+    "drain",
+    "dev-workflow"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

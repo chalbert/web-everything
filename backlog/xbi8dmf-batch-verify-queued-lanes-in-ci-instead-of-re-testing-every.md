@@ -1,0 +1,143 @@
+---
+kind: decision
+status: open
+dateOpened: "2026-08-26"
+relatedTo: ["2138", "2153", "2152", "2692", "2740", "2704", "2680"]
+relatedReport: reports/2026-08-26-ci-batch-verification-and-strict-up-to-date.md
+tags: [ci, drain, merge-queue, branch-protection]
+---
+
+# Batch-verify queued lanes in CI instead of re-testing every PR against a moving main
+
+Strict up-to-date branch protection marks every queued PR BEHIND the moment one lands, so the drain rebases it and re-runs the full ~6min required suite per PR. A prep pass found the batch-gate turf already ruled and deferred by #2692 behind an unmeasured trigger, so the open question is not which batching design but whether the deferral trips.
+
+Research: [CI Batch Gate vs Strict Up-To-Date Branch Protection](/research/ci-batch-gate-vs-strict-up-to-date/) · report `we:reports/2026-08-26-ci-batch-verification-and-strict-up-to-date.md`
+
+## Prep verdict — NOT prepared; the question was reframed
+
+A prep pass ran on 2026-08-26 (prior-art survey, measurement, mandated skeptic + fresh-context screen).
+**It did not produce a ratifiable fork set — it dissolved the one it started with.** `preparedDate` is
+deliberately unstamped; this item is `○ needs prep` against the *reframed* question below, not against the
+four forks the first draft carried.
+
+The prep pass is still recorded here in full, because what it destroyed and what it measured are both
+durable.
+
+## The blocking reconciliation — #2692 already ruled and deferred this
+
+The first draft proposed a batch gate without citing the statute that governs it.
+[`#event-driven-land-is-wake-only`](../../docs/agent/platform-decisions.md#event-driven-land-is-wake-only)
+(ratified 2026-07-27, operator, #2692):
+
+- **Clause 3** defers *"the full event-driven MERGE-QUEUE build — speculative merge-commit preserving the
+  signed-off SHA, per-step CAS/idempotent transaction-tail guards, **and the batching rider**"* behind a
+  **measured `land-serialization` saturation trigger** (#2680's metric: *k > 1 ready PRs queued behind the
+  sole writer, sustained over the window*). The ruled defaults are **pre-attached** precisely so that *"no
+  re-litigation is needed"* when it fires.
+- **Clause 4** requires the un-gate to **surface and route** through #2704 criticality decision-routing,
+  possibly to operator confirm — it *"does not autonomously execute the build."*
+- **#2740**, the tripwire that measures the trigger, is `status: open`. Never built. **No measured trip has
+  occurred.**
+
+Ratifying the first draft would have un-deferred the batching rider without its trigger, bypassed the
+required routing, and re-opened forks #2692 declared closed — after a human had spent their ratification,
+when the call is immutable. That is the class of miss prep exists to catch.
+
+Separately,
+[`#gate-on-merged-tree-lane-fast-fail`](../../docs/agent/platform-decisions.md#gate-on-merged-tree-lane-fast-fail)
+already ratifies the *principle* — the binding gate runs once on the **merged** tree, citing the Not-Rocket-
+Science Rule and Bors by name. Batch verification is settled doctrine here, not a proposal.
+
+## The reframed question, for the next prep pass
+
+> Does the measured landing-queue evidence meet #2692 clause 3's saturation trigger — and if the trigger
+> cannot be evaluated because #2740 was never built, is building the tripwire the actual next move, or does
+> the evidence below already discharge it?
+
+That is a real open decision with a real fork (*build the meter* vs *rule the trigger met on existing
+evidence*), and it is **not** the decision this card was filed as. It needs its own prep pass — prior art
+on #2680's metric definition, and a fork set authored against clause 4's routing requirement.
+
+## What the prep pass measured — this part stands
+
+None of it appears in any prior ruling. Full method and per-run figures in the linked report.
+
+- **Required-check critical path ≈ 6.2 min**, entirely inside the `test` chain — slowest `vitest` shard
+  (~4.6 min, `we:.github/workflows/ci.yml:65`) plus the `needs: test-shard` aggregator (~1.6 min, `:141`).
+- **`smoke` is off the critical path** in the measured (uncontended) regime — ~2.2 min (`:215`), finishing
+  ~2.5 min before the `test` chain. *Caveat the skeptic raised and this card accepts:* the sample is four
+  **successful, low-contention** runs; at 6 jobs per run × a p90 batch of 6 PRs, against a runner cap shared
+  with `frontierui` and `plateau-app`, shards and `smoke` contend and the conclusion may invert. **Not
+  re-measured under saturation.**
+- **Shard imbalance** — shard 4 runs 3.2× shard 2 (276s vs 85s).
+- **`check:standards` is serialized for no reason** — it has no shard dependency and sits behind them only
+  through job co-location (`:200`).
+- **Batch-size distribution** — 124 drain passes over 10 days: median 2, p75 4, p90 6, max 49; 65% land ≤2.
+- `visual` is already `if: false` pending #2232 (`:372`); `test-selection-measure` is opt-in (`:298`).
+
+## Withdrawn forks — what the skeptic and screen destroyed
+
+Recorded rather than deleted: each was authored, attacked, and did not survive. None should be revived
+without the reconciliation above.
+
+**Fork 1 (was: does the batch gate replace a per-PR check?) — WITHDRAWN.**
+`Skeptic: REFUTED — not a fork at all.` `#repo-drain-check-contract` declares CI job shape and required
+contexts repo-private ("how a repo turns that check green … is repo-private impl"); the drain consumes only
+the name `test` (`we:scripts/merge-ai-prs.mjs:2476`) and `smoke` appears zero times in it. The default also
+inverted `#gate-on-merged-tree-lane-fast-fail`, which ranks the per-lane gate as best-effort fast-fail, not
+binding authority. Premise separately unstable under queue saturation.
+`Screen: clear` (destroyed on the skeptic axis instead).
+
+**Fork 2 (was: where does batch verification execute?) — WITHDRAWN.**
+`Skeptic: REFUTED — the code sketch did not run.` `git merge-tree --write-tree` returns a TREE; the sketch
+fed it back as a commit and pushed it to a branch ref (both fail; the skeptic reproduced the errors). The
+push would have triggered no workflow at all — `we:.github/workflows/ci.yml:44-49` fires only on
+`push: branches: [main]` / `pull_request`. Naive stacking hits the #2198 shared-manifest wall at the item's
+own median N=2. And the FUI sibling is checked out with no `ref:` (`:90-95`), so a WE batch ref is verified
+against FUI *main* — it can never verify a cross-repo couple.
+`Screen: clear` (destroyed on the skeptic axis instead).
+
+**Fork 3 (was: when does `strict` flip?) — WITHDRAWN, and its premise was false.**
+`Skeptic: REFUTED — "the batch run subsumes strict" is untrue.` `strict` asserts every state `main` passes
+through was tested; a batch run asserts one terminal combined tree is green. The intermediate states are
+never verified, and `we:.github/workflows/deploy.yml` + `we:.github/workflows/release-please.yml` fire on
+each of them. Under auto-eject it is worse: green(A∪B∪C) does not imply green(A∪C), and the required check
+contains genuinely non-monotone gates — `coverage:merge --threshold=80` (`:196`) and `check:standards`
+(`:200`).
+`Screen: clear` (destroyed on the skeptic axis instead).
+
+**Correction of a published claim:** the draft asserted `strict: true` was an unexamined default absent from
+#2152's ruling. **False — #2152 records it in three places** (its digest lists "require branches up-to-date
+before merge"; its result block records `strict: true`; its verify command reads `strict` first). Flipping
+it is a **reversal of a deliberate ruling**, not the correction of an oversight. The report carries the same
+correction.
+
+**Fork 4 (was: how is a red batch attributed?) — WITHDRAWN.**
+`Skeptic: REFUTED — per-lane re-run cannot find the only failure class batching introduces.` Every queued PR
+already has a green `test` at its own head (`we:scripts/merge-ai-prs.mjs:584`), so re-running lanes alone
+re-tests things that are green by construction; a two-lane semantic interaction is invisible to it and only a
+subset search finds it. Run-count (N vs log N) was the wrong axis entirely. Auto-eject is separately
+forbidden for stacked lanes — `we:docs/agent/backlog-workflow.md:779` makes "salvage the tail without the
+broken parent" structurally impossible, and a stacked tip contains its parent's commits.
+`Screen: flagged(prio)` — the default rested on "complexity carried in the common case", a cost argument. At
+zero cost the merit residue is completeness of the culprit set, not run count. Fix moot: the fork is
+withdrawn on the skeptic axis.
+
+**Citation-scope downgrades applied:** #2165 is context, not authority (its root cause was single-repo CI
+failing to resolve `@frontierui/*` aliases, nothing to do with breakage landing on `main`). #2138 Fork 5
+constrains placement (native queue OFF) but does not authorize an in-house batch gate — the actual governing
+authority is #2692, which the draft never cited. The draft also cited `we:scripts/merge-ai-prs.mjs:586` for
+the red-check refusal; that is `:584`, and `:586` is the merge-state refusal.
+
+## Carved child — not blocked by any of this
+
+- **#xsouh7c** — take `check:standards` and shard imbalance off the per-PR CI critical path. Repo-private CI
+  shape, explicitly outside the drain contract per `#repo-drain-check-contract`, no statute conflict, and it
+  is where the measured per-PR win actually is (~2–3 min). Independent of this decision entirely; it should
+  proceed regardless of how the reframed question is answered.
+
+## Done when
+
+1. **Executable** — this card is resolved only by a ruling on the reframed question above. Concretely: the
+   item file carries a `preparedDate`, and its fork set cites `#event-driven-land-is-wake-only` clause 3 and
+   states whether #2680's saturation metric is met or whether #2740 must be built to evaluate it.
