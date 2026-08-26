@@ -69,6 +69,7 @@ import {
   scanPublishSecrets,
   findGitHookAllFlags,
   gitHookAllFlagError,
+  buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 import { scanUnfencedMandateParams } from './lib/mandate-fence-scan.mjs';
@@ -732,6 +733,16 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
   // Recognize a `<repo>:` locus prefix — the SAME key set as check-standards-rules.mjs `LOCUS_MARKER_RE`
   // (we/fui/plateau + full names) and the #883 locus-prefix convention, anchored to the START of the entry.
   const SCOPE_REPO_PREFIX_RE = /^(?:we|fui|plateau|webeverything|frontierui|plateau-app):/;
+  // The tracked-path index behind the §6d-septies unresolved-path WARN below (#3337). Built ONCE for the
+  // whole loop (the pure rule takes it as an argument — the fs read stays here, the logic stays in
+  // check-standards-rules.mjs). A failed `git ls-files` yields an empty index, which the rule reads as
+  // "not checkable" and stays silent on — never as "nothing resolves".
+  let trackedIndex = buildTrackedPathIndex([]);
+  try {
+    trackedIndex = buildTrackedPathIndex(
+      execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+        .split('\0').filter(Boolean));
+  } catch { /* non-git environment — the scope-path WARN below is simply not emitted */ }
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
     let raw;
     try { raw = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')).data; }
@@ -786,6 +797,15 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
       if (dirs.length)
         warn(`Backlog item "${id}" has directory-level scope entr${dirs.length > 1 ? 'ies' : 'y'} ${JSON.stringify(dirs)} (a repo-qualified prefix ending in "/") — scope defaults to FILE-LEVEL (#2739/#2679). A bare directory scope re-creates the coarse serialization finer leases removed: file-disjoint items stall behind one broad dir-scope. NARROW it to the specific files this item writes (never fewer than the real write-set — an under-scope breaches the lease at build time), OR, if the item genuinely spans the directory / is inherently cross-cutting, add a short \`scopeRationale:\` note stating why and this flag clears.`);
     }
+
+    // ── 6d-septies. A scope entry whose path does not resolve but whose BASENAME does (#3337) ──
+    // The pure rule — and the reasoning behind every one of its four narrowing axes — lives in
+    // check-standards-rules.mjs `scopeBasenameMismatches`; this call site only supplies the tracked-path
+    // index built above and emits the message that names the probable intended path. WARNING, never an
+    // error: a scope entry for a file the item is about to CREATE is legitimate, and a hard failure would
+    // redden exactly that greenfield case.
+    for (const finding of scopeBasenameMismatches(raw, trackedIndex))
+      warn(scopeBasenameMismatchMessage(id, finding));
   }
 }
 

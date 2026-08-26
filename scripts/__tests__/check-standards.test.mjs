@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -20,7 +21,10 @@ import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDemos } from '../lib/demos-loader.cjs';
 import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import { loadAdapters } from '../lib/adapters-loader.cjs';
-import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, dirLevelScopeFinding } from '../check-standards-rules.mjs';
+import {
+  buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, dirLevelScopeFinding,
+  buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage, SCOPE_BASENAME_MAX_SUGGESTIONS,
+} from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -392,5 +396,139 @@ describe('scope defaults to file-level — dir-level scope flagged unless justif
     expect(callIdx).toBeGreaterThan(-1);
     const localWindow = section.slice(Math.max(0, callIdx - 200), callIdx + 200);
     expect(localWindow).not.toMatch(/try\s*\{/);
+  });
+});
+
+// ── #3337 — a scope entry whose path does not resolve but whose BASENAME does ────────────────────
+// `scope:` is matched by EXACT path (`coversFile`), so an entry naming a path that does not exist covers
+// NOTHING: the file the item really writes goes undeclared and the dispatcher can launch it beside an item
+// that writes the very same file. Nothing caught that before this. Exercises the SHIPPED
+// `scopeBasenameMismatches` (never a hand-mirrored copy — the #2751 lesson) against synthetic fixtures, then
+// pins the four narrowing axes that keep it from adding noise to a ~1400-warning pile, then pins the wiring.
+describe('#3337 scope entry basename matches a tracked file at a different path', () => {
+  const matter = require('gray-matter');
+  // A small synthetic tree standing in for `git ls-files` — includes the real #3321 shape (a `scripts/lib/*`
+  // module whose test lives at the TOP-level `scripts/__tests__/`, not a sibling `scripts/lib/__tests__/`).
+  const INDEX = buildTrackedPathIndex([
+    'scripts/check-standards-rules.mjs',
+    'scripts/__tests__/lane-verify.test.mjs',
+    'scripts/lib/pr-merge-gate.mjs',
+    'skills-src/review/SKILL.md',
+    'skills-src/drain/SKILL.md',
+    'skills-src/jury/SKILL.md',
+    'src/a/index.ts', 'src/b/index.ts', 'src/c/index.ts', 'src/d/index.ts',
+  ]);
+  const open = (scope, extra) => ({ status: 'open', scope, ...extra });
+
+  it('warns on the #3321 shape — wrong directory, right basename — and names the tracked path', () => {
+    const found = scopeBasenameMismatches(open(['we:scripts/lib/__tests__/lane-verify.test.mjs']), INDEX);
+    expect(found).toEqual([{
+      entry: 'we:scripts/lib/__tests__/lane-verify.test.mjs',
+      path: 'scripts/lib/__tests__/lane-verify.test.mjs',
+      suggestions: ['scripts/__tests__/lane-verify.test.mjs'],
+    }]);
+    // The actionable half: the message must NAME the probable intended path, repo-qualified.
+    expect(scopeBasenameMismatchMessage('9999-x', found[0]))
+      .toContain('Did you mean "we:scripts/__tests__/lane-verify.test.mjs"?');
+  });
+
+  it('stays SILENT on an entry that resolves, and on a basename that matches nothing (a new file)', () => {
+    expect(scopeBasenameMismatches(open(['we:scripts/lib/pr-merge-gate.mjs']), INDEX)).toEqual([]);
+    // #3307's `we:scripts/lib/claim-sweep.mjs` shape: no basename match anywhere ⇒ a genuine new file, and
+    // the greenfield case is exactly what must not redden.
+    expect(scopeBasenameMismatches(open(['we:scripts/lib/claim-sweep.mjs']), INDEX)).toEqual([]);
+  });
+
+  it('axis 1 — only `we:` entries are checked; a sibling repo\'s tree is not visible to this gate', () => {
+    // "Not found" in fui:/plateau: means "not checkable", never "wrong".
+    expect(scopeBasenameMismatches(open(['fui:scripts/lib/__tests__/lane-verify.test.mjs']), INDEX)).toEqual([]);
+    expect(scopeBasenameMismatches(open(['plateau-app:scripts/check-standards-rules.mjs']), INDEX)).toEqual([]);
+    expect(scopeBasenameMismatches(open(['scripts/lib/__tests__/lane-verify.test.mjs']), INDEX)).toEqual([]);
+  });
+
+  it('axis 2 — a SUBTREE entry leases a tree, not an exact path, so it is never resolution-checked', () => {
+    for (const entry of ['we:scripts/lib/__tests__/', 'we:scripts/lib/__tests__', 'we:scripts/lib/*.test.mjs'])
+      expect(scopeBasenameMismatches(open([entry]), INDEX), entry).toEqual([]);
+  });
+
+  it('axis 3 — a generic basename is disambiguated by the longest shared TRAILING path segments', () => {
+    // `SKILL.md` matches three tracked files; only one shares the `review/SKILL.md` tail, so the warning
+    // offers ONE probable path instead of a useless list of every SKILL.md in the repo.
+    expect(scopeBasenameMismatches(open(['we:.claude/skills/review/SKILL.md']), INDEX)[0].suggestions)
+      .toEqual(['skills-src/review/SKILL.md']);
+  });
+
+  it('axis 4 — a top tier wider than the cap is SILENCE, not an unactionable "this looks wrong"', () => {
+    // Four `index.ts`, none sharing the entry's parent directory ⇒ every candidate ties at the basename, the
+    // tier exceeds the cap, and there is no path worth suggesting.
+    expect(SCOPE_BASENAME_MAX_SUGGESTIONS).toBe(3);
+    expect(scopeBasenameMismatches(open(['we:src/zzz/index.ts']), INDEX)).toEqual([]);
+    // …but a tie AT the cap still warns, and offers every tied path.
+    const capped = buildTrackedPathIndex(['src/a/index.ts', 'src/b/index.ts', 'src/c/index.ts']);
+    const found = scopeBasenameMismatches(open(['we:src/zzz/index.ts']), capped);
+    expect(found[0].suggestions).toEqual(['src/a/index.ts', 'src/b/index.ts', 'src/c/index.ts']);
+    expect(scopeBasenameMismatchMessage('9999-x', found[0])).toContain('Did you mean one of ');
+  });
+
+  it('skips resolved items and clears on a non-empty scopeRationale (the greenfield escape)', () => {
+    const entry = ['we:scripts/lib/__tests__/lane-verify.test.mjs'];
+    expect(scopeBasenameMismatches({ status: 'resolved', scope: entry }, INDEX)).toEqual([]);
+    expect(scopeBasenameMismatches(open(entry, { scopeRationale: 'this item CREATES the sibling test dir' }), INDEX))
+      .toEqual([]);
+    // Whitespace is not a justification.
+    expect(scopeBasenameMismatches(open(entry, { scopeRationale: '  ' }), INDEX)).toHaveLength(1);
+  });
+
+  it('an unreadable tracked list means NOT CHECKABLE — never "nothing resolves"', () => {
+    // check-standards.mjs falls back to an empty index when `git ls-files` throws; that must flag nothing
+    // rather than warn on the entire corpus.
+    expect(scopeBasenameMismatches(open(['we:scripts/lib/__tests__/lane-verify.test.mjs']), buildTrackedPathIndex([])))
+      .toEqual([]);
+    expect(scopeBasenameMismatches(open(['we:anything.mjs']), undefined)).toEqual([]);
+    expect(scopeBasenameMismatches({ status: 'open', scope: 'not-an-array' }, INDEX)).toEqual([]);
+  });
+
+  it('every finding over the REAL backlog is well-formed and carries at least one suggestion', () => {
+    // Real-corpus false-positive guard, in the shape of the #2751 loop above: not an assertion of zero
+    // findings (the mis-scoped paths are exactly what the rule surfaces), but a standing check that the
+    // shipped predicate stays well-typed over real, messy frontmatter — and, critically, that it never
+    // emits a finding with NOTHING to suggest, which would be the unactionable warning it must not be.
+    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+      .split('\0').filter(Boolean);
+    const index = buildTrackedPathIndex(tracked);
+    const dir = join(ROOT, 'backlog');
+    let total = 0;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+      let data;
+      try { data = matter(readFileSync(join(dir, file), 'utf8')).data; } catch { continue; }
+      if (data?.scope === undefined) continue;
+      for (const f of scopeBasenameMismatches(data, index)) {
+        total++;
+        expect(data.status, `${file} flagged but resolved`).not.toBe('resolved');
+        expect(f.entry.startsWith('we:'), `${file}: ${f.entry}`).toBe(true);
+        expect(index.paths.has(f.path), `${file}: ${f.entry} actually resolves`).toBe(false);
+        expect(f.suggestions.length, `${file}: ${f.entry} has no suggestion`).toBeGreaterThan(0);
+        expect(f.suggestions.length).toBeLessThanOrEqual(SCOPE_BASENAME_MAX_SUGGESTIONS);
+        for (const s of f.suggestions) expect(index.paths.has(s), `${file}: suggested ${s}`).toBe(true);
+      }
+    }
+    // The rule must stay a needle, not a firehose: a corpus-wide count in the hundreds would drown the
+    // gate's existing warnings rather than add to them. It was 4 when this landed.
+    expect(total).toBeLessThan(30);
+  });
+
+  // ── #3337 wiring: §6d-septies must call the SHIPPED function, not re-derive it inline ──────────
+  it('§6d-septies is WIRED: check-standards.mjs imports and calls the shipped rule, un-swallowed', () => {
+    const gate = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
+    expect(gate).toMatch(/buildTrackedPathIndex,\s*scopeBasenameMismatches,\s*scopeBasenameMismatchMessage,/);
+    const from = gate.indexOf('// ── 6d-septies.');
+    expect(from).toBeGreaterThan(-1);
+    const call = 'for (const finding of scopeBasenameMismatches(raw, trackedIndex))';
+    const callIdx = gate.indexOf(call, from);
+    expect(callIdx).toBeGreaterThan(-1);
+    expect(gate.slice(callIdx, callIdx + 200)).toMatch(/warn\(scopeBasenameMismatchMessage\(id, finding\)\)/);
+    // The WARN itself must never be silenced by a try/catch. The `git ls-files` read above legitimately has
+    // one (a non-git environment is a silent no-op, by design), so scan only the window around the call.
+    expect(gate.slice(Math.max(0, callIdx - 200), callIdx + 200)).not.toMatch(/try\s*\{/);
   });
 });
