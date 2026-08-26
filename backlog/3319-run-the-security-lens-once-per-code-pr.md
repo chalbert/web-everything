@@ -26,10 +26,26 @@ Of the 92 replayed cases, 87 recorded a lens row and **86 of those 87 were `corr
 
 ## Done when
 
-1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-pr.test.mjs -t "#3319"` (drop the
-   `we:` prefix when actually running it). Fails before this item lands — no `judgeSecurity` step exists and
-   the run reaches `confirm` after ONE judge suspend — and passes after.
+1. **Executable** — `npx vitest run review-pr -t "#3319" | grep -qE "Tests +[0-9]+ passed"`. Fails before this
+   item lands — no `judgeSecurity` step exists and the run reaches `confirm` after ONE judge suspend — and
+   passes after (17 passed | 176 skipped).
 2. `npm run check:standards` — 0 errors.
+
+> **The `grep` is load-bearing, and the bare form it replaces was vacuous.** The criterion first read
+> `npx vitest run … -t "#3319"` with no pipe. On `origin/main` that exits **0** — 368 files and 9221 tests
+> **skipped**, because a `-t` filter matching nothing is a selection of zero, and vitest treats an empty
+> selection as success rather than as a miss. So the criterion was green before the work, in exactly the way
+> the card claimed it would not be.
+>
+> The check must therefore assert that tests **ran**, not merely that the command returned. `Tests N passed`
+> appears only when the filter selected something; `Tests 9221 skipped` does not match it. Verified both ways
+> before landing: non-zero on `origin/main`, zero on this branch.
+>
+> This is `vacuous-executable-criterion`, one of the eight candidate gates in
+> [we:scripts/review-corpus/gates.mjs](../scripts/review-corpus/gates.mjs) — written for the replay harness by
+> the same session that then shipped the defect it detects. The gate scores a **corpus of past reviews** and
+> never runs against a backlog card, so it could not fire here. A detector pointed only backwards catches
+> nobody. Filed as its own gap; not fixed in this item.
 
 ## What shipped
 
@@ -65,6 +81,16 @@ file header rather than hidden.
 
 ### Known follow-up, not fixed here
 
-`factsFromRun` in [we:scripts/operations/record-verdict.mjs](../scripts/operations/record-verdict.mjs) takes
-the FIRST telemetry `sessionId`, which is now one of two. The independence marker it carries is therefore
-partial rather than wrong. Out of this item's scope.
+`factsFromRun` in [we:scripts/operations/record-verdict.mjs](../scripts/operations/record-verdict.mjs)
+under-reports on **two** fields, not one — the first draft of this note said `sessionId` alone, which a
+reviewer corrected:
+
+- **`sessionId`** takes the first telemetry entry, which is now one of two.
+- **`lens`** reads `record.input.lens` — the **CLI input**, i.e. what the FIRST seat judges. The
+  `judgeSecurity` seat is not CLI-reachable by design, so it can never appear there. A transported verdict
+  therefore names one lens where two jurors sat.
+
+Both make the marker **partial rather than wrong**, and partial in the safe direction: it under-claims
+independence and under-claims coverage. Neither invents a juror that did not sit. Out of this item's scope,
+but the `lens` half is the one to fix first — an under-reported `sessionId` weakens a proof, while an
+under-reported `lens` misdescribes what was actually reviewed.
