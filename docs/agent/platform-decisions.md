@@ -3117,6 +3117,63 @@ server acts on which clone") and on the session-free direction of #2701/#2703.
 
 ---
 
+### The conveyor's headless dispatch starts agents by CALLING the declared `dispatch-lane` operation — never a second spawn implementation, never a cross-process call into a sibling repo's server {#conveyor-dispatch-calls-the-declared-operation}
+
+**Ratified 2026-08-26 by the operator (Nicolas Gilbert) (#3118).** The conveyor's headless runner surfaces
+dispatch decisions; the thing that turns a surfaced decision into a running agent is the **declared
+`dispatch-lane` operation**, called once per dispatch. Three clauses:
+
+1. **One spawn implementation, and it is the declared operation.** The repo has exactly one place that starts
+   a delivery agent — `dispatch-lane`'s sink. A second module that spawns `claude` for the conveyor is the
+   same second-implementation shape [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment)'s
+   one-source clause forbids, and it is forbidden whether the rival lives in this repo or a sibling one.
+   Widening dispatch to a new kind of work extends the declared operation; it does not fork a new spawner.
+2. **The runner becomes a caller, not a backend.**
+   [#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) says an
+   operation is declared once and its callers are adapters over that declaration. The conveyor's runner is
+   one such caller. It supplies the item and the dispatch kind; the operation owns the argv, the brief, the
+   handle, the run record and the observation.
+3. **Steering is stop-then-resume, and that is accepted as sufficient — but reaching the mechanism is
+   UNVERIFIED.** The [#agent-runner-cli-backend](#agent-runner-cli-backend) contract names `steer(text)` as a
+   boundary-delivered write to a live child's stdin. A detached background session reaches the same end by
+   being stopped and resumed with new instructions, which preserved the session's context in **one manual
+   observation on 2026-08-25**. The conveyor's requirement is **"steer while keeping the work"**, not **"steer
+   without ever interrupting"** — so the coarser verb satisfies it, and the finer one does not earn a second
+   spawner. *That sufficiency is the operator's ruling and it stands.* What does **not** stand on the same
+   footing is the separate factual claim that the conveyor can reach the mechanism at all:
+   **`claude --resume` addresses a session by its id, so stop-then-resume presupposes that the dispatcher
+   knows the id of the agent it started.** The same 2026-08-25 run recorded the opposite result for that
+   presupposition — `--session-id` was **ignored** on a `--bg` spawn — and `#xhmktct` is the probe that
+   settles it. No code here resumes or steers anything yet:
+   `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
+   `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**
+   (re-run 2026-08-26, on both `main` at `3b2aeded` and `main` at `1ed16d63`). **This clause is the hinge,
+   and two triggers revisit it**, not one:
+   (i) if the requirement ever becomes steering a *running* agent without interrupting it — no
+   stop-then-resume backend can reach that; or (ii) **if `#xhmktct`'s probe comes back negative** — if
+   `claude --bg` really does discard `--session-id`, the dispatcher cannot address the session it started,
+   and stop-then-resume is unreachable as designed until `#xhmktct`'s own remedy (reading the real id back
+   off `claude agents --json`) exists. Trigger (i) is hypothetical; **trigger (ii) is live today.**
+
+**Lineage:** #3118 (ratified 2026-08-26, operator), resolving its single fork as **(c)** over (a) a WE-native
+port of the CLI-spawn runner and (b) a cross-process HTTP call into `plateau-app`'s dev server. (b) was
+rejected on the same grounds #3031's reconciliation footnote already gives — lane clones mean N checkouts and
+N ports with no answer to "which server acts on which clone". (a) was rejected by the fork's own opening
+argument, which forbids two live spawn implementations behind one contract and lands on (a) as squarely as on
+(b). **Composes with, and does not re-declare,**
+[#conveyor-orchestration-mechanics-not-per-lane-agent](#conveyor-orchestration-mechanics-not-per-lane-agent)
+(the runner spends no model context per tick; calling a declared operation spends none either),
+[#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) (this names one
+more caller of one already-declared operation) and
+[#agent-runner-cli-backend](#agent-runner-cli-backend) (that ruling governs what a spawn backend must offer;
+this one governs who is allowed to call it). The costs this ruling accepts rather than waives — the dispatch
+kinds the operation does not yet route, and the handle assumption that both the observer *and* clause 3's
+stop-then-resume rest on — are tracked on #3118 and the items it links (`#3165`, `#xj86df4`, `#xhmktct`,
+`#3096`), per
+[#statute-anchor-states-rule-not-status](#statute-anchor-states-rule-not-status).
+
+---
+
 ### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
 
 **Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #2617).** *Where* a piece of state lives is
