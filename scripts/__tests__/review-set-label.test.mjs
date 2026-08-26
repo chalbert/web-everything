@@ -2030,7 +2030,7 @@ describe('checkBodyFileLocation (#2897)', () => {
     // one: there `TMP` IS `/tmp`, so it matched the shared root by coincidence; on macOS `TMP` resolves to
     // `/private/var/folders/<hash>/T`, which matches none of the three roots, so the assertion inverted. It
     // reddened for every macOS developer, on `main`, unattributable to any change — and three separate agents
-    // each spent time ruling it out of their own work before reporting it (#xuyij7f). A test that fails for
+    // each spent time ruling it out of their own work before reporting it (#3327). A test that fails for
     // everyone and belongs to no one teaches readers to discount a red suite, which costs more than the test
     // was ever worth.
     const macOsish = bodyFileRoots('/repo', '/var/folders/ab/T');
