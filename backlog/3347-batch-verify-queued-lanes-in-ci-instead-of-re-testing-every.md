@@ -1,8 +1,10 @@
 ---
 bornAs: xbi8dmf
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+codifiedIn: one-off
 relatedTo: ["2138", "2153", "2152", "2692", "2740", "2704", "2680"]
 relatedReport: reports/2026-08-26-ci-batch-verification-and-strict-up-to-date.md
 tags: [ci, drain, merge-queue, branch-protection]
@@ -13,6 +15,9 @@ tags: [ci, drain, merge-queue, branch-protection]
 Strict up-to-date branch protection marks every queued PR BEHIND the moment one lands, so the drain rebases it and re-runs the full ~6min required suite per PR. A prep pass found the batch-gate turf already ruled and deferred by #2692 behind an unmeasured trigger, so the open question is not which batching design but whether the deferral trips.
 
 Research: [CI Batch Gate vs Strict Up-To-Date Branch Protection](/research/ci-batch-gate-vs-strict-up-to-date/) · report `we:reports/2026-08-26-ci-batch-verification-and-strict-up-to-date.md`
+
+> **Superseded — read the RULED section at the bottom first.** The prep record below stands as history: it
+> is what the pass found *before* the post-prep investigation overturned part of it. The card is resolved.
 
 ## Prep verdict — NOT prepared; the question was reframed
 
@@ -137,8 +142,64 @@ the red-check refusal; that is `:584`, and `:586` is the merge-state refusal.
   is where the measured per-PR win actually is (~2–3 min). Independent of this decision entirely; it should
   proceed regardless of how the reframed question is answered.
 
+## RULED 2026-08-26 (operator) — `strict` off; batching stays deferred
+
+The prep pass above withdrew all four forks. Post-prep investigation then **overturned the reasoning behind
+one of those withdrawals**, and the operator ruled on the corrected evidence.
+
+### The correction that changed the call
+
+The withdrawal of Fork 3 leaned on a claim that the drain's rebases were caused by textual conflicts on the
+shared `we:.lane-manifest.json`, not by `BEHIND`. **That was wrong, twice over:**
+
+1. **#2411 is `resolved`** — *"Move the lane-manifest off the tree into the PR body"*. Verified across 11
+   consecutive lane PRs: **zero** carry the manifest in their diff. It is written to the working tree and
+   never committed.
+2. The classification was taken from the rebase commit **subject**, which is a **fixed template** —
+   `we:scripts/lib/rebase-drop-manifest.mjs:189` always emits *"drop transient &lt;manifest&gt;"* regardless of
+   what triggered the rebuild. Every rebase has announced a file that has not been there since #2411 landed.
+
+The rebuild guard (`we:scripts/lib/rebase-drop-manifest.mjs:172-176`) skips only when the tip is **both**
+not-behind **and** already manifest-free, and states outright that *"a genuinely BEHIND tip has
+`isAncestor === false` and still gets the real rebase"*. With the manifest condition permanently satisfied,
+**every one of the 167 rebases measured over 10 days fired on `BEHIND` alone** — i.e. on `strict: true`.
+
+Measured cost: ~4.9 CI runs per PR, 167 `drain: rebase` commits in 10 days, ≈ **17 hours of CI** spent
+re-testing unchanged trees.
+
+### The ruling
+
+- **`strict: false` — applied 2026-08-26** via the scoped `required_status_checks` endpoint. Required
+  contexts (`test`, `smoke`), 0-approval self-merge, `enforce_admins: false` and the force-push block are all
+  unchanged; a snapshot of the prior config was taken first. This **reverses the `strict: true` half of
+  #2152**, deliberately and on measured evidence — #2152 ruled it, so this is a reversal, not a correction.
+- **Batching stays deferred**, per `#event-driven-land-is-wake-only` clause 3. Independently confirmed by the
+  #2680 conveyor instrument: the binding regime is `latency-bound` on `firstCi`, with land-serialization at
+  ~20s/item against ~366s/item of first-CI. Batching optimizes a non-binding term. **Revisit when it hurts**,
+  not on a schedule.
+- **Recovery stays manual for now.** The auto-repair (freeze arming + drain-owned revert-to-green) is filed
+  and explicitly **not started** — see below.
+- **The deploy hole is closed separately.** `strict` never protected the deploy:
+  `we:.github/workflows/deploy.yml` fired on push, in parallel with CI, and shipped the branch tip regardless
+  of outcome. Fixed in the same batch of work.
+
+### What the reframed question turned into
+
+Not "which batching design" — that is ruled and deferred — but "revisit when the pain is felt." No prep pass
+is owed unless that happens. If it does, the entry point is #2740's trigger and #2704's routing, not this
+card.
+
+## Spawned
+
+- **#xmiuo0r** — deploy only a CI-verified SHA (`workflow_run` + `head_sha` + re-derive the verdict).
+  Delivered alongside this ruling.
+- **#xd6hbxe** — pin the FUI sibling ref so a deploy is reproducible.
+- **#xmit46t** — stamp the deployed SHA into the Worker; settle the rollback path.
+- **#xu9c4q4** — arm the red-main stop-the-line. **Deferred by the operator**: recover manually until it hurts.
+- **#3348** — take `check:standards` and shard imbalance off the per-PR critical path (attacks `firstCi`, the
+  binding term).
+
 ## Done when
 
-1. **Executable** — this card is resolved only by a ruling on the reframed question above. Concretely: the
-   item file carries a `preparedDate`, and its fork set cites `#event-driven-land-is-wake-only` clause 3 and
-   states whether #2680's saturation metric is met or whether #2740 must be built to evaluate it.
+1. **Executable** — `gh api repos/:owner/:repo/branches/main/protection --jq .required_status_checks.strict`
+   returns `false`. ✅ verified 2026-08-26.
