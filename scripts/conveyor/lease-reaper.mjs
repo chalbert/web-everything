@@ -51,14 +51,35 @@ import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTE
 // ── PURE CORE (no fs / git / gh / clock — every signal is injected) ───────────────────────────────────────────
 
 /**
- * The item number a lane's owning session encodes. Conveyor sessions are `conveyor-<num>` / `fix-<num>` /
- * `prepare-<num>` / `prepare-decision-<num>` (and a retry suffix like `conveyor-2500b`), so the trailing digit
- * run is the item. Returns the number as a string, or null when the session names no item (a non-conveyor lease).
+ * The item number a lane's owning session encodes, or null when the session names no item.
+ *
+ * THE KEY IS A GRAMMAR, NOT "THE TRAILING DIGIT RUN OF ANYTHING" (#3283). This matched `(\d+)[a-z]?$` against
+ * any slug, so EVERY digit-tailed session aliased onto whatever backlog card those digits happened to name:
+ * `probe1` read as item 1; `rv1566j` (a review juror for **PR** 1566) read as item 1566; `Mac:24827` — the
+ * `hostname():ppid` shape `defaultSession()` mints for an acquire with no `--session`
+ * (`we:scripts/lane-pool.mjs:526`) — read as item 24827; a minted `holder` slug's hex tail read as an item too.
+ * Roughly four in five live backlog ids name a `status: resolved` card, so an aliased lease was far more
+ * likely than not to look instantly reapable to the acquire-native reaper — which is how a lane handed out
+ * seconds earlier got reclaimed by the very next acquire, collapsing a whole pool onto one lane.
+ *
+ * The accepted shapes are exactly the ones the dispatcher MINTS — `sessionSlugFor`
+ * (`we:scripts/operations/dispatch-lane.mjs:202`) and `releaseSessionForNum`
+ * (`we:scripts/conveyor/tick-core.mjs:582`) both emit `conveyor-<id>` / `prepare-<id>` /
+ * `prepare-decision-<id>`, and `fix-<id>` is the historical fourth — plus the retry suffix (`conveyor-2500b`),
+ * which still collapses to the base number so a live retry and its base share one key (the #2267 "open wins"
+ * safety in {@link prStatesFromList} depends on that collapse).
+ *
+ * A HASH-identified item (`conveyor-x9ylkp7`) deliberately yields null rather than its own key: a lease
+ * session is only ever LOOKED UP here, and the only Map it is looked up in is keyed by {@link laneRefItemNum},
+ * whose hash keys were minted for the dispatch observer, not the reap path. Returning null keeps that key
+ * unreachable — the same conclusion the widening docblock below records, now for the stronger reason that
+ * there is no key at all instead of a WRONG one (`conveyor-x9ylkp7` used to read as item `7`).
+ *
  * @param {string|null|undefined} session
  * @returns {string|null}
  */
 export function itemNumFromSession(session) {
-  const m = String(session ?? '').match(/(\d+)[a-z]?$/i);
+  const m = String(session ?? '').match(/^(?:conveyor|fix|prepare-decision|prepare)-(\d+)[a-z]?$/i);
   return m ? m[1] : null;
 }
 

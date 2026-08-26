@@ -34,10 +34,34 @@ describe('itemNumFromSession — the couple key encoded in a lease session', () 
     expect(itemNumFromSession('conveyor-2500b')).toBe('2500');
   });
   it('a non-item session → null', () => {
-    expect(itemNumFromSession('Mac:24827')).toBe('24827'); // trailing digits are the ppid — still a number
+    // #3283 — a session that merely ENDS in digits is not an item reference. `Mac:24827`'s trailing run is the
+    // shell `ppid` that `defaultSession()` stamps (`we:scripts/lane-pool.mjs:526`), so reading it as item 24827
+    // aliased a plain `acquire` onto whatever card that number happens to name. This assertion previously read
+    // `.toBe('24827')` inside this very `it` — it now agrees with the title it always had.
+    expect(itemNumFromSession('Mac:24827')).toBe(null);
     expect(itemNumFromSession('shell-fix')).toBe(null);
     expect(itemNumFromSession('')).toBe(null);
     expect(itemNumFromSession(null)).toBe(null);
+  });
+
+  // ── #3283 — the couple key is a GRAMMAR, not "the trailing digit run of anything" ────────────────────
+
+  it('#3283 — a GENUINE item-encoding slug still resolves', () => {
+    expect(itemNumFromSession('conveyor-2500')).toBe('2500');
+    expect(itemNumFromSession('prepare-2500')).toBe('2500');
+    expect(itemNumFromSession('prepare-decision-2500')).toBe('2500');
+    expect(itemNumFromSession('fix-2500')).toBe('2500');
+    expect(itemNumFromSession('conveyor-2500b')).toBe('2500'); // the retry suffix still collapses
+  });
+
+  it('#3283 — an ARBITRARY digit-tailed slug no longer aliases onto a backlog item', () => {
+    // Every one of these resolved to a real item number before the fix, and ~4 in 5 backlog ids name a
+    // `status: resolved` card — so each was a lease the acquire-native reaper would reclaim on sight.
+    expect(itemNumFromSession('probe1')).toBe(null);                     // not item 1
+    expect(itemNumFromSession('rv1566j')).toBe(null);                    // a juror for PR 1566, not item 1566
+    expect(itemNumFromSession('Mac:24827')).toBe(null);                  // `defaultSession()` — host:ppid
+    expect(itemNumFromSession('build-3283-lane-27-df14bb76')).toBe(null); // a minted `holder` slug (hex tail)
+    expect(itemNumFromSession('lane-27')).toBe(null);
   });
 });
 
@@ -80,8 +104,11 @@ describe('laneRefItemNum — the couple key encoded in a lane/<num>-<slug> head 
     ]);
     expect(states.get('x9ylkp7')).toBe('merged');
     expect(states.get('2667')).toBe('open');
-    // A lease for the hash item is named `conveyor-x9ylkp7`; its session key is the trailing digit run.
-    expect(itemNumFromSession('conveyor-x9ylkp7')).toBe('7');
+    // A lease for the hash item is named `conveyor-x9ylkp7`. #3283 — that slug carries no DIGIT item number at
+    // all, so it resolves to null; it previously read as item `7`, a DIFFERENT, real, `status: resolved` card,
+    // which made every hash-item lease instantly reapable. `:85`'s conclusion is unchanged and now holds for
+    // the stronger reason: a hash key is not merely unreachable, the lookup key itself is absent.
+    expect(itemNumFromSession('conveyor-x9ylkp7')).toBe(null);
     expect(states.get(itemNumFromSession('conveyor-x9ylkp7'))).toBeUndefined();
   });
 });
