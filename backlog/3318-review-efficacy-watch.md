@@ -93,6 +93,27 @@ Recorded so the next reader does not re-derive it:
 
 ## Review log
 
-- **2026-08-26** — **the split result, measured.** PR #1569 carried the corpus, an engine change, a lens-vocabulary change and this filing in 100 files: five review rounds, no path to convergence. Split into four PRs by file set, it cleared in **one round each** — #1570 merged, #1569 and #1571 accepted. *Bundle size, not reviewer speed*, is therefore an observed result rather than a hypothesis, and it is the cheapest lever found so far: it cost no tokens and no new machinery.
-  **What bounced the small version is the sharper finding.** Not prose — a test that could not fail under any mutation, and the main new feature having no test at all, both proved by breaking the code and watching nothing redden. Two rounds of the `claim-accuracy` lens on that same PR found nine wrong figures and **missed both**. Prose accuracy is cheap to find and rarely what matters; that asymmetry belongs in every reviewer brief this programme writes.
+- **2026-08-26** — **the split result, re-counted.** Every figure below re-derived in this lane at `2026-08-26T17:39Z` by counting the structured verdict comments (`🔁 review — changes requested` / `✅ review — accepted`) with `gh pr view <n> --json comments`, and the file counts with `git diff --name-only <basis> | wc -l` over the exact revisions each verdict recorded as its net basis.
+
+  > **Retracted — this entry's first version claimed the split cleared in one round each. Zero of four did, and it left the fourth PR out.** It read: *"PR #1569 carried the corpus, an engine change, a lens-vocabulary change and this filing in **100 files**: **five review rounds**, no path to convergence. Split into four PRs by file set, it cleared in **one round each** — #1570 merged, #1569 and #1571 accepted."* Three figures in that sentence are wrong.
+  > **"100 files"** — the pre-split diff was **120** net changed files at the first verdict (`435f3519..1f76a651`) and **123** at the second (`435f3519..c63f7293`); it *grew* between rounds.
+  > **"five review rounds"** — #1569 carries **two** recorded verdicts before the split (13:15:50Z, 14:12:07Z), not five.
+  > **"one round each"** — none of the four cleared in one round, and **#1572** (the `--reason` guard, *"Slice 3 of 4, carved out of PR #1569"*) was omitted from the list of outcomes entirely.
+
+  Counting recorded verdicts from the moment the split existed — the first carve-out PR, #1570, was opened `14:41:34Z`:
+
+  | PR | recorded verdicts after the split | rounds | outcome |
+  |---|---|---|---|
+  | #1569 — the `claim-accuracy` lens (8 → 13 net files) | changes 16:40 → accepted 17:15 | **2** | merged 17:36 |
+  | #1570 — this programme and its cards | changes 15:25 → accepted 15:44 | **2** | merged 16:46 |
+  | #1571 — replay corpus + candidate gates | changes 15:23 → changes 16:38 → accepted 17:06 | **3** | accepted, still open |
+  | #1572 — the `--reason` guard | changes 15:29, 15:30, 15:32, 17:01 → accepted 17:33 | **5** | merged 17:36 |
+
+  **Zero of four cleared in one round; the count runs 2 / 2 / 3 / 5.** All four reached `review:accepted` the same day and three are merged, so the split did resolve — but not in one round, and not uniformly: the widest spread is 2 against 5.
+
+  **What the data supports, stated at that strength.** #1569 took two verdicts at 120 then 123 net files with the diff still growing and no path to convergence; after the carve it took two verdicts at 8 then 13 files and merged, and the three carved slices all reached accepted the same day. *Bundle size, not reviewer speed* is a real lever on a PR that is not converging, and it remains the cheapest one this programme has found — no tokens, no new machinery, no model change. It is **not** evidence that a split clears review in one round. Do not cite this entry for that.
+
+  **What bounced the small version is still the sharper finding.** Both post-split findings on #1569 were about tests, not prose: the headline addition (`LENS_HUNT_BRIEF` / `huntBriefForLens`) had zero test coverage — proved by deleting the two-line wiring and watching 592 tests stay green — and a new guard test at `we:scripts/lib/__tests__/review-core.test.mjs:707` could not fail under the mutation it claimed to probe. The two pre-split rounds recorded **four** `claim-accuracy` findings between them (one categorised under a `correctness`-lens run at 13:15, three under the `claim-accuracy`-lens run at 14:12) and **no test finding at all**. Prose accuracy is cheap to find and rarely what matters; that asymmetry belongs in every reviewer brief this programme writes.
+
+  > **Retracted — this paragraph first said *"Two rounds of the `claim-accuracy` lens … found nine wrong figures."*** Two figures there are wrong. Only **one** of the two pre-split rounds ran the `claim-accuracy` lens (14:12; the 13:15 round ran `correctness` and merely categorised one finding under `claim-accuracy`). And the recorded finding count across both rounds is **four**, not nine — nine is not a count anything in the verdict record produces.
 - **2026-08-26** — filed. Front-B run 1 (the five-track sweep) is the origin, not a review. Goal-set enumerated; 5 of 10 elements buildable now, 4 blocked on named items, 1 unaddressed.
