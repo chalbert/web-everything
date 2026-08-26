@@ -120,6 +120,7 @@ import { op } from './registry.mjs';
 import { compute, confirm as confirmStep, effect as effectStep, judge as judgeStep } from './step-kinds.mjs';
 import { LEDGER_EFFECT_TYPE } from './effect-executor.mjs';
 import {
+  ADVISORY_LENSES,
   IMPACT_LEVELS,
   MANDATORY_LENSES,
   PANEL_LENSES,
@@ -172,10 +173,126 @@ export const DEFAULT_LENS = MANDATORY_LENSES[0];
 export const SECURITY_LENS = MANDATORY_LENSES[1];
 
 /**
- * The names of the two `judge` steps, in declared order. Exported so an adapter (or a test) can name the
- * telemetry rows a run produces without hard-coding step names a rename would silently strand.
+ * THE MARKER FOR A SEAT WHOSE LENS THE CALLER CHOOSES. A `Symbol`, not a sentinel string, because every
+ * string in this position is a legal lens name and a sentinel would be one `PANEL_LENSES` entry away from
+ * colliding with a real one.
  */
-export const JUDGE_STEPS = Object.freeze(['judge', 'judgeSecurity']);
+export const CALLER_CHOSEN_LENS = Symbol('review-pr: this seat judges under `input.lens`');
+
+/**
+ * THE JUDGE SEATS, AS DATA (#3344) — every `judge` step this operation declares, in declared order, each
+ * beside the lens it will actually judge under. `{@link JUDGE_STEPS}` and `{@link decideLensFloor}` are both
+ * derived from this one list, and `reviewPrOperation` REFUSES AT REGISTRATION if it ever stops matching the
+ * declared `judge`-kind steps (see the assertion at the bottom of that function). That is what makes the
+ * floor check below a statement about the RUN SHAPE rather than a second copy of it: a third seat, a removed
+ * seat, or a seat whose lens is decided some other way all pass through here, or fail loudly.
+ *
+ * `judge`'s lens is {@link CALLER_CHOSEN_LENS} — it is `input.lens`, which the caller supplies.
+ * `judgeSecurity`'s is the literal `SECURITY_LENS`, deliberately not CLI-reachable (#3319).
+ */
+export const JUDGE_SEATS = Object.freeze([
+  Object.freeze({ step: 'judge', lens: CALLER_CHOSEN_LENS }),
+  Object.freeze({ step: 'judgeSecurity', lens: SECURITY_LENS }),
+]);
+
+/**
+ * The names of the two `judge` steps, in declared order. Exported so an adapter (or a test) can name the
+ * telemetry rows a run produces without hard-coding step names a rename would silently strand. DERIVED from
+ * {@link JUDGE_SEATS} since #3344 — the roster is the one place the seats are listed.
+ */
+export const JUDGE_STEPS = Object.freeze(JUDGE_SEATS.map((seat) => seat.step));
+
+/**
+ * WHICH LENSES A RUN WOULD ACTUALLY SEAT, given the caller's `--lens`. Resolves {@link CALLER_CHOSEN_LENS}
+ * against `lens` and takes every other seat's literal. PURE.
+ *
+ * @param {object} o
+ * @param {string} [o.lens] - the caller's `input.lens`.
+ * @param {ReadonlyArray<{step: string, lens: string|symbol}>} [o.seats] - the roster; defaults to the live one.
+ *   Parameterised so the FUTURE run shape this guard exists for — a conditional or absent pinned seat — is
+ *   testable without pretending the current declaration is something it is not.
+ * @returns {readonly string[]} the seated lens names, in seat order, with unresolvable seats dropped.
+ */
+export function seatedLenses({ lens, seats = JUDGE_SEATS } = {}) {
+  return Object.freeze(
+    seats
+      .map((seat) => (seat.lens === CALLER_CHOSEN_LENS ? lens : seat.lens))
+      .filter((l) => typeof l === 'string' && l.length > 0),
+  );
+}
+
+/**
+ * DOES THIS RUN HAVE A BLOCKING FLOOR? PURE, and the whole of #3344's condition.
+ *
+ * THE PROPERTY IS "NO MANDATORY LENS SEATED ACROSS ALL JUDGE STEPS" — deliberately NOT "the `--lens` input
+ * names an advisory lens". Those two were the same question before #3319 and are not the same question now,
+ * and the difference is the point:
+ *
+ *   - `--lens`-is-advisory would fire TODAY on `--lens=simplicity`, and it would be WRONG to: the pinned
+ *     `judgeSecurity` seat is judging under `security`, the floor is intact, and the run should proceed.
+ *     A guard that blocks a legitimate run is worse than the hole it closes — the card says so in as many
+ *     words, and it is why the negative half of the test matters as much as the positive.
+ *   - "no mandatory lens across all seats" is the invariant the operator actually believes when they read a
+ *     verdict: SOMETHING that ran could have blocked. It stays correct if `judgeSecurity` is later made
+ *     conditional, is removed, or is joined by a third seat — the roster changes, this reads the roster, and
+ *     the answer follows.
+ *
+ * WHAT THAT COSTS, STATED PLAINLY: under the CURRENT step list this can never fire. `judgeSecurity` is
+ * unconditional and pinned to `MANDATORY_LENSES[1]`, and `reviewPrOperation` already refuses at REGISTRATION
+ * if that resolves to something outside `PANEL_LENSES` — so `security` is seated on every run that exists at
+ * all, whatever `--lens` says. This guard is therefore DORMANT today. That is the honest state of it, not a
+ * reason to weaken the condition into the `--lens`-is-advisory one that would fire: a guard that is correct
+ * and currently unreachable keeps its meaning when the shape changes; a guard that fires on the wrong
+ * property is a false refusal waiting for its first legitimate run.
+ *
+ * @param {object} o
+ * @param {string} [o.lens]
+ * @param {ReadonlyArray<{step: string, lens: string|symbol}>} [o.seats]
+ * @returns {{seated: readonly string[], mandatorySeated: readonly string[], advisorySeated: readonly string[], seatsFloor: boolean}}
+ */
+export function decideLensFloor({ lens, seats = JUDGE_SEATS } = {}) {
+  const seated = seatedLenses({ lens, seats });
+  const mandatorySeated = Object.freeze(MANDATORY_LENSES.filter((l) => seated.includes(l)));
+  return Object.freeze({
+    seated,
+    mandatorySeated,
+    advisorySeated: Object.freeze(ADVISORY_LENSES.filter((l) => seated.includes(l))),
+    seatsFloor: mandatorySeated.length > 0,
+  });
+}
+
+/**
+ * REFUSE a lens selection that seats no mandatory lens (#3344). THROWS; it does not warn.
+ *
+ * WHY A REFUSAL AND NOT A WARNING. This operation is driven headless — the juror is spawned by the caller
+ * between two `advance` calls and its answer is consumed by `reduce`. Nobody is watching stderr at the moment
+ * a run is dispatched, which is exactly how the second of the two 2026-08-26 cases got through: the run was
+ * dispatched, not watched. A warning here would be a line in a log that already scrolled.
+ *
+ * WHY IT NAMES WHAT IS MISSING rather than restating the flag: the two sessions that hit this arrived from
+ * OPPOSITE directions — one narrowed to an advisory lens believing it ADDED a check, the other omitted the
+ * flag believing it WIDENED to a panel — so the sentence has to say what the run would lack, not what the
+ * caller typed.
+ *
+ * @param {object} o
+ * @param {string} [o.lens]
+ * @param {ReadonlyArray<{step: string, lens: string|symbol}>} [o.seats]
+ * @returns {ReturnType<typeof decideLensFloor>} the floor decision, when it holds.
+ */
+export function assertMandatoryLensSeated({ lens, seats = JUDGE_SEATS } = {}) {
+  const floor = decideLensFloor({ lens, seats });
+  if (floor.seatsFloor) return floor;
+  throw new Error(
+    `review-pr.read: \`--lens=${lens}\` seats no mandatory lens — this run would have no blocking floor. `
+    + `The ${seats.length} judge seat(s) (${seats.map((s) => `\`${s.step}\``).join(', ')}) would judge under `
+    + `${floor.seated.length ? floor.seated.map((l) => `\`${l}\``).join(' + ') : '(no lens at all)'}, and `
+    + `\`MANDATORY_LENSES\` is [${MANDATORY_LENSES.join(', ')}]. An advisory lens INFORMS; only a mandatory `
+    + 'one can block, so the verdict this run rendered could never have been anything but a pass. `--lens` '
+    + 'SUBSTITUTES the first seat\'s lens, it does not add one: pass a mandatory lens (or omit `--lens`, '
+    + `which takes \`${DEFAULT_LENS}\`) and re-run. Refusing BEFORE the PR is read and before any juror is `
+    + 'spawned, so nothing is billed for a review that could not have blocked.',
+  );
+}
 
 /**
  * The juror's model / effort / budget. LITERALS, deliberately — never sourced from an input field.
@@ -658,7 +775,7 @@ export function reviewPrOperation({ readPr } = {}) {
     );
   }
 
-  return op(REVIEW_PR_OP, {
+  const declaration = op(REVIEW_PR_OP, {
     input: {
       pr: 'number',
       repo: 'string',
@@ -675,6 +792,12 @@ export function reviewPrOperation({ readPr } = {}) {
       // run bills two jurors for one lens and `derivePanelVerdict` is then owed `correctness` by nobody, so
       // `reduce` scopes its mandatory set to the lenses actually seated. See that step for why that is the
       // honest reduction rather than a crash.
+      // IT SUBSTITUTES, IT DOES NOT ADD (#3344). `--lens=claim-accuracy` does not mean "also check claim
+      // accuracy" — it means "the FIRST seat judges under claim accuracy instead of correctness", and two
+      // sessions on 2026-08-26 read it the other way, from opposite directions (one narrowed believing it
+      // added a check, one omitted the flag believing it widened to a panel). `read` refuses a selection that
+      // leaves NO mandatory lens seated across all judge steps — see `assertMandatoryLensSeated`, and see
+      // `decideLensFloor` for why that condition, and for why it is dormant while `judgeSecurity` is pinned.
       // THIS IS STILL NOT A PANEL. `judgePanel` (`we:scripts/lib/judge-panel.mjs`, #3050) is BUILT and remains
       // UNWIRED here, because its per-seat call omits `allowedTools` and every seat would go tool-free (#3158,
       // OPEN). Two declared `judge` steps buy the second lens without paying that; see the file header.
@@ -763,11 +886,24 @@ export function reviewPrOperation({ readPr } = {}) {
     // The park context (`assembleReviewDetail`) plus the NET-basis diff and file list. See `shapeReadFinding`
     // for the `exec-contract` refusal and for why `ghDiffStat` is named apart from `netChangedFiles`.
     read: compute({
-      reads: ['input.pr', 'input.repo'],
-      fn: (view) => shapeReadFinding(
-        readPr({ pr: view.input.pr, repo: view.input.repo }),
-        { pr: view.input.pr, repo: view.input.repo },
-      ),
+      // `input.lens` is DECLARED here even though the `read` finding does not carry it: the floor refusal
+      // below consumes it, and a step that reads an input without declaring it is reading state the run
+      // record does not record it as depending on.
+      reads: ['input.pr', 'input.repo', 'input.lens'],
+      fn: (view) => {
+        // #3344 — THE LENS-FLOOR REFUSAL, FIRST IN THE STEP AND THEREFORE FIRST IN THE RUN. Ahead of the
+        // injected read, not merely ahead of `judge`: whether the seated lenses include a mandatory one is
+        // decidable from the INPUT alone, so there is no reason to spend a `gh` round trip — let alone a
+        // juror — establishing it. Same instinct as #3322's self-clear refusal one function down and
+        // #xwp8ioh's liveness one beside it: refuse early, and refuse rather than warn, when the caller is
+        // a machine. See `decideLensFloor` for why the condition reads across ALL judge seats, and for the
+        // honest note that today's step list makes it dormant.
+        assertMandatoryLensSeated({ lens: view.input.lens });
+        return shapeReadFinding(
+          readPr({ pr: view.input.pr, repo: view.input.repo }),
+          { pr: view.input.pr, repo: view.input.repo },
+        );
+      },
     }),
 
     // ── 2. judge ────────────────────────────────────────────────────────────────────────────────────────────
@@ -1183,6 +1319,25 @@ export function reviewPrOperation({ readPr } = {}) {
       },
     }),
   });
+
+  // #3344 — THE ROSTER MUST BE THE STEP LIST. `JUDGE_SEATS` is the only place the seats are enumerated, and
+  // `read`'s floor refusal answers "does any seat judge under a mandatory lens?" by reading it. That answer is
+  // only as true as the roster, so a `judge` step added, removed or renamed WITHOUT the roster following it
+  // must not reach a run: the refusal would then be reasoning about a run shape that no longer exists, which
+  // is the exact failure mode #3344 exists to rule out. REFUSED AT REGISTRATION, before any run record, for
+  // the same reason the `SECURITY_LENS` check above is.
+  const declaredJudgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+  const roster = JUDGE_SEATS.map((seat) => seat.step);
+  if (declaredJudgeSteps.length !== roster.length || declaredJudgeSteps.some((n, i) => n !== roster[i])) {
+    throw new Error(
+      `review-pr: \`JUDGE_SEATS\` lists [${roster.join(', ')}] but the declaration's \`judge\` steps are `
+      + `[${declaredJudgeSteps.join(', ')}]. The mandatory-lens floor check (#3344) decides whether a run has a `
+      + 'blocking lens by reading that roster, so the two must not drift: add the new seat to `JUDGE_SEATS` '
+      + 'beside the lens it judges under (`CALLER_CHOSEN_LENS` if it takes `input.lens`).',
+    );
+  }
+
+  return declaration;
 }
 
 /** The lens set a caller may pass. Re-exported so an adapter can list it in `--help` without a second copy. */

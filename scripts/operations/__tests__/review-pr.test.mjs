@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { advance, advanceWhileRunning, projectReads, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
 import { createRegistry, op, validateInput } from '../registry.mjs';
-import { compute } from '../step-kinds.mjs';
+import { compute, judge as judgeStep } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import {
   driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli, judgeOutcome,
@@ -46,13 +46,19 @@ import {
   SECURITY_LENS,
   DEFAULT_LENS,
   buildReviewJudgeRequest,
+  // #3344 — the lens-floor guard and the seat roster it reads.
+  CALLER_CHOSEN_LENS,
+  JUDGE_SEATS,
+  assertMandatoryLensSeated,
+  decideLensFloor,
+  seatedLenses,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
 // test that spells the marker by hand still passes when the marker's shape changes, which is the mutant the
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
-import { CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { ADVISORY_LENSES, CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -399,6 +405,124 @@ describe('#3322 — a self-clear is refused at `read`, not at `record`', () => {
     // so in as many words, and this pins that the read side inherits it rather than normalising on its way in.
     const raw = stubReader({ body: stampedBody(AUTHOR), clearerId: AUTHOR.toUpperCase() })({ pr: 7, repo: 'o/n' });
     expect(shapeReadFinding(raw, { pr: 7, repo: 'o/n' }).independence).toBe(INDEPENDENCE.INDEPENDENT);
+  });
+});
+
+// ── #3344 — A LENS SELECTION THAT SEATS NO MANDATORY LENS MUST REFUSE ─────────────────────────────────────
+//
+// THE PROPERTY UNDER TEST IS "no mandatory lens seated ACROSS ALL judge steps", NOT "the `--lens` input names
+// an advisory lens". Those two answers diverged the moment #3319 pinned a second seat, and the tests below are
+// written so that swapping the implementation to the `--lens`-is-advisory condition REDDENS them: the
+// `--lens=simplicity` cases assert the run PROCEEDS, which is exactly what that weaker condition would break.
+//
+// AND THE HONEST HALF, PINNED AS A TEST RATHER THAN A COMMENT: under today's step list this refusal cannot
+// fire at all, because `judgeSecurity` is unconditional. `no member of PANEL_LENSES can unseat the floor`
+// below asserts that directly. It is the dormancy, stated where it cannot rot.
+describe('#3344 — a lens selection that seats no mandatory lens must refuse', () => {
+  /** The FUTURE run shape the guard exists for: the pinned `judgeSecurity` seat conditional away, or removed. */
+  const CALLER_SEAT_ONLY = Object.freeze([Object.freeze({ step: 'judge', lens: CALLER_CHOSEN_LENS })]);
+
+  it('REFUSES when the only seat judges under an advisory lens, naming the missing floor', () => {
+    expect(() => assertMandatoryLensSeated({ lens: 'claim-accuracy', seats: CALLER_SEAT_ONLY }))
+      .toThrow(/seats no mandatory lens/);
+    expect(() => assertMandatoryLensSeated({ lens: 'claim-accuracy', seats: CALLER_SEAT_ONLY }))
+      .toThrow(/would have no blocking floor/);
+    // It names WHAT IS MISSING — the ratified pair, read off the constant — rather than restating the flag.
+    // The two burned sessions arrived from opposite directions, so "you typed X" was never the useful sentence.
+    expect(() => assertMandatoryLensSeated({ lens: 'claim-accuracy', seats: CALLER_SEAT_ONLY }))
+      .toThrow(new RegExp(`MANDATORY_LENSES\\\` is \\[${MANDATORY_LENSES.join(', ')}\\]`));
+  });
+
+  it('every advisory lens refuses on that shape, and every mandatory one proceeds', () => {
+    for (const lens of ADVISORY_LENSES) {
+      expect(() => assertMandatoryLensSeated({ lens, seats: CALLER_SEAT_ONLY })).toThrow(/seats no mandatory lens/);
+    }
+    for (const lens of MANDATORY_LENSES) {
+      expect(assertMandatoryLensSeated({ lens, seats: CALLER_SEAT_ONLY }).seatsFloor).toBe(true);
+    }
+  });
+
+  it('the condition reads ALL seats: an advisory `--lens` beside the pinned security seat KEEPS the floor', () => {
+    // THE DISCRIMINATING CASE. `--lens=claim-accuracy` is the exact selection one of the two burned sessions
+    // recommended, and on TODAY's roster it is no longer a floorless run — `judgeSecurity` is judging under
+    // `security`. An implementation that asked "is `--lens` advisory?" would refuse this, wrongly.
+    expect(seatedLenses({ lens: 'claim-accuracy' })).toEqual(['claim-accuracy', SECURITY_LENS]);
+    const floor = decideLensFloor({ lens: 'claim-accuracy' });
+    expect(floor.seated).toEqual(['claim-accuracy', SECURITY_LENS]);
+    expect(floor.mandatorySeated).toEqual([SECURITY_LENS]);
+    expect(floor.advisorySeated).toEqual(['claim-accuracy']);
+    expect(floor.seatsFloor).toBe(true);
+  });
+
+  it('no member of PANEL_LENSES can unseat the floor on the CURRENT step list — the guard is dormant today', () => {
+    // The card asked for the honest answer and this is it, as an assertion rather than a claim. `judgeSecurity`
+    // is unconditional and pinned to `MANDATORY_LENSES[1]`, so `security` is seated on every run that exists.
+    // When that seat becomes conditional or goes away, THIS test is the one that goes red first, and the
+    // refusal above stops being dead code on the same day.
+    for (const lens of PANEL_LENSES) {
+      expect(decideLensFloor({ lens }).seatsFloor).toBe(true);
+    }
+    expect(decideLensFloor({ lens: undefined }).mandatorySeated).toEqual([SECURITY_LENS]);
+  });
+
+  it('refuses BEFORE the PR is read and before any juror is spawned', () => {
+    // THE POSITION, driven rather than asserted by inspection. The real declaration cannot exhibit a floorless
+    // run today (the test above is why), so the run shape is modelled: the SAME guard call the real `read`
+    // step makes, in the SAME first-statement position, over a one-seat roster. What is proven is the ordering
+    // — the reader is never called and the run never reaches `awaiting-judge`.
+    let reads = 0;
+    const declaration = op('floorless-review', {
+      input: { lens: { type: 'string', required: false, default: 'claim-accuracy', enum: [...PANEL_LENSES] } },
+      read: compute({
+        reads: ['input.lens'],
+        fn: (view) => {
+          assertMandatoryLensSeated({ lens: view.input.lens, seats: CALLER_SEAT_ONLY });
+          reads += 1;
+          return { ok: true };
+        },
+      }),
+      judge: judgeStep({
+        reads: ['findings.read'],
+        request: () => ({ mandate: 'm', input: 'i', shape: REVIEW_JUDGE_SHAPE }),
+      }),
+    });
+    const registry = createRegistry();
+    registry.register(declaration);
+
+    const started = startRun({ op: 'floorless-review', id: 'run-3344', input: { lens: 'claim-accuracy' }, registry });
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(/seats no mandatory lens/);
+    expect(reads).toBe(0);
+    expect(runStatus(started, { registry })).not.toBe('awaiting-judge');
+  });
+
+  it('a legitimate selection still runs — including the advisory `--lens` the weaker condition would block', () => {
+    // THE NEGATIVE HALF THE CARD WEIGHTS AS HEAVILY AS THE POSITIVE. Real runs, driven to `confirm`, over the
+    // real declaration. A refusal that also blocks legitimate runs is worse than the hole.
+    for (const [i, lens] of [DEFAULT_LENS, SECURITY_LENS, 'simplicity', 'claim-accuracy'].entries()) {
+      const { registry } = registryFor({});
+      const { run, requests } = atConfirm({ registry, input: { ...BASE_INPUT, lens }, id: `run-3344-ok-${i}` });
+      expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+      expect(requests[JUDGE_STEPS[0]].lens).toBe(lens);
+      expect(requests[JUDGE_STEPS[1]].lens).toBe(SECURITY_LENS);
+    }
+  });
+
+  it('the `read` step DECLARES the input its refusal consumes', () => {
+    // A step that reads an input it did not declare is reading state the run record does not record it as
+    // depending on — and `projectReads` would hand it `undefined`, which resolves to a floorless-looking seat.
+    const { declaration } = registryFor({});
+    const read = declaration.steps.find((s) => s.name === 'read');
+    expect(read.index).toBe(0); // FIRST: ahead of the io read and ahead of both judge seats.
+    expect(read.step.reads).toContain('input.lens');
+  });
+
+  it('the seat roster IS the declared judge-step list, and a drift is refused at REGISTRATION', () => {
+    // The refusal is only as true as `JUDGE_SEATS`, so the roster and the declaration must not drift.
+    const { declaration } = registryFor({});
+    expect(declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name)).toEqual([...JUDGE_STEPS]);
+    expect(JUDGE_SEATS.map((s) => s.step)).toEqual([...JUDGE_STEPS]);
+    expect(JUDGE_SEATS.find((s) => s.step === 'judgeSecurity').lens).toBe(SECURITY_LENS);
+    expect(JUDGE_SEATS.find((s) => s.step === 'judge').lens).toBe(CALLER_CHOSEN_LENS);
   });
 });
 
