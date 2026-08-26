@@ -88,6 +88,12 @@ import { writeAllSync } from './lib/write-all-sync.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
 import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
+// #3334 — the reasonless-bounce rule. A LEAF module with no imports, so the other route that must hold it
+// (`we:scripts/operations/record-verdict.mjs`, which asserts an EMPTY external import graph) can too; see that
+// file's header for why the split exists. Re-exported below so this file stays the single place to look.
+import {
+  REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, RENDERED_FINDINGS_HEADING, bounceEvidenceFromWriteUp,
+} from './lib/reasonless-bounce.mjs';
 
 /**
  * we:scripts/review-set-label.mjs#REVIEW_LABEL_TARGETS — the CLOSED set of label-swap targets `decideSetLabel`
@@ -104,6 +110,16 @@ import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
 export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm', 'clear-human', 'restamp']);
 
 /**
+ * we:scripts/review-set-label.mjs — THE #3334 REASONLESS-BOUNCE RULE, re-exported from its leaf module so this
+ * file stays the one place a reader looks for what governs a label swap. The rule itself lives in
+ * `we:scripts/lib/reasonless-bounce.mjs` for ONE reason, stated there in full: the other route that must hold
+ * it (`we:scripts/operations/record-verdict.mjs`) asserts an EMPTY external import graph, and this file reaches
+ * `node:child_process` through `computeNetDiffText`. `decideSetLabel` below is still where the refusal is
+ * DECIDED; the leaf only holds the predicate that decision asks.
+ */
+export { REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, RENDERED_FINDINGS_HEADING, bounceEvidenceFromWriteUp };
+
+/**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and
  * the PR's OBSERVED labels, return the label swap. FOUR targets (the closed set is `REVIEW_LABEL_TARGETS`), each
  * with its invariant enforced HERE (unbypassable): the reviewer verdicts `accepted` / `changes`, the conveyor
@@ -112,8 +128,10 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  *   • `accepted` — INVARIANT 2: REFUSED on a `review:human` PR (only a human's /review may clear the gate);
  *     otherwise adds `review:accepted`, drops the parked `review:pending` AND a stale `review:changes` (#2974 —
  *     a bounce that was fixed and re-verdicted straight to `accepted` must not still read as awaiting changes).
- *   • `changes` — always allowed (a bounce lands nothing); adds `review:changes`, drops `review:pending` AND a
- *     stale `review:accepted`, but NEVER `review:human`.
+ *   • `changes` — a bounce lands nothing, so it is allowed regardless of the PR's state, with ONE refusal:
+ *     #3334's reasonless bounce (a KNOWN zero finding count and no stated reason — see `isReasonlessBounce`).
+ *     Otherwise adds `review:changes`, drops `review:pending` AND a stale `review:accepted`, but NEVER
+ *     `review:human`.
  *   • `rearm` — the #2630 invariant: ONLY a live `review:changes` is re-armable (idempotent — a second call
  *     refuses cleanly); the swap is ALWAYS `review:changes → review:pending`, NEVER `review:accepted`, and
  *     NEVER removes `review:human`. The strongest thing an auto-fix can do is re-arm the review, never clear it.
@@ -125,11 +143,14 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  *     fix in its POSITION section: the drain KNOWS it produced the rebase, so it can re-stamp rather than have
  *     a gate re-derive. REFUSED unless a live `review:accepted` is already on the PR: a re-stamp may only carry
  *     an acceptance ACROSS a head move, never manufacture one.
- * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array}} o - `currentLabels` is the
- *   observed label array (string or `{name}` shape, per `hasReviewLabel`).
+ * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array, findingCount?:number|null,
+ *   reason?:string}} o - `currentLabels` is the observed label array (string or `{name}` shape, per
+ *   `hasReviewLabel`). `findingCount` and `reason` are the #3334 decision inputs: how many findings the juror
+ *   raised (tri-state — `null` is UNKNOWN and never refuses) and the reason the caller stated, if any. They are
+ *   ARGUMENTS, never fetched: this function is pure and stays pure.
  * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
  */
-export function decideSetLabel({ to, currentLabels = [] } = {}) {
+export function decideSetLabel({ to, currentLabels = [], findingCount = null, reason = '' } = {}) {
   // we:scripts/review-set-label.mjs#decideSetLabel — only the targets in the closed set are valid.
   if (!REVIEW_LABEL_TARGETS.includes(to)) {
     throw new Error(
@@ -278,10 +299,35 @@ export function decideSetLabel({ to, currentLabels = [] } = {}) {
     };
   }
 
-  // we:scripts/review-set-label.mjs#decideSetLabel — changes: a bounce is always allowed (regardless of
-  // human/pending). It adds review:changes and drops BOTH review:pending AND a stale review:accepted (a bounce
-  // must never leave the PR looking accepted), but NEVER removes review:human — a bounce lands nothing, so the
-  // human gate stays until a human clears it.
+  // ── THE REASONLESS-BOUNCE REFUSAL (#3334) ──────────────────────────────────────────────────────────────────
+  // WHY IT IS HERE AND NOT IN A CALLER. #1572 put this rule in `we:scripts/operations/review-pr.mjs`'s `record`
+  // step, which protects exactly the one route that runs it. The other two sanctioned write paths —
+  // `we:scripts/operations/record-verdict.mjs` (the transport for a host that cannot authenticate to GitHub,
+  // i.e. every cloud runner) and this file's own CLI — carried no such check, and a real reasonless bounce
+  // landed on PR #1593: "✅ pass — no blocking findings … Findings (0) … _No findings._" directly above
+  // "Decision: `changes`", with no reason anywhere. #2644 made this file the SINGLE HOME of the label swap and
+  // INVARIANT 2 already lives here; the guard belongs beside it, where every route passes through it.
+  //
+  // A rule enforced in one caller of a single-home function is not enforced — it is merely usually encountered.
+  //
+  // THE NEGATIVE DIRECTION IS THE RISK, so the condition is as narrow as it can be (`isReasonlessBounce`): a
+  // bounce carrying ANY finding needs no reason (the findings ARE the reason, and they are already rendered),
+  // a bounce carrying a reason needs no findings, and an UNKNOWN finding count never refuses at all. A guard
+  // that also blocked legitimate bounces would be worse than the hole it closes.
+  if (isReasonlessBounce({ to, findingCount, reason })) {
+    return {
+      allowed: false,
+      addLabel: '',
+      removeLabels: [],
+      keepsHuman: isHuman,
+      reason: REASONLESS_BOUNCE_REFUSAL,
+    };
+  }
+
+  // we:scripts/review-set-label.mjs#decideSetLabel — changes: a bounce is otherwise always allowed (regardless
+  // of human/pending). It adds review:changes and drops BOTH review:pending AND a stale review:accepted (a
+  // bounce must never leave the PR looking accepted), but NEVER removes review:human — a bounce lands nothing,
+  // so the human gate stays until a human clears it.
   return {
     allowed: true,
     addLabel: REVIEW_LABELS.changes,
@@ -633,9 +679,21 @@ export function runReviewLabelCli({
     );
   }
 
-  // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, or nothing to
-  // re-arm) changes NOTHING and exits non-zero.
-  const decision = decideSetLabel({ to, currentLabels });
+  // we:scripts/review-set-label.mjs#runReviewLabelCli — the PURE decision. A refusal (INVARIANT 2, a reasonless
+  // bounce, or nothing to re-arm) changes NOTHING and exits non-zero.
+  //
+  // #3334 — THE TWO DECISION INPUTS, READ OFF THE WRITE-UP THIS RUN IS ABOUT TO PUBLISH. They are computed here,
+  // in the impure harness, and handed to the pure core as arguments; the core fetches nothing. `--reason` is
+  // taken FIRST but the body's own quoted reason counts too, because the one caller that shells this CLI with a
+  // reason (`we:scripts/operations/review-pr-io.mjs`'s label sink) renders it into the body and passes no
+  // `--reason` flag at all — see `bounceEvidenceFromWriteUp`.
+  const bounceEvidence = bounceEvidenceFromWriteUp(verdictBody);
+  const decision = decideSetLabel({
+    to,
+    currentLabels,
+    findingCount: bounceEvidence.findingCount,
+    reason: clearReason || bounceEvidence.reason,
+  });
   if (!decision.allowed) {
     emit(`${JSON.stringify(refusalResult({ pr: Number(pr), decision }))}\n`);
     process.exit(1);
