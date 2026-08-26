@@ -539,14 +539,19 @@ describe('deriveReviewDisposition (#2285 — one reason→disposition derivation
 });
 
 describe('MANDATE_LENSES / MANDATORY_LENSES / ADVISORY_LENSES / PANEL_LENSES (#2310)', () => {
-  it('splits the four /code-review lenses into a mandatory pair and an advisory pair', () => {
+  it('keeps #2310\'s ratified mandatory pair, and carries claim-accuracy as a third advisory', () => {
+    // The mandatory pair is the #2310 RULING and is unchanged. `claim-accuracy` (#3035) lands advisory
+    // PENDING a ruling of its own — promoting it would override that decision, and nothing needs it promoted
+    // yet because `review-pr` runs one caller-chosen lens.
     expect(MANDATORY_LENSES).toEqual([MANDATE_LENSES.CORRECTNESS, MANDATE_LENSES.SECURITY]);
-    expect(ADVISORY_LENSES).toEqual([MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS]);
+    expect(ADVISORY_LENSES).toEqual([
+      MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS, MANDATE_LENSES.CLAIM_ACCURACY,
+    ]);
   });
 
   it('PANEL_LENSES is the mandatory + advisory union, mandatory first', () => {
     expect(PANEL_LENSES).toEqual([...MANDATORY_LENSES, ...ADVISORY_LENSES]);
-    expect(PANEL_LENSES).toHaveLength(4);
+    expect(PANEL_LENSES).toHaveLength(5);
   });
 });
 
@@ -686,8 +691,24 @@ describe('buildPanelMandate (#2310)', () => {
       'utf8',
     );
 
+    // THE ONE INTERPOLATED VALUE. The fixture's "full panel: …" line lists PANEL_LENSES, so growing the lens
+    // vocabulary rewrites it in every mandate — which is truthful (the panel really did grow) but is NOT the
+    // silent-clause drift this fixture exists to catch. Substituting the list keeps the guard at full strength
+    // on the prose while letting the vocabulary change: add a CLAUSE and this still reddens.
+    const withCurrentPanel = (text) => text.replace(
+      /the full panel: [^)]*\)/,
+      `the full panel: ${PANEL_LENSES.join(', ')})`,
+    );
+
     it('adds the mutation probe and NOTHING else when `aim` is omitted', () => {
-      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS })).toBe(`${FIXTURE} ${MUTATION_PROBE_RULE}`);
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+        .toBe(`${withCurrentPanel(FIXTURE)} ${MUTATION_PROBE_RULE}`);
+    });
+
+    it('the substitution is the ONLY licence — an added clause still reddens', () => {
+      // Proves the escape hatch above cannot hide a real change: perturb one clause and the comparison fails.
+      const tampered = `${withCurrentPanel(FIXTURE)} AND ONE MORE THING. ${MUTATION_PROBE_RULE}`;
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS })).not.toBe(tampered);
     });
 
     it('the fixture really is the mandate minus the probe — no `aim` scaffolding hiding in it', () => {
@@ -1526,9 +1547,10 @@ describe('methodsForLens — band override validated against the REVIEW_METHODS 
 });
 
 describe('ROSTER_CRITIQUE_LENSES — the completeness critic\'s lens vocabulary (#2637)', () => {
-  it('is the four static lenses plus the three UI perspective lenses (concrete ids), and is frozen', () => {
+  it('is every static lens plus the three UI perspective lenses (concrete ids), and is frozen', () => {
     expect(ROSTER_CRITIQUE_LENSES).toEqual([
-      'correctness', 'security', 'simplicity', 'standards-conformance', 'a11y', 'visual-vs-target', 'perf',
+      'correctness', 'security', 'simplicity', 'standards-conformance', 'claim-accuracy',
+      'a11y', 'visual-vs-target', 'perf',
     ]);
     expect(Object.isFrozen(ROSTER_CRITIQUE_LENSES)).toBe(true);
   });

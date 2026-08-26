@@ -48,6 +48,7 @@ import {
 } from '../panel-fanout.mjs';
 import {
   IMPACT_LEVELS,
+  PANEL_LENSES,
   panelRigorForCareLevel,
   materializeRoster,
   resolveRoster,
@@ -506,9 +507,10 @@ describe('the shims\' stdout survives the exit — a truncated answer is not an 
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     expect(out.length).toBeGreaterThan(8192);       // past the pipe buffer that used to swallow it
     const parsed = JSON.parse(out);                  // …and still parseable, which truncation never is
-    expect(parsed.jurors.map((j) => j.id)).toEqual([
-      'correctness#1', 'security#1', 'simplicity#1', 'standards-conformance#1',
-    ]);
+    // One seat per static lens at care `low`. Derived from PANEL_LENSES rather than typed, so adding a
+    // lens (claim-accuracy joined in #3035) does not silently redden a test whose subject is the PIPE,
+    // not the roster's membership.
+    expect(parsed.jurors.map((j) => j.id)).toEqual(PANEL_LENSES.map((l) => `${l}#1`));
     for (const j of parsed.jurors) expect(j.mandate.length).toBeGreaterThan(1000);
   }, 30_000);
 

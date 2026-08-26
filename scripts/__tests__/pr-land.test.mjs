@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS, decideHoldReadyStrip } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL, scoreEscalation } from '../lib/review-escalation.mjs';
 import { buildAuthorActorMarker, parseAuthorActorId } from '../lib/review-independence.mjs';
+import { PANEL_LENSES } from '../lib/review-core.mjs';
 
 // ── #2844 · the AUTHOR STAMP pr-land writes at PR-open ─────────────────────────────────────────────────────────
 // PR #1100 review: this half had ZERO coverage. `withAuthorStamp` was module-private and read a module-scope
@@ -690,7 +691,10 @@ describe('resolveRosterReconcile — #2635 bind + reconcile the jury roster from
     const r = resolveRosterReconcile({
       careLevel: 'high',
       changedFiles: ['scripts/pr-land.mjs'],
-      preRegistered: ['correctness', 'security', 'simplicity', 'standards-conformance'],
+      // The full static set — `claim-accuracy` joined it in #3035. A roster pre-registered against the old
+      // four genuinely HAS expanded once a fifth lens resolves, so this fixture must carry all of them for the
+      // no-expansion case to be the no-expansion case.
+      preRegistered: [...PANEL_LENSES],
     });
     expect(r.expanded).toBe(false);
     expect(r.humanAlignmentRequired).toBe(false);
