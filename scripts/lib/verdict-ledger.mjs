@@ -122,6 +122,10 @@ export const VERDICT_LEDGER_KIND = 'we.review-verdict';
  * parks under — so a Phase-2 gate reading this ledger can express every state a label can express, and the
  * Phase-1 checker can compare like with like. Adding a label without adding a member here is what makes a
  * ledger silently narrower than the thing it is meant to replace.
+ *
+ * SINCE #3329 THE SET IS NO LONGER TOTAL OVER {CLEARS, HOLDS}. Five members are DISPOSITIONS — each clears the
+ * merge or holds it. `OBSERVED` is neither: it is NON-BEARING, a row recording THAT a review happened. See
+ * {@link NON_BEARING}.
  */
 export const VERDICTS = Object.freeze({
   ACCEPTED: 'accepted',         // the reviewer accepted → clears
@@ -134,16 +138,58 @@ export const VERDICTS = Object.freeze({
   // a witness at the new head rather than a marker nobody can reproduce. It is deliberately NOT `ACCEPTED`:
   // no review was run, and a reader counting acceptances must not count this as one.
   RESTAMPED: 'restamped',       // acceptance re-witnessed after a drain-authored rebase → clears
+  // #3329 — A REVIEW HAPPENED. Nothing follows from it. It neither clears nor holds; see NON_BEARING.
+  OBSERVED: 'observed',         // a review was run and recorded → bears on NOTHING
 });
 
 /** Verdicts in the closed set, as an array. */
 export const VERDICT_VALUES = Object.freeze(Object.values(VERDICTS));
 
-/** The two verdicts that CLEAR. Everything else in the closed set is a HOLD. A hold is only ever ended by a
- *  LATER clearing record — never by removing a row, which this format makes impossible anyway. */
+/** The three verdicts that CLEAR. Every other BEARING member of the closed set is a HOLD. A hold is only ever
+ *  ended by a LATER clearing record — never by removing a row, which this format makes impossible anyway. */
 const CLEARING = new Set([VERDICTS.ACCEPTED, VERDICTS.CLEAR_HUMAN, VERDICTS.RESTAMPED]);
 
-/** Does this verdict clear the PR for merge? Pure. An unknown verdict is NOT clearing (fail closed). */
+/**
+ * THE NON-BEARING MEMBERS (#3329). A non-bearing row is written into `history` and is INVISIBLE to every
+ * question the ledger answers about whether a PR may land: it never becomes `current`, it never sets `clears`,
+ * and it is never an outstanding hold.
+ *
+ * WHY A THIRD CATEGORY RATHER THAN A SIXTH DISPOSITION. Two situations on 2026-08-26 had a review that
+ * genuinely ran and no honest verdict to record: one produced findings and recorded NOTHING (zero rows, label
+ * unchanged — the findings survived only by being hand-carried between sessions), and one passed with zero
+ * findings and had `changes` recorded on it with no reason, which #3334 now refuses. Neither existing value
+ * fits. `accepted` is a lie AND a measurement bug — nothing was accepted, and a reader counting acceptances
+ * would count it, the exact miscount `RESTAMPED` was added to prevent. `changes` HOLDS, and holding the merge
+ * is precisely what an advisory look must not do.
+ *
+ * ENFORCED, NOT INTENDED — the enforcement point is {@link foldVerdictLedger}, which states the fold bug that
+ * "non-clearing" alone would have shipped. What it costs: a PR whose ONLY rows are `observed` folds to
+ * `current: null`, the same shape as a PR with no record, because that is the truth about its DISPOSITION.
+ * Its `history` is not empty, and that is where "a review happened" is read back from.
+ *
+ * AN ARRAY, NOT AN EXPORTED SET, and not cosmetically: `Object.freeze` on a `Set` leaves the internal slots
+ * writable, so an exported frozen Set still answers `.add('accepted')` — a public handle for making a CLEARING
+ * verdict non-bearing. Membership goes through the private `NON_BEARING_SET`; the export is truly immutable.
+ * No `BEARING_VERDICTS` companion: that subset is `VERDICT_VALUES` minus this list, and a third constant
+ * nothing here uses is precisely what the #2967 test-only-export scan flags.
+ */
+export const NON_BEARING = Object.freeze([VERDICTS.OBSERVED]);
+
+const NON_BEARING_SET = new Set(NON_BEARING);
+
+/**
+ * Does this verdict bear on whether the PR may land? Pure.
+ *
+ * FAIL-CLOSED IN THE OPPOSITE DIRECTION TO {@link verdictClears}. Only an EXPLICITLY enrolled member is
+ * non-bearing; anything else — an unknown word included — BEARS, and a row that bears without clearing is a
+ * hold. So a typo'd verdict holds the merge instead of silently vanishing from the disposition.
+ */
+export function verdictBears(verdict) {
+  return !NON_BEARING_SET.has(String(verdict ?? ''));
+}
+
+/** Does this verdict clear the PR for merge? Pure. An unknown verdict is NOT clearing (fail closed), and
+ *  neither is a non-bearing one — `observed` is not in `CLEARING` and must never be added to it. */
 export function verdictClears(verdict) {
   return CLEARING.has(String(verdict ?? ''));
 }
@@ -163,6 +209,13 @@ export function verdictClears(verdict) {
  *
  * `rearm` is `pending`: the conveyor's re-arm swaps `review:changes` → `review:pending`, which is a HOLD
  * awaiting an independent review, not a verdict on the contribution. An unrecognized target is `null` —
+ *
+ * **NO `observed` CASE (#3329), AND THE ABSENCE IS THE FEATURE.** `observed` mirrors no label, so there is no
+ * `--to=observed` swap to derive it from; its producer writes the row directly. Because this function is the
+ * ONLY way a label target becomes a ledger verdict and it fails closed, an invented `--to=observed` yields
+ * `null` and both the writer and the reconciling sink REFUSE — a label-shaped path to a label-less verdict
+ * stays impossible.
+ *
  * fail closed, never a guessed disposition, because the recorded verdict is the thing a Phase-2 gate will
  * merge on and a wrong one is worse than an absent one.
  *
@@ -186,6 +239,11 @@ export function verdictForLabelTarget(to) {
  * so the writer and the checker cannot disagree about what "mirroring" means.
  * `clear-human` maps to `review:accepted` because that is exactly what `decideSetLabel`'s `clear-human`
  * branch applies (it adds `review:accepted` and drops `review:human`).
+ *
+ * TOTAL OVER THE **BEARING** SET ONLY (#3329). `observed` returns `null` by CONSTRUCTION, not by omission —
+ * hence the explicit arm rather than a fallthrough. Every review label either clears the merge or holds it;
+ * there is no label meaning "looked at, nothing follows", and inventing one is what would turn `observed`
+ * into a soft accept.
  */
 export function verdictLabel(verdict) {
   switch (String(verdict ?? '')) {
@@ -196,6 +254,8 @@ export function verdictLabel(verdict) {
     case VERDICTS.CHANGES: return REVIEW_LABELS.changes;
     case VERDICTS.HUMAN: return REVIEW_LABELS.human;
     case VERDICTS.PENDING: return REVIEW_LABELS.pending;
+    // #3329 — EXPLICIT, not a fallthrough. A non-bearing row mirrors no label; see the doc above.
+    case VERDICTS.OBSERVED: return null;
     default: return null;
   }
 }
@@ -442,11 +502,14 @@ export function parseVerdictLog(text) {
  * @typedef {Object} FoldedPr
  * @property {number} pr
  * @property {string} repo
- * @property {VerdictRecord} current - the LATEST record, which is the live verdict.
- * @property {boolean} clears - whether the live verdict clears.
- * @property {VerdictRecord[]} history - every record for this PR, in append order.
- * @property {VerdictRecord[]} outstandingHolds - holds appended after the last clearing record. Empty when
- *   the live verdict clears. This is the card's *"no unanswered hold may exist"* in its computed form.
+ * @property {VerdictRecord|null} current - the latest BEARING record, which is the live verdict. **`null` when
+ *   the PR has only non-bearing rows** (#3329) — the same shape as a PR with no ledger record, because that is
+ *   the truth about its disposition. Every consumer must null-guard this.
+ * @property {boolean} clears - whether the live verdict clears. `false` when `current` is `null`.
+ * @property {VerdictRecord[]} history - EVERY record for this PR, in append order, bearing or not. This is the
+ *   only place a non-bearing row is visible, and it is where "a review happened" is read back from.
+ * @property {VerdictRecord[]} outstandingHolds - BEARING holds appended after the last clearing record. Empty
+ *   when the live verdict clears. This is the card's *"no unanswered hold may exist"* in its computed form.
  */
 
 /**
@@ -458,6 +521,14 @@ export function parseVerdictLog(text) {
  *     simply a later row, and there is no delete in this format to begin with.
  * Nothing is keyed on a content hash, so no rebase can make a row unreachable — see the file header.
  *
+ * LATEST-WINS RUNS OVER THE **BEARING** ROWS ONLY (#3329), AND THIS IS WHERE NON-BEARING IS ENFORCED. An
+ * `observed` row is pushed to `history` and then skipped: it never becomes `current`, never sets `clears`, and
+ * the outstanding-hold slice is taken over the bearing rows so it can neither BE a hold nor displace one. Had
+ * it merely been marked non-CLEARING, `[accepted, observed]` would have folded to `clears: false` with a
+ * phantom hold — a cleared PR silently re-held by an advisory note. That regression is pinned by a test; do
+ * not "simplify" the two `verdictBears` filters away. Consequence a caller must handle: `current` is `null`
+ * for a PR whose only rows are non-bearing.
+ *
  * @param {VerdictRecord[]} records - in append order.
  * @returns {Map<number, FoldedPr>} pr → state, in first-seen order.
  */
@@ -468,18 +539,21 @@ export function foldVerdictLedger(records) {
     if (!r || !Number.isInteger(r.pr)) continue;
     let entry = byPr.get(r.pr);
     if (!entry) {
-      entry = { pr: r.pr, repo: r.repo, current: r, clears: r.clears, history: [], outstandingHolds: [] };
+      entry = { pr: r.pr, repo: r.repo, current: null, clears: false, history: [], outstandingHolds: [] };
       byPr.set(r.pr, entry);
     }
     entry.history.push(r);
+    entry.repo = r.repo;
+    // #3329 — the non-bearing skip. `history` above is the ONLY thing an `observed` row touches.
+    if (!verdictBears(r.verdict)) continue;
     entry.current = r;
     entry.clears = r.clears;
-    entry.repo = r.repo;
   }
   for (const entry of byPr.values()) {
+    const bearing = entry.history.filter((r) => verdictBears(r.verdict));
     let lastClearAt = -1;
-    entry.history.forEach((r, i) => { if (r.clears) lastClearAt = i; });
-    entry.outstandingHolds = entry.history.slice(lastClearAt + 1).filter((r) => !r.clears);
+    bearing.forEach((r, i) => { if (r.clears) lastClearAt = i; });
+    entry.outstandingHolds = bearing.slice(lastClearAt + 1).filter((r) => !r.clears);
   }
   return byPr;
 }
@@ -492,6 +566,11 @@ export function foldVerdictLedger(records) {
  * Nothing calls this today. Phase 1 does not move the merge authority, and this function is not a gate; it
  * exists so the Phase-2 wiring is a call rather than a re-derivation, and so the "witnesses, not keys"
  * decision above is demonstrable rather than merely asserted.
+ *
+ * A `null` RECORD ANSWERS `covers: true`, WHICH IS SAFE AND NOT AN OVERSIGHT (#3329 re-checked it). Since
+ * `observed` was added, `folded.current` is `null` for a PR with only non-bearing rows, so a Phase-2 gate fed
+ * `{ record: folded.current }` gets `covers: true` from a PR nobody cleared. It cannot land on that: coverage
+ * is the SECOND question, asked only of a verdict that already clears, and such a PR's `clears` is `false`.
  *
  * @param {{record: VerdictRecord|null, headSha?: string|null, headDiff?: string|null,
  *   headContribution?: string|null}} o
@@ -564,6 +643,12 @@ export function labelVerdictOf(labels) {
  * ledger row behind it, and folding that into "disagreement" would drown the signal the phase exists to
  * measure. It is counted on its own line instead — and its count IS a Phase-2 precondition, because a ledger
  * that cannot express a drain-applied hold cannot be the merge authority. Say the number, do not hide it.
+ *
+ * A NON-BEARING ROW IS NOT DRIFT (#3329). `folded.current` is the latest BEARING row, so `observed` can never
+ * be `ledgerVerdict` here nor be scored as a disagreement or an `unlabeled` orphan — it is CORRECTLY
+ * label-less, and counting it as drift would inflate the number and bury a real orphan. The other half of that
+ * filtering is `buildRows` (`we:scripts/review-ledger-check.mjs`), which must not admit a PR to the comparison
+ * set on the strength of a non-bearing row alone.
  *
  * @param {{pr: number, labels?: Array, folded?: FoldedPr|null}} o
  * @returns {{pr: number, status: string, direction: string|null, ledgerVerdict: string|null,
@@ -807,10 +892,20 @@ function main(argv) {
       process.stderr.write('verdict-ledger show: --repo=<owner/name> is required\n');
       process.exit(2);
     }
+    // `e.current` is NULL-GUARDED (#3329): a PR whose only rows are non-bearing has no live verdict, and a
+    // bare `e.current.verdict` would throw on exactly the shape this ledger was widened to hold. The observed
+    // count prints alongside so a review that HAPPENED stays visible even though it bears nothing.
     const folded = [...foldRepo(repo).values()].map((e) => ({
-      pr: e.pr, verdict: e.current.verdict, clears: e.clears, at: e.current.at,
-      actor: e.current.actor, source: e.current.source, coverage: e.current.coverage,
-      records: e.history.length, outstandingHolds: e.outstandingHolds.length,
+      pr: e.pr,
+      verdict: e.current ? e.current.verdict : null,
+      clears: e.clears,
+      at: e.current ? e.current.at : null,
+      actor: e.current ? e.current.actor : null,
+      source: e.current ? e.current.source : null,
+      coverage: e.current ? e.current.coverage : null,
+      records: e.history.length,
+      observed: e.history.filter((r) => !verdictBears(r.verdict)).length,
+      outstandingHolds: e.outstandingHolds.length,
     }));
     writeAllSync(1, `${JSON.stringify(folded, null, flags.json ? 0 : 2)}\n`);
     process.exit(0);

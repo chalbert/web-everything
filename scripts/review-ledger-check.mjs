@@ -67,6 +67,19 @@ export function readOpenPrs({ repo, limit = 200, exec = execFileSync } = {}) {
  * failed) invisible, and that row is precisely the failure Phase 1 needs to be able to see. A ledger record
  * for a PR that is no longer open is skipped: the PR is decided, and nothing merges twice.
  *
+ * "A LEDGER RECORD" MEANS A **BEARING** ONE (#3329), which is why the admission test is `current != null` and
+ * not `folded.has(n)`. `observed` records that a review happened and bears on nothing; it mirrors no label BY
+ * CONSTRUCTION (`verdictLabel` returns `null`), so it is not drift and must not be scored as any. Admitting a
+ * PR on the strength of an `observed` row alone would add a row whose ledger side is empty and whose label
+ * side is empty — counted `agree`, inflating `total` with PRs that were never a comparison, or counted
+ * against the drift lines the moment the PR also carries a label. Either way the number this checker exists
+ * to produce gets noise in it and a real orphan row is that much harder to see. `folded.current` is already
+ * the fold's own answer to "is there a live verdict here", so this reuses it rather than re-deriving
+ * bearingness — one definition, not two that can disagree.
+ *
+ * A PR with a review label AND an `observed` row is still admitted (the label admits it) and still scored
+ * `unledgered`, which is correct: the label genuinely has no verdict row behind it.
+ *
  * @param {{prs: Array<{number: number, labels: Array}>, folded: Map<number, object>}} o
  * @returns {Array} comparison rows, PR-ascending.
  */
@@ -77,7 +90,7 @@ export function buildRows({ prs = [], folded = new Map() } = {}) {
     byNumber.set(p.number, Array.isArray(p.labels) ? p.labels : []);
   }
   return [...byNumber.keys()]
-    .filter((n) => folded.has(n) || labelVerdictOf(byNumber.get(n)) != null)
+    .filter((n) => (folded.get(n)?.current ?? null) != null || labelVerdictOf(byNumber.get(n)) != null)
     .sort((a, b) => a - b)
     .map((pr) => compareLedgerToLabels({ pr, labels: byNumber.get(pr) || [], folded: folded.get(pr) || null }));
 }
