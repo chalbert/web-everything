@@ -28,12 +28,20 @@ in its Tasks section, four sections apart. Nothing compares them, because nothin
 
 **One correction to the record.** The review that raised this on PR #1563 called `x4dbhiy`'s `:812` a
 *"locator drift (main moved between when the card was authored and when it was measured here)"*. That is
-wrong, and the difference matters for what this card must do. Walking the last 15 commits touching
-`we:scripts/check-standards-rules.mjs`, `const markers = [...new Set(markerHits…` has been at line **814**
-since `d898a879` (2026-08-15), ten days before the card was authored on 2026-08-25. The citation was never
-correct on any tree the author could have measured. So the check must **verify against the tree it runs on**
-rather than trying to date the drift — a wrong citation and a drifted citation are the same finding, and the
-cheap check catches both.
+wrong, and the difference matters for what this card must do. Walking **all 81** commits that have touched
+`we:scripts/check-standards-rules.mjs`, `const markers = [...new Set(markerHits…` reached line **814** at
+`5da6b548` (2026-08-15) and has been there in every commit since — ten days before the card was authored on
+2026-08-25 — and **812 never held it in any of the 81**. The citation was never correct on any tree the
+author could have measured. So the check must **verify against the tree it runs on** rather than trying to
+date the drift — a wrong citation and a drifted citation are the same finding, and the cheap check catches
+both.
+
+*(Retracted, not deleted. An earlier version of this paragraph said the statement had been at 814 "since
+`d898a879`", from a walk of "the last 15 commits". **Both were wrong.** `d898a879` is four commits after
+`5da6b548` and inherited 814 rather than establishing it, and a 15-commit sample cannot support a claim
+about when a line settled. The corrected figures above are from the full 81-commit walk. That this card's
+own motivating paragraph carried a wrong commit citation, through two rounds of review, is the argument for
+the card.)*
 
 ## What it must not do
 

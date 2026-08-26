@@ -37,8 +37,11 @@ that claims to have written it, wrote it.
 that filed this card. When #1556's body was corrected, the fix did not delete the false sentence — it quoted
 it, in order to say it was wrong:
 
-> *An earlier draft said "#3160 now carries the operation's contract, recorded verbatim on the card." … the
-> net diff touches no `backlog/3160-*.md` file.*
+> *## #3160 is NOT prepared by this PR — and an earlier draft of this description said it was*
+>
+> *Round 6 **pulled #3160 out of this PR** … The description did not follow, and kept claiming "#3160 now
+> carries the operation's contract, recorded verbatim on the card." An independent review checked the ground
+> truth and found the opposite: the net diff touches no `backlog/3160-*.md` file …*
 
 The claim string is still present, still next to a claim verb, still with no `backlog/3160-*.md` in the diff.
 A rule that only pattern-matches would flag the **corrected** body — a false positive on its own motivating
@@ -55,7 +58,17 @@ is pure and testable without a network call. Wiring it to a PR context is the ca
 
 1. **Executable** — a case where a body says *"#3160 now carries the operation's contract, recorded verbatim
    on the card"* and `changedFiles` contains only `backlog/3233-*.md`, `backlog/3230-*.md`,
-   `backlog/3238-*.md` returns exactly one finding naming `3160`. That is PR #1556's real input.
+   `backlog/3238-*.md` returns exactly one finding naming `3160`. That is PR #1556's real input **as it
+   stood when the finding was raised** — the three-file set an independent review re-derived on 2026-08-25.
+
+   *(Retracted, not deleted. An earlier version of this criterion said flatly "That is PR #1556's real
+   input", with no date. **That is no longer true and the sentence needed the qualifier from the start.**
+   #1556 kept taking rounds after the finding and merged on 2026-08-26 carrying **13** changed files, not
+   three — `agent-memory-src/` entries plus `backlog/` `3118`, `3165`, `3230`, `3233`, `3238`, `3273`,
+   `3277`–`3281`. A reader who runs `gh pr view 1556 --json files` today gets 13 paths and cannot reproduce
+   this criterion's input. What has **not** changed, and is the part the criterion actually rests on, is that
+   no `backlog/3160-*.md` is in that set — not in the three-file version, not in the merged 13-file version.
+   The finding stands; only its snapshot needed dating.)*
 2. **Executable** — the same body with `backlog/3160-*.md` added to `changedFiles` returns none. This is a
    **constructed** variant, not a replay: #1556's real correction changed the *body* and never touched its
    file set, so no such input ever existed. An earlier draft of this criterion called it "its corrected
