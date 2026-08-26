@@ -1,4 +1,5 @@
 ---
+bornAs: xbi8dmf
 kind: decision
 status: open
 dateOpened: "2026-08-26"
@@ -131,7 +132,7 @@ the red-check refusal; that is `:584`, and `:586` is the merge-state refusal.
 
 ## Carved child — not blocked by any of this
 
-- **#xsouh7c** — take `check:standards` and shard imbalance off the per-PR CI critical path. Repo-private CI
+- **#3348** — take `check:standards` and shard imbalance off the per-PR CI critical path. Repo-private CI
   shape, explicitly outside the drain contract per `#repo-drain-check-contract`, no statute conflict, and it
   is where the measured per-PR win actually is (~2–3 min). Independent of this decision entirely; it should
   proceed regardless of how the reframed question is answered.
