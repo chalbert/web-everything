@@ -54,7 +54,13 @@ Cost today ≈ **$0.43/PR** (four recorded juror runs: $0.6152–$0.9042, 167–
 
 ## The goal-set
 
-Front-A completeness maps each element to a child **and** to live code. Buildability is stated because three elements are currently blocked on other work.
+Front-A completeness maps each element to a child **and** to live code. Buildability is stated because **four** elements are currently blocked on other work (#6, #7, #8, #9 in the table below) — 5 buildable + 4 blocked + 1 unaddressed = 10.
+
+> **Retracted — this line said "three", and the table directly under it lists four.**
+> It read *"Buildability is stated because three elements are currently blocked on other work."* The blocked rows
+> are #6 (#3158), #7 (suite runtime), #8 (no ledger) and #9 (the same ledger) — four, not three. 5+3+1=9 does not
+> account for the ten elements the table enumerates; 5+4+1=10 does. The review log at the foot of this card and
+> this PR's description already said **4**; this sentence was the site left behind when those two were corrected.
 
 | # | Element | State |
 |---|---|---|
