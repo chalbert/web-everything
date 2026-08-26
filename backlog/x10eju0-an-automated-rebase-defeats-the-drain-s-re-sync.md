@@ -66,15 +66,34 @@ Two earlier drafts of this card asserted causes that were **wrong**, and both we
    must measure it again with nothing interfering.
 
 Both wrong causes were confidently asserted between two sessions, and each time the receiving session had no
-reason to re-derive them. That is the same failure as the gate-aperture retraction on [#3319](/backlog/3319/),
-running in the other direction. The pattern is worth more than either bug: **neither session checks a peer's
-claim the way it would check its own.**
+reason to re-derive them. That is the same failure as the retraction on
+[#3319](/backlog/3319-run-the-security-lens-once-per-code-pr/), running in the other direction. The pattern is
+worth more than either bug: **neither session checks a peer's claim the way it would check its own.**
+
+> ~~"the **gate-aperture** retraction on #3319"~~ — **that name was wrong, and it was this card's own version
+> of the very mistake it is about.** #3319's retraction has nothing to do with gate aperture: it corrects a
+> **corpus count and a lens attribution**. That card had asserted *"All 84 recorded verdicts ran correctness
+> alone. Security ran once and found two real forgery holes"*; the re-count over
+> `we:scripts/review-corpus/cases` found **92** cases, 87 carrying a lens row, **86** of those `correctness`,
+> and exactly **one** security finding — the second `we:scripts/operations/explore-io.mjs` hole is filed under
+> `correctness` in `we:scripts/review-corpus/cases/1457-r1.json`. Read in this lane at
+> `we:backlog/3319-run-the-security-lens-once-per-code-pr.md:17-25`, not recalled.
+>
+> The *shape* is what the sentence was reaching for, and that half does hold — better than the wrong name did.
+> #3319 records that the `84` figure arrived from its **parent `3318`** and was carried forward without being
+> re-derived. A peer's claim received unchecked, which is precisely this card's point.
 
 **And the two wrong causes shared a method, which is the more fixable half.** Both came from reading a single
 docblock line and generalising it into a mechanism, without opening the function it described. `:35` says
-*"the sweep never force-updates someone's branch"*; `isRebaseDropCandidate` sits forty lines later and says the
-opposite for the certified-and-green case. The prose was not wrong — it was scoped to the skip path, and the
-scope was only visible in the code.
+*"the sweep never force-updates someone's branch"*; `isRebaseDropCandidate` at `:609` says the opposite for the
+certified-and-green case.
+
+> ~~"`isRebaseDropCandidate` sits **forty lines later**."~~ **Wrong — and wrong in the direction that
+> flattered the mistake.** `grep -n` in this lane puts the docblock line at `we:scripts/merge-ai-prs.mjs:35`
+> and the function at `we:scripts/merge-ai-prs.mjs:609`. The gap is **574 lines**, not forty. At forty lines
+> the miss reads as a glance that stopped a paragraph short. At 574 the comment and the code it describes are
+> never on screen together — which is both why the shortcut is tempting and why the rule has to be *open the
+> function* rather than *read a bit further*.
 
 So the operative rule is narrower and more actionable than "verify claims": **a docblock line describes the
 branch it sits on, not the function's whole behaviour. Read the function before quoting its comment as a
@@ -101,9 +120,41 @@ The drain correctly skipped. The helper correctly rebased. CI correctly ran. Onl
 
 ## Done when
 
-1. **Executable** — a test asserting `isRebaseDropCandidate` returns `false` for a certified PR whose
-   `testGreen` is false, and `true` once it is green, with the livelock documented at the call site so the next
-   person adding a rebase helper meets the constraint before writing it.
-2. A note in `we:scripts/merge-ai-prs.mjs` stating the invariant: **do not rebase a queued PR from outside the
-   drain.**
-3. `npm run check:standards` — 0 errors.
+1. **Executable** — `isRebaseDropCandidate` (`we:scripts/merge-ai-prs.mjs:609`) carries the constraint in its
+   own docblock, asserted by a check that **fails today**:
+
+   ```sh
+   node -e "const s=require('fs').readFileSync('scripts/merge-ai-prs.mjs','utf8');
+            const i=s.indexOf('export function isRebaseDropCandidate');
+            process.exit(/do not rebase a queued PR from outside the drain/i.test(s.slice(Math.max(0,i-1200),i))?0:1)"
+   ```
+
+   Run in this lane at this card's tip: **exit 1** — the note is absent. Nothing of the kind sits near the
+   predicate or its call sites either:
+
+   ```sh
+   grep -n 'livelock\|do not rebase a queued' scripts/merge-ai-prs.mjs
+   # → 1215, 1425, 1515, 2688 — all the unrelated R2 livelock, and none within
+   #   1400 lines of :609 or of the rebase-pass call sites :3047, :3078, :3101.
+   ```
+
+2. The note states the invariant **and its reason**: *do not rebase a queued PR from outside the drain, because
+   a rebase restarts `test`, `testGreen` goes false, and the PR stops being a rebase-drop candidate.* The
+   reason is the load-bearing half — the bare instruction reads as territorial and gets routed around.
+
+3. `npm run check:standards` — no error attributable to this card.
+
+> **Retracted — `Done when` #1 previously asked for work that was already done, and could not have failed.**
+> It read: ~~"**Executable** — a test asserting `isRebaseDropCandidate` returns `false` for a certified PR
+> whose `testGreen` is false, and `true` once it is green …"~~
+>
+> **Both halves already exist on `main` and pass today.**
+> `we:scripts/__tests__/merge-ai-prs.test.mjs:1042` is the true-when-green case
+> (*"a BEHIND (needs-rebase) certified+green PR is a candidate"*); `:1051` is the false-when-red case
+> (*"a red `test` is NOT a candidate"*). Confirmed by mutation in this lane, not by reading: dropping
+> `|| !v.testGreen` from the guard at `we:scripts/merge-ai-prs.mjs:612` reddens **exactly** `:1051`
+> (`1 failed | 6 passed | 393 skipped`); restoring it returns all **7** to green.
+>
+> An `Executable` criterion has to be able to fail before the item lands and pass after. That one could not
+> fail, so the card would have shipped with no way to tell when it was done — the vacuity shape #3340 exists
+> to catch. What is genuinely missing is the *call-site constraint*, which is what #1 and #2 now ask for.
