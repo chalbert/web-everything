@@ -1,0 +1,29 @@
+{
+  "_": "Recorded answers to the `git` questions `mine-review-corpus.mjs` asks while mining `fixtures/comments/`. Regenerate in a FULL checkout with `node scripts/review-corpus/__tests__/helpers/git-replay.mjs --record`. A key absent here, or recorded null, exits 128 — the miner reads that as unreachable/unchanged, exactly as it reads a real git failure.",
+  "answers": {
+    "cat-file -e 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2^{commit}": "",
+    "cat-file -e 3712d4bdcdf93206c53138a375bb615bfe02f541^{commit}": "",
+    "cat-file -e 95572d0c94b439f9b10e32c33333eb8c7a6aeb8b^{commit}": "",
+    "cat-file -e ba1bcc1b24a8cebebe9e1bdd40d17d3d1322db70^{commit}": "",
+    "cat-file -e c71344b816817950ca98575f5406086c2676fd4c^{commit}": "",
+    "cat-file -e e7a338161e51ac0cc641075919701812b5a3a498^{commit}": "",
+    "cat-file -e e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15^{commit}": "",
+    "cat-file -e eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33^{commit}": "",
+    "diff --name-only 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2 95572d0c94b439f9b10e32c33333eb8c7a6aeb8b -- scripts/operations/__tests__/helpers/fake-claude.mjs": "scripts/operations/__tests__/helpers/fake-claude.mjs\n",
+    "diff --name-only c71344b816817950ca98575f5406086c2676fd4c e7a338161e51ac0cc641075919701812b5a3a498": "backlog/x4omld5-mutation-check-operation-prove-a-guard-fails-when-its-bug-re.md\nbacklog/xi3hiug-record-verdict-add-to-retracted-for-a-verdict-recorded-in-er.md\nbacklog/xm1y7m2-jit-numbering-does-not-sweep-prose-citations-in-docs.md\nbacklog/xnjm6y6-backfill-wire-the-11-declared-operations-into-the-21-skills-.md\nbacklog/xob418x-mutation-check-disqualifier-priority-is-asserted-nowhere-aga.md\nbacklog/xq94q0w-verify-add-a-suite-input-for-the-targeted-inner-loop.md\nbacklog/xqt8yfc-check-standards-gate-a-skill-naming-a-raw-home-that-a-declar.md\nbacklog/xrrpfo7-declare-the-backlog-lifecycle-siblings-scaffold-and-resolve.md\nbacklog/xv8hlrl-declare-the-working-tree-operations-commit-push-lane-sync.md\nbacklog/xwp8ioh-gate-review-pr-on-the-pr-being-open-before-the-juror-is-paid.md\n",
+    "diff --name-only e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2": "scripts/operations/__tests__/dispatch-lane-integration.test.mjs\nscripts/operations/__tests__/dispatch-spawn-live.test.mjs\nscripts/operations/__tests__/helpers/fake-claude.mjs\nscripts/operations/dispatch-lane-io.mjs\n",
+    "diff --name-only e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15 3712d4bdcdf93206c53138a375bb615bfe02f541": "agent-memory-src/full-concurrency-is-the-default-never-a-cost-judgment.md\nagent-memory-src/index-meta.md\n",
+    "diff --name-only e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15 95572d0c94b439f9b10e32c33333eb8c7a6aeb8b": "scripts/operations/__tests__/dispatch-lane-integration.test.mjs\nscripts/operations/__tests__/dispatch-spawn-live.test.mjs\nscripts/operations/__tests__/helpers/fake-claude.mjs\nscripts/operations/dispatch-lane-io.mjs\n",
+    "diff --name-only e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15 ba1bcc1b24a8cebebe9e1bdd40d17d3d1322db70": "agent-memory-src/full-concurrency-is-the-default-never-a-cost-judgment.md\nagent-memory-src/index-meta.md\n",
+    "diff --name-only e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15 eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33": "scripts/operations/__tests__/dispatch-spawn-live.test.mjs\nscripts/operations/__tests__/helpers/fake-claude.mjs\n",
+    "diff --name-only eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2 -- scripts/operations/__tests__/dispatch-spawn-live.test.mjs": "scripts/operations/__tests__/dispatch-spawn-live.test.mjs\n",
+    "diff --name-only eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2 -- scripts/operations/__tests__/helpers/fake-claude.mjs": "scripts/operations/__tests__/helpers/fake-claude.mjs\n",
+    "diff --name-only eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33 95572d0c94b439f9b10e32c33333eb8c7a6aeb8b -- scripts/operations/__tests__/helpers/fake-claude.mjs": "scripts/operations/__tests__/helpers/fake-claude.mjs\n",
+    "show -s --format=%cI 1cd5c2b0ae077a6008946f7489011c2fa3c93ff2": "2026-08-25T17:53:38-04:00\n",
+    "show -s --format=%cI 3712d4bdcdf93206c53138a375bb615bfe02f541": "2026-08-25T15:13:36-04:00\n",
+    "show -s --format=%cI 95572d0c94b439f9b10e32c33333eb8c7a6aeb8b": "2026-08-25T19:55:23-04:00\n",
+    "show -s --format=%cI ba1bcc1b24a8cebebe9e1bdd40d17d3d1322db70": "2026-08-25T15:31:57-04:00\n",
+    "show -s --format=%cI e7a338161e51ac0cc641075919701812b5a3a498": "2026-08-21T12:58:26Z\n",
+    "show -s --format=%cI eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33": "2026-08-25T16:52:22-04:00\n"
+  }
+}

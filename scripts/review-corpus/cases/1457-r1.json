@@ -1,0 +1,43 @@
+{
+  "pr": 1457,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "d7eb97684eb4287869895882d3a951a6baa3efb4",
+  "head": "1aff80f7bb506e8be72339fc9292b2c8ac3acfde",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3150-declare-an-explore-operation-multi-agent-committee-investiga.md",
+    "backlog/x6km5wp-the-effect-executor-serializes-dispatch-effects-so-a-committ.md",
+    "backlog/x7w2z4u-nothing-reclaims-an-explore-run-s-panelist-scratch-directory.md",
+    "backlog/xvpy20j-a-committee-panelist-can-still-reach-a-sibling-seat-s-report.md",
+    "scripts/backlog/__tests__/primary-write-guard.test.mjs",
+    "scripts/backlog/guarded-write.mjs",
+    "scripts/operations/__tests__/explore.test.mjs",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/explore-io.mjs",
+    "scripts/operations/explore.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/wake.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/explore-io.mjs",
+      "line": null,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "renderResearchTopic in scripts/operations/explore-io.mjs wraps juror-authored finding text in a Nunjucks `{% raw %}...{% endraw %}` block but only HTML-escapes the text (escapeHtml), never neutralizes a literal `{% endraw %}` sequence inside the text, so untrusted content can prematurely close the raw block and inject live Nunjucks template syntax into the published .njk file."
+    }
+  ],
+  "missedHere": []
+}

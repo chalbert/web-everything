@@ -1,0 +1,25 @@
+{
+  "pr": 1501,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "a9adadffc8eb2ebed8305a4c3720bea4e2a66769",
+  "head": "6dfa6e51c396e60f40a16eb3bb52ab0951bde90c",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x5royou-a-review-verdict-cannot-be-recorded-once-its-run-record-is-g.md",
+    "backlog/xalrjkh-extract-the-applier-subject-predicate-so-record-verdict-stop.md",
+    "backlog/xybgcsp-verify-lane-refuses-to-re-verify-after-an-ordinary-second-co.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

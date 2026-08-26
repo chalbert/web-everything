@@ -1,0 +1,40 @@
+{
+  "pr": 1562,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "1e1eb06305af2295632dbbd1dc10ddee4a62e17d",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "backlog/3273-the-operation-surface-still-uncovered-measured-a-census-not.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3273-the-operation-surface-still-uncovered-measured-a-census-not.md",
+      "line": 79,
+      "category": "prose-accuracy",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The card claims two new-operation slices 'collide only on the registry line in run.mjs' and that declaration/io/tests are 'new files nobody else names,' but scripts/operations/declared-homes.mjs is a second shared file (an Object.freeze map keyed by operation name, consumed by scripts/check-standards.mjs at line 2171 for the #3224 scan) that an operation replacing a raw call site should also add a"
+    },
+    {
+      "path": "backlog/3273-the-operation-surface-still-uncovered-measured-a-census-not.md",
+      "line": 67,
+      "category": "prose-accuracy",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The section titled 'HOW to slice it"
+    }
+  ],
+  "missedHere": []
+}

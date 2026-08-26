@@ -1,0 +1,34 @@
+{
+  "pr": 1560,
+  "round": 6,
+  "totalRounds": 7,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "fed61bc5ff203f4ab089333ac7c5bc98e48ea862",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+    "backlog/xaemgqd-a-pr-body-s-frontmatter-claims-are-never-checked-against-the.md",
+    "backlog/xxzs9l7-a-claim-corrected-at-one-site-while-the-same-claim-stands-at.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+      "line": 20,
+      "category": "citation-precision",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "The card cites the SKILL.md line-77 mention of `dispatch-lane` as \"the `#3239` annotation\", but the annotation's literal text at that line (verified at 60acbe5f, the exact commit the card claims to have checked) still reads `#xbbscm5`"
+    }
+  ],
+  "missedHere": []
+}

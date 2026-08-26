@@ -1,0 +1,23 @@
+{
+  "pr": 1558,
+  "round": 2,
+  "totalRounds": 3,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "532175a52c6e404449ac55e4cc8bf193dfc352be",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3165-tick-core-plans-auto-prepare-scope-dispatches-that-never-act.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

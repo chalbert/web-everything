@@ -1,0 +1,35 @@
+{
+  "pr": 1556,
+  "round": 1,
+  "totalRounds": 8,
+  "base": "27ce5bf0d5bab058e8155eec2783ed1234b8af79",
+  "head": "c5339f1648483542665c128572127175f9c9aaff",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3160-declare-prepare-decision-only-as-a-callable-operation-not-a-.md",
+    "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+    "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+    "backlog/3238-review-prep-note-introduces-883-errors-and-a-false-unverifie.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3238-review-prep-note-introduces-883-errors-and-a-false-unverifie.md",
+      "line": 57,
+      "category": "correctness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The new prose #3238 adds to explain the `unverified prerequisite` regex itself matches that regex, so the card still trips the exact false-positive marker it exists to eliminate"
+    }
+  ],
+  "missedHere": []
+}

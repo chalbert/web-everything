@@ -1,0 +1,44 @@
+{
+  "pr": 1457,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "8d9eb7420abb583f0d1d245de75f46104ee9ca0c",
+  "head": "4624cce3c3e7f28e1a12ead7ca48e21c512dd9b7",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "security",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3150-declare-an-explore-operation-multi-agent-committee-investiga.md",
+    "backlog/3179-the-effect-executor-serializes-dispatch-effects-so-a-committ.md",
+    "backlog/3180-nothing-reclaims-an-explore-run-s-panelist-scratch-directory.md",
+    "backlog/3181-replace-the-forgeable-clear-human-comment-marker-with-a-loca.md",
+    "backlog/3182-a-committee-panelist-can-still-reach-a-sibling-seat-s-report.md",
+    "scripts/backlog/__tests__/primary-write-guard.test.mjs",
+    "scripts/backlog/guarded-write.mjs",
+    "scripts/operations/__tests__/explore.test.mjs",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/explore-io.mjs",
+    "scripts/operations/explore.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/wake.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/explore-io.mjs",
+      "line": 165,
+      "category": "committee-blindness-residual",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "A subverted committee panelist can read the run-store JSON (every seat's session handle) from its own cwd and/or set-difference the agent listing, letting it derive a sibling panelist's report path and forge that seat's report to manufacture false cross-lens agreement."
+    }
+  ],
+  "missedHere": []
+}

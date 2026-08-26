@@ -1,0 +1,25 @@
+{
+  "pr": 1508,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "9343d019633b3efcd21e1b56120836a7d75d4da7",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xl83aku-the-credential-less-open-pr-fallback-silently-drops-the-park.md",
+    "skills-src/next-backlog-item/SKILL.md",
+    "skills-src/pr/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

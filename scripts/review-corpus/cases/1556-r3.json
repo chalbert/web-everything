@@ -1,0 +1,46 @@
+{
+  "pr": 1556,
+  "round": 3,
+  "totalRounds": 8,
+  "base": "27ce5bf0d5bab058e8155eec2783ed1234b8af79",
+  "head": "958834c2c5d189b85ea2d75f064f11704d0535e4",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3160-declare-prepare-decision-only-as-a-callable-operation-not-a-.md",
+    "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+    "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+    "backlog/3238-review-prep-note-introduces-883-errors-and-a-false-unverifie.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+      "line": 158,
+      "category": "citation-accuracy",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "Step 8 cites `we:scripts/pr-land.mjs:574` as \"the push it does itself\", but line 574 is `gitPushMain`, the MAIN_PUSH_OK-gated push used only when merging into `main` (label-on-green/fallback-git); the actual initial lane-ref push this design relies on (`git push origin <sha>:refs/heads/<ref>`) is at pr-land.mjs:737."
+    }
+  ],
+  "missedHere": [
+    {
+      "path": "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+      "line": 0,
+      "category": "acceptance-criteria-accuracy",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "Done-when 6 (and #3238's Done-when 7) hardcode \"the 0-error / 1435-warning baseline\" as a literal gate target, but that count is already stale on current main.",
+      "foundAtRound": 7,
+      "provenBy": "git diff 958834c2 ee6e5a98 -- backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md is empty"
+    }
+  ]
+}

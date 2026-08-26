@@ -1,0 +1,24 @@
+{
+  "pr": 1461,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "ea6de54e3a6685f80ddbaf40ab5d02f252e0bd44",
+  "head": "24e0adc3acb3b3a21617ac66e434972ca4890054",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3152-genericize-prepare-into-a-kind-polymorphic-operation-absorbi.md",
+    "backlog/xj1d04h-wrap-dispatch-lane-in-a-thin-build-skill-mirroring-review-s-.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,30 @@
+{
+  "pr": 1523,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "237dabf5de861b21183015aee8695bb6ed2b4df4",
+  "head": "7e295b288b55bba3b99598cc588e283c47602621",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3250-open-pr-cannot-express-pr-land-default-land-mode-nor-a-bodyl.md",
+    "backlog/x2v3kgr-the-batch-skill-instructs-a-pr-land-call-its-own-body-guard-.md",
+    "backlog/x729f3a-pr-status-cannot-run-on-a-credential-less-host-which-is-the-.md",
+    "backlog/xxc7d18-the-3224-gate-proves-a-skill-names-the-operation-never-that-.md",
+    "scripts/operations/__tests__/open-pr.test.mjs",
+    "scripts/operations/open-pr.mjs",
+    "skills-src/batch-backlog-items/SKILL.md",
+    "skills-src/pr/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

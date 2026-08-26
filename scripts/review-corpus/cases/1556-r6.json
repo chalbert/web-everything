@@ -1,0 +1,53 @@
+{
+  "pr": 1556,
+  "round": 6,
+  "totalRounds": 8,
+  "base": "27ce5bf0d5bab058e8155eec2783ed1234b8af79",
+  "head": "ee6e5a9873be70a4bd86c27e8a1dc5e2e622ae19",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+    "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+    "backlog/3238-review-prep-note-introduces-883-errors-and-a-false-unverifie.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+      "line": 227,
+      "category": "citation-accuracy",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "Card #3233 cites two current-state line numbers for review-prep.mjs that are each off by one from the actual file."
+    },
+    {
+      "path": "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+      "line": 200,
+      "category": "citation-accuracy",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "Card #3233's Interfaces section states `recordPrepVerdict` 'today returns' a single unified shape, but that shape is only the success-path return; the existing hash-mismatch/abort path returns a materially smaller object."
+    }
+  ],
+  "missedHere": [
+    {
+      "path": "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+      "line": 0,
+      "category": "acceptance-criteria-accuracy",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "Done-when 6 (and #3238's Done-when 7) hardcode \"the 0-error / 1435-warning baseline\" as a literal gate target, but that count is already stale on current main.",
+      "foundAtRound": 7,
+      "provenBy": "git diff ee6e5a98 ee6e5a98 -- backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md is empty"
+    }
+  ]
+}

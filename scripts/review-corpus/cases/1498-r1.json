@@ -1,0 +1,29 @@
+{
+  "pr": 1498,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "d1bbf957676995d397b791293a3a2b820cb12825",
+  "head": "fa32a5e7153202ea3f873ac4f47d5d5fe08d4baf",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xhqqy9j-declare-a-stage-pr-view-operation-that-refuses-an-incomplete.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/stage-pr-view.test.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/stage-pr-view-io.mjs",
+    "scripts/operations/stage-pr-view.mjs",
+    "skills-src/review/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

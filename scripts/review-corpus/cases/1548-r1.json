@@ -1,0 +1,39 @@
+{
+  "pr": 1548,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "5c9a63a01ccc75258ee6bb329cee21bc8f3c9475",
+  "head": "72a8820a416de4d9f406b88efd7758d2282f7b01",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    ".github/workflows/stage-pr-view.yml",
+    "backlog/3268-a-reviewing-session-can-author-the-material-its-own-juror-ju.md",
+    "docs/agent/vm-sessions.md",
+    "scripts/__tests__/collect-review-requests.test.mjs",
+    "scripts/__tests__/produce-pr-view.test.mjs",
+    "scripts/collect-review-requests.mjs",
+    "scripts/lib/__tests__/git-transport-branch.test.mjs",
+    "scripts/lib/__tests__/pr-view-transport.test.mjs",
+    "scripts/lib/git-transport-branch.mjs",
+    "scripts/lib/pr-view-transport.mjs",
+    "scripts/operations/__tests__/stage-pr-view.test.mjs",
+    "scripts/operations/record-verdict-io.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/stage-pr-view-io.mjs",
+    "scripts/operations/stage-pr-view.mjs",
+    "scripts/produce-pr-view.mjs",
+    "skills-src/review/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

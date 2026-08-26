@@ -1,0 +1,38 @@
+{
+  "pr": 1500,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "1f2ae138604e35e144956bdbdb7287beb62fb158",
+  "head": "91944643c8fe0999a6623706defd037beca20907",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/xlqwz62-declare-an-open-pr-operation-so-the-pr-opening-guards-cannot.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/open-pr.test.mjs",
+    "scripts/operations/open-pr-io.mjs",
+    "scripts/operations/open-pr.mjs",
+    "scripts/operations/run.mjs",
+    "skills-src/pr/SKILL.md"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/open-pr.mjs",
+      "line": 195,
+      "category": "coverage",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "HOME_REASONS maps 'untracked' and 'red-ci-gated' to 'refused', but these are the two verifyGateDecision outcomes with ok:true (non-blocking)"
+    }
+  ],
+  "missedHere": []
+}

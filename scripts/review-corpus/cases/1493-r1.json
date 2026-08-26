@@ -1,0 +1,25 @@
+{
+  "pr": 1493,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "b0c439bc8bc0c8cab8617767cd48aa87b8f5dd2d",
+  "head": "ea78859c9176d96545a1aec4bf490ba124816301",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3201-check-backlog-item-passes-an-item-the-standards-gate-then-re.md",
+    "scripts/__tests__/check-backlog-item.test.mjs",
+    "scripts/check-backlog-item.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

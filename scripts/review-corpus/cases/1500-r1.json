@@ -1,0 +1,38 @@
+{
+  "pr": 1500,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "1f2ae138604e35e144956bdbdb7287beb62fb158",
+  "head": "699d9271d3397622bc7f5814cf036d0fe83229f5",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/xlqwz62-declare-an-open-pr-operation-so-the-pr-opening-guards-cannot.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/open-pr.test.mjs",
+    "scripts/operations/open-pr-io.mjs",
+    "scripts/operations/open-pr.mjs",
+    "scripts/operations/run.mjs",
+    "skills-src/pr/SKILL.md"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/open-pr.mjs",
+      "line": 214,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "classifySubmit checks parsed.pr/parsed.url before parsed.reason, so a post-open refusal from pr-land (check-red, behind, conflict, check-timeout, the live-body empty-body recheck) is misreported as outcome 'opened' instead of 'refused'/'unrun'."
+    }
+  ],
+  "missedHere": []
+}

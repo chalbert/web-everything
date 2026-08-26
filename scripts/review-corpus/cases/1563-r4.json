@@ -1,0 +1,28 @@
+{
+  "pr": 1563,
+  "round": 4,
+  "totalRounds": 4,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "bdb59f3e92e6ff7703dcae0eac587e924c4cf6a8",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "backlog/x4dbhiy-a-same-count-marker-swap-reads-as-no-change-because-only-the.md",
+    "backlog/x4ongaj-a-pr-description-that-claims-an-item-was-recorded-on-its-car.md",
+    "backlog/x70498i-a-card-claims-its-slices-build-in-parallel-without-naming-a.md",
+    "backlog/xfgjxyf-a-pr-body-corrects-a-claim-in-one-place-and-leaves-the-same.md",
+    "backlog/xh25i14-a-card-that-names-the-operations-registry-as-a-shared-file-w.md",
+    "backlog/xnzi6hv-a-pr-body-claims-it-files-the-preventions-owed-by-named-revi.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

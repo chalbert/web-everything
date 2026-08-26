@@ -1,0 +1,29 @@
+{
+  "pr": 1511,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "6feecd066c32be88385a38fa4353181bbcf7cd4a",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/scaffold-io.test.mjs",
+    "scripts/operations/__tests__/scaffold.test.mjs",
+    "scripts/operations/run.mjs",
+    "scripts/operations/scaffold-io.mjs",
+    "scripts/operations/scaffold.mjs",
+    "skills-src/next-backlog-item/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

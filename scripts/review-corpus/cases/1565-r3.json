@@ -1,0 +1,25 @@
+{
+  "pr": 1565,
+  "round": 3,
+  "totalRounds": 3,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "b9bf78e17fd8136114c12e59ba69441d01027f91",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3118-session-free-conveyor-where-does-headless-agent-spawning-liv.md",
+    "backlog/x17op72-review-lens-an-x-already-handles-this-claim-must-line-cite-t.md",
+    "backlog/xu4ddw5-check-standards-rule-a-decision-card-may-name-exactly-one-de.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

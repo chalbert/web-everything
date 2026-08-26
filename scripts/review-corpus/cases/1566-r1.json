@@ -1,0 +1,33 @@
+{
+  "pr": 1566,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "e7ab2833ede606735105a21576e367c92ddb6ac0",
+  "head": "0bcf5e0a516d0169db1c0df269b0a46cb26344e0",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "scripts/__tests__/bootstrap-session.test.mjs",
+    "scripts/bootstrap-session.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/bootstrap-session.mjs",
+      "line": 526,
+      "category": "test-purity",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "trustableDirs() calls primaryCheckout(root) without forwarding the `exists` it was itself given, so the function is not actually pure over a probe the way its own doc comment claims"
+    }
+  ],
+  "missedHere": []
+}
