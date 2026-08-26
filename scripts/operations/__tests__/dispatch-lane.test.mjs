@@ -37,6 +37,7 @@ import {
   DISPATCH_HOLD_GRACE_MINUTES,
   DISPATCH_LANE_OP,
   DISPATCH_LISTING_GRACE_MINUTES,
+  LAUNCH_KINDS,
   canonicalPlaceholder,
   dispatchLaneOperation,
   dispatchStillHolds,
@@ -54,6 +55,7 @@ import {
   classifyDispatchPr,
   createDispatchObservers,
   createDispatchSinks,
+  REPO_ROOT,
   forwardableBookkeeping,
   inFlightDispatchesFor,
   isPreSpawnRefusal,
@@ -559,13 +561,29 @@ describe('filling the delivery brief', () => {
     }
   });
 
-  it('the session slug agrees with the tick core\'s OWN releaseSessionForNum, imported not retyped', () => {
+  it('the session slug agrees with the tick core\'s OWN releaseSessionForNum, imported not retyped — for ALL THREE kinds', () => {
     // The first cut of this test hand-typed `'conveyor-3037'` on both sides while claiming to guard agreement
     // with the core — two literals cannot diverge, so it guarded nothing. The real risk is that the merge
     // watcher releases a session slug the agent never leased, and the lease strands.
     for (const num of ['3037', 'x0t9923', '42']) {
       expect(sessionSlugFor(num)).toBe(releaseSessionForNum(num, new Map()));
     }
+    // #3165 — THE SAME AGREEMENT FOR THE PREPARE KINDS, which is where it newly matters: a prepare dispatched
+    // under `conveyor-<num>` arms a watcher that releases `prepare-<num>`, a session nobody ever acquired, and
+    // the real lease strands with nothing pointing at it.
+    //
+    // NOTE THE SECOND ARGUMENT'S SHAPE, because getting it wrong is a test that passes while proving nothing:
+    // `releaseSessionForNum` takes a **Map of num → kind** and does `prepareKindByNum instanceof Map`. Handing
+    // it the bare kind STRING yields `undefined`, falls through to `conveyor-<num>` — and would then only
+    // agree with the hardcoded slug this card exists to remove.
+    for (const num of ['3037', 'x0t9923', '42']) {
+      for (const kind of ['prepare', 'prepare-decision']) {
+        expect(sessionSlugFor(num, kind), `${kind} #${num}`).toBe(releaseSessionForNum(num, new Map([[num, kind]])));
+      }
+    }
+    // …and the two prepare kinds are DISTINCT slugs, not one aliased onto the other — `prepare-decision-<num>`
+    // must not be read as `prepare-` plus a `decision-<num>` id.
+    expect(sessionSlugFor('3037', 'prepare')).not.toBe(sessionSlugFor('3037', 'prepare-decision'));
     // THE RESIDUAL, pinned rather than papered over: the dispatcher slugs the NORMALIZED id while `armWatchers`
     // slugs the PR row's RAW one, so a zero-padded spelling would diverge. No id in this repo is padded (the
     // backlog numbers items plainly), which is why this is a pin and not a fix — but if one ever is, the lease
@@ -1176,5 +1194,219 @@ describe('the tick reader', () => {
 
   it('refuses an id that normalizes to nothing', () => {
     expect(() => readTick({ num: '  ', ...bindings })).toThrow(/must be an item id/);
+  });
+});
+
+
+// ── 8. #3165 — a PLANNED PREPARE is DISPATCHED, not merely surfaced ─────────────────────────────────────────
+//
+// THE DEFECT THIS SECTION PINS. `planTick` returns three launch lists; the operation launched one. So an item
+// the planner put in `spawnPrepareScope` — the operator sees it every tick as `⚠ N auto-preparing scope: #NNN`
+// — came back from `dispatch-lane --num=<it>` as "not in `decisions.spawnBuilds`", forever. The spawner was
+// called ZERO times, which is why every case below counts the calls rather than inspecting a verdict: the
+// verdict was always honest about not dispatching. Nothing was dispatched.
+//
+// EVERY CASE HERE GOES THROUGH THE REAL `readTick` AND THE REAL BRIEFS ON DISK. A stub read that hands the
+// declaration a `launchKind` proves only that the declaration honours one; the whole gap was in the shell,
+// between the core's three lists and the one the reader looked at. Only the spawner is stubbed.
+
+describe('#3165: the planner\'s prepare lists reach the spawner', () => {
+  /** A tick as the core returns one, with the asked item in exactly ONE of the three launch lists. */
+  function tickWith(list, row) {
+    return {
+      decisions: {
+        spawnBuilds: [], spawnPrepareScope: [], spawnPrepareDecision: [],
+        suppressedBuilds: [], statusLine: 'conveyor · 1 preparing', notes: [],
+        [list]: [row],
+      },
+      // The guards the core recorded for the SAME plan. Both prepare kinds live in ONE `prepareGuards` list
+      // keyed by `kind`, and a sibling rides along so "picked the matching one" is a real assertion.
+      nextState: {
+        tick: 4,
+        buildGuards: [{ num: '3037', lane: 8, spawnedTick: 3 }],
+        prepareGuards: [
+          { num: '3150', kind: 'prepare', lane: 5, spawnedTick: 3, sawPr: false },
+          { num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false },
+          { num: '9999', kind: 'prepare', lane: 7, spawnedTick: 3, sawPr: false },
+        ],
+      },
+    };
+  }
+
+  /** An UNSCOPED held item — no `scope:` frontmatter at all, which is exactly why a prepare is planned for it. */
+  const UNSCOPED = { num: '3150', slug: 'an-unscoped-held-item' };
+  const SPEC_PATH = 'backlog/3150-an-unscoped-held-item.md';
+  /** A scoped item, for the build case. */
+  const SCOPED = { num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] };
+
+  /**
+   * ONE WHOLE DISPATCH — the real `readTick`, the real declaration, the real sink, the real brief files, and a
+   * STUB SPAWNER that records what it was handed and starts nothing.
+   *
+   * Every process boundary except the spawner is injected: `runNode` returns the given tick instead of running
+   * the core, `loadItems` returns the given item instead of loading the backlog, and the two listings are
+   * stubbed so no ambient run record can make this shell `claude`. `readText` is the REAL `readFileSync`, so
+   * the brief under assertion is the one that ships.
+   */
+  async function dispatchThrough({ num, tick, items }) {
+    const spawned = [];
+    const registry = createRegistry();
+    registry.register(dispatchLaneOperation({
+      readTick: (asked) => readTick({
+        ...asked,
+        runNode: () => JSON.stringify(tick),
+        readText: (path) => readFileSync(path, 'utf8'),
+        loadItems: () => items,
+        listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
+        listAgents: () => [],
+      }),
+    }));
+    const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
+    // A NON-DISPATCH declares ZERO effects and the run COMPLETES — there is nothing to apply, and asking the
+    // executor to apply nothing is itself an error. So the spawner stays untouched and the count stays 0,
+    // which is the honest reading of "nothing was started".
+    if (!run.effects.length) return { run, spawned };
+    const outcome = await applyPendingEffects(run, {
+      sinks: createDispatchSinks({
+        root: PRIMARY,
+        spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+        mintSessionId: () => 'sess-3165',
+        now: () => new Date(NOW),
+      }),
+      store: createMemoryRunStore(),
+    });
+    return { run: outcome.run, spawned };
+  }
+
+  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. */
+  function expectedPrompt(kind, values) {
+    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values).prompt;
+  }
+
+  // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnPrepareScope` entry SPAWNS ONCE, with the scope-prep brief — it spawned zero times before', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnPrepareScope', { num: '3150', lane: 5 }), items: [UNSCOPED],
+    });
+    // THE WHOLE DEFECT, in one number.
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'prepare', lane: 5, sessionSlug: 'prepare-3150' });
+    // …and it is the SCOPE-PREP mandate, byte-for-byte the file on disk with this item's five values in it —
+    // not the 39 KB delivery brief, which would tell it to build an item whose scope nobody has written.
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('prepare', {
+      ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 5, SESSION_SLUG: 'prepare-3150', SCOPE: `we:${SPEC_PATH}`,
+    }));
+    expect(prompt).toContain('--purpose=conveyor-prepare-scope');
+    // criterion 5 (guard half) — the guard stamped is the PREPARE one for this num AND this kind, out of a
+    // `prepareGuards` list holding a second kind for the same num and a sibling item.
+    expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare', lane: 5, spawnedTick: 3, sawPr: false });
+  });
+
+  // ── criterion 2 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnPrepareDecision` entry SPAWNS ONCE, with the decision-prep brief', async () => {
+    // `spawnPrepareDecision` is the planner's PUBLIC key (`tick-core.mjs` §planTick's return). `decisionSpawns`
+    // is `planPrepareSpawns`'s internal local and appears nowhere on `decisions` — searching for it is how the
+    // consumers of these lists got missed in the first place.
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnPrepareDecision', { num: '3150', lane: 6 }), items: [UNSCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'prepare-decision', lane: 6, sessionSlug: 'prepare-decision-3150' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('prepare-decision', {
+      ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 6, SESSION_SLUG: 'prepare-decision-3150', SCOPE: `we:${SPEC_PATH}`,
+    }));
+    expect(prompt).toContain('--purpose=conveyor-prepare-decision');
+    expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false });
+  });
+
+  // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('a BUILD is byte-identical to before — the same brief, the same slug, the same argv', async () => {
+    // The additive claim, TESTED rather than asserted in a comment. If any of these three moved, every caller
+    // that predates #3165 changed behaviour, and the card's "it can land before anything that depends on it"
+    // stops being true.
+    const { run, spawned } = await dispatchThrough({
+      num: '3037', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [SCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'build', lane: 8, sessionSlug: 'conveyor-3037' });
+    expect(run.verdict.reason).toBe('cleared for build on lane 8');
+    expect(briefPath(REPO_ROOT)).toBe(briefPath(REPO_ROOT, 'build'));
+    expect(briefPath(REPO_ROOT)).toMatch(/skills-src\/conveyor\/delivery-agent-brief\.md$/);
+    // THE ARGV IS THE CONTRACT, and it is pinned whole — the prompt is the delivery brief filled with the
+    // item's OWN `scope:` frontmatter, not the one-file prepare scope.
+    expect(spawned[0].argv).toEqual([
+      '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
+      expectedPrompt('build', {
+        ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
+        SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/',
+      }),
+    ]);
+    expect(run.findings.read.scope).toEqual(['we:scripts/operations/']);
+  });
+
+  // ── criterion 4 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('an UNKNOWN kind THROWS on both halves — it never falls back to the delivery brief', () => {
+    // The silent fallback is the failure being guarded: a scope-prep agent handed the delivery mandate is told
+    // to BUILD an item whose scope is precisely what it was dispatched to write. It would acquire a lane, read
+    // an empty scope, and improvise.
+    for (const bogus of ['prepare-scope', 'Prepare', 'delivery', '', 'toString', '__proto__']) {
+      expect(() => briefPath(REPO_ROOT, bogus), `briefPath(${JSON.stringify(bogus)})`).toThrow(/no agent brief for kind/);
+    }
+    // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
+    expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
+      .toThrow(/unknown `launchKind`/);
+    // The three that ARE wired all resolve, and to three DISTINCT files — one map entry pointing at the wrong
+    // brief is the same failure with a quieter face.
+    const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
+    expect(new Set(paths).size).toBe(3);
+    for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
+  });
+
+  // ── criterion 5 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('an item with NO `scope:` dispatches as a prepare, and declares the ONE-FILE lane scope `we:<specPath>`', async () => {
+    // THE CASE A NAIVE CHANGE FAILS HARDEST. `dispatch-lane.mjs`'s unscoped refusal sits directly in the path,
+    // and it is BUILD-ONLY for a reason one word obscured: it tests the backlog item's `scope:` FRONTMATTER —
+    // the very thing a prepare-scope agent is dispatched to write. A prepare never needs it. The lane-lease
+    // `--scope` is a different value from a different source: the item's own backlog file, per
+    // `we:skills-src/conveyor/SKILL.md:272` and the `acquire` both prepare briefs already run.
+    expect(UNSCOPED.scope).toBeUndefined();
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnPrepareScope', { num: '3150', lane: 5 }), items: [UNSCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.findings.read.scope).toEqual([`we:${SPEC_PATH}`]);
+    expect(run.effects[0].payload.scope).toEqual([`we:${SPEC_PATH}`]);
+    // ONE file — a prepare lane that declared a directory would stop being "disjoint by construction".
+    expect(run.effects[0].payload.scope).toHaveLength(1);
+    // …while the build path keeps the refusal, unweakened: an unscoped item routed as a BUILD still throws.
+    expect(() => shapeDispatchRead(
+      tickRead({ launchKind: 'build', item: { num: '3150', slug: 'x', specPath: SPEC_PATH, scope: [] } }),
+      { num: '3150' },
+    )).toThrow(/never launches an unscoped item to build/);
+  });
+
+  it('the whole plan is not dispatched — ONE call starts ONE agent, never the tick\'s other planned prepares', async () => {
+    // The tick plans every prepare it can; this operation executes exactly one of them. A loop here would put a
+    // second scheduler in front of the one that already decides multiplicity.
+    const tick = tickWith('spawnPrepareScope', { num: '3150', lane: 5 });
+    tick.decisions.spawnPrepareScope.push({ num: '9999', lane: 7 });
+    const { spawned } = await dispatchThrough({ num: '3150', tick, items: [UNSCOPED, { num: '9999', slug: 'other' }] });
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].argv[4]).toBe('prepare-3150');
+  });
+
+  it('a num in NO list still says so, and now names all three', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [UNSCOPED],
+    });
+    expect(spawned).toEqual([]);
+    expect(run.verdict.dispatching).toBe(false);
+    expect(run.verdict.reason).toMatch(/spawnPrepareScope/);
+    expect(run.verdict.reason).toMatch(/spawnPrepareDecision/);
+    // …and it reports WHICH agent was asked for, so a run record of a declined prepare is not mistakable for a
+    // declined build.
+    expect(run.verdict.launchKind).toBe('build');
   });
 });
