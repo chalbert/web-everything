@@ -1,10 +1,11 @@
 ---
+bornAs: xmxjxjz
 kind: story
 size: 5
 parent: "3029"
 status: open
 relatedTo: ["3094", "3151"]
-scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/engine.mjs", "we:scripts/operations/__tests__/engine.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/http-adapter.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:backlog/xmxjxjz-the-verdict-write-up-renders-the-juror-s-findings-so-an-oper.md"]
+scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/engine.mjs", "we:scripts/operations/__tests__/engine.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/http-adapter.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:backlog/3282-the-verdict-write-up-renders-the-juror-s-findings-so-an-oper.md"]
 dateOpened: "2026-08-25"
 tags: [operations, epic-3029, review-pr, bug]
 ---
