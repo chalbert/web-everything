@@ -83,10 +83,34 @@ On the operator's explicit decision:
 ```
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=accept    # → review:accepted
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes   # → review:changes, back to the author lane
+node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes --reason="<what must change>"   # required when the juror found nothing
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=abstain   # → records nothing at all
 ```
 
 Four things you no longer have to remember, because the machinery holds them:
+
+**An override must say why (#3035).** When the juror returns **zero** findings and you record `changes`, that is
+an OPERATOR OVERRIDE — you are bouncing on something the juror did not raise. `--reason` is then REQUIRED and the
+operation refuses without it. The reason is rendered in the durable comment under **Why this was overridden**, which
+is the only place the author lane can read it.
+
+`--reason` is accepted on *any* answer, and only a decision that actually departs from the juror is captioned as an
+override. Pass one alongside an answer the juror agrees with and it is still rendered — under **Operator note**,
+which says in words that this was not an override. (Corrected here: this section previously implied every `--reason`
+rendered as **Why this was overridden**. It did, and that was the defect — `--answer=accept --reason="fyi"` posted a
+durable claim of disagreement where there was none.)
+
+Why the refusal exists: the write-up's panel body is composed from the JUROR's findings while `Decision:` comes from
+your answer, so a reasonless override posted *"✅ pass — no blocking findings"* directly above *"Decision: `changes`"*.
+Counted 2026-08-26 over every structured verdict comment on PRs #1428–#1567 (108 comments, 62 PRs): 45 recorded
+`changes`, and **17 of those, across 8 PRs (#1556–#1567), recorded `changes` over zero juror findings** — the case
+the refusal binds. On the wider reading — the juror's verdict line said "✅ pass" whatever findings it carried — it is
+33, across 11 PRs. A bounce the author cannot act on buys another round.
+A bounce that carries juror findings needs no `--reason` — those findings ARE the reason and are already rendered.
+
+> **Retracted.** This paragraph used to read *"Eleven bounces across PRs #1428–#1567 did exactly that."* Eleven is the
+> number of PRs in the wider set, not the number of bounces (33); the narrow set is 17 across 8 PRs; and none of them
+> occurred below #1556, so the stated range implied 128 PRs of history containing none.
 
 - **The stop is a suspend.** `--answer` without `--resume` is refused — you cannot answer a question that has
   not been asked, so there is no auto-proceed to resist.

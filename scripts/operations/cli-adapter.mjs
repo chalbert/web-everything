@@ -45,7 +45,7 @@ import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 
 /** Flags the adapter owns. A declaration may not name an input field that collides with one. */
-export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model']);
+export const CONTROL_FLAGS = Object.freeze(['help', 'json', 'resume', 'answer', 'run-id', 'cwd', 'model', 'reason']);
 
 /**
  * The control flags that mean something ONLY to a declaration with a `judge` step — the JUROR flags.
@@ -231,7 +231,7 @@ export function parseOperationArgv(declaration, argv = []) {
   const judged = declaresJudgeStep(declaration);
   const errors = [];
   const raw = {};
-  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '' };
+  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '', reason: null };
 
   for (const token of argv) {
     if (!token.startsWith('--')) { errors.push(`unexpected positional argument ${JSON.stringify(token)} — every input is a --flag`); continue; }
@@ -242,6 +242,8 @@ export function parseOperationArgv(declaration, argv = []) {
     if (name === 'json') { control.json = true; continue; }
     if (name === 'resume') { control.resume = value; continue; }
     if (name === 'answer') { control.answer = value; continue; }
+    // A CONFIRM-TIME attribute, not a run input — see the resume-merge below for why it is control.
+    if (name === 'reason') { control.reason = value; continue; }
     if (name === 'run-id') { control.runId = value; continue; }
     // ── THE JUROR FLAGS (#3151) ────────────────────────────────────────────────────────────────────────────
     // Refused where there is no juror, because a flag that silently does nothing is the failure this card is
@@ -294,6 +296,11 @@ export function parseOperationArgv(declaration, argv = []) {
   // A resume carries no input — the run record already holds it. Passing both is a confusion worth refusing.
   if (control.resume && Object.keys(raw).length) {
     errors.push('a --resume carries no input: the run record already holds it. Drop the input flags.');
+  }
+  // `--reason` QUALIFIES AN ANSWER, so it is meaningless without one. Refused rather than ignored: a
+  // reason silently dropped is worse than no reason, because the caller believes one was recorded.
+  if (control.reason != null && control.answer == null) {
+    errors.push('--reason qualifies a --answer; pass both, or neither.');
   }
   // THE STOP-POINT PROPERTY. You cannot answer a question that has not been asked.
   if (control.answer != null && !control.resume) {
@@ -645,6 +652,22 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
       };
     }
     resume = { step: run.pending.step, value: parsed.control.answer };
+
+    // THE CONFIRM-TIME INPUT, merged onto the run record here rather than carried as a run input.
+    //
+    // WHY IT CANNOT BE A RUN INPUT (the bug this fixes, found reviewing PR #1569). `reason` qualifies an
+    // operator's OVERRIDE of the juror, and the only moment anyone can know an override is needed is AFTER
+    // `judge` has returned — which is after the initial `--pr=` call, the only call an input flag may ride.
+    // `--resume` refuses input flags by design, so the field was reachable exclusively before the fact it
+    // describes existed. A guard whose reason can only be supplied blind is not a guard; the operator's
+    // choices were to re-run the whole review and pay a second juror, or bounce with no reason at all.
+    //
+    // It is merged into `run.input` (not a new channel) so `record` reads it exactly where the declaration
+    // says it lives, and the run record still holds one authoritative copy of every input.
+    if (parsed.control.reason != null) {
+      run = { ...run, input: { ...run.input, reason: parsed.control.reason } };
+      store.write(run);
+    }
   }
 
   // The command line genuinely is a person at a terminal.

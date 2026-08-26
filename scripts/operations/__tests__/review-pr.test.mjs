@@ -38,11 +38,13 @@ import {
   REVIEW_JUDGE_SHAPE,
   renderJudgeInput,
   renderVerdictWriteUp,
+  overridesJuror,
   reviewPrOperation,
   shapeReadFinding,
   REVIEW_JUROR_TOOLS,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
+import { VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -554,6 +556,7 @@ describe('the derived command line', () => {
 
   it('derives its flags and usage from the declaration, not from a hand-written parser', () => {
     const spec = buildCliSpec(declaration);
+    // `reason` is deliberately absent — it is a CONFIRM-TIME control flag, not an input (see the block below).
     expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'lens', 'pr', 'repo']);
     expect(spec.usage).toContain('--pr=<number>');
     // THE LENSES ARE NAMED, NOT TYPED. `[--lens=<string>]` told the operator nothing they could act on while
@@ -984,5 +987,94 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ of: CONFIRM_ACTORS.AGENT, id: 'r-args' });
     expect(calls[0].verdict).toBeDefined();
+  });
+});
+
+// ── THE REASONLESS-BOUNCE REFUSAL (#3035) ─────────────────────────────────────────────────────────────────
+// A `changes` recorded over a juror that raised nothing is an operator override. Without a reason the write-up
+// posts "no blocking findings" beside "Decision: `changes`" and the author lane has nothing to act on — eleven
+// such bounces across PRs #1428–#1567, each of which bought another round.
+describe('an override must say why', () => {
+  const readStub = {
+    repo: 'o/r',
+    pr: 7,
+    title: 't',
+    labels: ['review:pending'],
+    netBasis: { base: 'a', rev: 'b' },
+    netChangedFiles: [],
+    ghDiffStat: [],
+    disposition: null,
+    humanRequired: false,
+    degraded: false,
+  };
+  const viewFor = (answer, { findings = [], reason } = {}) => ({
+    input: { pr: 7, repo: 'o/r', actor: 'operator', ...(reason === undefined ? {} : { reason }) },
+    verdict: { findings, verdict: findings.length ? 'changes' : 'accept', lens: 'correctness' },
+    findings: { read: readStub, confirm: answer },
+  });
+  // `steps` is an ordered ARRAY on the declaration, not a name-keyed object.
+  const recordOf = () => {
+    const d = reviewPrOperation({ readPr: () => readStub });
+    return d.steps[d.stepNames.indexOf('record')].step;
+  };
+
+  it('refuses `changes` when the juror found nothing and no reason was given', () => {
+    expect(() => recordOf().effects(viewFor('changes'))).toThrow(/no stated reason/);
+  });
+
+  it('refuses an all-whitespace reason — a blank string is not a reason', () => {
+    expect(() => recordOf().effects(viewFor('changes', { reason: '   \n  ' }))).toThrow(/no stated reason/);
+  });
+
+  it('allows the override once a reason is given, and renders it for the author lane', () => {
+    const effects = recordOf().effects(viewFor('changes', { reason: 'Card cites :574; the real push is :737.' }));
+    const body = effects.map((e) => e?.payload?.body).find((b) => typeof b === 'string');
+    expect(body).toContain('Why this was overridden');
+    expect(body).toContain('Card cites :574; the real push is :737.');
+  });
+
+  it('does NOT require a reason when the juror itself raised findings — those ARE the reason', () => {
+    const findings = [{ lens: 'correctness', path: 'a.mjs', line: 1, summary: 's', impact: 'degraded' }];
+    expect(() => recordOf().effects(viewFor('changes', { findings }))).not.toThrow();
+  });
+
+  it('leaves an ordinary accept untouched — no override section', () => {
+    const effects = recordOf().effects(viewFor('accept'));
+    const body = effects.map((e) => e?.payload?.body).find((b) => typeof b === 'string');
+    expect(body).not.toContain('Why this was overridden');
+  });
+
+  it('still writes nothing on abstain, reason or not', () => {
+    expect(recordOf().effects(viewFor('abstain'))).toEqual([]);
+  });
+});
+
+// ── `--reason` IS A CONFIRM-TIME FLAG, NOT A RUN INPUT (#3035) ─────────────────────────────────────────────
+// The bug this pins, found reviewing PR #1569: `reason` shipped as an operation INPUT, and `--resume` refuses
+// input flags. The only moment an operator knows an override is needed is AFTER `judge` returns — which is
+// after the one call an input flag may ride. So the reason could only ever be supplied blind, before the fact
+// it describes existed, and the guard it feeds was unreachable at the only moment it binds.
+describe('the override reason is reachable when the override is decided', () => {
+  const declaration = () => reviewPrOperation({ readPr: () => ({}) });
+
+  it('is NOT an input field — an input named `reason` collides with the control flag', () => {
+    expect(Object.keys(declaration().input)).not.toContain('reason');
+  });
+
+  it('parses alongside --resume --answer, where an input flag would be refused', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--answer=changes', '--reason=because']);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.control.reason).toBe('because');
+    expect(parsed.control.answer).toBe('changes');
+  });
+
+  it('proves the contrast: a real input flag IS still refused with --resume', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--answer=changes', '--aim=something']);
+    expect(parsed.errors.join(' ')).toMatch(/carries no input/);
+  });
+
+  it('refuses a reason with no answer — a silently dropped reason is worse than none', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--reason=orphan']);
+    expect(parsed.errors.join(' ')).toMatch(/qualifies a --answer/);
   });
 });

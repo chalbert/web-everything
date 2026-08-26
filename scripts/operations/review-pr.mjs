@@ -78,7 +78,7 @@ import {
   normalizeFindings,
   renderReviewNotice,
 } from '../lib/review-core.mjs';
-import { DISPOSITIONS } from '../lib/jury-core.mjs';
+import { DISPOSITIONS, VERDICTS } from '../lib/jury-core.mjs';
 import { renderPanelComment } from '../lib/review-render.mjs';
 // #xwp8ioh — the SAME predicate `we:scripts/review-set-label.mjs` enforces at the write side (#2953), imported
 // rather than restated, so the read side and the write side cannot drift into two answers (#2644).
@@ -328,12 +328,37 @@ export function renderJudgeInput(read) {
 }
 
 /**
+ * DOES THE RECORDED DECISION ACTUALLY DISAGREE WITH THE JUROR? PURE.
+ *
+ * WHY IT EXISTS. `renderVerdictWriteUp` used to render its "Why this was overridden … the decision above
+ * differs from them" section on `reason` being non-empty ALONE. `--reason` is accepted on every answer, so
+ * `--answer=accept --reason="fyi"` — or a `changes` answer the juror itself asked for — posted a durable
+ * claim of disagreement where there was none. The reason is the operator's, but the *disagreement* is a fact
+ * about two verdicts, and only this predicate may assert it.
+ *
+ * It is the GENERAL form of the reasonless-bounce refusal in `record`: that guard binds `changes` over zero
+ * juror findings, and zero findings is exactly `deriveVerdict`'s `accept`, so every case it refuses is a case
+ * this returns true for. `abstain` writes nothing at all, so it can never be an override.
+ *
+ * @param {{verdict?: {verdict?: string}, answer?: string}} o the juror's verdict and the operator's answer.
+ * @returns {boolean} true iff the operator's answer departs from what the juror's verdict called for.
+ */
+export function overridesJuror({ verdict, answer } = {}) {
+  const juror = verdict?.verdict;
+  if (answer === 'accept') return juror !== VERDICTS.ACCEPT;
+  if (answer === 'changes') return juror === VERDICTS.ACCEPT;
+  // `abstain` declares no effects, so there is no recorded decision to disagree with anything.
+  return false;
+}
+
+/**
  * The durable verdict write-up posted as the PR comment. EXTENDS `renderPanelComment`
  * (`we:scripts/lib/review-render.mjs`, #2432) rather than hand-rolling markdown — the operation adds only the
  * three lines that are ITS business: who decided, on what basis, and whether that basis was degraded.
  * PURE.
  */
-export function renderVerdictWriteUp({ read, verdict, answer, actor, lens }) {
+export function renderVerdictWriteUp({ read, verdict, answer, actor, lens, reason = '' }) {
+  const overrode = overridesJuror({ verdict, answer });
   const body = renderPanelComment({
     findings: verdict.findings,
     verdict: verdict.verdict,
@@ -360,6 +385,24 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, lens }) {
     '---',
     '',
     `**Decision:** \`${answer}\` — recorded by ${actor}.`,
+    // THE OPERATOR'S OWN WORDS, rendered where the author lane reads the bounce. The panel body above is the
+    // JUROR's output; when the operator disagrees with it, that disagreement is the actionable half and it
+    // belongs beside the decision, not in a separate comment somebody has to go find.
+    //
+    // RETRACTED — this comment used to end *"Omitted entirely when there is no override, so an ordinary accept
+    // is unchanged."* That was WRONG on both halves: the section rendered on `reason` being non-empty alone, so
+    // `--answer=accept --reason="fyi"` rendered it, and rendered it claiming a disagreement that did not exist.
+    // Which heading is used is now decided by `overridesJuror` — the fact — and never by reason-present.
+    ...(reason
+      ? ['', overrode
+        ? `**Why this was overridden.** The \`${lens}\` juror's findings are rendered above; the decision `
+          + 'above differs from them. The operator gave this reason:'
+        // NOT AN OVERRIDE, SO IT MUST NOT SAY ONE. `--reason` is accepted on every answer; when the decision
+        // agrees with the juror the operator's words are still worth carrying, but calling them an override
+        // would be a false claim about the record (see `overridesJuror`).
+        : `**Operator note.** The decision above agrees with the \`${lens}\` juror; this is not an override. `
+          + 'The operator added:', '', `> ${reason.split('\n').join('\n> ')}`, '']
+      : []),
     `**Lens:** \`${lens}\` — a SINGLE-LENS run. One \`judge\` step, one juror, one lens; the table above lists `
       + `only the lens that judged. The other ${Math.max(PANEL_LENSES.length - 1, 0)} panel lenses `
       + `(${PANEL_LENSES.filter((l) => l !== lens).join(', ')}) did NOT run and are not reported as unjudged.`,
@@ -429,6 +472,34 @@ export function reviewPrOperation({ readPr } = {}) {
       // juror only inside the mandate TEXT and inside a #2438 data fence — never a flag position in argv (the
       // `JUDGE_MODEL` note above is the general form of that property).
       aim: { type: 'string', required: false },
+      // (The `reason` field that carried this rationale is NOT an input — see `record`'s guard. It is a
+      //  CONFIRM-TIME control flag, because an override is only knowable after `judge` returns, and an
+      //  input flag may ride only the initial call. The counted evidence below is why the guard exists.)
+      //
+      // THE REASON THIS INPUT EXISTS. `confirm` records one of a closed answer set and nothing else, so an
+      // operator who bounces a PR the juror ACCEPTED had no channel to say why. The write-up is composed from
+      // `verdict.findings` — the JUROR's — while `Decision:` comes from `findings.confirm`, so the PR received
+      // a comment reading "✅ pass — no blocking findings" directly above "Decision: `changes`", and the author
+      // lane was bounced with no stated reason. A bounce the author cannot act on buys another round by
+      // construction, which is why this is the cheapest round to delete.
+      //
+      // HOW OFTEN, COUNTED. Sweeping every structured verdict comment on PRs #1428–#1567 (108 of them, across
+      // 62 PRs; counted 2026-08-26 from the live comments, which is a wider population than the replay corpus,
+      // since the corpus drops a verdict whose net basis it cannot reconstruct):
+      //   - 45 recorded `changes`;
+      //   - 17 of those, across 8 PRs (#1556–#1567), recorded `changes` over ZERO juror findings — the exact
+      //     case the guard below refuses;
+      //   - 33, across 11 PRs (#1556–#1567), recorded `changes` while the juror's own verdict line read
+      //     "✅ pass — no blocking findings" — the wider set, since a `pass` can carry cosmetic findings.
+      //
+      // RETRACTED — this comment used to read *"Across PRs #1428–#1567 that happened ELEVEN times."* Wrong on
+      // both halves. Eleven is the count of PRs in the wider set, not of occurrences (33), and neither set
+      // reaches below #1556, so quoting the range as #1428–#1567 implied 128 PRs of history that contain none
+      // of them. The corpus replay it cited does not support 11 either: it holds 13 such cases, because it
+      // sees fewer verdicts than the live sweep above.
+      //
+      // It is free text with no `enum` for the same reason `aim` is: stating a reason cannot be a closed
+      // vocabulary. `record` REFUSES a reasonless override — see the guard there — so this is not advisory.
       // Who the durable comment is attributed to. Free text, exactly like `review-set-label.mjs --actor`.
       actor: { type: 'string', required: false, default: 'operator' },
     },
@@ -577,6 +648,28 @@ export function reviewPrOperation({ readPr } = {}) {
         // gate-self PR any more than the hand-written one could, and for the same reason: the decision is not
         // its to make. The sanctioned clearance (`--to=clear-human`, #2895) is DELIBERATELY not reachable from
         // here — it demands an operator instruction quoted verbatim, which is judgment, not a declared step.
+        // ── THE REASONLESS-BOUNCE REFUSAL (#3035) ─────────────────────────────────────────────────────────
+        // A `changes` recorded over a juror that raised NOTHING is an override, and an override with no stated
+        // reason ships a comment that reads "✅ pass — no blocking findings" beside "Decision: `changes`". The
+        // author lane is then bounced with nothing to act on and comes back for another round having changed
+        // whatever it guessed at. Refuse it here, in the pure core, so no caller can post one: either the juror
+        // named findings, or the operator names a reason.
+        //
+        // The check is deliberately narrow. A bounce that CARRIES juror findings needs no `--reason` — the
+        // findings are the reason, and they are already rendered. This only binds the empty case.
+        const overrideReason = typeof view.input.reason === 'string' ? view.input.reason.trim() : '';
+        const jurorFindings = Array.isArray(verdict.findings) ? verdict.findings.length : 0;
+        if (answer === 'changes' && jurorFindings === 0 && overrideReason === '') {
+          throw new Error(
+            `review-pr.record: refusing to record \`changes\` on ${repo}#${pr} with no stated reason — the `
+            + `\`${verdict.lens}\` juror returned 0 findings, so this is an OPERATOR OVERRIDE and the write-up `
+            + 'would post "no blocking findings" above "Decision: `changes`". The author lane cannot act on '
+            + 'that, so it buys another round. Pass `--reason="<what must change>"`, or record `abstain` to '
+            + 'write nothing. (17 bounces across 8 PRs, #1556–#1567, were reasonless in exactly this way — see '
+            + 'the count and its retraction at the `reason` input above, and `we:scripts/review-corpus/`.)',
+          );
+        }
+
         const decision = decideSetLabel({ to, currentLabels: read.labels });
         if (!decision.allowed) {
           throw new Error(
@@ -589,7 +682,7 @@ export function reviewPrOperation({ readPr } = {}) {
         }
 
         const bodyFile = `${repo.replace(/[^\w.-]+/g, '-')}-${pr}-verdict.md`;
-        const body = renderVerdictWriteUp({ read, verdict, answer, actor, lens: verdict.lens });
+        const body = renderVerdictWriteUp({ read, verdict, answer, actor, lens: verdict.lens, reason: overrideReason });
 
         return [
           // 0 — THE COMMENT (its body). IDEMPOTENT: TRUE. It writes bytes that are a pure function of the run
