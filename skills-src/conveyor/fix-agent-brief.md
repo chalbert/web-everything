@@ -68,8 +68,23 @@ gh pr view {{PR_NUM}} --json title,body,comments --repo <owner/name>
 ```
 
 Take the **latest** changes-requested comment as the authoritative ask. If the finding is ambiguous or needs a
-judgment you cannot safely make, do **NOT** guess — leave the PR `review:changes` (do not re-arm) and RETURN
-`#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`. A human handles it via `/finish`.
+judgment you cannot safely make, do **NOT** guess. **Record the stand-down on the PR first**, then leave the PR
+`review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`:
+
+```bash
+node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=needs-judgment \
+  --detail="<one line — what you could not decide>"
+```
+
+A human handles it via `/finish`.
+
+> **Why a script and not just the RETURN line (#3296).** Stopping to ask is the *right* call — but before this
+> step existed it wrote **nothing durable**: the PR kept `review:changes`, no comment was posted, and your
+> one-line return went to a calling session that then exited. On the PR itself, *"a fixer proved the fix wrong
+> and stood down"* was byte-identical to *"a fixer died"* — so the reconcile pass
+> (`we:scripts/conveyor/reconcile-core.mjs`) re-dispatched the refusal forever, re-asking a question nobody was
+> there to answer. The marker is what tells the two apart. It changes **no label** and re-arms nothing; it is
+> terminal for the automatic loop and cleared by a **person**.
 
 ### 3. Apply the fix — repair ONLY the reviewer's finding
 
@@ -87,8 +102,16 @@ escalated (conflict with main)`.
 npm run check:standards          # (or the item's locus gate — LOCI[item.locus] in check-standards-rules.mjs)
 ```
 
-A red gate is a hard stop: leave the PR `review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix
-gate-red`. Do not re-push a red diff.
+A red gate is a hard stop. Record the stand-down on the PR, leave it `review:changes` (do **not** re-arm), and
+RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
+
+```bash
+node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=gate-red \
+  --detail="<one line — which check stayed red>"
+```
+
+Same reason as the exit in step 2 (#3296): without the durable marker the reconcile pass cannot tell your
+deliberate stop from a crash, and re-dispatches a fixer at this PR forever.
 
 ### 5. Converge before handback — self-review the repair (proportionate to the change)
 
@@ -170,6 +193,8 @@ it. When a human takes over a `review:changes` bounce (the `/finish` `review-cha
 2. **Read the reviewer's finding** off the PR's latest changes-requested comment (step 2 above).
 3. **Repair only the finding**, resolve any conflict the `/finish` way (regenerate derived artifacts; take-main
    for coordination JSON; STOP on a genuine same-line overlap), get the locus gate green (steps 3–5 above).
+   If you stop instead, run `node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=conflict` so the PR records
+   that a repair was attempted and deliberately abandoned — the auto-fix loop then leaves it to you (#3296).
 4. **Re-push HEAD to the same `lane/*` ref** — update the PR in place, never open a new one (step 6 above).
 5. **Re-arm, never clear.** Hand back with `node scripts/conveyor/rearm-review.mjs {{PR_NUM}}` — the same
    invariant-guarded swap (`review:changes → review:pending`; never `review:accepted`; never removes
@@ -190,3 +215,6 @@ re-push, re-arm-never-clear shape is identical — which is the point (#2630).
 - **Repair only the finding** — do not fold unrelated work in; do not weaken or delete a test to go green.
 - **Work only through the normal verbs** — `acquire --base=<ref>` → repair → `git push … lane/*` →
   `rearm-review.mjs` → daemon/human re-review. No parallel state store (#2612 ruling).
+- **If you stop, say so ON THE PR** — every escalation exit runs `stand-down.mjs` before it returns (#3296). A
+  refusal that leaves no durable trace is indistinguishable from a crash, and gets re-dispatched forever. The
+  marker changes no label; it is terminal for the auto-fix loop and cleared by a human.
