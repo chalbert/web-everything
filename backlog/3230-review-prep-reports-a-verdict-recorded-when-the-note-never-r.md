@@ -84,6 +84,11 @@ Incremental behind `main`, in #3233's PR. No branch.
 5. **Mutation** — deleting the verification branch reddens case 1 by name; moving the check back to before
    the stage reddens case 3 by name. (Case 4 alone would stay green under both, which is why it is not the
    mutation target.)
-6. `npm run check:standards` shows **no new warnings** against the 0-error / 1435-warning baseline. Stated
-   as a delta, not as "passes": the gate exits 0 both before and after, so an exit-code assertion would be
-   decorative — the same defect #3238 refutes in this PR, which this criterion originally reproduced.
+6. `npm run check:standards` shows **no new warnings** against **the baseline measured at build time** — do
+   not hard-code a number. Stated as a delta, not as "passes": the gate exits 0 both before and after, so an
+   exit-code assertion would be decorative — the same defect #3238 refutes in this PR, which this criterion
+   originally reproduced.
+
+   *(An earlier version read *"against the 0-error / 1435-warning baseline"*. Hard-coding it was wrong for
+   the same reason the exit-code assertion was: 1435 was `main` at `b914eca2`, and by `60acbe5f` the count
+   is 1437 — measured, not recalled. #3233's Done-when 8 states this rule; this criterion contradicted it.)*

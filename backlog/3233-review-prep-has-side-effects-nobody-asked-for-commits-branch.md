@@ -165,9 +165,14 @@ made.
 
 ## The composed step order — one place, because three cards edit one function
 
-#3233, #3230 and #3238 all restructure `recordPrepVerdict` and land in one PR. A juror noted no card states
-the merged result, leaving the builder to compose three diffs by hand. It is stated here, and this order
-**is** the acceptance target:
+#3233, #3230 and #3238 all restructure `recordPrepVerdict`. A juror noted no card states the merged result,
+leaving the builder to compose three diffs by hand. It is stated here, and this order **is** the acceptance
+target:
+
+*(An earlier version of this sentence ended *"and land in one PR"*. Dropped, because #3238's delivery shape
+reserves the option to land in its own PR after this one — see the Delivery shape section below, where the
+same over-claim is retracted. The order below is the end state either way; it is not a claim about how many
+PRs get there.)*
 
 0. **Resolve the effective `land`**: requested `land` AND a GitHub credential is present. No credential ⇒
    downgrade to `false` with `reason: 'no-credential'`. Decided FIRST, before any mutation (#3233).
@@ -296,8 +301,15 @@ card should not be read as closing the loop. It makes the loop *closable*.
 
 ## Delivery shape
 
-Lands incrementally behind `main` in one PR with #3230 and #3238 — one function, three diffs, composed order
-stated above. No branch needed.
+Lands incrementally behind `main` in one PR with #3230 — one function, two diffs, composed order stated
+above. No branch needed. #3238 rides in the same PR by default but is **not required to**: its own delivery
+shape reserves the option to land separately, after this card. Nothing here depends on that choice, because
+no criterion below touches a file outside this card's `scope:`.
+
+*(An earlier version read *"in one PR with #3230 and #3238"* flatly. That was wrong against #3238's own
+delivery shape, which says it "can land in #3233's PR **or its own**" — two cards in the same PR asserting
+different things about the same land. This card is the one that had to give: #3238 states the constraint
+that actually exists — order, not co-location.)*
 
 ## Done when
 
@@ -306,7 +318,9 @@ stated above. No branch needed.
    exactly once, and issues **no `git push` of its own** — pr-land owns the push on this path. Byte-identical
    to today's behaviour, which is what makes the default flip safe.
 
-   **EXTEND the existing case at `we:scripts/operations/__tests__/review-prep-io.test.mjs:150-181`, and make
+   **EXTEND the existing case at `we:scripts/operations/__tests__/review-prep-io.test.mjs:140-181`
+   (`it('a matching hash proceeds to write, commit and land')` — earlier drafts, and the review that raised
+   this, both cited `:150-181`, which starts ten lines inside the case), and make
    the count exact: `expect(calls).toHaveLength(4)`.** That case already asserts positionally — `calls[0]`
    `git add`, `calls[1][1][0]` `commit`, `calls[2]` `git rev-parse`, `calls[3]` the pr-land shell — with no
    length assertion, so a stray `git push` landing at `calls[4]` leaves it **green while violating the very
@@ -333,7 +347,10 @@ stated above. No branch needed.
    case 3; changing `?? true` to a plain read reddens case 4; deleting the push-failure branch reddens
    case 5; removing `'input.land'` from the `record` step's `reads` reddens cases 2 and 4. Each by name.
 8. `npm run check:standards` shows no new errors and no new warnings **against the baseline at build time**
-   — do not hard-code a number; it has already moved twice while this card was being prepared.
+   — do not hard-code a number. `main` moved **three times on 2026-08-25 alone**, while this card was being
+   prepared: `e9aa38f6` → `b914eca2` → `e7ab2833` → `60acbe5f` (ancestry checked, not recalled). An earlier
+   version of this criterion said *"it has already moved twice"*; that was the count at the time and it went
+   stale the same day, which is the point.
 
 *(An earlier Done-when 6 asked for "three cases, one per gate in `writeBacklogMd`, asserting the returned
 `reason` distinguishes a lane-ownership refusal from a secret-scrub refusal from a locus refusal." It is

@@ -66,8 +66,14 @@ does not warn on parked cards.
 #3238 and #3103 warn for legitimate reasons — they discuss the phrase — and #2717 is a false positive of an
 entirely different kind that this card does not own.
 
-Baseline: `npm run check:standards` is **0 errors, 1435 warnings**, so every one of these is a warning and
-none is breaking the gate.
+Baseline: `npm run check:standards` is **0 errors, 1437 warnings**, measured in a clean lane at `main`
+`60acbe5f` on 2026-08-25, so every one of these is a warning and none is breaking the gate.
+
+*(An earlier version of this line read **"0 errors, 1435 warnings"** with no basis named. The count itself
+was wrong by the time it was read — 1435 was `main` at `b914eca2`, and `main` moved twice more the same day,
+to `e7ab2833` and then `60acbe5f`, at both of which the count is 1437. Naming the sha is the actual fix: an unanchored
+absolute count is stale the moment `main` moves, which is why Done-when 7 below states a **delta** and
+#3233's Done-when 8 forbids hard-coding a number at all.)*
 
 ## The two defects are independent — say so, because the fixes differ
 
@@ -187,7 +193,10 @@ renderer, so if it lands separately it should land **after** #3233 to avoid a te
    always refusing.
 6. **Mutation** — reverting to the bare write reddens cases 3 **and** 4 by name; reverting the reworded
    sentence reddens case 1 by name.
-7. `npm run check:standards` shows no NEW warnings against the 0-error / 1435-warning baseline, and its
+7. `npm run check:standards` shows no NEW warnings against **the baseline measured at build time** — do not
+   hard-code a number: `main` moved three times on 2026-08-25 alone while this card was being prepared
+   (`e9aa38f6` → `b914eca2` → `e7ab2833` → `60acbe5f`). An earlier draft said *"the 0-error / 1435-warning
+   baseline"*; the figure was 1435 at `b914eca2` and is 1437 at `60acbe5f`. And its
    `unverified prerequisite` count drops by **one** — #3100, the only true instance among the four that
    warn. (#1637 and #3183 carry the line but do not warn, so rewording them changes no count; #3238 and
    #3103 keep warning because they discuss the phrase; #2717 is out of scope.) Stated as a count delta, not
