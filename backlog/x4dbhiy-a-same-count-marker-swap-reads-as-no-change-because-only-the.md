@@ -16,18 +16,28 @@ An edit that removes one non-batchable marker from a card and introduces another
 ## Why the total cannot see this, by construction
 
 This is not a sampling gap that a more careful reading of the output would close.
-`we:scripts/check-standards-rules.mjs:812` collects every marker hit on an item and then pushes **one**
+`we:scripts/check-standards-rules.mjs:814` collects every marker hit on an item and then pushes **one**
 warning for the item, with the distinct markers and lines interpolated into the message:
 
 > `const markers = [...new Set(markerHits.map((h) => h.marker))].join('", "');`
+
+*(Retracted, not deleted. An earlier version of this card cited that statement as
+`we:scripts/check-standards-rules.mjs:812`. **That was wrong** — the line is **814**, and `:812` lands two
+lines early, inside the `if (markerHits.length) {` guard. Nor was it drift: walking every commit that has
+touched the file, the quoted statement has been at 814 since `d898a879` on 2026-08-15, ten days before this
+card was authored, so the citation was never correct on any tree its author could have measured. That is why
+`xv92hju` — the citation-verification card owed by PR #1556 — checks the citation against the tree it runs
+on rather than trying to date the drift.)*
 
 So an item with one marker and the same item with four produce **one** warning either way. The aggregate at
 `we:scripts/check-standards.mjs:2373` is a count of warnings, so a swap inside one item is invisible to it
 *even in principle* — and so is a swap across two items, since one leaves and one arrives.
 
-Measured on the real case rather than argued. Running `findNonBatchableMarkers` over
-`backlog/3238-…md` on this lane's `main` and over the same file at PR #1556's head (`5289202`) — the marker
-sets are fenced below because this card would otherwise trip the very lint it is about:
+Measured on the real case rather than argued. Running `findNonBatchableMarkers` over the **item body** of
+`backlog/3238-…md` — frontmatter stripped, which is what the loader passes it — on this lane's `main` and
+over the same file at PR #1556's head (`5289202`). Run against the raw file instead and every line below
+shifts by that file's frontmatter length (8 lines on `main`, 19 at #1556's head), which is why the input is
+named. The marker sets are fenced because this card would otherwise trip the very lint it is about:
 
 ```text
 main            [{"line":4,"marker":"unverified prerequisite"}]
