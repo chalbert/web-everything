@@ -3662,6 +3662,51 @@ clears nor holds) then `#3330` (the pass). Deliberately **not** blocked on #3158
 jurors are a cost for a deep reviewer and the specification for a diff-only one. #3315 remains owed
 independently — this rule feeds it the whole population instead of a sampled trickle; it does not build it.
 
+### What blocks a land is the impact of a finding, not the lens that found it — a prose-judging lens stays advisory and blocks only above the bar {#claim-accuracy-advisory-blocks-on-impact}
+
+**Ratified 2026-08-26 by the operator (Nicolas Gilbert) (#3314).** Leaves
+[`#2310`](/backlog/2310/)'s mandatory/advisory split intact — `claim-accuracy` stays **out** of
+`MANDATORY_LENSES` — and refines what an advisory lens may nonetheless do. Cite alongside
+[`#blast-radius-advisory-care-not-a-gate`](#blast-radius-advisory-care-not-a-gate) (#2563).
+
+**A lens pointed at prose returns mostly prose findings, and mandatory means unanimity.** `claim-accuracy`
+judges the writing *about* the repo — card bodies, Done-when criteria, docs, agent-memory notes, code
+comments, PR descriptions. Its finding population is therefore dominated by low-impact prose *by
+construction*, not as an accident of some sample. Promoting such a lens wholesale to the mandatory set makes
+a wrong figure in a paragraph nobody depends on sufficient to stop a land. That is review **permission**
+scaling with a signal, which #2563 clause 1 already forbids. The argument does **not** depend on the lens's
+measured hit rate, and would not change if the lens got better: the objection is structural.
+
+**The right axis is already typed, and it is `impact`.** What should stop a land is what shipping the
+finding *costs*, not which reviewer noticed it. `IMPACT_LEVELS` / `IMPACT_GLOSS` in
+`we:scripts/lib/jury-core.mjs` already carry that, enum-constrained and fail-loud, and
+`PREVENTION_IMPACT_BAR` (`broken`) already dials the panel's other findings-derived block. So the blocking
+sub-class is **`impact >= broken`** and needs no new field: a wrong acceptance criterion or a wrong
+`file:line` a card directs work to is `broken` (*"real work is lost, duplicated, or silently skipped"*); a
+wrong figure no criterion depends on is `cosmetic`. **A sub-class defined by a typed field is the whole
+point** — the objection to a sometimes-blocking advisory lens ("mandatory with extra steps") holds only
+where the sub-class is reviewer discretion, so any future rule of this shape must name a typed field or take
+plain advisory instead.
+
+**A ruling that needs a build says so on its face.** `derivePanelVerdict` blocks on an advisory lens's
+findings only for **resolved** ones owing an uncaptured guard; an **outstanding** above-bar advisory finding
+still rides the accept. Until that third scan ships (`#x38ergj`), this rule's blocking half is inert and the
+lens behaves as plain advisory. The two-stage form is part of the ruling, not a caveat on it — a decision
+recorded as if it binds while nothing enforces it is worse than one recorded as pending.
+
+**Scope held deliberately narrow.** The blocking set is an explicit one-member set, not `ADVISORY_LENSES`.
+Whether the bar should govern every advisory lens — which would leave little of #2310's split standing — is
+`#x2iwy8f`, and generalizing it as a side effect of a single lens's promotion would reverse a ratified
+decision without convening it, the move [`#size-adds-reviewers-never-refuses`](#size-adds-reviewers-never-refuses)
+refused for size.
+
+**Lineage:** ratified by #3314 (operator, 2026-08-26) under the Review-efficacy watch (#3318); implemented by
+`#x38ergj`. The preparation argued the mandatory case from two figures since retracted (*"3 of 13"*, *"30
+verdicts / roughly 24"*); the measured values are **5 of 39** (12.8%) and a cross-tab of **27 of 92**, and
+both corrections strengthen the mandatory case the ruling declined. The ruling stands because it never rested
+on the backstop's recall. Nor does it rest on the two-round result on PR #1569 — one PR cannot establish a
+lens's profile; that grounding belongs to the omission seat under `#size-adds-reviewers-never-refuses`.
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

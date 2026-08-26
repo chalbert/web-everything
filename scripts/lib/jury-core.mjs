@@ -698,16 +698,29 @@ export const MANDATORY_LENSES = Object.freeze([MANDATE_LENSES.CORRECTNESS, MANDA
 export const ADVISORY_LENSES = Object.freeze([
   MANDATE_LENSES.SIMPLICITY,
   MANDATE_LENSES.STANDARDS,
-  // ADVISORY **PENDING A RULING**, not on merit. #2310 ratified the mandatory/advisory split and its stated
-  // criterion for mandatory is "a genuine invariant with no other backstop" — which claim-accuracy arguably
-  // meets better than standards-conformance does, since `check:standards` backstops that one and the
-  // deterministic attempt at THIS class caught 5 of 39 confirmed labels — 12.8%, of which 3 survived
-  // hand-inspection (`node we:scripts/review-corpus/replay-gates.mjs`, lands with #1571; RETRACTED: this line
-  // used to say "caught 3 of 13", a population the replay does not report). Promoting it would override a
-  // ratified decision, so it lands advisory and the promotion is filed as its own call —
-  // `we:backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md`, ON `main` since PR #1570 landed
-  // 2026-08-26 (it was JIT-numbered from `xe9hwyi` at land). Nothing is lost meanwhile: `review-pr` runs ONE lens chosen by the caller, so the split
-  // only starts binding when the panel (`we:scripts/lib/judge-panel.mjs`, #3050) is wired.
+  // ADVISORY **ON MERIT, RULED** — #3314, operator, 2026-08-26, codified
+  // `we:docs/agent/platform-decisions.md#claim-accuracy-advisory-blocks-on-impact`. It is NOT here because
+  // #2310's criterion ("a genuine invariant with no other backstop") failed: the deterministic backstop for
+  // this class was measured at 5 of 39 confirmed labels — 12.8%, of which 3 survived hand-inspection (`node
+  // we:scripts/review-corpus/replay-gates.mjs`; RETRACTED: this line used to say "caught 3 of 13", a
+  // population the replay does not report) — so on that criterion alone it would qualify. It is advisory for
+  // a STRUCTURAL reason: this lens judges the writing ABOUT the repo, so its finding population is dominated
+  // by low-impact prose BY CONSTRUCTION, and mandatory means unanimity — a wrong figure in a paragraph
+  // nobody depends on would stop a land. That is review PERMISSION scaling with a signal (#2563 clause 1).
+  // The argument does not improve if the lens does; do not re-open it on hit-rate evidence.
+  //
+  // WHAT BLOCKS INSTEAD IS `impact`, NOT THE LENS: a claim-accuracy finding at `PREVENTION_IMPACT_BAR`
+  // (`broken`) or above blocks; below it advises. A wrong acceptance criterion or a wrong `file:line` a card
+  // directs work to is `broken`; a wrong figure no criterion depends on is `cosmetic`. Deliberately the
+  // EXISTING typed field — a sometimes-blocking advisory lens is "mandatory with extra steps" unless the
+  // sub-class is typed rather than reviewer discretion.
+  //
+  // NOT YET WIRED: `derivePanelVerdict` blocks on an advisory lens's findings only for RESOLVED ones owing an
+  // uncaptured guard, so an OUTSTANDING above-bar finding still rides the accept — this lens therefore
+  // behaves as plain advisory until `#x38ergj` adds that scan behind an explicit one-member
+  // `BLOCKING_ADVISORY_LENSES`. Generalizing the bar to every advisory lens is a separate call (`#x2iwy8f`).
+  // Nothing binds meanwhile regardless: `review-pr` runs ONE lens chosen by the caller, so the split only
+  // starts binding when the panel (`we:scripts/lib/judge-panel.mjs`, #3050) is wired.
   MANDATE_LENSES.CLAIM_ACCURACY,
 ]);
 

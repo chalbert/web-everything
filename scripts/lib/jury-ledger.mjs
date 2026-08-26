@@ -157,10 +157,16 @@ export const REVIEW_LENS_CHARTER = Object.freeze({
  *
  *  DELIBERATELY FOUR, NOT `PANEL_LENSES` (#3035). `jury-core.PANEL_LENSES` grew to five when `claim-accuracy`
  *  was added; this list did NOT follow, and that is a decision rather than drift: this is the DEFAULT ROSTER a
- *  ledger seats jurors from, so importing the five would silently seat a fifth juror on every recorded review
- *  while `claim-accuracy` is still advisory-pending-ruling. It also has no `REVIEW_LENS_CHARTER` entry above,
- *  so a seated juror would carry no expectation. Both follow together when the promotion call is made — and a
- *  caller that wants the lens today passes it explicitly via `activeLenses`, which this already honours. */
+ *  ledger seats jurors from, so importing the five would silently seat a fifth juror on every recorded review.
+ *  It also has no `REVIEW_LENS_CHARTER` entry above, so a seated juror would carry no expectation.
+ *
+ *  THE OLD TRIGGER IS SPENT — do not widen on it. This used to read "both follow together when the promotion
+ *  call is made". That call was made (#3314, 2026-08-26) and the answer was **advisory on merit**, so the
+ *  promotion this was waiting for will never come. Roster WIDTH is a separate question from the
+ *  mandatory/advisory split — seating costs one fresh-context juror per review, and the two seated advisories
+ *  (`simplicity`, `standards-conformance`) argue by parity for seating this one — but #3314 deliberately did
+ *  not rule it. See that card's "What this does not settle". A caller that wants the lens today passes it
+ *  explicitly via `activeLenses`, which this already honours. */
 export const REVIEW_PANEL_LENSES = Object.freeze(['correctness', 'security', 'simplicity', 'standards-conformance']);
 
 const VERDICT_STRINGS = new Set(Object.values(VERDICTS));
