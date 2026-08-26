@@ -46,6 +46,11 @@ It also explains what neither session could account for at the time: **the queue
 started flowing.** Not because anything was fixed — because PRs finally sat still long enough for CI to go
 green and become eligible again.
 
+**Consistent with, but not proof of, the diagnosis:** #1598 merged within minutes of the helper being stopped,
+and was the first land in that window. One PR, and others were maturing anyway — so it is corroboration, not
+evidence. The mechanism above stands on the source, not on this observation, and the observation is recorded
+here only so a later reader does not mistake it for the argument.
+
 ## What is NOT claimed, and why the retraction matters
 
 Two earlier drafts of this card asserted causes that were **wrong**, and both were retracted before landing:
@@ -62,8 +67,19 @@ Two earlier drafts of this card asserted causes that were **wrong**, and both we
 
 Both wrong causes were confidently asserted between two sessions, and each time the receiving session had no
 reason to re-derive them. That is the same failure as the gate-aperture retraction on [#3319](/backlog/3319/),
-running in the other direction. The pattern is worth more than either bug: **a confident claim from a peer
-reads like a verified one.**
+running in the other direction. The pattern is worth more than either bug: **neither session checks a peer's
+claim the way it would check its own.**
+
+**And the two wrong causes shared a method, which is the more fixable half.** Both came from reading a single
+docblock line and generalising it into a mechanism, without opening the function it described. `:35` says
+*"the sweep never force-updates someone's branch"*; `isRebaseDropCandidate` sits forty lines later and says the
+opposite for the certified-and-green case. The prose was not wrong — it was scoped to the skip path, and the
+scope was only visible in the code.
+
+So the operative rule is narrower and more actionable than "verify claims": **a docblock line describes the
+branch it sits on, not the function's whole behaviour. Read the function before quoting its comment as a
+mechanism.** That would have stopped both retractions here, and it is checkable in the moment in a way that
+general scepticism is not.
 
 ## What still stands on its own
 
