@@ -2,8 +2,11 @@
 bornAs: x501fk9
 kind: decision
 parent: "2753"
-status: open
+status: resolved
 dateOpened: "2026-08-15"
+dateResolved: "2026-08-26"
+codifiedIn: "docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation"
+ratifiedBy: "Nicolas Gilbert (operator)"
 preparedDate: "2026-08-25"
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 relatedTo: ["2464", "2530", "2444", "2703", "3102", "3031"]
@@ -11,6 +14,13 @@ tags: [plateau-loop, conveyor, agent-runner, session-free]
 ---
 
 # Session-free conveyor: where does headless agent-spawning live -- WE-native runner vs a cross-process call into plateau-app's build-runner
+
+> **RULED 2026-08-26 by the operator (Nicolas Gilbert): Fork 1 → (c), call the existing `dispatch-lane`
+> operation.** The ruling and its full reasoning are in **[THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation)**
+> near the end of this card. That section is the only operative statement of the decision — everything above
+> it is the record of how the card got there, including two amendments that were retracted rather than
+> deleted. Codified as
+> [#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation).
 
 **Filed while preparing #2464 (now resolved into this item — see below).** The #2444-ratified CLI-spawn
 agent-runner contract (`spawn`/`steer`/`stop`/`resume`/`observe`) already shipped in code at
@@ -175,6 +185,19 @@ Measured 2026-08-25 rather than reasoned about — a detached `--bg` agent, stop
 So steering IS reachable through the `--bg` backend — as stop-then-resume rather than as a `steer(text)`
 write to a live stdin. That is a coarser verb, not a missing capability, and it costs one extra round trip
 per steer. Two consequences for this fork:
+
+> **NARROWED 2026-08-26 (PR #1583 review).** *"Steering IS reachable"* is the **mechanism** being reachable,
+> not the conveyor being able to reach it. The third row of the same table is a **precondition** of the
+> second, and this paragraph originally read as though the two rows were independent findings, which was
+> **wrong**: `claude --resume` takes a session **id**, so if `--bg` discards `--session-id` the dispatcher has
+> no id to resume with. Read row 2 as *"resume preserves context once you can address the session"* — and row
+> 3 as the open question of whether it can. `#3331` owns it; see the correction under
+> [THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation)'s reason 2.
+> The two consequences below still hold, but with the dependency named. Unlike (c), **(a) would not need
+> id-addressing at all** — it holds the live child in-process, so its `steer(text)` is a write to that child's
+> stdin (see (a) above). So a negative probe does not restore (a)'s *capability* advantage — `#3331`'s
+> `Done when` #3 is a remedy, not a rebuild — but it does add a prerequisite to (c) that (a) does not carry,
+> which is why clause 3 revisits on it.
 
 1. **The pivot is gone.** "Does the conveyor need to steer?" no longer separates (a) from (c), because both
    can. What separates them is whether the conveyor needs to steer a *running* agent **without interrupting
@@ -418,6 +441,141 @@ predicted scope and is re-checked against the real diff at PR open.
 | simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
 | standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 
+## THE CALL (operator, 2026-08-26): Fork 1 → **(c) call the existing `dispatch-lane` operation**
+
+Ratified by the operator (Nicolas Gilbert) on 2026-08-26. The conveyor's headless dispatch starts agents by
+**calling `we:scripts/operations/dispatch-lane.mjs` once per surfaced dispatch**. No new module is written,
+nothing is spawned in-process, and no cross-process call into `plateau-app`'s dev server is introduced.
+(a) — a new `we:scripts/conveyor/agent-runner.mjs` — and (b) — HTTP into `plateau-app` — are both rejected.
+
+Codified as
+[#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation).
+
+### Why — the four reasons that make this ruling checkable later
+
+**1. The fork's own opening paragraph forbids (a), not only (b).** That paragraph rejects supporting two
+branches because it *"would mean two live spawn implementations behind the same five-verb contract with
+independent failure modes, which is exactly the second-implementation shape #deterministic-core-thin-judgment's
+one-source clause forbids."* A new `we:scripts/conveyor/agent-runner.mjs` sitting beside `dispatch-lane`'s
+existing `claude --bg` spawn **is that shape**. The argument was aimed at (b) and lands on (a) just as hard.
+This is the reason the amendment's author wrote first, and it is the reason the ruling rests on: the card
+argued itself out of its own original default.
+
+**2. The steer question the fork originally turned on was PROBED, not argued — on one run, and that run cuts
+both ways.** An earlier version of this card made mid-flight steering the pivot — if the conveyor needs to
+steer, (a)'s richer `spawn/steer/stop/resume/observe` contract earns its second implementation. That was
+addressed by measurement on 2026-08-25, not by reasoning: a detached `--bg` agent was stopped, then resumed
+with `claude --resume <sessionId>` and new instructions, and answered with a sentinel planted before the
+stop — **context preserved, in that one run**. So "steer while keeping the work" is reachable under (c) *as a
+mechanism*, as stop-then-resume rather than as a `steer(text)` write to a live stdin. That is a coarser verb,
+not a missing capability, and the pivot the fork turned on is gone.
+
+> **CORRECTED 2026-08-26 (PR #1583 review, `correctness` lens, operator override).** The paragraph above
+> originally ended at *"**context preserved**. So 'steer while keeping the work' is reachable under (c)"* and
+> asserted it as settled fact. **That was wrong in one specific way, and the wrongness was an asymmetry
+> inside this card**: the very same manual run produced a second row — `--session-id` **ignored** on a `--bg`
+> spawn (the probe table above, third row) — which this card treats as untrustworthy, files `#3331` over,
+> and demands be *"repeated at least three times"* before it is believed. Same table, same run, opposite
+> evidentiary standard.
+>
+> Worse than asymmetry, **the two rows are coupled and this card never said so**. `claude --resume` addresses
+> a session **by its id**. If `--bg` discards `--session-id`, the dispatcher does not know the id of the agent
+> it started, so it cannot resume it — and reading the real id back is, by this card's own probe-table note,
+> *"work that does not exist yet"*. So row 2 is reachable only if row 3 turns out false, or after `#3331`'s
+> remedy is built. Re-verified 2026-08-26:
+> `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
+> `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing** — at
+> this card's citation basis (`main` at `3b2aeded`, which this PR leaves untouched) **and** at `main` as it
+> stands today (`1ed16d63`), where those two modules have since been reworked. *(This sentence first pinned
+> the result to "this branch's head `3447eb27`", which two later fix commits made **wrong** as a label — the
+> grep result never changed, only the sha it named. Re-pinned to a basis that does not chase the head.)*
+>
+> **What is not retracted:** the operator's ruling that context-preserving stop-then-resume is a *sufficient*
+> requirement. That is a judgment call and it stands. What is corrected is the separate **factual** claim that
+> the conveyor can reach the mechanism — that is unverified, and it now has an owner (`#3331`) and a
+> revisit trigger (clause 3, trigger (ii)).
+>
+> **Prevention filed: `#3333`** — a `check:standards` rule requiring a statute clause that rests on a
+> manual observation to cite either a test or an OPEN verification card, the two-exit shape `#2844` already
+> enforces for operational invariants (`we:scripts/lib/validate-rules-anchors.cjs:249`). The finding recorded
+> it as OWED; nothing detected this asymmetry, a human re-read did. Sibling of `#3281`, the prevention the
+> previous round filed against this same card.
+
+**3. The hinge — the one capability (c) can never reach, and the operator ruled on it directly.** (c) cannot
+steer a **running** agent **without interrupting it**. Stop-then-resume, by construction, interrupts. The
+operator was asked this question directly and ruled that **context-preserving stop-then-resume satisfies the
+requirement**. That is the load-bearing acceptance of this whole decision.
+
+**Two things revisit this ruling, not one.** Both are carried into the statute as clause 3's triggers:
+
+1. **If the requirement ever changes from "steer while keeping the work" to "steer without ever
+   interrupting"** — no stop-then-resume backend can reach that, and the case for a second spawn
+   implementation would have to be re-argued from the start. *Hypothetical: nothing has asked for it.*
+2. **If `#3331`'s probe comes back negative** — if `claude --bg` really does discard `--session-id`, the
+   dispatcher cannot address the session it started, and stop-then-resume is not reachable as designed until
+   `#3331`'s `Done when` #3 remedy (read the real id back off `claude agents --json`) is built. *Live
+   today: that is exactly what the one manual run reported.*
+
+*(Trigger 2 added 2026-08-26 on the PR #1583 review. This section originally named trigger 1 as the only one,
+which was **wrong** — it made the hinge revisitable only on a change that has not happened, while the
+condition that could actually undercut it is open right now. See the correction under reason 2.)*
+
+**4. (c)'s costs are ACCEPTED, not waived.** Four of them, each named rather than smoothed over:
+
+- **It depends on `#3165` landing first.** The ruling makes this decision downstream of a card that is still
+  `status: open`.
+- **`#3165` buys three of the five dispatch kinds, not five** — `build`, `prepare-scope`, `prepare-decision`.
+  Verified: `grep -c 'spawnFixes\|spawnCiHeals\|ciHeal\|CI-heal'` over
+  `we:backlog/3165-tick-core-plans-auto-prepare-scope-dispatches-that-never-act.md` returns **0**. The card's
+  own text names `'build' | 'prepare' | 'prepare-decision'` at its `:68` and `:131`.
+- **The other two kinds had no card. They do now: `#3332`.** `we:scripts/conveyor/tick-core.mjs:860-861`
+  plans `spawnFixes` and `spawnCiHeals`; `we:scripts/operations/dispatch-lane-io.mjs:139` launches
+  `match(decisions.spawnBuilds)` only, and `briefPath` at `:52` takes no kind. After `#3165` lands, three of
+  five kinds dispatch through the operation and two still do not.
+- **It inherits an unproven handle assumption, and that now has a card too: `#3331`.** The sink mints the
+  session id (`we:scripts/operations/dispatch-lane-io.mjs:558`) and pins it with `--session-id` (`:621`); the
+  observer matches on that same minted value (`:738`). A single manual run suggested `claude --bg` ignores
+  `--session-id`. `#3331` probes it before anything is fixed, because one observation is not evidence.
+  **`#3331` owns two things, not one** *(added 2026-08-26, PR #1583 review — this bullet originally named
+  only the observer, which under-stated it)*: reason 3's hinge rests on the **same** unproven fact, because
+  `claude --resume` addresses a session by its id. If the probe comes back negative, the observer cannot see
+  its agents **and** the dispatcher cannot resume them.
+
+### Corrections this ruling makes to the card above it
+
+Recorded rather than silently applied, per this card's own established practice.
+
+- **The line numbers in the amendment's citations have drifted.** They were written against an earlier
+  revision. Verified against `main` at `3b2aeded`, the current lines are: `mintSessionId` at **`:558`** (card
+  says `:555`), the `--session-id` argv at **`:621`** (card says `:618`), the observer's
+  `sessions.find(… === handle)` at **`:738`** (card says `:735`), `handle` read off the entry at **`:693`**
+  (card says `:690`), and the sink header at **`:507-534`** (card says `:507-514`). The substance of every
+  cited claim checks out at the new lines; only the numbers moved.
+- **The sink's "not proven" comment has been reworded since the card quoted it.** The card quotes `:528` as
+  *"NOT YET PROVEN LIVE… the argv below is asserted, the CLI's response to it is not"*. `:528-534` now reads
+  *"PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI… What is still NOT proven: no dispatch has been fired
+  end to end, and the REAL CLI's response to this argv remains unasserted."* Same meaning, and the assumption
+  is still unproven — but the quote is no longer verbatim.
+- **The card points at "#3096" for the first live run; the code points at `#3096`.** Those are the same
+  item — `we:backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md` has
+  `bornAs: 3096`. Not an error, recorded so the next reader does not have to resolve it again.
+- **The observer defect is narrower than the card states, and still real.** The card says a `--session-id`
+  mismatch means the observer *"reports every real dispatch as `unresolved`"*. The observer tries the **PR
+  axis first** (`we:scripts/operations/dispatch-lane-io.mjs:695-729`), and a merged PR still returns
+  `succeeded` at `:716-724` regardless of the session id. The accurate claim is the one `:731-732` makes
+  about the liveness axis itself — it is *"what answers while no PR exists yet, which is every dispatch for
+  most of its life"* — so a dispatch would read `unresolved` for its entire pre-PR life, two minutes
+  (`DISPATCH_LISTING_GRACE_MINUTES = 2`, `we:scripts/operations/dispatch-lane.mjs:111`) after it starts. That
+  is the version `#3331` carries.
+
+### What was NOT re-run, stated so it is not mistaken for done
+
+The card itself flags that *"a fresh skeptic pass over (a)-vs-(c) has not been run and is owed at the
+decision turn."* **It still has not been run.** Both recorded skeptic passes and both screens ran against a
+survey containing only (a) and (b), and neither is evidence for or against (c). The operator ruled without
+it. That is the operator's call to make, and this line exists so nobody later reads the two `SURVIVES` marks
+above as endorsements of the option that actually won.
+
 ## Why this is a new item, not a rebuild of #2464
 
 #2464 asked to "build the phase-1 runner... behind a stable runner interface" — read literally, that
@@ -433,4 +591,25 @@ remaining critical-path decision #2753 (Phase B, item 1) and #3102 (Phase B) bot
 - [x] `#2753` and `#3102`'s Phase-B critical-path line points at this item's resolution/successor build item,
   not `#2464`. *(Verified 2026-08-16 — both already cite `#3118` directly: #2753's DAG item 1 and #3102's
   Phase B paragraph. No edit needed.)*
-- [ ] The fork above is ratified (explicit operator utterance, not inferred).
+- [x] The fork above is ratified (explicit operator utterance, not inferred). *(Ruled 2026-08-26 by the
+  operator — Fork 1 → (c). See [THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation).)*
+
+## Successors
+
+The ruling accepts costs rather than waiving them. **Five rows, each with an owner**, so none of them lives
+only in this card's prose:
+
+| what | where it is carried |
+| --- | --- |
+| three of five dispatch kinds routed through the operation | `#3165` (open) |
+| the other two kinds — `spawnFixes`, `spawnCiHeals` | **`#3332`** (filed 2026-08-26 by this ruling) |
+| the unproven `--session-id` handle assumption the observer rests on | **`#3331`** (filed 2026-08-26 by this ruling) |
+| **the ruling's hinge — stop-then-resume presupposes addressing the session by its id, the same unproven fact** | **`#3331`** (scope widened 2026-08-26 on the PR #1583 review) |
+| the first end-to-end live dispatch through the operation | `#3096` (open, `bornAs: 3096`) |
+
+*(**CORRECTED 2026-08-26, PR #1583 review.** This paragraph read **"The ruling accepts three costs; each has
+an owner now, so none of them lives only in this card's prose"** over a four-row table. Both halves were
+wrong. The count was wrong — the table listed four. And the claim itself was wrong in the way that mattered:
+the hinge, the ruling's own load-bearing acceptance, **was** a cost living only in this card's prose, with no
+owner, because nobody had noticed it rests on the same unproven `--session-id` fact `#3331` was already
+filed over. It is row 4 now.)*
