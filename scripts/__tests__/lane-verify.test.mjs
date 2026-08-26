@@ -112,7 +112,7 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
     expect(v.reason).toBe('unverified');
   });
 
-  it('NO marker without --require-verified → ok (CI-gated drain / workflow paths untouched)', () => {
+  it('NO marker under the EXPLICIT opt-out (requireVerified:false) → ok (a caller that verifies elsewhere)', () => {
     const v = verifyGateDecision({ record: null, headSha: SHA, requireVerified: false });
     expect(v.ok).toBe(true);
     expect(v.reason).toBe('untracked');
@@ -211,10 +211,12 @@ describe('normalizeVerifyRecord — the SHARED normalizer both readers use (#283
 
 describe('resolveVerifyOptions — one flag/env resolver for BOTH entry points (#2833 finding 5)', () => {
   it('--require-verified OR WE_REQUIRE_VERIFIED=1 → requireVerified true; WE_LAND_UNVERIFIED=1 → breakGlass', () => {
-    expect(resolveVerifyOptions({ flags: {}, env: {} })).toEqual({ requireVerified: false, breakGlass: false });
+    // #3321 flipped the bare default from false to true; the two POSITIVE spellings below still resolve the same.
+    expect(resolveVerifyOptions({ flags: {}, env: {} })).toEqual({ requireVerified: true, breakGlass: false });
     expect(resolveVerifyOptions({ flags: { 'require-verified': true }, env: {} })).toEqual({ requireVerified: true, breakGlass: false });
     expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: false });
-    expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: false, breakGlass: true });
+    // break-glass is reported SEPARATELY and does not relax `requireVerified` — the gate reads both.
+    expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: true });
   });
   it('the SAME flag/env pair yields IDENTICAL options at both call sites (they call one function)', () => {
     // verify-lane `check` and pr-land both call resolveVerifyOptions with {flags, env}; identical input ⇒ identical
@@ -226,6 +228,146 @@ describe('resolveVerifyOptions — one flag/env resolver for BOTH entry points (
     const atPrLand = resolveVerifyOptions({ flags, env });
     expect(atVerifyLane).toEqual(atPrLand);
     expect(atVerifyLane).toEqual({ requireVerified: true, breakGlass: true });
+  });
+});
+
+/**
+ * #3321 — VERIFICATION IS MANDATORY BEFORE A LANE LANDS.
+ *
+ * #2833 built the gate but defaulted `requireVerified` FALSE, so its mandatory half never engaged: a lane whose
+ * suites had never run at all landed on the `untracked` verdict — "no marker → not tracked here → allow". A gate
+ * that PASSES WHEN IT CANNOT TELL. The cost is measured: 18 of the 39 confirmed findings in the review corpus had
+ * their input available at COMMIT time, where the suite this marker records would have caught them; and the suite
+ * itself sat red on every macOS host precisely because nothing on the delivery path was obliged to look.
+ *
+ * These tests pin BOTH directions, because a gate that refuses everything is worse than the hole it closes:
+ *   · the REFUSAL — unverified/red/unidentifiable now blocks by default, at both the resolver and the decision; and
+ *   · the PASS — a legitimately verified lane (green marker for THIS head) sails through with no options at all.
+ * Plus the two escapes, kept at deliberately different strengths: the opt-out relaxes only "we never saw a
+ * result"; only break-glass overrides a broken one.
+ */
+describe('#3321 — the gate no longer passes when it cannot tell (requireVerified defaults true)', () => {
+  const greenFor = (sha) => verifyFinishBody(verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }), { finishedAt: new Date(T0).toISOString(), exitCode: 0 });
+  const runningFor = (sha) => verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() });
+
+  describe('the resolver: silence means "verified, please", never "don\'t bother"', () => {
+    it('#3321 no flags, no env → requireVerified TRUE (the flip; was false before this item)', () => {
+      expect(resolveVerifyOptions({ flags: {}, env: {} }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions()).toEqual({ requireVerified: true, breakGlass: false });
+    });
+
+    it('#3321 every documented OPT-OUT spelling resolves to requireVerified false', () => {
+      const optOuts = [
+        { flags: { 'no-require-verified': true }, env: {} },
+        { flags: { 'require-verified': '0' }, env: {} },
+        { flags: { 'require-verified': 'false' }, env: {} },
+        { flags: { 'require-verified': 'no' }, env: {} },
+        { flags: { 'require-verified': 'OFF' }, env: {} },
+        { flags: {}, env: { WE_REQUIRE_VERIFIED: '0' } },
+        { flags: {}, env: { WE_REQUIRE_VERIFIED: 'false' } },
+      ];
+      for (const input of optOuts) {
+        expect(resolveVerifyOptions(input).requireVerified, JSON.stringify(input)).toBe(false);
+      }
+    });
+
+    it('#3321 only an EXPLICIT negative opts out — absence and an empty/unknown value stay required', () => {
+      // An env var set to empty is an accident, not a decision. A fail-closed gate must not read an accident as
+      // consent, so `WE_REQUIRE_VERIFIED=` (and any value that is not one of the negative tokens) stays required.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '' } }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: 'maybe' } }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: { 'require-verified': undefined }, env: {} }).requireVerified).toBe(true);
+    });
+
+    it('#3321 break-glass is reported SEPARATELY and never relaxes requireVerified', () => {
+      // The two escapes are different strengths and must stay distinguishable: collapsing WE_LAND_UNVERIFIED into
+      // requireVerified would silently turn the narrow opt-out into the full bypass.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: true });
+    });
+  });
+
+  describe('the decision: a caller that omits the option gets the STRICT gate', () => {
+    it('#3321 THE HOLE, CLOSED: no marker + no requireVerified argument → REFUSED as unverified', () => {
+      // Before this item this exact call returned { ok: true, reason: 'untracked' } — a lane whose suites had
+      // never run was allowed to land because the gate could not tell that they had not.
+      const v = verifyGateDecision({ record: null, headSha: SHA });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('unverified');
+      expect(v.detail).toMatch(/verify-lane/);
+    });
+
+    it('#3321 a RED marker for this head + no requireVerified argument → REFUSED (was advisory)', () => {
+      const redRec = verifyFinishBody(runningFor(SHA), { finishedAt: new Date(T0).toISOString(), exitCode: 2 });
+      const v = verifyGateDecision({ record: redRec, headSha: SHA, nowMs: T0 });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('verify-red');
+    });
+
+    it('#3321 a marker for a DIFFERENT sha + no requireVerified argument → REFUSED (stale ≠ verified)', () => {
+      const v = verifyGateDecision({ record: greenFor(OTHER), headSha: SHA });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('unverified');
+    });
+
+    it('#3321 an UNIDENTIFIABLE head (no headSha) does not wave a green marker through', () => {
+      // Nothing can match a missing head, so this falls to the absent cell. Not being able to identify the tree
+      // is not evidence that the tree is fine — the whole defect class this item closes.
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: null }).ok).toBe(false);
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: undefined }).reason).toBe('unverified');
+    });
+
+    it('#3321 an ABANDONED (past-TTL) running marker no longer degrades to allow by default', () => {
+      // #2833 finding 1's degrade survives, but only for a caller that explicitly opted out.
+      const abandoned = { record: runningFor(SHA), headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES + 5) };
+      expect(verifyGateDecision(abandoned).ok).toBe(false);
+      expect(verifyGateDecision(abandoned).reason).toBe('verify-unfinished');
+      expect(verifyGateDecision({ ...abandoned, requireVerified: false }).ok).toBe(true);
+    });
+  });
+
+  describe('the counter-test: a legitimately verified lane still LANDS', () => {
+    // A gate that blocks everything is worse than the hole. These are the passes that must survive the flip.
+    it('#3321 a green marker for THIS head passes with NO options at all', () => {
+      const v = verifyGateDecision({ record: greenFor(SHA), headSha: SHA, nowMs: T0 + min(10) });
+      expect(v.ok).toBe(true);
+      expect(v.reason).toBe('verified');
+    });
+
+    it('#3321 a green marker still passes long after the TTL — sha-identity is the freshness test, not the clock', () => {
+      const v = verifyGateDecision({ record: greenFor(SHA), headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES * 100) });
+      expect(v.ok).toBe(true);
+      expect(v.reason).toBe('verified');
+    });
+
+    it('#3321 END TO END: the resolver\'s own output, fed to the gate, lands a verified lane and refuses a bare one', () => {
+      // The exact wiring both entry points do — `resolveVerifyOptions(…)` straight into `verifyGateDecision(…)`.
+      const opts = resolveVerifyOptions({ flags: {}, env: {} });
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: SHA, ...opts }).ok).toBe(true);
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }).ok).toBe(false);
+    });
+  });
+
+  describe('the two escapes are different strengths', () => {
+    it('#3321 the OPT-OUT is not a bypass: a fresh running marker and a corrupt marker still refuse under it', () => {
+      const optOut = resolveVerifyOptions({ flags: { 'no-require-verified': true }, env: {} });
+      expect(optOut).toEqual({ requireVerified: false, breakGlass: false });
+      // the #2833 stall — a half-run verification must never look complete, opt-out or not
+      expect(verifyGateDecision({ record: runningFor(SHA), headSha: SHA, nowMs: T0 + min(1), ...optOut }).reason).toBe('verify-unfinished');
+      // a marker that exists but did not parse is evidence of a BROKEN verification, not a missing one
+      expect(verifyGateDecision({ record: { corrupt: true }, headSha: SHA, ...optOut }).reason).toBe('verify-corrupt');
+      // ...while the cells it IS meant to relax do relax
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...optOut }).reason).toBe('untracked');
+    });
+
+    it('#3321 BREAK-GLASS is the full bypass, and reaches cells the opt-out does not', () => {
+      const bg = resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } });
+      expect(bg.requireVerified).toBe(true); // still "required" — break-glass overrides, it does not un-require
+      for (const record of [null, { corrupt: true }, runningFor(SHA)]) {
+        const v = verifyGateDecision({ record, headSha: SHA, nowMs: T0 + min(1), ...bg });
+        expect(v.ok).toBe(true);
+        expect(v.reason).toBe('break-glass');
+      }
+    });
   });
 });
 
