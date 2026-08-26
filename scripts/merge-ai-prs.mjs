@@ -1242,6 +1242,19 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
       p.commits = read.commits || [];
       const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
+      // #3308 (round-2 correctness fix) — the PASS-WIDE half of the relief valve, recorded HERE because it is the
+      // only place it is knowable. The scoped `=<pr#>` form stamps `v.reliefWaived` down in the escalation loop,
+      // but that whole loop is gated on `REVIEW_ESCALATION = label && !escalationRelief.passWide` — so under a BARE
+      // `--no-review-escalation` it never runs, nothing was ever stamped, and the `relief-waived` announcement
+      // could not fire for the deprecated form at all. The candidates still merged: `allowPendingReview` above
+      // carries them past their review hold through this separate bypass. That is a review waived in silence,
+      // which is the exact failure #3308 exists to end, so it gets its own gap code (`relief-waived-pass-wide`):
+      // the two forms are NOT the same statement — the scoped one waives ONE named PR's park with the rubric
+      // still live for the rest of the pass, the bare one turns the rubric OFF for EVERY candidate this pass,
+      // including ones that were never scored at all. Conditioned on `relief.passWide && !!label`, the SAME
+      // expression as the bypass it records: with no `--label` the rubric was already off (REVIEW_ESCALATION is
+      // falsy on `label` alone), so the flag waived nothing and claiming otherwise would be its own false record.
+      if (relief.passWide && !!label) v.reliefPassWide = true;
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
@@ -1738,7 +1751,9 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
  * ephemeral log (`we:scripts/merge-ai-prs.mjs`, previously ~715-722) — the log lives in whoever ran the drain's
  * terminal; the PR is where the human reviewer actually is. Pure builder + pure dedupe check (the `gh` I/O lives
  * in the CLI-only `postDrainReasonComment` wrapper below); unit-tested in `merge-ai-prs.test.mjs`.
- *   `kind`  — 'park' (review-escalation parked it, #2171) or 'skip' (a real non-manifest conflict / red check).
+ *   `kind`  — 'park' (review-escalation parked it, #2171), 'skip' (a real non-manifest conflict / red check),
+ *             'land' (the acted-on manifest record), or 'review-coverage' (#3308 — the review that covered a
+ *             LANDING PR was skipped or ran narrower than the default; see REVIEW_COVERAGE_GAP_META below).
  *   Dedup   — marker-prefixed body; a `--watch` loop re-scores the SAME PR every pass, so `hasDrainReasonComment`
  *             finds an existing comment carrying both the marker AND the exact same reason text and the caller
  *             skips re-posting. A CHANGED reason (escalation reasons shifted, a different check went red) has no
@@ -1759,7 +1774,11 @@ export function drainReasonMarker(kind) { return `<!-- drain-${kind}-reason -->`
 export function buildDrainReasonComment(kind, reasonText, auditLine) {
   const heading = kind === 'park' ? '⏸ **Parked for review by the drain**'
     : kind === 'land' ? '✅ **Landed by the drain**'
-    : '· **Skipped by the drain**';
+    // #3308 — the fourth kind. Its own marker (so it dedupes independently of the land stamp) and its own
+    // heading, because it says the OPPOSITE of the other three: those record a decision the drain took, this
+    // records a review that did NOT happen, or happened narrower than the default, on a PR that is landing.
+      : kind === REVIEW_COVERAGE_KIND ? '⚠️ **Incomplete review — what was not examined**'
+        : '· **Skipped by the drain**';
   const audit = auditLine ? `\n\n${auditLine}` : '';
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
@@ -1798,6 +1817,199 @@ export function hasDrainReasonComment(comments, kind, reasonText, auditLine) {
     const body = String(c?.body || '');
     return body.startsWith(marker) && body.includes(text) && body.includes(audit);
   });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #3308 — ANNOUNCE A SKIPPED OR DEGRADED REVIEW ON THE PR ITSELF.
+//
+// THE PROBLEM. 22.5% of merged PRs carry no recorded verdict at all. That is a RULING (#2631), not an
+// omission — but nothing on the PR says so, and a silent absence is byte-identical to a clean review. The
+// same shape recurs one level in: a run that seats only an ADVISORY lens completes with no blocking floor,
+// a verdict recorded before a rebase carries forward onto a tree no juror looked at, and an operator's
+// `--no-review-escalation` waives a park. Every one of those lands quietly. A degradation announced only in
+// a drain log — which lives in whoever ran it's terminal — is not announced; the PR is where the reader is.
+//
+// WHERE IT SURFACES, AND WHY HERE. The durable verdict comment is the obvious home, but a review that never
+// ran produces NO verdict comment, so it cannot host the announcement of its own absence. The drain is the
+// only actor that sees every landing PR regardless of whether a review ran, so it posts its OWN comment,
+// BEFORE the merge, on the PR — a fourth `drainReasonMarker` kind alongside park/skip/land. The park/skip
+// paths already stamp their reason (#2313); this closes the MERGE path, which is where the 22.5% lives.
+//
+// NOISE DISCIPLINE. An announcement on every PR trains readers to skip it, which recreates the very problem.
+// So: it posts ONLY when at least one gap is found (a normally-reviewed PR is byte-identical to before), only
+// on the land path (never once per open PR per `--watch` pass), and it dedupes on the rendered text through
+// the existing `hasDrainReasonComment`. Expected states are deliberately NOT gaps — a `clear-human` ceremony
+// clearance and dismissed findings both already have their own durable records, so restating them here would
+// be volume without information.
+// ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The `drainReasonMarker` kind for the #3308 coverage notice. Its own marker ⇒ its own dedupe bucket. */
+export const REVIEW_COVERAGE_KIND = 'review-coverage';
+
+/**
+ * The four durable review-record headlines `buildVerdictComment` (`we:scripts/review-set-label.mjs`) can
+ * render. Matched as literal substrings rather than imported, deliberately: this file must be able to read a
+ * record written by ANY past version of that renderer (records from before a heading changed are still on the
+ * PRs), and an import would couple the drain's read to the writer's current shape. Kept as data so the set is
+ * one edit away from growing.
+ */
+export const REVIEW_RECORD_HEADLINES = {
+  restamp: '📌 review — acceptance re-stamped after a rebase (no new review)',
+  'clear-human': '✅ review — `review:human` cleared via the sanctioned path',
+  accepted: '✅ review — accepted',
+  changes: '🔁 review — changes requested',
+};
+
+/** Which kind of durable review record is this comment body, or `null` if it is not one? Pure. Precedence is
+ *  the declaration order above: the two specific headlines are tested before the two generic ones, so a
+ *  restamp is never mis-read as the `accepted` it re-stamps. */
+export function reviewRecordKind(body) {
+  const text = typeof body === 'string' ? body : '';
+  if (!text) return null;
+  for (const [kind, headline] of Object.entries(REVIEW_RECORD_HEADLINES)) if (text.includes(headline)) return kind;
+  return null;
+}
+
+/** Every durable review record on a PR, in recorded order, as `{kind, body}`. `comments` is the raw
+ *  `gh pr view --json comments` array (tolerant of a missing/odd shape). Pure. */
+export function recordedReviewRecords(comments) {
+  return (Array.isArray(comments) ? comments : [])
+    .map((c) => (typeof c === 'string' ? c : String(c?.body || '')))
+    .map((body) => ({ kind: reviewRecordKind(body), body }))
+    .filter((r) => r.kind !== null);
+}
+
+/**
+ * Pull the COVERAGE facts out of one durable review record. Pure, and deliberately tolerant: an older
+ * unstructured verdict simply yields nulls, which the gap reader treats as UNKNOWN — never as clean.
+ *   · `basis`    — the `Net basis: \`<base>..<head>\`` range the review actually examined, or null.
+ *   · `lensRows` — the `### Panel verdicts` table rows, `{lens, weight, verdict}`.
+ * The two regexes mirror `we:scripts/review-corpus/mine-review-corpus.mjs#parseVerdict`, which reads the same
+ * bytes for the corpus. They are NOT shared with it on purpose: that parser returns `null` for a record with
+ * no `Net basis` (corpus policy — a record with no revision range is not replayable, so it is excluded), and
+ * excluding is exactly the wrong move here. A record that names no basis is the thing this item exists to
+ * announce, so it must survive parsing to be reported.
+ */
+export function readReviewRecord(body) {
+  const text = typeof body === 'string' ? body : '';
+  const basis = text.match(/Net basis: `([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})`/);
+  // The verdict CELL is matched loosely (`[^|]*`) rather than as a word, because `renderPanelVerdictTable`
+  // (`we:scripts/lib/review-core.mjs`) renders an unjudged seat as the literal `(no verdict)`. A tight
+  // `[a-z]+` skips that row, and skipping it is not neutral: a run whose only MANDATORY seat rendered
+  // `(no verdict)` would then read as having no mandatory row at all and fire `unseated-mandatory-lens` —
+  // the right alarm for the wrong reason. The seat existed; the weight column is what this reader asks
+  // about, so every rendered row is captured and the weight decides.
+  const lensRows = [...text.matchAll(/^\|\s*([a-z][a-z-]+)\s*\|\s*(mandatory|advisory)\s*\|\s*([^|]*?)\s*\|/gm)]
+    .map(([, lens, weight, verdict]) => ({ lens, weight, verdict }));
+  return { basis: basis ? { base: basis[1], head: basis[2] } : null, lensRows };
+}
+
+/**
+ * THE DEGRADED SET. One entry per condition that counts as "the review was skipped or ran narrower than the
+ * care level called for". Each is a DEPARTURE from the expected — the expected state (a panel verdict, on the
+ * landing tree, with a mandatory lens seated) produces an EMPTY gap list and therefore no comment at all.
+ *
+ * Why each earned its place:
+ *   · `no-recorded-review`      — the headline case (22.5%). Nothing on the PR says what was examined, and the
+ *                                 absence reads as a pass. This is the ruling being made visible, not reversed.
+ *   · `unseated-mandatory-lens` — a verdict whose panel table seats ZERO mandatory rows is an accept nothing
+ *                                 could have blocked: the correctness floor was unseated by the lens selection.
+ *   · `unstated-basis`          — a verdict that names no revision range. What it covered is UNKNOWN, and
+ *                                 unknown must be announced rather than resolved in the reassuring direction.
+ *   · `relief-waived`           — `--no-review-escalation=<pr#>` waived this PR's park. The review was
+ *                                 deliberately turned off for it, and today nothing on the PR records that it was.
+ *   · `relief-waived-pass-wide` — the DEPRECATED bare `--no-review-escalation` turned the escalation rubric off
+ *                                 for the WHOLE pass, so this PR merged without ever being scored — a strictly
+ *                                 wider statement than the scoped waiver above, and a separate code for that
+ *                                 reason: a reader must not read a pass-wide switch-off as one named exemption.
+ *
+ * WHAT IS EXCLUDED, AND THE MEASUREMENT THAT EXCLUDED IT. Four record-derived conditions were in this set and
+ * were CUT, because a notice that fires on nearly every PR trains readers to skip it — which recreates the
+ * very problem. Every cut is a MEASUREMENT, not a judgement call: each candidate was replayed over the 60
+ * most recently merged PRs in this repo, reading each PR's own comment stream. The unmeasured version of this
+ * function would have announced on 59 of those 60.
+ *   · a SELF-DECLARED SINGLE-LENS run — 21/60 (35%). Not a departure at that rate, and it is the one
+ *     condition that already announces itself IN BOLD in the same comment ("a SINGLE-LENS run. One `judge`
+ *     step, one juror, one lens … the other N panel lenses did NOT run"). #3319 has since retired that
+ *     sentence from the renderer, so a detector for it would now be legacy-record-only — the exclusion is
+ *     settled twice over. What survives is the sharp half: a single-lens run that seated an ADVISORY lens
+ *     still fires `unseated-mandatory-lens`, which nothing else on the PR states, and which reads the panel
+ *     TABLE — unchanged by #3319 — rather than the prose around it.
+ *   · a RE-STAMPED acceptance — 31/60 (52%). The re-stamp is the drain's OWN routine mechanism: it rebases a
+ *     lane to drop the manifest, the head moves, and the acceptance is carried forward. It is granted only
+ *     after the `reviewed-diff`/`reviewed-contribution` markers show the CONTRIBUTION is unchanged
+ *     (#x169fqe/#x9xqexm), so the re-stamp is EVIDENCE the staleness gate ran, not evidence it was skipped.
+ *   · a STALE BASIS (the verdict's `Net basis` head ≠ the head being merged) — 12/60 (20%), and every one of
+ *     them a FALSE positive. The drain already refuses to merge a PR whose acceptance does not cover its
+ *     head (#2409), and `reviewed-diff`/`reviewed-contribution` deliberately keep an acceptance valid across
+ *     a CONTENT-PRESERVING rebase — which the drain's own manifest-drop pass causes on nearly every lane. So
+ *     a sha-level difference that survives to the merge cascade is PROOF the staleness gate ran and cleared
+ *     it, not evidence of a skipped review. Announcing it would restate a gate's PASS as a gap. (An honest
+ *     form would compare the contribution fingerprint rather than the sha, but that duplicates a gate that
+ *     already BLOCKS — a genuinely stale acceptance never reaches this code. This is also why no `headSha`
+ *     is threaded onto the verdict any more: with this condition gone the field had no reader.)
+ *   · a `clear-human` ceremony clearance — 1/60. Its own durable comment states exactly what it proves and
+ *     what it does not (#2895), including the honesty tax about what the record cannot show.
+ * Both terminal record shapes (re-stamp, clear-human) still END the analysis rather than falling through to
+ * the basis checks: neither carries a panel table or a `Net basis` line, so reading them as an accept would
+ * manufacture `unstated-basis` on 53% of merges — the same noise by a different door.
+ * Also excluded: `dismissedFindings > 0`, already recorded verbatim by the land stamp's `manifestAuditLine`.
+ *
+ * The two relief codes are NOT measured away: neither can fire unless the operator passed the flag, so their
+ * rate is the rate at which the operator turns the review off — which is the thing being reported.
+ *
+ * Against that same 60-PR sample the surviving record-derived set fires on 8 (13.3%), every one of them
+ * `no-recorded-review`. The other two fired on none of the 60, which is the point: they are the rare shapes,
+ * and rare is exactly what a departures-only notice should be reserved for.
+ */
+export const REVIEW_COVERAGE_GAP_META = {
+  'no-recorded-review': 'no verdict or clearance record was ever posted on this PR — nothing states what was examined, by whom, or against which tree',
+  'unseated-mandatory-lens': 'the recorded verdict seats NO mandatory lens — every juror in its panel table is advisory, so the run completed with no blocking floor',
+  'unstated-basis': 'the recorded verdict names no revision range, so which tree it examined cannot be determined from the record',
+  'relief-waived': '`--no-review-escalation=<pr#>` waived this PR\'s review park, so it is merging past a hold the drain would otherwise have enforced',
+  'relief-waived-pass-wide': 'the deprecated bare `--no-review-escalation` waived the escalation rubric PASS-WIDE, so this PR merged without being scored at all — not one named exemption, but the review turned off for every candidate in the pass',
+};
+
+/**
+ * Which review-coverage gaps does this landing PR carry? Pure — the caller supplies the PR's own comments.
+ * Returns `[{code, line}]`, EMPTY for a normally-reviewed PR, which is what keeps the announcement off every
+ * PR.
+ *
+ * The record analysed is the LATEST one: a PR reviewed, bounced and re-reviewed is judged on the review that
+ * is operative at merge time, not on its history. A `restamp` or `clear-human` latest record is TERMINAL and
+ * CLEAN — see the measurement in REVIEW_COVERAGE_GAP_META for why those two are expected rather than
+ * degraded, and why they must STOP the analysis rather than fall through to the basis checks.
+ */
+export function reviewCoverageGaps({ comments = [], reliefWaived = false, reliefPassWide = false } = {}) {
+  const codes = [];
+  if (reliefWaived === true) codes.push('relief-waived');
+  // #3308 (round-2 correctness fix) — the pass-wide waiver is its OWN gap, not a synonym of the scoped one. The
+  // two are mutually exclusive by construction (`reliefWaived` is only ever stamped inside the escalation loop,
+  // which `passWide` switches off), so at most one of these two lines fires; the `else` is deliberately absent
+  // rather than assumed, because a caller passing both should be told both rather than silently told one.
+  if (reliefPassWide === true) codes.push('relief-waived-pass-wide');
+  const records = recordedReviewRecords(comments);
+  const latest = records[records.length - 1] || null;
+  if (!latest) codes.push('no-recorded-review');
+  else if (latest.kind !== 'restamp' && latest.kind !== 'clear-human') {
+    const read = readReviewRecord(latest.body);
+    if (read.lensRows.length && !read.lensRows.some((r) => r.weight === 'mandatory')) codes.push('unseated-mandatory-lens');
+    if (!read.basis) codes.push('unstated-basis');
+  }
+  return codes.map((code) => ({ code, line: REVIEW_COVERAGE_GAP_META[code] }));
+}
+
+/** Render the coverage notice body — the `reasonText` half; `buildDrainReasonComment` adds the marker and
+ *  the heading. Pure. */
+export function buildReviewCoverageReason(gaps) {
+  const bullets = (Array.isArray(gaps) ? gaps : []).filter((g) => g && g.code)
+    .map((g) => `- **\`${g.code}\`** — ${g.line || 'unspecified'}.`);
+  return 'This PR is being merged with its review skipped or degraded. Silence here would be '
+    + 'indistinguishable from a clean review, so the gap is stated on the PR rather than left to a drain log '
+    + 'nobody reads (#3308).\n\n'
+    + `${bullets.join('\n')}\n\n`
+    + 'None of the above blocked the merge — this is a record of what was **not** examined, so a later reader '
+    + 'can tell an unreviewed change from a reviewed one.';
 }
 
 // #2257/#2263 — the constellation's short repo names, SINGLE SOURCE for both `resolveRepos` (`--all-repos`
@@ -2612,13 +2824,20 @@ async function runCli() {
   // unchanged decision de-dupes (idempotent) while a body-edited manifest value posts a fresh, timestamped
   // record — the tamper trail. It is ancillary to the reason (`reasonText` still gates posting), never the
   // sole trigger for a comment.
-  const postDrainReasonComment = (repo, num, kind, reasonText, auditLine) => {
-    if (DRY_RUN || !reasonText) return false;
-    let comments = [];
+  // #3308 — the PR's comments, read once. Extracted from `postDrainReasonComment` so the land path can read
+  // the durable review records and the dedupe check off the SAME fetch (one `gh pr view` per landing PR, not
+  // two). Best-effort: a `gh` miss yields `[]`, which the caller must treat as "could not read", never as
+  // "there are none" — see the land-path call site.
+  const fetchPrComments = (repo, num) => {
     try {
       const data = JSON.parse(execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
-      comments = Array.isArray(data.comments) ? data.comments : [];
-    } catch { /* best-effort read; fall through and attempt the post anyway */ }
+      return { comments: Array.isArray(data.comments) ? data.comments : [], read: true };
+    } catch { return { comments: [], read: false }; }
+  };
+
+  const postDrainReasonComment = (repo, num, kind, reasonText, auditLine, preread = null) => {
+    if (DRY_RUN || !reasonText) return false;
+    const comments = Array.isArray(preread) ? preread : fetchPrComments(repo, num).comments;
     if (hasDrainReasonComment(comments, kind, reasonText, auditLine)) return false;
     try { execFileSync('gh', ['pr', 'comment', String(num), ...repoFlag(repo), '--body', buildDrainReasonComment(kind, reasonText, auditLine)], { stdio: ['ignore', 'ignore', 'pipe'] }); return true; }
     catch { return false; }
@@ -3770,9 +3989,35 @@ async function runCli() {
           // tampered PR seen intact at first sighting is already `skip` here; this stamp remains the durable
           // acted-on record for the honest manifest PRs that do land. (Residual: a manifest already weak at first
           // sighting, or a local baseline-cache loss racing a tamper, is NOT caught — see #2414's cache-loss doc.)
+          // #3308 — the PR's comments, read ONCE for both stamps below. The land stamp needs them for its
+          // dedupe; the coverage notice needs them to see which durable review records exist at all.
+          const preread = fetchPrComments(c.repo, c.num);
           if (c.hasManifest) {
-            const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c));
+            const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c), preread.comments);
             if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} acted-on manifest values stamped on PR before merge\n`);
+          }
+          // #3308 — ANNOUNCE A SKIPPED OR DEGRADED REVIEW, on the PR, BEFORE the merge, so the record survives
+          // on the merged PR. This runs for every landing candidate — manifest-carrying or not — because the
+          // 22.5%-no-verdict population is exactly the orphan/impl PRs the manifest-gated land stamp skips.
+          //
+          // GATED ON A SUCCESSFUL READ (`preread.read`). A `gh` miss returns `[]`, and an empty list is
+          // indistinguishable from "no review was ever recorded" — announcing `no-recorded-review` off a failed
+          // fetch would be the exact error this item exists to prevent, pointed the other way: asserting an
+          // absence from an unknown. A failed read says so in the log and posts nothing.
+          //
+          // NOT NOISY: `reviewCoverageGaps` returns [] for a normally-reviewed PR, so a clean PR is
+          // byte-identical to before this item; and `postDrainReasonComment` dedupes on the rendered text, so a
+          // `--watch` loop that re-lands nothing re-posts nothing. It cannot affect the merge either — the post
+          // swallows every `gh` error internally and returns a bool.
+          if (preread.read) {
+            const gaps = reviewCoverageGaps({ comments: preread.comments, reliefWaived: c.reliefWaived === true, reliefPassWide: c.reliefPassWide === true });
+            if (gaps.length) {
+              const reason = buildReviewCoverageReason(gaps);
+              const posted = postDrainReasonComment(c.repo, c.num, REVIEW_COVERAGE_KIND, reason, null, preread.comments);
+              if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} review coverage: ${gaps.map((g) => g.code).join(', ')}${posted ? ' — announced on the PR' : ' (already stamped / post failed)'}\n`);
+            }
+          } else if (!AS_JSON) {
+            process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} could not read PR comments — review coverage NOT assessed (unknown, not clean; #3308)\n`);
           }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
