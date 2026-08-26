@@ -7,21 +7,42 @@
  *
  * WHAT IS BEING MEASURED, and what each number can and cannot support:
  *
- *   HIT      a labelled finding that some gate flags at the same file within +/-`--tol` lines.
- *            This is the only sound recall measure in the corpus.
+ *   HIT      a labelled finding some gate flags in the same file AND names: under the default
+ *            `--match=content` matcher the gate's `subject` must appear in the reviewer's own
+ *            description of the finding. See `covers()` for why neither location matcher replaced it.
  *   MISS     a labelled finding no gate flags. Sound.
  *   EXTRA    a gate hit with no labelled finding at that place. This is NOT a false-positive count.
  *            The labels are what reviewers happened to notice, not ground truth, so an extra is either
  *            a false positive or a real defect nobody looked for. It is reported as a number to
  *            ADJUDICATE, never as a number to divide by — `--sample-extras` prints a sample to read.
  *
+ * RETRACTED — the HIT line used to read *"a labelled finding that some gate flags at the same file within
+ * +/-`--tol` lines. This is the only sound recall measure in the corpus."* Both clauses were wrong, and
+ * they described a matcher this file does not run: `--tol` applies ONLY under `--match=line`, which is not
+ * the default (`covers(hit, label, tol, mode = 'content')`), and `covers()` states eleven lines into its own
+ * body that NEITHER location matcher is sound on this corpus — line-proximity under-credits, file-level
+ * over-credits worse. Calling the one the file does not use "the only sound" measure inverted the finding.
+ *
+ * WHAT THE LABELS ARE, AND ARE NOT. The corpus records what a review SAID, not what was true. A
+ * `CONFIRMED` label is the reviewing session's own unadjudicated self-assessment of its own finding — no
+ * second party ever ruled on it, and a peer session that authored many of the underlying PRs reports
+ * finding real errors in several of those reviews after the fact. So the labels are fallible INDIVIDUALLY
+ * as well as incomplete COLLECTIVELY, and every rate derived from them is sound only as a RELATIVE
+ * comparison between reviewers scored on the same pool — never as an absolute catch rate.
+ *
  * CONTAMINATION. The replay reads file contents at the case's own `head` via `git show`, and never
  * looks at a later commit, the PR comments, or the network. A gate therefore cannot see the finding it
  * is being scored against.
  *
  * Usage:
- *   node scripts/review-corpus/replay-gates.mjs [--cases=scripts/review-corpus/cases] [--tol=3]
+ *   node scripts/review-corpus/replay-gates.mjs [--cases=scripts/review-corpus/cases]
+ *                                               [--match=content|file|line]   # default: content
+ *                                               [--tol=3]                     # ONLY read under --match=line
  *                                               [--sample-extras=10] [--gate=<name>] [--json]
+ *
+ * RETRACTED — this block used to list `--tol` and omit `--match` entirely, so the one flag that selects
+ * between the three matchers was undocumented while the flag that only qualifies one of them was the
+ * headline. `--tol` is dead weight unless `--match=line` is passed.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -38,6 +59,11 @@ const ROOT = resolve(HERE, '..', '..');
  * A file reader bound to ONE commit. Everything the gates see comes through here, which is what keeps
  * the replay honest: there is no path from a gate to a later revision or to the review that found the
  * defect. Reads are memoised per revision because several gates read the same card.
+ *
+ * Every `git` call here is a PROBE — a path that does not exist at this revision is an expected answer
+ * (`null`), not an error, and the catch below already encodes that. So `stderr` is ignored: it was
+ * printing `fatal: path '…' does not exist in '…'` above the replay's own header, which reads as a crash
+ * and is not one.
  */
 export function revisionReader(sha, { cwd = ROOT } = {}) {
   const cache = new Map();
@@ -45,7 +71,7 @@ export function revisionReader(sha, { cwd = ROOT } = {}) {
     if (cache.has(path)) return cache.get(path);
     let out = null;
     try {
-      out = execFileSync('git', ['show', `${sha}:${path}`], { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      out = execFileSync('git', ['show', `${sha}:${path}`], { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     } catch { out = null; }
     cache.set(path, out);
     return out;
@@ -54,7 +80,7 @@ export function revisionReader(sha, { cwd = ROOT } = {}) {
   const tree = () => {
     if (treeCache) return treeCache;
     try {
-      treeCache = execFileSync('git', ['ls-tree', '-r', '--name-only', sha], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+      treeCache = execFileSync('git', ['ls-tree', '-r', '--name-only', sha], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').filter(Boolean);
     } catch { treeCache = []; }
     return treeCache;
   };
@@ -74,7 +100,7 @@ export function revisionReader(sha, { cwd = ROOT } = {}) {
       if (m) ids.add(m[1]);
     }
     try {
-      const out = execFileSync('git', ['grep', '-h', '-E', '^bornAs: *x[0-9a-z]{6,7}', sha, '--', 'backlog/'], { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      const out = execFileSync('git', ['grep', '-h', '-E', '^bornAs: *x[0-9a-z]{6,7}', sha, '--', 'backlog/'], { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
       for (const m of out.matchAll(/bornAs:\s*(x[0-9a-z]{6,7})/g)) ids.add(m[1]);
     } catch { /* no matches at this revision */ }
     hashCache = ids;
@@ -89,18 +115,34 @@ export function revisionReader(sha, { cwd = ROOT } = {}) {
 /**
  * Does a gate hit cover a labelled finding?
  *
- * DEFAULT IS FILE-LEVEL, and that is a finding of this experiment rather than a convenience. Scoring
- * line-proximity first looked obviously right and was wrong: on card #3147 the gate flags the defective
- * criterion at line 138, while the reviewer who found the SAME defect recorded it at line 102 — 36 lines
- * off. The labels' own line numbers are unreliable, which is precisely the defect class being gated, so
- * a line-proximity matcher scores a correct gate as a miss. `--match=line` keeps the strict form for
- * comparison, and the report prints how often the two disagree.
+ * DEFAULT IS CONTENT (`mode = 'content'`), and which matcher is the default is a finding of this
+ * experiment rather than a convenience. Both location matchers were tried first and both are unsound here:
+ *
+ *   `line`  UNDER-credits. On card #3147 the gate flags the defective criterion at line 138 while the
+ *           reviewer who found the SAME defect recorded it at line 102 — 36 lines off. The labels' own
+ *           line numbers are unreliable, which is precisely the defect class being gated, so a
+ *           line-proximity matcher scores a correct gate as a miss. Kept behind `--match=line` for
+ *           comparison; `--tol` qualifies this mode and no other, and the report prints the disagreement.
+ *   `file`  OVER-credits, and worse — see the body comment below.
+ *   `content` (default) requires the gate to NAME the thing the reviewer named. It is the only version
+ *           that survives hand-checking, and it is the one the reported numbers are produced with.
+ *
+ * RETRACTED — this block used to open *"DEFAULT IS FILE-LEVEL, and that is a finding of this experiment
+ * rather than a convenience."* That was wrong: the signature below has read `mode = 'content'` throughout,
+ * and the body comment eleven lines down says file-level "over-credits far worse". The doc named as the
+ * default the very matcher the code beneath it rejects — in the file whose subject is claim accuracy.
  */
 export function covers(hit, label, tol, mode = 'content') {
   if (hit.path !== label.path) return false;
   if (mode === 'file') return true;
   if (mode === 'line') {
-    if (label.line == null || label.line === 0) return true;
+    // A label with no line number of its own is UNANSWERABLE in this mode, so it fails closed. It used to
+    // return `true`, which quietly made every such label match any hit anywhere in the same file — i.e.
+    // `line` degraded silently into the `file` matcher this file's own header calls the worse of the two.
+    // 5 of the corpus's 39 confirmed labels carry a null or 0 line, so it was not a corner case. Fail-closed
+    // is the right side to err on for a matcher whose whole purpose is to be the STRICT comparison against
+    // the default (#1571 review, the juror's non-blocking `correctness` finding).
+    if (label.line == null || label.line === 0) return false;
     return Math.abs(hit.line - label.line) <= tol;
   }
   // CONTENT (default). Neither location matcher is sound on this corpus. Line-proximity under-credits,

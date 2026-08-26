@@ -7,6 +7,7 @@ import {
   ALLOWED_READ_ENDPOINTS,
   assertReadOnlyEndpoint,
   assertReadOnlyGh,
+  WRITE_FLAG_PATTERNS,
 } from '../mine-review-corpus.mjs';
 
 // ── WHY THIS FILE EXISTS (#1569 review, `coverage`) ───────────────────────────────────────────────────────
@@ -38,20 +39,59 @@ describe('assertReadOnlyEndpoint — the allowed reads', () => {
 });
 
 describe('assertReadOnlyEndpoint — refuses a write flag whatever the endpoint', () => {
-  // Every shape `gh` accepts for "this is not a plain GET". `-f`/`--field` are here because a POST body
-  // can be handed over without `--method` ever appearing: `gh api <path> -f body=…` posts.
+  // RETRACTED — this list used to be introduced as *"Every shape `gh` accepts for 'this is not a plain
+  // GET'"*, and it was six space-separated or `=`-joined spellings. That sentence was false, and falsely
+  // reassuring: `gh` is cobra/pflag-based, so a shorthand flag carries its value CONCATENATED with no
+  // separator (`-XPOST`, `-fbody=…`, the same mechanism as `docker -p8080:80`) and shorthands cluster
+  // (`-qXPOST`). Against the pre-fix guard, which tested `/^-X$/` and `/^-f$/`, every concatenated form
+  // passed with no throw on an allowlisted endpoint — a real, working write the guard was supposed to
+  // refuse. `-F`/`--raw-field` and `--input`, two further ways to put a body on the request, were absent
+  // from the list in every spelling. All of them are below now, and the guard matches on a leading dash
+  // plus a run of letters ending in X/f/F rather than on token equality (#1571 review, f6).
   const WRITE_ARGV = [
+    // long forms, both spellings
     ['--method', 'POST'],
     ['--method=POST'],
-    ['-X', 'PATCH'],
     ['--field', 'body=nope'],
     ['--field=body=nope'],
+    ['--raw-field', 'body=nope'],
+    ['--raw-field=body=nope'],
+    ['--input', 'body.json'],
+    ['--input=body.json'],
+    // shorthand, space-separated
+    ['-X', 'PATCH'],
     ['-f', 'body=nope'],
+    ['-F', 'body=nope'],
+    // THE SHAPE THE PRE-FIX GUARD WAVED THROUGH: shorthand concatenated with its value, and clustered.
+    ['-XPOST'],
+    ['-fbody=nope'],
+    ['-Fbody=nope'],
+    ['-qXPOST'],
   ];
 
   it.each(WRITE_ARGV)('throws on %s even on an allowlisted endpoint', (...flags) => {
     expect(() => assertReadOnlyEndpoint(ALLOWED[0], ['api', ALLOWED[0], ...flags]))
       .toThrow(/read-only; argv carries a write flag/);
+  });
+
+  it('still accepts the read-only flags the miner actually passes', () => {
+    // The other half of a prefix-matching guard: it must not start refusing GETs. `--jq` is `-q`, which
+    // contains no X/f/F, and `--paginate` is a long flag that matches no write pattern.
+    expect(assertReadOnlyEndpoint(ALLOWED[0], ['api', ALLOWED[0], '--paginate'])).toBe(true);
+    expect(assertReadOnlyEndpoint(ALLOWED[0], ['api', ALLOWED[0], '--jq', '.[].body'])).toBe(true);
+    expect(assertReadOnlyEndpoint(ALLOWED[0], ['api', ALLOWED[0], '-q', '.[].body'])).toBe(true);
+  });
+
+  it('states the write set as DATA, so the header describing it can be checked rather than trusted', () => {
+    expect(Object.isFrozen(WRITE_FLAG_PATTERNS)).toBe(true);
+    // Each pattern below is named in the file header. If one is dropped, the header's claim that the guard
+    // refuses a write flag "in ANY spelling `gh` accepts" goes back to being false.
+    expect(WRITE_FLAG_PATTERNS.map(String)).toEqual([
+      '/^--method(=|$)/', '/^--field(=|$)/', '/^--raw-field(=|$)/', '/^--input(=|$)/', '/^-[a-zA-Z]*[XfF]/',
+    ]);
+    for (const spelling of ['--method', '--field', '--raw-field', '--input', '-X', '-f', '-F']) {
+      expect(SOURCE).toContain(`\`${spelling}\``);
+    }
   });
 });
 

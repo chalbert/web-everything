@@ -12,7 +12,16 @@ import {
   scopeOmitsDoneWhenFile,
   citationLineContent,
 } from '../gates.mjs';
+import { GATES } from '../gates.mjs';
 import { covers } from '../replay-gates.mjs';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** The two files' own source, so a doc claim can be pinned to the code it describes. */
+const GATES_SOURCE = readFileSync(resolve(HERE, '..', 'gates.mjs'), 'utf8');
+const REPLAY_SOURCE = readFileSync(resolve(HERE, '..', 'replay-gates.mjs'), 'utf8');
 
 const card = (body) => `---\nkind: story\nstatus: open\n---\n\n# A card\n\n${body}\n`;
 
@@ -156,5 +165,96 @@ describe('covers — the scoring matcher', () => {
   it('LINE scoring misses a correct gate, because the reviewer\'s own line number is wrong', () => {
     // The gate flags line 138; the reviewer recorded the same defect at 102. Proximity says "miss".
     expect(covers({ path: 'backlog/x.md', line: 138, subject: 'dispatch-lane' }, label, 3, 'line')).toBe(false);
+  });
+
+  it('LINE fails CLOSED on a label with no line of its own, instead of degrading into FILE', () => {
+    // RETRACTED BEHAVIOUR (#1571 review, the juror's non-blocking `correctness` finding). `line` mode used
+    // to `return true` for a label whose own line is null or 0, which made it match ANY hit anywhere in the
+    // same file — silently becoming the `file` matcher this file's header calls the worse of the two. It is
+    // not a corner case: 5 of the corpus's 39 confirmed labels carry a null or 0 line, and one of them was
+    // the whole of `stale-gate-count`'s apparent catch under `--match=line`. Unanswerable is now "no".
+    const unlocated = { path: 'backlog/x.md', line: null, summary: 'a totally different defect' };
+    expect(covers({ path: 'backlog/x.md', line: 999, subject: 'unrelated' }, unlocated, 3, 'line')).toBe(false);
+    expect(covers({ path: 'backlog/x.md', line: 999, subject: 'unrelated' }, { ...unlocated, line: 0 }, 3, 'line')).toBe(false);
+    // The contrast that makes the point: `file` still says yes, and `content` still says no for its own reason.
+    expect(covers({ path: 'backlog/x.md', line: 999, subject: 'unrelated' }, unlocated, 3, 'file')).toBe(true);
+    expect(covers({ path: 'backlog/x.md', line: 999, subject: 'unrelated' }, unlocated, 3, 'content')).toBe(false);
+    // And an unlocated label is still matchable under the DEFAULT matcher, which never reads a line at all.
+    expect(covers({ path: 'backlog/x.md', line: 999, subject: 'different defect' }, unlocated, 3, 'content')).toBe(true);
+  });
+});
+
+// ── THE DOCS ARE PART OF THE CONTRACT (#1571 review, `claim-accuracy` x2) ──────────────────────────────────
+// Two doc blocks in this pair of files described a shape and a default the code does not have: `gates.mjs`'s
+// `Finding` typedef omitted `subject`, the one field the default matcher depends on entirely; and
+// `replay-gates.mjs` named FILE-LEVEL as the default while the signature has always read `mode = 'content'`.
+// Both are retracted in place. These tests pin the corrected claims to the code, so the next drift reddens
+// instead of shipping — the same treatment the `#1569` allowlist-count claim already gets.
+
+describe('every gate emits the `subject` the default matcher scores on', () => {
+  // WHY THIS MATTERS MORE THAN IT LOOKS. `covers()` in content mode bails at `subject.length < 3` and
+  // returns false. A gate that forgets `subject` therefore scores a structural ZERO against every label in
+  // the corpus — no error, no warning, just a gate that appears to catch nothing. The typedef used to
+  // document exactly that broken shape.
+  const SAMPLES = [
+    ['resolved-with-todo', () => resolvedWithTodo('---\nstatus: resolved\n---\n\n## Done when\n\nTODO: fill this in.\n', { path: 'backlog/x.md' })],
+    ['stale-gate-count', () => staleGateCount(card('## Done when\n\n1. no new warnings against the 0-error / 1435-warning baseline.\n'), { path: 'backlog/x.md' })],
+    ['scope-omits-donewhen-file', () => scopeOmitsDoneWhenFile('---\nscope:\n  - we:skills-src/conveyor/SKILL.md\n---\n\n## Done when\n\n1. a test in `we:skills-src/conveyor/__tests__/runner.test.mjs` asserts it.\n', { path: 'backlog/x.md' })],
+    ['citation-line-content', () => citationLineContent('the push it does itself (`we:scripts/pr-land.mjs:5`) calls `realPush` first.', { path: 'backlog/x.md', read: () => `${'x\n'.repeat(20)}function gitPushMain() {}\n${'y\n'.repeat(20)}function realPush() {}\n` })],
+  ];
+
+  it.each(SAMPLES)('%s emits a subject of at least 3 characters on every finding', (_name, fire) => {
+    const out = fire();
+    expect(out.length).toBeGreaterThan(0);
+    for (const f of out) {
+      expect(typeof f.subject).toBe('string');
+      expect(f.subject.trim().length).toBeGreaterThanOrEqual(3);
+      expect(covers({ ...f }, { path: f.path, line: f.line, summary: f.subject }, 3, 'content')).toBe(true);
+    }
+  });
+
+  it('every gate in the registry has a sample above, so a ninth gate cannot skip this check unnoticed', () => {
+    // The other four gates are exercised with `subject` assertions in their own describes higher up; this
+    // pins the REGISTRY size, so adding a gate without adding coverage for its subject reddens here.
+    expect(GATES).toHaveLength(8);
+    expect(GATES.map((g) => g.name)).toEqual([
+      'resolved-with-todo', 'stale-gate-count', 'dangling-wikilink', 'dangling-hash-id',
+      'grep-literal-mismatch', 'vacuous-executable-criterion', 'scope-omits-donewhen-file',
+      'citation-line-content',
+    ]);
+  });
+
+  it('the `Finding` typedef documents `subject`, and no longer documents the shape without it', () => {
+    const live = GATES_SOURCE.replace(/^ \* RETRACTED[\s\S]*?^ \*\//m, '');
+    expect(live).toMatch(/@property \{string\} subject/);
+    expect(live).not.toMatch(/\{\{gate:string, path:string, line:number, message:string\}\}/);
+  });
+});
+
+describe('replay-gates documents the matcher it actually defaults to', () => {
+  it('`covers` defaults to content when no mode is passed', () => {
+    const label = { path: 'backlog/x.md', line: 102, summary: 'grepping for `dispatch-lane` returns nothing' };
+    // Same file, unrelated subject: content says no, file says yes. Omitting the mode must behave as content.
+    expect(covers({ path: 'backlog/x.md', line: 268, subject: 'scripts/pr-land.mjs' }, label)).toBe(false);
+    expect(covers({ path: 'backlog/x.md', line: 138, subject: 'dispatch-lane' }, label)).toBe(true);
+  });
+
+  it('the prose says CONTENT, and the retracted "DEFAULT IS FILE-LEVEL" survives only inside its retraction', () => {
+    const live = REPLAY_SOURCE.replace(/^ \* RETRACTED[\s\S]*?(?=^ \*$|^ \*\/)/gm, '');
+    expect(live).toMatch(/DEFAULT IS CONTENT/);
+    expect(live).not.toMatch(/DEFAULT IS FILE-LEVEL/);
+    expect(live).not.toMatch(/the only sound recall measure/);
+  });
+
+  it('the Usage block documents `--match`, the flag that selects between the three matchers', () => {
+    // It listed `--tol` — which qualifies ONE non-default mode — and omitted `--match` entirely.
+    expect(REPLAY_SOURCE).toMatch(/--match=content\|file\|line/);
+    expect(REPLAY_SOURCE).toMatch(/ONLY read under --match=line/);
+  });
+
+  it('the label caveat is in the FILE, not only on the PR page', () => {
+    // #1569 r3 f9 asked for provenance on the labels in the code. It reached the description and stopped.
+    expect(REPLAY_SOURCE).toMatch(/unadjudicated self-assessment/);
+    expect(REPLAY_SOURCE).toMatch(/never as an absolute catch rate/);
   });
 });

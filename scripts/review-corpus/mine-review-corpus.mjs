@@ -19,9 +19,11 @@
  * READ-ONLY, BY CONSTRUCTION — and the construction is TWO guards over ONE shell-out. Everything this file
  * reads from GitHub goes through `ghExec`, which calls:
  *   - `assertReadOnlyGh` — the `gh` subcommand must be one of TWO allowed reads, `gh api` or `gh pr list`;
- *   - `assertReadOnlyEndpoint` — for `gh api`, the argv must carry no write flag (`--method`, `-X`,
- *     `--field`, `-f`) and the endpoint must match one of a THREE-shape read allowlist:
- *     `/issues/{n}/comments`, `/pulls/{n}`, `/pulls/{n}/files`.
+ *   - `assertReadOnlyEndpoint` — for `gh api`, the argv must carry no write flag in ANY spelling `gh`
+ *     accepts (`--method`/`-X`, `--field`/`-f`, `--raw-field`/`-F`, `--input`, each of them space-separated,
+ *     `=`-joined, OR — because `gh` is cobra/pflag-based — concatenated as `-XPOST`; see
+ *     `WRITE_FLAG_PATTERNS` and the retraction on it), and the endpoint must match one of a
+ *     THREE-shape read allowlist: `/issues/{n}/comments`, `/pulls/{n}`, `/pulls/{n}/files`.
  * Of those three shapes the code today calls exactly ONE, `/issues/{n}/comments` (the single `ghJson` call
  * site, in `mineRepo`); the other two are allowlisted ahead of the callers that will read a PR's head/base
  * and its file list. The corpus is mined FROM the PRs and must never write back to them.
@@ -35,6 +37,15 @@
  * hold, because one word (`gh pr edit`) would have been refused by nothing. `assertReadOnlyGh` + `ghExec` now
  * close that path, and `__tests__/mine-review-corpus.test.mjs` pins the allowlist shape by shape AND counts
  * the `gh` call sites, so neither claim can rot silently again.
+ *
+ * WHAT A LABEL IS, AND IS NOT — read this before dividing by any number out of this corpus. The cases
+ * record what a review SAID, not what was true. A finding marked `CONFIRMED` is confirmed BY THE REVIEWING
+ * SESSION ABOUT ITS OWN FINDING; no second party ever adjudicated it, and a peer session that authored many
+ * of the underlying PRs reports finding real errors in several of those reviews after the fact. The labels
+ * are therefore fallible INDIVIDUALLY as well as incomplete COLLECTIVELY — the pooling problem twice over.
+ * Every rate derived from them is sound as a RELATIVE comparison between reviewers scored on the same pool,
+ * and unsound as an absolute catch rate. `index.json.provenance` carries the same sentence, so a reader who
+ * has only the mined tree and never saw the PR page still gets the weaker, correct reading (#1569 r3 f9).
  *
  * THE `presentAt` LABEL — the one that makes this worth building. A finding raised in round 4 was very
  * often already there in round 1; the reviewer just hadn't looked. We can prove that per finding rather
@@ -72,6 +83,36 @@ export const ALLOWED_READ_ENDPOINTS = Object.freeze([
 ]);
 
 /**
+ * A write flag, in EVERY shape `gh` accepts one. `gh` is built on cobra/pflag, which lets a SHORTHAND flag
+ * carry its value with no separator at all — `-XPOST` is the same invocation as `-X POST`, the same
+ * mechanism as `docker -p8080:80` — and lets shorthands cluster, so the value-taking letter can sit at the
+ * end of a run of boolean ones (`-qXPOST`). Hence the short-flag pattern matches a LEADING single dash
+ * followed by any run of letters ending in `X`, `f` or `F`, rather than the whole token: a token-equality
+ * test only ever catches the space-separated spelling.
+ *
+ * The long forms are matched on `(=|$)` so `--methodical` (were there such a flag) is not mistaken for one.
+ * `--input` is here because `gh api --input body.json` sends a body, which makes the request a POST without
+ * `--method` ever appearing.
+ *
+ * RETRACTED — this test used to read
+ * `/^--method(=|$)/.test(a) || /^-X$/.test(a) || /^--field(=|$)/.test(a) || /^-f$/.test(a)`, and the file
+ * header claimed on the strength of it that the guard refuses "any argv carrying a write flag". That was
+ * wrong. Anchoring the short flags at BOTH ends (`/^-X$/`, `/^-f$/`) meant the guard refused `-X POST` and
+ * waved through `-XPOST`; verified live before the fix, `assertReadOnlyEndpoint(<allowlisted>, [..., '-XPOST'])`
+ * returned true with no throw, as did `-fbody=…`. `-F`/`--raw-field` and `--input` — two more ways to put a
+ * body on the request — were not tested for at all, in any spelling. So `gh api <allowlisted-endpoint> -XPOST`
+ * would have reached GitHub as a WRITE against the very PRs this corpus is mined from (#1571 review, f6).
+ * Exported so the test suite asserts the patterns rather than a reader trusting the sentence above them.
+ */
+export const WRITE_FLAG_PATTERNS = Object.freeze([
+  /^--method(=|$)/,
+  /^--field(=|$)/,
+  /^--raw-field(=|$)/,
+  /^--input(=|$)/,
+  /^-[a-zA-Z]*[XfF]/,
+]);
+
+/**
  * Fail closed on anything that is not one of the THREE read shapes this miner is allowed to use (see the
  * header for the list, and for what is retracted). The point is not that `gh api` defaults to GET — it is
  * that a future edit adding `--method POST` or a `/comments` write must not silently start mutating the pull
@@ -85,7 +126,7 @@ export const ALLOWED_READ_ENDPOINTS = Object.freeze([
  * @param {string[]} argv the full argv handed to `gh`.
  */
 export function assertReadOnlyEndpoint(endpoint, argv = []) {
-  const mutating = argv.some((a) => /^--method(=|$)/.test(a) || /^-X$/.test(a) || /^--field(=|$)/.test(a) || /^-f$/.test(a));
+  const mutating = argv.some((a) => WRITE_FLAG_PATTERNS.some((re) => re.test(a)));
   if (mutating) {
     throw new Error(`mine-review-corpus: REFUSED — this miner is read-only; argv carries a write flag: ${argv.join(' ')}`);
   }
@@ -150,6 +191,23 @@ function ghJson(endpoint, { paginate = false } = {}) {
 }
 
 /* ------------------------------------------------------------------ parsing */
+
+/**
+ * The provenance stamped into `index.json`, so the caveat travels WITH the corpus rather than living only
+ * on a PR page a later consumer will never read. Exported and pinned by a test against the committed
+ * `cases/index.json`, because the whole failure mode this file keeps hitting is a caveat that is stated in
+ * one place and absent from the other.
+ *
+ * RETRACTED — this used to read *"Mined read-only from recorded review-pr verdict comments; revision ranges
+ * are the verdicts' own `Net basis` lines."* Nothing in it was false, but it disclaimed nothing: a reader of
+ * the tree had no way to learn that a `CONFIRMED` label is the reviewer's own unadjudicated self-assessment,
+ * so the stronger reading — "39 verified defects" — was the one the file invited.
+ */
+export const PROVENANCE = 'Mined read-only from recorded review-pr verdict comments; revision ranges are the '
+  + "verdicts' own `Net basis` lines. LABEL CAVEAT: a CONFIRMED label is the reviewing session's own "
+  + 'unadjudicated self-assessment of its own finding, not an adjudicated fact — the labels are fallible '
+  + 'individually and incomplete collectively, so rates derived from them are sound only as a RELATIVE '
+  + 'comparison between reviewers scored on this same pool, never as an absolute catch rate.';
 
 const VERDICT_ACCEPT = '✅ review — accepted';
 const VERDICT_CHANGES = '🔁 review — changes requested';
@@ -229,8 +287,13 @@ export function parseFindings(body) {
 
 /* ------------------------------------------------------------------ git */
 
+/**
+ * A git PROBE. Every caller below asks git a yes/no question and treats a non-zero exit as "no", so git's
+ * own stderr is never the answer to anything — it is only noise on the operator's terminal, interleaved
+ * with the miner's report. `stderr: 'ignore'` keeps the failure (the throw) and drops the chatter.
+ */
 function git(args, { cwd = ROOT } = {}) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 }
 
 export function commitExists(sha, { cwd = ROOT } = {}) {
@@ -369,7 +432,7 @@ async function main() {
       findings: perPr.reduce((a, p) => a + p.findings, 0),
       provenMissed: perPr.reduce((a, p) => a + p.missed, 0),
     },
-    provenance: 'Mined read-only from recorded review-pr verdict comments; revision ranges are the verdicts\' own `Net basis` lines.',
+    provenance: PROVENANCE,
     perPr,
   };
   writeFileSync(join(outDir, 'index.json'), `${JSON.stringify(index, null, 2)}\n`);

@@ -12,7 +12,7 @@
     "findings": 42,
     "provenMissed": 7
   },
-  "provenance": "Mined read-only from recorded review-pr verdict comments; revision ranges are the verdicts' own `Net basis` lines.",
+  "provenance": "Mined read-only from recorded review-pr verdict comments; revision ranges are the verdicts' own `Net basis` lines. LABEL CAVEAT: a CONFIRMED label is the reviewing session's own unadjudicated self-assessment of its own finding, not an adjudicated fact — the labels are fallible individually and incomplete collectively, so rates derived from them are sound only as a RELATIVE comparison between reviewers scored on this same pool, never as an absolute catch rate.",
   "perPr": [
     {
       "pr": 1456,

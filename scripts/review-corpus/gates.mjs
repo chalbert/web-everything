@@ -15,7 +15,25 @@
  * whole point is to take a class of finding away from the reviewer, not to give it more to read.
  */
 
-/** @typedef {{gate:string, path:string, line:number, message:string}} Finding */
+/**
+ * @typedef {object} Finding
+ * @property {string} gate the gate's name.
+ * @property {string} path the file the gate fired on.
+ * @property {number} line the 1-based line it fired at.
+ * @property {string} message what is wrong, in the gate's own words.
+ * @property {string} subject THE FIELD THE DEFAULT SCORER DEPENDS ON — the needle, slug, id, path or
+ *   locus the gate actually fired on. `covers()` in `replay-gates.mjs` runs in `content` mode by default
+ *   and matches a hit to a label by looking for this string inside the reviewer's own description of the
+ *   finding. It must be a real substring of the source, and at least 3 characters: `covers()` returns
+ *   false at `subject.length < 3`, so a gate that omits it scores a structural zero against every label,
+ *   silently. `__tests__/gates.test.mjs` asserts every gate here emits one.
+ *
+ * RETRACTED — this typedef used to read *`{{gate:string, path:string, line:number, message:string}}`*,
+ * omitting `subject` entirely. That was wrong, and wrong in the way that matters: all eight gates below
+ * already emit `subject`, and the default matcher is unusable without it, so the documented shape was a
+ * shape no gate has and no gate may have. A ninth gate written to it would have scored 0 with no error
+ * and no failing test.
+ */
 
 const DONE_WHEN_RX = /^#+\s*Done[- ]when\b/im;
 
