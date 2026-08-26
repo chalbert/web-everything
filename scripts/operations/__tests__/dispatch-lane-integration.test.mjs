@@ -1,11 +1,11 @@
 /**
  * @file dispatch-lane-integration.test.mjs — the double-dispatch guard against a REAL run store on disk.
  *
- * WHAT THIS OPERATION CANNOT HAVE TESTED, and why that is not a gap being papered over: `dispatch-lane`'s one
- * side effect is starting a `claude` delivery agent, and its reader shells the conveyor tick core. Neither is
- * a git or filesystem effect a hermetic fixture can witness — the sink's own docblock says as much
- * (*"NOT YET PROVEN LIVE. No test starts a `claude` process"*). So this file does not pretend to cover the
- * dispatch; it covers the one durable, on-disk thing the operation genuinely owns.
+ * WHAT THIS FILE DOES NOT COVER, and why that is not a gap being papered over: `dispatch-lane`'s one side
+ * effect is starting a `claude` delivery agent, and its reader shells the conveyor tick core. Neither is a git
+ * or filesystem effect this fixture can witness. The spawn is covered instead by
+ * `./dispatch-spawn-live.test.mjs`, which starts a real process against a fake `claude` on `PATH`; this file
+ * covers the one durable, on-disk thing the operation genuinely owns.
  *
  * THE GUARD, AND WHY IT NEEDS A REAL DIRECTORY. `inFlightDispatchesFor` answers *"did I already start an
  * agent for this item and never see it finish?"* out of the run store, and it is FAIL-SOFT PER RECORD: one
