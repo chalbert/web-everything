@@ -2022,10 +2022,21 @@ describe('checkBodyFileLocation (#2897)', () => {
   });
 
   it('accepts /tmp on a host whose OS temp dir is somewhere else entirely', () => {
+    // THE PATH UNDER TEST IS THE LITERAL `/tmp`, not `join(TMP, …)` — and that is the whole point of the case.
+    // The claim is "`/tmp` is accepted EVEN WHEN the OS temp dir is somewhere else", so the roots are a
+    // synthetic macOS-ish pair and the path must be the one the shared root is supposed to rescue.
+    //
+    // Using `join(TMP, …)` made this pass on Linux for the wrong reason and fail on every Mac for the right
+    // one: there `TMP` IS `/tmp`, so it matched the shared root by coincidence; on macOS `TMP` resolves to
+    // `/private/var/folders/<hash>/T`, which matches none of the three roots, so the assertion inverted. It
+    // reddened for every macOS developer, on `main`, unattributable to any change — and three separate agents
+    // each spent time ruling it out of their own work before reporting it (#xuyij7f). A test that fails for
+    // everyone and belongs to no one teaches readers to discount a red suite, which costs more than the test
+    // was ever worth.
     const macOsish = bodyFileRoots('/repo', '/var/folders/ab/T');
-    expect(checkBodyFileLocation(join(TMP, 'verdict.md'), macOsish).ok).toBe(true);
+    expect(checkBodyFileLocation('/tmp/verdict.md', macOsish).ok).toBe(true);
     // …and without the shared root it would be refused, which is the defect this closes.
-    expect(checkBodyFileLocation(join(TMP, 'verdict.md'), ['/repo', '/var/folders/ab/T']).ok).toBe(false);
+    expect(checkBodyFileLocation('/tmp/verdict.md', ['/repo', '/var/folders/ab/T']).ok).toBe(false);
   });
 
   it('accepts a scratch path nested under a temp root — an agent session scratchpad is not special', () => {
