@@ -15,14 +15,29 @@ Pointing `--lens` at an advisory lens silently replaces the mandatory correctnes
 
 ## The mechanic
 
-`MANDATORY_LENSES` is `[correctness, security]`; `ADVISORY_LENSES` is
-`[simplicity, standards-conformance, claim-accuracy]`. The distinction is what a finding can *do*: a mandatory
-lens's findings block, an advisory lens's findings inform.
+`MANDATORY_LENSES` is `[correctness, security]` (`we:scripts/lib/jury-core.mjs:694`).
+`ADVISORY_LENSES` is `[simplicity, standards-conformance, claim-accuracy]`
+(`we:scripts/lib/jury-core.mjs:698`).
+Both draw from the one `MANDATE_LENSES` vocabulary (`we:scripts/lib/jury-core.mjs:666`).
+The distinction is what a finding can *do*: a mandatory lens's findings block, an advisory lens's findings
+inform.
 
-`--lens=` sets the lens the first `judge` seat runs under. It does **not** add a lens — it **substitutes** one.
-So `--lens=claim-accuracy` does not mean "also check claim accuracy"; it means "review this PR with **no
-blocking lens seated at all**". The run completes, renders a verdict, and reports findings that cannot block,
-and nothing anywhere says the floor was removed.
+`--lens` is a **single scalar input with a default**, not a list:
+
+```js
+lens: { type: 'string', required: false, default: DEFAULT_LENS, enum: [...PANEL_LENSES] },
+```
+
+(`we:scripts/operations/review-pr.mjs:471`.)
+That default is `DEFAULT_LENS` (`we:scripts/operations/review-pr.mjs:103`), which is `MANDATORY_LENSES[0]`.
+Exactly one seat consumes it — the `judge` step (`we:scripts/operations/review-pr.mjs:560`).
+It reads `view.input.lens` (`we:scripts/operations/review-pr.mjs:564`) and hands that one value on as the
+whole run's lens.
+
+So passing `--lens` does **not** add a lens — it **substitutes** the default one. `--lens=claim-accuracy` does
+not mean "also check claim accuracy"; it means "review this PR with **no blocking lens seated at all**". The
+run completes, renders a verdict, and reports findings that cannot block, and nothing anywhere says the floor
+was removed.
 
 ## The evidence this is not a documentation gap
 

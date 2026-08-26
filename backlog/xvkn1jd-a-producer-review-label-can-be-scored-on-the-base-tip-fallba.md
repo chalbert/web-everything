@@ -6,6 +6,7 @@ status: open
 dateOpened: "2026-08-26"
 scope:
   - we:scripts/merge-ai-prs.mjs
+  - we:scripts/lib/review-escalation.mjs
   - we:scripts/pr-land.mjs
 tags: []
 ---
@@ -91,6 +92,13 @@ nothing downstream can distinguish an over-inflated basis from a narrowed one.
 The existing test for that path calls it *"the prior, safe over-scoring behavior, never a scoring failure"*
 (`we:scripts/__tests__/merge-ai-prs.test.mjs:1489`). Over-scoring is safe for SIZE and blast-radius, which cost
 a review round. It is **not** safe for the human gate, which is one-way (below). That asymmetry is the bug.
+
+**Both ends of that asymmetry are in `scope:`.** The basis has to report that its merge-base lookup failed
+(`resolveNetDiffBasis`, `we:scripts/merge-ai-prs.mjs:2060`), and the human gate has to refuse to score on such
+a basis — `humanRequired` is computed at `we:scripts/lib/review-escalation.mjs:574`, so
+`we:scripts/lib/review-escalation.mjs` is named in `scope:` alongside the producer that threads the two
+(`we:scripts/pr-land.mjs:839`). The first version of this card scoped only `we:scripts/merge-ai-prs.mjs` and
+`we:scripts/pr-land.mjs`, which named the symptom's path but not the gate that has to change.
 
 **What is NOT established:** why the merge-base lookup failed for #1595 specifically. Establish that before
 building — the diagnosis is what this card still owes. Candidates worth checking first, in order:
