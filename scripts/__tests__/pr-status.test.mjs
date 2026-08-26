@@ -192,6 +192,25 @@ describe('owedFromLedgerVerdict — one normalizer over BOTH ledger vocabularies
     expect(owedFromLedgerVerdict(VERDICTS.NEEDS_HUMAN)).toBe('human');
   });
 
+  it('maps prevention-outstanding to its OWN owed value — the fourth verdict is not a flavour of the other three', () => {
+    expect(owedFromLedgerVerdict(VERDICTS.PREVENTION_OUTSTANDING)).toBe('prevention');
+  });
+
+  // PR #1574 review, juror finding 1. The switch this replaces had no arm for `prevention-outstanding`, so a
+  // converged PR read as `STUCK: no review label`. Derived from the ENUM, so a fifth member reddens this test
+  // the moment it is added, alongside the `check:standards` totality gate the table is now annotated for.
+  it('is TOTAL over the jury VERDICTS enum — no member falls through to null', () => {
+    for (const verdict of Object.values(VERDICTS)) {
+      expect(owedFromLedgerVerdict(verdict), `VERDICTS member "${verdict}" has no owed mapping`).not.toBeNull();
+    }
+  });
+
+  it('inherits nothing — a prototype member name is unknown, not an accidental hit', () => {
+    for (const key of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(owedFromLedgerVerdict(key), key).toBeNull();
+    }
+  });
+
   it('maps the verdict-ledger vocabulary, including the two clears that are not acceptances', () => {
     expect(owedFromLedgerVerdict(LEDGER_VERDICTS.CHANGES)).toBe('fix');
     expect(owedFromLedgerVerdict(LEDGER_VERDICTS.ACCEPTED)).toBe('none');
@@ -308,7 +327,7 @@ describe('derivePhase — a working phase is unreachable without a live worker (
       [REVIEW_LABELS.pending, REVIEW_LABELS.changes], [REVIEW_LABELS.changes, REVIEW_LABELS.human],
       ['checking'], [{ name: REVIEW_LABELS.changes }],
     ];
-    const owedValues = [null, 'fix', 'review', 'human'];
+    const owedValues = [null, 'fix', 'review', 'human', 'prevention'];
     for (const labels of labelSets) {
       for (const ledgerOwed of owedValues) {
         const got = derivePhase({ labels, worker: null, ledgerOwed });
@@ -362,6 +381,66 @@ describe('derivePhase — a working phase is unreachable without a live worker (
 
   it('a ledger that says CLEARED with no label to match reads READY, not a stall', () => {
     expect(derivePhase({ labels: [], worker: null, ledgerOwed: 'none' }).phase).toBe(PHASES.READY);
+  });
+
+  // PR #1574 review, juror finding 2. `owed === 'none'` used to be reachable only inside the `else` of
+  // `if (worker)`, so a lane whose fixer session was still alive when the ledger cleared the PR — the
+  // `AGREEMENT.UNLABELED` window verdict-ledger.mjs's shadow checker exists to catch — reported FIXING for a PR
+  // that was done. The sibling test above only ever passed `worker: null`, which is why it stayed green.
+  it('a ledger that says CLEARED reads READY EVEN WITH A LIVE WORKER — a worker is not evidence anything is owed', () => {
+    expect(derivePhase({ labels: [], worker: WORKER, ledgerOwed: 'none' }).phase).toBe(PHASES.READY);
+    expect(derivePhase({ labels: [], worker: WORKER, ledgerOwed: 'none' }).display).toBe('READY');
+  });
+
+  it('a converged PR whose prevention guard is UNFILED says so — not "no review label", not "human gate"', () => {
+    const got = derivePhase({ labels: [], worker: null, ledgerOwed: 'prevention' });
+    expect(got.phase).toBe(PHASES.STUCK);
+    expect(got.reason).toBe(STUCK_REASONS.PREVENTION_UNFILED);
+    expect(got.display).toBe('STUCK: prevention unfiled');
+    expect(got.reason).not.toBe(STUCK_REASONS.NO_LABEL);
+    expect(got.reason).not.toBe(STUCK_REASONS.HUMAN_GATE);
+  });
+
+  it('a live worker on a prevention-outstanding PR is FIXING — filing the guard is authoring, not reviewing', () => {
+    expect(derivePhase({ labels: [], worker: WORKER, ledgerOwed: 'prevention' }).phase).toBe(PHASES.FIXING);
+  });
+
+  // The prevention the #1574 review named for finding 2: the per-case tests above each vary ONE axis, which is
+  // exactly how the missing branch hid. This enumerates BOTH axes against the docblock's stated precedence.
+  it('THE PRECEDENCE MATRIX — every {worker} x {owed} pair matches the documented order', () => {
+    const owedValues = [null, 'fix', 'review', 'human', 'prevention', 'none'];
+    for (const worker of [null, WORKER]) {
+      for (const ledgerOwed of owedValues) {
+        const got = derivePhase({ labels: [], worker, ledgerOwed });
+        const where = `worker=${worker ? 'live' : 'null'} owed=${ledgerOwed}`;
+        if (ledgerOwed === 'none') {
+          // Rung 1 — nothing is owed. Wins over a live worker, in BOTH columns.
+          expect(got.phase, where).toBe(PHASES.READY);
+        } else if (worker) {
+          // Rung 3 — a live worker, named by what is owed. Never READY, never STUCK.
+          expect(got.phase, where).toBe(ledgerOwed === 'review' || ledgerOwed === 'human'
+            ? PHASES.REVIEWING : PHASES.FIXING);
+        } else {
+          // Rung 4 — the owed-work stall, one distinct reason per owed value.
+          expect(got.phase, where).toBe(PHASES.STUCK);
+          expect(got.reason, where).toBe({
+            fix: STUCK_REASONS.BOUNCED_NO_FIXER,
+            review: STUCK_REASONS.NO_REVIEWER,
+            human: STUCK_REASONS.HUMAN_GATE,
+            prevention: STUCK_REASONS.PREVENTION_UNFILED,
+            null: STUCK_REASONS.NO_LABEL,
+          }[String(ledgerOwed)]);
+        }
+      }
+    }
+  });
+
+  it('an unanswered question still outranks a live worker, but NOT a cleared ledger — rung 2 sits below rung 1', () => {
+    const asked = { asked: true, question: 'which one?' };
+    expect(derivePhase({ labels: [], worker: WORKER, ledgerOwed: 'fix', pendingQuestion: asked }).reason)
+      .toBe(STUCK_REASONS.NEEDS_HUMAN);
+    expect(derivePhase({ labels: [], worker: WORKER, ledgerOwed: 'none', pendingQuestion: asked }).phase)
+      .toBe(PHASES.READY);
   });
 
   it('a live worker on a PR the ledger says needs REVIEW is REVIEWING, not FIXING', () => {

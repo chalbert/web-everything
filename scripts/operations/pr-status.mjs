@@ -3,6 +3,30 @@
  * @description THE `pr-status` DECLARATION (#xewnork, under epic #3029) — for each open PR, did a check
  *   actually RUN on the head that is there now, what did it conclude, and does the review label agree?
  *
+ * ── NOT THE SAME QUESTION AS `we:scripts/pr-status.mjs` ─────────────────────────────────────────────────────
+ *
+ * They share a basename because they share a SUBJECT (an open PR) and they answer to different failures. THIS
+ * one asks whether the MACHINE ran: did a check execute on the head that is there now, and does the review
+ * label agree — the question that caught #1510/#1511 sitting twelve hours with `total_count: 0`. The command
+ * `we:scripts/pr-status.mjs` (`npm run pr-status`) asks who is WORKING on the PR and what is owed — the PEOPLE
+ * and AGENTS question, which catches a PR sitting with no live worker. Neither subsumes the other and neither
+ * should grow into the other; a reader who wants "is this diff moving" wants that file, not this one.
+ *
+ * ONE MEASURED SIDE EFFECT OF SHARING THE BASENAME, recorded HERE as well as there so a maintainer reading THIS
+ * file is not left to re-discover it: the #2967 test-only-export scan matches imports and shelled files by
+ * specifier BASENAME, and `npm run pr-status` shells `pr-status.mjs`, so once that command landed BOTH files
+ * count as shelled and the scan stopped reporting this module's three-valued check-state export (the frozen
+ * list of `green`/`red`/`pending`/`unchecked`, declared a few lines below) as test-only. That export is no more
+ * wired than it was — the finding is HIDDEN, not fixed. The scan's own header calls basename merging a
+ * deliberate one-way trade ("can only ever HIDE a finding, never invent one"), so this is that trade being
+ * paid, not a new defect; if #2967's coverage of this module is wanted back, this note is why it went.
+ *
+ * AND THAT IS WHY THE EXPORT IS DESCRIBED HERE RATHER THAN NAMED. `findTestOnlyExports` treats ANY second
+ * mention of an export's name in its own file as evidence it is wired — a JSDoc mention counts. Spelling the
+ * identifier in this paragraph would therefore make the note a SECOND, permanent reason the scan stays quiet
+ * about it, surviving even if the basename merge above were ever undone. A note explaining why coverage went
+ * must not be the thing that keeps it gone.
+ *
  * ── WHY A POLL, WHEN A SUBSCRIPTION EXISTS ──────────────────────────────────────────────────────────────────
  *
  * Subscribing to PR activity looks like the answer to "we lost time not noticing a PR was stuck", and it is

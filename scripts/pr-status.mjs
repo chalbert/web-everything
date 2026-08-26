@@ -12,13 +12,13 @@
  * one caught #1510/#1511 sitting twelve hours with no check run; this one catches a PR sitting with no WORKER.
  * Neither subsumes the other and neither should grow into the other.
  *
- * ONE MEASURED SIDE EFFECT OF SHARING THE BASENAME, recorded so nobody re-discovers it as a mystery: the #2967
- * test-only-export scan matches imports and shelled files by specifier BASENAME, and `npm run pr-status` shells
- * `pr-status.mjs`, so BOTH files are now treated as shelled and the scan stops reporting `CHECK_STATES` in the
- * operations module. That export is no more wired than it was; the finding is HIDDEN, not fixed. The scan's own
- * header calls basename merging a deliberate one-way trade ("can only ever HIDE a finding, never invent one"),
- * so this is that trade being paid, not a new defect — but if #2967's coverage of that module is wanted back,
- * this note is why it went.
+ * ONE MEASURED SIDE EFFECT OF SHARING THE BASENAME, recorded in BOTH headers so nobody re-discovers it as a
+ * mystery from either side (the twin note lives in that file's header): the #2967 test-only-export scan matches
+ * imports and shelled files by specifier BASENAME, and `npm run pr-status` shells `pr-status.mjs`, so BOTH files
+ * are now treated as shelled and the scan stops reporting `CHECK_STATES` in the operations module. That export
+ * is no more wired than it was; the finding is HIDDEN, not fixed. The scan's own header calls basename merging
+ * a deliberate one-way trade ("can only ever HIDE a finding, never invent one"), so this is that trade being
+ * paid, not a new defect — but if #2967's coverage of that module is wanted back, this note is why it went.
  *
  * ── RULE 1: THE PHASE IS DERIVED, NEVER SELF-REPORTED ────────────────────────────────────────────────────────
  *
@@ -38,8 +38,11 @@
  * ── RULE 2: ROUNDS COME FROM THE LEDGER ──────────────────────────────────────────────────────────────────────
  *
  * Counting the string "verdict" in comment bodies is the obvious shortcut and it OVER-COUNTS badly: a review
- * write-up quotes its own verdict two or three times and a triage table restates every previous round's, so a PR
- * at 7 rounds reads as r13. Measured on this repo's own open PRs — #1563 counts 13 by string and 7 by ledger.
+ * write-up quotes its own verdict two or three times and a triage table restates every previous round's, so a
+ * PR reads several rounds higher than it has had. Measured on this repo's own open PRs, #1563 on 2026-08-26:
+ * 15 of its 15 comments contain the string, against 9 rounds by ledger. BOTH figures climb as that PR takes
+ * further rounds — the standing fact is the GAP, not this particular pair of numbers, and a reader re-running
+ * the count later should expect different ones.
  *
  * So rounds are read from the APPEND-ONLY LEDGERS, where one round is one record, written once. There are two of
  * them and both are read, because they are two writers recording the same negotiation from different paths:
@@ -74,7 +77,9 @@
  * `READY` · `FIXING` · `REVIEWING` · `STUCK: <reason>`. The reason is the part that makes the report actionable:
  * "a PR sitting there" is one appearance with several different causes, and they need OPPOSITE interventions.
  * `bounced, no fixer` wants a fixer sent to the lane; `no reviewer` wants a reviewer — the reason that stranded
- * #1567. Collapsing them into one `STUCK` would leave a reader doing the triage by hand on every row, which is
+ * #1567; `prevention unfiled` wants a GUARD FILED, and wants no fixer and no reviewer at all (#2823's
+ * `prevention-outstanding`: every finding on the diff is already resolved, so there is nothing for either to
+ * do). Collapsing them into one `STUCK` would leave a reader doing the triage by hand on every row, which is
  * the work this command is supposed to have already done. The full set is in `STUCK_REASONS` below.
  *
  * ── RULE 4: `STUCK: needs human` IS DETECTED NARROWLY, AND HERE IS EXACTLY HOW FAR IT REACHES ────────────────
@@ -167,6 +172,7 @@ export const STUCK_REASONS = Object.freeze({
   NO_REVIEWER: 'no reviewer',             // review:pending — the drain parked it and no lane is reviewing
   NEEDS_HUMAN: 'needs human',             // an agent stopped to ASK — restarting it re-runs the question forever
   HUMAN_GATE: 'human gate',               // review:human — only a human may clear this diff (a LABEL, not a question)
+  PREVENTION_UNFILED: 'prevention unfiled', // the jury CONVERGED but a named prevention guard is still unfiled
   NO_LABEL: 'no review label',            // never parked, and the ledger says nothing either
 });
 
@@ -207,7 +213,7 @@ export function reviewRoundsFromLedger(events) {
  * derived thing is missing, ask the authority. PURE.
  *
  * @param {Array<object>} events - raw append-only jury events for one subject.
- * @returns {'accept'|'changes'|'needs-human'|null}
+ * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'|null}
  */
 export function ledgerPanelVerdict(events) {
   const stream = Array.isArray(events) ? events : [];
@@ -267,22 +273,57 @@ export function reviewRounds({ juryEvents = [], verdictRecords = [], pr } = {}) 
 }
 
 /**
- * What a ledger verdict says is OWED, normalized across BOTH ledgers' vocabularies (the jury panel speaks
- * `accept`/`changes`/`needs-human`, the verdict ledger speaks `accepted`/`changes`/`pending`/`human`/
- * `clear-human`/`restamped`). One normalizer so `derivePhase` never has to know which ledger answered. PURE;
- * an unknown verdict is `null`, never a guess.
+ * What each ledger verdict says is OWED, normalized across BOTH ledgers' vocabularies (the jury panel speaks
+ * `accept`/`changes`/`needs-human`/`prevention-outstanding`, the verdict ledger speaks `accepted`/`changes`/
+ * `pending`/`human`/`clear-human`/`restamped`). One table so `derivePhase` never has to know which ledger
+ * answered, and so an unknown word can only be absent — never a guess.
+ *
+ * A TABLE, NOT A SWITCH, AND THAT IS THE FIX FOR PR #1574's REVIEW. The switch this replaces had no arm for
+ * `prevention-outstanding`, so a labelless PR whose jury ledger already sat at that verdict fell to `null` and
+ * printed `STUCK: no review label` — "never reviewed" about a PR that had CONVERGED. The reason nothing caught
+ * it is structural: #2823's derive-based totality gate (`we:scripts/lib/verdict-totality.mjs`) discovers a
+ * `VERDICTS` consumer by seeing its members in OBJECT-KEY position, and `case 'changes':` is not key position,
+ * so this function was invisible to the gate that exists for exactly this defect class. Written as a keyed
+ * table it is discovered, must carry `@verdicts-total`, and `check:standards` now FAILS if a fifth `VERDICTS`
+ * member is added without an arm here. That is the prevention the review asked for, taken as a gate rather
+ * than as a one-off assertion.
+ *
+ * NULL PROTOTYPE (jury-core's `freezeTable` rule): the key is free-form ledger text, so a plain frozen literal
+ * would answer `TABLE['constructor']` with an inherited member and the guard would fail OPEN. Nothing is
+ * inherited here, and the read goes through `Object.hasOwn` as well.
+ *
+ * @verdicts-total — every `VERDICTS` member is a key (the `check:standards` verdict-totality gate enforces it).
+ */
+const OWED_BY_LEDGER_VERDICT = Object.freeze(Object.assign(Object.create(null), {
+  // ── the JURY panel vocabulary (`we:scripts/lib/jury-core.mjs`'s `VERDICTS`) ──
+  accept: 'none',
+  changes: 'fix',
+  'needs-human': 'human',
+  // #2823's fourth member: every finding IS resolved, but a named prevention guard is neither captured by an
+  // existing gate nor filed as an item, so a clean accept is withheld. `deriveNegotiationOutcome` escalates it
+  // STRAIGHT to the operator rather than re-entering the round loop — nothing is owed to a fixer and nothing is
+  // owed to a reviewer, so it is its own owed value and gets its own stuck reason. Folding it into `human`
+  // would print `human gate`, which this file's rule 3 reserves for the `review:human` LABEL (policy-tier
+  // code); folding it into `none` would call an un-landable PR READY.
+  'prevention-outstanding': 'prevention',
+  // ── the VERDICT ledger vocabulary (`we:scripts/lib/verdict-ledger.mjs`) ──
+  accepted: 'none',
+  pending: 'review',
+  human: 'human',
+  'clear-human': 'none',
+  restamped: 'none',
+}));
+
+/**
+ * What a ledger verdict says is OWED — a lookup into `OWED_BY_LEDGER_VERDICT`. PURE; an unknown verdict is
+ * `null`, never a guess.
  *
  * @param {string|null} verdict
- * @returns {'fix'|'review'|'human'|'none'|null}
+ * @returns {'fix'|'review'|'human'|'prevention'|'none'|null}
  */
 export function owedFromLedgerVerdict(verdict) {
-  switch (String(verdict ?? '')) {
-    case 'changes': return 'fix';
-    case 'pending': return 'review';
-    case 'human': case 'needs-human': return 'human';
-    case 'accept': case 'accepted': case 'clear-human': case 'restamped': return 'none';
-    default: return null;
-  }
+  const key = String(verdict ?? '');
+  return Object.hasOwn(OWED_BY_LEDGER_VERDICT, key) ? OWED_BY_LEDGER_VERDICT[key] : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -485,13 +526,23 @@ function labelNames(labels) {
  * carry (the same relation `we:scripts/lib/auto-land-seam.mjs` draws: ledger as authority, label as derived
  * intent). "Someone is working" comes from the process; "on what" comes from the label. Neither alone is enough.
  *
- * Precedence: READY (nothing is owed, so no one needs to be working) → an unanswered question (nobody is
- * progressing regardless of whether a process is still parked at the prompt, and a restart would re-ask it) →
- * a live worker → the owed-work stall.
+ * Precedence, and THE CODE BELOW IS IN THIS ORDER so the two cannot drift: READY (nothing is owed, so no one
+ * needs to be working) → an unanswered question (nobody is progressing regardless of whether a process is still
+ * parked at the prompt, and a restart would re-ask it) → a live worker → the owed-work stall.
+ *
+ * PR #1574's REVIEW FOUND THAT ORDER BROKEN, and it is worth saying how. READY used to be reachable only two
+ * ways: a READY label (checked first, so fine) or the `owed === 'none'` arm of the trailing switch — and that
+ * switch ran only in the `else` of `if (worker)`. So `{labels: [], worker: <live>, ledgerOwed: 'none'}` reported
+ * FIXING: the ledger had already recorded the acceptance, no label contradicted it because none was present,
+ * and a fixer's session merely happened to still be alive in the lane. That is not a hypothetical state — it is
+ * `verdict-ledger.mjs`'s own `AGREEMENT.UNLABELED`, the divergence its Phase-1 shadow checker exists to catch
+ * (the label write lagging behind the ledger append). The `owed === 'none'` test is therefore hoisted to sit
+ * beside the label test, where the docblock always said it was: nothing owed outranks everything, INCLUDING a
+ * live worker, because a worker is evidence that someone is working, never evidence that anything is owed.
  *
  * @param {{ labels?: Array<string|{name:string}>, worker?: {lane:string,pid:(number|string),elapsed:string}|null,
  *           pendingQuestion?: {asked:boolean, question:string}|null,
- *           ledgerOwed?: 'fix'|'review'|'human'|'none'|null }} o
+ *           ledgerOwed?: 'fix'|'review'|'human'|'prevention'|'none'|null }} o
  * @returns {{ phase: string, reason: string, display: string }} `display` is the printable phase cell.
  */
 export function derivePhase({ labels = [], worker = null, pendingQuestion = null, ledgerOwed = null } = {}) {
@@ -500,20 +551,25 @@ export function derivePhase({ labels = [], worker = null, pendingQuestion = null
   const stuck = (reason) => ({ phase: PHASES.STUCK, reason, display: `${PHASES.STUCK}: ${reason}` });
   const settled = (phase) => ({ phase, reason: '', display: phase });
 
-  if (READY_LABELS.some(has)) return settled(PHASES.READY);
-
-  if (pendingQuestion && pendingQuestion.asked === true) return stuck(STUCK_REASONS.NEEDS_HUMAN);
-
   // When no label says what is owed, ask the LEDGER — the authority the label is derived from — instead of
-  // reporting "no label" over a jury that has already ruled on the diff.
+  // reporting "no label" over a jury that has already ruled on the diff. Computed FIRST because the READY test
+  // just below needs it; nothing here depends on the worker or on the question.
   const owed = has(REVIEW_LABELS.changes) ? 'fix'
     : has(REVIEW_LABELS.pending) ? 'review'
       : has(REVIEW_LABELS.human) ? 'human'
         : ledgerOwed;
 
+  // NOTHING IS OWED — the first rung of the precedence, by either route. The label route is a PR the drain may
+  // take; the ledger route is the same PR before the label caught up (`review:ledger-check` is the tool that
+  // adjudicates that disagreement, but for "what is happening right now" the honest answer is: nothing is owed).
+  if (READY_LABELS.some(has) || owed === 'none') return settled(PHASES.READY);
+
+  if (pendingQuestion && pendingQuestion.asked === true) return stuck(STUCK_REASONS.NEEDS_HUMAN);
+
   if (worker) {
     // A live process is PROVEN. `owed` only decides which of the two working phases to name it — it can never
-    // conjure one, which is why every arm here sits behind `if (worker)`.
+    // conjure one, which is why every arm here sits behind `if (worker)`. `prevention` falls to FIXING: filing
+    // the named guard is authoring work, not a review of this diff.
     return settled(owed === 'review' || owed === 'human' ? PHASES.REVIEWING : PHASES.FIXING);
   }
 
@@ -521,10 +577,10 @@ export function derivePhase({ labels = [], worker = null, pendingQuestion = null
     case 'fix': return stuck(STUCK_REASONS.BOUNCED_NO_FIXER);
     case 'review': return stuck(STUCK_REASONS.NO_REVIEWER);
     case 'human': return stuck(STUCK_REASONS.HUMAN_GATE);
-    // The ledger — the authority the label is derived from — says this PR is cleared, and no label agrees. That
-    // is a real disagreement (`npm run review:ledger-check` is the tool that adjudicates it), but for "what is
-    // happening right now" the honest answer is that nothing is owed.
-    case 'none': return settled(PHASES.READY);
+    // The jury CONVERGED — every finding is resolved — and is held back only by a prevention guard nobody has
+    // filed yet. "No review label" would read as never-reviewed, and `human gate` is rule 3's reserved name for
+    // the `review:human` LABEL; this stall wants a guard FILED, which is neither of those interventions.
+    case 'prevention': return stuck(STUCK_REASONS.PREVENTION_UNFILED);
     default: return stuck(STUCK_REASONS.NO_LABEL);
   }
 }
