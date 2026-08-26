@@ -5,6 +5,7 @@ status: open
 ongoing: true
 dateOpened: "2026-08-26"
 tags: [review, jury, program, delivery, operations]
+relatedTo: ["xy43foc"]
 ---
 
 # Review-efficacy watch
@@ -92,4 +93,6 @@ Recorded so the next reader does not re-derive it:
 
 ## Review log
 
+- **2026-08-26** — **the split result, measured.** PR #1569 carried the corpus, an engine change, a lens-vocabulary change and this filing in 100 files: five review rounds, no path to convergence. Split into four PRs by file set, it cleared in **one round each** — #1570 merged, #1569 and #1571 accepted. *Bundle size, not reviewer speed*, is therefore an observed result rather than a hypothesis, and it is the cheapest lever found so far: it cost no tokens and no new machinery.
+  **What bounced the small version is the sharper finding.** Not prose — a test that could not fail under any mutation, and the main new feature having no test at all, both proved by breaking the code and watching nothing redden. Two rounds of the `claim-accuracy` lens on that same PR found nine wrong figures and **missed both**. Prose accuracy is cheap to find and rarely what matters; that asymmetry belongs in every reviewer brief this programme writes.
 - **2026-08-26** — filed. Front-B run 1 (the five-track sweep) is the origin, not a review. Goal-set enumerated; 5 of 10 elements buildable now, 4 blocked on named items, 1 unaddressed.

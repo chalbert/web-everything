@@ -5,6 +5,8 @@ size: 3
 parent: "3318"
 status: open
 dateOpened: "2026-08-26"
+scope:
+  - we:scripts/operations/review-pr-io.mjs
 tags: []
 ---
 
