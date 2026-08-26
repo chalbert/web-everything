@@ -261,10 +261,46 @@ export function grepLiteralMismatch(text, { path, read } = {}) {
 }
 
 /**
+ * A test-runner invocation under a NAME FILTER, as written in a criterion: `vitest … -t <pattern>` or
+ * `--testNamePattern`. The filter is what makes the run an empty selection when no test matches.
+ */
+const NAME_FILTERED_RUN_RX = /\b(?:npx\s+|pnpm\s+|yarn\s+|npm\s+(?:run\s+\S+\s+--\s+)?)?(?:vitest|jest)\b[^\n`]*?(\s-t[= ]\s*[^\s`]+|\s--testNamePattern[= ]\s*[^\s`]+)/;
+
+/**
+ * Does the criterion assert, downstream of its command, that tests actually RAN? The repo's convention
+ * is `| grep -qE "Tests +[0-9]+ passed"`; a stated pass count in prose, or `--passWithNoTests=false`,
+ * says the same thing. Deliberately GENEROUS: a criterion that already carries any such assertion is
+ * correct, and a gate that flags correct criteria gets routed around, after which it protects nothing.
+ */
+function assertsTestsRan(criterion) {
+  return /(?:^|[^\w[])\d+\+?\s*(?:tests?\s+)?pass(?:ed|ing)\b/i.test(criterion)      // "Tests  3 passed"
+    || /\b(?:grep|rg|ripgrep)\b[\s\S]{0,120}?pass(?:ed|ing)/i.test(criterion)         // "| grep -qE \"… passed\""
+    || /--passWithNoTests[= ]*false/i.test(criterion)                                 // the runner flag itself
+    || /\bnon-?zero\s+pass\b/i.test(criterion);
+}
+
+/**
  * An "Executable" acceptance criterion that ALREADY holds before the change — a criterion that would
  * pass while the work sat untouched, so it proves nothing. Card #3147's own round-2 revision names this
  * defect in its own words: *"a criterion that would have 'passed' while the prose sat untouched."*
  * Labelled by: PR #1560 `backlog/3147-…md:100` (correctness, broken).
+ *
+ * THE GENERAL RULE, of which the shapes below are instances: **a criterion is vacuous when its success
+ * is independent of the work.** Two instances are modelled here, and more will follow — when the next
+ * one turns up it belongs in this function as a third predicate, not on a new card:
+ *
+ *   1. ABSENCE — "grepping <file> for <literal> returns zero hits", where the literal already matches
+ *      zero times at this revision. The criterion is green before anyone starts.
+ *   2. EMPTY SELECTION — a test-runner invocation under a name filter (`vitest … -t "#NNNN"`) with no
+ *      downstream assertion that tests ran. A filter matching nothing is a selection of ZERO, and
+ *      vitest exits **0** on an empty selection, so the command is green on a tree where the test does
+ *      not exist yet. The fix, and the positive example this gate must let through, is the repo's
+ *      convention: `| grep -qE "Tests +[0-9]+ passed"`. Specimen: the pre-fix #3319 criterion, quoted
+ *      verbatim in `backlog/3340-…md` and pinned as a case in `__tests__/gates.test.mjs`. (The two
+ *      commits that introduced and fixed it never landed on `main`, so the card text — not a sha — is
+ *      the fixture.)
+ *
+ * The two predicates are independent: a criterion can trip either, or both.
  */
 export function vacuousExecutableCriterion(text, { path, read } = {}) {
   if (!/^backlog\//.test(path || '') || typeof read !== 'function') return [];
@@ -273,21 +309,38 @@ export function vacuousExecutableCriterion(text, { path, read } = {}) {
   const out = [];
   for (const crit of doneWhenCriteria(dw.body)) {
     if (!/\*\*Executable\*\*/.test(crit.text)) continue;
+    const line = dw.startLine + crit.line;
+
+    /* --- shape 1: the literal is already absent ------------------------------------------------ */
     const demandsAbsence = /returns? \*{0,2}zero\*{0,2} hits|\bis gone\b|\bno longer (?:appears|occurs)\b|returns? nothing/i.test(crit.text);
-    if (!demandsAbsence) continue;
     const target = crit.text.match(/\b((?:we:)?[\w.-]+(?:\/[\w.-]+)+\.(?:mjs|md|js|ts|json|njk))\b/);
-    if (!target) continue;
-    const rel = target[1].replace(/^we:/, '');
-    const body = read(rel);
-    if (body == null) continue;
-    for (const needle of candidateNeedles(crit.text)) {
-      if (body.includes(needle)) continue; // the literal is present, so demanding its absence is real work
+    if (demandsAbsence && target) {
+      const rel = target[1].replace(/^we:/, '');
+      const body = read(rel);
+      if (body != null) {
+        for (const needle of candidateNeedles(crit.text)) {
+          if (body.includes(needle)) continue; // the literal is present, so demanding its absence is real work
+          out.push({
+            gate: 'vacuous-executable-criterion',
+            path,
+            line,
+            subject: needle,
+            message: `Executable criterion demands "${needle}" be absent from ${rel}, but it already matches zero times at this revision — the criterion passes without the work being done.`,
+          });
+        }
+      }
+    }
+
+    /* --- shape 2: the test selection is already empty ------------------------------------------ */
+    const filtered = crit.text.match(NAME_FILTERED_RUN_RX);
+    if (filtered && !assertsTestsRan(crit.text)) {
+      const subject = filtered[1].trim();
       out.push({
         gate: 'vacuous-executable-criterion',
         path,
-        line: dw.startLine + crit.line,
-        subject: needle,
-        message: `Executable criterion demands "${needle}" be absent from ${rel}, but it already matches zero times at this revision — the criterion passes without the work being done.`,
+        line,
+        subject,
+        message: `Executable criterion runs a test suite under the name filter \`${subject}\` and asserts nothing about the result. A filter matching no test is a selection of zero, and the runner exits 0 on it — so the criterion is green before the test exists. Assert that tests ran, e.g. \`| grep -qE "Tests +[0-9]+ passed"\`.`,
       });
     }
   }
