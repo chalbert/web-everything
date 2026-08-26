@@ -28,6 +28,13 @@ import {
   withBootstrapHook,
   withoutBootstrapHook,
   bootstrapStatus,
+  trustableDirs,
+  withTrustedDirs,
+  untrustedDirs,
+  trustStatus,
+  readJsonConfig,
+  TRUST_PATH,
+  SETTINGS_PATH,
   main,
 } from '../bootstrap-session.mjs';
 
@@ -627,12 +634,204 @@ describe('the post-merge hook is consent-preserving', () => {
  * Every handle is injected. Nothing here spawns a process or touches a settings file; a test that needed to
  * would be testing the machine, and would not run on the other kind of host.
  */
+// WORKSPACE TRUST — the step that stops a background agent stalling on a prompt nobody can answer.
+//
+// An untrusted workspace makes the CLI ignore the repo's COMMITTED `.claude/settings.json` allow-list. Every
+// agent this repo dispatches works in a lane, so the one trusted checkout was the one nobody uses.
+describe('trustableDirs — every checkout an agent is launched into, not just the one nobody works in', () => {
+  const POOL = '/w/.lanes/web-everything';
+  const ALIAS = '/w/web-everything';    // the clone-slug basename — a SYMLINK on the laptop
+  const REAL = '/w/webeverything';      // what the primary checkout actually is there
+  const laneRoot = `${POOL}/lane-7`;
+  const readdir = () => ['lane-1', 'lane-7', 'lane-nul-guard', 'README.md', '.DS_Store'];
+  const asis = (p) => p;                // a realpath probe that canonicalises nothing
+
+  it('enumerates the whole pool from inside one lane, not just the lane it stands in', () => {
+    const dirs = trustableDirs(laneRoot, () => true, readdir, asis);
+    expect(dirs).toContain(`${POOL}/lane-1`);
+    expect(dirs).toContain(`${POOL}/lane-7`);
+    // A lane provisioned but never opened has no `projects` entry at all. Those are precisely the ones a
+    // hand-pass misses, and three real ones were missed that way before this step existed.
+    expect(dirs).toContain(`${POOL}/lane-nul-guard`);
+  });
+
+  it('takes only `lane-*` entries, so a stray file in the pool root is never trusted as a checkout', () => {
+    const dirs = trustableDirs(laneRoot, () => true, readdir, asis);
+    expect(dirs.some((d) => d.endsWith('README.md'))).toBe(false);
+    expect(dirs.some((d) => d.endsWith('.DS_Store'))).toBe(false);
+  });
+
+  // FROM THE PRIMARY TOO — the root the installer is ACTUALLY run from. The registered `SessionStart` hook
+  // runs `scripts/bootstrap-session.mjs` out of the primary checkout, and `npm run bootstrap install` — the
+  // remediation this step's own drift message prints — is run there. An earlier cut enumerated the pool only
+  // when the root was itself a lane, so both reported `ok — 1 checkout(s) already trusted` forever while
+  // every lane stayed untrusted and nothing said so.
+  it('enumerates the pool from the PRIMARY checkout as well, which is where the installer runs', () => {
+    const exists = (p) => p === REAL || p === POOL || String(p).startsWith(`${POOL}/`);
+    const dirs = trustableDirs(REAL, exists, readdir, asis);
+    expect(dirs).toContain(REAL);
+    expect(dirs).toContain(`${POOL}/lane-1`);
+    expect(dirs).toContain(`${POOL}/lane-nul-guard`);
+    // Same answer from either root — that is the whole claim in the title, "on both hosts".
+    expect(dirs).toEqual(trustableDirs(laneRoot, exists, readdir, asis));
+  });
+
+  // THE ALIAS SYMLINK, which the exists filter alone does NOT catch. `primaryCheckout` probes among the
+  // repo's known basenames, so from a lane it can name `web-everything` on a machine whose checkout is
+  // `webeverything` — and this same script's `aliases` step creates that name as a SYMLINK, so it EXISTS and
+  // sails through the filter. `~/.claude.json` keys `projects` on the literal cwd string and the CLI's cwd is
+  // the real path, so trusting the alias writes an entry the CLI never consults, reports `trusted N of N`,
+  // and leaves the real primary untouched.
+  it('collapses an alias symlink onto the real checkout instead of trusting a path the CLI never keys on', () => {
+    const realpath = (p) => (p === ALIAS ? REAL : p);
+    const dirs = trustableDirs(laneRoot, () => true, readdir, realpath);
+    expect(dirs).not.toContain(ALIAS);
+    expect(dirs).toContain(REAL);
+    expect(dirs.length).toBe(4);   // collapsed, not renamed: one primary entry plus the three lanes
+  });
+
+  // THE BUG THIS STEP'S OWN FIRST LIVE RUN FOUND. `primaryCheckout` falls back to the first known basename
+  // when none resolves, so it can hand back a path that resolves NOWHERE. Trusting it writes a `projects`
+  // entry for a directory that is not there and reports success while the real checkout stays untrusted.
+  it('drops a derived checkout path that does not resolve, rather than trusting a directory that is not there', () => {
+    const exists = (p) => String(p).startsWith(POOL);   // both known basenames fail; the fallback is unresolvable
+    const dirs = trustableDirs(laneRoot, exists, readdir, asis);
+    expect(dirs).not.toContain(ALIAS);
+    expect(dirs).not.toContain(REAL);
+    // The lanes still come through, so the filter drops the unresolvable entry and nothing else.
+    expect(dirs).toEqual([`${POOL}/lane-1`, `${POOL}/lane-7`, `${POOL}/lane-nul-guard`]);
+  });
+
+  // THE PROBE IS FORWARDED, so no real filesystem answers on this function's behalf. `primaryCheckout` takes
+  // its own `exists` and defaults it to the real `existsSync`; not passing ours down left a live side channel
+  // to disk, and the assertion above then held only because `/w/web-everything` happens not to exist on
+  // whatever machine runs the suite — the one thing this file's testing philosophy says a test must never
+  // depend on. Here the injected probe accepts the SECOND basename only, an answer no real filesystem can
+  // give (no `/w` tree exists anywhere), so an unforwarded probe falls back to the first and reddens both.
+  it('forwards its own probe into primaryCheckout, so real disk state cannot answer for it', () => {
+    const exists = (p) => p === REAL || String(p).startsWith(POOL);
+    const dirs = trustableDirs(laneRoot, exists, readdir, asis);
+    expect(dirs).toContain(REAL);
+    expect(dirs).not.toContain(ALIAS);
+  });
+
+  it('a checkout with no pool beside it contributes itself alone — the fresh-VM case', () => {
+    const dirs = trustableDirs('/srv/webeverything', (p) => p === '/srv/webeverything', readdir, asis);
+    expect(dirs).toEqual(['/srv/webeverything']);
+  });
+
+  // `exists` and `readdir` are separate handles and a caller may inject an optimistic one (this file's own
+  // installer double answers `true` for every path). A pool root that cannot be opened must contribute no
+  // lanes rather than take the whole SessionStart hook down with an ENOENT.
+  it('survives a pool root that `exists` claims and `readdir` cannot open', () => {
+    const boom = () => { throw new Error('ENOENT'); };
+    expect(trustableDirs(REAL, () => true, boom, asis)).toEqual([REAL]);
+  });
+});
+
+describe('withTrustedDirs — additive, surgical, and never able to withdraw trust', () => {
+  it('sets the flag and creates the entry when the project has never been opened', () => {
+    const next = withTrustedDirs({}, ['/w/lane-1']);
+    expect(next.projects['/w/lane-1'].hasTrustDialogAccepted).toBe(true);
+  });
+
+  it('preserves every other key on an existing project entry', () => {
+    const before = { projects: { '/w/lane-1': { history: [1, 2], mcpServers: { a: 1 } } } };
+    const next = withTrustedDirs(before, ['/w/lane-1']);
+    expect(next.projects['/w/lane-1'].history).toEqual([1, 2]);
+    expect(next.projects['/w/lane-1'].mcpServers).toEqual({ a: 1 });
+    expect(next.projects['/w/lane-1'].hasTrustDialogAccepted).toBe(true);
+  });
+
+  it('leaves projects it was not asked about completely alone', () => {
+    const before = { projects: { '/other/repo': { hasTrustDialogAccepted: false } } };
+    const next = withTrustedDirs(before, ['/w/lane-1']);
+    expect(next.projects['/other/repo']).toEqual({ hasTrustDialogAccepted: false });
+  });
+
+  it('is PURE — the input object is not mutated', () => {
+    const before = { projects: { '/w/lane-1': {} } };
+    withTrustedDirs(before, ['/w/lane-1']);
+    expect(before.projects['/w/lane-1'].hasTrustDialogAccepted).toBeUndefined();
+  });
+
+  // NEVER `false`. A bootstrap that could withdraw trust on a bad derivation is one that can lock every agent
+  // out of every lane at once — a far worse failure than the one this step fixes.
+  it('never writes `false`, even for a directory not in its list', () => {
+    const next = withTrustedDirs({ projects: { '/w/lane-9': { hasTrustDialogAccepted: true } } }, ['/w/lane-1']);
+    expect(next.projects['/w/lane-9'].hasTrustDialogAccepted).toBe(true);
+    expect(JSON.stringify(next)).not.toContain('"hasTrustDialogAccepted":false');
+  });
+});
+
+describe('trustStatus — the step has to speak `drift` or the check gate cannot see it', () => {
+  const DIRS = ['/w/lane-1', '/w/lane-2'];
+  const TRUSTED = { projects: { '/w/lane-1': { hasTrustDialogAccepted: true }, '/w/lane-2': { hasTrustDialogAccepted: true } } };
+
+  it('reports `ok` and grants nothing when every checkout is already trusted', () => {
+    expect(trustStatus({ dirs: DIRS, config: TRUSTED, write: true })).toMatchObject({ status: 'ok', grant: false });
+  });
+
+  it('grants on a writable host, and says how many it fixed', () => {
+    const d = trustStatus({ dirs: DIRS, config: { projects: {} }, write: true });
+    expect(d.grant).toBe(true);
+    expect(d.status).toBe('ok');
+    expect(d.detail).toContain('2 of 2');
+  });
+
+  it('reports `drift` WITHOUT writing on a read-only run, and names the consequence', () => {
+    const d = trustStatus({ dirs: DIRS, config: { projects: {} }, write: false });
+    expect(d.status).toBe('drift');
+    expect(d.grant).toBe(false);
+    expect(d.detail).toMatch(/IGNORED/);
+  });
+
+  it('a --dry-run neither reads a verdict out of the config nor grants', () => {
+    expect(trustStatus({ dirs: DIRS, config: null, write: true, dryRun: true })).toMatchObject({ status: 'planned', grant: false });
+  });
+
+  it('an explicitly-false flag counts as untrusted, not as an answered question', () => {
+    const config = { projects: { '/w/lane-1': { hasTrustDialogAccepted: false } } };
+    expect(untrustedDirs(config, ['/w/lane-1'])).toEqual(['/w/lane-1']);
+  });
+});
+
+// ONE UNUSABLE CONFIG FILE COSTS ITS STEP, NEVER THE SESSION. Both config readers ran a bare `JSON.parse`,
+// and this script is a `SessionStart` hook: a read of the CLI's own actively-written `~/.claude.json` that
+// lands mid-write threw and took every unrelated step down with it. The distinction the tests below pin is
+// `{}` (absent — build it) vs `null` (present, unusable — report it, write NOTHING), because collapsing the
+// two would let a writer rebuild the operator's every-repo CLI state from an empty object.
+describe('readJsonConfig — absent is `{}`, present-but-unusable is `null`', () => {
+  const reads = (text) => () => text;
+
+  it('absent → `{}` without opening the file at all; a valid object → that object', () => {
+    let opened = 0;
+    expect(readJsonConfig('/nope', () => false, () => { opened++; return '{}'; })).toEqual({});
+    expect(opened).toBe(0);
+    expect(readJsonConfig('/p', () => true, reads('{"projects":{"/w/lane-1":{}}}'))).toEqual({ projects: { '/w/lane-1': {} } });
+  });
+
+  // Every case below is PRESENT, so none of them may answer `{}` — a writer reads `{}` as "build it".
+  it.each([
+    ['half-written (the mid-write race)', () => '{"projects": {"/w/lane-1"'],
+    ['truncated to nothing', () => ''],
+    ['valid JSON that is an array', () => '[]'],
+    ['valid JSON that is a scalar', () => '42'],
+    ['valid JSON that is literal null', () => 'null'],
+    ['a read that THROWS rather than returning', () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); }],
+  ])('%s → `null`, never `{}` and never a thrown session hook', (_label, read) => {
+    expect(readJsonConfig('/p', () => true, read)).toBeNull();
+  });
+});
+
 describe('main() — the installer orchestration', () => {
   const spyIo = (over = {}) => {
     const io = {
-      lines: [], writes: [], skills: [], hooks: [], links: [],
+      lines: [], writes: [], trustWrites: [], skills: [], hooks: [], links: [],
       readSettings: () => ({}),
       writeSettings: (next) => io.writes.push(next),
+      readTrust: () => ({}),
+      writeTrust: (next) => io.trustWrites.push(next),
       installHook: () => { io.hooks.push('install'); return 'registered'; },
       uninstallHook: () => { io.hooks.push('uninstall'); return 'removed'; },
       runSkills: (script, argv, opts) => { io.skills.push({ script, argv, ...opts }); return { ok: true, out: 'in sync' }; },
@@ -650,12 +849,82 @@ describe('main() — the installer orchestration', () => {
 
   const run = (argv, env, over = {}) => { const io = spyIo({ env, ...over }); const code = main(argv, io); return { io, code }; };
 
-  /**
-   * The `aliases` step's WRITE branch. The first cut of this PR tested only the pure `aliasesFor`, and the
-   * review proved the gap by mutation: inverting `io.symlink(target, path)` to create every link backwards,
-   * and forcing the consent gate to never write, BOTH still passed the whole suite. `exists: () => true` in
-   * the stub above makes every alias trivially present, so the branch was unreachable even incidentally.
-   */
+  // The `aliases` step's WRITE branch. The first cut of this PR tested only the pure `aliasesFor`, and the
+  // review proved the gap by mutation: inverting `io.symlink(target, path)` to create every link backwards,
+  // and forcing the consent gate to never write, BOTH still passed the whole suite. `exists: () => true` in
+  // the stub above makes every alias trivially present, so the branch was unreachable even incidentally.
+  // THE WIRING, which is the half a pure test cannot reach. `~/.claude.json` and `~/.claude/settings.json`
+  // are two different files with two different owners, and only the first can grant trust. A step that read
+  // or wrote the wrong one would report every checkout untrusted forever while writing permission rules
+  // nobody asked for — and every pure test above would still pass.
+  describe('the trust step reaches the CLI config, NOT the settings file', () => {
+    const trustStep = (io) => report(io).steps.find((s) => s.id === 'trust');
+
+    it('writes trust through `writeTrust` and leaves `writeSettings` untouched by it', () => {
+      const { io } = run(['--json'], VM, { readTrust: () => ({ projects: {} }) });
+      expect(io.trustWrites.length).toBe(1);
+      const written = io.trustWrites[0];
+      for (const entry of Object.values(written.projects)) expect(entry.hasTrustDialogAccepted).toBe(true);
+      // Whatever else the run writes to settings.json, none of it carries a trust flag.
+      expect(JSON.stringify(io.writes)).not.toContain('hasTrustDialogAccepted');
+    });
+
+    it('the two config paths are genuinely different files', () => {
+      expect(TRUST_PATH).not.toBe(SETTINGS_PATH);
+      expect(TRUST_PATH.endsWith('.claude.json')).toBe(true);
+      expect(SETTINGS_PATH.endsWith(join('.claude', 'settings.json'))).toBe(true);
+    });
+
+    // BOTH DERIVATIONS OF THE TRUSTED SET RUN THROUGH THE SAME `exists` PROBE, and that is what this test
+    // got wrong before. It built its expectation from `trustableDirs(REPO_ROOT)` — the module's DEFAULT
+    // probe, the real `existsSync` — while `main()` derived the set it actually asks about through the
+    // `io.exists` stub above. On any checkout where the `web-everything` alias symlink has not been created
+    // beside the real `webeverything` (a fresh lane, CI, any host `bootstrap install` has not run on) the
+    // two disagree: `primaryCheckout`'s `.find()` short-circuits on the always-true stub and yields the
+    // literal `web-everything`, whose `realpathSync.native` then throws ENOENT and falls back to that raw
+    // string, while the real probe rules the alias out and yields `webeverything`. The `readTrust` config
+    // would then not cover the set `main()` asks about, `main()` would write, and this assertion would
+    // redden on the MACHINE rather than on the code — in a file whose whole philosophy is that every handle
+    // is injected. Reproduced in an alias-less layout before fixing (review finding, 2026-08-26).
+    it('writes nothing when every checkout is already trusted', () => {
+      const exists = () => true;                        // the one probe BOTH derivations below run through
+      const trusted = trustableDirs(REPO_ROOT, exists).map((d) => [d, { hasTrustDialogAccepted: true }]);
+      const { io } = run(['--json'], VM, { exists, readTrust: () => ({ projects: Object.fromEntries(trusted) }) });
+      expect(io.trustWrites).toEqual([]);
+      expect(trustStep(io).status).toBe('ok');
+    });
+
+    it('runs on BOTH hosts — a fresh VM checkout needs trusting exactly as a laptop lane does', () => {
+      for (const env of [LAPTOP, VM]) {
+        const { io } = run(['--json'], env, { readTrust: () => ({ projects: {} }) });
+        expect(trustStep(io), `host ${JSON.stringify(env)}`).toBeDefined();
+      }
+    });
+
+    it('a --check run reports drift and writes nothing', () => {
+      const { io } = run(['--check', '--json'], VM, { readTrust: () => ({ projects: {} }) });
+      expect(io.trustWrites).toEqual([]);
+      expect(trustStep(io).status).toBe('drift');
+    });
+
+    // THE `null` PATH IS THE WHOLE POINT OF `readJsonConfig`'s two answers, wired end to end. An unusable
+    // `~/.claude.json` must cost the trust step and nothing else — and must NOT be rebuilt from an empty
+    // object, which is what a `{}` answer here would have produced under `install`'s write consent.
+    it('an unusable ~/.claude.json costs the trust step alone — it writes nothing and the rest still runs', () => {
+      const { io } = run(['install', '--json'], VM, { readTrust: () => null });
+      expect(io.trustWrites).toEqual([]);
+      expect(trustStep(io)).toMatchObject({ status: 'drift', detail: expect.stringContaining('does not parse as JSON') });
+      // Every other step still reported — the failure did not propagate out of `main()`.
+      expect(report(io).steps.filter((st) => st.id !== 'trust').length).toBeGreaterThan(3);
+    });
+
+    it('an unusable settings.json is reported by every step that reads it, and rebuilt by none', () => {
+      const { io } = run(['install', '--json'], LAPTOP, { readSettings: () => null });
+      expect(io.writes).toEqual([]);
+      for (const id of ['gitdir', 'pr-watch']) expect(report(io).steps.find((st) => st.id === id), id).toMatchObject({ status: 'drift' });
+    });
+  });
+
   describe('the aliases step', () => {
     // WE resolves as `web-everything`; its `webeverything` alias is the one thing absent.
     const NO_ALIAS = (p) => !String(p).endsWith('webeverything');

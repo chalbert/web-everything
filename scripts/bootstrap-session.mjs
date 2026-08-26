@@ -54,7 +54,7 @@
  *   node scripts/bootstrap-session.mjs install     # apply on ANY host (the explicit opt-in)
  *   node scripts/bootstrap-session.mjs uninstall   # drop the SessionStart registration
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync, copyFileSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -312,6 +312,12 @@ export function planSteps({ ephemeral, root = REPO_ROOT, home = homedir(), exist
   // needs an explicit grant. No lanes on an ephemeral host, so nothing to grant there.
   if (!ephemeral) steps.push({ id: 'gitdir', title: 'grant the primary checkout .git', gitDir: join(primaryCheckout(root), '.git') });
 
+  // BOTH HOSTS, unlike `gitdir`. An ephemeral VM has no pool yet, so `trustableDirs` returns just its own
+  // checkout — and that checkout still needs trusting, or the CLI ignores the committed allow-list there too.
+  // The step is idempotent and re-derives the lane list every run, so provisioning a pool later is picked up
+  // by the next session rather than needing its own command.
+  steps.push({ id: 'trust', title: 'trust this repo\'s checkouts (so the committed allow-list applies)', trustDirs: trustableDirs(root, exists) });
+
   return steps;
 }
 
@@ -489,9 +495,202 @@ export function bootstrapStatus(settings, exists = existsSync) {
   return found;
 }
 
+// ── workspace trust (#xtrust1) ────────────────────────────────────────────────────────────────────────
+
+/**
+ * The CLI's own config, which is NOT `~/.claude/settings.json`.
+ *
+ * Two files, two owners, and conflating them is the trap: `settings.json` holds hooks and permission RULES,
+ * while `.claude.json` holds per-directory workspace state — including `hasTrustDialogAccepted`. Nothing in
+ * `settings.json` can grant trust, so the `gitdir` step above (which writes `settings.json`) cannot fix the
+ * failure this one exists for.
+ */
+export const TRUST_PATH = join(homedir(), '.claude.json');
+
+/**
+ * Every checkout of this constellation that an agent may be launched INTO, so each can be trusted. PURE over
+ * its three injected probes (`exists`, `readdir`, `realpath`) — it reaches no real filesystem of its own.
+ *
+ * WHY LANES AND NOT JUST THE PRIMARY. An untrusted workspace makes the CLI **ignore the repo's committed
+ * `.claude/settings.json` allow-list** — it says so on startup: *"Ignoring N permissions.allow entries …
+ * this workspace has not been trusted."* Every agent this repo dispatches works in a LANE, never the
+ * primary (the committed `guard-lane.mjs` hook denies writes there), so the trusted checkout was the one
+ * directory no agent uses and every lane it does use was untrusted. Measured 2026-08-25, before this step
+ * existed: 40 of 40 lanes `false`, primary `true` — a figure that cannot be re-measured now that the step
+ * has run, since running it is what flipped them. Each such agent re-asked permission for work the repo
+ * already allows, and a background one has nobody to ask — it simply stops.
+ *
+ * A lane is a clone of a repo the operator has already trusted, provisioned by `lane-pool.mjs` on their own
+ * machine. Trusting it grants nothing the primary did not already grant; it stops silently WITHDRAWING it.
+ *
+ * THE POOL IS ENUMERATED FROM EITHER ROOT, and that is the whole point of {@link poolRoots}. An earlier cut
+ * enumerated it only when the root it ran in was ITSELF a lane, which quietly made the step useless exactly
+ * where it is installed: the registered `SessionStart` hook runs `scripts/bootstrap-session.mjs` out of the
+ * PRIMARY checkout, and `npm run bootstrap install` — the remediation this step itself prints — is run there
+ * too. Both reported `ok — 1 checkout(s) already trusted` while every lane stayed untrusted.
+ */
+export function trustableDirs(root = REPO_ROOT, exists = existsSync, readdir = readdirSync, realpath = realpathNative) {
+  const dirs = [primaryCheckout(root, exists)];
+  for (const poolRoot of poolRoots(root, exists)) {
+    for (const name of listDir(poolRoot, readdir)) {
+      if (/^lane-/.test(name)) dirs.push(join(poolRoot, name));
+    }
+  }
+  // EXISTS-FILTERED **THEN CANONICALISED**, and both halves are load-bearing rather than tidy.
+  //
+  // `primaryCheckout` PROBES among the repo's known directory basenames and falls back to the first when
+  // none is found, so from a lane on a machine whose primary is `webeverything` it can hand back
+  // `web-everything`. The exists filter drops that when it resolves NOWHERE.
+  //
+  // But on the laptop it resolves: this same script's `aliases` step creates `web-everything` as a SYMLINK
+  // to `webeverything`, so `exists` says true and the alias sails through. `~/.claude.json` keys `projects`
+  // on the literal cwd string, and the CLI's cwd is the real path — so trusting the alias writes an entry
+  // the CLI never consults, reports `trusted N of N`, and leaves the real primary untouched. Canonicalising
+  // before the de-dupe collapses the alias and the real checkout to ONE key, which is the entry that counts.
+  const seen = new Set();
+  const out = [];
+  for (const d of dirs) {
+    if (!exists(d)) continue;
+    const real = canonical(d, realpath);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    out.push(real);
+  }
+  return out.sort();
+}
+
+/**
+ * The lane-pool directories whose lanes belong to this checkout — derived from EITHER a lane root or the
+ * primary, because the step has to work from both. PURE over `exists`.
+ *
+ * From a lane the pool is known exactly (`lanePool` parses it out of the path). From a non-lane checkout it
+ * is PROBED, the same way {@link primaryCheckout} probes for the primary's directory: the pool name is the
+ * origin-URL basename `lane-pool.mjs` cloned under, which is one of the repo's known basenames but not
+ * necessarily the one the checkout itself occupies (the laptop's pool is `.lanes/web-everything` beside a
+ * primary named `webeverything`). A checkout that is not a constellation repo, or a fresh VM with no pool
+ * yet, yields nothing — correct there, and the step runs again once someone provisions one.
+ */
+function poolRoots(root = REPO_ROOT, exists = existsSync) {
+  const lane = lanePool(root);
+  const candidates = lane
+    ? [join(lane.workspace, '.lanes', lane.pool)]
+    : (CONSTELLATION_REPOS[selfKey(root) ?? '']?.dirs ?? []).map((d) => join(dirname(root), '.lanes', d));
+  return [...new Set(candidates)].filter((p) => exists(p));
+}
+
+/**
+ * `realpathSync.native`, but never throwing. A path can vanish between the `exists` probe and here, and a
+ * bootstrap step that dies on that race would take the whole session hook down with it; falling back to the
+ * literal path is the same answer the code gave before canonicalising existed.
+ */
+const realpathNative = (p) => { try { return realpathSync.native(p); } catch { return p; } };
+
+/** Canonicalise through an injected probe, tolerating a probe that throws. PURE over `realpath`. */
+function canonical(p, realpath) {
+  try { return realpath(p); } catch { return p; }
+}
+
+/**
+ * List a directory through an injected probe, tolerating one that throws. PURE over `readdir`.
+ *
+ * The `exists` probe and the `readdir` probe are separate handles and a caller may inject an optimistic one
+ * (the installer's own test double answers `true` for every path). A pool root that `exists` claims and
+ * `readdir` cannot open must contribute no lanes, not take the session hook down with an ENOENT.
+ */
+function listDir(p, readdir) {
+  try { return readdir(p); } catch { return []; }
+}
+
+/**
+ * Mark each directory trusted in a `.claude.json` OBJECT. PURE.
+ *
+ * ADDITIVE AND SURGICAL. It sets exactly one boolean per directory and creates the entry when absent; it
+ * never removes a project, never touches another key, and never sets the flag to `false`. Un-trusting is the
+ * operator's to do by hand, because a bootstrap that could withdraw trust on a bad derivation is a bootstrap
+ * that can lock an agent out of every lane at once.
+ */
+export function withTrustedDirs(config, dirs = []) {
+  const next = JSON.parse(JSON.stringify(config ?? {}));
+  next.projects = next.projects ?? {};
+  for (const dir of dirs) {
+    next.projects[dir] = { ...(next.projects[dir] ?? {}), hasTrustDialogAccepted: true };
+  }
+  return next;
+}
+
+/** Which of `dirs` are not yet trusted. PURE. */
+export function untrustedDirs(config, dirs = []) {
+  const projects = config?.projects ?? {};
+  return dirs.filter((d) => projects[d]?.hasTrustDialogAccepted !== true);
+}
+
+/**
+ * The `trust` step's decision, in the same `planned`/`ok`/`drift` vocabulary every other step reports. PURE.
+ *
+ * @param {{dirs: string[], config: object|null, write: boolean, dryRun?: boolean}} o
+ * @returns {{status: string, detail: string, grant: boolean}}
+ */
+export function trustStatus({ dirs = [], config, write, dryRun = false } = {}) {
+  if (dryRun) return { status: 'planned', detail: `${dirs.length} checkout(s)`, grant: false };
+  const missing = untrustedDirs(config, dirs);
+  if (!missing.length) return { status: 'ok', detail: `${dirs.length} checkout(s) already trusted`, grant: false };
+  if (!write) {
+    return {
+      status: 'drift',
+      detail: `${missing.length} of ${dirs.length} checkout(s) NOT trusted — the repo's committed allow-list is `
+        + 'being IGNORED there, so a background agent stalls on a permission prompt with nobody to answer it. '
+        + 'Run `npm run bootstrap install`',
+      grant: false,
+    };
+  }
+  return { status: 'ok', detail: `trusted ${missing.length} of ${dirs.length} checkout(s)`, grant: true };
+}
+
 // ── io ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const readSettings = () => (existsSync(SETTINGS_PATH) ? JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) : {});
+// ONE GUARDED READER FOR BOTH CONFIG FILES, and the guard is the point rather than the sharing.
+//
+// This ran as a bare `JSON.parse` per call site. `~/.claude.json` is the CLI's OWN, actively-written state
+// file, and this script runs as a `SessionStart` hook on a machine where dozens of lanes start sessions
+// close together — so a read that lands mid-write throws, and the throw propagates out of `main()` and
+// takes the WHOLE bootstrap down: skills, commands, memory, siblings, aliases, gitdir and trust alike. One
+// unusable config file must cost its own step and nothing else (review finding, 2026-08-26).
+//
+// ABSENT IS `{}`; PRESENT-BUT-UNUSABLE IS `null`, and the two are deliberately different answers. `{}` says
+// "nothing here yet, build it" — the correct read of a first run. Returning `{}` for a file that IS there
+// but did not parse would say the same thing to a writer, which would then rebuild `~/.claude.json` from an
+// empty object and take the operator's every-repo CLI state with it (a `.bak` copy of a file we could not
+// parse is thin comfort). `null` says "present, unusable", and every caller below reports it and writes
+// nothing.
+export function readJsonConfig(path, exists = existsSync, read = (p) => readFileSync(p, 'utf8')) {
+  if (!exists(path)) return {};
+  let parsed;
+  try { parsed = JSON.parse(read(path)); } catch { return null; }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
+/** What a step reports when its config file is there but unusable. Never a write. */
+export const unreadableConfig = (path) =>
+  `${path} is present but does not parse as JSON — this step read nothing and wrote nothing rather than `
+  + 'rebuilding that file from an empty object. Every other step still ran. Fix or move it aside, then '
+  + 're-run `npm run bootstrap install`.';
+
+const readSettings = () => readJsonConfig(SETTINGS_PATH);
+
+const readTrust = () => readJsonConfig(TRUST_PATH);
+
+/**
+ * Write `~/.claude.json`, backing the previous copy up first.
+ *
+ * The backup is not ceremony here: this file holds the operator's whole per-project CLI state — history,
+ * onboarding flags, MCP approvals — for every repo on the machine, not just this one. A bad write costs far
+ * more than the `settings.json` one, so it gets the same `.bak` treatment and the same single-key discipline
+ * in {@link withTrustedDirs}.
+ */
+function writeTrust(next) {
+  if (existsSync(TRUST_PATH)) copyFileSync(TRUST_PATH, `${TRUST_PATH}.bak`);
+  writeFileSync(TRUST_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+}
 
 function writeSettings(next) {
   mkdirSync(dirname(SETTINGS_PATH), { recursive: true });
@@ -501,6 +700,7 @@ function writeSettings(next) {
 
 function installHook() {
   const before = readSettings();
+  if (before === null) return `NOT registered — ${unreadableConfig(SETTINGS_PATH)}`;
   if (bootstrapStatus(before).some((f) => f.path === BOOTSTRAP_PATH && f.resolves)) return 'already registered';
   writeSettings(withBootstrapHook(before));
   return `registered in ${SETTINGS_PATH}`;
@@ -508,6 +708,7 @@ function installHook() {
 
 function uninstallHook() {
   const before = readSettings();
+  if (before === null) return `NOT removed — ${unreadableConfig(SETTINGS_PATH)}`;
   if (!bootstrapStatus(before).length) return `not registered in ${SETTINGS_PATH}`;
   writeSettings(withoutBootstrapHook(before));
   return `removed from ${SETTINGS_PATH} (previous saved to ${SETTINGS_PATH}.bak)`;
@@ -606,7 +807,7 @@ export function gitDirStatus({ gitDir, settings, write, dryRun = false } = {}) {
  */
 export function defaultIo() {
   return {
-    readSettings, writeSettings, installHook, uninstallHook, runSkills,
+    readSettings, writeSettings, readTrust, writeTrust, installHook, uninstallHook, runSkills,
     exists: existsSync,
     symlink: (target, path) => symlinkSync(target, path, 'dir'),
     env: process.env,
@@ -632,8 +833,21 @@ export function main(argv, io = defaultIo()) {
     if (step.gitDir) {
       const dryRun = has('--dry-run');
       const before = dryRun ? null : io.readSettings();
+      // `null` here is the UNUSABLE answer, not the `--dry-run` one — see `readJsonConfig`.
+      if (!dryRun && before === null) { report.steps.push({ id: step.id, status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }); continue; }
       const decision = gitDirStatus({ gitDir: step.gitDir, settings: before, write, dryRun });
       if (decision.grant) io.writeSettings(withPrimaryGitDir(before, step.gitDir, knownGitDirs()));
+      report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
+      continue;
+    }
+    if (step.trustDirs) {
+      const dryRun = has('--dry-run');
+      // A SEPARATE FILE from `readSettings`. `~/.claude.json` is the CLI's workspace config; `settings.json`
+      // is hooks and permission rules. Reading the wrong one here reports every checkout as untrusted forever.
+      const before = dryRun ? null : io.readTrust();
+      if (!dryRun && before === null) { report.steps.push({ id: step.id, status: 'drift', detail: unreadableConfig(TRUST_PATH) }); continue; }
+      const decision = trustStatus({ dirs: step.trustDirs, config: before, write, dryRun });
+      if (decision.grant) io.writeTrust(withTrustedDirs(before, step.trustDirs));
       report.steps.push({ id: step.id, status: decision.status, detail: decision.detail });
       continue;
     }
@@ -690,7 +904,10 @@ export function main(argv, io = defaultIo()) {
   // once for the `gitdir` step — its `gitDirStatus` returns the same `planned`/`ok`/`drift` vocabulary for
   // exactly this reason — so the second step to need it reuses the vocabulary instead of inventing one
   // (PR #1520 correctness juror).
-  report.steps.push(toolAllowStatus({ settings: io.readSettings(), write, dryRun: has('--dry-run'), apply: io.writeSettings }));
+  const allowSettings = io.readSettings();
+  report.steps.push(allowSettings === null
+    ? { id: 'pr-watch', status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }
+    : toolAllowStatus({ settings: allowSettings, write, dryRun: has('--dry-run'), apply: io.writeSettings }));
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
