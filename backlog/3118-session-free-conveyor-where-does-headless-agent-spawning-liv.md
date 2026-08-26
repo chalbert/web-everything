@@ -2,8 +2,11 @@
 bornAs: x501fk9
 kind: decision
 parent: "2753"
-status: open
+status: resolved
 dateOpened: "2026-08-15"
+dateResolved: "2026-08-26"
+codifiedIn: "docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation"
+ratifiedBy: "Nicolas Gilbert (operator)"
 preparedDate: "2026-08-25"
 relatedReport: reports/2026-07-12-claude-cli-agent-runner-headless-contract.md
 relatedTo: ["2464", "2530", "2444", "2703", "3102", "3031"]
@@ -11,6 +14,13 @@ tags: [plateau-loop, conveyor, agent-runner, session-free]
 ---
 
 # Session-free conveyor: where does headless agent-spawning live -- WE-native runner vs a cross-process call into plateau-app's build-runner
+
+> **RULED 2026-08-26 by the operator (Nicolas Gilbert): Fork 1 → (c), call the existing `dispatch-lane`
+> operation.** The ruling and its full reasoning are in **[THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation)**
+> near the end of this card. That section is the only operative statement of the decision — everything above
+> it is the record of how the card got there, including two amendments that were retracted rather than
+> deleted. Codified as
+> [#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation).
 
 **Filed while preparing #2464 (now resolved into this item — see below).** The #2444-ratified CLI-spawn
 agent-runner contract (`spawn`/`steer`/`stop`/`resume`/`observe`) already shipped in code at
@@ -418,6 +428,97 @@ predicted scope and is re-checked against the real diff at PR open.
 | simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
 | standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
 
+## THE CALL (operator, 2026-08-26): Fork 1 → **(c) call the existing `dispatch-lane` operation**
+
+Ratified by the operator (Nicolas Gilbert) on 2026-08-26. The conveyor's headless dispatch starts agents by
+**calling `we:scripts/operations/dispatch-lane.mjs` once per surfaced dispatch**. No new module is written,
+nothing is spawned in-process, and no cross-process call into `plateau-app`'s dev server is introduced.
+(a) — a new `we:scripts/conveyor/agent-runner.mjs` — and (b) — HTTP into `plateau-app` — are both rejected.
+
+Codified as
+[#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation).
+
+### Why — the four reasons that make this ruling checkable later
+
+**1. The fork's own opening paragraph forbids (a), not only (b).** That paragraph rejects supporting two
+branches because it *"would mean two live spawn implementations behind the same five-verb contract with
+independent failure modes, which is exactly the second-implementation shape #deterministic-core-thin-judgment's
+one-source clause forbids."* A new `we:scripts/conveyor/agent-runner.mjs` sitting beside `dispatch-lane`'s
+existing `claude --bg` spawn **is that shape**. The argument was aimed at (b) and lands on (a) just as hard.
+This is the reason the amendment's author wrote first, and it is the reason the ruling rests on: the card
+argued itself out of its own original default.
+
+**2. The steer question the fork originally turned on was PROBED, not argued.** An earlier version of this
+card made mid-flight steering the pivot — if the conveyor needs to steer, (a)'s richer
+`spawn/steer/stop/resume/observe` contract earns its second implementation. That was settled by measurement
+on 2026-08-25, not by reasoning: a detached `--bg` agent was stopped, then resumed with
+`claude --resume <sessionId>` and new instructions, and answered with a sentinel planted before the stop —
+**context preserved**. So "steer while keeping the work" is reachable under (c), as stop-then-resume rather
+than as a `steer(text)` write to a live stdin. That is a coarser verb, not a missing capability. The pivot
+the fork turned on is gone.
+
+**3. The hinge — the one capability (c) can never reach, and the operator ruled on it directly.** (c) cannot
+steer a **running** agent **without interrupting it**. Stop-then-resume, by construction, interrupts. The
+operator was asked this question directly and ruled that **context-preserving stop-then-resume satisfies the
+requirement**. That is the load-bearing acceptance of this whole decision.
+
+**If the requirement ever changes from "steer while keeping the work" to "steer without ever interrupting",
+this ruling is the thing that has to be revisited** — no stop-then-resume backend can reach that, and the
+case for a second spawn implementation would have to be re-argued from the start. Recorded here explicitly so
+a later reader does not have to reconstruct it, and carried into the statute as clause 3.
+
+**4. (c)'s costs are ACCEPTED, not waived.** Four of them, each named rather than smoothed over:
+
+- **It depends on `#3165` landing first.** The ruling makes this decision downstream of a card that is still
+  `status: open`.
+- **`#3165` buys three of the five dispatch kinds, not five** — `build`, `prepare-scope`, `prepare-decision`.
+  Verified: `grep -c 'spawnFixes\|spawnCiHeals\|ciHeal\|CI-heal'` over
+  `we:backlog/3165-tick-core-plans-auto-prepare-scope-dispatches-that-never-act.md` returns **0**. The card's
+  own text names `'build' | 'prepare' | 'prepare-decision'` at its `:68` and `:131`.
+- **The other two kinds had no card. They do now: `#xj86df4`.** `we:scripts/conveyor/tick-core.mjs:860-861`
+  plans `spawnFixes` and `spawnCiHeals`; `we:scripts/operations/dispatch-lane-io.mjs:139` launches
+  `match(decisions.spawnBuilds)` only, and `briefPath` at `:52` takes no kind. After `#3165` lands, three of
+  five kinds dispatch through the operation and two still do not.
+- **It inherits an unproven handle assumption, and that now has a card too: `#xhmktct`.** The sink mints the
+  session id (`we:scripts/operations/dispatch-lane-io.mjs:558`) and pins it with `--session-id` (`:621`); the
+  observer matches on that same minted value (`:738`). A single manual run suggested `claude --bg` ignores
+  `--session-id`. `#xhmktct` probes it before anything is fixed, because one observation is not evidence.
+
+### Corrections this ruling makes to the card above it
+
+Recorded rather than silently applied, per this card's own established practice.
+
+- **The line numbers in the amendment's citations have drifted.** They were written against an earlier
+  revision. Verified against `main` at `3b2aeded`, the current lines are: `mintSessionId` at **`:558`** (card
+  says `:555`), the `--session-id` argv at **`:621`** (card says `:618`), the observer's
+  `sessions.find(… === handle)` at **`:738`** (card says `:735`), `handle` read off the entry at **`:693`**
+  (card says `:690`), and the sink header at **`:507-534`** (card says `:507-514`). The substance of every
+  cited claim checks out at the new lines; only the numbers moved.
+- **The sink's "not proven" comment has been reworded since the card quoted it.** The card quotes `:528` as
+  *"NOT YET PROVEN LIVE… the argv below is asserted, the CLI's response to it is not"*. `:528-534` now reads
+  *"PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI… What is still NOT proven: no dispatch has been fired
+  end to end, and the REAL CLI's response to this argv remains unasserted."* Same meaning, and the assumption
+  is still unproven — but the quote is no longer verbatim.
+- **The card points at "#3096" for the first live run; the code points at `#xaibmeu`.** Those are the same
+  item — `we:backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md` has
+  `bornAs: xaibmeu`. Not an error, recorded so the next reader does not have to resolve it again.
+- **The observer defect is narrower than the card states, and still real.** The card says a `--session-id`
+  mismatch means the observer *"reports every real dispatch as `unresolved`"*. The observer tries the **PR
+  axis first** (`we:scripts/operations/dispatch-lane-io.mjs:695-729`), and a merged PR still returns
+  `succeeded` at `:716-724` regardless of the session id. The accurate claim is the one `:731-732` makes
+  about the liveness axis itself — it is *"what answers while no PR exists yet, which is every dispatch for
+  most of its life"* — so a dispatch would read `unresolved` for its entire pre-PR life, two minutes
+  (`DISPATCH_LISTING_GRACE_MINUTES = 2`, `we:scripts/operations/dispatch-lane.mjs:111`) after it starts. That
+  is the version `#xhmktct` carries.
+
+### What was NOT re-run, stated so it is not mistaken for done
+
+The card itself flags that *"a fresh skeptic pass over (a)-vs-(c) has not been run and is owed at the
+decision turn."* **It still has not been run.** Both recorded skeptic passes and both screens ran against a
+survey containing only (a) and (b), and neither is evidence for or against (c). The operator ruled without
+it. That is the operator's call to make, and this line exists so nobody later reads the two `SURVIVES` marks
+above as endorsements of the option that actually won.
+
 ## Why this is a new item, not a rebuild of #2464
 
 #2464 asked to "build the phase-1 runner... behind a stable runner interface" — read literally, that
@@ -433,4 +534,16 @@ remaining critical-path decision #2753 (Phase B, item 1) and #3102 (Phase B) bot
 - [x] `#2753` and `#3102`'s Phase-B critical-path line points at this item's resolution/successor build item,
   not `#2464`. *(Verified 2026-08-16 — both already cite `#3118` directly: #2753's DAG item 1 and #3102's
   Phase B paragraph. No edit needed.)*
-- [ ] The fork above is ratified (explicit operator utterance, not inferred).
+- [x] The fork above is ratified (explicit operator utterance, not inferred). *(Ruled 2026-08-26 by the
+  operator — Fork 1 → (c). See [THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation).)*
+
+## Successors
+
+The ruling accepts three costs; each has an owner now, so none of them lives only in this card's prose:
+
+| what | where it is carried |
+| --- | --- |
+| three of five dispatch kinds routed through the operation | `#3165` (open) |
+| the other two kinds — `spawnFixes`, `spawnCiHeals` | **`#xj86df4`** (filed 2026-08-26 by this ruling) |
+| the unproven `--session-id` handle assumption the observer rests on | **`#xhmktct`** (filed 2026-08-26 by this ruling) |
+| the first end-to-end live dispatch through the operation | `#3096` (open, `bornAs: xaibmeu`) |
