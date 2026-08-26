@@ -479,3 +479,89 @@ describe('an effect step writes a finding', () => {
     expect(advanceWhileRunning(rec, { registry }).findings.go.applied).toBe(true);
   });
 });
+
+// ── #3316 — a suspended run names the skill that owns the rest of it ────────────────────────────────────────
+//
+// THE FAILURE THIS PINS. A session invoked `review-pr` bare, hit its `confirm` suspend, did not know how to
+// proceed, and escalated to a human — while `we:skills-src/review/SKILL.md` documented both routes forward the
+// whole time. The operation suspended correctly; the record held no pointer from the run to the process it was
+// one stop inside. These tests assert the pointer is on the record at every suspend, that it is DECLARED
+// rather than special-cased per operation, and — the compatibility half — that an operation declaring none
+// produces exactly the record it produced before this field existed.
+describe('#3316 a suspend names the skill that owns the rest of the run', () => {
+  const SKILL = 'we:skills-src/review/SKILL.md';
+
+  /** One declaration that reaches all three suspends, with or without a declared owner. */
+  const decl = ({ ownedBy } = {}) => {
+    const r = createRegistry();
+    r.register(op('owned', {
+      input: { pr: 'number' },
+      ...(ownedBy === undefined ? {} : { ownedBy }),
+      panel: judge({ reads: ['input.pr'], request: (v) => ({ mandate: 'judge it', input: String(v.input.pr), shape: {} }) }),
+      humanOk: confirm({ reads: ['findings.panel'], asks: 'Accept this verdict?', of: 'operator', options: ['accept', 'changes'] }),
+      record: effect({ reads: ['findings.humanOk'], effects: () => [{ type: 'ledger.append', payload: {} }] }),
+    }));
+    return r;
+  };
+
+  const start = (registry) => startRun({ op: 'owned', id: 'run-o', input: { pr: 42 }, registry });
+
+  it('the confirm suspend — the one the defect was measured on — carries the pointer on the record', () => {
+    const registry = decl({ ownedBy: SKILL });
+    let run = advanceWhileRunning(start(registry), { registry });
+    run = advanceWhileRunning(run, { registry, resume: { value: { verdict: 'accept' } } });
+    expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+    expect(run.pending).toMatchObject({ kind: 'confirm', step: 'humanOk', ownedBy: SKILL });
+  });
+
+  it('the judge and effect suspends carry it too — every stop, not just the human one', () => {
+    const registry = decl({ ownedBy: SKILL });
+    const judging = advanceWhileRunning(start(registry), { registry });
+    expect(judging.pending).toMatchObject({ kind: 'judge', ownedBy: SKILL });
+
+    const confirming = advanceWhileRunning(judging, { registry, resume: { value: { verdict: 'accept' } } });
+    const effecting = advanceWhileRunning(confirming, { registry, resume: { value: 'accept' } });
+    expect(effecting.pending).toMatchObject({ kind: 'effect', ownedBy: SKILL });
+  });
+
+  // THE COMPATIBILITY CLAIM, asserted rather than assumed. A required field, or an always-present
+  // `ownedBy: null`, would have changed the record shape of every operation that legitimately owns no skill.
+  it('an operation that declares NO skill produces the identical record — the key is absent, not null', () => {
+    const registry = decl();
+    const run = advanceWhileRunning(start(registry), { registry });
+    expect(runStatus(run, { registry })).toBe('awaiting-judge');
+    expect(Object.prototype.hasOwnProperty.call(run.pending, 'ownedBy')).toBe(false);
+    expect(Object.keys(run.pending).sort()).toEqual(['kind', 'request', 'step', 'stepIndex']);
+  });
+
+  it('a run with no declared owner still completes end to end — the field breaks nothing it does not touch', () => {
+    const registry = createRegistry();
+    registry.register(op('plain', {
+      input: { pr: 'number' },
+      double: compute({ reads: ['input.pr'], fn: (v) => v.input.pr * 2 }),
+    }));
+    const run = advanceWhileRunning(startRun({ op: 'plain', id: 'run-p', input: { pr: 21 }, registry }), { registry });
+    expect(isComplete(run, { registry })).toBe(true);
+    expect(run.findings.double).toBe(42);
+    expect(run.pending).toBe(null);
+  });
+
+  // DECLARED, NOT SPECIAL-CASED. The engine names no operation; whatever the declaration says is what rides.
+  it('the engine reads the pointer off the declaration and invents nothing', () => {
+    const registry = decl({ ownedBy: 'we:skills-src/drain/SKILL.md' });
+    expect(advanceWhileRunning(start(registry), { registry }).pending.ownedBy).toBe('we:skills-src/drain/SKILL.md');
+  });
+
+  // REFUSED AT REGISTRATION, like every other structural claim about a declaration. A pointer that reads as
+  // advice is the dead end this field exists to close, so it never reaches a run record.
+  it('refuses a pointer that is not a locus-prefixed path, at registration', () => {
+    const build = (ownedBy) => () => op('t', { ownedBy, probe: compute({ reads: [], fn: () => 1 }) });
+    expect(build('the review skill')).toThrow(/not a locus-prefixed path/);
+    expect(build('skills-src/review/SKILL.md')).toThrow(/not a locus-prefixed path/);
+    expect(build('')).toThrow(/must be a locus-prefixed path/);
+    expect(build(7)).toThrow(/must be a locus-prefixed path/);
+    // Absent is legal, and normalizes to `null` rather than to a guess.
+    expect(op('t', { probe: compute({ reads: [], fn: () => 1 }) }).ownedBy).toBe(null);
+    expect(op('t', { ownedBy: SKILL, probe: compute({ reads: [], fn: () => 1 }) }).ownedBy).toBe(SKILL);
+  });
+});

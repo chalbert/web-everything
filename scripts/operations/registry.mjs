@@ -16,6 +16,7 @@
  *   input:       { pr: 'number', aim: { type: 'string', required: false },
  *                  reason: { type: 'string', required: false, atConfirm: true } },
  *   verdictFrom: 'panel',                                   // optional: which step's finding IS the verdict
+ *   ownedBy:     'we:skills-src/review/SKILL.md',           // optional: the skill that owns the rest of the run
  *   diff:    compute({ reads: ['input.pr'],       fn: (v) => … }),
  *   panel:   judge({   reads: ['findings.diff'],  request: (v) => ({ mandate, input, shape }) }),
  *   humanOk: confirm({ reads: ['verdict'], asks: 'Accept this verdict?', of: 'operator',
@@ -32,8 +33,8 @@
  * {@link normalizeInputSchema}.
  *
  * Step ORDER is the object's key order — JavaScript preserves insertion order for string keys, so the
- * declaration reads top-to-bottom as the run executes. `input` and `verdictFrom` are the ONLY reserved keys;
- * every other key is a step.
+ * declaration reads top-to-bottom as the run executes. {@link RESERVED_DECLARATION_KEYS} lists the only
+ * non-step keys; every other key is a step.
  *
  * REFUSED AT REGISTRATION, NEVER AT RUN TIME. A fifth kind, a hand-rolled step lookalike, a read of a
  * later step's finding, a read of an undeclared input field, a `verdictFrom` naming nothing — all of these
@@ -46,7 +47,54 @@
 import { STEP_KINDS, isStep } from './step-kinds.mjs';
 
 /** Keys of a declaration body that are NOT steps. Everything else must be a step. */
-export const RESERVED_DECLARATION_KEYS = Object.freeze(['input', 'verdictFrom', 'declaresOver']);
+export const RESERVED_DECLARATION_KEYS = Object.freeze(['input', 'verdictFrom', 'declaresOver', 'ownedBy']);
+
+/**
+ * THE SKILL THAT OWNS THE REST OF THE RUN (#3316) — validate one `ownedBy` value. PURE.
+ *
+ * WHY THIS IS A FIELD AND NOT A FIFTH STEP KIND. The statute's clause 2
+ * ([#operations-declared-once-callers-generated](../../docs/agent/platform-decisions.md#operations-declared-once-callers-generated),
+ * #3031) closes the vocabulary at four kinds and says an operation that appears to need a fifth is a signal to
+ * change the model. Nothing here asks for one: a pointer at prose is not a step the engine executes, it is a
+ * property of the DECLARATION in exactly the sense `verdictFrom` and `declaresOver` already are — one string,
+ * validated at registration, carried onto the record when the run stops.
+ *
+ * WHAT WENT WRONG WITHOUT IT. A session invoked `review-pr` bare, reached its `confirm` suspend, and stopped:
+ * the run said WHAT was asked and OF WHOM and offered a `--resume` line, and none of that told the caller that
+ * `we:skills-src/review/SKILL.md` documented both routes forward. The suspend was correct; it was a dead end
+ * for anyone who had not already read the skill. A suspended run is precisely the moment the caller is standing
+ * OUTSIDE a process, so that is the moment the process must be nameable.
+ *
+ * IT IS DECLARED, NEVER DERIVED, and that is the same split `declaresOver`'s header argues. Nothing in the
+ * import graph says which skill owns a run — a skill naming an operation in prose is not ownership, and #3224's
+ * scan already counts those mentions without being able to rank them. Only the author knows.
+ *
+ * SHAPE ONLY, here. A locus prefix (#883) is required so the value names something resolvable rather than
+ * reading as advice ("the review skill"); whether the file EXISTS is derived by `we:scripts/check-standards.mjs`,
+ * which can read the disk this module deliberately cannot.
+ *
+ * @param {*} value
+ * @param {string} name - operation name, for error text.
+ * @returns {string|null} the trimmed pointer, or `null` when the declaration names no skill.
+ */
+export function normalizeOwningSkill(value, name = '<anonymous>') {
+  if (value == null) return null;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(
+      `operations: \`${name}\` — \`ownedBy\` must be a locus-prefixed path to the skill that owns the rest of `
+      + `the run (e.g. "we:skills-src/review/SKILL.md"), got ${JSON.stringify(value)}`,
+    );
+  }
+  const pointer = value.trim();
+  if (!/^[a-z][a-z0-9-]*:\S+$/.test(pointer)) {
+    throw new TypeError(
+      `operations: \`${name}\` — \`ownedBy\` ${JSON.stringify(pointer)} is not a locus-prefixed path (#883), `
+      + 'e.g. "we:skills-src/review/SKILL.md". A pointer nobody can resolve is the dead end this field exists '
+      + 'to close, so it is refused at registration rather than emitted onto a suspended run.',
+    );
+  }
+  return pointer;
+}
 
 /**
  * Parse one `declaresOver` entry — `"we:scripts/lane-pool.mjs acquire"` — into `{home, command}`. PURE.
@@ -373,11 +421,17 @@ export function op(name, body) {
     }));
   }
 
+  // #3316 — the skill that owns the rest of this run, or `null`. OPTIONAL, and it must stay optional: making
+  // it required would redden every one of the twelve declarations that legitimately owns no skill, which is
+  // how a field meant to help a stuck caller becomes a field authors fill in with the nearest plausible path.
+  const ownedBy = normalizeOwningSkill(body.ownedBy, name);
+
   return Object.freeze({
     name: name.trim(),
     input,
     verdictFrom,
     declaresOver,
+    ownedBy,
     steps: Object.freeze(steps.map((s) => Object.freeze(s))),
     stepNames: Object.freeze(steps.map((s) => s.name)),
   });
