@@ -92,8 +92,11 @@ a filesystem.
    authored. The **pin is right and stays** — the fixture reproduces at `ee6e5a98`, verified — but the label
    moves the correct-citation half: at `74c1c9f0` those two lines are **279** and **284**, not 274 and 279,
    because later prep rounds inserted text above them. This is the same error `x4dbhiy` retracts one round
-   earlier over `5289202` — corrected there, written into this card in the same commit. It is the `xfgjxyf`
-   shape but not something `xfgjxyf` catches: that rule matches on the corrected claim's own string, and a
+   earlier over `5289202` — corrected there, and left standing here. *(Retracted, not deleted: this clause
+   used to read* **"written into this card in the same commit"**. *That per-commit attribution is withdrawn
+   in full on* `x3v6tn6`*;* `git log -S` *counts removals as well as additions and cannot settle it.)* It is
+   the `xfgjxyf` shape but not something `xfgjxyf` catches: that rule matches on the corrected claim's own
+   string, and a
    different sha carries none of it. `x3v6tn6` is filed for the head-label class itself, owed by the review
    that caught this.)*
 4. **Executable** — **`x4dbhiy`'s ACTUAL corrected body reports none.** It still contains the string

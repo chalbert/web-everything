@@ -34,29 +34,28 @@ cannot tell the fixture is fine.
 ## Why a gate rather than a careful author
 
 This is the same failure `x4dbhiy` already retracts once, in the same PR: *"`5289202` was an intermediate
-rebase commit, not the head that merged"*. The commit that made that correction wrote the *same* error, with
-a different sha, into two other cards and into the description. An author who has just fixed the error in one
-place is demonstrably not the mechanism that finds the next three.
+rebase commit, not the head that merged"*. The *same* error, with a different sha, stood in two other cards
+and in the description, and correcting the first one did not surface any of them. An author who has just
+fixed the error in one place is demonstrably not the mechanism that finds the next three.
 
 `xfgjxyf` — the card filed for *"corrected here, left standing there"* — is adjacent and does not cover it.
 That rule keys on the **corrected claim's own string**, which is how it hands a searcher the text to look
 for. `5289202` and `ee6e5a98` share no string, so the second instance carries nothing for it to match. The
 class is the wrong sha in the same **role**, and only resolving the role finds it.
 
-**The round that filed this card committed a third pair, and the review caught it rather than the author.**
-`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` ends at `6954693e` — its oldest entry, the commit that corrected
-`5289202` and wrote *both* remaining pairs, and the round after it corrected `ee6e5a98` in all three of its
-places while leaving `60acbe5f` labelled *"PR #1556's merge-base"* two lines above the paragraph it was
-editing — `x4dbhiy` twice and the description once. `60acbe5f` is a `drain` commit on `main`:
+**A third pair stood while this card was being filed, and the review caught it rather than the author.** The
+round that corrected `ee6e5a98` in all three of its places left `60acbe5f` labelled *"PR #1556's merge-base"*
+two lines above the paragraph it was editing — `x4dbhiy` twice and the description once. `60acbe5f` is a
+`drain` commit on `main`:
 `baseRefOid` is `e9aa38f6`, the merge-base at the merged head is `e6db8cf5`, and at the pre-rebase head
 `e7ab2833`. It is none of the three. That instance is the reason the role-word list below is not just *head*
 — an author fixing one role word does not think to re-resolve a different one, and a rule that resolves the
 role finds both without being told which word to worry about.
 
 **The round that corrected that one missed a fourth, on the same sha, in the same file.** `x4dbhiy`'s
-marker-set fence was labelled `base 60acbe5f` / `head 74c1c9f0` from `6954693e` until round 8. `head` was
-right; `base` was not — `baseRefOid` resolves to `e9aa38f6`. Round 6 swept for *head*, round 7 swept for
-*merge-base*, and **both swept prose**: the third role word sat inside a fenced result block and neither
+marker-set fence was labelled `base 60acbe5f` / `head 74c1c9f0` until round 8. `head` was right; `base` was
+not — `baseRefOid` resolves to `e9aa38f6`. Round 6 swept for *head*, round 7 swept for *merge-base*, and
+**both swept prose**: the third role word sat inside a fenced result block and neither
 grep for a quoted word reached it. Three consecutive rounds each fixed the instance a review quoted and left
 the next one standing a few lines away — at `87d5823d` the untouched `base` label sat six lines below the
 `merge-base` label round 7 rewrote.
@@ -65,7 +64,7 @@ Counted under this card's own predicate — a sha sitting beside a role word for
 produced four pairs across **nine** places: `5289202` as *head* in `x4dbhiy` and the description (2),
 `ee6e5a98` as *head* in `xv92hju`, `xo5pueh` and the description (3), `60acbe5f` as *merge-base* in
 `x4dbhiy` twice and the description (3), and `60acbe5f` as *base* in `x4dbhiy`'s fence (1).
-2 + 3 + 3 + 1 = 9. Three of the four pairs were written by the very commit that corrected the one before it.
+2 + 3 + 3 + 1 = 9. **Not one of the four was caught by an author** — each was found by a later review.
 That is the case for a gate rather than a more careful author.
 
 *(Retracted, not deleted. This paragraph, written in round 7 (`1090ac22`) together with the same count in
@@ -76,6 +75,19 @@ grep could see. The card-side figures are re-read from git, not recalled.*
 *60 and 110 are the two* merge-base *places — 110 holds the sha and its role word ends the wrapped line 109
 above it — and 66 is the fenced* `base` *label. Three places on one sha in one file, and the round-7 fix
 reached two of them.)*
+
+*(Retracted, not deleted — the* **attribution**, *not the count. Until this round this card also stated*
+***which commit wrote which pair***, *in two places that disagreed: the third-pair paragraph opening this
+section said* `6954693e` *"corrected `5289202` and wrote* both *remaining pairs", and the sentence closing
+the count above said* three *of the four "were written by the very commit that corrected the one before it".*
+***Both are withdrawn.*** *They contradict each other — two and three cannot both be right — and re-reading
+the history supports neither cleanly:* `ee6e5a98` *enters at* `95b5585a` *and is touched again at* `87d5823d`
+*and* `1090ac22`; `60acbe5f` *appears across four commits, two of them from other PRs.* `git log -S` *counts*
+**removals** *as well as additions, which is why two careful readings of the same command disagreed.
+Per-commit attribution is not resolvable here at reasonable cost, and nothing depends on it: the argument for
+a gate needs only* **four wrong (sha, role) pairs across nine places, none of them caught by an author** —
+*verified, uncontested, and already the basis of every Done-when. The pair inventory and the 2 + 3 + 3 + 1 = 9
+arithmetic are unchanged.)*
 
 (Anaphoric back-references — `xo5pueh`'s round-5 *"at the same head"*, twice — are not counted here: they
 carry no sha, so the predicate does not reach them. They still have to move when the label they point at

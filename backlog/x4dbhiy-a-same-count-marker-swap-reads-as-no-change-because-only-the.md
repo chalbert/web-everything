@@ -109,15 +109,13 @@ e6db8cf5  [{"line":4,"marker":"unverified prerequisite"}]
 ```
 
 *This is the third distinct wrong* **(sha, role)** *pair in this PR, after `5289202` and `ee6e5a98`, and the
-first whose role word is* **merge-base** *rather than* **head**. *Traced in git, not recalled:*
-`git log -S'60acbe5f' -- 'backlog/x4dbhiy*'` *ends at* `6954693e` — *its oldest entry, the round-5 commit
-that introduced the string and wrote this pair and the `ee6e5a98` pair together. Round 6 then corrected
-`ee6e5a98` in all three of its places and left this one standing two lines above the paragraph it was
-editing. That is precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected
-claim, and why its role-word list names* merge-base *alongside* head.*)*
+first whose role word is* **merge-base** *rather than* **head**. *The round that corrected `ee6e5a98` in
+all three of its places left this one standing two lines above the paragraph it was editing. That is
+precisely why `x3v6tn6` resolves the* **role** *rather than string-matching a corrected claim, and why its
+role-word list names* merge-base *alongside* head.*)*
 
 *(Retracted, not deleted — a third time, on the same block, and the reason the fence above is now labelled by
-sha. The marker-set fence read* `base 60acbe5f` *and* `head 74c1c9f0` *from round 5 until this round.* ***The
+sha. The marker-set fence read* `base 60acbe5f` *and* `head 74c1c9f0` *until this round.* ***The
 `base` label was wrong***, *and wrong in exactly the way this file has now been wrong three times: a role
 word beside a sha for a PR named two lines above it.* `gh pr view 1556 --json baseRefOid` *returns*
 `e9aa38f6`, *not* `60acbe5f`, *so a reader who resolved the label instead of reading the sha measured a
@@ -126,13 +124,19 @@ adjacent* `head 74c1c9f0` *label was correct —* `headRefOid` *is* `74c1c9f0` �
 two lines was false.*
 
 *This is the* **fourth** *distinct wrong* **(sha, role)** *pair in this PR, and the second on this sha:*
-`60acbe5f` *as* base *here, and as* merge-base *in the two prose places corrected one retraction above.*
-`git log -S'base 60acbe5f' -- 'backlog/x4dbhiy*'` *ends at* `6954693e` *as well — the same commit wrote the
-fenced label and the prose label together. Round 6 swept for* head*, round 7 swept for* merge-base*, and both
+`60acbe5f` *as* base *here, and as* merge-base *in the two prose places corrected one retraction above.
+Round 6 swept for* head*, round 7 swept for* merge-base*, and both
 swept prose: the fenced label carried a third role word inside a code block and survived both. That is the
 argument for a rule that resolves the* **role** *over an author who greps the word a review quoted, and it is
 why the pin never moved — the sets fenced above are identical at* `e9aa38f6`, `e7ab2833`, `60acbe5f` *and*
 `e6db8cf5`, *as the block above this one measures.)*
+
+*(Retracted, not deleted — the* **attribution**, *not the pairs. The two retractions above used to name*
+`6954693e` *as the commit that wrote these labels, citing* `git log -S'60acbe5f'` *and*
+`git log -S'base 60acbe5f'`*. Both clauses are withdrawn:* `git log -S` *counts removals as well as
+additions, so the same command supported two incompatible readings in two different rounds. Withdrawn in
+full on* `x3v6tn6`, *which carries the reasoning. Nothing here rests on it — the wrong* **(sha, role)**
+*pairs, their places and the corrections are all read from the files themselves and are unchanged.)*
 
 ## What it must not do
 

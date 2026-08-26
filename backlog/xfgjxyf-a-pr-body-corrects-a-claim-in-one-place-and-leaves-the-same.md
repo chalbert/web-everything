@@ -41,10 +41,13 @@ occurrence carrying its own retraction marker is clean.
 **It must not be mistaken for a check on the underlying claim.** Keying on the corrected claim's own string
 is what makes this rule free of judgment, and it is also its boundary: a body that fixes one instance of an
 error and commits the *same kind* of error with different text elsewhere passes clean. That happened inside
-this card's own PR — `x4dbhiy`'s *"#1556's head (`5289202`)"* was corrected in the very commit that wrote
-*"#1556's head `ee6e5a98`"* into two sibling cards, and the two share no string. `x3v6tn6` is filed for that
-class. Widening this rule to catch it would mean asking what a claim *means*, which is the line this card
-exists on the safe side of.
+this card's own PR — `x4dbhiy`'s *"#1556's head (`5289202`)"* was corrected while *"#1556's head
+`ee6e5a98`"* stood in two sibling cards, and the two share no string. `x3v6tn6` is filed for that class.
+*(Retracted, not deleted: this sentence used to say the correction was made* **in the very commit that
+wrote** *the second label. That per-commit attribution is withdrawn in full on* `x3v6tn6` — `git log -S`
+*counts removals as well as additions and cannot settle it. The two labels, and the fact that they share no
+string, are all this negation needs and are unchanged.)* Widening this rule to catch it would mean asking
+what a claim *means*, which is the line this card exists on the safe side of.
 
 ## Interfaces
 
