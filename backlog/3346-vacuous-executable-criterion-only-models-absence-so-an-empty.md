@@ -23,8 +23,8 @@ double-minted item as a resolved audit record, not an error.
 
 **Why this one lost the tiebreak, and it is not quality.** Both cards describe the same defect —
 `vacuousExecutableCriterion` in `we:scripts/review-corpus/gates.mjs` models only the "demands a literal be
-absent" shape, so a vitest `-t` filter selecting zero tests passes it. `xaevzg4` (→ #3340) was authored
-`2026-08-26T15:44:52-0400`; this card (`xac2c78`) `2026-08-26T15:44:53-0400`. **The card filed first survives**,
+absent" shape, so a vitest `-t` filter selecting zero tests passes it. `3340` (→ #3340) was authored
+`2026-08-26T15:44:52-0400`; this card (`3346`) `2026-08-26T15:44:53-0400`. **The card filed first survives**,
 because commits and PR bodies already cite whichever landed first and re-pointing them is the move that
 manufactures duplicates. Everything this card carried that #3340 lacked has been folded into #3340; the full
 account of how one defect got two cards is written up there, not here.

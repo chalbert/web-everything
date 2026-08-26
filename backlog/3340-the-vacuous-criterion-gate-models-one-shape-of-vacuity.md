@@ -121,18 +121,18 @@ precision against past reviews — it cannot tell you what the gate never looks 
 
 ## The near miss: this defect was filed twice, one second apart
 
-**#3346 (`bornAs: xac2c78`) is the same defect as this card (`bornAs: xaevzg4`), and is resolved as a duplicate
+**#3346 (`bornAs: 3346`) is the same defect as this card (`bornAs: 3340`), and is resolved as a duplicate
 pointing here.** Recorded on the survivor, because the duplicate is the file nobody opens again.
 
-Both cards were authored within one second of each other on 2026-08-26 — `xaevzg4` at `15:44:52 -0400`
+Both cards were authored within one second of each other on 2026-08-26 — `3340` at `15:44:52 -0400`
 (commit `3dcd4e7f`, *"backlog: file three gaps the review build surfaced"*, later rebased to `f8ac22a4`) and
-`xac2c78` at `15:44:53 -0400` (commit `11ec560a`, *"backlog/3319: retract the wrong gate diagnosis, and
+`3346` at `15:44:53 -0400` (commit `11ec560a`, *"backlog/3319: retract the wrong gate diagnosis, and
 actually file the gap"*, landed in PR #1585). Two sessions, working the same review-build fallout, each
 independently noticed that `vacuousExecutableCriterion` models only the absence shape, and each filed it.
 
 The #3319 session's own PR body records the search it ran before filing: *"Grepped `backlog/` for
 `vacuous-executable-criterion`, `vacuousExecutableCriterion` and `pointed only backwards`; the only hit was
-#3319 itself."* **That search was correct and its conclusion was still wrong** — `xaevzg4` had been filed
+#3319 itself."* **That search was correct and its conclusion was still wrong** — `3340` had been filed
 sixty seconds earlier and had not landed, so it was not in any checkout to be grepped. A hash-named card is
 unresolvable **by design** between filing and land. `grep` finding nothing is the *expected* state for a real
 card, and it is indistinguishable from the state for a card that never existed.
