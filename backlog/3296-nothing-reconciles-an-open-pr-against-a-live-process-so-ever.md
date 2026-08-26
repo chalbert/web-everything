@@ -41,7 +41,7 @@ claims no longer hold. They are retracted immediately below the table rather tha
 | `<primary>/.conveyor/jury/*.jsonl` | 6 ledgers, newest `we#1049.jsonl` written **2026-08-05**. None of the four open PRs has one |
 | `#1563`'s comment thread (merged `16:39:23Z`, so historical) | reached `## Independent review — PR #1563 — round 12` at `2026-08-26T16:04:41Z`. Round 7 was `03:16:32Z`, round 8 `14:21:20Z` — an **11 h 04 m** gap. `NEGOTIATION_ROUND_CAP = 5` (`we:scripts/lib/jury-core.mjs:545`). `countRearmComments` on its 17 comments reads **0** |
 | `#1576` `review:pending` applied `17:18:24Z`, swapped to `review:changes` `17:31:38Z` | **13 m 14 s** — and the reviewer that did it was dispatched by a person, not by anything in the tree |
-| `npm run check:standards` at `a517c8f8` | **1 error, 1434 warnings** (3297 backlog items). The one error is pre-existing and unrelated: a stranded hash id, `we:backlog/xy43foc-declare-converge-pr-drive-one-bounced-pr-to-merged-asserting.md`, left by `#1575`'s land |
+| `npm run check:standards` at `a517c8f8` | **1 error, 1434 warnings** (3297 backlog items). The one error is pre-existing and unrelated: a stranded hash id, `we:backlog/3323-declare-converge-pr-drive-one-bounced-pr-to-merged-asserting.md`, left by `#1575`'s land |
 
 Both durable round sources still read **zero** for every open PR — and `#1563` proves the point harder than the
 filing snapshot claimed: it ran to **twelve** rounds against a cap of five with a durable count of **0**.
@@ -304,7 +304,7 @@ its entries are one-per-refusal and the refusals *are* the item — dropping one
 8. `npm run check:standards` — **no new errors and no more than 1434 warnings**, the base measured in this lane
    at `origin/main` `a517c8f8`: **1 error, 1434 warnings, 3297 backlog items**. That one error is pre-existing
    and not this card's to fix — a stranded hash id,
-   `we:backlog/xy43foc-declare-converge-pr-drive-one-bounced-pr-to-merged-asserting.md`, left by `#1575`'s land
+   `we:backlog/3323-declare-converge-pr-drive-one-bounced-pr-to-merged-asserting.md`, left by `#1575`'s land
    and cleared by the `number-stranded` verb on `we:scripts/backlog.mjs`. If it is gone by build time the bar
    is 0 errors; it must not rise.
 
