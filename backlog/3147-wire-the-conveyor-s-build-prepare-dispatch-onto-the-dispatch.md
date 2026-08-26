@@ -19,7 +19,7 @@ tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 `dispatch-lane` operation now mechanizes: call the tick core for the dispatch plan, fill the delivery-agent
 brief, and *"Spawn it as one background `Agent`"*. No skill, including conveyor's own, **calls** the operation
 that exists to do exactly this. Run rather than asserted: `grep -rl "dispatch-lane" we:skills-src/` returns
-**one** file — `we:skills-src/conveyor/SKILL.md` — and its single hit is the `#xbbscm5` annotation at line
+**one** file — `we:skills-src/conveyor/SKILL.md` — and its single hit is the `#3239` annotation at line
 77, which *names* the operation while explaining that routing through it is a separate item. A mention, not a
 call.
 
@@ -29,36 +29,36 @@ recorded here rather than silently applied because the same string standing in t
 is fixed is the defect that has now cost this PR two rounds.)*
 
 *(Earlier rounds called line 77 "the `#3239` annotation". It is not written that way. The comment reads
-`@operation-home-ok: #xbbscm5` — the pre-JIT hash **#3239** was born as, confirmed by `bornAs: xbbscm5` in
+`@operation-home-ok: #3239` — the pre-JIT hash **#3239** was born as, confirmed by `bornAs: 3239` in
 its own frontmatter. The item is the right one; only the label was wrong, so the annotation is named by the
 string it actually carries.)*
 
-*(The round-6 cut of that note ended **"and `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly
+*(The round-6 cut of that note ended **"and `grep -rl 3239 we:backlog/ we:skills-src/` returns exactly
 those two files"**. **That was wrong the moment it was written, and it is retracted.** The same commit put
-`xbbscm5` on five lines of this card, so this card became a third hit — a stated command with a stated result
+`3239` on five lines of this card, so this card became a third hit — a stated command with a stated result
 that does not reproduce at the head that states it, in a paragraph whose stated virtue is "Run rather than
 asserted".*
 
 *Round 7 corrected that to a **three**-file listing — this card, #3239's card and
 `we:skills-src/conveyor/SKILL.md` — and **that correction is retracted too, for the same reason one round
-later.** The commit that wrote it, `50bcc3f6`, also put `xbbscm5` into `we:backlog/x6uyq86-…md`, the very card
+later.** The commit that wrote it, `50bcc3f6`, also put `3239` into `we:backlog/3286-…md`, the very card
 filed to prevent this, making a fourth hit. A count corrected without re-running the command at the commit
 that carries the correction is not a correction. Re-run in this lane at the head that states it:*
 
 ```
-$ grep -rl xbbscm5 backlog/ skills-src/
+$ grep -rl 3239 backlog/ skills-src/
 backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
 backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
-backlog/x6uyq86-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
+backlog/3286-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
 skills-src/conveyor/SKILL.md
 ```
 
-*The identity claim never depended on the count — `bornAs: xbbscm5` in #3239's own frontmatter establishes it
+*The identity claim never depended on the count — `bornAs: 3239` in #3239's own frontmatter establishes it
 alone. Of the four hits, **two carry** the annotation and its born-as declaration —
 `we:skills-src/conveyor/SKILL.md:77` and #3239's frontmatter — and **two only discuss it**: this card and
-`x6uyq86`. (Round 7's sentence here read "this card is the third hit and only discusses them"; there are four
+`3286`. (Round 7's sentence here read "this card is the third hit and only discusses them"; there are four
 hits and two discussers, so it is retracted with the count above.) A quoted invocation carrying a quoted
-result that nobody re-ran is its own defect class, and the prevention for it is `x6uyq86` — widened in the
+result that nobody re-ran is its own defect class, and the prevention for it is `3286` — widened in the
 previous push to cover it, and now carrying this round's repeat as its second founding fixture.)*
 
 ## The overlap is not superficial
@@ -117,7 +117,7 @@ operation change inside it.
 **#3096** (*Route the conveyor's build dispatch through the declared dispatch-lane operation*) and **#3239**
 (*the conveyor tick executes spawnBuilds by hand instead of through dispatch-lane*) are both open and both
 name exactly the step-3 rewiring described here. `we:skills-src/conveyor/SKILL.md` even carries #3239's
-annotation — written as `#xbbscm5`, its born-as hash — saying *"routing the spawnBuilds half through the
+annotation — written as `#3239`, its born-as hash — saying *"routing the spawnBuilds half through the
 operation is its own item."* Neither is blocked by #3165 (#3096 is blocked by #3037; #3239 by nothing), so
 either could land the build half independently — and whichever lands second either conflicts with the
 other's edits or discovers the work already done.
@@ -249,7 +249,7 @@ step 3b later would leave two dispatch mechanisms live inside one skill.
 
 1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits inside
    **both** step 3 and step 3b. Counted, not assumed: the file has **1** occurrence today, at line 77 — the
-   `@operation-home-ok: #xbbscm5` annotation (#3239's born-as hash) in the tick-core table, which is neither
+   `@operation-home-ok: #3239` annotation (#3239's born-as hash) in the tick-core table, which is neither
    step. So the criterion is that the count rises
    to at least 3 *and* that the two new ones fall within those steps; a bare whole-file count would already
    be non-zero and prove nothing.

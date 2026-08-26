@@ -1,4 +1,5 @@
 ---
+bornAs: xfw8svt
 kind: story
 size: 2
 status: open
@@ -17,7 +18,7 @@ adjacent quoted sentence is not at line N in the named file at the head that sta
 
 ## The observation this is filed from
 
-PR #1560 (preparing #3147), round 9. `xeh31dn`'s *Done when* 3 cited two sentences in #3147's card by line
+PR #1560 (preparing #3147), round 9. `3288`'s *Done when* 3 cited two sentences in #3147's card by line
 number "at this PR's head". The pointers were **correct when written and wrong one commit later**, moved by
 a hunk in the same push:
 
@@ -54,11 +55,11 @@ the same file. Nothing external moved; the lane shifted its own citation.
 
 | item | the class it gates | why it misses this one |
 | --- | --- | --- |
-| `x6uyq86` Half A | a **quoted invocation** with a stated result, re-run and compared | a bare `line N` pointer carries no command. Half A's verb list is closed (`grep`, `git show`, `git log`, `wc`, read-only `node … --json`) and a pointer is on none of it, so Half A never sees the span |
-| `x6uyq86` Half B | a *Done when* pinning a fixture with **no reproducing command** | its error case is a fixture that **does not resolve**; its warn case is a missing command. Here the path resolves, the line exists, and the criterion is otherwise well-formed — at most a warn, and never for the right reason |
-| `xeh31dn` | a prose claim about **another item**, staled by a **concurrent lane** amending it | this drift is intra-lane and intra-commit: same author, same push, same file. Nothing landed underneath |
-| `xxzs9l7` | a claim corrected at one site while the same claim stands at another | nothing was corrected here. The citation's text never changed — the target moved out from under it |
-| `xaemgqd` | a PR body's `key: value` frontmatter span vs the diff | not a body, not frontmatter, not a `key: value` span |
+| `3286` Half A | a **quoted invocation** with a stated result, re-run and compared | a bare `line N` pointer carries no command. Half A's verb list is closed (`grep`, `git show`, `git log`, `wc`, read-only `node … --json`) and a pointer is on none of it, so Half A never sees the span |
+| `3286` Half B | a *Done when* pinning a fixture with **no reproducing command** | its error case is a fixture that **does not resolve**; its warn case is a missing command. Here the path resolves, the line exists, and the criterion is otherwise well-formed — at most a warn, and never for the right reason |
+| `3288` | a prose claim about **another item**, staled by a **concurrent lane** amending it | this drift is intra-lane and intra-commit: same author, same push, same file. Nothing landed underneath |
+| `3290` | a claim corrected at one site while the same claim stands at another | nothing was corrected here. The citation's text never changed — the target moved out from under it |
+| `3287` | a PR body's `key: value` frontmatter span vs the diff | not a body, not frontmatter, not a `key: value` span |
 
 And the three that landed on `main` while this PR was open:
 
@@ -90,20 +91,20 @@ the head being pushed.
   a sha cannot move.
 - Silent when the citation carries a quote and **no** number, which is the cheapest correct form.
 - Out of range when there is no quoted text to anchor to. Nothing can be dereferenced, and guessing which
-  sentence was meant is not this check's job — that is `x6uyq86` Half B's warn.
+  sentence was meant is not this check's job — that is `3286` Half B's warn.
 
 The remedy the check pushes authors toward is either **drop the number** or **pin the sha**, both of which
 are drift-proof; re-deriving against a moving head is the form that keeps failing.
 
-The siblings: the quoted-command-wrong-result half is `x6uyq86`, the amended-by-another-lane half is
-`xeh31dn`, the fixed-here-standing-there half is `xxzs9l7`, and the body-vs-own-diff half is `xaemgqd`.
+The siblings: the quoted-command-wrong-result half is `3286`, the amended-by-another-lane half is
+`3288`, the fixed-here-standing-there half is `3290`, and the body-vs-own-diff half is `3287`.
 
 ## Done when
 
-1. **Executable** — given `we:backlog/xeh31dn-a-card-s-prose-claim-about-another-item-s-current-content-is.md`
+1. **Executable** — given `we:backlog/3288-a-card-s-prose-claim-about-another-item-s-current-content-is.md`
    as it stood at `775cd30f`, and #3147's card at that same sha, the check **warns** on *Done when* 3: the
    span quotes *"**#3165** carries it"* against *"line 102"*, and at `775cd30f` that sentence is at line 111.
-   Both fixtures are in git: `git show 775cd30f:<xeh31dn's card>` and `git show 775cd30f:<#3147's card>`.
+   Both fixtures are in git: `git show 775cd30f:<3288's card>` and `git show 775cd30f:<#3147's card>`.
 2. **Mutation, moving head** — run that same criterion text against #3147's card at `77f69705` instead, and
    the check is **silent**: there the quoted sentence really is at line 102. The check must key on the head it
    is asked about, and the pair proves it discriminates rather than always firing. Fixture:
@@ -112,7 +113,7 @@ The siblings: the quoted-command-wrong-result half is `x6uyq86`, the amended-by-
    `77f69705`"*; the check is then **silent whatever head it runs at**, because the citation now dereferences
    against a sha. This is the drift-proof form the warning pushes authors toward, and it must not warn.
 4. **Silent on a quote with no number** — no warning on a span that quotes a sentence from a resolvable file
-   and names no line. Verified against `xeh31dn`'s *The observation* section at `775cd30f`, which quotes
+   and names no line. Verified against `3288`'s *The observation* section at `775cd30f`, which quotes
    #3147's *Interfaces* sentence (*"#3118's Fork 1 default (a) is a WE-native in-process runner …"*, that
    card's line 190 at `775cd30f`) with no line number attached.
 5. It warns and never fails the gate — verified by a fixture that warns while the run still exits 0.

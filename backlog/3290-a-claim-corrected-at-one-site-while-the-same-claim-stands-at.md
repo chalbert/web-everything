@@ -1,4 +1,5 @@
 ---
+bornAs: xxzs9l7
 kind: story
 size: 3
 status: open
@@ -49,24 +50,24 @@ body as one more "changed markdown file" since that is where the r4→r5 instanc
 ## Not in scope
 
 The mechanically-decidable `key: value` half — a body span quoting a frontmatter value its diff contradicts.
-That is exact-comparable and is filed separately as `xaemgqd`, "A PR body's frontmatter claims are never
+That is exact-comparable and is filed separately as `3287`, "A PR body's frontmatter claims are never
 checked against the diff it describes". This item takes the fuzzy prose half only, and its output is advisory
 for that reason.
 
 A **newly written** claim that is wrong on its own terms — no earlier site to compare against, so a
 survivor-detector cannot see it. The instance that bounced #1560's round 5 was a *Done when* criterion naming
 a fixture whose stated exit code it never ran, and round 6 added a quoted `grep` whose stated file count was
-falsified by the commit that wrote it; that is the third sibling in this family, filed as `x6uyq86`, "A
+falsified by the commit that wrote it; that is the third sibling in this family, filed as `3286`, "A
 quoted invocation ships with a result nobody re-ran".
 
 A claim that was **true when written and falsified behind the lane**, when a concurrent lane amends the item
 it cites. No site changed, so there is nothing for a survivor-detector to compare; the check has to re-read
-the cited item at the target `main`. That is the fourth sibling, filed as `xeh31dn`, "A card's prose claim
+the cited item at the target `main`. That is the fourth sibling, filed as `3288`, "A card's prose claim
 about another item's current content is never re-read when that item is amended".
 
 A citation whose **text** never changed and whose **address** did — a `line N` pointer moved by a later hunk
 in the same lane. Nothing was corrected, so a survivor-detector has no pair to compare; the number simply
-stopped resolving to the sentence. That is the fifth sibling, filed as `xfw8svt`, "A `file:line` citation
+stopped resolving to the sentence. That is the fifth sibling, filed as `3289`, "A `file:line` citation
 goes stale because a later hunk in the same lane shifts the line it points at".
 
 ## Done when

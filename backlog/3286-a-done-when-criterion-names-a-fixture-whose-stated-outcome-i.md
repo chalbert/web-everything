@@ -1,4 +1,5 @@
 ---
+bornAs: x6uyq86
 kind: story
 size: 2
 status: open
@@ -23,7 +24,7 @@ identical on both sides: take the quoted command, run it, compare.)*
 
 PR #1560 (preparing #3147) filed two prevention cards in its round-5 push and was bounced again in round 5's
 review — on one of those cards. `fed61bc5`, whose entire subject was *"the prevention card's own table read
-as present-tense — fixed"*, tightened `xaemgqd`'s *Done when* 1 to read:
+as present-tense — fixed"*, tightened `3287`'s *Done when* 1 to read:
 
 > Run against a body whose spans all match — #1560 at `3644b569` and after — it exits 0.
 
@@ -33,7 +34,7 @@ this repo requires — and quotes one frontmatter value belonging to an item the
 this lane, at that fixture:
 
 ```
-$ node <xaemgqd's Sketch, implemented literally> <#1560 body> fed61bc5
+$ node <3287's Sketch, implemented literally> <#1560 body> fed61bc5
 FAIL  body says `blockedBy: ["3118", "3165"]`  — diff writes `["3165"]`
 FAIL  body says `kind: decision, status: open`  — diff writes `story`
 4 span(s) compared, 2 disagreement(s) — exit 1
@@ -46,14 +47,14 @@ The criterion was authored, tightened, and reviewed without once being run again
 Round 6 of the same PR produced a second instance, in ordinary prose, and it is what widened this item.
 The fix for round 5's advisory added this parenthetical to #3147's card:
 
-> `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly those two files.
+> `grep -rl 3239 we:backlog/ we:skills-src/` returns exactly those two files.
 
-It returns **three**. The very commit that wrote the sentence put `xbbscm5` on five lines of #3147's own
+It returns **three**. The very commit that wrote the sentence put `3239` on five lines of #3147's own
 card, making that card the grep's third hit — the claim was falsified by the act of writing it. Run in the
 fix lane at `13f2da58`:
 
 ```
-$ grep -rl xbbscm5 backlog/ skills-src/
+$ grep -rl 3239 backlog/ skills-src/
 backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
 backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
 skills-src/conveyor/SKILL.md
@@ -66,15 +67,15 @@ and compare. Both instances then reduce to one rule, which is why this is a wide
 ## The repeat — the defect recurring inside the card filed to prevent it
 
 Round 7 of #1560 fixed the sentence above by replacing *"two files"* with a three-file listing. `50bcc3f6`,
-**the commit that wrote that correction**, put `xbbscm5` into **this card** (the block quoted above), making a
+**the commit that wrote that correction**, put `3239` into **this card** (the block quoted above), making a
 fourth hit. The corrected count was falsified by the act of correcting it — the same shape, one round later,
 in the card filed to stop it:
 
 ```
-$ grep -rl xbbscm5 backlog/ skills-src/          # at 50bcc3f6, bb914a00 and 77f69705 — four files at all three
+$ grep -rl 3239 backlog/ skills-src/          # at 50bcc3f6, bb914a00 and 77f69705 — four files at all three
 backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
 backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
-backlog/x6uyq86-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
+backlog/3286-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md
 skills-src/conveyor/SKILL.md
 ```
 
@@ -96,7 +97,7 @@ round each was pushed.
 *(An earlier cut of this paragraph read **"three consecutive rounds of human and juror review read the
 corrected count and none re-ran it."** **That was false against this PR's own comment thread, and it is
 retracted.** There were two such rounds, not three, and in both the human reviewer re-ran the count and
-caught it — the round-6 comment quotes its own run, ``$ grep -rl xbbscm5 backlog/ skills-src/   # at
+caught it — the round-6 comment quotes its own run, ``$ grep -rl 3239 backlog/ skills-src/   # at
 13f2da58``. Shipping an unchecked claim about a checkable artifact, inside the paragraph arguing that claims
 must be checked rather than reviewed, is this card's own class.)*
 
@@ -109,9 +110,9 @@ The three siblings cover the neighbouring shapes and none reaches this one:
 
 | item | the class it gates | why it misses this one |
 | --- | --- | --- |
-| `xaemgqd` | a PR body's `key: value` span disagreeing with the diff | both instances are in a **card**, not a body, and neither quotes a frontmatter value |
-| `xxzs9l7` | a claim corrected at one site and left standing at another | both were **newly written**, not surviving copies — the `grep` instance was written *as* a correction |
-| `xeh31dn` | a prose claim about another named item, staled by that item's amendment | both instances were false at the head that stated them, not falsified later by someone else's landed work |
+| `3287` | a PR body's `key: value` span disagreeing with the diff | both instances are in a **card**, not a body, and neither quotes a frontmatter value |
+| `3290` | a claim corrected at one site and left standing at another | both were **newly written**, not surviving copies — the `grep` instance was written *as* a correction |
+| `3288` | a prose claim about another named item, staled by that item's amendment | both instances were false at the head that stated them, not falsified later by someone else's landed work |
 
 The distinguishing shape is a *testable promise about a named artifact* — "run X and it returns R" — shipped
 untested. It is the cheapest of the four to gate, because the text states its own test.
@@ -154,19 +155,19 @@ better.
 running it**. This item asks only that a criterion pinning a fixture carries the invocation, and that the
 pin resolves."** The "or running it" clause is **retracted** — Half A runs it, and that is the whole of the
 widening. Quoted rather than deleted because leaving it standing beside Half A would state the two readings
-at once, which is the defect `xxzs9l7` exists to catch.)*
+at once, which is the defect `3290` exists to catch.)*
 
 Anything that is not a side-effect-free read from the closed verb list. A stated result for a build, a
 network call, or a writing command is out of range in both halves — the cost of running it is not worth the
 catch.
 
-The siblings: the body-vs-diff half is `xaemgqd`, the fixed-here-standing-there half is `xxzs9l7`, the
-staled-by-another-lane half is `xeh31dn`, and the stale-`line N`-pointer half is `xfw8svt`. Half A does not
-reach `xfw8svt`: a bare line pointer carries no command, so it never enters the closed verb list above.
+The siblings: the body-vs-diff half is `3287`, the fixed-here-standing-there half is `3290`, the
+staled-by-another-lane half is `3288`, and the stale-`line N`-pointer half is `3289`. Half A does not
+reach `3289`: a bare line pointer carries no command, so it never enters the closed verb list above.
 
 ## Done when
 
-1. **Half B, executable** — a check that, given `we:backlog/xaemgqd-…md` as it stood at `fed61bc5`, flags
+1. **Half B, executable** — a check that, given `we:backlog/3287-…md` as it stood at `fed61bc5`, flags
    *Done when* 1: it names a fixture (#1560's body at `3644b569`) and an outcome (*"it exits 0"*) and carries
    no reproducing command. The fixture is retrievable with `git show fed61bc5:<that path>`.
 2. **Half B, mutation** — adding a reproducing invocation to that criterion clears the flag; deleting it
@@ -174,17 +175,17 @@ reach `xfw8svt`: a bare line pointer carries no command, so it never enters the 
 3. A criterion naming a sha that does not resolve (`git cat-file -e`) is an **error**, not a warning —
    verified by a fixture carrying a fabricated sha.
 4. **Half A, executable** — given #3147's card as it stood at `13f2da58`, the check re-runs the quoted
-   `grep -rl xbbscm5 …` and **errors**: the card states two files, the command returns three. Fixture in git
+   `grep -rl 3239 …` and **errors**: the card states two files, the command returns three. Fixture in git
    with `git show 13f2da58:<#3147's card>`.
 5. **Half A, mutation** — take that same `13f2da58` card and change only the stated result to the three files
    the command actually returned at that sha (the listing in *The widening* above, reproducible with
-   `git show 13f2da58:<#3147's card>` plus `grep -rl xbbscm5 backlog/ skills-src/` at `13f2da58`); the same
+   `git show 13f2da58:<#3147's card>` plus `grep -rl 3239 backlog/ skills-src/` at `13f2da58`); the same
    check is then **silent**. The check must key on the *disagreement between the stated and the actual
    result*, not on the presence of a command.
 
    *(An earlier cut of this criterion read **"against the same card at this PR's head, where the sentence is
    retracted and the three-file result is quoted from a run, the same check is silent"**. **That was red where
-   it promised green, and it is retracted.** At the head it named, `50bcc3f6` had just added `xbbscm5` to this
+   it promised green, and it is retracted.** At the head it named, `50bcc3f6` had just added `3239` to this
    card, so the grep returned **four** files against a stated three and Half A errors — see *The repeat*
    above. Re-pinned to a mutation of the `13f2da58` fixture, which is fixed in git and cannot move out from
    under the criterion the way a moving head did.)*

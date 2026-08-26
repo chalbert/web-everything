@@ -1,4 +1,5 @@
 ---
+bornAs: xeh31dn
 kind: story
 size: 3
 status: open
@@ -69,9 +70,9 @@ The three siblings already filed for this PR each gate a different failure, and 
 
 | item | the class it gates | why it misses this one |
 | --- | --- | --- |
-| `xaemgqd` | a PR **body**'s `key: value` span vs the PR's **own** diff | this claim is in a card, is prose rather than a `key: value` span, and is about an item the diff does **not** touch — `xaemgqd`'s binding filter deliberately *skips* exactly this span |
-| `xxzs9l7` | a claim corrected at one site and left standing at another | there was no correction and no second site — one sentence, written once, never edited |
-| `x6uyq86` | a quoted invocation whose quoted result does not reproduce | this claim carries no invocation; it is a characterisation, and it was true when run |
+| `3287` | a PR **body**'s `key: value` span vs the PR's **own** diff | this claim is in a card, is prose rather than a `key: value` span, and is about an item the diff does **not** touch — `3287`'s binding filter deliberately *skips* exactly this span |
+| `3290` | a claim corrected at one site and left standing at another | there was no correction and no second site — one sentence, written once, never edited |
+| `3286` | a quoted invocation whose quoted result does not reproduce | this claim carries no invocation; it is a characterisation, and it was true when run |
 
 The distinguishing shape is a claim that is **true at authoring time and falsified by someone else's landed
 work**. It is the only member of the family a re-read by the author cannot prevent, which is why the check
@@ -87,9 +88,9 @@ Claims about **code** paths rather than backlog items. `we:agent-memory-src/grep
 already covers citing a name that does not exist; this is about a name that exists and whose *content*
 changed under the lane.
 
-The sibling classes: the body-vs-own-diff half is `xaemgqd`, the fixed-here-standing-there half is
-`xxzs9l7`, the quoted-command-wrong-result half is `x6uyq86`, and the stale-`line N`-pointer half is
-`xfw8svt`. This card and `xfw8svt` are the two drift classes and they are opposites: here the citing text
+The sibling classes: the body-vs-own-diff half is `3287`, the fixed-here-standing-there half is
+`3290`, the quoted-command-wrong-result half is `3286`, and the stale-`line N`-pointer half is
+`3289`. This card and `3289` are the two drift classes and they are opposites: here the citing text
 stands still and the **cited item** is amended by another lane; there the cited text stands still and the
 **citing lane shifts it itself**. This card's check keys on the target `main`, which is exactly where an
 intra-lane shift is invisible.
@@ -117,6 +118,6 @@ intra-lane shift is invisible.
    and nothing re-read this pointer. At `775cd30f` line 102 reads *"So the prepare lists are **consumed and
    surfaced** — they are not dropped."* and line 127 reads *"**both** — #3096 and #3239 — are now
    `relatedTo`."* — neither is the sentence cited. Re-pinned to a fixed sha, because "this PR's head" is
-   precisely what moved. That is its own class, filed as `xfw8svt`.)*
+   precisely what moved. That is its own class, filed as `3289`.)*
 4. It warns and never fails the gate — verified by a fixture that warns while the run still exits 0.
 5. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.

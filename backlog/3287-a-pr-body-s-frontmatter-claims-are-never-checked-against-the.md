@@ -1,4 +1,5 @@
 ---
+bornAs: xaemgqd
 kind: story
 size: 2
 status: open
@@ -70,7 +71,7 @@ value at the PR head; fail when the two differ." Implemented literally and run a
 card's own Done-when 1 named as **green**, it exited **1** with two disagreements: the retraction quote
 `` `blockedBy: ["3118", "3165"]` `` and the about-#3118 span `` `kind: decision, status: open` ``. The
 criterion and the Sketch are both corrected here; the wrong version is quoted rather than deleted because
-that is what this card's sibling `xxzs9l7` exists to enforce.)*
+that is what this card's sibling `3290` exists to enforce.)*
 
 Silent on a body that makes no **present-tense** `key: value` claim about an item the diff touches —
 including a body that quotes such keys only to retract them, and one that quotes them about other items. The
@@ -86,21 +87,21 @@ scoping cost of that silence is stated in *Not in scope*.
 - a span bound to no item at all (a sentence with neither an item reference nor a self-reference). Reported
   as **unchecked**, never as agreement, so the count of skipped spans stays visible.
 
-Prose claims that are not `key: value` spans. Those are the sibling class, filed separately as `xxzs9l7`,
+Prose claims that are not `key: value` spans. Those are the sibling class, filed separately as `3290`,
 "A claim corrected at one site while the same claim stands at another has no gate". This item deliberately
 takes only the mechanically-decidable half.
 
 Whether a quoted invocation actually produces the result it states — including the *Done when* case that sent
-this card back for a round. Filed separately as `x6uyq86`, "A quoted invocation ships with a result nobody
+this card back for a round. Filed separately as `3286`, "A quoted invocation ships with a result nobody
 re-ran".
 
 Whether a `line N` pointer still resolves to the sentence it is cited for. That is address drift, not a
-`key: value` disagreement, and it is filed separately as `xfw8svt`, "A `file:line` citation goes stale
+`key: value` disagreement, and it is filed separately as `3289`, "A `file:line` citation goes stale
 because a later hunk in the same lane shifts the line it points at".
 
 A prose claim about a **different, explicitly named** item's current content, which the binding filter above
 deliberately skips and which can go stale after this check passes, when a concurrent lane amends that item.
-Filed separately as `xeh31dn`, "A card's prose claim about another item's current content is never re-read
+Filed separately as `3288`, "A card's prose claim about another item's current content is never re-read
 when that item is amended".
 
 ## Done when
