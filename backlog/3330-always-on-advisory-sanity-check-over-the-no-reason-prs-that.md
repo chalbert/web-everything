@@ -1,8 +1,9 @@
 ---
+bornAs: xay586h
 kind: story
 size: 5
 parent: "3318"
-blockedBy: ["xvdhiro"]
+blockedBy: ["3329"]
 status: open
 dateOpened: "2026-08-26"
 tags: [review, delivery, jury]
@@ -48,7 +49,7 @@ specification. Scaling the pass down removes the blocker rather than inheriting 
 
 ## Never holds
 
-The verdict is `observed` (`#xvdhiro`) — recorded in the ledger, mirroring no label, invisible to the fold's
+The verdict is `observed` (`#3329`) — recorded in the ledger, mirroring no label, invisible to the fold's
 disposition. The pass must be structurally incapable of parking: it writes a ledger row and nothing else. No
 `review:*` label, no `REVIEW_HOLD_LABELS` member, no path by which a finding becomes a merge condition.
 
@@ -76,7 +77,7 @@ this produces all of them.
 
 ## Not in scope
 
-- **The `observed` verdict itself** — `#xvdhiro`, which this is blocked on.
+- **The `observed` verdict itself** — `#3329`, which this is blocked on.
 - **Changing any escalation threshold or route.** The rubric is untouched.
 - **Adjudicating the findings.** Whether an `observed` finding was *right* is #3315's per-category
   false-positive meter, not this pass.

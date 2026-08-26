@@ -3656,9 +3656,9 @@ sensitive paths, nothing that tripped a reason — and is never a template for a
 
 **Lineage:** ratified by #3313 (operator, 2026-08-26) under the Review-efficacy watch (#3318). Convened as a
 go/no-go on restoring the #2631 sampler; the ruling took **neither** branch, on the finding that "not yet"
-was circular (#3313 waiting on #3315, which needs the verdicts only coverage produces). Built by `#xvdhiro`
+was circular (#3313 waiting on #3315, which needs the verdicts only coverage produces). Built by `#3329`
 (a non-bearing `observed` verdict — `we:scripts/lib/verdict-ledger.mjs`'s closed set had no value that neither
-clears nor holds) then `#xay586h` (the pass). Deliberately **not** blocked on #3158: `judgePanel`'s tool-free
+clears nor holds) then `#3330` (the pass). Deliberately **not** blocked on #3158: `judgePanel`'s tool-free
 jurors are a cost for a deep reviewer and the specification for a diff-only one. #3315 remains owed
 independently — this rule feeds it the whole population instead of a sampled trickle; it does not build it.
 

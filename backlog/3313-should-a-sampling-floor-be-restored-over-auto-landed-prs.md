@@ -15,7 +15,7 @@ tags: []
 **Ruled 2026-08-26: no sampler — every no-reason PR gets a cheap advisory sanity check instead.** Convened as
 a go/no-go on restoring random sampling, the ruling took **neither** branch: the answer is full coverage at
 much lower depth, non-blocking. Codified as `#every-pr-gets-a-look-advisory-floor` in
-`we:docs/agent/platform-decisions.md`. Built by `#xvdhiro` (the `observed` verdict) then `#xay586h` (the pass).
+`we:docs/agent/platform-decisions.md`. Built by `#3329` (the `observed` verdict) then `#3330` (the pass).
 
 ## What was proposed
 
@@ -56,7 +56,7 @@ Two consequences worth stating, because both were found rather than assumed:
 
 - **It needs a verdict the ledger does not have.** `VERDICTS` is closed and total — every value clears or
   holds. `accepted` would be a lie *and* would inflate the acceptance count, the exact miscount `RESTAMPED`
-  exists to prevent; `changes` holds. Hence `observed` (`#xvdhiro`), which must be excluded from
+  exists to prevent; `changes` holds. Hence `observed` (`#3329`), which must be excluded from
   `foldVerdictLedger`'s disposition entirely, not merely marked non-clearing.
 - **It is not blocked on [#3158].** `judgePanel` runs every juror `--tools ''`, which #3158 files as a real
   cost for a deep reviewer. For a diff-only sanity read it is the specification. Scaling down removed the

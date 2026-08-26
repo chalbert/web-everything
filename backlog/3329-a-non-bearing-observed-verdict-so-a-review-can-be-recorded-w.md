@@ -1,4 +1,5 @@
 ---
+bornAs: xvdhiro
 kind: story
 size: 3
 parent: "3318"
@@ -17,7 +18,7 @@ honest verdict to record. Add `observed` — recorded, never bearing on the merg
 `RESTAMPED` precedent.
 
 Required by [`#every-pr-gets-a-look-advisory-floor`](../docs/agent/platform-decisions.md#every-pr-gets-a-look-advisory-floor);
-`#xay586h` is the pass that writes these rows and is blocked on this.
+`#3330` is the pass that writes these rows and is blocked on this.
 
 ## Why the existing values will not do
 
@@ -53,7 +54,7 @@ half of the item; the enum addition on its own is the easy part and would ship t
 
 ## Not in scope
 
-Writing the rows — that is `#xay586h`. This item lands the vocabulary and its fold semantics with no producer,
+Writing the rows — that is `#3330`. This item lands the vocabulary and its fold semantics with no producer,
 which is the same shape `RESTAMPED` and `ledgerCoversHead` already ship in.
 
 ## Done when
