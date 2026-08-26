@@ -27,7 +27,7 @@ import { compute } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import {
   driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli, judgeOutcome,
-  restartCommand, acceptedControlFlags, confirmTimeFields, CONTROL_FLAGS,
+  restartCommand, acceptedControlFlags, confirmTimeFields, CONTROL_FLAGS, renderOutcome, outcomePayload,
 } from '../cli-adapter.mjs';
 import {
   CONFIRM_ACTORS,
@@ -1573,5 +1573,71 @@ describe('the override reason is reachable when the override is decided', () => 
     expect(cmd).not.toContain('--reason');
     const argv = cmd.split(' ').slice(3); // drop `node scripts/operations/run.mjs review-pr`
     expect(parseOperationArgv(d, argv).errors).toEqual([]);
+  });
+});
+
+// ── #3316 — the run points at the skill that owns the rest of it ────────────────────────────────────────────
+//
+// THE MEASURED FAILURE. A session invoked THIS operation bare, reached its `confirm` suspend, did not know how
+// to proceed, stopped mid-run and escalated to a human — while `we:skills-src/review/SKILL.md` documented both
+// routes forward the whole time. Five steps invoked bare are a findings generator, not a review. The engine
+// stamps the declared pointer onto `pending` (`engine.test.mjs`, `#3316`); these assert the two surfaces a
+// stuck caller actually reads — the terminal's lines and the `--json` envelope a headless caller parses.
+describe('#3316 review-pr names the skill that owns the rest of its run', () => {
+  const decl = () => reviewPrOperation({ readPr: () => ({}) });
+  const SKILL = 'we:skills-src/review/SKILL.md';
+
+  it('declares the review skill, and the declaration is where the pointer lives', () => {
+    expect(decl().ownedBy).toBe(SKILL);
+  });
+
+  // BEFORE THE RUN, not only after it suspends — the failure started with a BARE invocation, and `--help` is
+  // what a caller reads at that moment. Derived from the same declared field as the suspend, so they agree.
+  it('`--help` names it too, so an invocation that has not started yet can still find the skill', () => {
+    expect(buildCliSpec(decl()).usage).toContain(SKILL);
+    expect(buildCliSpec(op('plain-op', { input: {}, first: compute({ fn: () => 1 }) })).usage).not.toContain('owned by');
+  });
+
+  // THE CONFIRM SUSPEND, RENDERED. This is the exact stop the session was standing at.
+  it('the confirm suspend prints the skill, so the caller can find the process it is standing outside of', () => {
+    const run = {
+      id: 'run-x', op: REVIEW_PR_OP, verdict: { verdict: 'accept' }, effects: [], telemetry: [],
+      pending: { kind: 'confirm', step: 'confirm', stepIndex: 3, asks: 'Accept?', of: 'operator', options: ['accept', 'changes'], ownedBy: SKILL },
+    };
+    const { code, lines } = renderOutcome({ outcome: { run, stopped: 'confirm', applied: [] }, declaration: decl() });
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain(SKILL);
+  });
+
+  // THE HEADLESS CALLER. `--json` prints `outcomePayload` verbatim and #3036's HTTP adapter returns the same
+  // envelope, so the pointer must survive the serialization rather than living only in the terminal prose.
+  it('survives `--json`: the envelope carries the pointer, from the record on a suspend', () => {
+    const run = {
+      id: 'run-x', op: REVIEW_PR_OP, verdict: null, findings: {}, effects: [], telemetry: [],
+      pending: { kind: 'confirm', step: 'confirm', stepIndex: 3, asks: 'Accept?', of: 'operator', options: null, ownedBy: SKILL },
+    };
+    const { lines } = renderOutcome({ outcome: { run, stopped: 'confirm', applied: [] }, json: true, declaration: decl() });
+    expect(JSON.parse(lines[0]).ownedBy).toBe(SKILL);
+    expect(JSON.parse(lines[0]).pending.ownedBy).toBe(SKILL);
+  });
+
+  // A REFUSAL CLEARS `pending`, and a refusal is exactly when the caller most needs the pointer. The
+  // declaration is the fallback source, so the field is present on that stop too.
+  it('a `step-refused` stop still names it, though the record no longer can', () => {
+    const run = { id: 'run-x', op: REVIEW_PR_OP, input: { pr: 7, repo: 'o/r' }, verdict: null, findings: {}, effects: [], telemetry: [], pending: null };
+    const outcome = { run, stopped: 'step-refused', step: 'record', error: new Error('reasonless override'), applied: [] };
+    expect(renderOutcome({ outcome, declaration: decl() }).lines.join('\n')).toContain(SKILL);
+    expect(JSON.parse(renderOutcome({ outcome, json: true, declaration: decl() }).lines[0]).ownedBy).toBe(SKILL);
+  });
+
+  // THE COMPATIBILITY CLAIM ON THE ENVELOPE. An operation that owns no skill emits the payload it always did —
+  // the key is ABSENT, not `null`, so nothing downstream has to learn a new field to keep working.
+  it('an operation declaring no skill emits no `ownedBy` at all', () => {
+    const run = { id: 'run-y', op: 'plain', verdict: null, findings: {}, effects: [], telemetry: [], pending: null };
+    const payload = outcomePayload({ run, stopped: 'complete' });
+    expect(Object.prototype.hasOwnProperty.call(payload, 'ownedBy')).toBe(false);
+    const plain = op('plain-op', { input: {}, first: compute({ fn: () => 1 }) });
+    expect(plain.ownedBy).toBe(null);
+    expect(renderOutcome({ outcome: { run, stopped: 'complete', applied: [] }, declaration: plain }).lines.join('\n')).not.toContain('owned by');
   });
 });

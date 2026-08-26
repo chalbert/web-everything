@@ -752,6 +752,13 @@ export function reviewPrOperation({ readPr } = {}) {
     // The reduction IS the run's verdict — declared, not inferred by a caller reading findings.
     verdictFrom: 'reduce',
 
+    // #3316 — THE SKILL THAT OWNS THE REST OF THIS RUN. This operation is the one the defect was measured on:
+    // a session invoked it bare, reached `confirm`, did not know how to proceed, and escalated to a human while
+    // this file documented both routes forward the whole time. Five steps invoked bare are a findings
+    // generator; the review is the skill. The pointer rides every suspend and every refusal from here on, so
+    // the skill is reachable FROM the run instead of only by someone who already knew to look for it.
+    ownedBy: 'we:skills-src/review/SKILL.md',
+
     // ── 1. read ─────────────────────────────────────────────────────────────────────────────────────────────
     // The park context (`assembleReviewDetail`) plus the NET-basis diff and file list. See `shapeReadFinding`
     // for the `exec-contract` refusal and for why `ghDiffStat` is named apart from `netChangedFiles`.

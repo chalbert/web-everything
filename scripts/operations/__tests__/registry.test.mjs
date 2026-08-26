@@ -63,11 +63,11 @@ describe('the closed step vocabulary', () => {
   });
 
   it('refuses a stray non-step key, so a typo cannot become a silent no-op', () => {
-    expect(() => op('typo', { a: noop, descriptoin: 'oops' })).toThrow(/the only non-step keys are input\|verdictFrom\|declaresOver/);
+    expect(() => op('typo', { a: noop, descriptoin: 'oops' })).toThrow(/the only non-step keys are input\|verdictFrom\|declaresOver\|ownedBy/);
     // PINNED DELIBERATELY. Every name in this set is a key that stops being a typo and starts being accepted
     // silently, so widening it must be a decision made in this file rather than a side effect of an edit
-    // somewhere else. `declaresOver` was added by #3224.
-    expect(RESERVED_DECLARATION_KEYS).toEqual(['input', 'verdictFrom', 'declaresOver']);
+    // somewhere else. `declaresOver` was added by #3224; `ownedBy` by #3316.
+    expect(RESERVED_DECLARATION_KEYS).toEqual(['input', 'verdictFrom', 'declaresOver', 'ownedBy']);
   });
 
   it('refuses an operation with no steps', () => {

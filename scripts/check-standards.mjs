@@ -2219,6 +2219,22 @@ try {
         schemas.set(name, declaration.input);
         controls.set(name, acceptedControlFlags(declaration));
       }
+      // ── #3316 — an `ownedBy` pointer must RESOLVE ────────────────────────────────────────────────────────
+      // `op()` checks the SHAPE (a locus prefix, #883) because `registry.mjs` is pure and cannot read a disk.
+      // Existence is derivable, so it is derived here rather than restated as a flag on the declaration. It
+      // matters: the whole field exists so a caller holding a suspended run can find the process that owns
+      // the rest of it, and a pointer at a moved or deleted skill sends them to the same dead end the field
+      // was built to close — while LOOKING like it was handled.
+      if (declaration?.ownedBy) {
+        const rel = declaration.ownedBy.replace(/^[a-z][a-z0-9-]*:/, '');
+        if (!existsSync(join(ROOT, rel))) {
+          err(
+            `operation \`${name}\` declares \`ownedBy: ${declaration.ownedBy}\`, but that file does not exist. A `
+            + 'suspended run would name a skill nobody can open (#3316).',
+            rel,
+          );
+        }
+      }
     } catch { /* unbuildable on this host — stays unknown, which never produces a finding */ }
   }
 

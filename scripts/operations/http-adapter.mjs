@@ -240,6 +240,11 @@ export function describeOperation(declaration, { basePath = DEFAULT_BASE_PATH } 
       enum: spec.enum ? [...spec.enum] : null,
     }]))),
     verdictFrom: declaration.verdictFrom,
+    // #3316 — the skill that owns the rest of a run. `null` here rather than omitted: this route DESCRIBES the
+    // declaration, and a console rendering it needs "declares none" to be a readable answer rather than a
+    // missing key. The RECORD is the opposite (absent when undeclared) because there the field's presence is
+    // what changes shape for every other operation.
+    ownedBy: declaration.ownedBy ?? null,
     steps: declaration.steps.map((s) => ({ name: s.name, kind: s.step.kind, reads: [...s.step.reads] })),
     // `kind` RIDES ALONG, and it is the field a programmatic consumer actually needs. `method`/`path`/`safe`/
     // `summary` describe a route to a READER; `kind` ({@link ROUTE_KINDS}) names it to a CALLER, which is what

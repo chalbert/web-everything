@@ -27,6 +27,12 @@
  * choice, and it buys one mechanism instead of three: a run in ANY waiting state is a record on disk with a
  * `pending` field, resumable from any surface by the same call.
  *
+ * A SUSPEND NAMES THE SKILL THAT OWNS THE REST OF THE RUN (#3316). Every `pending` above carries the
+ * declaration's `ownedBy` pointer when it declares one, so a caller holding a suspended run can find the
+ * process it is standing one stop inside without already knowing that process exists. See {@link pendingOn}
+ * for the failure that bought this and for why a declaration naming no skill still produces the identical
+ * record it always did.
+ *
  * DECLARED READS ARE ENFORCED, NOT DOCUMENTED. A step fn is handed a frozen view containing ONLY the paths
  * its declaration listed. Reading something undeclared is not discouraged — it is absent.
  *
@@ -193,6 +199,32 @@ function effectFinding(run, stepIndex) {
       error: e.error ?? null,
     })),
   };
+}
+
+/**
+ * BUILD A `pending` ENTRY, NAMING THE SKILL THAT OWNS THE REST OF THE RUN (#3316).
+ *
+ * THE DEFECT THIS CLOSES. A suspended run already recorded everything about ITSELF — which step, which kind,
+ * what is asked, of whom, and the `--resume` line that answers it — and nothing about the PROCESS it is one
+ * stop inside. So a caller who invoked `review-pr` bare hit its `confirm`, had no idea what the two routes
+ * forward were, and escalated to a human while `we:skills-src/review/SKILL.md` documented both the whole time.
+ * The engine suspended correctly. The record was a dead end for anyone who had not already read the skill.
+ *
+ * GENERIC, NOT PER-OPERATION. This file knows nothing about reviewing a PR and must not start: the pointer is
+ * read off `declaration.ownedBy`, which `op()` validated at registration, so every operation gets the same
+ * behaviour from one line and none of them gets a special case.
+ *
+ * ABSENT, NOT NULL, WHEN NOTHING IS DECLARED. `ownedBy` is optional — most operations own no skill — and a
+ * declaration that names none produces a `pending` that is byte-identical to the one it produced before this
+ * field existed. That is deliberate: a required field, or an always-present `ownedBy: null`, would have made
+ * every other operation's record change shape to serve one operation's need.
+ *
+ * @param {object} declaration
+ * @param {object} fields - the kind-specific `pending` fields.
+ * @returns {object}
+ */
+function pendingOn(declaration, fields) {
+  return declaration.ownedBy ? { ...fields, ownedBy: declaration.ownedBy } : fields;
 }
 
 /** Record a step's result: its finding, and the run verdict when the declaration says this step sets it. */
@@ -376,12 +408,12 @@ export function advance(run, { registry = defaultRegistry, resume = null } = {})
       }
       return {
         ...run,
-        pending: {
+        pending: pendingOn(declaration, {
           kind: 'judge',
           step: stepName,
           stepIndex,
           request: { ...frozenCopy({ ...request, runId: run.id, lens: request.lens ?? stepName }) },
-        },
+        }),
       };
     }
 
@@ -400,7 +432,9 @@ export function advance(run, { registry = defaultRegistry, resume = null } = {})
       }
       return {
         ...run,
-        pending: { kind: 'confirm', step: stepName, stepIndex, asks, of, options: step.options ? [...step.options] : null },
+        pending: pendingOn(declaration, {
+          kind: 'confirm', step: stepName, stepIndex, asks, of, options: step.options ? [...step.options] : null,
+        }),
       };
     }
 
@@ -415,7 +449,11 @@ export function advance(run, { registry = defaultRegistry, resume = null } = {})
         .map((d, i) => toEffectEntry(run, declaration, stepIndex, stepName, d, i))
         .filter((e) => !already.has(e.key));
       const effects = [...(run.effects ?? []), ...entries];
-      const next = { ...run, effects, pending: { kind: 'effect', step: stepName, stepIndex, count: declared.length } };
+      const next = {
+        ...run,
+        effects,
+        pending: pendingOn(declaration, { kind: 'effect', step: stepName, stepIndex, count: declared.length }),
+      };
       // Zero declared effects is a legitimate outcome (nothing to do) — resolve it in the same call rather
       // than suspending on an empty list the executor would have nothing to apply.
       return unappliedEffects(next, stepIndex).length === 0
