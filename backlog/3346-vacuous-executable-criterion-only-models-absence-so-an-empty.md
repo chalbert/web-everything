@@ -5,12 +5,35 @@ size: 2
 parent: "3318"
 relatedTo: ["3319"]
 scope: ["we:scripts/review-corpus/gates.mjs", "we:scripts/review-corpus/__tests__/gates.test.mjs"]
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: 3340
 tags: [review, gates, backlog-hygiene, replay-harness]
 ---
 
 # `vacuous-executable-criterion` only models absence, so an empty test selection passes it
+
+**Duplicate of [#3340](/backlog/3340-the-vacuous-criterion-gate-models-one-shape-of-vacuity/) — resolved as
+such, not as work done.** The gap is still open; #3340 is the card that carries it, and is the one to read.
+
+This file stays rather than being deleted, because `we:scripts/guard-bash.mjs` refuses `rm`/`git rm` of any
+backlog card: *"done items resolve (status:resolved); the file stays."* `check:standards` reads a
+double-minted item as a resolved audit record, not an error.
+
+**Why this one lost the tiebreak, and it is not quality.** Both cards describe the same defect —
+`vacuousExecutableCriterion` in `we:scripts/review-corpus/gates.mjs` models only the "demands a literal be
+absent" shape, so a vitest `-t` filter selecting zero tests passes it. `xaevzg4` (→ #3340) was authored
+`2026-08-26T15:44:52-0400`; this card (`xac2c78`) `2026-08-26T15:44:53-0400`. **The card filed first survives**,
+because commits and PR bodies already cite whichever landed first and re-pointing them is the move that
+manufactures duplicates. Everything this card carried that #3340 lacked has been folded into #3340; the full
+account of how one defect got two cards is written up there, not here.
+
+---
+
+*Original body below, unchanged.*
+
+## Original digest
 
 The gate models exactly one shape of a vacuous "Executable" criterion — one demanding that a named literal be
 **absent** from a file it already never occurs in. A criterion that runs a *command* which trivially succeeds

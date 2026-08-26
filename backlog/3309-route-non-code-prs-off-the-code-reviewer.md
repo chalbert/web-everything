@@ -3,8 +3,10 @@ bornAs: x5q4hpj
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 relatedTo: ["3319", "3335"]
 scope:
   - we:scripts/lib/decision-routing.mjs
@@ -74,3 +76,34 @@ exists to re-route straight back to the correctness juror, and the item would sa
    `if (codeFiles.length)` gate and the code-touch-set sweep reddens; add `'size'` to `PROSE_VETO_SIGNALS` and the
    capacity-signal test reddens.
 5. **Observable.** `npm run check:standards` — 0 errors. `npx vitest run decision-routing` fully green.
+
+## What shipped
+
+Landed on `origin/main` as **PR #1601** (merge commit `239aec29`, 2026-08-26). Resolved by bookkeeping
+reconciliation after the fact — the card was left `open` at land.
+
+One new section, `THE REVIEW-SUBJECT ROUTER`, in `we:scripts/lib/decision-routing.mjs` (+269 lines), beneath the
+existing decision-card router. It is a **pure function a caller runs before the run command is composed** — no
+operation was touched and no step list changed, because a conditional declared step is forbidden by the
+four-kind statute (#3031) and `review-pr`'s `--lens` is fixed at registration.
+
+Three exports plus their frozen knobs:
+
+- `isProsePath(path)` — an allow-list of inert-text extensions (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`),
+  minus **operative prose** an agent executes: `we:skills-src/`, `we:agent-memory-src/`, `we:docs/agent/`,
+  `.claude/`, `.github/`, and `we:AGENTS.md` / `we:CLAUDE.md` at any depth. Git rename spellings normalize
+  through the existing `plainDiffPath`.
+- `classifyReviewSubject({changedFiles, escalation})` — three gates, all required for `prose`: a readable
+  touch-set, every file inert text, and no path-**kind** escalation signal. Gate 3 re-uses `scoreEscalation`'s
+  own rosters rather than a second taxonomy, so it cannot drift from the gate.
+- `routeReviewShape({changedFiles, escalation, careLevel})` — returns
+  `{subject, careLevel, rounds, jurorsPerLens, lenses, mandatoryLenses, seatLens, trail}`. `careLevel`, `rounds`
+  and `jurorsPerLens` are `panelRigorForCareLevel`'s, passed through untouched: the router swaps the lens
+  vocabulary and nothing else. `seatLens` is `mandatoryLenses[0]`, never a hard-coded name.
+
+The classifier **fails closed to `code`** — an empty or unreadable touch-set, one non-prose file anywhere, an
+unknown or absent extension, and `.json`/`.yml`/`.toml` all route `code`. `size` and `dismissedFindings` do not
+veto the prose route, as the card required. Tests: `we:scripts/lib/__tests__/decision-routing.test.mjs`
+(+214 lines), including the code-touch-set sweep that must not be weakened.
+
+The caller half stays open under **#3335** — this landed the router, not its wiring.
