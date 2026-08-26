@@ -9,18 +9,69 @@
  *
  * IT RE-DECLARES; IT DOES NOT RE-IMPLEMENT. Every step below delegates to a script that already owns its logic:
  *
- *   | step      | kind      | the implementation behind it                                                     |
- *   |-----------|-----------|----------------------------------------------------------------------------------|
- *   | `read`    | `compute` | `we:scripts/review-detail.mjs#assembleReviewDetail` (park context) + the NET-basis |
- *   |           |           | `computeNetDiffText`/`computeNetDiffPaths` (`we:scripts/merge-ai-prs.mjs`, #2450)  |
- *   | `judge`   | `judge`   | `buildPanelMandate` (`we:scripts/lib/review-core.mjs`) shaping a `judgeSpawn`      |
- *   |           |           | request (`we:scripts/lib/judge-spawn.mjs`, #3028) — DECLARED, never spawned here   |
- *   | `reduce`  | `compute` | `deriveVerdict` (`we:scripts/lib/review-core.mjs`); `humanRequired` off the LABELS |
- *   | `confirm` | `confirm` | the engine SUSPENDS — this is the human stop, as machinery instead of prose        |
- *   | `record`  | `effect`  | `decideSetLabel` (`we:scripts/review-set-label.mjs`) + `renderPanelComment`        |
- *   |           |           | (`we:scripts/lib/review-render.mjs`) + `renderReviewNotice` — DECLARED, not applied |
+ *   | step             | kind      | the implementation behind it                                                |
+ *   |------------------|-----------|-----------------------------------------------------------------------------|
+ *   | `read`           | `compute` | `we:scripts/review-detail.mjs#assembleReviewDetail` (park context) + the      |
+ *   |                  |           | NET-basis `computeNetDiffText`/`computeNetDiffPaths` (`merge-ai-prs.mjs`,     |
+ *   |                  |           | #2450)                                                                       |
+ *   | `judge`          | `judge`   | `buildPanelMandate` (`we:scripts/lib/review-core.mjs`) shaping a `judgeSpawn` |
+ *   |                  |           | request (`we:scripts/lib/judge-spawn.mjs`, #3028) — DECLARED, never spawned   |
+ *   | `judgeSecurity`  | `judge`   | THE SAME recipe at the `security` lens (#3319) — a SECOND, structurally       |
+ *   |                  |           | distinct juror, blind to the first                                           |
+ *   | `reduce`         | `compute` | `derivePanelVerdict` + `buildPanelFindings` (`we:scripts/lib/jury-core.mjs`); |
+ *   |                  |           | `humanRequired` off the LABELS                                               |
+ *   | `confirm`        | `confirm` | the engine SUSPENDS — the human stop, as machinery instead of prose           |
+ *   | `record`         | `effect`  | `decideSetLabel` (`we:scripts/review-set-label.mjs`) + `renderPanelComment`   |
+ *   |                  |           | (`we:scripts/lib/review-render.mjs`) + `renderReviewNotice` — DECLARED only   |
  *
  * If a reader finds review LOGIC in this file rather than a call into one of those, that is the bug.
+ *
+ * ── WHY TWO `judge` STEPS AND NOT A PANEL (#3319) ───────────────────────────────────────────────────────────
+ *
+ * THE EVIDENCE. Across the replayed corpus (`we:scripts/review-corpus/cases`, 92 cases, 87 carrying a lens row)
+ * **86 of 87 rows are `correctness`**. `security` ran exactly ONCE — #1457 r2 — and declared exactly ONE
+ * finding: the run-store / agent-listing seat-forgery hole at `we:scripts/operations/explore-io.mjs:165`. That
+ * single finding is the WHOLE of the evidence that a second lens sees something the incumbent misses, and
+ * #3319's own card retracts the inflated version of this count. One finding is a thin case — it is why this
+ * ships as the CHEAPEST wiring that keeps the juror as strong as it is today, and not as a panel.
+ *
+ * THE THREE OPTIONS, AND WHY THIS ONE.
+ *
+ *   (a) TWO SEQUENTIAL `review-pr` RUNS, orchestrated by the caller. REJECTED. Each run owns a whole `record`
+ *       step: two durable PR comments, two label swaps, two `verdict-ledger` rows (ordinal 2 is
+ *       `idempotent: false` precisely because a second comment is not the same comment), and
+ *       `deriveLoopOutcome` counting `read.priorRounds + 1` TWICE for one review. The verdict story is not
+ *       merely unclear — it is two verdicts on one PR with no declared reduction between them, which is the
+ *       thing `derivePanelVerdict` exists to be.
+ *   (b) WIRE `judgePanel` (`we:scripts/lib/judge-panel.mjs`, #3050). REJECTED, and #3158 is why: its per-seat
+ *       call object omits `allowedTools`, so EVERY panel seat is `--tools ''`. Today's single juror is
+ *       tool-bearing (see `REVIEW_JUROR_TOOLS`), and `we:scripts/lib/judge-spawn.mjs`'s own header records the
+ *       trade — *"The tools ARE the finding mechanism."* Wiring it as-is would swap one juror that can run a
+ *       gate, reproduce a hole and mutate a line for several that can only read. #3158 is OPEN; this item does
+ *       not pay its bill, and it does not need to.
+ *   (c) A SECOND DECLARED `judge` STEP — THIS. The engine's vocabulary never said one `judge` step per
+ *       operation: `advance` suspends per step and `driveRun` loops on `awaiting-judge`, so N judge steps is
+ *       N spawns with no engine change at all. Both jurors are tool-bearing. `judgeSpawn` derives each session
+ *       id from `runId` + `lens` (#3028), and the two steps carry DIFFERENT lenses, so the two actors are
+ *       pairwise distinct by construction — the same property #3050 was built to buy, obtained here without
+ *       #3158's cost.
+ *
+ * WHAT THIS COSTS, HONESTLY. The two spawns are SEQUENTIAL, not parallel — `driveRun` awaits each judge before
+ * it advances — so wall time roughly doubles (measured single-juror runs were 167-312s). A panel would have
+ * been concurrent; that is the one thing option (b) buys that this does not, and it is a wall-clock cost, not a
+ * verdict-quality one. The bill is the card's ~$0.29 per PR.
+ *
+ * WHAT THIS DOES NOT DO — the card's "on code PRs only" half. It is NOT implementable inside this declaration,
+ * and the reason is structural rather than an omission: the step list is fixed at REGISTRATION, before any PR
+ * is read, and the engine runs every declared step at its cursor. There is no conditional step and no "skip"
+ * return — `advance`'s `judge` case REFUSES a request that is not `{mandate, input, shape}`-shaped, so a step
+ * cannot decline to judge. An INPUT cannot gate it either, for the same reason: an input changes what a step
+ * asks, never whether it runs. Gating therefore belongs to a CALLER that knows the touch-set before it starts
+ * the run, or to a fifth thing the statute (#3031) forbids. So a docs-only PR pays for a security juror here.
+ * That is stated rather than hidden, and it is the residual this slice leaves behind.
+ *
+ * `MANDATORY_LENSES` IS NOT TOUCHED. It is #2310's ratified pair (`correctness`, `security`) and re-opening it
+ * is #3314's decision, not this slice's. This file only ARRANGES to seat both of them; it re-declares nothing.
  *
  * ── THE TWO PROPERTIES THIS SLICE EXISTS FOR ────────────────────────────────────────────────────────────────
  *
@@ -72,7 +123,9 @@ import {
   IMPACT_LEVELS,
   MANDATORY_LENSES,
   PANEL_LENSES,
+  buildPanelFindings,
   buildPanelMandate,
+  derivePanelVerdict,
   deriveVerdict,
   deriveLoopOutcome,
   normalizeFindings,
@@ -105,8 +158,24 @@ export const REVIEW_PR_OP = 'review-pr';
  */
 export const REVIEW_PR_CHANNEL = `the declared \`${REVIEW_PR_OP}\` operation (#3035)`;
 
-/** The default lens a single juror judges under. `correctness` is `MANDATORY_LENSES[0]` — the floor, not a pick. */
+/** The default lens the FIRST juror judges under. `correctness` is `MANDATORY_LENSES[0]` — the floor, not a pick. */
 export const DEFAULT_LENS = MANDATORY_LENSES[0];
+
+/**
+ * The lens the SECOND juror judges under (#3319). READ OFF `MANDATORY_LENSES`, never retyped as `'security'`:
+ * the pair is #2310's ratified set and #3314 is the open decision about widening it, so if that set ever
+ * changes this seat follows it instead of pinning a string the statute no longer names.
+ *
+ * A LITERAL, not an input field, for the same reason `JUDGE_MODEL` is: it reaches `buildPanelMandate` and then
+ * `judgeSpawn`'s `lens`, and a run's input must have no path to either.
+ */
+export const SECURITY_LENS = MANDATORY_LENSES[1];
+
+/**
+ * The names of the two `judge` steps, in declared order. Exported so an adapter (or a test) can name the
+ * telemetry rows a run produces without hard-coding step names a rename would silently strand.
+ */
+export const JUDGE_STEPS = Object.freeze(['judge', 'judgeSecurity']);
 
 /**
  * The juror's model / effort / budget. LITERALS, deliberately — never sourced from an input field.
@@ -421,26 +490,84 @@ export function overridesJuror({ verdict, answer } = {}) {
 }
 
 /**
+ * ONE JUROR CALL RECIPE, TWO LENSES (#3319). Both `judge` steps call THIS — a second copy of the request
+ * literal is how the two seats would drift into different jurors, and the whole claim of the second seat is
+ * that it differs from the first in EXACTLY ONE respect: its lens.
+ *
+ * PURE. Returns `judgeSpawn`'s option shape (#3028); it spawns nothing, exactly like the step that calls it.
+ *
+ * WHAT IS DELIBERATELY NOT A PARAMETER: `input`. Both jurors are shown `renderJudgeInput(read)` — the SAME PR
+ * description and the SAME net diff, and nothing else (#2336 context isolation). A second seat that saw
+ * different material would not be a second opinion on this diff, it would be an opinion on another one.
+ *
+ * @param {object} o
+ * @param {object} o.read - the `read` step's finding.
+ * @param {string} o.lens - the lens this seat judges under. A `PANEL_LENSES` member; `buildPanelMandate`
+ *   refuses anything else before it can become argv.
+ * @param {string} [o.aim] - the caller's #3094 hypothesis, or `''`.
+ * @returns {object} the judge request.
+ */
+export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
+  return {
+    // GROUND TRUTH goes in as the NET list, never `ghDiffStat` (#2450).
+    // `fenced: true` (#2967) — `read.title` is the PR title straight off `gh pr view`, written by whoever
+    // opened the PR, so it goes to the juror inside the #2438 labelled data fence rather than in
+    // instruction position. What that fixes is caller-supplied text reaching the mandate unfenced; whether
+    // a crafted title could actually move a verdict is UNMEASURED, so this is hygiene, not a patched hole.
+    mandate: buildPanelMandate({
+      lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
+    }),
+    input: renderJudgeInput(read),
+    shape: REVIEW_JUDGE_SHAPE,
+    lens,
+    model: JUDGE_MODEL,
+    effort: JUDGE_EFFORT,
+    budget: JUDGE_BUDGET_USD,
+    // TOOL-BEARING. A juror that can only read a diff finds none of the defects the hand-run reviews found
+    // this week — a gh flag bypass proven by firing the command, a guard hole reproduced on the parent
+    // commit, four decorative tests found by mutating source. The tools ARE the finding mechanism.
+    // Isolation is structural instead: `assertLaneCwd` refuses the spawn unless the cwd is a lane of the
+    // juror's OWN — not the primary checkout, and not the driver's lane. It cannot lean on
+    // `guard-lane`, because `--safe-mode` disables hooks inside the juror; see
+    // `we:scripts/lib/judge-spawn.mjs`
+    // and its sessionId is derived, so the self-clear refusal holds against the author.
+    //
+    // #3319 — BOTH seats carry it. This is the single line that option (b) could not have: `judgePanel`
+    // (`we:scripts/lib/judge-panel.mjs`) never forwards `allowedTools`, so wiring the panel would have made
+    // the security seat — and the correctness one with it — `--tools ''`. That is #3158, and it is open.
+    allowedTools: REVIEW_JUROR_TOOLS,
+  };
+}
+
+/**
  * The durable verdict write-up posted as the PR comment. EXTENDS `renderPanelComment`
  * (`we:scripts/lib/review-render.mjs`, #2432) rather than hand-rolling markdown — the operation adds only the
  * three lines that are ITS business: who decided, on what basis, and whether that basis was degraded.
  * PURE.
  */
-export function renderVerdictWriteUp({ read, verdict, answer, actor, lens, reason = '' }) {
+export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = '' }) {
   const overrode = overridesJuror({ verdict, answer });
+  // #3319 — THE ROSTER TRAVELS ON THE VERDICT. `lens` used to be a separate parameter, which was the seam
+  // through which the write-up could describe a different set of seats than the reduction was computed over.
+  const lensVerdicts = verdict.lensVerdicts && typeof verdict.lensVerdicts === 'object' ? verdict.lensVerdicts : {};
+  const lenses = Array.isArray(verdict.lenses) && verdict.lenses.length ? verdict.lenses : Object.keys(lensVerdicts);
+  const absent = PANEL_LENSES.filter((l) => !lenses.includes(l));
   const body = renderPanelComment({
     findings: verdict.findings,
     verdict: verdict.verdict,
     disposition: read.disposition,
-    lensVerdicts: { [lens]: verdict.verdict },
+    lensVerdicts,
     // THE TABLE LISTS WHAT RAN, NOT WHAT EXISTS. `renderPanelComment` defaults `lenses` to the whole
     // `PANEL_LENSES` set, so the first live run (PR #1146) rendered `security | mandatory | (no verdict)`
     // directly under "✅ pass — no blocking findings": three mandatory lenses shown as unjudged beside a pass,
-    // which reads as a hole in the review. It was not a hole — this operation declares ONE `judge` step and
-    // therefore runs ONE juror. The honest render is a one-row table plus the note below saying so; the four
-    // rows come back when the multi-lens panel (`we:scripts/lib/judge-panel.mjs`, #3050 — BUILT, and not yet
-    // wired into this operation) substitutes behind the same step.
-    lenses: [lens],
+    // which reads as a hole in the review. It was not a hole then (one `judge` step, one juror) and it is not
+    // one now — but WHAT ran has changed, so this passes the seats the run ACTUALLY seated (#3319) rather than
+    // a hard-coded singleton. Two rows today; still never a row for a lens nobody judged.
+    lenses,
+    // #3319 — the MANDATORY column is scoped to what this run seated, for exactly the same reason the row set
+    // is. `renderPanelVerdictTable` defaults `mandatoryLenses` to the whole ratified pair, which is right when
+    // both are present and would print `mandatory` beside a lens with no row if a caller ever seats only one.
+    mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
     heading: `Human review verdict — ${read.repo}#${read.pr}`,
   });
   const basis = read.degraded
@@ -464,17 +591,24 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, lens, reaso
     // Which heading is used is now decided by `overridesJuror` — the fact — and never by reason-present.
     ...(reason
       ? ['', overrode
-        ? `**Why this was overridden.** The \`${lens}\` juror's findings are rendered above; the decision `
-          + 'above differs from them. The operator gave this reason:'
+        ? `**Why this was overridden.** The ${lenses.length} juror(s) (${lenses.join(', ')}) reported above; the `
+          + 'decision above differs from what they reduced to. The operator gave this reason:'
         // NOT AN OVERRIDE, SO IT MUST NOT SAY ONE. `--reason` is accepted on every answer; when the decision
         // agrees with the juror the operator's words are still worth carrying, but calling them an override
         // would be a false claim about the record (see `overridesJuror`).
-        : `**Operator note.** The decision above agrees with the \`${lens}\` juror; this is not an override. `
-          + 'The operator added:', '', `> ${reason.split('\n').join('\n> ')}`, '']
+        : `**Operator note.** The decision above agrees with the panel reduction over ${lenses.join(', ')}; this `
+          + 'is not an override. The operator added:', '', `> ${reason.split('\n').join('\n> ')}`, '']
       : []),
-    `**Lens:** \`${lens}\` — a SINGLE-LENS run. One \`judge\` step, one juror, one lens; the table above lists `
-      + `only the lens that judged. The other ${Math.max(PANEL_LENSES.length - 1, 0)} panel lenses `
-      + `(${PANEL_LENSES.filter((l) => l !== lens).join(', ')}) did NOT run and are not reported as unjudged.`,
+    // THE LENS LINE SAYS WHAT RAN AND WHAT DID NOT, in words, beside a table that could otherwise be read as
+    // the whole panel. It is deliberately still a NOT-A-PANEL disclosure: `${lenses.length}` separate
+    // `judge` steps is not the same thing as `judgePanel` (#3050), and a reader who believes it was gets a
+    // false picture of the concurrency, the budget and the roster this verdict came from.
+    `**Lenses:** ${lenses.map((l) => `\`${l}\``).join(' + ')} — ${lenses.length} juror(s), one per lens, each a `
+      + 'separate `judge` step spawned with its own derived session id (#3028) and its own tools (#3319). They '
+      + 'ran SEQUENTIALLY and neither saw the other\'s findings; this is not a `judgePanel` fan-out (#3050). '
+      + (absent.length
+        ? `The other ${absent.length} panel lens(es) (${absent.join(', ')}) did NOT run and are not reported as unjudged.`
+        : 'Every panel lens judged.'),
     basis,
     '',
     `_Recorded through the declared \`${REVIEW_PR_OP}\` operation (#3035)._`,
@@ -511,24 +645,39 @@ export function reviewPrOperation({ readPr } = {}) {
       + 'without `gh`; the real binding is `we:scripts/operations/review-pr-io.mjs`.',
     );
   }
+  // REFUSED AT REGISTRATION, NEVER AT RUN TIME (#3319) — the registry's own posture. `SECURITY_LENS` is read
+  // off `MANDATORY_LENSES` rather than typed, which is right, and the failure mode of that is a set with fewer
+  // than two members: `SECURITY_LENS` would be `undefined`, `buildPanelMandate` would throw INSIDE a live
+  // `judge` step, and the operator would meet the ratified-set change as a mid-review crash on a real PR. If
+  // #3314 ever narrows the pair, this fails here — before any run record exists — and names the reason.
+  if (!SECURITY_LENS || !PANEL_LENSES.includes(SECURITY_LENS)) {
+    throw new Error(
+      `review-pr: the second juror's lens comes from \`MANDATORY_LENSES[1]\` and resolved to ${JSON.stringify(SECURITY_LENS)}, `
+      + `which is not one of ${PANEL_LENSES.join(', ')}. The ratified mandatory pair (#2310) no longer seats a second `
+      + 'lens; #3319 declared this step on it, so re-decide that seat (#3314) rather than judging on nothing.',
+    );
+  }
 
   return op(REVIEW_PR_OP, {
     input: {
       pr: 'number',
       repo: 'string',
-      // Which single lens judges. The value set is DECLARED (`enum`), so `validateInput` refuses an unknown
-      // lens before a run record exists and the derived `--help` lists all five by name instead of `<string>`.
+      // WHICH LENS THE FIRST SEAT JUDGES — not "which single lens judges" any more (#3319). The `judgeSecurity`
+      // seat is a declared literal and this field cannot reach it, so `security` runs whatever a caller passes
+      // here. The value set is DECLARED (`enum`), so `validateInput` refuses an unknown lens before a run
+      // record exists and the derived `--help` lists all five by name instead of `<string>`.
       // (This comment said "the four" until #3035 added `claim-accuracy`; the enum is `[...PANEL_LENSES]`, so
       // the count follows the set and the sentence has to follow the count.)
-      // `buildPanelMandate` still refuses anything outside `PANEL_LENSES` in the `judge` step — belt and
+      // `buildPanelMandate` still refuses anything outside `PANEL_LENSES` in each `judge` step — belt and
       // braces, and it is the one that binds a caller who builds a run record by hand.
-      // THE MULTI-LENS PANEL IS NOT THIS SLICE. A `judge` step declares ONE request; fanning it out to N
-      // jurors under one budget is #3050, which is now RESOLVED and SHIPPED as `we:scripts/lib/judge-panel.mjs`
-      // — but it is NOT wired into this operation, which still declares and spawns exactly one juror. (This
-      // comment said "NOT built" until #3050 landed; the correction matters, because the verdict write-up
-      // renders a ONE-ROW panel table on that basis and would be lying if the panel were actually running.)
-      // Wiring it substitutes behind this same step — the request already carries `lens` — and no other step
-      // changes.
+      // PASSING `--lens=security` IS LEGAL AND SEATS TWO SECURITY JURORS. That is the `jurorsPerLens: 2` shape
+      // `panelRigorForCareLevel('high')` produces and it is not refused here, but it is not free either: the
+      // run bills two jurors for one lens and `derivePanelVerdict` is then owed `correctness` by nobody, so
+      // `reduce` scopes its mandatory set to the lenses actually seated. See that step for why that is the
+      // honest reduction rather than a crash.
+      // THIS IS STILL NOT A PANEL. `judgePanel` (`we:scripts/lib/judge-panel.mjs`, #3050) is BUILT and remains
+      // UNWIRED here, because its per-seat call omits `allowedTools` and every seat would go tool-free (#3158,
+      // OPEN). Two declared `judge` steps buy the second lens without paying that; see the file header.
       lens: { type: 'string', required: false, default: DEFAULT_LENS, enum: [...PANEL_LENSES] },
       // WHAT TO HUNT (#3094) — the caller's hypothesis about where the defect is, surfaced as `--aim=<string>`.
       // THE REASON THIS INPUT EXISTS: over one session driving four PRs to merge, every review that found a real
@@ -615,70 +764,131 @@ export function reviewPrOperation({ readPr } = {}) {
     }),
 
     // ── 2. judge ────────────────────────────────────────────────────────────────────────────────────────────
-    // DECLARES the tool-free juror call in `judgeSpawn`'s option shape (#3028) and spawns NOTHING: the engine
-    // suspends and the caller does the spawn between two `advance` calls. `--tools ""` is what makes the
-    // mandate's "never check the branch out in a shared tree" (#2336) a thing the juror cannot do.
+    // DECLARES the juror call in `judgeSpawn`'s option shape (#3028) and spawns NOTHING: the engine suspends
+    // and the caller does the spawn between two `advance` calls. The recipe itself is
+    // `buildReviewJudgeRequest`, shared with the `judgeSecurity` seat below so the two differ in one field.
     judge: judgeStep({
       reads: ['input.lens', 'input.aim', 'findings.read'],
-      request: (view) => {
-        const read = view.findings.read;
-        const lens = view.input.lens;
+      request: (view) => buildReviewJudgeRequest({
+        read: view.findings.read,
+        lens: view.input.lens,
         // #3094 — the caller's aim rides in the MANDATE, beside the goal. `input.aim` is DECLARED in `reads`
         // above: a step that consumes an input without declaring it is reading state the run record does not
         // record it as depending on.
-        const aim = typeof view.input.aim === 'string' ? view.input.aim : '';
-        return {
-          // GROUND TRUTH goes in as the NET list, never `ghDiffStat` (#2450).
-          // `fenced: true` (#2967) — `read.title` is the PR title straight off `gh pr view`, written by whoever
-          // opened the PR, so it goes to the juror inside the #2438 labelled data fence rather than in
-          // instruction position. What that fixes is caller-supplied text reaching the mandate unfenced; whether
-          // a crafted title could actually move a verdict is UNMEASURED, so this is hygiene, not a patched hole.
-          mandate: buildPanelMandate({
-            lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
-          }),
-          input: renderJudgeInput(read),
-          shape: REVIEW_JUDGE_SHAPE,
-          lens,
-          model: JUDGE_MODEL,
-          effort: JUDGE_EFFORT,
-          budget: JUDGE_BUDGET_USD,
-          // TOOL-BEARING. A juror that can only read a diff finds none of the defects the hand-run reviews found
-          // this week — a gh flag bypass proven by firing the command, a guard hole reproduced on the parent
-          // commit, four decorative tests found by mutating source. The tools ARE the finding mechanism.
-          // Isolation is structural instead: `assertLaneCwd` refuses the spawn unless the cwd is a lane of the
-          // juror's OWN — not the primary checkout, and not the driver's lane. It cannot lean on
-          // `guard-lane`, because `--safe-mode` disables hooks inside the juror; see
-          // `we:scripts/lib/judge-spawn.mjs`
-          // and its sessionId is derived, so the self-clear refusal holds against the author.
-          allowedTools: REVIEW_JUROR_TOOLS,
-        };
-      },
+        aim: typeof view.input.aim === 'string' ? view.input.aim : '',
+      }),
     }),
 
-    // ── 3. reduce ───────────────────────────────────────────────────────────────────────────────────────────
-    // `deriveVerdict` decides; this step only feeds it. `humanRequired` comes off the LABELS the `read` step
-    // observed, which is what makes a gate-self PR's verdict `needs-human` no matter how clean the findings are.
+    // ── 3. judgeSecurity ────────────────────────────────────────────────────────────────────────────────────
+    // THE SECOND SEAT (#3319). Same recipe, same material, `SECURITY_LENS` instead of `input.lens`.
+    //
+    // IT DOES NOT READ `findings.judge`, AND THAT IS THE POINT. The engine hands a step ONLY its declared
+    // reads, so leaving `findings.judge` out of the list below does not merely discourage this juror from
+    // seeing the correctness juror's answer — it makes it ABSENT. Two seats that ran sequentially but where
+    // the second was shown the first's findings would be one review in two rounds, anchored on the first, and
+    // the whole reason to seat a second lens is that it starts somewhere else (#3050's recorded PR #1128
+    // result: the corrections came from a different starting point, not from greater skill).
+    //
+    // ITS LENS IS A LITERAL, NOT `input.lens`. `input.lens` names the FIRST seat and is caller-chosen; if it
+    // could also name this one, a caller could seat `security` twice and this operation would bill two jurors
+    // for one lens while `derivePanelVerdict` was still owed the other. The security seat is not negotiable
+    // from the command line, which is exactly what "run the security lens once per PR" means.
+    //
+    // `input.aim` RIDES ALONG. The #3094 hypothesis is about WHERE the caller thinks the defect is, not about
+    // which lens should hunt it; withholding it from this seat would make the security juror the only reviewer
+    // in the run told less than the operator knows. `buildPanelMandate` already renders it as an UNVERIFIED
+    // claim and instructs a juror to report the named defect absent when it is absent, so it cannot become
+    // this seat's conclusion any more than it can the first's.
+    judgeSecurity: judgeStep({
+      reads: ['input.aim', 'findings.read'],
+      request: (view) => buildReviewJudgeRequest({
+        read: view.findings.read,
+        lens: SECURITY_LENS,
+        aim: typeof view.input.aim === 'string' ? view.input.aim : '',
+      }),
+    }),
+
+    // ── 4. reduce ───────────────────────────────────────────────────────────────────────────────────────────
+    // THE PANEL REDUCER DECIDES; this step only feeds it. `derivePanelVerdict` (`we:scripts/lib/jury-core.mjs`)
+    // is #2310's ratified reduction and is IMPORTED, never restated — adding a second answer to "what does this
+    // set of per-lens verdicts mean" is the drift `AGGREGATION` exists to prevent.
+    //
+    // WHY THE PANEL REDUCER AND NOT `deriveVerdict` OVER THE MERGED LIST (#3319). They are NOT the same
+    // function. `derivePanelVerdict` reads the MANDATORY lenses' verdicts and lets an ADVISORY lens's ordinary
+    // findings ride the accept — the "unanimous accept lands" line #2310 ratified. Flattening two lenses into
+    // one `deriveVerdict` call would make a `simplicity` seat blocking the moment a caller passed
+    // `--lens=simplicity`, silently promoting an advisory lens to a gate. The per-lens `deriveVerdict` calls
+    // below are still `deriveVerdict` — one per seat, exactly as a single-seat run has always been — and the
+    // panel reducer composes them.
+    //
+    // `mandatoryLenses` IS SCOPED TO WHAT THIS RUN SEATED, and that is load-bearing rather than defensive:
+    // `derivePanelVerdict` THROWS on a mandatory lens with no verdict, and `input.lens` may name an advisory
+    // one, in which case `correctness` genuinely did not run and there is no verdict to give it. Scoping to
+    // the seated lenses turns that into the honest statement "this run seated `security` as its only mandatory
+    // lens" instead of a crash. The reducer's own empty-set refusal still stands behind it — and cannot fire,
+    // because the `judgeSecurity` seat is not caller-negotiable, so a mandatory lens is always seated.
+    //
+    // `humanRequired` comes off the LABELS the `read` step observed, which is what makes a gate-self PR's
+    // verdict `needs-human` no matter how clean the findings are. It is passed ONCE, to the panel reducer —
+    // not to the per-lens calls, where it would flatten every seat to `needs-human` and destroy the per-lens
+    // table the write-up renders.
     reduce: compute({
-      reads: ['findings.read', 'findings.judge', 'input.lens'],
+      reads: ['findings.read', 'findings.judge', 'findings.judgeSecurity', 'input.lens'],
       fn: (view) => {
         const read = view.findings.read;
-        const answer = view.findings.judge && typeof view.findings.judge === 'object' ? view.findings.judge : {};
-        const findings = normalizeFindings(answer.findings);
-        // #x0p5k2q — REFUSE A SILENT JUROR, here as well as in the shape. `required` in JSON Schema only
-        // asserts the KEY is present, so `{findings: [], summary: ""}` satisfies it and arrives as the same
-        // nothing. Checked at the reduce step because this is where an empty answer would otherwise become
-        // `accept`: `deriveVerdict` reads only the findings array, so silence and a clean bill are the same
-        // input to it. Zero findings remains a fine verdict — this asks only that it be an ANSWER.
-        const summary = String(answer.summary ?? '').trim();
-        if (!summary) {
-          throw new Error(
-            'review-pr.reduce: the juror returned no summary — it reported nothing about what it examined, '
-            + `which is \`unrun\`, not an accept (${findings.length} finding(s) returned). A juror that judged `
-            + 'must say what it judged. Re-run the review; do not record a verdict on this run.',
-          );
+        // The seats, in declared order. `step` is carried so the refusal below can NAME which juror was
+        // silent: with two of them, "the juror returned no summary" is not enough to act on.
+        const seats = [
+          { step: JUDGE_STEPS[0], lens: view.input.lens, answer: view.findings.judge },
+          { step: JUDGE_STEPS[1], lens: SECURITY_LENS, answer: view.findings.judgeSecurity },
+        ];
+
+        /** @type {Object<string, Array<object>>} raw findings per lens, accumulated so two seats on ONE lens
+         *  merge rather than the second silently replacing the first (the `--lens=security` case). */
+        const lensFindings = {};
+        const lenses = [];
+        const summaries = [];
+        for (const seat of seats) {
+          const answer = seat.answer && typeof seat.answer === 'object' ? seat.answer : {};
+          const raw = normalizeFindings(answer.findings);
+          // #x0p5k2q — REFUSE A SILENT JUROR, here as well as in the shape. `required` in JSON Schema only
+          // asserts the KEY is present, so `{findings: [], summary: ""}` satisfies it and arrives as the same
+          // nothing. Checked at the reduce step because this is where an empty answer would otherwise become
+          // `accept`: `deriveVerdict` reads only the findings array, so silence and a clean bill are the same
+          // input to it. Zero findings remains a fine verdict — this asks only that it be an ANSWER.
+          // #3319 — CHECKED PER SEAT. One silent juror out of two is still a review that did not happen on
+          // that lens, and letting it pass because its sibling spoke would record a two-lens verdict on one
+          // lens's evidence.
+          const seatSummary = String(answer.summary ?? '').trim();
+          if (!seatSummary) {
+            throw new Error(
+              `review-pr.reduce: the \`${seat.lens}\` juror (\`${seat.step}\` step) returned no summary — it reported `
+              + `nothing about what it examined, which is \`unrun\`, not an accept (${raw.length} finding(s) `
+              + 'returned). A juror that judged must say what it judged. Re-run the review; do not record a '
+              + 'verdict on this run.',
+            );
+          }
+          if (!lenses.includes(seat.lens)) lenses.push(seat.lens);
+          lensFindings[seat.lens] = [...(lensFindings[seat.lens] ?? []), ...raw];
+          summaries.push(`${seat.lens}: ${seatSummary}`);
         }
+
+        // TAGGED WITH THEIR LENS, by `buildPanelFindings` — so a merged list never loses which juror said it.
+        // That provenance is what makes the operator-facing comment readable with two seats: without it, a
+        // security finding and a correctness finding are indistinguishable rows.
+        const findings = buildPanelFindings(lensFindings);
+        const lensVerdicts = Object.fromEntries(
+          lenses.map((lens) => [lens, deriveVerdict({ findings: lensFindings[lens] })]),
+        );
         const humanRequired = read.humanRequired === true;
-        const verdict = deriveVerdict({ findings, humanRequired });
+        const verdict = derivePanelVerdict({
+          lensVerdicts,
+          humanRequired,
+          mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
+          // REQUIRED by the reducer, never defaulted (#2823 round-3 finding 1): the findings-derived prevention
+          // scan is what catches an uncaptured guard that per-lens verdict flattening would hide.
+          findings,
+        });
         return {
           verdict,
           // WHERE THE LOOP STANDS, distinct from what this round decided. "converged" and "exhausted" both end
@@ -686,14 +896,22 @@ export function reviewPrOperation({ readPr } = {}) {
           // round comes from the durable ledger, so it needs no new state and survives a dead session.
           loop: deriveLoopOutcome({ verdict, round: read.priorRounds + 1 }),
           humanRequired,
-          lens: view.input.lens,
+          // THE SEATS THIS RUN ACTUALLY FILLED, and what each of them said. `lenses` is the roster; the render
+          // and the ledger both read it rather than re-deriving one from `input.lens` (which now names only the
+          // FIRST seat and would under-report the run by half).
+          lenses,
+          lensVerdicts,
+          // A DISPLAY LABEL, kept because `lens` was a string on this object before #3319 and a reader that
+          // still expects one gets an honest "both of them" rather than half the truth. Nothing DECIDES on it —
+          // every consumer that needs the roster reads `lenses`.
+          lens: lenses.join(', '),
           findings,
-          summary,
+          summary: summaries.join(' | '),
         };
       },
     }),
 
-    // ── 4. confirm ──────────────────────────────────────────────────────────────────────────────────────────
+    // ── 5. confirm ──────────────────────────────────────────────────────────────────────────────────────────
     // THE STOP POINT, AS MACHINERY. The engine suspends here and records what is asked and OF WHOM; the run is
     // resumable from any surface. `of` is `human` on a gate-self PR and `agent` otherwise, so the record itself
     // says which tier of actor was owed — the skill no longer has to.
@@ -703,15 +921,21 @@ export function reviewPrOperation({ readPr } = {}) {
         const read = view.findings.read;
         const v = view.verdict || {};
         const n = Array.isArray(v.findings) ? v.findings.length : 0;
-        return `${read.repo}#${read.pr} — the \`${v.lens}\` juror returned ${n} finding(s); `
-          + `\`deriveVerdict\` reduced them to \`${v.verdict}\`${v.humanRequired ? ' (gate-self: review:human)' : ''}. `
+        // #3319 — THE QUESTION NAMES EACH JUROR AND WHAT IT SAID. The operator is being asked to record a
+        // verdict reduced from more than one seat, and "2 finding(s) → changes" does not say WHICH lens
+        // objected. It is the per-lens breakdown or nothing: a two-juror reduction reported as one number is
+        // the flattening `lensVerdicts` exists to undo.
+        const perLens = Object.entries(v.lensVerdicts ?? {}).map(([l, x]) => `${l}=${x}`).join(', ');
+        return `${read.repo}#${read.pr} — ${(v.lenses ?? []).length} juror(s) returned ${n} finding(s) `
+          + `(${perLens || 'no lens verdicts recorded'}); \`derivePanelVerdict\` reduced them to \`${v.verdict}\``
+          + `${v.humanRequired ? ' (gate-self: review:human)' : ''}. `
           + `Record which verdict? (${CONFIRM_OPTIONS.join(' | ')}; \`abstain\` writes nothing)`;
       },
       of: (view) => (view.findings.read.humanRequired ? CONFIRM_ACTORS.HUMAN : CONFIRM_ACTORS.AGENT),
       options: [...CONFIRM_OPTIONS],
     }),
 
-    // ── 5. record ───────────────────────────────────────────────────────────────────────────────────────────
+    // ── 6. record ───────────────────────────────────────────────────────────────────────────────────────────
     // DECLARES four effects and applies NONE. See the per-effect idempotency notes below — each is decided on
     // its own, because the executor's refusal to replay an indeterminate attempt is only as strong as the flag.
     //
@@ -765,7 +989,10 @@ export function reviewPrOperation({ readPr } = {}) {
         if (answer === 'changes' && jurorFindings === 0 && overrideReason === '') {
           throw new Error(
             `review-pr.record: refusing to record \`changes\` on ${repo}#${pr} with no stated reason — the `
-            + `\`${verdict.lens}\` juror returned 0 findings, so this is an OPERATOR OVERRIDE and the write-up `
+            // #3319 — ALL of them, named. "the `correctness` juror returned 0 findings" would now be a claim
+            // about one of two seats, and the operator's next question is exactly "which one was silent?".
+            + `${(verdict.lenses ?? []).length} juror(s) (${(verdict.lenses ?? []).join(', ')}) returned 0 `
+            + 'findings between them, so this is an OPERATOR OVERRIDE and the write-up '
             + 'would post "no blocking findings" above "Decision: `changes`". The author lane cannot act on '
             + 'that, so it buys another round. Pass `--reason="<what must change>"` on this same --resume, or '
             + 'record `abstain` to write nothing. (18 bounces across 8 PRs, #1556–#1567, were reasonless in '
@@ -785,7 +1012,10 @@ export function reviewPrOperation({ readPr } = {}) {
         }
 
         const bodyFile = `${repo.replace(/[^\w.-]+/g, '-')}-${pr}-verdict.md`;
-        const body = renderVerdictWriteUp({ read, verdict, answer, actor, lens: verdict.lens, reason: overrideReason });
+        // #3319 — the roster travels ON the verdict (`lenses` / `lensVerdicts`), so the renderer is no longer
+        // handed a lens separately: that was the seam through which the write-up could describe a different set
+        // of seats than the reduction was computed over.
+        const body = renderVerdictWriteUp({ read, verdict, answer, actor, reason: overrideReason });
 
         return [
           // 0 — THE COMMENT (its body). IDEMPOTENT: TRUE. It writes bytes that are a pure function of the run
@@ -848,7 +1078,15 @@ export function reviewPrOperation({ readPr } = {}) {
               to,
               actor,
               verdict: verdict.verdict,
+              // #3319 — `lens` stays a STRING because the sink interpolates it into the fallback reason, and
+              // `lenses` is added beside it for a reader that wants the roster. The explicit `reason` below
+              // means the sink's `${payload.lens} lens` fallback is no longer the sentence anyone reads: with
+              // two seats it would have rendered "(correctness, security lens)", singular, about two jurors.
               lens: verdict.lens,
+              lenses: verdict.lenses,
+              lensVerdicts: verdict.lensVerdicts,
+              reason: `recorded by the review-pr operation (${(verdict.lenses ?? []).length} juror(s): `
+                + `${Object.entries(verdict.lensVerdicts ?? {}).map(([l, v]) => `${l}=${v}`).join(', ')})`,
               humanRequired: verdict.humanRequired === true,
               findings: verdict.findings,
               netChangedFiles: read.netChangedFiles,

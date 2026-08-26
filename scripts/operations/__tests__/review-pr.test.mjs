@@ -42,13 +42,17 @@ import {
   reviewPrOperation,
   shapeReadFinding,
   REVIEW_JUROR_TOOLS,
+  JUDGE_STEPS,
+  SECURITY_LENS,
+  DEFAULT_LENS,
+  buildReviewJudgeRequest,
 } from '../review-pr.mjs';
-import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
+import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
 // test that spells the marker by hand still passes when the marker's shape changes, which is the mutant the
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
-import { VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -106,14 +110,24 @@ const BLOCKING_ANSWER = {
   findings: [{ summary: 'the guard is inverted', file: NET_PATHS[0], disposition: 'blocker' }],
 };
 
-/** Drive a run to its `confirm` suspend with a canned juror answer. */
-function atConfirm({ registry, input, answer = CLEAN_ANSWER, id = 'run-rp' }) {
+/**
+ * Drive a run to its `confirm` suspend, answering EVERY judge suspend on the way (#3319 — there are two).
+ *
+ * `answer` is what each seat returns unless `answers` names a per-step override, so a test that cares about
+ * one lens's answer says so and every other test keeps reading as the single-answer test it was written as.
+ * `requests` is every judge request the run suspended with, keyed by step name; `request` stays the FIRST
+ * one so the pre-#3319 assertions about "the juror's request" still address the correctness seat they meant.
+ */
+function atConfirm({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 'run-rp' }) {
   let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input, registry }), { registry });
-  expect(runStatus(run, { registry })).toBe('awaiting-judge');
-  const request = run.pending.request;
-  run = advanceWhileRunning(run, { registry, resume: { value: answer } });
+  const requests = {};
+  while (runStatus(run, { registry }) === 'awaiting-judge') {
+    const step = run.pending.step;
+    requests[step] = run.pending.request;
+    run = advanceWhileRunning(run, { registry, resume: { value: answers[step] ?? answer } });
+  }
   expect(runStatus(run, { registry })).toBe('awaiting-confirm');
-  return { run, request };
+  return { run, requests, request: requests[JUDGE_STEPS[0]] };
 }
 
 const BASE_INPUT = { pr: 1234, repo: 'chalbert/web-everything' };
@@ -420,12 +434,35 @@ describe('a juror that judged must say what it judged', () => {
     // making every clean review unrecordable. Zero findings stays a perfectly good verdict.
     const { run } = reduceWith({ summary: 'read all 6 files; nothing blocking', findings: [] });
     expect(run.verdict.verdict).toBe('accept');
-    expect(run.verdict.summary).toBe('read all 6 files; nothing blocking');
+    // #3319 — the carried summary is now ATTRIBUTED, because two jurors said something and an unlabelled
+    // concatenation would read as one reviewer's account of a review two of them did.
+    expect(run.verdict.summary)
+      .toBe(`${DEFAULT_LENS}: read all 6 files; nothing blocking | ${SECURITY_LENS}: read all 6 files; nothing blocking`);
   });
 
-  it('trims the summary it carries, so padding cannot pass as content', () => {
+  it('trims each seat\'s summary, so padding cannot pass as content', () => {
     expect(reduceWith({ summary: '  looked at the guard  ', findings: [] }).run.verdict.summary)
-      .toBe('looked at the guard');
+      .toBe(`${DEFAULT_LENS}: looked at the guard | ${SECURITY_LENS}: looked at the guard`);
+  });
+
+  it('#3319 REFUSES a silent SECOND juror even when the first one spoke', () => {
+    // The half a per-run check would have missed. `security` returning nothing is a lens that did not judge,
+    // and reducing it into a two-lens verdict on `correctness`'s evidence records a review that never ran.
+    expect(() => atConfirm({
+      registry: registry(),
+      input: BASE_INPUT,
+      id: 'run-sum-silent-2',
+      answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: { summary: '  ', findings: [] } },
+    })).toThrow(new RegExp(`the \`${SECURITY_LENS}\` juror \\(\`${JUDGE_STEPS[1]}\` step\\) returned no summary`));
+  });
+
+  it('#3319 names WHICH seat was silent — with two jurors, "a juror" is not actionable', () => {
+    expect(() => atConfirm({
+      registry: registry(),
+      input: BASE_INPUT,
+      id: 'run-sum-silent-1',
+      answers: { [JUDGE_STEPS[0]]: { summary: '', findings: [] }, [JUDGE_STEPS[1]]: CLEAN_ANSWER },
+    })).toThrow(new RegExp(`the \`${DEFAULT_LENS}\` juror \\(\`${JUDGE_STEPS[0]}\` step\\) returned no summary`));
   });
 
   it('the judge shape REQUIRES summary, so the refusal is also asked for up front', () => {
@@ -522,11 +559,13 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     expect(text).toContain('the answer recorded at `confirm` is `accept`');
     expect(text).toContain(restartCommand(refused.run, declaration));
     // The point of the whole card: the thrown-away juror's cost is stated.
-    expect(text).toContain('judge spend: $0.4599 over 1 juror(s)');
+    // #3319 — TWO jurors were thrown away, and the line says so. `over 1 juror(s)` here would have been the
+    // tell that the second seat's bill was silently dropped from the operator's picture.
+    expect(text).toContain('judge spend: $0.9198 over 2 juror(s)');
 
     // NOTHING WAS RECORDED: cursor unchanged, the confirm answer still `accept`, effects still empty.
     const record = store.read('run-refuse');
-    expect(record.cursor).toBe(4);
+    expect(record.cursor).toBe(5);
     expect(record.findings.confirm).toBe('accept');
     expect(record.effects).toEqual([]);
   });
@@ -656,14 +695,14 @@ describe('the record step', () => {
 
     const first = await applyPendingEffects(declared, { sinks, store });
     expect(first.error).toBeTruthy();
-    expect(first.applied).toEqual(['run-replay#4#0', 'run-replay#4#1']);
+    expect(first.applied).toEqual(['run-replay#5#0', 'run-replay#5#1']);
 
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(second.error).toBeNull();
     // THE ASSERTION: the label/comment sink ran exactly ONCE across both passes.
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.LABEL)).toHaveLength(1);
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.WRITE_UP)).toHaveLength(1);
-    expect(second.skipped).toEqual(['run-replay#4#0', 'run-replay#4#1']);
+    expect(second.skipped).toEqual(['run-replay#5#0', 'run-replay#5#1']);
   });
 
   it('REFUSES to replay the label effect when its outcome is unknown', async () => {
@@ -703,7 +742,7 @@ describe('the derived command line', () => {
     // lens shows up in `--help` the moment it is declared, with no second list to remember.
     expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
     expect(spec.usage).not.toContain('--lens=<string>');
-    expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → confirm(confirm) → record(effect)');
+    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → confirm(confirm) → record(effect)');
   });
 
   // #3094 — `--aim` IS DERIVED, NOT HAND-ADDED. It appears in `--help` because it is declared on the operation;
@@ -792,7 +831,10 @@ describe('the juror\'s cost survives the run (the adapter used to drop it)', () 
 
   it('lands the metered fields on the run record, attributed to the step that spawned it', async () => {
     const { out } = await driveToConfirm(meteredJudge);
-    expect(out.run.telemetry).toHaveLength(1);
+    // #3319 — ONE ROW PER SEAT. A single row here would mean a juror's bill went unrecorded.
+    expect(out.run.telemetry).toHaveLength(2);
+    expect(out.run.telemetry.map((r) => r.step)).toEqual([...JUDGE_STEPS]);
+    expect(out.run.telemetry.map((r) => r.stepIndex)).toEqual([1, 2]);
     const row = out.run.telemetry[0];
     expect(row).toMatchObject({
       step: 'judge', stepIndex: 1, costUsd: 0.0421, wallMs: 8400, durationMs: 8123,
@@ -802,6 +844,8 @@ describe('the juror\'s cost survives the run (the adapter used to drop it)', () 
     expect(row.lens).toBe('correctness');
     expect(row.model).toBe('sonnet');
     expect(row.effort).toBe('high');
+    // …and the second row is attributed to the OTHER lens, from the OTHER request.
+    expect(out.run.telemetry[1].lens).toBe(SECURITY_LENS);
     // The counters are carried; the non-numeric noise in `usage` is not.
     expect(row.usage).toEqual({ input_tokens: 900, output_tokens: 120, cache_read_input_tokens: 50214 });
     // AND NOT THE MATERIAL: `argv` embeds the whole mandate and must never reach a record that is printed.
@@ -811,8 +855,9 @@ describe('the juror\'s cost survives the run (the adapter used to drop it)', () 
   it('reports the cost AT THE CONFIRM STOP — before the operator decides whether to spend more', async () => {
     const { out } = await driveToConfirm(meteredJudge);
     const text = out.lines.join('\n');
-    expect(text).toContain('judge spend: $0.0421 over 1 juror(s)');
+    expect(text).toContain('judge spend: $0.0842 over 2 juror(s)');
     expect(text).toContain('judge (correctness): $0.0421 · 8.4s');
+    expect(text).toContain(`judgeSecurity (${SECURITY_LENS}): $0.0421 · 8.4s`);
     expect(text).toContain('session 11111111-2222-3333-4444-555555555555');
   });
 
@@ -824,7 +869,7 @@ describe('the juror\'s cost survives the run (the adapter used to drop it)', () 
     });
     expect(second.stopped).toBe('complete');
     const payload = JSON.parse(second.lines.join('\n'));
-    expect(payload.spend).toEqual({ jurors: 1, costUsd: 0.0421, wallMs: 8400, durationMs: 8123 });
+    expect(payload.spend).toEqual({ jurors: 2, costUsd: 0.0842, wallMs: 16800, durationMs: 16246 });
     expect(payload.telemetry[0].costUsd).toBe(0.0421);
   });
 
@@ -856,29 +901,203 @@ describe('the durable comment states ONE provenance (#2898)', () => {
   });
 });
 
-describe('the write-up does not over-promise on a single-lens run', () => {
-  const writeUp = (lens = 'correctness') => {
+describe('the write-up reports the seats that ACTUALLY judged, and no others', () => {
+  const writeUp = (lens = DEFAULT_LENS) => {
     const { registry } = registryFor({});
     const { run } = atConfirm({ registry, input: { ...BASE_INPUT, lens }, id: `run-wu-${lens}` });
-    return renderVerdictWriteUp({
-      read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op', lens,
-    });
+    return renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op' });
   };
 
-  it('lists ONLY the lens that judged — never a mandatory lens as `(no verdict)` beside a pass', () => {
-    const body = writeUp('correctness');
-    expect(body).toContain('| correctness | mandatory | accept |');
-    for (const other of PANEL_LENSES.filter((l) => l !== 'correctness')) {
+  it('lists BOTH mandatory lenses now that both judged — and still no lens as `(no verdict)`', () => {
+    const body = writeUp(DEFAULT_LENS);
+    expect(body).toContain(`| ${DEFAULT_LENS} | mandatory | accept |`);
+    expect(body).toContain(`| ${SECURITY_LENS} | mandatory | accept |`);
+    // The ADVISORY lenses still did not run, and are still not printed as unjudged rows (#1146's defect).
+    for (const other of PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l))) {
       expect(body).not.toContain(`| ${other} |`);
     }
     expect(body).not.toContain('(no verdict)');
   });
 
-  it('says in words that it was a single-lens run, and which lenses did not run', () => {
-    const body = writeUp('security');
-    expect(body).toContain('a SINGLE-LENS run');
+  it('names each seat in words, and which panel lenses did not run', () => {
+    const body = writeUp(DEFAULT_LENS);
+    expect(body).toContain(`**Lenses:** \`${DEFAULT_LENS}\` + \`${SECURITY_LENS}\` — 2 juror(s)`);
     expect(body).toContain('did NOT run and are not reported as unjudged');
-    expect(body).toContain('correctness');
+    for (const other of PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l))) {
+      expect(body).toContain(other);
+    }
+  });
+
+  it('#3319 does NOT claim to be a `judgePanel` fan-out — two judge steps are not a panel', () => {
+    // The disclosure that keeps the write-up honest while #3158 is open: a reader must not take a two-row
+    // table as evidence that `judgePanel` (#3050) ran, because it did not, and its seats would be tool-free.
+    const body = writeUp(DEFAULT_LENS);
+    expect(body).toContain('ran SEQUENTIALLY and neither saw the other\'s findings');
+    expect(body).toContain('this is not a `judgePanel` fan-out (#3050)');
+  });
+
+  it('a caller that seats an ADVISORY lens gets a two-row table, not a claim that correctness judged', () => {
+    const body = writeUp('simplicity');
+    expect(body).toContain('| simplicity |');
+    expect(body).toContain(`| ${SECURITY_LENS} | mandatory | accept |`);
+    // `correctness` genuinely did not run: it must be named as absent, never printed as a mandatory row.
+    expect(body).not.toContain(`| ${DEFAULT_LENS} |`);
+    expect(body).toContain(DEFAULT_LENS);
+    expect(body).not.toContain('(no verdict)');
+  });
+});
+
+// ── #3319 THE SECOND SEAT ────────────────────────────────────────────────────────────────────────────────
+// The whole point of the item, and the three properties it turns on: security ACTUALLY runs, it runs as a
+// second TOOL-BEARING actor distinct from the first, and it is BLIND to what the first found.
+describe('#3319 the security lens runs on every PR', () => {
+  it('declares a second `judge` step at the security lens, seated from `MANDATORY_LENSES` not a literal', () => {
+    const { declaration } = registryFor({});
+    const judgeSteps = declaration.steps.filter((s) => s.step.kind === 'judge').map((s) => s.name);
+    expect(judgeSteps).toEqual([...JUDGE_STEPS]);
+    expect(SECURITY_LENS).toBe(MANDATORY_LENSES[1]);
+  });
+
+  it('spawns a SECURITY juror even when the caller asked for correctness — it is not caller-negotiable', () => {
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-1' });
+    expect(requests[JUDGE_STEPS[0]].lens).toBe(DEFAULT_LENS);
+    expect(requests[JUDGE_STEPS[1]].lens).toBe(SECURITY_LENS);
+    // …and its mandate really is the security one, not correctness's text with a different label on it.
+    expect(requests[JUDGE_STEPS[1]].mandate).toContain(SECURITY_LENS);
+    expect(requests[JUDGE_STEPS[0]].mandate).not.toBe(requests[JUDGE_STEPS[1]].mandate);
+  });
+
+  it('runs security even when the caller asked for an ADVISORY lens', () => {
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: { ...BASE_INPUT, lens: 'simplicity' }, id: 'run-sec-2' });
+    expect(requests[JUDGE_STEPS[0]].lens).toBe('simplicity');
+    expect(requests[JUDGE_STEPS[1]].lens).toBe(SECURITY_LENS);
+  });
+
+  it('BOTH seats are TOOL-BEARING — the #3158 downgrade `judgePanel` would have cost is not paid here', () => {
+    // This is the single assertion that distinguishes option (c) from option (b). `judgePanel`
+    // (`we:scripts/lib/judge-panel.mjs`) omits `allowedTools` per seat, so wiring it would have made both of
+    // these `--tools ''`. If a future refactor routes this operation through the panel, this reddens.
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-tools' });
+    for (const step of JUDGE_STEPS) {
+      expect(requests[step].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
+      expect(requests[step].allowedTools).toContain('Bash');
+    }
+  });
+
+  it('the two seats are PAIRWISE-DISTINCT ACTORS — different derived session ids from one run id', () => {
+    // `judgeSpawn` derives a session id from `runId` + `lens` (#3028). Two seats on ONE run therefore differ
+    // only because their lenses differ, which is exactly the property #3050 was built to buy.
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-ids' });
+    const ids = JUDGE_STEPS.map((step) => deriveSessionId(
+      sessionSeed([requests[step].runId, requests[step].lens]),
+    ));
+    expect(requests[JUDGE_STEPS[0]].runId).toBe(requests[JUDGE_STEPS[1]].runId);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('the security seat is BLIND to the correctness seat — `findings.judge` is not among its reads', () => {
+    // Not a convention: the engine projects ONLY declared reads, so an undeclared path is ABSENT. A seat that
+    // could see its sibling's findings would be a second round, anchored, not a second opinion.
+    const { declaration } = registryFor({});
+    const security = declaration.steps.find((s) => s.name === JUDGE_STEPS[1]).step;
+    expect([...security.reads]).not.toContain('findings.judge');
+    expect([...security.reads]).toEqual(['input.aim', 'findings.read']);
+  });
+
+  it('shows BOTH jurors the same material — a second opinion on the SAME diff, or it is not one', () => {
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-input' });
+    expect(requests[JUDGE_STEPS[0]].input).toBe(requests[JUDGE_STEPS[1]].input);
+  });
+
+  it('passes the #3094 aim to BOTH seats — the security juror is not the one reviewer told less', () => {
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({
+      registry, input: { ...BASE_INPUT, aim: 'the run-store seat check may be forgeable' }, id: 'run-sec-aim',
+    });
+    for (const step of JUDGE_STEPS) {
+      expect(requests[step].mandate).toContain('the run-store seat check may be forgeable');
+    }
+  });
+
+  it('a SECURITY finding bounces the PR even when correctness accepted — that is the point of the seat', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({
+      registry,
+      input: BASE_INPUT,
+      id: 'run-sec-blocks',
+      answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: BLOCKING_ANSWER },
+    });
+    expect(run.verdict.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'accept', [SECURITY_LENS]: 'changes' });
+    expect(run.verdict.verdict).toBe('changes');
+    // The finding keeps its provenance, so the operator can see WHICH lens objected.
+    expect(run.verdict.findings[0].category).toBe(SECURITY_LENS);
+  });
+
+  it('an ADVISORY lens\'s findings ride the accept — #2310\'s reduction, not a flattened `deriveVerdict`', () => {
+    // The test that proves the reducer is `derivePanelVerdict` rather than `deriveVerdict` over the merged
+    // list. Merging would make `simplicity` blocking here; the ratified reduction reports it and accepts.
+    const { registry } = registryFor({});
+    const { run } = atConfirm({
+      registry,
+      input: { ...BASE_INPUT, lens: 'simplicity' },
+      id: 'run-sec-advisory',
+      answers: { [JUDGE_STEPS[0]]: BLOCKING_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER },
+    });
+    expect(run.verdict.lensVerdicts).toEqual({ simplicity: 'changes', [SECURITY_LENS]: 'accept' });
+    expect(run.verdict.verdict).toBe('accept');
+    // Reported, never dropped.
+    expect(run.verdict.findings.map((f) => f.category)).toContain('simplicity');
+  });
+
+  it('two seats on ONE lens MERGE rather than the second replacing the first', () => {
+    // `--lens=security` is legal (the `jurorsPerLens: 2` shape). Both answers must survive: a lens-keyed map
+    // that overwrote would lose a whole juror's findings without saying so.
+    const { registry } = registryFor({});
+    const { run } = atConfirm({
+      registry,
+      input: { ...BASE_INPUT, lens: SECURITY_LENS },
+      id: 'run-sec-double',
+      answers: { [JUDGE_STEPS[0]]: BLOCKING_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER },
+    });
+    expect(run.verdict.lenses).toEqual([SECURITY_LENS]);
+    expect(run.verdict.findings).toHaveLength(1);
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.summary).toBe(`${SECURITY_LENS}: one blocker | ${SECURITY_LENS}: nothing blocking`);
+  });
+
+  it('the ledger row names every seat, so a two-juror verdict is not filed as a one-juror one', () => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-ledger' });
+    const declared = advance(advance(run, { registry, resume: { value: 'accept' } }), { registry });
+    const ledger = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LEDGER);
+    expect(ledger.payload.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+    expect(ledger.payload.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'accept', [SECURITY_LENS]: 'accept' });
+    // The sink interpolates `payload.reason` when present; without it the fallback reads "(a, b lens)".
+    expect(ledger.payload.reason).toContain('2 juror(s)');
+    expect(ledger.payload.reason).toContain(`${SECURITY_LENS}=accept`);
+  });
+
+  it('ONE request recipe, two lenses — the seats differ in their lens and in nothing else', () => {
+    // A second literal is how the seats drift into different jurors. Built directly, off the same read.
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-recipe' });
+    const read = run.findings.read;
+    const a = buildReviewJudgeRequest({ read, lens: DEFAULT_LENS });
+    const b = buildReviewJudgeRequest({ read, lens: SECURITY_LENS });
+    const differing = Object.keys(a).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    expect(differing.sort()).toEqual(['lens', 'mandate']);
+  });
+
+  it('REFUSES AT REGISTRATION if the ratified pair stops seating a second lens (#3314)', () => {
+    // The failure mode of reading the seat off `MANDATORY_LENSES` instead of typing it: a narrowed pair would
+    // otherwise surface as `buildPanelMandate` throwing inside a live judge step, mid-review, on a real PR.
+    expect(SECURITY_LENS).toBeTruthy();
+    expect(PANEL_LENSES).toContain(SECURITY_LENS);
   });
 });
 
@@ -904,7 +1123,10 @@ describe('the net basis is pinned to a commit, not a moving ref', () => {
       diff: { text: 'x', scored: true },
     }, { pr: 1, repo: 'o/n' });
     const body = renderVerdictWriteUp({
-      read, verdict: { verdict: 'accept', findings: [], lens: 'correctness' }, answer: 'accept', actor: 'op', lens: 'correctness',
+      read,
+      verdict: { verdict: 'accept', findings: [], lenses: ['correctness'], lensVerdicts: { correctness: 'accept' } },
+      answer: 'accept',
+      actor: 'op',
     });
     expect(body).toContain(`Net basis: \`abc..${SHA}\` (rev \`origin/lane/3058-seed-encoding\` at review time)`);
   });
@@ -918,7 +1140,10 @@ describe('the net basis is pinned to a commit, not a moving ref', () => {
     }, { pr: 1, repo: 'o/n' });
     expect(read.netBasis.rev).toBe(null);
     const body = renderVerdictWriteUp({
-      read, verdict: { verdict: 'accept', findings: [], lens: 'correctness' }, answer: 'accept', actor: 'op', lens: 'correctness',
+      read,
+      verdict: { verdict: 'accept', findings: [], lenses: ['correctness'], lensVerdicts: { correctness: 'accept' } },
+      answer: 'accept',
+      actor: 'op',
     });
     expect(body).toContain('⚠️ UNPINNED');
     expect(body).toContain('origin/lane/gone');
@@ -1184,6 +1409,9 @@ describe('an override must say why', () => {
     expect(out.code).toBe(1);
     expect(out.stopped).toBe('step-refused');
     expect(out.lines.join('\n')).toMatch(/no stated reason/);
+    // #3319 — it names BOTH silent seats. "the `correctness` juror returned 0 findings" would now be a claim
+    // about one of two, and the operator's next question is exactly which one said nothing.
+    expect(out.lines.join('\n')).toContain(`2 juror(s) (${DEFAULT_LENS}, ${SECURITY_LENS}) returned 0 findings`);
     // AND NOTHING WAS POSTED. A refusal that still wrote the comment would be no refusal at all.
     expect(calls).toEqual([]);
   });
