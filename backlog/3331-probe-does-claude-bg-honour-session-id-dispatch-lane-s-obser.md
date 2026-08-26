@@ -1,4 +1,5 @@
 ---
+bornAs: xhmktct
 kind: story
 size: 3
 parent: "3029"
@@ -70,7 +71,7 @@ pre-PR life, two minutes after it starts.
   instead of racing to discover it"* — asserts the argv and nothing about the CLI's response to it.
 - **The sink already concedes this.** `we:scripts/operations/dispatch-lane-io.mjs:528-534`: *"PROVEN AGAINST
   A PROCESS, NOT AGAINST THE REAL CLI… What is still NOT proven: no dispatch has been fired end to end, and
-  the REAL CLI's response to this argv remains unasserted."* It names `#xaibmeu` — which is `#3096` — as
+  the REAL CLI's response to this argv remains unasserted."* It names `#3096` — which is `#3096` — as
   where a first live run happens.
 
 ## Done when

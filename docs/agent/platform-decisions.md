@@ -3143,16 +3143,16 @@ dispatch decisions; the thing that turns a surfaced decision into a running agen
    footing is the separate factual claim that the conveyor can reach the mechanism at all:
    **`claude --resume` addresses a session by its id, so stop-then-resume presupposes that the dispatcher
    knows the id of the agent it started.** The same 2026-08-25 run recorded the opposite result for that
-   presupposition — `--session-id` was **ignored** on a `--bg` spawn — and `#xhmktct` is the probe that
+   presupposition — `--session-id` was **ignored** on a `--bg` spawn — and `#3331` is the probe that
    settles it. No code here resumes or steers anything yet:
    `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
    `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**
    (re-run 2026-08-26, on both `main` at `3b2aeded` and `main` at `1ed16d63`). **This clause is the hinge,
    and two triggers revisit it**, not one:
    (i) if the requirement ever becomes steering a *running* agent without interrupting it — no
-   stop-then-resume backend can reach that; or (ii) **if `#xhmktct`'s probe comes back negative** — if
+   stop-then-resume backend can reach that; or (ii) **if `#3331`'s probe comes back negative** — if
    `claude --bg` really does discard `--session-id`, the dispatcher cannot address the session it started,
-   and stop-then-resume is unreachable as designed until `#xhmktct`'s own remedy (reading the real id back
+   and stop-then-resume is unreachable as designed until `#3331`'s own remedy (reading the real id back
    off `claude agents --json`) exists. Trigger (i) is hypothetical; **trigger (ii) is live today.**
 
 **Lineage:** #3118 (ratified 2026-08-26, operator), resolving its single fork as **(c)** over (a) a WE-native
@@ -3168,7 +3168,7 @@ more caller of one already-declared operation) and
 [#agent-runner-cli-backend](#agent-runner-cli-backend) (that ruling governs what a spawn backend must offer;
 this one governs who is allowed to call it). The costs this ruling accepts rather than waives — the dispatch
 kinds the operation does not yet route, and the handle assumption that both the observer *and* clause 3's
-stop-then-resume rest on — are tracked on #3118 and the items it links (`#3165`, `#xj86df4`, `#xhmktct`,
+stop-then-resume rest on — are tracked on #3118 and the items it links (`#3165`, `#3332`, `#3331`,
 `#3096`), per
 [#statute-anchor-states-rule-not-status](#statute-anchor-states-rule-not-status).
 

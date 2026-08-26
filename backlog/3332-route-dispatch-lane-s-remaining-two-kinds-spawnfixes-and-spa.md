@@ -1,4 +1,5 @@
 ---
+bornAs: xj86df4
 kind: story
 size: 5
 parent: "3029"

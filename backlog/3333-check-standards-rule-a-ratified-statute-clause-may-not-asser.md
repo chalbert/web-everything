@@ -1,4 +1,5 @@
 ---
+bornAs: xv8uoiv
 kind: story
 size: 3
 status: open
@@ -31,12 +32,12 @@ run produced two capability rows, and the card applied **opposite** evidentiary 
 | row | claim | how the card treated it |
 | --- | --- | --- |
 | `claude --resume <sessionId>` | context survived the stop | promoted to ratified statute as settled fact |
-| `--session-id` on a `--bg` spawn | **ignored** | *"one observation is not evidence"* — filed `#xhmktct`, which requires the observation be repeated **at least three times** before it is believed |
+| `--session-id` on a `--bg` spawn | **ignored** | *"one observation is not evidence"* — filed `#3331`, which requires the observation be repeated **at least three times** before it is believed |
 
 The `correctness` juror found the asymmetry independently and marked it CONFIRMED; the operator overrode to
 `changes` on the sharper version of it — the two rows are **coupled** (`--resume` addresses a session by its
 id), so the promoted row depended on the distrusted one. Both were fixed on the review round, and the hinge
-now has `#xhmktct` as its owner. Nothing stopped it from landing that way in the first place, and the
+now has `#3331` as its owner. Nothing stopped it from landing that way in the first place, and the
 prevention was written into the review as OWED. This card is it.
 
 **Not a one-off.** `#3281` is the sibling prevention from the round before, on the same card, for the same
@@ -86,7 +87,7 @@ clean for a while.
    (`we:scripts/__tests__/rules-anchors.test.mjs:145`) still passes.
 2. `npm run check:standards` on current `main` gains no new error and no new warning from the rule — i.e. no
    existing statute clause trips it, or the ones that do are fixed in the same change. `#3118`'s clause 3
-   must **pass**, since it now cites `#xhmktct`; that is the rule's own regression fixture.
+   must **pass**, since it now cites `#3331`; that is the rule's own regression fixture.
 3. The two questions above are answered in this card or in the commit that closes it.
 
 ## Lineage
@@ -94,5 +95,5 @@ clean for a while.
 Filed 2026-08-26 as the prevention the `correctness` finding on PR #1583 recorded as **OWED** while bouncing
 `#3118`'s ratification. Sibling of `#3281` (one default marker per fork), which came out of the previous
 round on the same card. Extends `#2844`'s enforcer-or-owner shape
-(`we:scripts/lib/validate-rules-anchors.cjs:249`) from the invariant catalogue to statute prose. `#xhmktct`
+(`we:scripts/lib/validate-rules-anchors.cjs:249`) from the invariant catalogue to statute prose. `#3331`
 is the verification card the `#3118` hinge now points at — the exit this rule would have required.

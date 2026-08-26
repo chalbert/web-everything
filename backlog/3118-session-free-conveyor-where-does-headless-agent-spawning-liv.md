@@ -191,11 +191,11 @@ per steer. Two consequences for this fork:
 > second, and this paragraph originally read as though the two rows were independent findings, which was
 > **wrong**: `claude --resume` takes a session **id**, so if `--bg` discards `--session-id` the dispatcher has
 > no id to resume with. Read row 2 as *"resume preserves context once you can address the session"* — and row
-> 3 as the open question of whether it can. `#xhmktct` owns it; see the correction under
+> 3 as the open question of whether it can. `#3331` owns it; see the correction under
 > [THE CALL](#the-call-operator-2026-08-26-fork-1--c-call-the-existing-dispatch-lane-operation)'s reason 2.
 > The two consequences below still hold, but with the dependency named. Unlike (c), **(a) would not need
 > id-addressing at all** — it holds the live child in-process, so its `steer(text)` is a write to that child's
-> stdin (see (a) above). So a negative probe does not restore (a)'s *capability* advantage — `#xhmktct`'s
+> stdin (see (a) above). So a negative probe does not restore (a)'s *capability* advantage — `#3331`'s
 > `Done when` #3 is a remedy, not a rebuild — but it does add a prerequisite to (c) that (a) does not carry,
 > which is why clause 3 revisits on it.
 
@@ -474,14 +474,14 @@ not a missing capability, and the pivot the fork turned on is gone.
 > originally ended at *"**context preserved**. So 'steer while keeping the work' is reachable under (c)"* and
 > asserted it as settled fact. **That was wrong in one specific way, and the wrongness was an asymmetry
 > inside this card**: the very same manual run produced a second row — `--session-id` **ignored** on a `--bg`
-> spawn (the probe table above, third row) — which this card treats as untrustworthy, files `#xhmktct` over,
+> spawn (the probe table above, third row) — which this card treats as untrustworthy, files `#3331` over,
 > and demands be *"repeated at least three times"* before it is believed. Same table, same run, opposite
 > evidentiary standard.
 >
 > Worse than asymmetry, **the two rows are coupled and this card never said so**. `claude --resume` addresses
 > a session **by its id**. If `--bg` discards `--session-id`, the dispatcher does not know the id of the agent
 > it started, so it cannot resume it — and reading the real id back is, by this card's own probe-table note,
-> *"work that does not exist yet"*. So row 2 is reachable only if row 3 turns out false, or after `#xhmktct`'s
+> *"work that does not exist yet"*. So row 2 is reachable only if row 3 turns out false, or after `#3331`'s
 > remedy is built. Re-verified 2026-08-26:
 > `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
 > `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing** — at
@@ -492,10 +492,10 @@ not a missing capability, and the pivot the fork turned on is gone.
 >
 > **What is not retracted:** the operator's ruling that context-preserving stop-then-resume is a *sufficient*
 > requirement. That is a judgment call and it stands. What is corrected is the separate **factual** claim that
-> the conveyor can reach the mechanism — that is unverified, and it now has an owner (`#xhmktct`) and a
+> the conveyor can reach the mechanism — that is unverified, and it now has an owner (`#3331`) and a
 > revisit trigger (clause 3, trigger (ii)).
 >
-> **Prevention filed: `#xv8uoiv`** — a `check:standards` rule requiring a statute clause that rests on a
+> **Prevention filed: `#3333`** — a `check:standards` rule requiring a statute clause that rests on a
 > manual observation to cite either a test or an OPEN verification card, the two-exit shape `#2844` already
 > enforces for operational invariants (`we:scripts/lib/validate-rules-anchors.cjs:249`). The finding recorded
 > it as OWED; nothing detected this asymmetry, a human re-read did. Sibling of `#3281`, the prevention the
@@ -511,9 +511,9 @@ requirement**. That is the load-bearing acceptance of this whole decision.
 1. **If the requirement ever changes from "steer while keeping the work" to "steer without ever
    interrupting"** — no stop-then-resume backend can reach that, and the case for a second spawn
    implementation would have to be re-argued from the start. *Hypothetical: nothing has asked for it.*
-2. **If `#xhmktct`'s probe comes back negative** — if `claude --bg` really does discard `--session-id`, the
+2. **If `#3331`'s probe comes back negative** — if `claude --bg` really does discard `--session-id`, the
    dispatcher cannot address the session it started, and stop-then-resume is not reachable as designed until
-   `#xhmktct`'s `Done when` #3 remedy (read the real id back off `claude agents --json`) is built. *Live
+   `#3331`'s `Done when` #3 remedy (read the real id back off `claude agents --json`) is built. *Live
    today: that is exactly what the one manual run reported.*
 
 *(Trigger 2 added 2026-08-26 on the PR #1583 review. This section originally named trigger 1 as the only one,
@@ -528,15 +528,15 @@ condition that could actually undercut it is open right now. See the correction 
   Verified: `grep -c 'spawnFixes\|spawnCiHeals\|ciHeal\|CI-heal'` over
   `we:backlog/3165-tick-core-plans-auto-prepare-scope-dispatches-that-never-act.md` returns **0**. The card's
   own text names `'build' | 'prepare' | 'prepare-decision'` at its `:68` and `:131`.
-- **The other two kinds had no card. They do now: `#xj86df4`.** `we:scripts/conveyor/tick-core.mjs:860-861`
+- **The other two kinds had no card. They do now: `#3332`.** `we:scripts/conveyor/tick-core.mjs:860-861`
   plans `spawnFixes` and `spawnCiHeals`; `we:scripts/operations/dispatch-lane-io.mjs:139` launches
   `match(decisions.spawnBuilds)` only, and `briefPath` at `:52` takes no kind. After `#3165` lands, three of
   five kinds dispatch through the operation and two still do not.
-- **It inherits an unproven handle assumption, and that now has a card too: `#xhmktct`.** The sink mints the
+- **It inherits an unproven handle assumption, and that now has a card too: `#3331`.** The sink mints the
   session id (`we:scripts/operations/dispatch-lane-io.mjs:558`) and pins it with `--session-id` (`:621`); the
   observer matches on that same minted value (`:738`). A single manual run suggested `claude --bg` ignores
-  `--session-id`. `#xhmktct` probes it before anything is fixed, because one observation is not evidence.
-  **`#xhmktct` owns two things, not one** *(added 2026-08-26, PR #1583 review — this bullet originally named
+  `--session-id`. `#3331` probes it before anything is fixed, because one observation is not evidence.
+  **`#3331` owns two things, not one** *(added 2026-08-26, PR #1583 review — this bullet originally named
   only the observer, which under-stated it)*: reason 3's hinge rests on the **same** unproven fact, because
   `claude --resume` addresses a session by its id. If the probe comes back negative, the observer cannot see
   its agents **and** the dispatcher cannot resume them.
@@ -556,9 +556,9 @@ Recorded rather than silently applied, per this card's own established practice.
   *"PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI… What is still NOT proven: no dispatch has been fired
   end to end, and the REAL CLI's response to this argv remains unasserted."* Same meaning, and the assumption
   is still unproven — but the quote is no longer verbatim.
-- **The card points at "#3096" for the first live run; the code points at `#xaibmeu`.** Those are the same
+- **The card points at "#3096" for the first live run; the code points at `#3096`.** Those are the same
   item — `we:backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md` has
-  `bornAs: xaibmeu`. Not an error, recorded so the next reader does not have to resolve it again.
+  `bornAs: 3096`. Not an error, recorded so the next reader does not have to resolve it again.
 - **The observer defect is narrower than the card states, and still real.** The card says a `--session-id`
   mismatch means the observer *"reports every real dispatch as `unresolved`"*. The observer tries the **PR
   axis first** (`we:scripts/operations/dispatch-lane-io.mjs:695-729`), and a merged PR still returns
@@ -566,7 +566,7 @@ Recorded rather than silently applied, per this card's own established practice.
   about the liveness axis itself — it is *"what answers while no PR exists yet, which is every dispatch for
   most of its life"* — so a dispatch would read `unresolved` for its entire pre-PR life, two minutes
   (`DISPATCH_LISTING_GRACE_MINUTES = 2`, `we:scripts/operations/dispatch-lane.mjs:111`) after it starts. That
-  is the version `#xhmktct` carries.
+  is the version `#3331` carries.
 
 ### What was NOT re-run, stated so it is not mistaken for done
 
@@ -602,14 +602,14 @@ only in this card's prose:
 | what | where it is carried |
 | --- | --- |
 | three of five dispatch kinds routed through the operation | `#3165` (open) |
-| the other two kinds — `spawnFixes`, `spawnCiHeals` | **`#xj86df4`** (filed 2026-08-26 by this ruling) |
-| the unproven `--session-id` handle assumption the observer rests on | **`#xhmktct`** (filed 2026-08-26 by this ruling) |
-| **the ruling's hinge — stop-then-resume presupposes addressing the session by its id, the same unproven fact** | **`#xhmktct`** (scope widened 2026-08-26 on the PR #1583 review) |
-| the first end-to-end live dispatch through the operation | `#3096` (open, `bornAs: xaibmeu`) |
+| the other two kinds — `spawnFixes`, `spawnCiHeals` | **`#3332`** (filed 2026-08-26 by this ruling) |
+| the unproven `--session-id` handle assumption the observer rests on | **`#3331`** (filed 2026-08-26 by this ruling) |
+| **the ruling's hinge — stop-then-resume presupposes addressing the session by its id, the same unproven fact** | **`#3331`** (scope widened 2026-08-26 on the PR #1583 review) |
+| the first end-to-end live dispatch through the operation | `#3096` (open, `bornAs: 3096`) |
 
 *(**CORRECTED 2026-08-26, PR #1583 review.** This paragraph read **"The ruling accepts three costs; each has
 an owner now, so none of them lives only in this card's prose"** over a four-row table. Both halves were
 wrong. The count was wrong — the table listed four. And the claim itself was wrong in the way that mattered:
 the hinge, the ruling's own load-bearing acceptance, **was** a cost living only in this card's prose, with no
-owner, because nobody had noticed it rests on the same unproven `--session-id` fact `#xhmktct` was already
+owner, because nobody had noticed it rests on the same unproven `--session-id` fact `#3331` was already
 filed over. It is row 4 now.)*
