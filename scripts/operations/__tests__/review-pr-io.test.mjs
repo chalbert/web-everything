@@ -420,6 +420,16 @@ describe('the PR-view transport', () => {
     expect(PR_VIEW_FIELDS).toContain('comments');
     expect(PR_VIEW_FIELDS).toContain('files');
   });
+
+  it('#3322 — asks for `createdAt`, so the stamp-regime comparison rides the same one `gh pr view`', () => {
+    // #3067 tells a STRIPPED author stamp from one that never existed by comparing the PR's open date against
+    // the regime start. Without the field on this list the read side would answer `unknown-author` for every
+    // unstamped PR while `we:scripts/review-set-label.mjs` — which reads it on its own call — answered
+    // `stamp-lost`: two answers to one question about one PR, which is the drift #2644 forbids.
+    expect(PR_VIEW_FIELDS).toContain('createdAt');
+    // And it is ONE call, not a second hop: the whole set still goes to a single `gh pr view --json`.
+    expect(new Set(PR_VIEW_FIELDS).size).toBe(PR_VIEW_FIELDS.length);
+  });
 });
 
 /**
@@ -450,6 +460,38 @@ describe('readPr wires the injected view transport', () => {
     const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
     expect(out.headRefName).toBe('lane/x');
     expect(out.body).toBe('a body');
+  });
+
+  /**
+   * #3322 — THE TWO HALVES OF THE INDEPENDENCE COMPARISON REACH THE PURE SHAPER.
+   *
+   * The refusal itself lives in `shapeReadFinding` (`we:scripts/operations/review-pr.mjs`) and is tested
+   * there. What can only be tested HERE is the wiring: the shaper is pure, so if the io shell drops either
+   * field the guard silently answers `unknown-clearer` on every run and refuses nothing — green tests, dead
+   * guard. That is the same shape of miss the `readView` block above exists for.
+   */
+  it('#3322 — carries the PR open date and this process\'s actor id up for the independence check', () => {
+    const before = process.env.CLAUDE_CODE_SESSION_ID;
+    process.env.CLAUDE_CODE_SESSION_ID = 'sess-under-test';
+    try {
+      const out = readPr({
+        pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, createdAt: '2026-08-20T00:00:00Z' }),
+      });
+      expect(out.createdAt).toBe('2026-08-20T00:00:00Z');
+      // READ FROM THE ENVIRONMENT, never from argv or the view — the #2844 property this whole comparison
+      // rests on. Setting the env var moves this value; nothing a caller passes can.
+      expect(out.clearerId).toBe('sess-under-test');
+    } finally {
+      if (before === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+      else process.env.CLAUDE_CODE_SESSION_ID = before;
+    }
+  });
+
+  it('#3322 — a view with no `createdAt` degrades to "" rather than undefined, and never throws', () => {
+    // A pre-fetched view staged by hand (`WE_PR_VIEW_DIR`) may simply omit it. `distinguishMissingAuthorStamp`
+    // treats an unparseable date as NEVER_STAMPED, i.e. the pre-#3067 behaviour — no new false refusal.
+    const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
+    expect(out.createdAt).toBe('');
   });
 
   it('validates pr and repo BEFORE calling the transport — a bad request never reaches it', () => {

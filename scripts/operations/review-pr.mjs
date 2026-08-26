@@ -83,6 +83,12 @@ import { renderPanelComment } from '../lib/review-render.mjs';
 // #xwp8ioh — the SAME predicate `we:scripts/review-set-label.mjs` enforces at the write side (#2953), imported
 // rather than restated, so the read side and the write side cannot drift into two answers (#2644).
 import { classifyPrLiveness, inertPrMessage } from '../lib/pr-liveness.mjs';
+// #xwk0tzu — the SAME decider `we:scripts/review-set-label.mjs` runs at the write side (#2844/#3067),
+// imported rather than restated, for the same #2644 reason as the line above. The two PURE readers of the PR
+// body come with it, so the declaration derives the author half itself instead of trusting an io-shell field.
+import {
+  INDEPENDENCE, decideClearerIndependence, hasStampLostMarker, parseAuthorActorId,
+} from '../lib/review-independence.mjs';
 // THE GUARD, IMPORTED NOT INJECTED — see property 2 in the header.
 import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
 
@@ -254,6 +260,55 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
     );
   }
 
+  // #xwk0tzu (#3322) — THE SELF-CLEAR REFUSAL, MOVED TO `read` FOR THE SAME REASON THE LIVENESS ONE WAS.
+  // Exactly the shape of the block above, and deliberately so: #2844's refusal was never wrong, it was LAST.
+  // `we:scripts/review-set-label.mjs` fires it at `record`, which is after `judge` has spawned a juror and
+  // been billed for it, and the operation cannot reach the one target that is exempt from it
+  // (`--to=clear-human` is not a declarable step — see `record` below), so a run that trips it has NO
+  // outcome: `accept` is terminally refused and the money is already gone. Two rounds on PR #1569 cost
+  // roughly two dollars before that terminal refusal was even reachable.
+  //
+  // BOTH HALVES ARE KNOWABLE HERE, which is the whole reason the position can move. The author's id is a pure
+  // read of the PR BODY the io shell already fetched (the `authored-by-actor` stamp `we:scripts/pr-land.mjs`
+  // writes once, at open); the clearer's id is this process's harness session, read by the io shell because
+  // it is the one input this pure function may not read for itself. Nothing new is asked of the network.
+  //
+  // ONLY A PROVEN `self-clear` REFUSES — the SAME narrowing the write side applies, imported not restated:
+  //   • `unknown-author` / `unknown-clearer` PROCEED. Refusing "we could not establish it" would strand every
+  //     PR opened before the stamp existed and every review run without a harness session (CI, a bare shell);
+  //     `we:scripts/lib/review-independence.mjs`'s header argues that trade in full.
+  //   • `stamp-lost` PROCEEDS TOO, and that is NOT this item turning a missing stamp into a pass. #3067
+  //     DETECTS it — `prCreatedAt` and `stampLostMarked` are supplied below precisely so a stripped stamp
+  //     resolves to `STAMP_LOST` here and not to `UNKNOWN_AUTHOR` — and its card records the refusal as
+  //     deliberately NOT landed yet: "adding STAMP_LOST would block every PR opened outside pr-land … The
+  //     refusal should land together with a route that stamps a PR opened without pr-land, not before it."
+  //     Refusing it HERE, unilaterally, would both pre-empt that call and put the read side and the write
+  //     side on two different answers — the drift #2644 forbids. So the status is COMPUTED, carried onto the
+  //     finding as `independence` where a reader can see it, and gates nothing. When #3067's pairing lands,
+  //     both sites widen together and this comment is the note that says where.
+  //
+  // A LEGITIMATE REVIEW IS UNTOUCHED: a session that did not open the PR compares two DIFFERENT ids, gets
+  // `independent`, and proceeds exactly as before. That direction is tested as explicitly as the refusal —
+  // getting it backwards would block every review, which is a far worse failure than the one being fixed.
+  const independence = decideClearerIndependence({
+    authorId: parseAuthorActorId(raw.body),
+    clearerId: raw.clearerId,
+    prCreatedAt: raw.createdAt,
+    stampLostMarked: hasStampLostMarker(raw.body),
+  });
+  if (independence.status === INDEPENDENCE.SELF_CLEAR) {
+    throw new Error(
+      `review-pr.read: ${independence.reason}. Refusing BEFORE the \`judge\` step, so no juror is paid for a `
+      + 'verdict this operation could never record: `--to=accepted` is refused at `record` by '
+      + '`we:scripts/review-set-label.mjs` (#2844) and `--to=clear-human`, the one exempt target, is not '
+      + 'reachable from this operation at all. THE ROUTE THAT WORKS is a DIFFERENT SESSION: run `review-pr` '
+      + 'from a session that did not open this PR, so its own session id is the clearing actor and the '
+      + `independence bar is genuinely met. There is no flag on this operation that lifts this — ${repo}#${pr} `
+      + 'can also be cleared by the human ceremony `review-set-label.mjs --to=clear-human --actor=… '
+      + '--reason="<the operator instruction>"`, which is run by hand and quotes an instruction (#2895).',
+    );
+  }
+
   if (net.scored !== true && net.reason === 'exec-contract') {
     throw new Error(
       `review-pr.read: the net-diff basis reported \`exec-contract\` for ${repo}#${pr} — the injected \`exec\` is `
@@ -274,6 +329,12 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
     url: String(detail.url || ''),
     headRefName: String(raw.headRefName || ''),
     body: String(raw.body || ''),
+    // #xwk0tzu — WHAT THE INDEPENDENCE CHECK ANSWERED, recorded even when it did not refuse. A status that
+    // only ever appears in a thrown message is invisible on every run that proceeds, and the two statuses
+    // that proceed WITHOUT proving independence (`unknown-author`, `stamp-lost`) are exactly the ones a
+    // reader of the run record should be able to see. Silence would read as "independence held" — the
+    // failure mode `we:scripts/review-set-label.mjs`'s own durable comment note exists to prevent.
+    independence: String(independence.status || ''),
     labels: Array.isArray(detail.labels) ? detail.labels.map(String) : [],
     // FROM THE LABELS, per the card — never inferred from the diff or from what the PR touches.
     humanRequired: detail.humanRequired === true,

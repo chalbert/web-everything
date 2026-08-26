@@ -40,6 +40,9 @@ const view = (over = {}) => ({
   files: [{ path: 'scripts/operations/verify.mjs', additions: 10, deletions: 0 }],
   headRefName: 'lane/verify-operation',
   state: 'OPEN', // #xwp8ioh — a staged view without it cannot be reviewed at all (see VIEW_FIELD_TYPES)
+  // #xwk0tzu (#3322) — without it, a stripped `authored-by-actor` stamp reads as one that never existed, so
+  // a review through a staged view is quietly weaker than the same review through `gh` (see VIEW_FIELD_TYPES).
+  createdAt: '2026-08-14T12:00:00Z',
   headRefOid: HEAD_OID, // #xaoja7a — what makes a staged view falsifiable against the tree that will be judged
   ...over,
 });
