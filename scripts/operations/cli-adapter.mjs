@@ -102,6 +102,28 @@ export function declaresJudgeStep(declaration) {
 }
 
 /**
+ * The declaration's CONFIRM-TIME input fields — those marked `atConfirm` in its schema. PURE.
+ *
+ * These are real declared inputs (a step may read them; `projectReads` hands them over), and they are the only
+ * fields whose flag rides a `--resume` instead of the opening call. See `atConfirm` in
+ * {@link ../registry.mjs normalizeInputSchema} for why the distinction exists at all.
+ *
+ * DERIVED PER DECLARATION, never a hard-coded name. `--reason` was briefly a member of {@link CONTROL_FLAGS},
+ * which made every operation in the registry advertise and accept it — including the ones with no confirm step
+ * and no field to put it in, where it would have been a flag that silently did nothing. The whole point of
+ * reading it off the schema is that an operation accepts the confirm-time flags it actually declares, and no
+ * others. RETRACTED: `CONTROL_FLAGS` above used to end `…, 'model', 'reason']`. That was wrong twice over — it
+ * over-advertised the flag everywhere, and (because the collision check below refuses an input field named
+ * after a control flag) it made the declaration that needs `reason` unable to declare it.
+ *
+ * @param {object} declaration
+ * @returns {string[]} field names, in declaration order.
+ */
+export function confirmTimeFields(declaration) {
+  return Object.entries(declaration?.input ?? {}).filter(([, spec]) => spec?.atConfirm).map(([name]) => name);
+}
+
+/**
  * Which control flags THIS declaration actually accepts. PURE.
  *
  * `CONTROL_FLAGS` is the union across all operations and is NOT the per-operation answer: `--cwd`/`--model`
@@ -155,6 +177,7 @@ export const JUROR_FLAG_HELP = Object.freeze([
 export function buildCliSpec(declaration) {
   const fields = Object.entries(declaration.input).map(([name, spec]) => ({
     name, type: spec.type, required: spec.required, default: spec.default, enum: spec.enum ?? null,
+    atConfirm: !!spec.atConfirm,
   }));
   const collision = fields.find((f) => CONTROL_FLAGS.includes(f.name));
   if (collision) {
@@ -167,11 +190,15 @@ export function buildCliSpec(declaration) {
   // nothing they can act on, and the four valid lenses were already declared — the help just never read them.
   // The default is shown alongside, so "what happens if I omit it" is answered in the same line.
   const placeholder = (f) => (f.enum ? f.enum.map(String).join('|') : `<${f.type}>`);
+  // A CONFIRM-TIME FIELD IS NOT PRINTED ON THE OPENING LINE, for the same reason `--cwd` is not printed where
+  // there is no juror: the adapter REFUSES it there, so advertising it would document a refusal. It is printed
+  // on the resume line instead, which is the call it actually rides.
+  const optional = (f) => `[--${f.name}=${placeholder(f)}${f.default !== undefined ? `, default ${f.default}` : ''}]`;
   const flagText = fields
-    .map((f) => (f.required
-      ? `--${f.name}=${placeholder(f)}`
-      : `[--${f.name}=${placeholder(f)}${f.default !== undefined ? `, default ${f.default}` : ''}]`))
+    .filter((f) => !f.atConfirm)
+    .map((f) => (f.required ? `--${f.name}=${placeholder(f)}` : optional(f)))
     .join(' ');
+  const confirmFlagText = fields.filter((f) => f.atConfirm).map((f) => ` ${optional(f)}`).join('');
   const steps = declaration.steps.map((s) => `${s.name}(${s.step.kind})`).join(' → ');
   // THE RESUME LINE IS DERIVED TOO. A declaration whose every step is `compute` can never suspend, so there is
   // no run to resume and no question to answer — printing the line anyway documents a flag combination the
@@ -187,7 +214,7 @@ export function buildCliSpec(declaration) {
     fields,
     usage: [
       `usage: run.mjs ${declaration.name} ${flagText} [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`,
-      ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>] [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`] : []),
+      ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>]${confirmFlagText} [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`] : []),
       '',
       `steps: ${steps}`,
       ...(judged ? ['', ...JUROR_FLAG_HELP] : []),
@@ -228,10 +255,14 @@ export function coerceInputValue(type, raw) {
 export function parseOperationArgv(declaration, argv = []) {
   const spec = buildCliSpec(declaration);
   const known = new Set(spec.fields.map((f) => f.name));
+  const confirmTime = new Set(confirmTimeFields(declaration));
   const judged = declaresJudgeStep(declaration);
   const errors = [];
   const raw = {};
-  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '' };
+  // `confirm` holds the CONFIRM-TIME inputs. They are declared inputs, so they are NOT control flags and are
+  // deliberately not siblings of `resume`/`answer` here — but they arrive on the resume call rather than the
+  // opening one, so they cannot travel in `input` either, which is what `--resume` refuses.
+  const control = { help: false, json: false, resume: '', answer: null, runId: '', cwd: '', model: '', confirm: {} };
 
   for (const token of argv) {
     if (!token.startsWith('--')) { errors.push(`unexpected positional argument ${JSON.stringify(token)} — every input is a --flag`); continue; }
@@ -243,6 +274,17 @@ export function parseOperationArgv(declaration, argv = []) {
     if (name === 'resume') { control.resume = value; continue; }
     if (name === 'answer') { control.answer = value; continue; }
     if (name === 'run-id') { control.runId = value; continue; }
+    // ── THE CONFIRM-TIME INPUTS (#3035) ────────────────────────────────────────────────────────────────────
+    // Declared inputs, coerced against their declared type exactly like any other — they differ only in WHICH
+    // call carries them. Handled before the `known` branch below so they never land in `raw`, because `raw` is
+    // what the `--resume carries no input` refusal counts and these are the one kind of input that may.
+    if (confirmTime.has(name)) {
+      const field = spec.fields.find((f) => f.name === name);
+      const coerced = coerceInputValue(field.type, value);
+      if (coerced === undefined) { errors.push(`--${name} must be a ${field.type}, got ${JSON.stringify(value)}`); continue; }
+      control.confirm[name] = coerced;
+      continue;
+    }
     // ── THE JUROR FLAGS (#3151) ────────────────────────────────────────────────────────────────────────────
     // Refused where there is no juror, because a flag that silently does nothing is the failure this card is
     // about; an empty value is refused here rather than downstream, where `assertLaneCwd`'s "no `cwd` was
@@ -294,6 +336,11 @@ export function parseOperationArgv(declaration, argv = []) {
   // A resume carries no input — the run record already holds it. Passing both is a confusion worth refusing.
   if (control.resume && Object.keys(raw).length) {
     errors.push('a --resume carries no input: the run record already holds it. Drop the input flags.');
+  }
+  // A CONFIRM-TIME INPUT QUALIFIES AN ANSWER, so it is meaningless without one. Refused rather than ignored: a
+  // value silently dropped is worse than one never given, because the caller believes it was recorded.
+  for (const name of Object.keys(control.confirm)) {
+    if (control.answer == null) errors.push(`--${name} qualifies a --answer; pass both, or neither.`);
   }
   // THE STOP-POINT PROPERTY. You cannot answer a question that has not been asked.
   if (control.answer != null && !control.resume) {
@@ -645,11 +692,31 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
       };
     }
     resume = { step: run.pending.step, value: parsed.control.answer };
+
+    // THE CONFIRM-TIME INPUTS, merged onto the run record here — at the confirm, which is the whole point.
+    //
+    // WHY THEY CANNOT RIDE THE OPENING CALL (the bug this fixes, found reviewing PR #1569). `reason` qualifies
+    // an operator's OVERRIDE of the juror, and the only moment anyone can know an override is needed is AFTER
+    // `judge` has returned — which is after the initial `--pr=` call, the only call an ordinary input flag may
+    // ride. `--resume` refuses input flags by design, so the field was reachable exclusively before the fact it
+    // describes existed. A guard whose reason can only be supplied blind is not a guard; the operator's
+    // choices were to re-run the whole review and pay a second juror, or bounce with no reason at all.
+    //
+    // THEY STAY DECLARED INPUTS, and that is the second half of the fix (PR #1572 round 5). The first attempt
+    // made `reason` an adapter-only control flag and merged it here just the same — and it STILL did not work,
+    // because `projectReads` builds a step's `view.input` from the leaves the step NAMES in `reads`, and a step
+    // may only name a field the schema declares. An undeclared value on the record is a value no step can see.
+    // So it is merged into `run.input` under a name the declaration carries (`atConfirm`), which is what lets
+    // `record` name `input.reason` in its `reads` and actually receive it.
+    for (const [field, value] of Object.entries(parsed.control.confirm)) {
+      run = { ...run, input: { ...run.input, [field]: value } };
+    }
+    if (Object.keys(parsed.control.confirm).length) store.write(run);
   }
 
   // The command line genuinely is a person at a terminal.
   const outcome = await driveRun({ run, registry, store, sinks, judge: activeJudge, resume, attemptedBy: 'human' });
-  return { ...renderOutcome({ outcome, json: parsed.control.json }), run: outcome.run, stopped: outcome.stopped };
+  return { ...renderOutcome({ outcome, json: parsed.control.json, declaration }), run: outcome.run, stopped: outcome.stopped };
 }
 
 /**
@@ -717,16 +784,29 @@ export function outcomePayload({ run, stopped, error = null, applied = [] }) {
  * with a control flag (`:59-65`), so `run.input`'s own keys can never render an ambiguous line — field names
  * map 1:1 to flags. Exported so `step-refused`'s restart line is asserted directly, not scraped from prose.
  *
+ * IT MUST ROUND-TRIP THROUGH {@link parseOperationArgv}, and once it did not (PR #1572 round 5, finding 2).
+ * `run.input` holds the CONFIRM-TIME fields too, merged there at the resume, and echoing every key blindly
+ * emitted a line carrying `--reason=…` with no `--answer` — which this adapter's own parser then refuses. A
+ * recovery command the tool rejects when you paste it back is worse than no recovery line: the operator is
+ * refused twice and the second refusal looks like their typo. So the flag list is built from the DECLARATION,
+ * and confirm-time fields are dropped: a restart starts a NEW run, which has not yet reached the confirm those
+ * values qualify, so they could not be passed on this line even in principle.
+ *
  * @param {object} run
+ * @param {object} [declaration] - the run's declaration. Omitted, every input key is echoed (the old
+ *   behaviour, still correct for a declaration with no confirm-time field).
  * @returns {string}
  */
-export function restartCommand(run) {
-  const flags = Object.entries(run.input ?? {}).map(([key, value]) => `--${key}=${value}`);
+export function restartCommand(run, declaration = null) {
+  const skip = new Set(declaration ? confirmTimeFields(declaration) : []);
+  const flags = Object.entries(run.input ?? {})
+    .filter(([key]) => !skip.has(key))
+    .map(([key, value]) => `--${key}=${value}`);
   return [`node scripts/operations/run.mjs`, run.op, ...flags].join(' ');
 }
 
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
-export function renderOutcome({ outcome, json = false }) {
+export function renderOutcome({ outcome, json = false, declaration = null }) {
   const { run, stopped, error, applied } = outcome;
   if (json) {
     return {
@@ -811,7 +891,7 @@ export function renderOutcome({ outcome, json = false }) {
           + '--resume replays this same step with it.',
           'if this refusal is deterministic the run cannot reach another answer — start a fresh one:',
         ] : []),
-        `  ${restartCommand(run)}`,
+        `  ${restartCommand(run, declaration)}`,
         ...spend,
       ],
     };

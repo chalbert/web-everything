@@ -20,14 +20,14 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
+import { advance, advanceWhileRunning, projectReads, runStatus, startRun } from '../engine.mjs';
 import { applyPendingEffects } from '../effect-executor.mjs';
-import { createRegistry, op } from '../registry.mjs';
+import { createRegistry, op, validateInput } from '../registry.mjs';
 import { compute } from '../step-kinds.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import {
   driveRun, parseOperationArgv, buildCliSpec, assertSafeJudgeRequest, runOperationCli, judgeOutcome,
-  restartCommand,
+  restartCommand, acceptedControlFlags, confirmTimeFields, CONTROL_FLAGS,
 } from '../cli-adapter.mjs';
 import {
   CONFIRM_ACTORS,
@@ -38,11 +38,13 @@ import {
   REVIEW_JUDGE_SHAPE,
   renderJudgeInput,
   renderVerdictWriteUp,
+  overridesJuror,
   reviewPrOperation,
   shapeReadFinding,
   REVIEW_JUROR_TOOLS,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
+import { VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -383,7 +385,7 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     expect(text).toContain('decideSetLabel');
     // The committed answer, and that a fresh run is the way out.
     expect(text).toContain('the answer recorded at `confirm` is `accept`');
-    expect(text).toContain(restartCommand(refused.run));
+    expect(text).toContain(restartCommand(refused.run, declaration));
     // The point of the whole card: the thrown-away juror's cost is stated.
     expect(text).toContain('judge spend: $0.4599 over 1 juror(s)');
 
@@ -456,7 +458,7 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     const text = out.lines.join('\n');
     expect(text).toContain('run run-first — REFUSED at `first`: the first step refuses, deterministically');
     expect(text).not.toContain('the answer recorded at');
-    expect(text).toContain(restartCommand(out.run));
+    expect(text).toContain(restartCommand(out.run, throwsFirst));
   });
 
   // THE NEIGHBOURING TEST THIS STORY MUST NOT REDDEN — a mistyped `--answer` is a CALLER error, not a
@@ -554,7 +556,12 @@ describe('the derived command line', () => {
 
   it('derives its flags and usage from the declaration, not from a hand-written parser', () => {
     const spec = buildCliSpec(declaration);
-    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'lens', 'pr', 'repo']);
+    // `reason` IS here — it is a declared input like the rest, marked `atConfirm` so it rides the resume
+    // instead of the opening call (see `the override reason is reachable…` below). RETRACTED: this line used
+    // to read *"`reason` is deliberately absent — it is a CONFIRM-TIME control flag, not an input"* and
+    // omitted it from the expectation. That was the shape PR #1572 round 5 proved unworkable: a value no
+    // declaration names is a value `projectReads` strips before any step can read it.
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'lens', 'pr', 'reason', 'repo']);
     expect(spec.usage).toContain('--pr=<number>');
     // THE LENSES ARE NAMED, NOT TYPED. `[--lens=<string>]` told the operator nothing they could act on while
     // the four valid values sat in the declaration unread — asserted against `PANEL_LENSES` itself so a fifth
@@ -984,5 +991,221 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ of: CONFIRM_ACTORS.AGENT, id: 'r-args' });
     expect(calls[0].verdict).toBeDefined();
+  });
+});
+
+// ── THE REASONLESS-BOUNCE REFUSAL (#3035) ─────────────────────────────────────────────────────────────────
+// A `changes` recorded over a juror that raised nothing is an operator override. Without a reason the write-up
+// posts "no blocking findings" beside "Decision: `changes`" and the author lane has nothing to act on — 18 such
+// bounces across 8 PRs (#1556–#1567), each of which bought another round. (Counted 2026-08-26 by sweeping the
+// live comments on PRs #1428–#1567; the retraction at the `reason` input in `review-pr.mjs` records what this
+// comment said when it read "eleven such bounces across PRs #1428–#1567" and why every figure in it was wrong.)
+//
+// THESE TESTS DRIVE THE REAL CLI, NOT A HAND-BUILT VIEW, and that is the whole point of the block (PR #1572
+// round 5, the blocking finding). The version that shipped called `recordOf().effects(viewFor(...))` with a
+// `view` object assembled by hand — which bypasses `projectReads`, the exact component that was broken. All 74
+// of those tests passed against code where `--reason` was silently discarded on every real run, and adding the
+// naive one-line fix did not turn a single one red. A test that cannot tell fixed from broken is not a test of
+// the thing it names, so every assertion below goes through `runOperationCli` → `advance` → `projectReads`.
+describe('an override must say why', () => {
+  /** A juror that returns NOTHING — the zero-finding verdict that makes a `changes` an override. */
+  const cleanJudge = async () => judgeOutcome(CLEAN_ANSWER, {});
+  const blockingJudge = async () => judgeOutcome(BLOCKING_ANSWER, {});
+
+  /** Recorder sinks — every effect succeeds, and the bodies it was handed are kept for assertion. */
+  function recordingSinks() {
+    const calls = [];
+    const sinks = Object.fromEntries(Object.values(REVIEW_EFFECTS).map((t) => [
+      t, async (payload) => { calls.push({ type: t, payload }); return { ok: true }; },
+    ]));
+    return { sinks, calls };
+  }
+
+  /**
+   * Drive a run through the ACTUAL command line to its confirm, then answer it — through the actual command
+   * line again. `argvExtra` is whatever rides the resume, which is the seam under test.
+   */
+  async function driveToAnswer({ answer, argvExtra = [], judge = cleanJudge, labels = ['review:pending'], id }) {
+    const { declaration, registry } = registryFor({ labels });
+    const store = createMemoryRunStore();
+    const { sinks, calls } = recordingSinks();
+    const started = await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: ['--pr=7', '--repo=o/r'], newRunId: () => id,
+    });
+    expect(started.stopped).toBe('confirm');
+    const out = await runOperationCli({
+      declaration, registry, store, sinks, judge,
+      argv: [`--resume=${id}`, `--answer=${answer}`, ...argvExtra], newRunId: () => 'unused',
+    });
+    return { out, calls, store, declaration, registry };
+  }
+
+  it('refuses `changes` when the juror found nothing and no reason was given', async () => {
+    const { out, calls } = await driveToAnswer({ answer: 'changes', id: 'run-noreason' });
+    expect(out.code).toBe(1);
+    expect(out.stopped).toBe('step-refused');
+    expect(out.lines.join('\n')).toMatch(/no stated reason/);
+    // AND NOTHING WAS POSTED. A refusal that still wrote the comment would be no refusal at all.
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses an all-whitespace reason — a blank string is not a reason', async () => {
+    const { out } = await driveToAnswer({
+      answer: 'changes', argvExtra: ['--reason=   '], id: 'run-blank',
+    });
+    expect(out.code).toBe(1);
+    expect(out.lines.join('\n')).toMatch(/no stated reason/);
+  });
+
+  // THE TEST THE OLD BLOCK COULD NOT HAVE FAILED. `--reason` here travels the whole real path: parsed by
+  // `parseOperationArgv`, merged onto `run.input` by `runOperationCli`, projected by `projectReads` against
+  // `record`'s DECLARED `reads`, and read by `effects`. Drop `'input.reason'` from that `reads` array and this
+  // test goes red on the refusal — which is precisely what the shipped version did not do.
+  it('allows the override once a reason is given, and renders it for the author lane', async () => {
+    const reason = 'Card cites :574; the real push is :737.';
+    const { out, calls, store } = await driveToAnswer({
+      answer: 'changes', argvExtra: [`--reason=${reason}`], id: 'run-reason',
+    });
+    expect(out.code).toBe(0);
+    expect(out.stopped).toBe('complete');
+    const body = calls.find((c) => c.type === REVIEW_EFFECTS.WRITE_UP)?.payload?.body;
+    expect(body).toContain('Why this was overridden');
+    expect(body).toContain(reason);
+    // The run record holds ONE authoritative copy, under the declared field name.
+    expect(store.read('run-reason').input.reason).toBe(reason);
+  });
+
+  it('projects `input.reason` into the step view — the declaration is the boundary, so it must name it', () => {
+    const { declaration } = registryFor({});
+    const record = declaration.steps[declaration.stepNames.indexOf('record')].step;
+    expect(record.reads).toContain('input.reason');
+    // Driven through the ENGINE's own projector, against a record carrying the value.
+    const view = projectReads({ input: { pr: 7, repo: 'o/r', actor: 'operator', reason: 'a stated reason' } }, record.reads);
+    expect(view.input.reason).toBe('a stated reason');
+  });
+
+  it('does NOT require a reason when the juror itself raised findings — those ARE the reason', async () => {
+    const { out, calls } = await driveToAnswer({ answer: 'changes', judge: blockingJudge, id: 'run-hasfindings' });
+    expect(out.code).toBe(0);
+    const body = calls.find((c) => c.type === REVIEW_EFFECTS.WRITE_UP)?.payload?.body;
+    expect(body).toContain('the guard is inverted');
+    expect(body).not.toContain('Why this was overridden');
+  });
+
+  it('leaves an ordinary accept untouched — no override section', async () => {
+    const { out, calls } = await driveToAnswer({ answer: 'accept', id: 'run-accept' });
+    expect(out.code).toBe(0);
+    const body = calls.find((c) => c.type === REVIEW_EFFECTS.WRITE_UP)?.payload?.body;
+    expect(body).not.toContain('Why this was overridden');
+    expect(body).not.toContain('Operator note');
+  });
+
+  it('still writes nothing on abstain, reason or not', async () => {
+    const { out, calls } = await driveToAnswer({
+      answer: 'abstain', argvExtra: ['--reason=changed my mind'], id: 'run-abstain',
+    });
+    expect(out.code).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  // `--reason` is accepted on ANY answer, and only a decision that DEPARTS from the juror is captioned as one.
+  it('captions an agreeing decision as an Operator note, never as an override', async () => {
+    const { calls } = await driveToAnswer({
+      answer: 'accept', argvExtra: ['--reason=fyi, I read this one closely'], id: 'run-note',
+    });
+    const body = calls.find((c) => c.type === REVIEW_EFFECTS.WRITE_UP)?.payload?.body;
+    expect(body).toContain('Operator note');
+    expect(body).toContain('this is not an override');
+    expect(body).not.toContain('Why this was overridden');
+  });
+
+  // `overridesJuror` asks about the JUROR'S VERDICT; the guard asks about its FINDING COUNT. They are NOT the
+  // same question, and the docblock that claimed they were is retracted in `review-pr.mjs`.
+  it('is not co-extensive with the guard: a zero-finding `needs-human` is refused but is no override', () => {
+    expect(deriveVerdict({ findings: [], humanRequired: true })).toBe(VERDICTS.NEEDS_HUMAN);
+    expect(overridesJuror({ verdict: { verdict: VERDICTS.NEEDS_HUMAN }, answer: 'changes' })).toBe(false);
+    expect(overridesJuror({ verdict: { verdict: VERDICTS.ACCEPT }, answer: 'changes' })).toBe(true);
+    expect(overridesJuror({ verdict: { verdict: VERDICTS.CHANGES }, answer: 'accept' })).toBe(true);
+    expect(overridesJuror({ verdict: { verdict: VERDICTS.ACCEPT }, answer: 'abstain' })).toBe(false);
+  });
+});
+
+// ── `--reason` IS A CONFIRM-TIME INPUT, NOT AN ORDINARY ONE (#3035) ────────────────────────────────────────
+// Two bugs are pinned here, one per shipped attempt.
+//
+//   1. PR #1569 declared `reason` an ORDINARY input, and `--resume` refuses input flags. The only moment an
+//      operator knows an override is needed is AFTER `judge` returns — after the one call an ordinary input
+//      flag may ride — so the reason could only be supplied blind, before the fact it describes existed.
+//   2. PR #1572's first attempt over-corrected: it removed the field from the schema and made `--reason` an
+//      adapter CONTROL flag. It parsed, and `projectReads` then stripped it, because a step may only read a
+//      leaf its declaration names. Undeclared meant invisible.
+//
+// The `atConfirm` marker is what satisfies both at once: a DECLARED field (so `reads` can name it) that rides
+// the RESUME (so it can be supplied when it is known).
+describe('the override reason is reachable when the override is decided', () => {
+  const declaration = () => reviewPrOperation({ readPr: () => ({}) });
+
+  it('IS a declared input field, and is marked `atConfirm`', () => {
+    expect(Object.keys(declaration().input)).toContain('reason');
+    expect(declaration().input.reason.atConfirm).toBe(true);
+    expect(confirmTimeFields(declaration())).toEqual(['reason']);
+  });
+
+  it('is refused at START — a decision cannot be supplied before it is asked for', () => {
+    const { errors } = validateInput(declaration().input, { pr: 7, repo: 'o/r', reason: 'too early' });
+    expect(errors.join(' ')).toMatch(/supplied at confirm time, not at start/);
+  });
+
+  it('parses alongside --resume --answer, where an ordinary input flag would be refused', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--answer=changes', '--reason=because']);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.control.confirm.reason).toBe('because');
+    expect(parsed.control.answer).toBe('changes');
+    // …and it never lands in `input`, which is what the `--resume carries no input` rule counts.
+    expect(parsed.input).toEqual({});
+  });
+
+  it('proves the contrast: an ORDINARY input flag IS still refused with --resume', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--answer=changes', '--aim=something']);
+    expect(parsed.errors.join(' ')).toMatch(/carries no input/);
+  });
+
+  it('refuses a reason with no answer — a silently dropped reason is worse than none', () => {
+    const parsed = parseOperationArgv(declaration(), ['--resume=run-1', '--reason=orphan']);
+    expect(parsed.errors.join(' ')).toMatch(/qualifies a --answer/);
+  });
+
+  // ADVERTISED WHERE IT IS ACCEPTED, AND NOWHERE ELSE — the same property `--cwd` has. Printing `--reason` on
+  // the opening line would document a call the adapter refuses.
+  it('is advertised on the resume line and not on the opening line', () => {
+    const { usage, fields } = buildCliSpec(declaration());
+    const [opening, resumeLine] = usage.split('\n');
+    expect(opening).not.toContain('--reason');
+    expect(resumeLine).toContain('[--reason=<string>]');
+    expect(fields.find((f) => f.name === 'reason').atConfirm).toBe(true);
+  });
+
+  // `acceptedControlFlags` MUST NOT hand `--reason` to every operation. It briefly did, as a member of
+  // `CONTROL_FLAGS`, which both over-advertised the flag and — because an input field may not collide with a
+  // control flag — blocked the one declaration that needs to declare it.
+  it('is not a control flag: an operation that declares no confirm-time field has none', () => {
+    const plain = op('plain-op', { input: {}, first: compute({ fn: () => 1 }) });
+    expect(CONTROL_FLAGS).not.toContain('reason');
+    expect(confirmTimeFields(plain)).toEqual([]);
+    expect(acceptedControlFlags(plain)).not.toContain('reason');
+    expect(parseOperationArgv(plain, ['--reason=x']).errors.join(' ')).toMatch(/unknown flag --reason/);
+  });
+
+  // ROUND-TRIP: the recovery line the tool prints must be a command the tool accepts. It was not — it echoed
+  // every key of `run.input`, so once a `reason` had been merged there it suggested a bare `--reason=` with no
+  // `--answer`, which this same parser refuses. The operator was refused twice, the second time by their paste.
+  it('is dropped from `restartCommand`, whose output must parse — a restart starts a NEW run', () => {
+    const d = declaration();
+    const run = { op: REVIEW_PR_OP, input: { pr: 7, repo: 'o/r', lens: 'correctness', actor: 'operator', reason: 'a stated reason' } };
+    const cmd = restartCommand(run, d);
+    expect(cmd).not.toContain('--reason');
+    const argv = cmd.split(' ').slice(3); // drop `node scripts/operations/run.mjs review-pr`
+    expect(parseOperationArgv(d, argv).errors).toEqual([]);
   });
 });

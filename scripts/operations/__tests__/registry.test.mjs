@@ -145,8 +145,54 @@ describe('verdictFrom', () => {
 describe('the input schema', () => {
   it('treats a shorthand type as REQUIRED — optionality is opt-in', () => {
     const schema = normalizeInputSchema({ pr: 'number' }, 'x');
-    expect(schema.pr).toEqual({ type: 'number', required: true, default: undefined, enum: null });
+    // `atConfirm: false` is part of the normalized shape (#3035) — every field answers "when may this be
+    // supplied", and the shorthand answers "at start", like everything before it.
+    expect(schema.pr).toEqual({ type: 'number', required: true, default: undefined, enum: null, atConfirm: false });
     expect(validateInput(schema, {}).errors).toEqual(['missing required input field `pr` (number)']);
+  });
+
+  // ── `atConfirm` — WHEN A FIELD MAY BE SUPPLIED (#3035) ──────────────────────────────────────────────────
+  // The marker exists because `review-pr`'s `reason` qualifies the operator's DECISION, which does not exist
+  // until the run has suspended and asked. It stays a declared field (so a step may `read` it) and moves only
+  // in WHEN it arrives. See the retracted example in this module's header for the two shapes that did not work.
+  describe('atConfirm', () => {
+    it('marks the field and defaults to false', () => {
+      const schema = normalizeInputSchema({ why: { type: 'string', required: false, atConfirm: true } }, 'x');
+      expect(schema.why.atConfirm).toBe(true);
+      expect(normalizeInputSchema({ why: { type: 'string', required: false } }, 'x').why.atConfirm).toBe(false);
+    });
+
+    it('refuses a non-boolean marker', () => {
+      expect(() => normalizeInputSchema({ why: { type: 'string', required: false, atConfirm: 'yes' } }, 'x'))
+        .toThrow(/`atConfirm` must be a boolean/);
+    });
+
+    it('refuses `required` — nothing can supply it when `required` is checked', () => {
+      expect(() => normalizeInputSchema({ why: { type: 'string', atConfirm: true } }, 'x'))
+        .toThrow(/cannot also be `required`/);
+    });
+
+    it('refuses a `default` — a canned answer would satisfy the guard the field exists to feed', () => {
+      expect(() => normalizeInputSchema({ why: { type: 'string', required: false, atConfirm: true, default: 'x' } }, 'x'))
+        .toThrow(/cannot carry a `default`/);
+    });
+
+    it('is REFUSED at start by validateInput, and is absent rather than defaulted when omitted', () => {
+      const schema = normalizeInputSchema({ pr: 'number', why: { type: 'string', required: false, atConfirm: true } }, 'x');
+      expect(validateInput(schema, { pr: 1, why: 'too early' }).errors.join(' '))
+        .toMatch(/supplied at confirm time, not at start/);
+      const ok = validateInput(schema, { pr: 1 });
+      expect(ok.ok).toBe(true);
+      expect(ok.value).toEqual({ pr: 1 });
+    });
+
+    it('may be named in a step\'s `reads` — that is the whole point of it staying a declared field', () => {
+      const declared = op('with-confirm-input', {
+        input: { why: { type: 'string', required: false, atConfirm: true } },
+        only: compute({ reads: ['input.why'], fn: (v) => v.input.why ?? null }),
+      });
+      expect(declared.steps[0].step.reads).toEqual(['input.why']);
+    });
   });
 
   it('refuses an unknown type', () => {
