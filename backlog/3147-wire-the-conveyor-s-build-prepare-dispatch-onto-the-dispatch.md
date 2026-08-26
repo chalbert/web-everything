@@ -5,7 +5,6 @@ size: 5
 parent: "2612"
 status: open
 relatedTo: ["3037", "3029", "3225", "3096", "3239", "3161", "3118"]
-blockedBy: ["3165"]
 dateOpened: "2026-08-16"
 preparedDate: "2026-08-25"
 scope:
@@ -136,6 +135,12 @@ accepted end state for the other kinds, not the unconditional harm the argument 
 **Consequence for sequencing:** #3165 lands first and makes step 3b callable; #3147 then rewires both steps
 in one pass. Doing #3147 first would mean wiring step 3 to the operation and leaving step 3b hand-spawned —
 a half-migration with two dispatch mechanisms live in one skill, which is worse than either end state.
+
+**Unblocked 2026-08-26 — and the sibling overlap above is STILL unreconciled.** #3165 resolved (built by
+PR #1581, merged `3f472152`; all eight Done-when criteria re-verified against `main`, mutation included), so
+`blockedBy` is now empty and step 3b is callable. Nothing was decided about **#3096** and **#3239**: both
+remain open, both still duplicate this card's build half, and neither is blocked by anything this card owns.
+Whoever claims #3147 makes that absorb-or-narrow call first, exactly as the paragraph above sets out.
 
 ## Not in scope
 
