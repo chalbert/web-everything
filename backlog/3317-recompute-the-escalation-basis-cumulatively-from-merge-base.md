@@ -9,6 +9,7 @@ scope:
   - we:scripts/lib/review-escalation.mjs
   - we:scripts/merge-ai-prs.mjs
   - we:scripts/pr-land.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
 tags: []
 ---
 

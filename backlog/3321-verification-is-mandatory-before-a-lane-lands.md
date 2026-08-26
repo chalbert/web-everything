@@ -7,7 +7,7 @@ status: open
 dateOpened: "2026-08-26"
 scope:
   - we:scripts/lib/lane-verify.mjs
-  - we:scripts/lib/__tests__/lane-verify.test.mjs
+  - we:scripts/__tests__/lane-verify.test.mjs
 tags: []
 ---
 
