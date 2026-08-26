@@ -6,7 +6,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
   siblingLaneLeases,
@@ -15,9 +15,10 @@ import {
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
-  nestedCommandStrings,
+  nestedCommandStrings, fileWriteTargets, collateralStepsNotice,
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 describe('guard-bash — backgrounded verification is denied (#2833 finding 3)', () => {
   it('isVerificationRun matches the verification set (verify-lane / check:standards / test:unit), not a mention', () => {
@@ -1643,5 +1644,159 @@ describe('commit identity override (#3269)', () => {
 
   it('honours the sanctioned escape for a deliberate re-attribution', () => {
     expect(decide('COMMIT_IDENTITY_OK=1 git -c user.email=x commit -m repair', {})).toBeNull();
+  });
+});
+
+/**
+ * #3311 — a refusal blocks the WHOLE command, so it silently discards every OTHER step in the chain.
+ *
+ * The defect cost one session three incidents in a single day, all the same shape and all invisible: the
+ * deny message named the git violation, the caller fixed exactly that, and never learned that the
+ * `cat > file <<'EOF'` earlier in the same chain had also been dropped. Once it was reported as APPLIED,
+ * because the follow-up tool was pointed at a file that had never been written.
+ *
+ * The fix is a NOTICE, not a behaviour change — see `collateralStepsNotice`'s header for why "gate at the
+ * offending step and let the rest run" was rejected (it is strictly MORE permissive than today, it would
+ * make the guard a shell rewriter, and it trades a visible failure for a subtle one). So the load-bearing
+ * assertions here are the negative ones: `decide` must be byte-identical, and nothing may become allowed.
+ */
+describe('guard-bash — a refusal names the collateral it takes down with it (#3311)', () => {
+  // The three real incidents, in the shape they were actually typed.
+  const HEREDOC_THEN_ADD = "cat > /tmp/pr-body.md <<'EOF'\n## Summary\nwhat changed\nEOF\ngit add -A && git commit -m wip && git push origin main";
+  const HEREDOC_THEN_FORCE_PUSH = "cat > /tmp/body.md <<'EOF'\nbody\nEOF\ngit commit -m fix && git push --force-with-lease origin main";
+
+  it('the notice is STRICTLY additive — `decide` still returns exactly its own reason', () => {
+    // The golden corpus (scripts/golden-corpus/hook-guard-bash/*.json) asserts decide()'s reason
+    // byte-for-byte, and every arm's test matches on its own wording. Composing the notice into `decide`
+    // would have churned all of it; it is composed at the CLI deny site instead.
+    for (const cmd of [HEREDOC_THEN_ADD, HEREDOC_THEN_FORCE_PUSH, 'echo hi > /tmp/x && git push origin main']) {
+      const r = decide(cmd, {});
+      expect(r, cmd).toBeTruthy();
+      expect(r, cmd).not.toMatch(/COLLATERAL/);
+    }
+    expect(decide('git push origin main', {}))
+      .toBe(decide('cat > /tmp/b.md <<EOF\nx\nEOF\ngit push origin main', {}));
+  });
+
+  it('names the dropped heredoc and the dropped commit — incident 1 and incident 3', () => {
+    const n = collateralStepsNotice(HEREDOC_THEN_ADD, {});
+    expect(n).toMatch(/COLLATERAL \(#3311\)/);
+    expect(n).toMatch(/cat > \/tmp\/pr-body\.md/);
+    expect(n).toMatch(/heredoc body that exists ONLY in this command text/);
+    expect(n).toMatch(/git add/);
+    expect(n).toMatch(/git commit/);
+    // …and it tells the caller the thing incident 2 got wrong: do not report these as done.
+    expect(n).toMatch(/do NOT report them as done/);
+    expect(collateralStepsNotice(HEREDOC_THEN_FORCE_PUSH, {})).toMatch(/writes \/tmp\/body\.md/);
+  });
+
+  it('a SCRATCH write counts here even though it does not count for the #2749 tree-write arm', () => {
+    // The single most important asymmetry in this change. Every one of the three incidents wrote to /tmp —
+    // scratch-ness says nothing about whether the caller will notice the file is missing, and a /tmp file is
+    // if anything LESS likely to be missed, because nothing downstream is watching it.
+    expect(fileWriteTargets('cat > /tmp/pr-body.md')).toEqual(['/tmp/pr-body.md']);
+    expect(isFileWriteRedirect('cat > /tmp/pr-body.md')).toBe(false);          // #2749 arm: unchanged
+    expect(collateralStepsNotice('cat > /tmp/pr-body.md <<EOF\nx\nEOF\ngit push origin main', {}))
+      .toMatch(/\/tmp\/pr-body\.md/);
+  });
+
+  it('fileWriteTargets is the SAME path scan isFileWriteRedirect always did (extraction, not a rewrite)', () => {
+    // isFileWriteRedirect is now `.some(non-scratch)` over this list; these pin that the list itself still
+    // finds every spelling the #2749/#2986 arms depend on.
+    expect(fileWriteTargets('echo x > config/app.json')).toEqual(['config/app.json']);
+    expect(fileWriteTargets('echo x >> docs/notes.md')).toEqual(['docs/notes.md']);
+    expect(fileWriteTargets('npm run build 2>&1')).toEqual([]);                 // fd dup writes no file
+    expect(fileWriteTargets("sed -i '' s/a/b/ src/x.ts")).toEqual(['src/x.ts']); // #2986(1) BSD empty suffix
+    expect(fileWriteTargets('tee -a reports/out.md')).toEqual(['reports/out.md']);
+    expect(fileWriteTargets('env sed -i s/a/b/ src/x.ts')).toEqual(['src/x.ts']); // wrapper still peeled
+    expect(fileWriteTargets('git status')).toEqual([]);
+    // the boolean the tree-write arm reads is unmoved
+    expect(isFileWriteRedirect('echo x > config/app.json')).toBe(true);
+    expect(isFileWriteRedirect('echo x > /tmp/scratch.json')).toBe(false);
+    expect(isFileWriteRedirect('npm run build 2>&1')).toBe(false);
+    expect(primaryTreeWriteReason('echo x > config/app.json')).toMatch(/shell redirect/);
+    expect(primaryTreeWriteReason('echo x > /tmp/scratch.json')).toBeNull();
+  });
+
+  it('stays SILENT when there is no collateral to name', () => {
+    expect(collateralStepsNotice('git push origin main', {})).toBe('');        // single segment
+    expect(collateralStepsNotice('git status && git push origin main', {})).toBe(''); // read-only neighbour
+    expect(collateralStepsNotice('git log --oneline -5 | head; git push origin main', {})).toBe('');
+    expect(collateralStepsNotice('cd /some/lane && npm run build', { primaryCwd: true })).toBe('');
+  });
+
+  it('does not list the OFFENDING step as collateral — the reason already names it', () => {
+    const n = collateralStepsNotice('echo x > config/app.json && rm -rf dist', { primaryCwd: true });
+    expect(n).toMatch(/rm -rf dist/);            // the neighbour that will be lost
+    expect(n).not.toMatch(/config\/app\.json/);  // the step the deny message is about
+  });
+
+  it('refuses to GUESS on a command the parser cannot represent', () => {
+    // An unterminated quote is already denied (unparseableReason); a guessed list of "what you lost" is
+    // worse than no list, so the notice says nothing rather than segmenting text it cannot read.
+    const bad = "cat > /tmp/x.md <<EOF\nbody\nEOF\ngit commit -m 'oops && git push origin main";
+    expect(decide(bad, {})).toMatch(/UNTERMINATED quote/);
+    expect(collateralStepsNotice(bad, {})).toBe('');
+  });
+
+  it('is bounded — a long chain summarises the tail instead of dumping it', () => {
+    const many = Array.from({ length: 9 }, (_, i) => `touch /tmp/f${i}`).join(' && ') + ' && git push origin main';
+    const n = collateralStepsNotice(many, {});
+    expect(n).toMatch(/9 other step\(s\)/);
+    expect(n).toMatch(/…and 4 more\./);
+    expect(n.split('\n  • ').length - 1).toBe(6);   // 5 listed + the "…and N more" line
+  });
+
+  it('never throws — an advisory note must not be able to take the deny down with it', () => {
+    for (const bad of [null, undefined, '', 42, {}, '  && git push origin main'])
+      expect(() => collateralStepsNotice(bad, {})).not.toThrow();
+  });
+
+  it('reuses the #2749 tree-write predicates rather than a parallel list of its own', () => {
+    // "What counts as writing the tree" must have ONE definition in this file, or the notice drifts from
+    // the arm that denies it. These two shapes are recognised by isTreeWritingBuildRun/isGeneratorScriptRun.
+    expect(collateralStepsNotice('npm run build && git push origin main', {})).toMatch(/tree-writing build/);
+    expect(collateralStepsNotice('node scripts/generate-docs.mjs && git push origin main', {}))
+      .toMatch(/generator\/scaffold script/);
+    // …and at a PRIMARY cwd the build is the DENIED step, so it is not repeated as collateral.
+    expect(collateralStepsNotice('cd /some/lane && npm run build', { primaryCwd: true })).toBe('');
+  });
+
+  it('resolves the program word the same way every deny arm does (wrappers, paths, quotes)', () => {
+    const wrapped = "cat > /tmp/b.md <<EOF\nx\nEOF\nenv /usr/bin/git commit -m hi && git push origin main";
+    expect(collateralStepsNotice(wrapped, {})).toMatch(/git commit/);
+  });
+});
+
+describe('guard-bash — the collateral notice reaches the real deny channel (#3311, CLI boundary)', () => {
+  // The house idiom for locating a sibling script (this file is `scripts/__tests__/*`) — a relative
+  // `new URL(…, import.meta.url)` does NOT work here, because vitest rewrites `import.meta.url` to a
+  // non-file base and `fileURLToPath` then rejects it.
+  const GUARD = join(dirname(fileURLToPath(import.meta.url)), '..', 'guard-bash.mjs');
+  const run = (command, cwd = '/tmp') => execFileSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ tool_input: { command }, cwd }),
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'ignore'],
+  }).trim();
+
+  it('a denied chain carries BOTH the original reason and the collateral list', () => {
+    const out = run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add -A && git push origin main");
+    const parsed = JSON.parse(out);
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+    const msg = parsed.hookSpecificOutput.permissionDecisionReason;
+    expect(msg).toMatch(/^Blocked: direct push to `main` is blocked/);   // the reason is still FIRST, unchanged
+    expect(msg).toMatch(/COLLATERAL \(#3311\)/);
+    expect(msg).toMatch(/\/tmp\/pr-body\.md/);
+    expect(msg).toMatch(/git add/);
+  });
+
+  it('a denied SINGLE command is byte-identical to what it was before the notice existed', () => {
+    const msg = JSON.parse(run('git push origin main')).hookSpecificOutput.permissionDecisionReason;
+    expect(msg).toBe('Blocked: ' + decide('git push origin main', {}));
+  });
+
+  it('an ALLOWED command is still allowed and still emits nothing — the notice cannot deny', () => {
+    expect(run('git push origin HEAD:refs/heads/lane/x')).toBe('');
+    expect(run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add -A && git commit -m hi")).toBe('');
   });
 });
