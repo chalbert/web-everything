@@ -667,15 +667,16 @@ export const MANDATE_LENSES = Object.freeze({
   CORRECTNESS: 'correctness',
   SECURITY: 'security',
   // #3035 — DOES THE WRITING MATCH WHAT IT POINTS AT. Added on measured evidence, not taste. Counted over the
-  // replay corpus (`we:scripts/review-corpus/cases`, 92 cases across PRs #1456–#1567; re-counted 2026-08-26):
+  // replay corpus (`we:scripts/review-corpus/cases` — NOT ON `main` YET: it lands with PR #1571, the sibling
+  // slice of this same work; 92 cases across PRs #1456–#1567; re-counted 2026-08-26):
   // 86 cases carry a `correctness` row and the juror ACCEPTED 79 of them, while the operator recorded `changes`
   // on 37 of the 92. The number that matters is the cross-tab, which needs no subtraction: in 27 cases the
   // correctness juror accepted and the operator bounced anyway — an operator raising something no lens was
   // looking for. Nearly all of it was one class — a citation, count, grep literal or claimed change that does
   // not hold against the thing it names. `correctness` does not cover it (the code is fine; the PROSE about the
   // code is wrong), and the deterministic-gate attempt at the class caught 5 of 39 confirmed labels (12.8%,
-  // `node we:scripts/review-corpus/replay-gates.mjs`) — of which only 3 survived hand-inspection — which is the
-  // evidence it needs judgment rather than a lint.
+  // `node we:scripts/review-corpus/replay-gates.mjs`, lands with #1571) — of which only 3 survived
+  // hand-inspection — which is the evidence it needs judgment rather than a lint.
   //
   // RETRACTED — this comment used to read *"across PRs #1428–#1567 the correctness juror accepted 80 of 86 lens
   // rows, yet 30 of 84 verdicts recorded `changes`, so roughly 24 bounces were an operator raising something no
@@ -701,11 +702,12 @@ export const ADVISORY_LENSES = Object.freeze([
   // criterion for mandatory is "a genuine invariant with no other backstop" — which claim-accuracy arguably
   // meets better than standards-conformance does, since `check:standards` backstops that one and the
   // deterministic attempt at THIS class caught 5 of 39 confirmed labels — 12.8%, of which 3 survived
-  // hand-inspection (`node we:scripts/review-corpus/replay-gates.mjs`; RETRACTED: this line used to say
-  // "caught 3 of 13", a population the replay does not report). Promoting it would
-  // override a ratified decision, so it lands advisory and the promotion is filed as its own call. Nothing is
-  // lost meanwhile: `review-pr` runs ONE lens chosen by the caller, so the split only starts binding when the
-  // panel (`we:scripts/lib/judge-panel.mjs`, #3050) is wired.
+  // hand-inspection (`node we:scripts/review-corpus/replay-gates.mjs`, lands with #1571; RETRACTED: this line
+  // used to say "caught 3 of 13", a population the replay does not report). Promoting it would override a
+  // ratified decision, so it lands advisory and the promotion is filed as its own call —
+  // `we:backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md`, ON `main` since PR #1570 landed
+  // 2026-08-26 (it was JIT-numbered from `xe9hwyi` at land). Nothing is lost meanwhile: `review-pr` runs ONE lens chosen by the caller, so the split
+  // only starts binding when the panel (`we:scripts/lib/judge-panel.mjs`, #3050) is wired.
   MANDATE_LENSES.CLAIM_ACCURACY,
 ]);
 

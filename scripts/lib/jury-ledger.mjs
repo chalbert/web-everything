@@ -153,7 +153,14 @@ export const REVIEW_LENS_CHARTER = Object.freeze({
   'standards-conformance': 'flag deviations from repo standards the deterministic gate does not catch (advisory)',
 });
 
-/** The PR-review panel lenses, in order — the default roster when a caller passes no explicit `activeLenses`. */
+/** The PR-review panel lenses, in order — the default roster when a caller passes no explicit `activeLenses`.
+ *
+ *  DELIBERATELY FOUR, NOT `PANEL_LENSES` (#3035). `jury-core.PANEL_LENSES` grew to five when `claim-accuracy`
+ *  was added; this list did NOT follow, and that is a decision rather than drift: this is the DEFAULT ROSTER a
+ *  ledger seats jurors from, so importing the five would silently seat a fifth juror on every recorded review
+ *  while `claim-accuracy` is still advisory-pending-ruling. It also has no `REVIEW_LENS_CHARTER` entry above,
+ *  so a seated juror would carry no expectation. Both follow together when the promotion call is made — and a
+ *  caller that wants the lens today passes it explicitly via `activeLenses`, which this already honours. */
 export const REVIEW_PANEL_LENSES = Object.freeze(['correctness', 'security', 'simplicity', 'standards-conformance']);
 
 const VERDICT_STRINGS = new Set(Object.values(VERDICTS));

@@ -378,9 +378,12 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      per-lens verdict flattening), so dropping the list silently reinstates the advisory-prevention leak on the ONE
      path the drain actually runs. `findings` is a REQUIRED argument — an omitting call now throws rather than
      defaulting to `[]`. `MANDATORY_LENSES` (`correctness`, `security` — real invariants with no other gate)
-     must **unanimously accept** to land; `ADVISORY_LENSES` (`simplicity`, `standards-conformance` —
-     `standards-conformance` already has a deterministic backstop in `check:standards`, #2199; `simplicity` is
-     genuine stylistic judgment) are always surfaced but never block on their own. `conflict` is a **judgment
+     must **unanimously accept** to land; `ADVISORY_LENSES` (`simplicity`, `standards-conformance`,
+     `claim-accuracy` — `standards-conformance` already has a deterministic backstop in `check:standards`,
+     #2199; `simplicity` is genuine stylistic judgment; `claim-accuracy` is advisory PENDING ITS OWN RULING,
+     #3035, not on merit) are always surfaced but never block on their own. (This line read
+     "(`simplicity`, `standards-conformance`)" until #3035 added the third member — it was a two-member list
+     stating a set that had grown to three.) `conflict` is a **judgment
      call, not a mechanical one** (#51): read the mandatory lenses' findings — if they are a genuine
      MUTUALLY-EXCLUSIVE tradeoff (e.g. security's fix directly undoes simplicity's, or vice versa within the
      mandatory pair), pass `conflict: true`; a merely-unlucky pair of independent "changes" verdicts is not a
