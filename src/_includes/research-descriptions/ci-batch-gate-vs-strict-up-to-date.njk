@@ -1,0 +1,81 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/xbi8dmf-batch-verify-queued-lanes-in-ci-instead-of-re-testing-every/">#xbi8dmf</a> —
+  <em>batch-verify queued lanes in CI instead of re-testing every PR against a moving main</em>. The repo's
+  <code>main</code> requires branches be up to date (<code>strict: true</code>, required contexts
+  <code>test</code> and <code>smoke</code>), so every queued <code>lane/*</code> PR flips to
+  <code>BEHIND</code> the moment another lands. The drain rebuilds its tip and the whole required suite
+  re-runs — <strong>N serial CI rounds for N queued couples</strong>, most of them re-testing lanes that
+  never touched a common file.
+</p>
+
+<h2>The intuitive fix does not work</h2>
+<p>
+  &ldquo;Keep the fast unit tests per-PR, move the slow browser suites to a batch run&rdquo; buys
+  <strong>roughly zero wall-clock</strong>. Per-job durations over four consecutive successful CI runs put
+  the entire required-check critical path inside the <code>test</code> chain:
+</p>
+<ul>
+  <li><strong>Slowest <code>vitest</code> shard</strong> — 241&ndash;278s, consistently shard 4.</li>
+  <li><strong>The <code>needs: test-shard</code> aggregator</strong> — 65&ndash;109s, running
+    <code>coverage:merge</code> and <code>check:standards</code> only after every shard finishes.</li>
+  <li><strong><code>smoke</code></strong> — 127&ndash;134s, but <em>concurrent</em>, finishing about
+    2.5 minutes before the <code>test</code> chain does.</li>
+</ul>
+<p>
+  Critical path ≈ <strong>6.2 minutes</strong>, none of it attributable to a browser suite. Moving
+  <code>smoke</code> off per-PR frees a runner, not a minute. The <code>visual</code> job is already
+  disabled pending #2232 and <code>test-selection-measure</code> is opt-in, so there is no other browser
+  suite to relocate.
+</p>
+<p>
+  What actually costs the minutes is <strong>shard imbalance</strong> (shard 4 runs 3.2× shard 2) and the
+  <strong>serial aggregator</strong>. Both are real targets, but neither is a check-placement question —
+  the first belongs to the test-selection work already shadow-running in CI.
+</p>
+
+<h2>How big is a batch?</h2>
+<p>
+  Merge commits on <code>origin/main</code> over ten days, clustered into passes at a ten-minute idle gap:
+  <strong>124 passes, median 2, p75 4, p90 6, max 49</strong>. Roughly two thirds of drain passes land two
+  PRs or fewer. Small N with a thin tail is the number that decides attribution strategy — and it argues
+  against building bisection machinery.
+</p>
+
+<h2>Prior art</h2>
+<dl>
+  <dt><strong>Bors-NG</strong></dt>
+  <dd>Tests the batch; on failure splits it and recurses until the culprit is isolated. The original
+    open-source formulation of &ldquo;test the combination, not the parts&rdquo;.</dd>
+
+  <dt><strong>GitHub merge queue</strong></dt>
+  <dd>Builds speculative <em>merge groups</em>, runs checks against each, and on failure ejects the
+    offending PR and re-forms the group from the survivors. <strong>Ruled OFF for this repo by #2138
+    Fork 5</strong> — it is branch-level and per-repo, so it reorders the cross-repo
+    <code>impl-first/WE-last</code> couples the drain sequences. That ruling constrains an in-house batch
+    gate to per-repo scope; it does not forbid one.</dd>
+
+  <dt><strong>Zuul (OpenStack)</strong></dt>
+  <dd>Dependent pipelines with speculative execution — PR1, PR1+PR2, PR1+PR2+PR3 tested concurrently on the
+    optimistic assumption that everything ahead passes. Keeps full per-change attribution <em>and</em>
+    batching, paid for with N concurrent pipelines.</dd>
+
+  <dt><strong>Google (TAP)</strong></dt>
+  <dd>Presubmit runs only the dependency-affected target subset; the full suite runs post-submit over
+    batched changes with an automated culprit finder bisecting a broken batch back to one change.</dd>
+
+  <dt><strong>Meta</strong></dt>
+  <dd>ML-ranked predictive test selection at presubmit, continuous post-land runs, automated bisection and
+    auto-revert of identified culprits.</dd>
+</dl>
+
+<h2>The through-line</h2>
+<p>
+  <strong>Nobody accepts losing per-change attribution.</strong> The published approaches differ only in
+  what they spend to recover it — extra runs (bisect), extra concurrency (speculate), or extra
+  infrastructure (selection plus culprit-finding). At median N=2 and p90 N=6, the cheapest recovery here is
+  the naive one: re-run each lane on its own and let the survivors land.
+</p>
+{% endraw %}
