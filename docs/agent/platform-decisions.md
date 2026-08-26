@@ -3147,7 +3147,8 @@ dispatch decisions; the thing that turns a surfaced decision into a running agen
    settles it. No code here resumes or steers anything yet:
    `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
    `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**
-   (re-run 2026-08-26 at `3447eb27`). **This clause is the hinge, and two triggers revisit it**, not one:
+   (re-run 2026-08-26, on both `main` at `3b2aeded` and `main` at `1ed16d63`). **This clause is the hinge,
+   and two triggers revisit it**, not one:
    (i) if the requirement ever becomes steering a *running* agent without interrupting it — no
    stop-then-resume backend can reach that; or (ii) **if `#xhmktct`'s probe comes back negative** — if
    `claude --bg` really does discard `--session-id`, the dispatcher cannot address the session it started,

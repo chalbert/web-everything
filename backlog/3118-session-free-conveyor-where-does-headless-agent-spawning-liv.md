@@ -482,14 +482,24 @@ not a missing capability, and the pivot the fork turned on is gone.
 > a session **by its id**. If `--bg` discards `--session-id`, the dispatcher does not know the id of the agent
 > it started, so it cannot resume it — and reading the real id back is, by this card's own probe-table note,
 > *"work that does not exist yet"*. So row 2 is reachable only if row 3 turns out false, or after `#xhmktct`'s
-> remedy is built. Re-verified at this branch's head `3447eb27`:
+> remedy is built. Re-verified 2026-08-26:
 > `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
-> `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**.
+> `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing** — at
+> this card's citation basis (`main` at `3b2aeded`, which this PR leaves untouched) **and** at `main` as it
+> stands today (`1ed16d63`), where those two modules have since been reworked. *(This sentence first pinned
+> the result to "this branch's head `3447eb27`", which two later fix commits made **wrong** as a label — the
+> grep result never changed, only the sha it named. Re-pinned to a basis that does not chase the head.)*
 >
 > **What is not retracted:** the operator's ruling that context-preserving stop-then-resume is a *sufficient*
 > requirement. That is a judgment call and it stands. What is corrected is the separate **factual** claim that
 > the conveyor can reach the mechanism — that is unverified, and it now has an owner (`#xhmktct`) and a
 > revisit trigger (clause 3, trigger (ii)).
+>
+> **Prevention filed: `#xv8uoiv`** — a `check:standards` rule requiring a statute clause that rests on a
+> manual observation to cite either a test or an OPEN verification card, the two-exit shape `#2844` already
+> enforces for operational invariants (`we:scripts/lib/validate-rules-anchors.cjs:249`). The finding recorded
+> it as OWED; nothing detected this asymmetry, a human re-read did. Sibling of `#3281`, the prevention the
+> previous round filed against this same card.
 
 **3. The hinge — the one capability (c) can never reach, and the operator ruled on it directly.** (c) cannot
 steer a **running** agent **without interrupting it**. Stop-then-resume, by construction, interrupts. The
