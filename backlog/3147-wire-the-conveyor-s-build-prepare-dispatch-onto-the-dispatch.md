@@ -30,9 +30,27 @@ is fixed is the defect that has now cost this PR two rounds.)*
 
 *(Earlier rounds called line 77 "the `#3239` annotation". It is not written that way. The comment reads
 `@operation-home-ok: #xbbscm5` — the pre-JIT hash **#3239** was born as, confirmed by `bornAs: xbbscm5` in
-its own frontmatter, and `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly those two files. The
-item is the right one; only the label was wrong, so the annotation is named by the string it actually
-carries.)*
+its own frontmatter. The item is the right one; only the label was wrong, so the annotation is named by the
+string it actually carries.)*
+
+*(The round-6 cut of that note ended **"and `grep -rl xbbscm5 we:backlog/ we:skills-src/` returns exactly
+those two files"**. **That was wrong the moment it was written, and it is retracted.** The same commit put
+`xbbscm5` on five lines of this card, so this card became the grep's third hit — a stated command with a
+stated result that does not reproduce at the head that states it, in a paragraph whose stated virtue is
+"Run rather than asserted". Re-run in this lane at this head:*
+
+```
+$ grep -rl xbbscm5 backlog/ skills-src/
+backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md
+backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md
+skills-src/conveyor/SKILL.md
+```
+
+*The identity claim never depended on the count — `bornAs: xbbscm5` in #3239's own frontmatter establishes
+it alone. `we:skills-src/conveyor/SKILL.md:77` and #3239's frontmatter are the two sites that **carry** the
+annotation and its born-as declaration; this card is the third hit and only discusses them. A quoted
+invocation carrying a quoted result that nobody re-ran is its own defect class, and the prevention for it is
+`x6uyq86`, widened in this same push to cover it.)*
 
 ## The overlap is not superficial
 
@@ -147,14 +165,46 @@ alone"** — and the frontmatter carried `blockedBy: ["3118", "3165"]` from roun
 `#3118` half was wrong and is retracted.** The premise above supports the scope, not the blocker: declining
 to create a runner spawn site is precisely what stops this card pre-empting #3118, and a card that avoids a
 question is not blocked by it. Two further checks, both run in this lane rather than reasoned from the card:
-#3118's Fork 1 default (a) is a WE-native in-process runner, and `we:scripts/operations/dispatch-lane-io.mjs`
-already shells `claude --bg` locally — no cross-process call into `plateau-app` anywhere in the file — so
-naming the operation in prose sits on the default side of the fork and pre-empts neither branch; and
-`we:scripts/readiness/dispatch-plan.mjs:165` records that `isReady requires every blockedBy resolved`, so an
-open `kind: decision` in `blockedBy` would have made this card undispatchable until a human ratifies — the
-exact opposite of what preparing it is for. `#3118` is now `relatedTo`. The card's other two statements of
-its own ordering — *Consequence for sequencing* and *Delivery shape* — always said `#3165` alone; the
-frontmatter is what disagreed with them, and it now agrees.)*
+naming the operation in prose sits on the **default** side of #3118's Fork 1 and pre-empts neither branch
+(re-read against live #3118 below); and `we:scripts/readiness/dispatch-plan.mjs:165` records that `isReady
+requires every blockedBy resolved`, so an open `kind: decision` in `blockedBy` would have made this card
+undispatchable until a human ratifies — the exact opposite of what preparing it is for. `#3118` is now
+`relatedTo`. The card's other two statements of its own ordering — *Consequence for sequencing* and
+*Delivery shape* — always said `#3165` alone; the frontmatter is what disagreed with them, and it now
+agrees.)*
+
+### The Fork 1 premise, re-read against live #3118
+
+**The round-6 cut of the paragraph above said `#3118`'s Fork 1 default was *"(a) … a WE-native in-process
+runner, and `we:scripts/operations/dispatch-lane-io.mjs` already shells `claude --bg` locally — no
+cross-process call into `plateau-app` anywhere in the file — so naming the operation in prose sits on the
+default side of the fork"*. **That is no longer #3118's default, and the sentence is retracted rather than
+edited away.** It was true at this branch's old merge base `60acbe5f`. It is false on the `main` this card
+lands on: PR #1565 (merged `b71595f9`) amended #3118, and at `origin/main` `e6db8cf5` its *Recommended path
+at a glance* row reads
+
+> **(c) call the existing `dispatch-lane` operation** — the declared operation that already starts agents
+> headlessly; the runner calls it per surfaced dispatch
+
+with `(a) port a new WE-native we:scripts/conveyor/agent-runner.mjs` moved into the *excluded alternatives*
+column, under an amendment note headed *"the fork survey was missing an option, and it changes the
+default."* Verified in this lane at the merged head, `we:backlog/3118-session-free-conveyor-where-does-headless-agent-spawning-liv.md:57`
+and `:59`.
+
+**The conclusion is unchanged and the premise is stronger, not weaker.** Under (c) the default *is* calling
+`dispatch-lane`, which is precisely what this card asks the skill's prose to do — so this card sits more
+squarely on the default side of the fork than the retracted sentence claimed, and neither the scope of the
+skill file alone nor the dropped `blockedBy: ["3118"]` moves. The check that is genuinely independent of the
+amendment still holds and was re-run here: `we:scripts/operations/dispatch-lane-io.mjs` shells `claude --bg`
+locally with no cross-process call into `plateau-app` anywhere in the file — `grep -c claude` returns **33**
+lines and `grep -c plateau` returns **0** — so option (b) is untouched either way.
+
+**The tension (c) creates with the paragraph above, stated rather than left silent.** #3118's new default
+has *the runner* calling `dispatch-lane` per surfaced dispatch — the very spawn site this section argues is
+out of this card's scope. Those are not in conflict: this card declines to create that site, and #3118 is
+still `kind: decision, status: open`, so the site is #3118's to create when it is ratified. But a builder
+reading both should know the runner call is the ruling's likely destination, and that this card stops one
+step short of it on purpose.
 
 ## Tasks
 

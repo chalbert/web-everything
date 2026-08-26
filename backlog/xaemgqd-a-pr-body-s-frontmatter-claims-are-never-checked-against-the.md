@@ -45,6 +45,13 @@ frontmatter key (`blockedBy`, `scope`, `status`, `kind`, `parent`, `relatedTo`, 
   naming it (`#3147`, or its born-as hash) or by a self-reference (*"this card"*, *"this item"*, *"the
   card"*), which resolves to the item the PR is about. Skip the span when the bound item is one the diff does
   **not** touch, and skip it when nothing binds it.
+  - **Precedence, when a sentence carries both.** A self-reference **wins** over a named item in the same
+    sentence: the span is bound to the item the PR is about. *"…#3165 carries it, and this card is
+    `` `blockedBy: ["3165"]` ``"* binds to #3147, not #3165, because the span sits on the self-reference's
+    side of the sentence and #3165 is named as the subject of a different clause. Stated because this card's
+    own *Done when* 1 fixture is exactly that sentence: read the other way — "two referents ⇒ skip" — the red
+    side compares 0 spans and exits 0, and the criterion's stated numbers do not reproduce.
+  - Two **named** items in one sentence and no self-reference is still a skip, reported as unchecked.
 - **skip retractions.** Skip the span when its sentence carries a retraction marker — a closed, greppable
   list: `an earlier draft`, `was wrong`, `is retracted`, `superseded`, `said`, `stood at`, `from round`,
   `no longer`, `used to`, `previously`.
@@ -83,9 +90,13 @@ Prose claims that are not `key: value` spans. Those are the sibling class, filed
 "A claim corrected at one site while the same claim stands at another has no gate". This item deliberately
 takes only the mechanically-decidable half.
 
-Whether a *Done when* criterion's own named fixture actually produces the outcome it states — the defect that
-sent this card back for a round. Filed separately as "A Done-when criterion names a fixture whose stated
-outcome is wrong".
+Whether a quoted invocation actually produces the result it states — including the *Done when* case that sent
+this card back for a round. Filed separately as "A quoted invocation ships with a result nobody re-ran".
+
+A prose claim about a **different, explicitly named** item's current content, which the binding filter above
+deliberately skips and which can go stale after this check passes, when a concurrent lane amends that item.
+Filed separately as "A card's prose claim about another item's current content is never re-read when that
+item is amended".
 
 ## Done when
 
