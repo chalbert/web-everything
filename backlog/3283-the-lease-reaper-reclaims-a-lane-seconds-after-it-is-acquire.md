@@ -230,14 +230,14 @@ defect 2's fix must invert. Opened and run in this lane, this session:
 ```
 
 ```js
-    expect(itemNumFromSession('conveyor-x9ylkp7')).toBe('7');              // :84
-    expect(states.get(itemNumFromSession('conveyor-x9ylkp7'))).toBeUndefined(); // :85
+    expect(itemNumFromSession('conveyor-3095')).toBe('7');              // :84
+    expect(states.get(itemNumFromSession('conveyor-3095'))).toBeUndefined(); // :85
 ```
 
 `:37` sits inside an `it` **titled** *"a non-item session → null"* and then asserts a non-item session
 resolves to `'24827'` — the test's own name already describes the behaviour this card wants, and the
-assertion under it contradicts the name. `:84` aliases a **hash-id** lease slug (`conveyor-x9ylkp7`, for the
-hash item `x9ylkp7`) onto item `7`, whose card *is* `resolved` on `main`. Both go red under Criterion 2, and
+assertion under it contradicts the name. `:84` aliases a **hash-id** lease slug (`conveyor-3095`, for the
+hash item `3095`) onto item `7`, whose card *is* `resolved` on `main`. Both go red under Criterion 2, and
 the file is now in `scope:`. This is the same class as (d) — a criterion that did not name the assertions it
 would break — and is exactly what `we:backlog/3285-…` was filed to catch.
 
@@ -317,7 +317,7 @@ clone geometry); case 2 is the pure unit half.
 2. **Executable** — `itemNumFromSession` (`we:scripts/conveyor/lease-reaper.mjs:60-63`) no longer treats an
    arbitrary digit-tailed slug as an item number: a genuine conveyor slug (`conveyor-2500`,
    `prepare-decision-2500`, retry suffix `conveyor-2500b`) still resolves to `'2500'`, while `probe1`,
-   `rv1566j`, `Mac:24827` and `conveyor-x9ylkp7` resolve to `null`. **Fails today** — measured in this lane,
+   `rv1566j`, `Mac:24827` and `conveyor-3095` resolve to `null`. **Fails today** — measured in this lane,
    all of them resolve the old way: `'2500'`, `'2500'`, `'2500'`, `'1'`, `'1566'`, `'24827'`, `'7'`; only
    `'fresh'` → `null`.
 
@@ -325,7 +325,7 @@ clone geometry); case 2 is the pure unit half.
    `we:scripts/conveyor/__tests__/lease-reaper.test.mjs`: `:37`
    `expect(itemNumFromSession('Mac:24827')).toBe('24827')` — inside an `it` at `:36` titled *"a non-item
    session → null"*, so the fix makes the assertion agree with its own test name; and `:84`
-   `expect(itemNumFromSession('conveyor-x9ylkp7')).toBe('7')`, whose follow-on `:85`
+   `expect(itemNumFromSession('conveyor-3095')).toBe('7')`, whose follow-on `:85`
    (`expect(states.get(…)).toBeUndefined()`) stays green either way, since `null` and `'7'` both miss the
    hash key. Re-point `:37`/`:84`, don't weaken them. Say so in the commit.
 3. **Executable, and this is a NEW case that fails today** — a lease minted seconds ago under a **genuine**
@@ -369,8 +369,8 @@ clone geometry); case 2 is the pure unit half.
    diff **byte-identical** — this card's body adds nothing to the gate.
 
    The drift, recorded so the next reader does not mistake it for a regression: **1 error / 1435 warnings**
-   at `0b8db7b7` (stranded filing `xy43foc`), **0 / 1435** at `a2f0cf3c` after the drain JIT-numbered it to
-   `#3323`, **2 / 1436** at `ad5a1947` (two fresh stranded filings, `x5df5nm` and `xuplxab`), **0 / 1436** at
+   at `0b8db7b7` (stranded filing `3323`), **0 / 1435** at `a2f0cf3c` after the drain JIT-numbered it to
+   `#3323`, **2 / 1436** at `ad5a1947` (two fresh stranded filings, `3324` and `3325`), **0 / 1436** at
    `29dd36b1` after the drain numbered those to `#3324`/`#3325`. Every one of those swings came from other
    lanes landing, none from this card. Compare like for like against a base you took yourself, never against
    this line.

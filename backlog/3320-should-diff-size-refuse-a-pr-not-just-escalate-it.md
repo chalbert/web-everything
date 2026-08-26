@@ -53,7 +53,7 @@ Grounding for the omission seat: on PR #1569 two rounds of the claim-accuracy le
 and missed both defects that actually bounced it — a test that could not fail under any mutation, and the main
 new feature having no test at all. Neither is visible to a per-shard reviewer, because absence has no shard.
 
-Built by **#xytw33u** (scoped fan-out review). Dependency-graph-based shard cutting is deliberately **not**
+Built by **#3326** (scoped fan-out review). Dependency-graph-based shard cutting is deliberately **not**
 taken up there: shared context removes most of its value, and it is revisitable if scoped reviewers still miss
 cross-file defects.
 
