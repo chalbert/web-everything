@@ -7,6 +7,7 @@ status: open
 dateOpened: "2026-08-26"
 scope:
   - we:scripts/lib/review-escalation.mjs
+  - we:scripts/lib/__tests__/review-escalation.test.mjs
 tags: []
 ---
 
