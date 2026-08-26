@@ -437,6 +437,113 @@ describe('scoreEscalation', () => {
   });
 });
 
+// #3317 — the escalation basis is recomputed CUMULATIVELY, from merge-base(origin/main, head), for EVERY signal.
+// Before this, only the human gate was (#2390-review-fix); size and blast-radius scored the own-delta
+// `baseRev…head`, whose left side is SELF-DECLARED (the manifest `base`, riding the editable PR body). Two
+// evasions followed from that: declare a stacked base, or take the sanctioned slice-into-two-PRs route.
+//
+// WHAT THIS IS NOT. It is a MEASUREMENT fix, not a permission one. Per #3320
+// (`#size-adds-reviewers-never-refuses`) size never refuses a PR — the last test in this block pins that an
+// enormous honest diff still escalates AGENT-clearably and still parks alive rather than blocking.
+describe('#3317 — the escalation basis is cumulative (merge-base…head) for every signal, not just the human gate', () => {
+  describe('#3317 — BLAST RADIUS scores over the cumulative basis, so a stacked base cannot hide an ancestor', () => {
+    it('#3317 — an ANCESTOR\'s scripts/ edit that dropped out of the own delta still fires blast-radius', () => {
+      const r = scoreEscalation({
+        changedFiles: ['backlog/leaf.md'],                                        // the de-inflated own delta
+        humanBasisFiles: ['backlog/leaf.md', 'scripts/merge-ai-prs.mjs'],         // merge-base(origin/main, head)…head
+      });
+      expect(r.escalate).toBe(true);
+      expect(r.signals.blastRadius).toEqual(['scripts/merge-ai-prs.mjs']);
+      expect(r.reasons.join(' ')).toMatch(/blast-radius/);
+    });
+    it('#3317 — …and it used to NOT fire: scoring the own delta alone is clean, which is the hole', () => {
+      // The same lane, scored the pre-#3317 way (own delta only). Green — a lander edit merging with no signal.
+      expect(scoreEscalation({ changedFiles: ['backlog/leaf.md'] }).escalate).toBe(false);
+    });
+    it('#3317 — the union is MONOTONE: an own-delta-only file still scores, so the fix can never LOSE a signal', () => {
+      // A child that reverts an ancestor's edit has a file in the own delta with no net cumulative change.
+      const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], humanBasisFiles: ['backlog/leaf.md'] });
+      expect(r.signals.blastRadius).toEqual(['scripts/pr-land.mjs']);
+      expect(r.basisFiles).toEqual(['backlog/leaf.md', 'scripts/pr-land.mjs']);
+    });
+  });
+
+  describe('#3317 — SIZE is floored at the cumulative line count', () => {
+    it('#3317 — a stacked base that de-inflates 900 lines to 50 still scores the honest 900', () => {
+      const r = scoreEscalation({ diffLines: 50, cumulativeDiffLines: 900 });
+      expect(r.escalate).toBe(true);
+      expect(r.signals.size).toBe(900);
+      expect(r.reasons.join(' ')).toMatch(/size \(900 ≥ 400 changed lines\)/);
+    });
+    it('#3317 — …and the same lane scored the pre-#3317 way is clean, which is the hole', () => {
+      expect(scoreEscalation({ diffLines: 50 }).escalate).toBe(false);
+    });
+    it('#3317 — a self-declared base may only ADD: a LARGER declared count is not lowered to the cumulative one', () => {
+      const r = scoreEscalation({ diffLines: 800, cumulativeDiffLines: 10 });
+      expect(r.signals.size).toBe(800);
+    });
+    it('#3317 — omitting cumulativeDiffLines is exactly the pre-#3317 behaviour (every existing caller unchanged)', () => {
+      expect(scoreEscalation({ diffLines: 400 }).escalate).toBe(true);
+      expect(scoreEscalation({ diffLines: 399 }).escalate).toBe(false);
+      expect(scoreEscalation({ diffLines: 399, cumulativeDiffLines: null }).escalate).toBe(false);
+    });
+    it('#3317 — junk in either count degrades to 0 rather than throwing or NaN-ing the comparison', () => {
+      expect(scoreEscalation({ diffLines: 'lots', cumulativeDiffLines: 900 }).signals.size).toBe(900);
+      expect(scoreEscalation({ diffLines: 900, cumulativeDiffLines: {} }).signals.size).toBe(900);
+      expect(scoreEscalation({ diffLines: 'lots', cumulativeDiffLines: undefined }).escalate).toBe(false);
+    });
+  });
+
+  describe('#3317 — the human gate keeps its #2390-review-fix guarantee, and gains the union', () => {
+    it('#3317 — an ancestor\'s declarative-leash edit still forces a human (unchanged)', () => {
+      const r = scoreEscalation({ changedFiles: ['backlog/leaf.md'], humanBasisFiles: ['scripts/lib/gate-config.mjs'] });
+      expect(r.humanRequired).toBe(true);
+    });
+    it('#3317 — and an own-delta-only statute edit now does too: the union can only ADD to the gate', () => {
+      const r = scoreEscalation({ changedFiles: ['docs/agent/platform-decisions.md'], humanBasisFiles: ['backlog/leaf.md'] });
+      expect(r.humanRequired).toBe(true);
+      expect(r.reasons.join(' ')).toMatch(/statute/);
+    });
+  });
+
+  it('#3317 — the honest measurement is handed on as `basisFiles`, so a downstream reviewer-picker uses it too', () => {
+    const r = scoreEscalation({ changedFiles: ['b.md'], humanBasisFiles: ['a.md', 'b.md'] });
+    expect(r.basisFiles).toEqual(['a.md', 'b.md']);
+    // first-seen order, cumulative first, de-duplicated — a stable list a roster recompute can be pinned against
+    expect(scoreEscalation({ changedFiles: ['b.md', 'b.md'], humanBasisFiles: ['b.md'] }).basisFiles).toEqual(['b.md']);
+  });
+
+  it('#3317 — measurement ONLY: an enormous honest diff escalates AGENT-clearably and still parks alive (#3320)', () => {
+    // The whole point of #3320 (`#size-adds-reviewers-never-refuses`): size dials review CAPACITY, never review
+    // PERMISSION. Making the number honest must not, anywhere, turn it into a refusal.
+    const r = scoreEscalation({ changedFiles: ['backlog/leaf.md'], diffLines: 5, cumulativeDiffLines: 50_000 });
+    expect(r.escalate).toBe(true);
+    expect(r.humanRequired).toBe(false);           // size alone never reaches for a human
+    const gate = decideReviewGate({ escalate: r.escalate, humanRequired: r.humanRequired });
+    expect(gate.action).toBe('park');              // park ALIVE — never 'block', never 'refuse'
+    expect(gate.applyLabel).toBe(REVIEW_LABELS.pending);
+    // and a converged agent verdict lands it, exactly as before
+    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
+  });
+
+  it('#3317 — both PRODUCTION call sites feed the cumulative line count in, or the rubric scores a lie', async () => {
+    // The rubric can only be as honest as its inputs. `computeNetDiffSignals` is the ONE derivation both call
+    // sites use (#2890-review-r2 finding 3), so this pins the field it must publish and the two hand-offs.
+    // Structural, and narrow on purpose — the BEHAVIOURAL half lives in merge-ai-prs.test.mjs, where a real
+    // fake-exec stacked lane is scored end to end.
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const read = (rel) => readFileSync(join(scriptsDir, rel), 'utf8');
+    const drain = read('merge-ai-prs.mjs');
+    expect(drain).toMatch(/cumulativeDiffLines: basis\.ok \? basis\.humanBasis\.diffLines : 0/);
+    const loop = drain.slice(drain.indexOf('for (const v of verdicts)'));
+    expect(loop).toMatch(/scoreEscalation\(\{[^}]*cumulativeDiffLines[^}]*\}\)/);
+    expect(read('pr-land.mjs')).toMatch(/scoreEscalation\(\{[^}]*cumulativeDiffLines[^}]*\}\)/);
+  });
+});
+
 describe('#2890 — diffHunks (base-vs-head diff CONTENT) is accepted and threaded through, pure plumbing', () => {
   it('defaults to null (NOT COMPUTED) when omitted — never \'\', which means "computed and empty"', () => {
     // #2890-review-fix finding 1 — the original default was `''`, the SAME value every producer returns on its
@@ -584,7 +691,24 @@ describe('#2890-review-fix finding 4 — the hunks travel with the file list com
       diffHunks: '@@ -1 +1 @@\n-a\n+b\n',
     });
     expect(r.diffHunksBasisFiles).toEqual(['scripts/child-only.mjs', 'docs/agent/platform-decisions.md']);
-    expect(r.diffHunksBasisFiles).not.toEqual(r.signals.blastRadius);
+    // #3317 — the second half of this test used to assert `diffHunksBasisFiles !== signals.blastRadius`, which
+    // held only because blast-radius scored the DE-INFLATED own delta. It now scores the cumulative-floored
+    // basis, so on this fixture the two legitimately coincide — and the ancestor's statute file is finally IN
+    // the blast radius, which is the point of #3317. The pairing property is what this test is for, and it is
+    // pinned above; the basis-vs-signal distinction is pinned by its own test below.
+    expect(r.signals.blastRadius).toContain('docs/agent/platform-decisions.md');
+  });
+  it('#3317 — …and the two are still DISTINCT fields: the pairing list is strictly cumulative, the scoring basis is the union', () => {
+    // A file in the own delta but NOT in the cumulative set (a child that reverts an ancestor's edit): it scores
+    // (the union), but it must NOT appear in the hunks pairing list — the hunk text cannot contain it.
+    const r = scoreEscalation({
+      changedFiles: ['scripts/reverted-again.mjs'],
+      humanBasisFiles: ['docs/agent/platform-decisions.md'],
+      diffHunks: '@@ -1 +1 @@\n-a\n+b\n',
+    });
+    expect(r.diffHunksBasisFiles).toEqual(['docs/agent/platform-decisions.md']);
+    expect(r.basisFiles).toEqual(['docs/agent/platform-decisions.md', 'scripts/reverted-again.mjs']);
+    expect(r.signals.blastRadius).toContain('scripts/reverted-again.mjs');
   });
   it('falls back to changedFiles in the NON-stacked case, where the two bases are identical', () => {
     const r = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], diffHunks: 'diff\n' });
