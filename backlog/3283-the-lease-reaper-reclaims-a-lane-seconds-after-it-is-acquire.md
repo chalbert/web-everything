@@ -1,4 +1,5 @@
 ---
+bornAs: x3884p1
 kind: story
 size: 3
 status: open
@@ -169,10 +170,10 @@ fix.
 
 **Prevention for the two classes, filed with this fix:**
 
-- `we:backlog/x6fm4mx-gate-a-backlog-filing-that-asserts-existing-code-behaviour-m.md` — warn at
+- `we:backlog/3284-gate-a-backlog-filing-that-asserts-existing-code-behaviour-m.md` — warn at
   `check:standards` time when a new, unlanded filing asserts existing code behaviour with no `file:line`
   citation in the same paragraph. Covers (a).
-- `we:backlog/x9bca87-review-lens-an-acceptance-criterion-that-names-an-existing-t.md` — a `correctness`
+- `we:backlog/3285-review-lens-an-acceptance-criterion-that-names-an-existing-t.md` — a `correctness`
   lens clause: a criterion naming a concrete test location must quote the assertion it relies on. Covers
   (d), which the first card does **not** reach — there the citation resolves and the test is real; what is
   false is what the test is said to prove.

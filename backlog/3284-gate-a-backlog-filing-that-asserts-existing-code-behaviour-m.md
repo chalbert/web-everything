@@ -1,4 +1,5 @@
 ---
+bornAs: x6fm4mx
 kind: story
 size: 2
 status: open
@@ -14,7 +15,7 @@ When a filing says *"X already exists"* or *"the release path already checks it"
 
 ## The incident that produced this
 
-`we:backlog/x3884p1-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md` shipped this sentence
+`we:backlog/3283-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md` shipped this sentence
 as its central diagnosis:
 
 > *"…nothing consults holder liveness, which the pool already records: the holder slug carries a pid
@@ -47,7 +48,7 @@ different moments and neither subsumes the other:
   (two rounds) has already been paid.
 
 The heuristic catches the cheap case early; the lens catches the expensive one properly. A third sibling,
-`we:backlog/x9bca87-review-lens-an-acceptance-criterion-that-names-an-existing-t.md`, covers the case where
+`we:backlog/3285-review-lens-an-acceptance-criterion-that-names-an-existing-t.md`, covers the case where
 the citation resolves and the claim is about a **test's** assertions.
 
 ## RETRACTION — the gating precedent this card cited does not exist

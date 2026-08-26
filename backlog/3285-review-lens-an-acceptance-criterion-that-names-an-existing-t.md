@@ -1,4 +1,5 @@
 ---
+bornAs: x9bca87
 kind: story
 size: 2
 status: open
@@ -19,7 +20,7 @@ assertion it relies on, and a reviewer rejects it when the quote is absent or do
 
 ## The incident that produced this
 
-`we:backlog/x3884p1-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md` shipped this criterion:
+`we:backlog/3283-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md` shipped this criterion:
 
 > *"a lane whose item is genuinely finished **and** whose holder is gone is still reaped … the existing
 > `we:scripts/__tests__/lane-pool-reap-on-acquire.test.mjs:73` case must not be weakened."*
@@ -41,7 +42,7 @@ Three checks all pass on the bad criterion, and that is the point:
   covers an *"X already handles this"* claim about **production code**, answered by line-citing the code
   performing X. Here the citation is already a line cite, and it points at a **test**; what is false is not
   the location but what the test is said to **prove**.
-- `we:backlog/x6fm4mx-gate-a-backlog-filing-that-asserts-existing-code-behaviour-m.md` — that gate fires on
+- `we:backlog/3284-gate-a-backlog-filing-that-asserts-existing-code-behaviour-m.md` — that gate fires on
   an existing-code-behaviour claim carrying **no** citation. This claim carries one.
 
 The failure is one level down from all three: the citation resolves, the test is real, and the sentence
