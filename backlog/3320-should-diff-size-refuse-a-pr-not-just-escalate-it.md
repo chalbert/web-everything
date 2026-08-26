@@ -1,6 +1,7 @@
 ---
+bornAs: xpqf41v
 kind: decision
-parent: "xjbdhzb"
+parent: "3318"
 status: open
 dateOpened: "2026-08-26"
 tags: []

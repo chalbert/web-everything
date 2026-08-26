@@ -1,7 +1,8 @@
 ---
+bornAs: xi6608w
 kind: story
 size: 3
-parent: "xjbdhzb"
+parent: "3318"
 status: open
 dateOpened: "2026-08-26"
 tags: []

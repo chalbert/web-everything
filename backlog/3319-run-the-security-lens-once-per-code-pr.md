@@ -1,7 +1,8 @@
 ---
+bornAs: xn9c3mh
 kind: story
 size: 3
-parent: "xjbdhzb"
+parent: "3318"
 status: open
 dateOpened: "2026-08-26"
 tags: []
@@ -14,7 +15,7 @@ Of the 92 replayed cases, 87 recorded a lens row and **86 of those 87 were `corr
 > **Retracted — this card's opening sentence was wrong on both halves, re-counted 2026-08-26 over `we:scripts/review-corpus/cases` (92 case files plus `we:scripts/review-corpus/cases/index.json`).**
 > It read *"All 84 recorded verdicts ran correctness alone. Security ran once and found two real forgery holes in
 > we:scripts/operations/explore-io.mjs, the only lens with evidence it sees something the incumbent misses."*
-> **(a)** There is no population of 84 anywhere in the corpus — the parent card `xjbdhzb` retracts the same figure.
+> **(a)** There is no population of 84 anywhere in the corpus — the parent card `3318` retracts the same figure.
 > Measured: 92 cases, 87 record a lens row, 86 of those `correctness`. And "alone" is false: #1457 r2 is `security`.
 > **(b)** The security lens declared **one** finding, not two. The second `we:scripts/operations/explore-io.mjs`
 > hole — the Nunjucks raw-block injection in `renderResearchTopic` — is recorded in

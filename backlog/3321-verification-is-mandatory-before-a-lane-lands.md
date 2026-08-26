@@ -1,7 +1,8 @@
 ---
+bornAs: xq0034b
 kind: story
 size: 2
-parent: "xjbdhzb"
+parent: "3318"
 status: open
 dateOpened: "2026-08-26"
 tags: []
