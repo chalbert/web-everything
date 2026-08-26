@@ -362,7 +362,13 @@ export function normalizeFinding(raw) {
   if (raw.file) out.file = String(raw.file);
   if (raw.failure_scenario) out.failure_scenario = String(raw.failure_scenario);
   if (raw.category) out.category = String(raw.category);
-  if (raw.line != null && Number.isFinite(Number(raw.line))) out.line = Number(raw.line);
+  // #x6t2z6h — A LINE NUMBER IS A POSITIVE INTEGER. `Number.isFinite` alone accepted `0`, `-3` and `12.5`, all of
+  // which render straight into the PR comment as `file:0` / `file:-3` and address nothing a reader can open. An
+  // invalid line adds NO key — the FINDING SURVIVES, only its unusable coordinate is dropped, because a juror that
+  // miscounted a line may still be right about the defect. (End-of-file bounds are NOT checked here and cannot be:
+  // this is pure, and the run carries the diff, not the files. See the card.)
+  const lineNumber = raw.line != null ? Number(raw.line) : Number.NaN;
+  if (Number.isInteger(lineNumber) && lineNumber >= 1) out.line = lineNumber;
   if (raw.verdict && VALID_VERDICT_TAGS.has(String(raw.verdict))) out.verdict = String(raw.verdict);
   if (raw.outcome && VALID_OUTCOMES.has(String(raw.outcome))) out.outcome = String(raw.outcome);
   // #2823 — the PREVENTION-INTROSPECTION fields, carried through the canonical shape so they survive into the
@@ -397,6 +403,18 @@ export function normalizeFinding(raw) {
   const declared = raw.disposition != null && Object.hasOwn(DISPOSITION_EARNS_ROUND, String(raw.disposition))
     ? String(raw.disposition)
     : undefined;
+  // #x6t2z6h — CITATION SCOPE, carried so the marker survives a re-normalization (`renderPanelComment` normalizes
+  // the list again before rendering, so a key this function drops never reaches the posted comment). Validated
+  // against the enum; anything else adds no key.
+  //
+  // IT IS DISPLAY/AUDIT DATA, AND NOTHING READS IT TO DECIDE A VERDICT. Carrying it here would otherwise be a
+  // self-certification seam — a juror that wrote `citationScope: 'unverifiable'` on its own finding would be
+  // un-blocking itself, the exact hole the `disposition` block above exists to refuse. It cannot be: the ONLY
+  // un-blocking is `scopeFindingsToCitedFiles` withholding a finding from the set the caller reduces, and that
+  // function RECOMPUTES this field from ground truth on every finding it touches, discarding whatever arrived.
+  if (raw.citationScope != null && Object.hasOwn(CITATION_SCOPE_ADMITS, String(raw.citationScope))) {
+    out.citationScope = String(raw.citationScope);
+  }
   // THE ROUTING DECIDES; A SELF-DECLARED WORD MAY ONLY EVER MAKE A FINDING *MORE* BLOCKING (PR #1082 review,
   // blocker 1). A juror that answered the three questions has already said everything that decides this, so its
   // own `disposition` word cannot override them — that is self-certification, the anchoring problem the
@@ -426,6 +444,150 @@ export function normalizeFinding(raw) {
 export function normalizeFindings(rawList) {
   const arr = Array.isArray(rawList) ? rawList : [];
   return arr.map(normalizeFinding).filter(Boolean);
+}
+
+/**
+ * #x6t2z6h — WHERE A FINDING'S CITATION STANDS AGAINST THE SUBJECT'S GROUND-TRUTH FILE LIST.
+ *
+ *   • `in-scope`     — the cited path resolves to a file the subject actually changed.
+ *   • `uncited`      — the finding names no file at all. A perfectly good finding (a claim about the PR
+ *                      description, a whole-diff observation); NEVER flagged, and it carries no key.
+ *   • `unverifiable` — the finding cites a path that is NOT in the subject's changed-file set, under any
+ *                      canonicalisation. The claim's one machine-checkable fact is false.
+ */
+export const CITATION_SCOPES = Object.freeze({
+  IN_SCOPE: 'in-scope',
+  UNCITED: 'uncited',
+  UNVERIFIABLE: 'unverifiable',
+});
+
+/**
+ * Which citation scopes are ADMITTED to the set a verdict reduces. A `frozenLookup` (null-prototype) for the same
+ * reason `DISPOSITION_EARNS_ROUND` is one: the key can arrive as free-form model JSON, and a bare bracket read on a
+ * normal literal would answer for `'constructor'`. Read through `admitsCitation` only.
+ */
+const CITATION_SCOPE_ADMITS = frozenLookup({
+  [CITATION_SCOPES.IN_SCOPE]: true,
+  [CITATION_SCOPES.UNCITED]: true,
+  [CITATION_SCOPES.UNVERIFIABLE]: false,
+});
+
+/** Does a finding at this citation scope reach the set a verdict is reduced from? FAIL-OPEN on an unknown scope —
+ *  an unrecognised word must never silently withhold a finding from the verdict, which is the DROP direction and
+ *  the one that costs an escaped defect.
+ *  @param {string|undefined|null} scope
+ *  @returns {boolean} */
+export function admitsCitation(scope) {
+  if (scope === undefined || scope === null) return true;
+  const k = String(scope);
+  return Object.hasOwn(CITATION_SCOPE_ADMITS, k) ? CITATION_SCOPE_ADMITS[k] : true;
+}
+
+/**
+ * #x6t2z6h — every form a cited path might reasonably have been written in, widest first. Pure.
+ *
+ * THE DIRECTION IS DELIBERATE AND IT IS THE WHOLE SAFETY ARGUMENT: this returns CANDIDATES to match, never a single
+ * canonical form to compare by. Adding a candidate can only ever make a citation MATCH — i.e. can only ever admit a
+ * finding — so a canonicalisation this function gets wrong costs a missed hallucination, never a dropped real
+ * finding. Rewriting it as "normalise both sides, compare once" inverts that: a wrong rewrite then REJECTS.
+ *
+ * Handles: surrounding backticks; a `we:`-style repo prefix (#883 markdown locus form); a trailing `:120` or
+ * `#L12-L20` line pin; a leading `./`, `/`, or a diff-side `a/` / `b/`.
+ * @param {*} file
+ * @returns {string[]} de-duplicated, blanks removed.
+ */
+export function citedPathCandidates(file) {
+  if (file == null) return [];
+  const seen = [];
+  const add = (v) => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    if (t && !seen.includes(t)) seen.push(t);
+  };
+  let p = String(file).trim();
+  add(p);
+  p = p.replace(/^`+/, '').replace(/`+$/, '').trim();
+  add(p);
+  // A repo prefix (`we:`, `fui:`) — only when what follows is not a slash, so a Windows drive letter is untouched.
+  add(p.replace(/^[A-Za-z][A-Za-z0-9_-]*:(?=[^/])/, ''));
+  for (const base of [...seen]) {
+    // A trailing line pin, in either form the corpus writes it.
+    add(base.replace(/(?::L?\d+(?:[-:]L?\d+)?|#L\d+(?:-L?\d+)?)$/, ''));
+  }
+  for (const base of [...seen]) {
+    add(base.replace(/^\.\//, '').replace(/^\/+/, ''));
+  }
+  for (const base of [...seen]) {
+    add(base.replace(/^[ab]\//, ''));
+  }
+  return seen;
+}
+
+/**
+ * #x6t2z6h — classify ONE finding's citation against a ground-truth changed-file list. Pure.
+ *
+ * A candidate matches a scope path when it EQUALS it, or when either ends with `/` + the other — so a juror that
+ * wrote only the basename (`review-pr.mjs`), or an absolute path with a checkout prefix, is IMPRECISE and admitted,
+ * not fabricated. Only a path that matches nothing in the set under any candidate form is `unverifiable`.
+ *
+ * @param {{file?: string}|null|undefined} finding
+ * @param {{scope?: string[]}} [o] - the ground-truth changed-file list. An EMPTY list is not ground truth; every
+ *   finding classifies `uncited` rather than `unverifiable`, so a caller that forgets to guard cannot flag the world.
+ * @returns {'in-scope'|'uncited'|'unverifiable'}
+ */
+export function findingCitationScope(finding, { scope = [] } = {}) {
+  const cited = finding && finding.file != null ? String(finding.file).trim() : '';
+  if (!cited) return CITATION_SCOPES.UNCITED;
+  const paths = (Array.isArray(scope) ? scope : []).filter(Boolean).map((p) => String(p).trim()).filter(Boolean);
+  if (!paths.length) return CITATION_SCOPES.UNCITED;
+  for (const candidate of citedPathCandidates(cited)) {
+    for (const path of paths) {
+      if (path === candidate) return CITATION_SCOPES.IN_SCOPE;
+      if (path.endsWith(`/${candidate}`) || candidate.endsWith(`/${path}`)) return CITATION_SCOPES.IN_SCOPE;
+    }
+  }
+  return CITATION_SCOPES.UNVERIFIABLE;
+}
+
+/**
+ * #x6t2z6h — THE OFF-SCOPE-CITATION GATE. Split a findings list into what is PUBLISHED and what the verdict is
+ * REDUCED FROM. Pure.
+ *
+ * THE RULING (see the card): a finding citing a file outside the subject's changed-file set is **downgraded to
+ * non-blocking and kept fully visible** — never dropped, never a refusal of the whole run.
+ *   - NOT REFUSE. The review happened; one bad citation from one seat must not discard the other seat's real
+ *     findings. Refusal is reserved for a juror that said NOTHING (`unrun`), which is a different claim.
+ *   - NOT DROP. A validator that deletes findings is worse than the hole it closes: a real defect whose path is
+ *     merely stale (a rename, a sibling-lane file) would vanish silently, and an escaped defect costs more than a
+ *     wasted round. So `findings` — the PUBLISHED list — keeps every one of them.
+ *   - DOWNGRADE + DISCLOSE. `admitted` is what a verdict reduces, and it withholds the unverifiable ones, so a
+ *     claim whose only checkable fact is false loses its AUTOMATED consequence and keeps its human-readable one.
+ *
+ * NOT FORGEABLE. `citationScope` is RECOMPUTED on every finding here and whatever arrived on the input is
+ * discarded, so a juror writing the field cannot withhold its own finding from the verdict (nor pin one in).
+ *
+ * NOT ENFORCED WITHOUT GROUND TRUTH. An empty `scope` returns everything admitted and unmarked, with
+ * `enforced: false`. On a degraded basis the changed-file list is empty or inflated, and enforcing there would
+ * flag every legitimate finding at once — the drop direction, arrived at by omission.
+ *
+ * @param {Array<object>} findings - raw or normalized; normalized here either way.
+ * @param {{scope?: string[]}} [o] - the ground-truth changed-file list, or empty/omitted to not enforce.
+ * @returns {{findings: Finding[], admitted: Finding[], unverifiable: Finding[], enforced: boolean}}
+ */
+export function scopeFindingsToCitedFiles(findings, { scope = [] } = {}) {
+  const paths = (Array.isArray(scope) ? scope : []).filter(Boolean).map((p) => String(p).trim()).filter(Boolean);
+  // Strip any inbound `citationScope` UNCONDITIONALLY, enforced or not — a field only this function may write.
+  const list = normalizeFindings(findings).map(({ citationScope: _inbound, ...rest }) => rest);
+  if (!paths.length) return { findings: list, admitted: list, unverifiable: [], enforced: false };
+  const marked = list.map((f) => {
+    const scoped = findingCitationScope(f, { scope: paths });
+    return scoped === CITATION_SCOPES.UNCITED ? f : { ...f, citationScope: scoped };
+  });
+  return {
+    findings: marked,
+    admitted: marked.filter((f) => admitsCitation(f.citationScope)),
+    unverifiable: marked.filter((f) => !admitsCitation(f.citationScope)),
+    enforced: true,
+  };
 }
 
 /**

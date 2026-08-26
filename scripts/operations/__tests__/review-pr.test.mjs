@@ -52,7 +52,7 @@ import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-sp
 // test that spells the marker by hand still passes when the marker's shape changes, which is the mutant the
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
-import { MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -1639,5 +1639,403 @@ describe('#3316 review-pr names the skill that owns the rest of its run', () => 
     const plain = op('plain-op', { input: {}, first: compute({ fn: () => 1 }) });
     expect(plain.ownedBy).toBe(null);
     expect(renderOutcome({ outcome: { run, stopped: 'complete', applied: [] }, declaration: plain }).lines.join('\n')).not.toContain('owned by');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// THE FAKE-JUROR FIXTURE LIBRARY (#x6t2z6h)
+//
+// Everything above drives the engine with a juror that is PERFECTLY FORMED — two shapes, both well-typed, both
+// citing a real file. That covers the plumbing and none of the seam. A language-model seat's failure mode is not
+// "returns garbage"; it is **plausible and wrong**, and the pipeline's job is to be un-fooled by exactly that.
+//
+// So: one library of realistically-bad answers, each driven END-TO-END through the real engine over the stub
+// reader (the same `atConfirm` harness), each asserting what the pipeline SHOULD do — not what it happens to do.
+//
+// THE HOLE THE LIBRARY FOUND, and the reason the citation half exists: nothing anywhere in `jury-core.mjs`,
+// `review-core.mjs` or `review-pr.mjs` compared a finding's `file` against the run's OWN net changed-file list —
+// the very list `buildPanelMandate` states to the juror as GROUND TRUTH. A juror could invent a path and it
+// reduced to `changes` and bounced the PR for a round, on a claim whose one checkable fact was false.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A path that is emphatically NOT in `NET_PATHS` — the hallucination. Realistic, not obviously fake: this is
+ *  what a juror that half-remembers the repo layout actually writes. */
+const OFF_SCOPE_PATH = 'scripts/lib/review-escalation.mjs';
+
+/** A well-formed, IN-SCOPE blocker. The control for every negative-direction assertion below: whatever the gate
+ *  does to a fabricated citation, it must do NOTHING to this. */
+const LEGIT_BLOCKER = {
+  summary: 'the liveness guard is inverted — an inert PR passes', file: NET_PATHS[0], line: 326,
+  disposition: 'blocker',
+};
+
+/**
+ * The library. Each entry is a juror ANSWER, named for the way it is wrong. Kept as data so a reader can see the
+ * whole failure catalogue in one place, and so a new fixture is one entry rather than a new harness.
+ */
+const FAKE_JURORS = Object.freeze({
+  /** Cites a file the PR does not touch. The live hole. */
+  hallucinatedPath: {
+    summary: 'one blocker in the escalation policy',
+    findings: [{ summary: 'the escalation reason table is missing a branch', file: OFF_SCOPE_PATH, disposition: 'blocker' }],
+  },
+  /** A line number past the end of any plausible file. NOT machine-checkable from here — see the test. */
+  lineBeyondEof: {
+    summary: 'one blocker, deep in the file',
+    findings: [{ ...LEGIT_BLOCKER, line: 999999 }],
+  },
+  /** Line numbers that cannot address anything: zero, negative, fractional. */
+  lineNonPositive: {
+    summary: 'three blockers with unusable coordinates',
+    findings: [
+      { ...LEGIT_BLOCKER, summary: 'zero line', line: 0 },
+      { ...LEGIT_BLOCKER, summary: 'negative line', line: -12 },
+      { ...LEGIT_BLOCKER, summary: 'fractional line', line: 3.7 },
+    ],
+  },
+  /** Prose where the array belongs — the model narrated instead of filling the schema. */
+  proseInsteadOfFindings: {
+    summary: 'I reviewed the diff',
+    findings: 'I looked at all six files. The liveness guard in review-pr.mjs looks inverted to me and I would '
+      + 'not merge this as it stands.',
+  },
+  /** `findings` present but an object, not an array — the other shape of the same mistake. */
+  objectInsteadOfFindings: { summary: 'I reviewed the diff', findings: { 0: LEGIT_BLOCKER } },
+  /** Fifty findings. Volume, to prove nothing quietly truncates. */
+  volume: {
+    summary: '50 findings',
+    findings: Array.from({ length: 50 }, (_, i) => ({
+      summary: `finding number ${i + 1}`, file: NET_PATHS[i % NET_PATHS.length], line: i + 1, disposition: 'blocker',
+    })),
+  },
+  /** No `disposition` at all — every pre-#2950 finding shape. */
+  dispositionMissing: {
+    summary: 'one finding, undispositioned',
+    findings: [{ summary: 'the guard is inverted', file: NET_PATHS[0] }],
+  },
+  /** A disposition word that is not in the enum. */
+  dispositionUnknown: {
+    summary: 'one finding, invented disposition',
+    findings: [{ summary: 'the guard is inverted', file: NET_PATHS[0], disposition: 'minor' }],
+  },
+  /** A bare `carve-out` with none of the three direction facts answered — the self-certification shortcut. */
+  dispositionUnearned: {
+    summary: 'one finding, self-declared non-blocking',
+    findings: [{ summary: 'this diff drops the auth check', file: NET_PATHS[0], disposition: 'carve-out' }],
+  },
+  /** Says nothing is wrong, then lists a blocker. */
+  summarySaysCleanFindingsSayBlocked: {
+    summary: 'nothing blocking — the diff is clean',
+    findings: [LEGIT_BLOCKER],
+  },
+  /** Says something is wrong, then lists nothing. */
+  summarySaysBlockedFindingsSayClean: { summary: 'one serious blocker, see below', findings: [] },
+});
+
+/** A run driven to `confirm` with a per-seat answer; `security` defaults to clean so a fixture is read as the
+ *  ONE seat it is about. `n` disambiguates the run id, which the store keys on. */
+let fixtureRunSeq = 0;
+function driveFixture({ correctness, security = CLEAN_ANSWER, reader = {} } = {}) {
+  const { registry } = registryFor(reader);
+  fixtureRunSeq += 1;
+  return atConfirm({
+    registry, input: BASE_INPUT, id: `run-fx-${fixtureRunSeq}`,
+    answers: { [JUDGE_STEPS[0]]: correctness, [JUDGE_STEPS[1]]: security },
+  });
+}
+
+// ── THE CITATION GATE ─────────────────────────────────────────────────────────────────────────────────────
+describe('#x6t2z6h — a finding must cite a file this PR actually changed', () => {
+  it('DOWNGRADES a hallucinated path: still published, still visible, withheld from the verdict', () => {
+    // THE RULING, driven. Before this item the same run reduced to `changes` — a fabricated path bought a
+    // negotiation round on its own. Three things must hold together, and any two without the third is a
+    // different (worse) ruling:
+    //   1. the verdict no longer counts it   → the automated consequence is gone
+    //   2. the finding is STILL in the published list → it is not a DROP, so a stale-but-real path survives
+    //   3. the render says WHY               → a silent downgrade is a loss of information, not a scaled gate
+    const { run } = driveFixture({ correctness: FAKE_JURORS.hallucinatedPath });
+
+    expect(run.verdict.verdict).toBe('accept');                          // (1)
+    expect(run.verdict.unverifiableCitations).toBe(1);
+    expect(run.verdict.citationScopeEnforced).toBe(true);
+    expect(run.verdict.lensVerdicts[DEFAULT_LENS]).toBe('accept');
+
+    const published = run.verdict.findings;                              // (2)
+    expect(published).toHaveLength(1);
+    expect(published[0].file).toBe(OFF_SCOPE_PATH);
+    expect(published[0].summary).toBe('the escalation reason table is missing a branch');
+    expect(published[0].citationScope).toBe(CITATION_SCOPES.UNVERIFIABLE);
+    expect(run.verdict.admittedFindings).toEqual([]);
+
+    const writeUp = renderVerdictWriteUp({                               // (3)
+      read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op',
+    });
+    expect(writeUp).toContain('the escalation reason table is missing a branch');
+    expect(writeUp).toContain('CITATION NOT IN THE NET DIFF');
+    expect(writeUp).toContain('withheld from the verdict');
+  });
+
+  it('names the withheld count in the QUESTION, so the operator is not asked to trust two different counts', () => {
+    const { run } = driveFixture({ correctness: FAKE_JURORS.hallucinatedPath });
+    expect(run.pending.asks).toContain('1 finding(s)');
+    expect(run.pending.asks).toContain('WITHHELD from the reduction');
+    expect(run.pending.asks).toContain('the verdict is over 0');
+  });
+
+  // ── THE NEGATIVE DIRECTION. A validator that drops real findings is far worse than the hole it closes, so
+  //    this is the longer half of the gate on purpose.
+  it('a LEGITIMATE finding still blocks — the control the whole gate is judged against', () => {
+    const { run } = driveFixture({ correctness: { summary: 'one blocker', findings: [LEGIT_BLOCKER] } });
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.unverifiableCitations).toBe(0);
+    expect(run.verdict.findings[0].citationScope).toBe(CITATION_SCOPES.IN_SCOPE);
+    expect(run.verdict.admittedFindings).toHaveLength(1);
+  });
+
+  it('admits every reasonable WRITING of a real path — imprecise is not fabricated', () => {
+    // Each of these names a file that IS in the net set. A citation gate that rejected any of them would be
+    // deleting a true finding over formatting, which is the failure mode that costs an escaped defect. The
+    // candidate-matching in `citedPathCandidates` is built so that adding a form can only ever ADMIT more.
+    const forms = [
+      NET_PATHS[0],                          // exact
+      `we:${NET_PATHS[0]}`,                  // the #883 markdown locus prefix
+      `./${NET_PATHS[0]}`,                   // relative
+      `/${NET_PATHS[0]}`,                    // rooted
+      `b/${NET_PATHS[0]}`,                   // the diff's own right-hand prefix
+      `a/${NET_PATHS[0]}`,                   // …and its left-hand one
+      `${NET_PATHS[0]}:326`,                 // a trailing line pin
+      `we:${NET_PATHS[0]}:326`,              // both at once, as the review corpus writes them
+      `\`${NET_PATHS[0]}\``,                 // backticked out of a markdown body
+      'review-pr.mjs',                       // basename only
+      `/Users/someone/workspace/webeverything/${NET_PATHS[0]}`, // an absolute checkout path
+    ];
+    for (const file of forms) {
+      const { run } = driveFixture({ correctness: { summary: 'one blocker', findings: [{ ...LEGIT_BLOCKER, file }] } });
+      expect({ file, verdict: run.verdict.verdict, withheld: run.verdict.unverifiableCitations })
+        .toEqual({ file, verdict: 'changes', withheld: 0 });
+    }
+  });
+
+  it('NEVER flags a finding that cites no file at all — a whole-diff or prose finding is legitimate', () => {
+    const { run } = driveFixture({
+      correctness: { summary: 'one blocker about the description', findings: [{ summary: 'the PR body claims a figure the diff retracts', disposition: 'blocker' }] },
+    });
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.unverifiableCitations).toBe(0);
+    expect(run.verdict.findings[0]).not.toHaveProperty('citationScope');
+  });
+
+  it('does NOT enforce on a DEGRADED basis — there is no ground truth to enforce against', () => {
+    // `ref-unresolved` leaves `netChangedFiles` empty. Enforcing there would classify EVERY finding as
+    // off-scope in one go — the drop outcome, reached by omission rather than by decision.
+    const { run } = driveFixture({ correctness: FAKE_JURORS.hallucinatedPath, reader: { netScored: false, netReason: 'ref-unresolved' } });
+    expect(run.findings.read.degraded).toBe(true);
+    expect(run.verdict.citationScopeEnforced).toBe(false);
+    expect(run.verdict.unverifiableCitations).toBe(0);
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.findings[0]).not.toHaveProperty('citationScope');
+  });
+
+  it('a juror CANNOT withhold its own finding by writing `citationScope` itself', () => {
+    // The self-certification seam this would otherwise open, and the reason the field is recomputed rather than
+    // carried: a juror that could stamp `unverifiable` on an in-scope finding would be un-blocking itself, which
+    // is exactly what `normalizeFinding` already refuses for `disposition`. The stamp is discarded and rebuilt.
+    const { run } = driveFixture({
+      correctness: { summary: 'one blocker', findings: [{ ...LEGIT_BLOCKER, citationScope: CITATION_SCOPES.UNVERIFIABLE }] },
+    });
+    expect(run.verdict.findings[0].citationScope).toBe(CITATION_SCOPES.IN_SCOPE);
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.unverifiableCitations).toBe(0);
+  });
+
+  it('a hallucination on ONE seat does not disarm the OTHER seat\'s real finding', () => {
+    // The argument against REFUSING the whole verdict, as an assertion: one bad citation must not discard a
+    // sibling seat's true finding, and it must not be laundered into an accept either.
+    const { run } = driveFixture({
+      correctness: FAKE_JURORS.hallucinatedPath,
+      security: { summary: 'one real blocker', findings: [LEGIT_BLOCKER] },
+    });
+    expect(run.verdict.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'accept', [SECURITY_LENS]: 'changes' });
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.findings).toHaveLength(2);
+    expect(run.verdict.admittedFindings).toHaveLength(1);
+    expect(run.verdict.unverifiableCitations).toBe(1);
+  });
+
+  it('an off-scope finding cannot withhold the accept through its PREVENTION field either', () => {
+    // The downgrade has to reach the SECOND gate too. `deriveVerdict` withholds a clean accept for an uncaptured
+    // prevention guard (#2823/#xdompzx); if the panel reducer were still handed the full list, an off-scope
+    // finding would come back as `prevention-outstanding` and the downgrade would be undone one gate later.
+    const { run } = driveFixture({
+      correctness: {
+        summary: 'one off-scope finding that names a guard',
+        findings: [{
+          summary: 'the escalation table is missing a branch', file: OFF_SCOPE_PATH, disposition: 'blocker',
+          prevention: 'a check:standards rule over the reason table', preventionCaptured: false,
+          impactIfUnfixed: 'broken',
+        }],
+      },
+    });
+    expect(run.verdict.verdict).toBe('accept');
+  });
+});
+
+// ── SHAPE FAILURES: WHAT A JUROR RETURNS WHEN IT DID NOT FILL THE SCHEMA ───────────────────────────────────
+describe('#x6t2z6h — a malformed juror answer is `unrun`, never an accept', () => {
+  it('REFUSES prose where the findings array belongs, naming the seat and the type it got', () => {
+    // The same class as the #x0p5k2q silent juror, and it was open: `normalizeFindings` coerces a non-array to
+    // `[]`, so a juror that NARRATED a blocker instead of filling the schema reduced to zero findings and the
+    // run recorded an accept — with the juror's own prose ("I would not merge this") sitting in the summary.
+    expect(() => driveFixture({ correctness: FAKE_JURORS.proseInsteadOfFindings }))
+      .toThrow(/returned `findings` as a string, not an array/);
+  });
+
+  it('REFUSES an object where the findings array belongs', () => {
+    expect(() => driveFixture({ correctness: FAKE_JURORS.objectInsteadOfFindings }))
+      .toThrow(/returned `findings` as an object, not an array/);
+  });
+
+  it('REFUSES a malformed SECOND seat even when the first one answered properly', () => {
+    expect(() => driveFixture({ correctness: CLEAN_ANSWER, security: FAKE_JURORS.proseInsteadOfFindings }))
+      .toThrow(new RegExp(`the \\\`${SECURITY_LENS}\\\` juror \\(\\\`${JUDGE_STEPS[1]}\\\` step\\)`));
+  });
+
+  it('still accepts an ABSENT `findings` key as zero findings — the pre-existing shape is untouched', () => {
+    // The negative direction on the refusal above. `null`/`undefined` is a juror that returned no list, which the
+    // pipeline has always read as none; only a WRONGLY-TYPED value is new information that something went wrong.
+    const { run } = driveFixture({ correctness: { summary: 'read all six files; nothing blocking' } });
+    expect(run.verdict.verdict).toBe('accept');
+    expect(run.verdict.findings).toEqual([]);
+  });
+
+  it('REFUSES a whitespace-only summary on the security seat, naming it (#x0p5k2q, re-pinned per seat)', () => {
+    expect(() => driveFixture({ correctness: CLEAN_ANSWER, security: { summary: '   \n  ', findings: [] } }))
+      .toThrow(new RegExp(`the \\\`${SECURITY_LENS}\\\` juror \\(\\\`${JUDGE_STEPS[1]}\\\` step\\) returned no summary`));
+  });
+});
+
+// ── LINE NUMBERS ──────────────────────────────────────────────────────────────────────────────────────────
+describe('#x6t2z6h — a cited line must be a line', () => {
+  it('DROPS a zero, negative or fractional line and KEEPS the finding', () => {
+    // The direction matters: a juror that miscounted a line may still be right about the defect, so the
+    // unusable coordinate is what is dropped, never the finding. Before this item `file:0` and `file:-12`
+    // rendered straight into the posted comment as though a reader could open them.
+    const { run } = driveFixture({ correctness: FAKE_JURORS.lineNonPositive });
+    expect(run.verdict.findings).toHaveLength(3);
+    for (const f of run.verdict.findings) expect(f).not.toHaveProperty('line');
+    expect(run.verdict.verdict).toBe('changes');
+
+    const writeUp = renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'changes', actor: 'op' });
+    expect(writeUp).not.toContain(`${NET_PATHS[0]}:0`);
+    expect(writeUp).not.toContain(`${NET_PATHS[0]}:-12`);
+    expect(writeUp).not.toContain(`${NET_PATHS[0]}:3.7`);
+    expect(writeUp).toContain('zero line');
+  });
+
+  it('KEEPS a valid line, so the fix is not "drop every line"', () => {
+    const { run } = driveFixture({ correctness: { summary: 'one blocker', findings: [LEGIT_BLOCKER] } });
+    expect(run.verdict.findings[0].line).toBe(326);
+    expect(renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'changes', actor: 'op' }))
+      .toContain(`${NET_PATHS[0]}:326`);
+  });
+
+  it('carries a line PAST end-of-file through unchanged — the run holds the diff, not the files', () => {
+    // PINNED, NOT FIXED, and deliberately so. Bounding a line against end-of-file needs the file's length, which
+    // this pipeline never has: `read` carries the net path list and the diff TEXT, and a finding may legitimately
+    // cite an unchanged context line no hunk header bounds. Checking it against the hunks instead would reject
+    // true findings, which is the direction this item refuses. Recorded on the card as found-and-not-fixed.
+    const { run } = driveFixture({ correctness: FAKE_JURORS.lineBeyondEof });
+    expect(run.verdict.findings[0].line).toBe(999999);
+    expect(run.verdict.verdict).toBe('changes');
+  });
+});
+
+// ── VOLUME, DISPOSITION AND SELF-CONTRADICTION ────────────────────────────────────────────────────────────
+describe('#x6t2z6h — a juror that is wrong in bulk', () => {
+  it('carries all FIFTY findings through with nothing truncated, at any stage', () => {
+    const { run } = driveFixture({ correctness: FAKE_JURORS.volume });
+    expect(run.verdict.findings).toHaveLength(50);
+    expect(run.verdict.admittedFindings).toHaveLength(50);
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.pending.asks).toContain('50 finding(s)');
+    // The RENDER is where a quiet truncation would actually hurt, so it is asserted separately: a count that
+    // survives the reduce and is then cut by the renderer publishes a comment that under-reports the review.
+    const writeUp = renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'changes', actor: 'op' });
+    expect(writeUp).toContain('### Findings (50)');
+    expect(writeUp).toContain('finding number 1\n');
+    expect(writeUp).toContain('finding number 50\n');
+  });
+
+  it('BLOCKS on a missing disposition and on an invented one — undeclared fails closed', () => {
+    for (const fixture of [FAKE_JURORS.dispositionMissing, FAKE_JURORS.dispositionUnknown]) {
+      expect(driveFixture({ correctness: fixture }).run.verdict.verdict).toBe('changes');
+    }
+    // …and the invented word is not recorded as though it were real.
+    const { run } = driveFixture({ correctness: FAKE_JURORS.dispositionUnknown });
+    expect(run.verdict.findings[0]).not.toHaveProperty('disposition');
+  });
+
+  it('BLOCKS a bare `carve-out` that answered none of the three direction facts', () => {
+    // The self-certification shortcut: label the finding non-blocking, skip the booleans that would earn it.
+    const { run } = driveFixture({ correctness: FAKE_JURORS.dispositionUnearned });
+    expect(run.verdict.verdict).toBe('changes');
+    expect(run.verdict.findings[0]).not.toHaveProperty('disposition');
+  });
+
+  it('un-blocks only when the three direction facts EARN it', () => {
+    const { run } = driveFixture({
+      correctness: {
+        summary: 'one pre-existing issue',
+        findings: [{
+          summary: 'this predates the branch', file: NET_PATHS[0],
+          introduced: false, worseThanBase: false, parallelizable: true,
+        }],
+      },
+    });
+    expect(run.verdict.findings[0].disposition).toBe('carve-out');
+    expect(run.verdict.verdict).toBe('accept');
+  });
+
+  it('follows the FINDINGS, not a summary that contradicts them — in BOTH directions', () => {
+    // A juror whose prose and structure disagree is the ordinary case, not an exotic one, and the structure is
+    // what the pipeline is entitled to reduce. The prose must still reach the operator VERBATIM, because the
+    // contradiction is itself the signal that the seat is unreliable on this run.
+    const clean = driveFixture({ correctness: FAKE_JURORS.summarySaysCleanFindingsSayBlocked });
+    expect(clean.run.verdict.verdict).toBe('changes');
+    expect(clean.run.verdict.summary).toContain('nothing blocking — the diff is clean');
+
+    const blocked = driveFixture({ correctness: FAKE_JURORS.summarySaysBlockedFindingsSayClean });
+    expect(blocked.run.verdict.verdict).toBe('accept');
+    expect(blocked.run.verdict.summary).toContain('one serious blocker, see below');
+  });
+});
+
+// ── THE TWO SEATS DISAGREEING (#3319) ─────────────────────────────────────────────────────────────────────
+describe('#x6t2z6h — the two seats disagree', () => {
+  it('one clean and one blocking reduces to `changes`, in EITHER seat order', () => {
+    const securityBlocks = driveFixture({ correctness: CLEAN_ANSWER, security: { summary: 'a hole', findings: [LEGIT_BLOCKER] } });
+    expect(securityBlocks.run.verdict.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'accept', [SECURITY_LENS]: 'changes' });
+    expect(securityBlocks.run.verdict.verdict).toBe('changes');
+
+    const correctnessBlocks = driveFixture({ correctness: { summary: 'a bug', findings: [LEGIT_BLOCKER] }, security: CLEAN_ANSWER });
+    expect(correctnessBlocks.run.verdict.lensVerdicts).toEqual({ [DEFAULT_LENS]: 'changes', [SECURITY_LENS]: 'accept' });
+    expect(correctnessBlocks.run.verdict.verdict).toBe('changes');
+  });
+
+  it('keeps BOTH seats\' findings, each tagged with the lens that said it', () => {
+    const { run } = driveFixture({
+      correctness: { summary: 'a bug', findings: [{ summary: 'the guard is inverted', file: NET_PATHS[0], disposition: 'blocker' }] },
+      security: { summary: 'a hole', findings: [{ summary: 'the token is logged', file: NET_PATHS[1], disposition: 'blocker' }] },
+    });
+    expect(run.verdict.findings.map((f) => f.category)).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+    expect(run.verdict.summary).toBe(`${DEFAULT_LENS}: a bug | ${SECURITY_LENS}: a hole`);
+    // BOTH accounts reach the operator's question. A reduction reported as one number is the flattening the
+    // per-lens table exists to undo.
+    expect(run.pending.asks).toContain(`${DEFAULT_LENS}=changes`);
+    expect(run.pending.asks).toContain(`${SECURITY_LENS}=changes`);
+  });
+
+  it('BOTH seats clean is the only route to `accept`', () => {
+    expect(driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER }).run.verdict.verdict).toBe('accept');
   });
 });
