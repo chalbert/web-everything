@@ -74,7 +74,7 @@ already emits), and `we:skills-src/conveyor/SKILL.md:29-41` (the "interim bridge
 > above said (c) while the option-(a) bullet, the recommendation line, the `codifiedIn` sentence and the
 > pre-registered jury's touch-set all still said (a). Corrected 2026-08-25 (PR #1565 round 2, finding F2):
 > each of those four now carries its own quoted retraction in place. A recommendation, a ratification text and
-> a jury binding are not analysis. Prevention filed: **#xu4ddw5** (a `check:standards` rule counting default
+> a jury binding are not analysis. Prevention filed: **#3281** (a `check:standards` rule counting default
 > markers per fork).
 
 ## Fork 1 — where the agent-spawn backend lives
@@ -215,10 +215,10 @@ racing to discover it"*), asserts the **argv shape** and nothing about the CLI's
 sink's own comment concedes the path is *"NOT YET PROVEN LIVE... the argv below is asserted, the CLI's
 response to it is not"* (`:528`). So the honest reading of the row is: a one-off manual observation that
 **contradicts an assumption dispatch-lane is built on**, which makes settling it — a live end-to-end
-dispatch, per the `#xaibmeu` pointer the same comment gives — a prerequisite of routing the conveyor
+dispatch, per the `#3096` pointer the same comment gives — a prerequisite of routing the conveyor
 through (c), not a detail to note in passing.
 
-*Prevention for the generator, filed rather than promised:* **#x17op72** — every name in the retracted
+*Prevention for the generator, filed rather than promised:* **#3280** — every name in the retracted
 sentence grepped clean, so the existing name-resolution discipline could not have caught it. The clause it
 adds to the `correctness` lens is that an "already handles this" claim must line-cite the code doing the
 handling.
