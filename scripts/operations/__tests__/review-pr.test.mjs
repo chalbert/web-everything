@@ -44,6 +44,10 @@ import {
   REVIEW_JUROR_TOOLS,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId } from '../../lib/judge-spawn.mjs';
+// #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
+// test that spells the marker by hand still passes when the marker's shape changes, which is the mutant the
+// #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
+import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
 import { VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
@@ -56,9 +60,16 @@ function stubReader({
   // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
   // written for; overridden only by the liveness tests.
   state = 'OPEN',
+  // #xwk0tzu — the three fields the independence refusal reads. Defaulted to the SHAPE EVERY OTHER TEST WAS
+  // ALREADY WRITTEN AGAINST — an unstamped body and no harness session, i.e. `unknown-clearer`, which
+  // proceeds — so adding the guard changes nothing for a suite that is about something else. The
+  // independence tests are the only ones that override them.
+  body = 'the PR description', clearerId = undefined, createdAt = '',
 } = {}) {
   return ({ pr, repo }) => ({
     state,
+    clearerId,
+    createdAt,
     detail: {
       pr, repo, title, url: `https://example.invalid/${pr}`,
       labels,
@@ -72,7 +83,7 @@ function stubReader({
       diffStat: [...NET_PATHS, GH_ONLY_PATH].map((p) => ({ path: p, additions: 1, deletions: 0 })),
     },
     headRefName: 'lane/thing',
-    body: 'the PR description',
+    body,
     net: netScored
       ? { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true }
       : { paths: [], base: null, rev: null, scored: false, reason: netReason },
@@ -250,6 +261,130 @@ describe('the net basis', () => {
     // the `outcome !== 'reviewable'` condition and always throwing would still pass the three tests above.
     const shaped = shapeReadFinding(stubReader({ state: 'open' })({ pr: 2, repo: 'o/n' }), { pr: 2, repo: 'o/n' });
     expect(shaped.pr).toBe(2); // and case-insensitively — `gh` reports OPEN, other transports may not
+  });
+});
+
+// ── #3322 / #xwk0tzu: THE SELF-CLEAR REFUSAL HAPPENS AT `read`, BEFORE A JUROR IS PAID ────────────────────
+//
+// THE PROPERTY UNDER TEST IS POSITIONAL, exactly as it is for the liveness block above. #2844's refusal has
+// always been correct and has always been LAST: `we:scripts/review-set-label.mjs` fires it at `record`, after
+// `judge` has spawned a juror and been billed. Asserting "a self-clear is refused" against the write side
+// would pass today and would have passed on PR #1569, where two rounds cost ~$2 before that refusal was even
+// reachable. So every test here binds on `shapeReadFinding` — the pure `read` shaper, the step BEFORE
+// `judge` — or drives a real run and asserts it never reaches the judge suspend.
+describe('#3322 — a self-clear is refused at `read`, not at `record`', () => {
+  const AUTHOR = 'sess-aaaaaaaa-1111';
+  const OTHER = 'sess-bbbbbbbb-2222';
+  /** A PR body carrying the `authored-by-actor` stamp `we:scripts/pr-land.mjs` writes at open. */
+  const stampedBody = (id) => `the PR description\n\n${buildAuthorActorMarker(id)}\n`;
+
+  it('#3322 — the authoring session reviewing its OWN PR is refused before the `judge` step', () => {
+    const raw = stubReader({ body: stampedBody(AUTHOR), clearerId: AUTHOR })({ pr: 1569, repo: 'o/n' });
+    const shape = () => shapeReadFinding(raw, { pr: 1569, repo: 'o/n' });
+    // It names the fact, through the SHARED decider's own words — not a restatement of them.
+    expect(shape).toThrow(/SELF-CLEAR REFUSED/);
+    // It says WHY it is refusing early. That nothing has been spent yet is the entire point of the position.
+    expect(shape).toThrow(/Refusing BEFORE the `judge` step, so no juror is paid/);
+    // And it names the route that ACTUALLY works. #2844's own review found that naming a route this same
+    // refusal has shut ("let a human clear it") is worse than naming none, so this asserts the working one.
+    expect(shape).toThrow(/DIFFERENT SESSION/);
+  });
+
+  it('#3322 — the refusal fires before a juror request is ever declared, driven end to end', () => {
+    // The unit assertion above is about the shaper; this one is about the RUN. `advanceWhileRunning` would
+    // suspend at `judge` with a request in hand (that is what `atConfirm` relies on everywhere else in this
+    // file) — so a run that throws instead has provably not reached the step that costs money.
+    const { registry } = registryFor({ body: stampedBody(AUTHOR), clearerId: AUTHOR });
+    let reached = null;
+    let thrown = null;
+    try {
+      reached = advanceWhileRunning(
+        startRun({ op: REVIEW_PR_OP, id: 'run-self-clear', input: BASE_INPUT, registry }), { registry },
+      );
+    } catch (e) { thrown = e; }
+    // It THREW — asserted first, so the assertion below cannot pass vacuously on a run that simply suspended
+    // somewhere unexpected.
+    expect(thrown?.message).toMatch(/SELF-CLEAR REFUSED/);
+    // …and it never got as far as declaring a juror request. `atConfirm` reads exactly `run.pending.request`
+    // off this same call on every other test in this file, so an absent run here is the same fact stated the
+    // other way round: no mandate was built, so nothing could be spawned and nothing could be billed.
+    expect(reached).toBeNull();
+
+    // THE CONTROL, in the same test so the two cannot drift: the identical drive over an INDEPENDENT clearer
+    // does reach `awaiting-judge` and does carry a request. Without it, an engine that threw for an unrelated
+    // reason would satisfy the assertions above.
+    const independent = registryFor({ body: stampedBody(AUTHOR), clearerId: OTHER }).registry;
+    const suspended = advanceWhileRunning(
+      startRun({ op: REVIEW_PR_OP, id: 'run-not-self-clear', input: BASE_INPUT, registry: independent }),
+      { registry: independent },
+    );
+    expect(runStatus(suspended, { registry: independent })).toBe('awaiting-judge');
+    expect(suspended.pending.request.mandate).toBeTruthy();
+  });
+
+  // ── THE OTHER DIRECTION, AND IT IS THE ONE THAT MUST NOT BE GOT WRONG ───────────────────────────────────
+  // Inverting the comparison would refuse EVERY review — a far worse failure than the one being fixed, and
+  // one the two tests above cannot catch on their own (a guard that always throws passes both).
+  it('#3322 — a LEGITIMATE review by a different session proceeds, and reaches the juror', () => {
+    const raw = stubReader({ body: stampedBody(AUTHOR), clearerId: OTHER })({ pr: 1570, repo: 'o/n' });
+    const shaped = shapeReadFinding(raw, { pr: 1570, repo: 'o/n' });
+    expect(shaped.pr).toBe(1570);
+    expect(shaped.independence).toBe(INDEPENDENCE.INDEPENDENT);
+
+    // …and the RUN gets all the way to the judge suspend with a real mandate, which is the only proof that
+    // "proceeds" means the review actually happens rather than merely not throwing here.
+    const { registry } = registryFor({ body: stampedBody(AUTHOR), clearerId: OTHER });
+    const { request } = atConfirm({ registry, input: BASE_INPUT, id: 'run-independent' });
+    expect(request.mandate).toContain(NET_PATHS[0]);
+  });
+
+  // ── THE THREE STATUSES THAT PROCEED, each for its own recorded reason ───────────────────────────────────
+  it('#3322 — an unstamped body on a PRE-regime PR is `unknown-author` and still proceeds (#2844)', () => {
+    // Refusing here would strand every PR opened before the stamp existed, with no route to clear it.
+    const raw = stubReader({ body: 'no stamp at all', clearerId: OTHER, createdAt: '2026-01-01T00:00:00Z' })(
+      { pr: 3, repo: 'o/n' },
+    );
+    expect(shapeReadFinding(raw, { pr: 3, repo: 'o/n' }).independence).toBe(INDEPENDENCE.UNKNOWN_AUTHOR);
+  });
+
+  it('#3322 — no harness session is `unknown-clearer` and still proceeds (CI, a bare shell)', () => {
+    const raw = stubReader({ body: stampedBody(AUTHOR), clearerId: '' })({ pr: 4, repo: 'o/n' });
+    expect(shapeReadFinding(raw, { pr: 4, repo: 'o/n' }).independence).toBe(INDEPENDENCE.UNKNOWN_CLEARER);
+  });
+
+  /**
+   * #3322 — A MISSING STAMP IS NOT TURNED INTO A PASS, and it is not turned into a refusal either.
+   *
+   * #3067 DETECTS a stripped stamp: a PR opened at/after `STAMP_REGIME_START` that now carries none had one
+   * written and lost, which is `stamp-lost` and NOT the tolerated `unknown-author`. That distinction is
+   * preserved here — both inputs that produce it (`createdAt`, and the `author-stamp-lost` marker a repair
+   * run leaves behind) are supplied to the decider, so the read side computes the SAME status the write side
+   * does for the same PR.
+   *
+   * What #3322 deliberately does NOT do is refuse on it. #3067's card records that refusal as an open call:
+   * *"adding STAMP_LOST would block every PR opened outside pr-land — which on a credential-less host is all
+   * of them … The refusal should land together with a route that stamps a PR opened without pr-land, not
+   * before it."* Landing it unilaterally here would pre-empt that call AND put the read side and the write
+   * side on two different answers for one PR (#2644). So: computed, recorded on the finding, gates nothing.
+   */
+  it('#3322 — a STRIPPED stamp resolves to `stamp-lost`, is recorded, and does not (yet) refuse', () => {
+    const postRegime = stubReader({ body: 'no stamp', clearerId: OTHER, createdAt: '2026-08-20T00:00:00Z' })(
+      { pr: 5, repo: 'o/n' },
+    );
+    expect(shapeReadFinding(postRegime, { pr: 5, repo: 'o/n' }).independence).toBe(INDEPENDENCE.STAMP_LOST);
+
+    // The marker route reaches the same status without any date at all — a PR a repair run investigated.
+    const marked = stubReader({ body: `no stamp\n${buildStampLostMarker()}\n`, clearerId: OTHER })(
+      { pr: 6, repo: 'o/n' },
+    );
+    expect(shapeReadFinding(marked, { pr: 6, repo: 'o/n' }).independence).toBe(INDEPENDENCE.STAMP_LOST);
+  });
+
+  it('#3322 — the comparison is exact, so a differently-cased id is NOT read as the same actor', () => {
+    // Case-folding could only ever make two DIFFERENT ids look equal (a false self-clear); the decider says
+    // so in as many words, and this pins that the read side inherits it rather than normalising on its way in.
+    const raw = stubReader({ body: stampedBody(AUTHOR), clearerId: AUTHOR.toUpperCase() })({ pr: 7, repo: 'o/n' });
+    expect(shapeReadFinding(raw, { pr: 7, repo: 'o/n' }).independence).toBe(INDEPENDENCE.INDEPENDENT);
   });
 });
 
