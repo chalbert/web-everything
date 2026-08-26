@@ -2,7 +2,7 @@
 kind: story
 size: 2
 status: open
-relatedTo: ["2548", "2823"]
+relatedTo: ["2548", "2823", "3280"]
 scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-rules.test.mjs"]
 dateOpened: "2026-08-25"
 tags: [backlog, gate, check-standards, filing-quality]
@@ -33,13 +33,53 @@ Two review rounds were spent on it (chalbert/web-everything#1567, juror finding 
 independent reviewer confirming it). The failure mode is specific: **the claim was plausible, so it was not
 questioned — the citation is what would have forced the author to look.**
 
+## Why this and `#3280` are both wanted
+
+`#3280` (`we:backlog/3280-review-lens-an-x-already-handles-this-claim-must-line-cite-t.md`, opened one day
+before this card) attacks the same class and argues for the opposite mechanism outright: *"which is why this
+is a review-lens bar rather than a `check:standards` rule."* Both are wanted, because they catch the claim at
+different moments and neither subsumes the other:
+
+- **This card** is a cheap, syntactic **warning at filing time** — it fires on an uncited claim while the
+  author is still writing, before a reviewer is ever seated. It cannot tell whether a *cited* claim is true.
+- **`#3280`** is a **semantic bar at review time** — it judges whether the cited code actually performs what
+  the sentence says. It cannot fire before a review exists, and by then the cost the incident above measured
+  (two rounds) has already been paid.
+
+The heuristic catches the cheap case early; the lens catches the expensive one properly. A third sibling,
+`we:backlog/x9bca87-review-lens-an-acceptance-criterion-that-names-an-existing-t.md`, covers the case where
+the citation resolves and the claim is about a **test's** assertions.
+
+## RETRACTION — the gating precedent this card cited does not exist
+
+The first version of the section below read:
+
+> *"Gate it the way `#2548` gates `handNumberedNewItems`: a hash-keyed `item.num` (`!/^\d+$/`) means the
+> item has not landed yet…"*
+
+**`#2548` gates nothing.** It is `status: open`
+(`we:backlog/2548-gate-new-backlog-items-must-be-hash-keyed-not-hand-numbered.md:5`), and
+`handNumberedNewItems` exists only inside that card's own body as a proposal (`:46`, `:104`, `:114`, `:140`):
+
+```
+$ grep -rn "handNumberedNewItems" --include=*.mjs .
+(no matches)
+```
+
+Present tense, uncited, and false — **the exact class this card is filed to catch, inside the card filing
+it.** Struck rather than deleted, per this repo's convention. The design is unaffected: the premise it was
+reaching for is real, and is now cited directly rather than borrowed from an unbuilt card.
+
 ## Why a warning on new items only
 
 The prose signal is heuristic, so this must not be an error, and it must not redden the ~1400-warning
-baseline by firing retroactively on every landed card. Gate it the way `#2548` gates
-`handNumberedNewItems`: a hash-keyed `item.num` (`!/^\d+$/`) means the item has not landed yet
-(`we:docs/agent/backlog-workflow.md`, `#2288` — the drain assigns the real NNN at land), so the check sees
-exactly the filings still being authored and never an item already on `main`.
+baseline by firing retroactively on every landed card. Gate it on the item's own id token: `ID_TOKEN_RE`
+(`we:scripts/backlog/id.mjs:37`) makes the leading id either a landed `NNN` or a provisional `xNNNNNN`, and
+`isHash` (`we:scripts/backlog/id.mjs:40`) is the canonical predicate for the provisional form — a hash means
+the item has not landed yet (`we:docs/agent/backlog-workflow.md`, `#2288` — the drain assigns the real NNN
+at land). `we:scripts/check-standards.mjs:92` already imports `isHash`, so this adds no new helper and no
+second spelling of one. `#2548` *proposes* the same new-items-only shape for a different rule; when it lands
+the two should share this predicate.
 
 ## Decided design
 
@@ -70,7 +110,8 @@ export function uncitedCodeBehaviourClaims(body = '') { /* … */ }
 ## Tasks
 
 1. Add `uncitedCodeBehaviourClaims(body)` to `we:scripts/check-standards-rules.mjs`.
-2. Call it inside `lintBacklogItemRendering` (`:757`), guarded on `!/^\d+$/.test(item.num)`, pushing to
+2. Call it inside `lintBacklogItemRendering` (`:757`), guarded on `isHash(item.num)`
+   (`we:scripts/backlog/id.mjs:40`, already imported at `we:scripts/check-standards.mjs:92`), pushing to
    `warnings`.
 3. Unit tests in `we:scripts/__tests__/check-standards-rules.test.mjs`:
    - hash-keyed item, uncited "the release path already checks it" → one warning.
@@ -84,6 +125,6 @@ export function uncitedCodeBehaviourClaims(body = '') { /* … */ }
 1. **Executable** — the four unit cases in Task 3 pass.
 2. **Executable** — `npm run check:standards --item <a hash-keyed item with an uncited claim>` reports the
    new warning; the same body with a citation added reports nothing.
-3. **Mutation** — removing the `!/^\d+$/.test(item.num)` guard reddens the landed-item case by name.
+3. **Mutation** — removing the `isHash(item.num)` guard reddens the landed-item case by name.
 4. `npm run check:standards` on the whole repo shows **no new errors and no new warnings** against the
    baseline at build time (the new-items-only gate is what makes this true).
