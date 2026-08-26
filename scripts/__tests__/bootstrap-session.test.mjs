@@ -641,44 +641,92 @@ describe('the post-merge hook is consent-preserving', () => {
  */
 describe('trustableDirs — every checkout an agent is launched into, not just the one nobody works in', () => {
   const POOL = '/w/.lanes/web-everything';
+  const ALIAS = '/w/web-everything';    // the clone-slug basename — a SYMLINK on the laptop
+  const REAL = '/w/webeverything';      // what the primary checkout actually is there
   const laneRoot = `${POOL}/lane-7`;
   const readdir = () => ['lane-1', 'lane-7', 'lane-nul-guard', 'README.md', '.DS_Store'];
+  const asis = (p) => p;                // a realpath probe that canonicalises nothing
 
   it('enumerates the whole pool from inside one lane, not just the lane it stands in', () => {
-    const dirs = trustableDirs(laneRoot, () => true, readdir);
+    const dirs = trustableDirs(laneRoot, () => true, readdir, asis);
     expect(dirs).toContain(`${POOL}/lane-1`);
     expect(dirs).toContain(`${POOL}/lane-7`);
-    // A lane that was provisioned but never opened has no `projects` entry at all. Those are precisely the
-    // ones a hand-pass misses, and three real ones were missed that way before this step existed.
+    // A lane provisioned but never opened has no `projects` entry at all. Those are precisely the ones a
+    // hand-pass misses, and three real ones were missed that way before this step existed.
     expect(dirs).toContain(`${POOL}/lane-nul-guard`);
   });
 
   it('takes only `lane-*` entries, so a stray file in the pool root is never trusted as a checkout', () => {
-    const dirs = trustableDirs(laneRoot, () => true, readdir);
+    const dirs = trustableDirs(laneRoot, () => true, readdir, asis);
     expect(dirs.some((d) => d.endsWith('README.md'))).toBe(false);
     expect(dirs.some((d) => d.endsWith('.DS_Store'))).toBe(false);
   });
 
-  /**
-   * THE BUG THIS STEP'S OWN FIRST LIVE RUN FOUND. `primaryCheckout` PROBES among the repo's known basenames
-   * and falls back to the first when none resolves, so from a lane it can name `web-everything` on a machine
-   * whose checkout is `webeverything`. Trusting that writes an entry for a directory that does not exist and
-   * reports success while the REAL checkout stays untrusted.
-   */
-  it('drops a derived checkout path that does not resolve, rather than trusting a directory that is not there', () => {
-    const derivedPrimary = primaryCheckout(laneRoot);
-    // Everything resolves EXCEPT the primary this lane derives — the real shape of the bug.
-    const exists = (p) => String(p) !== derivedPrimary;
-    const dirs = trustableDirs(laneRoot, exists, readdir);
-    expect(dirs).not.toContain(derivedPrimary);
-    // The lanes still come through, so the filter drops the unresolvable entry and nothing else.
+  // FROM THE PRIMARY TOO — the root the installer is ACTUALLY run from. The registered `SessionStart` hook
+  // runs `scripts/bootstrap-session.mjs` out of the primary checkout, and `npm run bootstrap install` — the
+  // remediation this step's own drift message prints — is run there. An earlier cut enumerated the pool only
+  // when the root was itself a lane, so both reported `ok — 1 checkout(s) already trusted` forever while
+  // every lane stayed untrusted and nothing said so.
+  it('enumerates the pool from the PRIMARY checkout as well, which is where the installer runs', () => {
+    const exists = (p) => p === REAL || p === POOL || String(p).startsWith(`${POOL}/`);
+    const dirs = trustableDirs(REAL, exists, readdir, asis);
+    expect(dirs).toContain(REAL);
     expect(dirs).toContain(`${POOL}/lane-1`);
-    expect(dirs).toContain(`${POOL}/lane-7`);
+    expect(dirs).toContain(`${POOL}/lane-nul-guard`);
+    // Same answer from either root — that is the whole claim in the title, "on both hosts".
+    expect(dirs).toEqual(trustableDirs(laneRoot, exists, readdir, asis));
   });
 
-  it('a checkout that is not a lane clone contributes itself alone — the fresh-VM case', () => {
-    const dirs = trustableDirs('/srv/webeverything', () => true, readdir);
+  // THE ALIAS SYMLINK, which the exists filter alone does NOT catch. `primaryCheckout` probes among the
+  // repo's known basenames, so from a lane it can name `web-everything` on a machine whose checkout is
+  // `webeverything` — and this same script's `aliases` step creates that name as a SYMLINK, so it EXISTS and
+  // sails through the filter. `~/.claude.json` keys `projects` on the literal cwd string and the CLI's cwd is
+  // the real path, so trusting the alias writes an entry the CLI never consults, reports `trusted N of N`,
+  // and leaves the real primary untouched.
+  it('collapses an alias symlink onto the real checkout instead of trusting a path the CLI never keys on', () => {
+    const realpath = (p) => (p === ALIAS ? REAL : p);
+    const dirs = trustableDirs(laneRoot, () => true, readdir, realpath);
+    expect(dirs).not.toContain(ALIAS);
+    expect(dirs).toContain(REAL);
+    expect(dirs.length).toBe(4);   // collapsed, not renamed: one primary entry plus the three lanes
+  });
+
+  // THE BUG THIS STEP'S OWN FIRST LIVE RUN FOUND. `primaryCheckout` falls back to the first known basename
+  // when none resolves, so it can hand back a path that resolves NOWHERE. Trusting it writes a `projects`
+  // entry for a directory that is not there and reports success while the real checkout stays untrusted.
+  it('drops a derived checkout path that does not resolve, rather than trusting a directory that is not there', () => {
+    const exists = (p) => String(p).startsWith(POOL);   // both known basenames fail; the fallback is unresolvable
+    const dirs = trustableDirs(laneRoot, exists, readdir, asis);
+    expect(dirs).not.toContain(ALIAS);
+    expect(dirs).not.toContain(REAL);
+    // The lanes still come through, so the filter drops the unresolvable entry and nothing else.
+    expect(dirs).toEqual([`${POOL}/lane-1`, `${POOL}/lane-7`, `${POOL}/lane-nul-guard`]);
+  });
+
+  // THE PROBE IS FORWARDED, so no real filesystem answers on this function's behalf. `primaryCheckout` takes
+  // its own `exists` and defaults it to the real `existsSync`; not passing ours down left a live side channel
+  // to disk, and the assertion above then held only because `/w/web-everything` happens not to exist on
+  // whatever machine runs the suite — the one thing this file's testing philosophy says a test must never
+  // depend on. Here the injected probe accepts the SECOND basename only, an answer no real filesystem can
+  // give (no `/w` tree exists anywhere), so an unforwarded probe falls back to the first and reddens both.
+  it('forwards its own probe into primaryCheckout, so real disk state cannot answer for it', () => {
+    const exists = (p) => p === REAL || String(p).startsWith(POOL);
+    const dirs = trustableDirs(laneRoot, exists, readdir, asis);
+    expect(dirs).toContain(REAL);
+    expect(dirs).not.toContain(ALIAS);
+  });
+
+  it('a checkout with no pool beside it contributes itself alone — the fresh-VM case', () => {
+    const dirs = trustableDirs('/srv/webeverything', (p) => p === '/srv/webeverything', readdir, asis);
     expect(dirs).toEqual(['/srv/webeverything']);
+  });
+
+  // `exists` and `readdir` are separate handles and a caller may inject an optimistic one (this file's own
+  // installer double answers `true` for every path). A pool root that cannot be opened must contribute no
+  // lanes rather than take the whole SessionStart hook down with an ENOENT.
+  it('survives a pool root that `exists` claims and `readdir` cannot open', () => {
+    const boom = () => { throw new Error('ENOENT'); };
+    expect(trustableDirs(REAL, () => true, boom, asis)).toEqual([REAL]);
   });
 });
 

@@ -54,7 +54,7 @@
  *   node scripts/bootstrap-session.mjs install     # apply on ANY host (the explicit opt-in)
  *   node scripts/bootstrap-session.mjs uninstall   # drop the SessionStart registration
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync, copyFileSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -509,39 +509,96 @@ export const TRUST_PATH = join(homedir(), '.claude.json');
 
 /**
  * Every checkout of this constellation that an agent may be launched INTO, so each can be trusted. PURE over
- * a probe.
+ * its three injected probes (`exists`, `readdir`, `realpath`) — it reaches no real filesystem of its own.
  *
  * WHY LANES AND NOT JUST THE PRIMARY. An untrusted workspace makes the CLI **ignore the repo's committed
  * `.claude/settings.json` allow-list** — it says so on startup: *"Ignoring N permissions.allow entries …
  * this workspace has not been trusted."* Every agent this repo dispatches works in a LANE, never the
  * primary (the committed `guard-lane.mjs` hook denies writes there), so the trusted checkout was the one
- * directory no agent uses and the 40 it does use were all untrusted. Measured 2026-08-25: 40 of 40 lanes
- * `false`, primary `true`. Each such agent then re-asks permission for work the repo already allows, and a
- * background one has nobody to ask — it simply stops.
+ * directory no agent uses and every lane it does use was untrusted. Measured 2026-08-25, before this step
+ * existed: 40 of 40 lanes `false`, primary `true` — a figure that cannot be re-measured now that the step
+ * has run, since running it is what flipped them. Each such agent re-asked permission for work the repo
+ * already allows, and a background one has nobody to ask — it simply stops.
  *
  * A lane is a clone of a repo the operator has already trusted, provisioned by `lane-pool.mjs` on their own
  * machine. Trusting it grants nothing the primary did not already grant; it stops silently WITHDRAWING it.
+ *
+ * THE POOL IS ENUMERATED FROM EITHER ROOT, and that is the whole point of {@link poolRoots}. An earlier cut
+ * enumerated it only when the root it ran in was ITSELF a lane, which quietly made the step useless exactly
+ * where it is installed: the registered `SessionStart` hook runs `scripts/bootstrap-session.mjs` out of the
+ * PRIMARY checkout, and `npm run bootstrap install` — the remediation this step itself prints — is run there
+ * too. Both reported `ok — 1 checkout(s) already trusted` while every lane stayed untrusted.
  */
-export function trustableDirs(root = REPO_ROOT, exists = existsSync, readdir = readdirSync) {
-  const dirs = [primaryCheckout(root)];
-  const lane = lanePool(root);
-  // The pool root is derived the same way `primaryCheckout` derives its workspace, so a checkout that has
-  // never been a lane (a fresh VM clone) contributes its own root and nothing else — which is correct there:
-  // an ephemeral host has no pool until someone provisions one, and this step runs again when they do.
-  if (lane) {
-    const poolRoot = join(lane.workspace, '.lanes', lane.pool);
-    if (exists(poolRoot)) {
-      for (const name of readdir(poolRoot)) {
-        if (/^lane-/.test(name)) dirs.push(join(poolRoot, name));
-      }
+export function trustableDirs(root = REPO_ROOT, exists = existsSync, readdir = readdirSync, realpath = realpathNative) {
+  const dirs = [primaryCheckout(root, exists)];
+  for (const poolRoot of poolRoots(root, exists)) {
+    for (const name of listDir(poolRoot, readdir)) {
+      if (/^lane-/.test(name)) dirs.push(join(poolRoot, name));
     }
   }
-  // EXISTS-FILTERED, and the filter is load-bearing rather than tidy. `primaryCheckout` PROBES among the
-  // repo's known directory basenames and falls back to the first when none is found, so from a lane on a
-  // machine whose primary is `webeverything` it can hand back `web-everything` — a path that resolves
-  // nowhere. Trusting it would write a `projects` entry for a directory that does not exist and silently
-  // report success while the real checkout stayed untrusted. Caught by this step's own first live run.
-  return [...new Set(dirs)].filter((d) => exists(d)).sort();
+  // EXISTS-FILTERED **THEN CANONICALISED**, and both halves are load-bearing rather than tidy.
+  //
+  // `primaryCheckout` PROBES among the repo's known directory basenames and falls back to the first when
+  // none is found, so from a lane on a machine whose primary is `webeverything` it can hand back
+  // `web-everything`. The exists filter drops that when it resolves NOWHERE.
+  //
+  // But on the laptop it resolves: this same script's `aliases` step creates `web-everything` as a SYMLINK
+  // to `webeverything`, so `exists` says true and the alias sails through. `~/.claude.json` keys `projects`
+  // on the literal cwd string, and the CLI's cwd is the real path — so trusting the alias writes an entry
+  // the CLI never consults, reports `trusted N of N`, and leaves the real primary untouched. Canonicalising
+  // before the de-dupe collapses the alias and the real checkout to ONE key, which is the entry that counts.
+  const seen = new Set();
+  const out = [];
+  for (const d of dirs) {
+    if (!exists(d)) continue;
+    const real = canonical(d, realpath);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    out.push(real);
+  }
+  return out.sort();
+}
+
+/**
+ * The lane-pool directories whose lanes belong to this checkout — derived from EITHER a lane root or the
+ * primary, because the step has to work from both. PURE over `exists`.
+ *
+ * From a lane the pool is known exactly (`lanePool` parses it out of the path). From a non-lane checkout it
+ * is PROBED, the same way {@link primaryCheckout} probes for the primary's directory: the pool name is the
+ * origin-URL basename `lane-pool.mjs` cloned under, which is one of the repo's known basenames but not
+ * necessarily the one the checkout itself occupies (the laptop's pool is `.lanes/web-everything` beside a
+ * primary named `webeverything`). A checkout that is not a constellation repo, or a fresh VM with no pool
+ * yet, yields nothing — correct there, and the step runs again once someone provisions one.
+ */
+function poolRoots(root = REPO_ROOT, exists = existsSync) {
+  const lane = lanePool(root);
+  const candidates = lane
+    ? [join(lane.workspace, '.lanes', lane.pool)]
+    : (CONSTELLATION_REPOS[selfKey(root) ?? '']?.dirs ?? []).map((d) => join(dirname(root), '.lanes', d));
+  return [...new Set(candidates)].filter((p) => exists(p));
+}
+
+/**
+ * `realpathSync.native`, but never throwing. A path can vanish between the `exists` probe and here, and a
+ * bootstrap step that dies on that race would take the whole session hook down with it; falling back to the
+ * literal path is the same answer the code gave before canonicalising existed.
+ */
+const realpathNative = (p) => { try { return realpathSync.native(p); } catch { return p; } };
+
+/** Canonicalise through an injected probe, tolerating a probe that throws. PURE over `realpath`. */
+function canonical(p, realpath) {
+  try { return realpath(p); } catch { return p; }
+}
+
+/**
+ * List a directory through an injected probe, tolerating one that throws. PURE over `readdir`.
+ *
+ * The `exists` probe and the `readdir` probe are separate handles and a caller may inject an optimistic one
+ * (the installer's own test double answers `true` for every path). A pool root that `exists` claims and
+ * `readdir` cannot open must contribute no lanes, not take the session hook down with an ENOENT.
+ */
+function listDir(p, readdir) {
+  try { return readdir(p); } catch { return []; }
 }
 
 /**
