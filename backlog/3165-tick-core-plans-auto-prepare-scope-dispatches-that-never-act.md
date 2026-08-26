@@ -2,11 +2,13 @@
 bornAs: x5qc0lw
 kind: story
 size: 5
-status: open
+status: resolved
 parent: "3029"
 relatedTo: ["3161", "3147", "3160"]
 tier: pinned
 dateOpened: "2026-08-17"
+dateResolved: "2026-08-26"
+graduatedTo: none
 preparedDate: "2026-08-25"
 tags: [operations, epic-3029, conveyor, prepare, orchestration-load]
 scope:
