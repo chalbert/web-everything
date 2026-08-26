@@ -1,4 +1,5 @@
 ---
+bornAs: x3gvcun
 kind: story
 size: 5
 parent: "3029"
@@ -161,7 +162,7 @@ interpreted), so #3331 is `relatedTo`, not a `blockedBy` — but do not fire the
   widen this card past `size: 5` for work no citation asks of it. **File it as its own card once hardening 2's
   shape is settled**, so it copies a landed pattern instead of a second guess.
 - **The skill-side rewiring** — steps 3 and 3b of `we:skills-src/conveyor/SKILL.md`. That is #3096.
-- **The stranded-hash heal** (`backlog/x10eju0-*.md`, the one pre-existing `check:standards` error). It
+- **The stranded-hash heal** (`backlog/3350-*.md`, the one pre-existing `check:standards` error). It
   rewrites `we:docs/agent/platform-decisions.md` and turns any card that bundles it into a statute edit.
 
 ## Acceptance
@@ -246,6 +247,6 @@ criterion that already passes.
 
 8. `npm run check:standards` — no new errors and no new warnings against the baseline measured at build time.
    (Do not hard-code a number. It was **1 error / 1438 warnings** at `c8d92db7` on 2026-08-26 and it moves most
-   days; the one error there is the pre-existing stranded-hash card `backlog/x10eju0-*.md`, unrelated to this
+   days; the one error there is the pre-existing stranded-hash card `backlog/3350-*.md`, unrelated to this
    item and named out of scope above. Run it **twice** and compare — the loader is non-deterministic in the
    presence of any malformed card.)

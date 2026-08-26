@@ -6,11 +6,11 @@ parent: "3029"
 status: open
 dateOpened: "2026-08-13"
 preparedDate: "2026-08-25"
-blockedBy: ["x3gvcun"]
+blockedBy: ["3353"]
 relatedTo: ["3037", "3095", "3097", "3118", "3147", "3165", "3239", "3331", "3332", "2612"]
 scope:
   - we:skills-src/conveyor/SKILL.md
-scopeRationale: "Switches the conveyor SKILL's dispatch bridge — BOTH the step-3 build half and the step-3b prepare half, the latter absorbed from #3147 — to call the already-declared operation. ONE file, and `scope:` now names it at FILE level rather than the directory, so this slice is provably disjoint from #x3gvcun's. The scripts/operations/ half (five liveness hardenings + the first live dispatch) was split out to #x3gvcun on 2026-08-26 and is no longer in this card's touch-set."
+scopeRationale: "Switches the conveyor SKILL's dispatch bridge — BOTH the step-3 build half and the step-3b prepare half, the latter absorbed from #3147 — to call the already-declared operation. ONE file, and `scope:` now names it at FILE level rather than the directory, so this slice is provably disjoint from #3353's. The scripts/operations/ half (five liveness hardenings + the first live dispatch) was split out to #3353 on 2026-08-26 and is no longer in this card's touch-set."
 tags: [plateau-loop, delivery, operations, conveyor, dispatch]
 ---
 
@@ -33,14 +33,14 @@ entirely code in another directory (`we:scripts/operations/`), with no shared sy
 | slice | scope | size | carries |
 | --- | --- | --- | --- |
 | **#3096** (this card) | `we:skills-src/conveyor/` | **3** | steps 3 + 3b rewired onto the operation; the hand-spawn prose deleted |
-| **#x3gvcun** | `we:scripts/operations/` | **5** | the five liveness hardenings from PR #1211's round-3 review + the first live dispatch |
+| **#3353** | `we:scripts/operations/` | **5** | the five liveness hardenings from PR #1211's round-3 review + the first live dispatch |
 
 `3 + 5 = 8` — the points are conserved, not laundered. Neither slice was resolved and nothing was renumbered.
 
-**This card is `blockedBy: ["x3gvcun"]`, and that edge is the whole safety argument.** Today the conveyor
+**This card is `blockedBy: ["3353"]`, and that edge is the whole safety argument.** Today the conveyor
 hand-spawns and never consults the dispatch guard at all, so the un-hardened liveness read is unreachable. The
 moment THIS card lands, the conveyor's next tick routes through the operation — which is the first real
-dispatch, straight into the guard #x3gvcun exists to harden. Landing this half first would fire the exact
+dispatch, straight into the guard #3353 exists to harden. Landing this half first would fire the exact
 double-dispatch the other half prevents. The other half ships valid on its own (a hardened guard, a real
 payload fixture and a proven live dispatch are all wanted regardless of what the skill says), so this is
 incremental delivery, not a chain that delivers nothing until the end.
@@ -58,21 +58,21 @@ adding this map**, not by touching them. A reader arriving from any of them is r
 | --- | --- | --- |
 | `we:skills-src/conveyor/SKILL.md:77` (`@operation-home-ok` marker) | "routing the spawnBuilds and spawnPrepareScope halves through the operation is its own item" | **#3096** — the marker gets *more* accurate, so it is left untouched |
 | `we:backlog/3037-*.md:150` | "Routing the bridge through it is #3096" | **#3096** |
-| `we:backlog/3037-*.md:173,180` | the reassigned "a lane IS dispatched … scope-lease arbitration" clause | **#x3gvcun** |
-| `we:backlog/3095-*.md:34,209` | "#3096 is what changes that" / "until #3096 lands real dispatch" | **#x3gvcun** |
-| `we:backlog/3097-*.md:86` | H1 of #3096 (the false docblock claims) | **#x3gvcun** |
-| `we:backlog/3102-*.md:78` | "gone" collapsing *finished cleanly* and *died* | **#x3gvcun** |
-| `we:backlog/3110-*.md:48` | "real dispatch hasn't [happened] per #3096" | **#x3gvcun** |
+| `we:backlog/3037-*.md:173,180` | the reassigned "a lane IS dispatched … scope-lease arbitration" clause | **#3353** |
+| `we:backlog/3095-*.md:34,209` | "#3096 is what changes that" / "until #3096 lands real dispatch" | **#3353** |
+| `we:backlog/3097-*.md:86` | H1 of #3096 (the false docblock claims) | **#3353** |
+| `we:backlog/3102-*.md:78` | "gone" collapsing *finished cleanly* and *died* | **#3353** |
+| `we:backlog/3110-*.md:48` | "real dispatch hasn't [happened] per #3096" | **#3353** |
 | `we:backlog/3118-*.md:241` | "a prerequisite of routing the conveyor" | **#3096** |
-| `we:backlog/3118-*.md:559-561,608` | "the first end-to-end live dispatch" | **#x3gvcun** |
-| `we:audits/backlog-health-audit.md:571` | the dangling `we:scripts/operations/__fixtures__/claude-agents-payload.json` path | **#x3gvcun** |
-| `we:backlog/3331-*.md` | the probe against the handle-match assumption | **#x3gvcun** (`relatedTo`, still not a blocker) |
+| `we:backlog/3118-*.md:559-561,608` | "the first end-to-end live dispatch" | **#3353** |
+| `we:audits/backlog-health-audit.md:571` | the dangling `we:scripts/operations/__fixtures__/claude-agents-payload.json` path | **#3353** |
+| `we:backlog/3331-*.md` | the probe against the handle-match assumption | **#3353** (`relatedTo`, still not a blocker) |
 | `we:backlog/3332-*.md` | the remaining two launch kinds' skill-side routing | **#3096** |
 | `we:backlog/3147-*.md`, `we:backlog/3239-*.md` | `graduatedTo: "3096"` on both collapsed duplicates | **#3096** — still true; the fold landed here and this card still holds both halves' history |
 | `we:backlog/3288-*.md`, `we:backlog/3289-*.md` | fixtures for the stale-claim / stale-locus prevention cards | **#3096** — and this split adds two more, below |
 | `we:docs/agent/platform-decisions.md:3172` | the statute's build pointer | **#3096** — deliberately NOT edited (a statute edit is out of scope) |
 
-### Two more of this card's own claims were wrong and are corrected in #x3gvcun
+### Two more of this card's own claims were wrong and are corrected in #3353
 
 Re-read at `origin/main` `c8d92db7` while cutting the seam. Recorded here because #3288/#3289 already cite this
 card as a fixture for exactly this failure mode, and because a reader of the text below meets the old claims:
@@ -82,7 +82,7 @@ card as a fixture for exactly this failure mode, and because a reader of the tex
   `we:scripts/operations/__fixtures__/claude-agents-payload.json` is missing — which is what `we:audits/backlog-health-audit.md:571` reports.
 - **"all four compare sites" mis-counted.** Three call sites were enumerated; the "fourth" was the `listed`
   Set path, a different shape. A genuine unnoticed fourth *file* exists —
-  `we:scripts/operations/explore-io.mjs:822` — and is named out of scope in #x3gvcun with its reason.
+  `we:scripts/operations/explore-io.mjs:822` — and is named out of scope in #3353 with its reason.
 
 ## Reconciled 2026-08-26 — this card is the survivor of a THREE-way duplicate
 
@@ -119,7 +119,7 @@ resolve to while they were being repointed.
 
 > **That split HAPPENED on 2026-08-26, in its own pass, and the seam was where this paragraph predicted — see
 > *Split 2026-08-26* above.** The size is now `3`, not `8`, and the sentences below that say "this card
-> carries the hardenings and the live run" are true of the pre-split card only. #x3gvcun carries them now.
+> carries the hardenings and the live run" are true of the pre-split card only. #3353 carries them now.
 
 ### What was folded in
 
@@ -196,7 +196,7 @@ cannot launch, which is a different thing from splitting one kind's migration ac
   or the read runs guard-less (`guardsFrom: 'none'` on the verdict). Note that the operation forwards only the
   `bookkeeping` key — `config` and `signals` are dropped and reported as `droppedBookkeeping`, so a runner using
   non-default TTLs gets the shipped ones instead; check that before switching.
-- **~~The first LIVE dispatch happens here.~~ MOVED to #x3gvcun in the 2026-08-26 split.** It settles what a
+- **~~The first LIVE dispatch happens here.~~ MOVED to #3353 in the 2026-08-26 split.** It settles what a
   background session's permission mode and isolation default have to be (`WE_DISPATCH_AGENT_ARGS` is the knob)
   and whether the brief's step 1 works from a background agent. Kept struck rather than deleted because the
   ordering it implies is now this card's `blockedBy` edge: by the time this card is claimed, the live run has
@@ -211,20 +211,20 @@ cannot launch, which is a different thing from splitting one kind's migration ac
 - **`blockedBy: ["3037"]` was cleared on 2026-08-26.** #3037 is `status: resolved`; the declaration it was
   waiting on exists. The frontmatter was stale, not load-bearing — every prose statement of this card's own
   ordering already treated #3037 as done.
-- **~~`#3331` is a live PROBE … do not spend the live run before reading its answer.~~ MOVED to #x3gvcun.**
+- **~~`#3331` is a live PROBE … do not spend the live run before reading its answer.~~ MOVED to #3353.**
   The probe guards the live run, and the live run is no longer this card's. #3331 stays `relatedTo` on both
   slices — its answer still tells a reader here whether the operation this card routes to can match a handle at
-  all — but the "do not spend the live run first" constraint is #x3gvcun's to honour.
+  all — but the "do not spend the live run first" constraint is #3353's to honour.
 
-## Moved to #x3gvcun in the 2026-08-26 split — the `scripts/operations/` half
+## Moved to #3353 in the 2026-08-26 split — the `scripts/operations/` half
 
 Two sections that stood here are now the body of
-[#x3gvcun](x3gvcun-harden-the-three-claude-agents-liveness-readings-then-make-t.md), moved verbatim with their
+[#3353](3353-harden-the-three-claude-agents-liveness-readings-then-make-t.md), moved verbatim with their
 line numbers re-read at `c8d92db7` and the two false claims above corrected:
 
 - **"It carries the other half of #3037's acceptance"** — the reassigned "a lane IS dispatched … verified
   against a real queue" clause from PR #1211's review, and the named classes of defect only a live run can
-  catch. **#3037 is still not fully accepted until that clause is met** — it is met in #x3gvcun now, not here.
+  catch. **#3037 is still not fully accepted until that clause is met** — it is met in #3353 now, not here.
 - **"Carried from PR #1211's round-3 review"** — the five liveness-reading hardenings to `stampLiveness`,
   `assertHandleNotLive` and `createDispatchObservers`, with the risk statement (a bad listing read looks like
   the strong guard, not a degraded one) and the `DISPATCH_LISTING_GRACE_MINUTES` docblock conflict.
@@ -268,7 +268,7 @@ that fork: what it asks the skill to do IS the ruling's direction. The runner sp
 
 **Added by the 2026-08-26 split, and named first because it is the largest thing this card no longer does:**
 everything under `we:scripts/operations/` — the five liveness hardenings and the first live dispatch. That is
-#x3gvcun. This card touches **exactly one file**, `we:skills-src/conveyor/SKILL.md`; a diff here that reaches
+#3353. This card touches **exactly one file**, `we:skills-src/conveyor/SKILL.md`; a diff here that reaches
 into `scripts/operations/` has crossed the split seam.
 
 The three other spawn sites in the skill, enumerated from the file rather than named as a range: **§3c** (fix
@@ -292,12 +292,12 @@ leaves two dispatch mechanisms live inside one skill for the SAME kind of work, 
 state.
 
 **The live run and the liveness hardenings are NOT part of this card's acceptance any more** — they are
-#x3gvcun's, and this card is `blockedBy` it, so they will already have landed when this one is claimed.
+#3353's, and this card is `blockedBy` it, so they will already have landed when this one is claimed.
 
 ## Done when (absorbed from #3147 — counts RE-RUN at `origin/main` `c8d92db7` on 2026-08-26, not copied)
 
 Criteria 4 and 5 of the pre-split list (the live dispatch, and the mutation tests for the five hardenings)
-moved to #x3gvcun with the work. What remains is the skill half, and **all three code criteria below fail
+moved to #3353 with the work. What remains is the skill half, and **all three code criteria below fail
 today** — re-run at `c8d92db7`, the counts are unchanged from `9f9cb310`:
 
 1. **Executable** — grepping `we:skills-src/conveyor/SKILL.md` for `dispatch-lane` returns hits inside **both**
@@ -337,5 +337,5 @@ today** — re-run at `c8d92db7`, the counts are unchanged from `9f9cb310`:
 4. `npm run check:standards` — no new errors and no new warnings against the baseline measured at build time.
    (Do not hard-code a number. It was **1 error / 1438 warnings** at `c8d92db7` on 2026-08-26 — measured twice,
    identical both runs — and it moves most days; the one error there is the pre-existing stranded-hash card
-   `backlog/x10eju0-*.md`, unrelated to this item. Run it **twice** and compare: the loader is
+   `backlog/3350-*.md`, unrelated to this item. Run it **twice** and compare: the loader is
    non-deterministic in the presence of any malformed card.)
