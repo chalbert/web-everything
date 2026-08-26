@@ -3,8 +3,10 @@ bornAs: x5pen0r
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/merge-ai-prs.mjs
 tags: []
@@ -50,3 +52,45 @@ tags: []
    Both terminal record shapes (re-stamp, `clear-human`) stop the analysis rather than falling through to
    the basis checks — reading either as an accept would manufacture `unstated-basis` on 53% of merges, the
    same noise by a different door.
+
+## Why the manual alternative does not count — "accidentally honest"
+
+On PR #1609 a reviewing session wrote a full lens disclosure by hand: it recorded that the security pass had
+been done **by the session itself rather than by a juror**, and that four of the five lenses never sat. That is
+exactly the information this item exists to surface, volunteered without any mechanism asking for it.
+
+The session that wrote it made the argument against relying on it, in its own words:
+
+> My hand-written disclosure was **not reliably honest, it was accidentally honest.** I did that because I
+> *knew* the panel was unwired, not because any mechanism told me. On a different day, with a different
+> reviewer, that disclosure simply would not have been written — there is nothing that makes it happen.
+
+**Anything that depends on a reviewer volunteering what it did not do is a control that works only when it is
+least needed.** A reviewer who has understood the gap will disclose it and did not need the notice; a reviewer
+who has not understood it writes nothing, and that silence is indistinguishable from a clean review — which is
+the exact failure this item names in its first line.
+
+That is the argument for the announcement being **derived from the record** rather than authored. It is also
+why the noise measurement above is load-bearing rather than polish: a notice that fires on 98.3% of merges is
+ignored on exactly the same schedule as a disclosure nobody writes, and the two failure modes are
+indistinguishable to a reader.
+
+## What shipped
+
+A `review-coverage` comment posted by the drain before `gh pr merge`, as a fourth `drainReasonMarker` kind with
+its own marker and dedupe bucket, so it survives on the merged PR. It reads the durable review records already
+on the PR and names what was **not** examined, firing only on the five kept codes — `no-recorded-review`,
+`unseated-mandatory-lens`, `unstated-basis`, `relief-waived`, `relief-waived-pass-wide`.
+
+A review that never ran produces no verdict comment and so cannot host the announcement of its own absence; the
+drain is the only actor that sees every landing PR either way, which is why the notice is its own comment rather
+than an addition to a verdict. The pre-existing land stamp is gated on `hasManifest`, which is precisely why it
+missed this population — the no-verdict PRs are the manifest-less orphan and implementation halves.
+
+### Known limits, not fixed here
+
+- **Juror-level degradation has no machine-readable field**, so the reader parses rendered prose. The durable
+  fix belongs in `we:scripts/operations/record-verdict.mjs` / `we:scripts/lib/jury-core.mjs`.
+- **An errored or timed-out juror is invisible**, for the same reason.
+- **"Narrower than the care level called for" is not computable** — the record does not carry the care level.
+- A parked PR gets no notice, deliberately: it has not landed, so nothing has been accepted silently.

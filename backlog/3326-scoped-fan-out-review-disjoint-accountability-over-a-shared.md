@@ -23,6 +23,25 @@ So the panel gets *deeper* on a large change and never gets *wider*. Size is the
 cannot answer, which is what made a refuse threshold look necessary in #3320. It isn't: the missing lever is
 breadth, not a ceiling.
 
+### Grounding for "context never is": a defect that was invisible in the diff
+
+PR #1609 would have **wedged the entire drain**, and a diff-only reviewer would have passed it.
+
+The change flipped a verification default to required. The defect was that the drain calls `pr-land` with no
+verify flag, lands WE from the **primary** checkout (`DRAIN_REPOS.we.path = null`), and a lane's
+`.git/.lane-verify` marker can never appear there because lanes are separate clones. Every queued couple would
+have failed `unverified`, and `reopenStrandedItem` would have sent each item back to open.
+
+Those are **three facts in three files, none of which the changed lines mention.** Nothing in the diff is
+wrong; the diff is only wrong *in combination with* code it does not touch. The reviewer that found it went and
+read `we:scripts/lane-drain.mjs`, then grepped the whole repo to establish that the opt-out the change relied on
+had **zero callers** — the escape existed in a docblock and nowhere else.
+
+This is the concrete argument for the tool-bearing seat and for full repository context, made from an observed
+defect rather than from theory. A juror restricted to the diff cannot reach any of the three facts. It also
+bounds the fan-out design: **narrowing a juror's `scope` must never narrow what it can read**, or this class of
+finding becomes unreachable by construction — which is the failure the shape below exists to avoid.
+
 ## The shape
 
 **Scope is disjoint; context never is.** Each juror receives the whole diff and full repository access, and a
