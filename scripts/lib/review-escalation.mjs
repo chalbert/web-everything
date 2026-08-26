@@ -473,8 +473,23 @@ export function deriveCareLevel({ signals = {}, humanRequired = false } = {}) {
  * display-encoded list — normalizing THOSE is a real behaviour change to the gate and is not smuggled in here.
  *
 
- * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, thresholds?:object, diffHunks?:string|null}} o
+ * #3317 — THE BASIS IS NOW CUMULATIVE FOR EVERY SIGNAL, not just the human gate. `changedFiles`/`diffLines` may
+ * be the own-delta `baseRev…head` of a stacked lane (#2390), and `baseRev` is SELF-DECLARED — it rides the
+ * editable PR body. #2390-review-fix forced only `humanBasisFiles` cumulative, which left SIZE and BLAST-RADIUS
+ * shrinkable by declaring a stacked base, and shrinkable again by the sanctioned slice-into-two-PRs workflow.
+ * Both now score over a basis floored at the cumulative `mergeBase(origin/main, head)…head` measurement:
+ *   • FILES — `basisFiles`, the UNION of `humanBasisFiles` (cumulative) and `changedFiles` (declared own delta).
+ *   • LINES — `max(diffLines, cumulativeDiffLines)`, where `cumulativeDiffLines` is the cumulative line count
+ *     (`computeNetDiffSignals` supplies it; omit it and the behaviour is exactly as before).
+ * The rule, stated so a refactor cannot lose it: **a self-declared base may only ever ADD to a signal.** The
+ * merge-base itself is graph-derived, never declared, so it cannot be gamed the way `baseRev` can.
+ *
+ * This changes MEASUREMENT ONLY. It adds no threshold that blocks and it relaxes none: per #3320
+ * (`#size-adds-reviewers-never-refuses`) size never refuses a PR — it dials review CAPACITY (reviewers, rounds,
+ * rigor), never review PERMISSION — and `size`'s contract clearance stays `agent`. `diffHunksBasisFiles` is
+ * deliberately NOT widened to `basisFiles`; see its comment below (it is a pairing contract, not a signal).
+ * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, cumulativeDiffLines?:number|null,
+ *          dismissedFindings?:number, crossRepo?:boolean, thresholds?:object, diffHunks?:string|null}} o
  */
 /**
  * #2890-review-r2 finding 5 — ONE numstat display-encoded entry → the PLAIN new path.
@@ -539,10 +554,32 @@ function unquoteGitPath(s) {
   return Buffer.from(bytes).toString('utf8');
 }
 
+/**
+ * #3317 — union two changed-file lists, cumulative first, first-seen order preserved, duplicates dropped.
+ * Non-string entries are dropped (a malformed list can neither crash the scorer nor smuggle in a `[object
+ * Object]` path). Pure, internal — the ONE place the "a self-declared base may only ADD" rule is realized.
+ * @param {string[]} cumulative the `mergeBase(origin/main, head)…head` list
+ * @param {string[]} own the possibly de-inflated `baseRev…head` list
+ * @returns {string[]}
+ */
+function unionPaths(cumulative, own) {
+  const seen = new Set();
+  const out = [];
+  for (const list of [cumulative, own]) {
+    for (const f of Array.isArray(list) ? list : []) {
+      if (typeof f !== 'string' || seen.has(f)) continue;
+      seen.add(f);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 export function scoreEscalation({
   changedFiles = [],
   diffLines = 0,
   humanBasisFiles = null,
+  cumulativeDiffLines = null,
   dismissedFindings = 0,
   crossRepo = false,
   thresholds = {},
@@ -552,10 +589,35 @@ export function scoreEscalation({
   const reasons = [];
   const signals = {};
 
+  // #3317 — THE ONE SCORING BASIS. Every signal below scores over `basisFiles` / `scoredDiffLines`, both of
+  // which are floored at the CUMULATIVE `mergeBase(origin/main, head)…head` measurement. Before this, only the
+  // human gate was; blast-radius and size read the own-delta `baseRev…head` shape, whose left side is
+  // SELF-DECLARED (the manifest `base`, riding the editable PR body — see #2390-review-fix). That made both
+  // evadable two ways: declare a stacked base, or take the sanctioned slice-into-two-PRs route, and the diff a
+  // reviewer is dialled for stops being the diff that lands.
+  //
+  // NOT A REFUSAL, IN EITHER DIRECTION (#3320, `#size-adds-reviewers-never-refuses` in
+  // `we:docs/agent/platform-decisions.md`). This makes the MEASUREMENT honest; it adds no threshold that blocks
+  // and removes none of the escape hatches. Size still only dials review CAPACITY — how many reviewers, how many
+  // rounds, how much rigor — never review PERMISSION, and `size`'s clearance in the contract stays `agent`.
+  //
+  // MONOTONE BY CONSTRUCTION: the basis is the UNION of the cumulative set and the declared own-delta, and the
+  // line count is the MAX of the two. A self-declared base can therefore only ever ADD to a signal, never shrink
+  // one — which is the property being restored, stated so it survives a future refactor. (Union rather than
+  // "cumulative wins" because the two are not strictly nested: a child that reverts an ancestor's edit has a file
+  // in the own delta with no net cumulative change. Over-scoring is the safe direction, and it costs a reviewer's
+  // attention, never an author's permission.)
+  const ownFiles = Array.isArray(changedFiles) ? changedFiles : [];
+  // The CUMULATIVE list, exactly as supplied — this and only this is the hunks' basis (#2890 finding 4 below).
+  const cumulativeFiles = Array.isArray(humanBasisFiles) ? humanBasisFiles : ownFiles;
+  const basisFiles = unionPaths(cumulativeFiles, ownFiles);
+
   // A trust-chain path ALWAYS escalates (even a relocated engine file that no longer matches `^scripts/`) —
   // isTrustChainPath covers both tiers, so the lander always gets an independent review whether or not it also
   // matches a blast-radius pattern.
-  const blastFiles = (Array.isArray(changedFiles) ? changedFiles : []).filter((f) => isBlastRadiusPath(f) || isTrustChainPath(f));
+  // #3317 — over `basisFiles`, not the own-delta: an ANCESTOR's edit to a high-blast-radius surface is part of
+  // what this PR merges into main, so it is part of this PR's blast radius.
+  const blastFiles = basisFiles.filter((f) => isBlastRadiusPath(f) || isTrustChainPath(f));
   if (blastFiles.length) { signals.blastRadius = blastFiles; reasons.push(`blast-radius (${blastFiles.slice(0, 3).join(', ')}${blastFiles.length > 3 ? ', …' : ''})`); }
 
   // #2390-review-fix — the human gate scores over the cumulative basis (a self-declared/mis-set stacked `base`
@@ -565,7 +627,9 @@ export function scoreEscalation({
   // #2771/#2785 — the POLICY tier is SPLIT. Only the DECLARATIVE LEASH (`isDeclarativeLeashPath`: the contract,
   // the roster, the invariant/conformance suites) still forces a human; the DERIVATION CODE that realizes it
   // escalates to the sized independent committee instead. Both sets come from the ONE roster in gate-config.mjs.
-  const gateBasis = Array.isArray(humanBasisFiles) ? humanBasisFiles : (Array.isArray(changedFiles) ? changedFiles : []);
+  // #3317 — these read `basisFiles` (⊇ the cumulative set they read before), so the gate they realize is
+  // unchanged where it already fired and only ever fires in MORE cases, never fewer.
+  const gateBasis = basisFiles;
   const leashFiles = gateBasis.filter(isDeclarativeLeashPath);
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   const statuteFiles = gateBasis.filter(isStatutePath);
@@ -579,7 +643,12 @@ export function scoreEscalation({
   if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
   if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
 
-  if (Number(diffLines) >= t.diffLines) { signals.size = Number(diffLines); reasons.push(`size (${diffLines} ≥ ${t.diffLines} changed lines)`); }
+  // #3317 — SIZE scores over the cumulative line count too, floored at the declared own-delta count. Same
+  // monotone rule as the file basis above: a stacked/self-declared base can raise this number, never lower it.
+  // Still a CAPACITY dial and never a refusal (#3320) — crossing the threshold adds a reason and lifts the care
+  // level, which is what routes more reviewers at it.
+  const scoredDiffLines = Math.max(Number(diffLines) || 0, Number(cumulativeDiffLines) || 0);
+  if (scoredDiffLines >= t.diffLines) { signals.size = scoredDiffLines; reasons.push(`size (${scoredDiffLines} ≥ ${t.diffLines} changed lines)`); }
 
   if (Number(dismissedFindings) > 0) { signals.dismissedFindings = Number(dismissedFindings); reasons.push(`dismissed-findings (${dismissedFindings} pre-PR review finding(s) the lane dismissed)`); }
 
@@ -602,8 +671,14 @@ export function scoreEscalation({
   // #2890-review-fix finding 4 — the file list on the SAME (cumulative) basis as `hunks`. `null` when there are
   // no hunks, so a detector can never pair a real file list with an absent content signal.
   // #2890-review-r2 finding 5 — as PLAIN paths, the only spelling that can match a hunk header.
-  const diffHunksBasisFiles = hunks === null ? null : gateBasis.map(plainDiffPath);
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, diffHunks: hunks, diffHunksBasisFiles };
+  // #3317 — DELIBERATELY `cumulativeFiles`, NOT the wider `basisFiles` the terms above score. This field is a
+  // PAIRING contract, not a signal: it must name exactly the files the `hunks` text covers, and the hunks are
+  // strictly the cumulative diff. Padding it with own-delta-only entries would hand a content-reading detector
+  // a path its hunk text cannot contain — the same class of mis-pairing #2890 finding 4 exists to prevent.
+  const diffHunksBasisFiles = hunks === null ? null : cumulativeFiles.map(plainDiffPath);
+  // #3317 — `basisFiles` rides the verdict so a downstream consumer that picks reviewers from the diff (the
+  // #2635 roster recompute) can select over the SAME honest basis this scored, instead of the own-delta.
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, basisFiles, diffHunks: hunks, diffHunksBasisFiles };
 }
 
 /**
