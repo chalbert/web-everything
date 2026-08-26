@@ -83,11 +83,17 @@ On the operator's explicit decision:
 ```
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=accept    # → review:accepted
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes   # → review:changes, back to the author lane
+node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=changes --reason="<what must change>"   # required when the juror found nothing
 node scripts/operations/run.mjs review-pr --resume=<run-id> --answer=abstain   # → records nothing at all
 ```
 
-Four things you no longer have to remember, because the machinery holds them:
+Five things you no longer have to remember, because the machinery holds them:
 
+- **An override must say why (#3035).** When the juror returns **zero** findings and you record `changes`, you are
+  bouncing on something the juror did not raise. `--reason` is then REQUIRED and the operation refuses without it;
+  the reason is rendered in the durable comment, which is the only place the author lane can read it. A bounce that
+  carries juror findings needs no `--reason` — those findings ARE the reason and are already rendered. See
+  *Why the override refusal exists* below.
 - **The stop is a suspend.** `--answer` without `--resume` is refused — you cannot answer a question that has
   not been asked, so there is no auto-proceed to resist.
 - **The diff is on the net basis** vs current `main` (#2450/#2901), and the juror is told that file set as
@@ -99,6 +105,41 @@ Four things you no longer have to remember, because the machinery holds them:
   `reviewed-sha` / `reviewed-diff` / `reviewed-contribution` markers and the #2964 write ordering. `accepted` on
   a `review:human` PR is refused in `decideSetLabel`'s pure core, so the operation cannot clear a gate-self PR
   either.
+
+### Why the override refusal exists
+
+The write-up's panel body is composed from the JUROR's findings while `Decision:` comes from your answer, so a
+reasonless override posted *"✅ pass — no blocking findings"* directly above *"Decision: `changes`"*. A bounce the
+author cannot act on buys another round by construction.
+
+Counted 2026-08-26 by sweeping the live comments on PRs #1428–#1567 (140 PRs, 479 comments) for the shape this
+operation emits — the line ``**Decision:** `x` — recorded by``:
+
+| | count | PRs |
+| --- | --- | --- |
+| structured verdict comments | 106 | 59 (none below #1456) |
+| …recording `changes` | 44 | 15 |
+| **…over `### Findings (0)`** — the case the refusal binds | **18** | **8** (#1556–#1567) |
+| …under the juror's own "✅ pass" line — the wider reading | 34 | 11 (#1556–#1567) |
+
+`--reason` rides the **same `--resume` that carries the `--answer`**, not the opening call — an override is only
+knowable once the juror has returned, so that is the first moment you could state one. Passing it without an
+`--answer` is refused rather than ignored: a reason silently dropped is worse than none.
+
+`--reason` is accepted on *any* answer, and only a decision that actually departs from the juror is captioned as an
+override. Pass one alongside an answer the juror agrees with and it is still rendered — under **Operator note**,
+which says in words that this was not an override.
+
+> **Retracted — three times, all in this section.**
+> 1. It read *"Eleven bounces across PRs #1428–#1567 did exactly that."* Eleven was the number of PRs in the wider
+>    set, not the number of bounces; and none of them occurred below #1556, so the stated range implied 128 PRs of
+>    history containing none.
+> 2. It read *"(108 comments, 62 PRs): 45 recorded `changes`, and 17 of those … it is 33, across 11 PRs."* Re-running
+>    the sweep gives 106 / 59 / 44 / 18 / 34. The 108 came from a looser match that also swept up 7 hand-written
+>    operator comments carrying a `**Decision:**` line with no `— recorded by` — an operator's own prose, not this
+>    operation's output.
+> 3. It implied every `--reason` rendered as **Why this was overridden**. It did, and that was the defect:
+>    `--answer=accept --reason="fyi"` posted a durable claim of disagreement where there was none.
 
 ## What still needs you
 
