@@ -79,7 +79,27 @@ skills-src/conveyor/SKILL.md
 ```
 
 This is the strongest fixture the card will get, and it is the argument for Half A being **executed** rather
-than reviewed: three consecutive rounds of human and juror review read the corrected count and none re-ran it.
+than reviewed — but the argument is about the *juror*, not about review as a whole. Read off #1560's own
+comment thread, two corrected counts have shipped and each was live for exactly one round:
+
+| the count | entered at | the juror that round | the human reviewer that round |
+| --- | --- | --- | --- |
+| *"exactly those two files"* | `13f2da58` | returned one finding, **not this one** — the round-6 comment records *"I found a second one of the same family that the juror did not"* | **re-ran the grep at `13f2da58` and caught it** — raised as C2, BLOCKING |
+| the three-file listing | `50bcc3f6` | returned **0** findings, its summary claiming it *"mechanically re-ran essentially every falsifiable claim it makes (grep counts, …)"* | **re-ran it at `50bcc3f6`, `bb914a00` and `77f69705` and caught it** — raised as D1, BLOCKING |
+
+So the failure is two-sided and neither side is "review". **The juror read a corrected count twice and re-ran
+it neither time**, once while asserting in its summary that it had — that is what Half A must replace, because
+a claimed re-run is indistinguishable from a real one until someone runs it. **The author** shipped both
+corrections without re-running them at the commit that carried them; the human reviewer caught both, in the
+round each was pushed.
+
+*(An earlier cut of this paragraph read **"three consecutive rounds of human and juror review read the
+corrected count and none re-ran it."** **That was false against this PR's own comment thread, and it is
+retracted.** There were two such rounds, not three, and in both the human reviewer re-ran the count and
+caught it — the round-6 comment quotes its own run, ``$ grep -rl xbbscm5 backlog/ skills-src/   # at
+13f2da58``. Shipping an unchecked claim about a checkable artifact, inside the paragraph arguing that claims
+must be checked rather than reviewed, is this card's own class.)*
+
 The operative rule the repeat adds is *which head to run at* — **the commit that carries the correction**, not
 the commit the fix started from. A correction re-run at the pre-fix head passes and still ships wrong.
 
@@ -140,8 +160,9 @@ Anything that is not a side-effect-free read from the closed verb list. A stated
 network call, or a writing command is out of range in both halves — the cost of running it is not worth the
 catch.
 
-The siblings: the body-vs-diff half is `xaemgqd`, the fixed-here-standing-there half is `xxzs9l7`, and the
-staled-by-another-lane half is `xeh31dn`.
+The siblings: the body-vs-diff half is `xaemgqd`, the fixed-here-standing-there half is `xxzs9l7`, the
+staled-by-another-lane half is `xeh31dn`, and the stale-`line N`-pointer half is `xfw8svt`. Half A does not
+reach `xfw8svt`: a bare line pointer carries no command, so it never enters the closed verb list above.
 
 ## Done when
 

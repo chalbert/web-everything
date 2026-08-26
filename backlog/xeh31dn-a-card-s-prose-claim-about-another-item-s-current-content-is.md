@@ -88,7 +88,11 @@ already covers citing a name that does not exist; this is about a name that exis
 changed under the lane.
 
 The sibling classes: the body-vs-own-diff half is `xaemgqd`, the fixed-here-standing-there half is
-`xxzs9l7`, and the quoted-command-wrong-result half is `x6uyq86`.
+`xxzs9l7`, the quoted-command-wrong-result half is `x6uyq86`, and the stale-`line N`-pointer half is
+`xfw8svt`. This card and `xfw8svt` are the two drift classes and they are opposites: here the citing text
+stands still and the **cited item** is amended by another lane; there the cited text stands still and the
+**citing lane shifts it itself**. This card's check keys on the target `main`, which is exactly where an
+intra-lane shift is invisible.
 
 ## Done when
 
@@ -101,8 +105,18 @@ The sibling classes: the body-vs-own-diff half is `xaemgqd`, the fixed-here-stan
    produce **no** warning, because the claim was true there. The check must key on the *target* `main`, not
    on the lane's merge base; running it against the basis is the failure mode it exists to catch.
 3. It is silent on a sentence that names another item without asserting its content — verified against
-   #3147's *"**#3165** carries it"* (that card's line 102 at this PR's head), which names an item and quotes
-   nothing from it, and against *"#3165 lands first and makes step 3b callable"* (line 127), which asserts a
-   sequencing consequence rather than #3165's content.
+   #3147's *"**#3165** carries it"*, which names an item and quotes nothing from it, and against *"#3165
+   lands first and makes step 3b callable"*, which asserts a sequencing consequence rather than #3165's
+   content. Both are pinned to a sha rather than to a head: at `775cd30f` they are that card's **line 111**
+   and **line 136**, retrievable with `git show 775cd30f:<#3147's card>`.
+
+   *(An earlier cut of this criterion pinned the same two sentences to **"(that card's line 102 at this PR's
+   head)"** and **"(line 127)"**. **Those numbers were wrong at the head that stated them, and they are
+   retracted.** They were correct at `77f69705`, where the sentences really are at 102 and 127; `775cd30f` —
+   the commit that fixed round 8's D1 — added nine lines to #3147's card in three hunks, all above line 102,
+   and nothing re-read this pointer. At `775cd30f` line 102 reads *"So the prepare lists are **consumed and
+   surfaced** — they are not dropped."* and line 127 reads *"**both** — #3096 and #3239 — are now
+   `relatedTo`."* — neither is the sentence cited. Re-pinned to a fixed sha, because "this PR's head" is
+   precisely what moved. That is its own class, filed as `xfw8svt`.)*
 4. It warns and never fails the gate — verified by a fixture that warns while the run still exits 0.
 5. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.

@@ -94,6 +94,10 @@ Whether a quoted invocation actually produces the result it states — including
 this card back for a round. Filed separately as `x6uyq86`, "A quoted invocation ships with a result nobody
 re-ran".
 
+Whether a `line N` pointer still resolves to the sentence it is cited for. That is address drift, not a
+`key: value` disagreement, and it is filed separately as `xfw8svt`, "A `file:line` citation goes stale
+because a later hunk in the same lane shifts the line it points at".
+
 A prose claim about a **different, explicitly named** item's current content, which the binding filter above
 deliberately skips and which can go stale after this check passes, when a concurrent lane amends that item.
 Filed separately as `xeh31dn`, "A card's prose claim about another item's current content is never re-read

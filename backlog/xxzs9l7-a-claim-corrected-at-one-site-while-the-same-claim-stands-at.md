@@ -64,6 +64,11 @@ it cites. No site changed, so there is nothing for a survivor-detector to compar
 the cited item at the target `main`. That is the fourth sibling, filed as `xeh31dn`, "A card's prose claim
 about another item's current content is never re-read when that item is amended".
 
+A citation whose **text** never changed and whose **address** did — a `line N` pointer moved by a later hunk
+in the same lane. Nothing was corrected, so a survivor-detector has no pair to compare; the number simply
+stopped resolving to the sentence. That is the fifth sibling, filed as `xfw8svt`, "A `file:line` citation
+goes stale because a later hunk in the same lane shifts the line it points at".
+
 ## Done when
 
 1. **Executable** — a check that, given PR #1560's r3→r4 diff, warns and names *Not in scope* as still
