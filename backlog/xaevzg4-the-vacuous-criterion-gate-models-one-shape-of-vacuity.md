@@ -25,8 +25,10 @@ and a reviewer refuted them by reading the code:
 if (!/^backlog\//.test(path || '') || typeof read !== 'function') return [];
 ```
 
-Backlog cards are the **only** thing it runs against. The reviewer also ran the gate directly against the
-pre-fix #3319 card text and got `[]` — so the failure was never about direction.
+(`we:scripts/review-corpus/gates.mjs:270`.) Backlog cards are the **only** thing it runs against. Re-verified
+here by driving the gate's `fn` directly over both revisions of the #3319 card — the one carrying the vacuous
+criterion and the one that fixed it — with a `read` that resolves files at that same revision: **both return
+`[]`**. So the failure was never about direction.
 
 ## The real gap
 
@@ -40,10 +42,12 @@ if (!demandsAbsence) continue;
 That models *"prove this literal is gone from that file"* — it then reads the file and reports the criterion as
 vacuous if the literal already matches zero times. Good gate, narrow aperture.
 
-The criterion that got through on [#3319](/backlog/3319/) was:
+The criterion that got through on [#3319](/backlog/3319/) was, verbatim:
 
 ```
-npx vitest run … -t "#3319"
+1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-pr.test.mjs -t "#3319"` (drop the
+   `we:` prefix when actually running it). Fails before this item lands — no `judgeSecurity` step exists and
+   the run reaches `confirm` after ONE judge suspend — and passes after.
 ```
 
 It is vacuous for a different reason: a `-t` filter matching nothing is a **selection of zero**, and vitest
@@ -79,8 +83,12 @@ precision against past reviews — it cannot tell you what the gate never looks 
 
 ## Done when
 
-1. **Executable** — running the gate registry over the pre-fix #3319 card text (the revision at `d2f8b77a`)
-   reports the `-t "#3319"` criterion, and running it over the fixed text reports nothing. Both directions:
-   the reviewer already established that the current gate returns `[]` on that input, so a change that does not
-   flip it has not closed the gap.
+1. **Executable** — running the gate registry over a card body carrying the criterion quoted verbatim above
+   reports it, and running it over a fixed criterion (one whose filter selects a test that exists) reports
+   nothing. Both directions: the gate returns `[]` on that input today — verified here against both revisions
+   of the #3319 card — so a change that does not flip it has not closed the gap.
+
+   The fixture is the quoted text itself, not a revision: the two commits that introduced and then fixed that
+   criterion never landed on `main`, so citing them by sha would leave whoever builds this with a reference
+   that does not resolve.
 2. `npm run check:standards` — 0 errors.
