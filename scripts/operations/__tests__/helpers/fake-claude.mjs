@@ -119,9 +119,10 @@ process.exit(0);
  * gone was itself an instance of the dead surface. `lastArgv` is the only reader anything uses.
  *
  * `assertWins` is the one member with no failure of its own in production use, and it is here on purpose:
- * this fixture exists to be extended, and a call that forgets `env` reaches the REAL `claude` on this
- * machine. For a `--bg` argv that means launching a real background agent, against a file whose headline
- * promise is that no model runs. Its refusal IS exercised — see the case that calls it without the override.
+ * this fixture exists to be extended, and a call that forgets `env` reaches whatever `claude` the HOST has.
+ * On a machine with the real CLI installed, a `--bg` argv then launches a real background agent, against a
+ * file whose headline promise is that no model runs. Its refusal IS exercised — see the case that calls it
+ * without the override, which pins both not-the-fake outcomes: a different binary, and none at all.
  *
  * @returns {{
  *   env: Record<string,string>,
@@ -150,9 +151,21 @@ export function withFakeClaude() {
      * Refuse to proceed unless THIS `claude` is the one the given env would run. Resolved the way the OS
      * resolves it, not by inspecting the `PATH` string — a check that only read `PATH` would agree with
      * itself while the child ran something else.
+     *
+     * NOT-FOUND IS A RESOLUTION, and getting that wrong made this guard host-dependent. `command -v` exits
+     * NON-ZERO when nothing is found, so an unguarded `execFileSync` throws `Command failed: sh -c command -v
+     * claude` before any comparison happens. Round 3 shipped exactly that, and the case written to exercise
+     * the guard then passed here — where a real `claude` is installed — and failed on CI, where none is. The
+     * `catch` normalises not-found to `''` so the one comparison below owns every outcome, and so the
+     * `(nothing)` arm of the message below is reachable instead of dead.
      */
     assertWins: (env) => {
-      const resolved = execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8', env }).trim();
+      let resolved = '';
+      try {
+        resolved = execFileSync('sh', ['-c', 'command -v claude'], {
+          encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+      } catch { /* nothing on this PATH — `resolved` stays '' and the comparison below rejects it */ }
       if (resolved !== bin) {
         throw new Error(`fake-claude: the fake did not win PATH — \`claude\` resolves to ${resolved || '(nothing)'}, not ${bin}. Refusing to spawn: this would reach the real CLI.`);
       }

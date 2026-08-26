@@ -34,10 +34,15 @@ import { buildAgentArgv, defaultSpawnAgent, defaultListAgents } from '../dispatc
 /**
  * Spawn through the REAL default path, with the fake first on PATH.
  *
- * `assertWins` runs FIRST, every time. Every case here passes `fake.env` today, so it never fires — but the
- * failure it prevents is live: a case that omits the override reaches the real `claude` on this machine, and
- * for a `--bg` argv that is a real background agent launched by a test file whose headline promise is that no
- * model runs. Enforced rather than conventional.
+ * `assertWins` runs FIRST, every time. It DOES fire: the last case in this file calls `spawnVia` with a
+ * `PATH` that overrides `fake.env`, and the guard stops it before a process starts.
+ *
+ * That correction is the point. Round 3 added that case and left this docblock reading *"Every case here
+ * passes `fake.env` today, so it never fires"* — which the same edit had just made false, since `extraEnv`
+ * spreads AFTER `fake.env` below. The failure the guard prevents is live either way: a case that omits the
+ * override reaches whatever `claude` the host has, and for a `--bg` argv on a machine with the real CLI
+ * installed that is a real background agent launched by a test file whose headline promise is that no model
+ * runs. Enforced rather than conventional.
  */
 function spawnVia(fake, argv, extraEnv = {}) {
   const env = { ...process.env, ...fake.env, ...extraEnv };
@@ -140,15 +145,30 @@ describe('dispatching an agent, against a real process', () => {
 
   /**
    * `assertWins` is the guard on every other case in this file, and a guard nothing exercises is a comment.
-   * This is what it prevents: an env WITHOUT the fake's `PATH` resolves the real `claude` on this machine,
-   * and a `--bg` argv would then launch a real background agent from a test file whose headline promise is
-   * that no model runs.
+   * This is what it prevents: an env WITHOUT the fake's `PATH` does not resolve the fake, and a `--bg` argv
+   * would then reach whatever `claude` the host has — on a machine with the real CLI installed, a real
+   * background agent launched from a test file whose headline promise is that no model runs.
+   *
+   * BOTH not-the-fake OUTCOMES MUST REACH THE SAME MESSAGE, and this case is worthless unless they do. Round
+   * 3's cut only handled "resolves to some other binary": `command -v` exits non-zero when nothing is found,
+   * so on CI — which installs no `claude` — this case failed with `Command failed: sh -c command -v claude`
+   * instead of the guard's message, while passing on a dev box where the real CLI happens to be installed.
+   * The regex below is therefore the whole assertion, not a convenience: it is what distinguishes the guard
+   * refusing from the resolution merely erroring.
+   *
+   * DO NOT run the "delete `fake.assertWins(env)` from `spawnVia`" mutation on a host that HAS a real
+   * `claude`. Without the guard, the last expectation below dispatches a `--bg` argv on the host's own
+   * `PATH` — which is the exact hazard the guard exists to prevent. Mutate it only where `command -v claude`
+   * finds nothing.
    */
   it('refuses to spawn when the fake did NOT win PATH, rather than reaching the real CLI', () => {
     fake = withFakeClaude();
 
-    // The GUARD ITSELF: an env without the fake's PATH resolves the real binary.
+    // The GUARD ITSELF, on an env without the fake's PATH. Passes whether the host resolves a real `claude`
+    // (dev box) or nothing at all (CI) — the two arms that used to diverge.
     expect(() => fake.assertWins({ ...process.env })).toThrow(/did not win PATH/);
+    // The not-found arm PINNED, independent of the host: a PATH that cannot contain a `claude` at all.
+    expect(() => fake.assertWins({ PATH: '/nonexistent-for-fake-claude' })).toThrow(/did not win PATH/);
     // …and it passes for the env every other case uses, so it is not simply always-throwing.
     expect(() => fake.assertWins({ ...process.env, ...fake.env })).not.toThrow();
 
