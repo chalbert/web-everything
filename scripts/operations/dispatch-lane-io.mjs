@@ -28,6 +28,21 @@
  * IMPURE by construction: `node`, `claude`, `fs`.
  */
 
+// @cohesive: ONE operation's io boundary, which is what this repo's pure-core/io-shell pairing makes a single
+// responsibility — `dispatch-lane.mjs` is the WHAT and this is the only place it touches the world, exactly as
+// `review-pr.mjs` / `review-pr-io.mjs` are paired. The three things inside it (the tick READER the `read` step
+// is injected with, the SINK that starts the agent, the OBSERVER that later asks how it is going) are the
+// #3084 effect contract's own three halves for ONE effect type: they are registered under one `DISPATCH_EFFECT`
+// string, they share the handle contract the sink's docblock owns, and every consumer imports them together.
+// Splitting them into three modules would put one operation's io across three lane-lease scopes while leaving
+// that contract split across them — fragmenting a cohesive file to hit a number, which #2678's own ruling says
+// cohesion outranks.
+//
+// WHAT THIS MARKER DOES NOT EXCUSE, stated so it is not read as a blank cheque: the size+collision composite is
+// telling the truth about the CONTENTION — 6 queued items name this file, and they do serialize on it. The
+// answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
+// underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -50,31 +65,30 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 export function tickCli(root = REPO_ROOT) {
   return join(root, 'scripts', 'conveyor', 'tick-core.mjs');
 }
-/**
- * The agent-brief TEMPLATE the declaration fills, PER KIND (#3165).
- *
- * All three briefs were authored and only one was reachable: `briefPath` took no kind, so
- * `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md` (18 KB) sat unrouted while
- * the planner kept surfacing prepares nobody could dispatch. This map is the whole connection.
- *
- * ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
- * resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
- * of naming the kind nobody wired.
- */
+// THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165).
+//
+// All three briefs were authored and only one was reachable: `briefPath` took no kind, so
+// `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md` (18 KB) sat unrouted while
+// the planner kept surfacing prepares nobody could dispatch. This map is the whole connection.
+//
+// ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
+// resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
+// of naming the kind nobody wired.
 const BRIEF_BY_KIND = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
 });
 
+// UNKNOWN KIND THROWS; it does NOT fall back to the delivery brief. Handing a scope-prep agent the delivery
+// mandate tells it to BUILD an item whose scope is exactly what it was dispatched to write — it would acquire
+// a lane, read an empty scope and improvise. A loud refusal costs one dispatch; the silent fallback costs a
+// lane and a wrong PR.
 /**
  * @param {string} [root]
  * @param {'build'|'prepare'|'prepare-decision'} [kind] - defaults to `build`, so every pre-#3165 caller
  *   resolves the same path it always did.
  * @returns {string}
- * @throws on an unknown kind — it does NOT fall back to the delivery brief. Handing a scope-prep agent the
- *   delivery mandate tells it to BUILD an item whose scope is exactly what it was dispatched to write; a loud
- *   refusal costs one dispatch, the silent fallback costs a lane and a wrong PR.
  */
 export function briefPath(root = REPO_ROOT, kind = 'build') {
   const file = Object.prototype.hasOwnProperty.call(BRIEF_BY_KIND, kind) ? BRIEF_BY_KIND[kind] : null;
