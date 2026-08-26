@@ -113,14 +113,29 @@ function isNegative(value) {
  *    - `WE_REQUIRE_VERIFIED=0|false|no|off`         → OPT-OUT
  *  The opt-out only relaxes the "we never saw a result" cells (absent/stale, `red`). A fresh `running` marker
  *  (the #2833 stall) and a `corrupt` marker still refuse under it — the FULL override is `WE_LAND_UNVERIFIED=1`,
- *  reported separately as `breakGlass`. Two different strengths, kept distinguishable on purpose. */
+ *  reported separately as `breakGlass`. Two different strengths, kept distinguishable on purpose.
+ *
+ *  When those inputs CONFLICT, an explicit positive FLAG beats a negative ENV (`--require-verified` with an
+ *  ambient `WE_REQUIRE_VERIFIED=0` ⇒ required), and `--require-verified` beats `--no-require-verified`. Both
+ *  tie-breaks resolve toward verifying — a fail-closed gate must not read a contradiction as consent, for the
+ *  same reason an empty env var is not consent. See the precedence note in the body. */
 export function resolveVerifyOptions({ flags = {}, env = {} } = {}) {
-  const optedOut =
+  // PRECEDENCE: an EXPLICIT POSITIVE FLAG OUTRANKS EVERYTHING BELOW IT — including a negative env var. The first
+  // cut of #3321 collapsed flag and env into one flat OR, which silently regressed the pre-#3321 precedence: an
+  // ambient `WE_REQUIRE_VERIFIED=0` in the environment defeated an explicit `--require-verified` on the command
+  // line (the old resolver had the flag win, since it was `!!flag || env === '1'`). That is fail-OPEN on a
+  // contradictory invocation, and this gate exists to fail CLOSED. A flag is a decision made HERE, for THIS run;
+  // an env var is ambient and may be inherited from a parent process that knew nothing about this call. When they
+  // disagree, the deliberate one wins — and when the deliberate one is "verify", it wins doubly, because reading a
+  // stale export as permission to skip verification is the whole defect class this item closes.
+  const flagRequires = flags['require-verified'] !== undefined && !isNegative(flags['require-verified']);
+  const optedOut = !flagRequires && (
     // `--no-require-verified` — present and not itself negated (`--no-require-verified=0` is a double negative
-    // nobody means; treat only a straightforward presence as the opt-out).
+    // nobody means; treat only a straightforward presence as the opt-out). Passing BOTH `--require-verified` and
+    // `--no-require-verified` is contradictory, and `flagRequires` above resolves it fail-closed: verify.
     (flags['no-require-verified'] !== undefined && !isNegative(flags['no-require-verified']))
     || isNegative(flags['require-verified'])
-    || isNegative(env.WE_REQUIRE_VERIFIED);
+    || isNegative(env.WE_REQUIRE_VERIFIED));
   return {
     requireVerified: !optedOut,
     breakGlass: env.WE_LAND_UNVERIFIED === '1',

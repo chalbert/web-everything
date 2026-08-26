@@ -279,6 +279,28 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
       expect(resolveVerifyOptions({ flags: { 'require-verified': undefined }, env: {} }).requireVerified).toBe(true);
     });
 
+    it('#3321 an explicit --require-verified BEATS an ambient WE_REQUIRE_VERIFIED=0 (precedence, fail-closed)', () => {
+      // Review finding (b) on PR #1609: the first cut of #3321 collapsed flag and env into one flat OR, so an
+      // ambient negative env DEFEATED an explicit positive flag — a silent regression of the pre-#3321 precedence
+      // (`!!flags['require-verified'] || env === '1'`, where the flag won) and fail-OPEN on a contradictory
+      // invocation. A flag is a decision made for THIS run; an env var may be inherited from a parent that knew
+      // nothing about this call. The deliberate one wins, and it wins toward verifying.
+      for (const env of [{ WE_REQUIRE_VERIFIED: '0' }, { WE_REQUIRE_VERIFIED: 'false' }, { WE_REQUIRE_VERIFIED: 'off' }]) {
+        expect(resolveVerifyOptions({ flags: { 'require-verified': true }, env }).requireVerified, JSON.stringify(env)).toBe(true);
+        expect(resolveVerifyOptions({ flags: { 'require-verified': '1' }, env }).requireVerified, JSON.stringify(env)).toBe(true);
+      }
+      // The env still decides when the flag is absent — the opt-out is not being broken, only out-ranked.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '0' } }).requireVerified).toBe(false);
+      // ...and an explicitly NEGATIVE flag still opts out; it is not "any mention of the flag wins".
+      expect(resolveVerifyOptions({ flags: { 'require-verified': '0' }, env: { WE_REQUIRE_VERIFIED: '1' } }).requireVerified).toBe(false);
+    });
+
+    it('#3321 contradictory flags resolve fail-closed: --require-verified beats --no-require-verified', () => {
+      // Nobody means both. A gate whose purpose is to refuse when it cannot tell must not read "I cannot tell"
+      // as consent, so the contradiction resolves toward verifying.
+      expect(resolveVerifyOptions({ flags: { 'require-verified': true, 'no-require-verified': true }, env: {} }).requireVerified).toBe(true);
+    });
+
     it('#3321 break-glass is reported SEPARATELY and never relaxes requireVerified', () => {
       // The two escapes are different strengths and must stay distinguishable: collapsing WE_LAND_UNVERIFIED into
       // requireVerified would silently turn the narrow opt-out into the full bypass.
