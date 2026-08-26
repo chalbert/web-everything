@@ -1,4 +1,5 @@
 ---
+bornAs: xgytlo1
 kind: story
 size: 3
 parent: "3318"
@@ -15,7 +16,7 @@ A card that asserts "component X does Y by mechanism Z" and cites nothing costs 
 ## Where this came from
 
 The OWED prevention on the confirmed correctness finding against
-[#1596](https://github.com/chalbert/web-everything/pull/1596). The `xvkn1jd` card in that PR opened with
+[#1596](https://github.com/chalbert/web-everything/pull/1596). The `3343` card in that PR opened with
 
 > pr-land derives the review label from GitHub's three-dot file list
 
@@ -46,7 +47,7 @@ convention: whoever files or reviews a card checks the citation before the card 
 convention down where reviewers will meet it rather than leaving it as folklore.
 
 The split matters because a gate that tried to judge the narrative would be exactly the failure the sibling
-card `xaevzg4` describes — a detector whose real aperture is invisible from its name.
+card `3340` describes — a detector whose real aperture is invisible from its name.
 
 ## Prior art in this PR
 
@@ -58,7 +59,7 @@ said:
 
 > All three cards `#1596` revised this round now carry `file:line` citations for every mechanism claim
 
-That was written while a fourth card in the same PR, `xxf6jvr`, carried **zero** citations — it asserted the
+That was written while a fourth card in the same PR, `3344`, carried **zero** citations — it asserted the
 lens vocabulary and the "`--lens` substitutes rather than adds" behaviour on bare assertion. Counted, not
 recalled: `grep -coE 'we:[A-Za-z0-9_./-]+\.mjs:[0-9]+'` returned `0` for that card and `1`/`4`/`5`/`11` for
 the other four. A round-3 pass raised it to `7`. Nobody was being careless: the claim was true of the cards
@@ -67,7 +68,7 @@ that had been *revised* and silently generalised to the ones that had not. A gat
 ## Done when
 
 1. **Executable** — a new gate in `we:scripts/review-corpus/gates.mjs`, registered in `GATES`, reports the
-   `xvkn1jd` card's original opening sentence (quoted above, naming `pr-land` with no citation) and reports
+   `3343` card's original opening sentence (quoted above, naming `pr-land` with no citation) and reports
    nothing on the revised card, which cites `we:scripts/pr-land.mjs:839`. Run through `runGates(text, { path,
    read })` — the registry's real calling convention — so the gate is exercised as it will be in production.
 2. The replay harness (`we:scripts/review-corpus/replay-gates.mjs`) scores the new gate against the recorded
