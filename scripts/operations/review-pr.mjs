@@ -131,7 +131,7 @@ import {
   normalizeFindings,
   renderReviewNotice,
 } from '../lib/review-core.mjs';
-import { DISPOSITIONS, VERDICTS } from '../lib/jury-core.mjs';
+import { CITATION_SCOPES, DISPOSITIONS, VERDICTS, scopeFindingsToCitedFiles } from '../lib/jury-core.mjs';
 import { renderPanelComment } from '../lib/review-render.mjs';
 // #xwp8ioh — the SAME predicate `we:scripts/review-set-label.mjs` enforces at the write side (#2953), imported
 // rather than restated, so the read side and the write side cannot drift into two answers (#2644).
@@ -850,14 +850,50 @@ export function reviewPrOperation({ readPr } = {}) {
           { step: JUDGE_STEPS[1], lens: SECURITY_LENS, answer: view.findings.judgeSecurity },
         ];
 
+        // #x6t2z6h — THE CITATION SCOPE THIS RUN CAN ENFORCE AGAINST. `read.netChangedFiles` is the SAME ground
+        // truth `buildPanelMandate` stated to the juror verbatim, so a finding failing this check contradicts the
+        // one fact the juror was handed as settled. Empty on a DEGRADED basis (`ref-unresolved`), and enforcing
+        // there would classify every legitimate finding as off-scope at once — so it is not enforced there, and
+        // `scopeFindingsToCitedFiles` reports which way it went rather than leaving the caller to infer it.
+        const citationScope = read.degraded === true || !Array.isArray(read.netChangedFiles)
+          ? []
+          : read.netChangedFiles;
+
         /** @type {Object<string, Array<object>>} raw findings per lens, accumulated so two seats on ONE lens
          *  merge rather than the second silently replacing the first (the `--lens=security` case). */
         const lensFindings = {};
+        /** @type {Object<string, Array<object>>} #x6t2z6h — the same per lens, MINUS the findings whose cited file
+         *  is not in the net set. This is what the VERDICT reduces; `lensFindings` is what is PUBLISHED. */
+        const lensAdmitted = {};
+        /** @type {Array<object>} #x6t2z6h — the downgraded ones, kept so `confirm` can name the count. */
+        const unverifiableCitations = [];
+        let citationScopeEnforced = false;
         const lenses = [];
         const summaries = [];
         for (const seat of seats) {
           const answer = seat.answer && typeof seat.answer === 'object' ? seat.answer : {};
-          const raw = normalizeFindings(answer.findings);
+          // #x6t2z6h — REFUSE A WRONGLY-TYPED `findings`, for exactly the reason #x0p5k2q refuses a silent
+          // juror. `normalizeFindings` coerces a non-array to `[]`, so a juror that NARRATED its blockers
+          // instead of filling the schema — the commonest way a forced-tool-call seat fails — arrived here as
+          // zero findings and reduced to `accept`, with its own prose ("I would not merge this") sitting
+          // unread in the summary. That is a review whose output was thrown away, which is `unrun`.
+          //
+          // NARROW ON PURPOSE: `null`/`undefined` is a juror that returned no list, which this pipeline has
+          // always read as none and which every existing answer shape relies on. Only a value that IS there and
+          // is the wrong TYPE is new information that something went wrong, so only that refuses.
+          if (answer.findings != null && !Array.isArray(answer.findings)) {
+            throw new Error(
+              `review-pr.reduce: the \`${seat.lens}\` juror (\`${seat.step}\` step) returned \`findings\` as `
+              + `${typeof answer.findings === 'string' ? 'a string' : `an ${typeof answer.findings}`}, not an `
+              + 'array — its structured output did not survive, so whatever it found is not readable here. '
+              + 'That is `unrun`, not an accept: coercing it to zero findings would record a clean bill from a '
+              + 'juror that may have reported blockers. Re-run the review; do not record a verdict on this run.',
+            );
+          }
+          const scoped = scopeFindingsToCitedFiles(answer.findings, { scope: citationScope });
+          const raw = scoped.findings;
+          citationScopeEnforced = citationScopeEnforced || scoped.enforced;
+          unverifiableCitations.push(...scoped.unverifiable);
           // #x0p5k2q — REFUSE A SILENT JUROR, here as well as in the shape. `required` in JSON Schema only
           // asserts the KEY is present, so `{findings: [], summary: ""}` satisfies it and arrives as the same
           // nothing. Checked at the reduce step because this is where an empty answer would otherwise become
@@ -877,6 +913,7 @@ export function reviewPrOperation({ readPr } = {}) {
           }
           if (!lenses.includes(seat.lens)) lenses.push(seat.lens);
           lensFindings[seat.lens] = [...(lensFindings[seat.lens] ?? []), ...raw];
+          lensAdmitted[seat.lens] = [...(lensAdmitted[seat.lens] ?? []), ...scoped.admitted];
           summaries.push(`${seat.lens}: ${seatSummary}`);
         }
 
@@ -884,8 +921,14 @@ export function reviewPrOperation({ readPr } = {}) {
         // That provenance is what makes the operator-facing comment readable with two seats: without it, a
         // security finding and a correctness finding are indistinguishable rows.
         const findings = buildPanelFindings(lensFindings);
+        // #x6t2z6h — THE VERDICT BASIS IS THE ADMITTED SET; THE PUBLISHED LIST IS THE WHOLE ONE. Two lists on
+        // purpose, and the asymmetry is the ruling: an off-scope citation loses its automated consequence (it
+        // cannot bounce the PR into a round by itself) and keeps its human-readable one (it is still rendered,
+        // still ledgered, marked `unverifiable`). Do not "align" these by filtering the published list — that is
+        // the DROP outcome the card refuses, and it costs an escaped defect whenever the path was merely stale.
+        const admitted = buildPanelFindings(lensAdmitted);
         const lensVerdicts = Object.fromEntries(
-          lenses.map((lens) => [lens, deriveVerdict({ findings: lensFindings[lens] })]),
+          lenses.map((lens) => [lens, deriveVerdict({ findings: lensAdmitted[lens] })]),
         );
         const humanRequired = read.humanRequired === true;
         const verdict = derivePanelVerdict({
@@ -894,7 +937,10 @@ export function reviewPrOperation({ readPr } = {}) {
           mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
           // REQUIRED by the reducer, never defaulted (#2823 round-3 finding 1): the findings-derived prevention
           // scan is what catches an uncaptured guard that per-lens verdict flattening would hide.
-          findings,
+          // #x6t2z6h — the ADMITTED set, matching `lensVerdicts` above: a finding whose cited file does not exist
+          // in this PR must not withhold the accept through its `prevention` field either, or the downgrade would
+          // be undone one gate later.
+          findings: admitted,
         });
         return {
           verdict,
@@ -913,6 +959,12 @@ export function reviewPrOperation({ readPr } = {}) {
           // every consumer that needs the roster reads `lenses`.
           lens: lenses.join(', '),
           findings,
+          // #x6t2z6h — WHAT THE VERDICT WAS ACTUALLY REDUCED FROM, declared rather than left to be inferred by
+          // subtracting two lists. A reader that wants "why is this an accept when the comment shows a blocker"
+          // gets the answer from the record, not from re-deriving it.
+          admittedFindings: admitted,
+          citationScopeEnforced,
+          unverifiableCitations: unverifiableCitations.length,
           summary: summaries.join(' | '),
         };
       },
@@ -933,8 +985,17 @@ export function reviewPrOperation({ readPr } = {}) {
         // objected. It is the per-lens breakdown or nothing: a two-juror reduction reported as one number is
         // the flattening `lensVerdicts` exists to undo.
         const perLens = Object.entries(v.lensVerdicts ?? {}).map(([l, x]) => `${l}=${x}`).join(', ');
+        // #x6t2z6h — A WITHHELD FINDING IS NAMED IN THE QUESTION, never only in the comment body. The operator is
+        // being asked to record a verdict that was reduced from FEWER findings than the count above, and a
+        // difference the question does not mention is a difference the operator cannot weigh.
+        const withheld = Number(v.unverifiableCitations ?? 0);
+        const citationNote = withheld > 0
+          ? `${withheld} of them cite a file NOT in this PR's net changed-file set and were reported but WITHHELD `
+            + `from the reduction (#x6t2z6h) — the verdict is over ${n - withheld}. `
+          : '';
         return `${read.repo}#${read.pr} — ${(v.lenses ?? []).length} juror(s) returned ${n} finding(s) `
-          + `(${perLens || 'no lens verdicts recorded'}); \`derivePanelVerdict\` reduced them to \`${v.verdict}\``
+          + `(${perLens || 'no lens verdicts recorded'}); ${citationNote}`
+          + `\`derivePanelVerdict\` reduced them to \`${v.verdict}\``
           + `${v.humanRequired ? ' (gate-self: review:human)' : ''}. `
           + `Record which verdict? (${CONFIRM_OPTIONS.join(' | ')}; \`abstain\` writes nothing)`;
       },

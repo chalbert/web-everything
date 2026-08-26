@@ -29,7 +29,7 @@ import {
 } from './review-core.mjs';
 // The null-prototype lookup builder lives in the subject-agnostic engine core; import it DIRECTLY (review-core
 // re-exports only the review-shaped symbols, and this module is engine-tier like jury-core itself).
-import { frozenLookup } from './jury-core.mjs';
+import { CITATION_SCOPES, frozenLookup } from './jury-core.mjs';
 
 /** Human-readable label per overall verdict (`VERDICTS`). An unknown verdict falls back to its raw token so a
  *  new verdict never renders as a blank line. Pure data.
@@ -94,6 +94,15 @@ function renderFindingLine(f) {
   let line = parts.join(' — ');
   if (f.failure_scenario) line += ` — ${f.failure_scenario}`;
   if (f.verdict) line += ` _[${f.verdict}]_`;
+  // #x6t2z6h — THE DISCLOSURE HALF of the off-scope-citation downgrade. The finding is still printed in full
+  // (dropping it is the outcome the card refuses); what is added is that its cited path is not in this PR's net
+  // changed-file set, so it did NOT reduce into the verdict. Without this line the downgrade is a silent one, and
+  // a silent downgrade is a loss of information rather than a scaling of the gate — the same two-sided argument
+  // `blocksAcceptance` (`jury-core.mjs`) makes for `PREVENTION_IMPACT_BAR`. Printed only when the field is
+  // present, so every finding that never went through the scope gate renders byte-identically.
+  if (f.citationScope === CITATION_SCOPES.UNVERIFIABLE) {
+    line += ' _[⚠️ CITATION NOT IN THE NET DIFF — reported, but withheld from the verdict; re-cite it to block]_';
+  }
   if (f.impactIfUnfixed) line += ` _[impact if unfixed: ${f.impactIfUnfixed}]_`;
   if (f.prevention) {
     const state = f.preventionCaptured === true ? 'captured' : 'OWED — file it';
