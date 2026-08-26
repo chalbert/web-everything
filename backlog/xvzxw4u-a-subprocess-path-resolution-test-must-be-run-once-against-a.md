@@ -21,8 +21,14 @@ reading.
    `we:scripts/check-standards.mjs` to flag a `__tests__` file that spawns `command -v` / `which` / `type`
    without a sibling case asserting the not-found arm, on the evidence that the not-found arm is the one that
    diverges between laptop and CI. Verify by pointing it at
-   `we:scripts/operations/__tests__/helpers/fake-claude.mjs` at commit `95572d0c` (must flag) and at its
-   successor (must not).
+   `we:scripts/operations/__tests__/helpers/fake-claude.mjs` at commit `6e8fb3df` (must flag) and at `dad2fe4d`
+   (must not) — the commit that wrapped the resolution in a `try` and normalised not-found to `''`.
+
+**A correction to the fixture.** This item first named commit `95572d0c` as the "must flag" side. That is the
+pre-rebase sha the round-3 review ran on; it is not reachable from `lane/test-harness-fake-claude` and a fresh
+clone cannot resolve it, so the fixture as written was not reproducible. `6e8fb3df` is the rebased commit whose
+`we:scripts/operations/__tests__/helpers/fake-claude.mjs` blob hashes identically to `95572d0c`'s (checked with
+`git show … | shasum` on both).
 
 Owed as prevention by the round-3 correctness review of #1561. The same round's other, structural half is
 filed alongside this one as "A PR body's gate line must be the CI result, not a local run".
