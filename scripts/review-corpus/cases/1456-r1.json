@@ -1,0 +1,25 @@
+{
+  "pr": 1456,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c7a5532d0204942ec9d7f44b7686526f49d1c249",
+  "head": "8ebe89382a8d87211362608d907c645111b00e49",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "agent-memory-src/check-skills-before-repeating-a-workaround.md",
+    "agent-memory-src/index-meta.md",
+    "backlog/xt5prp0-console-quick-accept-button-moved-to-always-visible-spot-eas.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

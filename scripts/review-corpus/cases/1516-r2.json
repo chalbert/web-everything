@@ -1,0 +1,29 @@
+{
+  "pr": 1516,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "19e67126d7ac13e5c11820f2b088ae6363b05b5c",
+  "head": "ea102c7606b314b3f5fc60a25ac662492be0320c",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3240-verify-has-no-gate-input-so-it-cannot-replace-the-call-sites.md",
+    "backlog/x0uj8hj-an-operation-cli-exits-0-for-a-verdict-that-did-not-pass-so-.md",
+    "backlog/x2t6cr5-check-backlog-item-passes-an-item-the-standards-gate-then-re.md",
+    "scripts/operations/__tests__/verify.test.mjs",
+    "scripts/operations/verify-io.mjs",
+    "scripts/operations/verify.mjs",
+    "skills-src/conveyor/delivery-agent-brief.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,24 @@
+{
+  "pr": 1557,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "27ce5bf0d5bab058e8155eec2783ed1234b8af79",
+  "head": "5462feab134e64a55c83c1422208fd1b4997c187",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xal2gqe-recover-the-20-stranded-review-prep-verdicts-from-their-orph.md",
+    "backlog/xzqaa7r-a-preparation-s-review-must-be-machine-readable-state-not-pr.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

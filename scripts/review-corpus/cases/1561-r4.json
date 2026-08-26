@@ -1,0 +1,35 @@
+{
+  "pr": 1561,
+  "round": 4,
+  "totalRounds": 4,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "95572d0c94b439f9b10e32c33333eb8c7a6aeb8b",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "scripts/operations/__tests__/dispatch-lane-integration.test.mjs",
+    "scripts/operations/__tests__/dispatch-spawn-live.test.mjs",
+    "scripts/operations/__tests__/helpers/fake-claude.mjs",
+    "scripts/operations/dispatch-lane-io.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/__tests__/helpers/fake-claude.mjs",
+      "line": 92,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "`assertWins` assumes `command -v claude` degrades gracefully when no `claude` binary exists anywhere on PATH, but `sh -c 'command -v claude'` exits non-zero in that case and `execFileSync` throws by default"
+    }
+  ],
+  "missedHere": []
+}

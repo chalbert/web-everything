@@ -1,0 +1,28 @@
+{
+  "pr": 1510,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "f132797ebc6638cd0c0dffe9049c4661b35550c5",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/resolve.test.mjs",
+    "scripts/operations/resolve-io.mjs",
+    "scripts/operations/resolve.mjs",
+    "scripts/operations/run.mjs",
+    "skills-src/next-backlog-item/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

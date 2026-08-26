@@ -1,0 +1,29 @@
+{
+  "pr": 1526,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "f01b2285b443de3e09d75a38d9ee7e2837d051a0",
+  "head": "a9e26d5eeca4fa0183e340593e134901a9b16ae9",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3253-the-3224-gate-proves-a-skill-names-the-operation-never-that-.md",
+    "backlog/xhqljee-the-operations-gate-family-is-documented-only-in-code-commen.md",
+    "backlog/xt97yt1-report-an-operation-that-shells-its-home-but-exposes-no-pure.md",
+    "scripts/check-standards.mjs",
+    "scripts/lib/__tests__/skill-operation-wiring.test.mjs",
+    "scripts/lib/skill-operation-wiring.mjs",
+    "scripts/operations/cli-adapter.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

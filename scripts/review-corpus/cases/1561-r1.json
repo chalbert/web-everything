@@ -1,0 +1,24 @@
+{
+  "pr": 1561,
+  "round": 1,
+  "totalRounds": 4,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "eaa1bc906bd2fc088789a2c9b87a54ac9d2faa33",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "scripts/operations/__tests__/dispatch-spawn-live.test.mjs",
+    "scripts/operations/__tests__/helpers/fake-claude.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

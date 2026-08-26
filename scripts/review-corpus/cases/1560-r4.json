@@ -1,0 +1,23 @@
+{
+  "pr": 1560,
+  "round": 4,
+  "totalRounds": 7,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "12db32561e9c93a83e78bc266285e5ad42fb058b",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

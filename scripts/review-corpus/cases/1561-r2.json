@@ -1,0 +1,43 @@
+{
+  "pr": 1561,
+  "round": 2,
+  "totalRounds": 4,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "1cd5c2b0ae077a6008946f7489011c2fa3c93ff2",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "scripts/operations/__tests__/dispatch-lane-integration.test.mjs",
+    "scripts/operations/__tests__/dispatch-spawn-live.test.mjs",
+    "scripts/operations/__tests__/helpers/fake-claude.mjs",
+    "scripts/operations/dispatch-lane-io.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/__tests__/helpers/fake-claude.mjs",
+      "line": 150,
+      "category": "coverage",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "`assertWins` is documented as an enforced safety guard against accidentally hitting the real `claude` CLI, but no test exercises the guard itself"
+    },
+    {
+      "path": "scripts/operations/__tests__/dispatch-spawn-live.test.mjs",
+      "line": 128,
+      "category": "test-flakiness",
+      "impact": "degraded",
+      "verdict": "PLAUSIBLE",
+      "summary": "The `--bg` vs foreground timing case asserts an absolute wall-clock bound (`background < 1_000`) rather than a relative one, so it depends on this machine/CI being fast enough to spawn two node subprocesses well under a second."
+    }
+  ],
+  "missedHere": []
+}

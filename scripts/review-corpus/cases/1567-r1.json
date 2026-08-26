@@ -1,0 +1,32 @@
+{
+  "pr": 1567,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "e7ab2833ede606735105a21576e367c92ddb6ac0",
+  "head": "ffb2df2f7ccad7d042972ce4bfbfcf2534de9da7",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/x3884p1-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/x3884p1-the-lease-reaper-reclaims-a-lane-seconds-after-it-is-acquire.md",
+      "line": 33,
+      "category": "false-premise",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The story's central diagnosis claims 'the holder slug carries a pid ... and the release path already checks it' as existing plumbing the fix can lean on, but neither half is true of the current code."
+    }
+  ],
+  "missedHere": []
+}

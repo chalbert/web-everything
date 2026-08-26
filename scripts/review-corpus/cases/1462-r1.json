@@ -1,0 +1,25 @@
+{
+  "pr": 1462,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "ea6de54e3a6685f80ddbaf40ab5d02f252e0bd44",
+  "head": "017534b6d1195e5e7260cd36aed40f190ddf6d70",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "agent-memory-src/index-meta.md",
+    "agent-memory-src/no-hand-rolling-around-a-missing-operation.md",
+    "agent-memory-src/orchestrating-session-should-delegate-mechanical-fixup-loops.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

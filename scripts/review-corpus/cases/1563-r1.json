@@ -1,0 +1,24 @@
+{
+  "pr": 1563,
+  "round": 1,
+  "totalRounds": 4,
+  "base": "b914eca28df57b835901519abd49d04b9dbb3979",
+  "head": "6b34c39ac2989a2b9489bd9826dc6319a67e71ba",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x4ongaj-a-pr-description-that-claims-an-item-was-recorded-on-its-car.md",
+    "backlog/xh25i14-a-card-that-names-the-operations-registry-as-a-shared-file-w.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

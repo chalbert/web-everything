@@ -1,0 +1,27 @@
+{
+  "pr": 1518,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c4d97a0650017e6f844acbac933c9f2164de2e04",
+  "head": "348a62afbdd21c40a9c0982318ed3f46639148d5",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3242-open-pr-cannot-replace-pr-land-call-sites-no-sha-no-requirev.md",
+    "backlog/x5bpt2m-open-pr-requires-a-title-the-home-treats-as-optional-so-no-s.md",
+    "scripts/operations/__tests__/open-pr.test.mjs",
+    "scripts/operations/declared-homes.mjs",
+    "scripts/operations/open-pr.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

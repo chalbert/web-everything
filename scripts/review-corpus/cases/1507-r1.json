@@ -1,0 +1,30 @@
+{
+  "pr": 1507,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "5f049249cc6dacbcf8a15edc1bf2b042a3b9c98a",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "scripts/lib/pr-liveness.mjs",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/review-pr.test.mjs",
+    "scripts/operations/__tests__/stage-pr-view.test.mjs",
+    "scripts/operations/review-pr-io.mjs",
+    "scripts/operations/review-pr.mjs",
+    "scripts/operations/stage-pr-view.mjs",
+    "scripts/review-set-label.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

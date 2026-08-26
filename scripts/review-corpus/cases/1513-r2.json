@@ -1,0 +1,36 @@
+{
+  "pr": 1513,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "50fb37e61d1b16b01585e7e85e9d0c912fd8c521",
+  "head": "5212b034a9b756ce28610dc8b673de42b6ae7f39",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3224-check-standards-gate-a-skill-naming-a-raw-home-that-a-declar.md",
+    "backlog/xbbscm5-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md",
+    "backlog/xvj8sj0-verify-has-no-gate-input-so-it-cannot-replace-the-call-sites.md",
+    "scripts/check-standards.mjs",
+    "scripts/lib/__tests__/skill-operation-wiring.test.mjs",
+    "scripts/lib/skill-operation-wiring.mjs",
+    "scripts/operations/__tests__/registry.test.mjs",
+    "scripts/operations/claim.mjs",
+    "scripts/operations/declared-homes.mjs",
+    "scripts/operations/dispatch-lane.mjs",
+    "scripts/operations/registry.mjs",
+    "scripts/operations/verify.mjs",
+    "skills-src/conveyor/SKILL.md",
+    "skills-src/conveyor/delivery-agent-brief.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

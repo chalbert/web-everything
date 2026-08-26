@@ -1,0 +1,36 @@
+{
+  "pr": 1509,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "36951969f0b6921b888896848a3b9d5d320e24f2",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/mutation-check.test.mjs",
+    "scripts/operations/mutation-check-io.mjs",
+    "scripts/operations/mutation-check.mjs",
+    "scripts/operations/run.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/__tests__/mutation-check.test.mjs",
+      "line": 55,
+      "category": "test-coverage",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The prose/code guarantee that disqualifiers are checked in a deliberate priority order (`not-restored` before the others) is asserted nowhere against a competing condition, so a future reordering would ship silently."
+    }
+  ],
+  "missedHere": []
+}
