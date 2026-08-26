@@ -52,6 +52,7 @@
     "review:ledger-check": "node scripts/review-ledger-check.mjs",
     "converge:pass": "node scripts/converge-daemon-pass.mjs",
     "converge:daemon": "node scripts/converge-daemon-install.mjs",
+    "pr-status": "node scripts/pr-status.mjs",
     "check:standards": "node scripts/check-standards.mjs",
     "check:statute": "node scripts/check-statute.mjs",
     "check:backlog-workflow": "node scripts/check-backlog-workflow.mjs",
