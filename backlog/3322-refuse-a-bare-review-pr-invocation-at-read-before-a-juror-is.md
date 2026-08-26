@@ -3,9 +3,11 @@ bornAs: xwk0tzu
 kind: story
 size: 3
 parent: "3318"
-status: active
+status: resolved
 dateOpened: "2026-08-26"
 dateStarted: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/operations/review-pr-io.mjs
   - we:scripts/operations/review-pr.mjs
@@ -51,6 +53,9 @@ review-pr refuses a self-clear at record — after the juror has run and been bi
    | `stampLostMarked` not passed to the decider | 1 failed |
 
 ## What shipped
+
+Landed on `origin/main` as **PR #1594** (merge commit `9f9cb310`, 2026-08-26). Resolved by bookkeeping
+reconciliation after the fact — the card was left `active` at land.
 
 The refusal moved from `record` to `read`, following #3228's pattern exactly — the io shell READS, the pure
 declaration DECIDES:

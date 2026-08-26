@@ -3,8 +3,10 @@ bornAs: xn9c3mh
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/operations/review-pr.mjs
 tags: []
@@ -70,10 +72,17 @@ Of the 92 replayed cases, 87 recorded a lens row and **86 of those 87 were `corr
 > Checked: that regex returns `false` against the pre-fix criterion text.
 >
 > **Now actually filed**, naming that shape:
-> [#3346](/backlog/3346-vacuous-executable-criterion-only-models-absence-so-an-empty/). Not fixed in this
+> [#3340](/backlog/3340-the-vacuous-criterion-gate-models-one-shape-of-vacuity/). Not fixed in this
 > item.
+>
+> *(Citation corrected 2026-08-26. This originally pointed at #3346, which turned out to be a second card for
+> the same defect, filed one second after #3340. #3340 is the survivor; #3346 is resolved as a duplicate and
+> carries `graduatedTo: "3340"`.)*
 
 ## What shipped
+
+Landed on `origin/main` as **PR #1585** (merge commit `5a1d82b9`, 2026-08-26). Resolved by bookkeeping
+reconciliation after the fact — the card was left `open` at land.
 
 A **second declared `judge` step**, `judgeSecurity`, in
 [we:scripts/operations/review-pr.mjs](../scripts/operations/review-pr.mjs) — same request recipe
