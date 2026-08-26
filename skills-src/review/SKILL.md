@@ -74,9 +74,25 @@ reason, the disposition, the net changed-file list, any advisory comment), its `
 the operator is on a constrained model budget, so report the dollar figure, never omit it) and its
 `pending.asks` to the operator, then stop.
 
-`--lens=` picks which single lens judges; `--help` lists the valid ones. **One `judge` step spawns ONE juror,
-so a run is single-lens** — the verdict write-up says so in words and its panel table lists only the lens that
-judged. Do not describe the result as a panel verdict.
+**A run seats TWO jurors, and `--lens=` steers only the first (#3319).** There are two declared `judge` steps:
+`judge`, whose lens comes from `--lens=` and defaults to `correctness` (`MANDATORY_LENSES[0]`), and
+`judgeSecurity`, pinned to `MANDATORY_LENSES[1]` and **deliberately not reachable from the command line**. Both
+run on every PR, so you will answer **two** judge suspends, not one. `--help` lists the valid lenses.
+
+**Read `--lens=` as "what the first seat judges", never as "which single lens judges".** The older reading is
+the one that burns people: pointing `--lens` at an *advisory* lens does not narrow a panel to that lens, it
+**replaces the mandatory correctness seat with an advisory one**, and the run's blocking floor quietly drops. Two
+sessions were caught by that in a single day, from opposite directions. If you want a specific advisory lens
+looked at, ask for it in addition — not by pointing `--lens` at it.
+
+**Two `judge` steps are still not a `judgePanel` fan-out**, and the distinction is load-bearing. `judgePanel`
+(#3050) omits `allowedTools` from its per-seat call object, so every panel seat would run `--tools ''` — that is
+**#3158, still open** — and today's juror is tool-bearing because, as `we:scripts/lib/judge-spawn.mjs` puts it,
+*"the tools ARE the finding mechanism."* Two declared steps buy two distinct tool-bearing actors without paying
+that bill.
+
+Report the verdict as **the seats that actually judged** — the write-up's table lists what ran, not what
+exists. Do not call it a panel verdict, and do not describe a run as single-lens.
 
 On the operator's explicit decision:
 
