@@ -13,20 +13,21 @@ Gate every backticked `key: value` span in a PR body against the value the PR's 
 
 ## The observation this is filed from
 
-PR #1560 (preparing #3147) was bounced four consecutive rounds, and three of those bounces were the same
-defect: **the description asserted something the diff did not do.**
+PR #1560 (preparing #3147) was bounced four consecutive rounds, and two of those bounces were the same
+defect: **the description asserted something the diff did not do.** Both are historical — both were resolved
+in the round-5 push that filed this item; the rows below name the commit each claim stood at, not the head.
 
-| round | the body said | the diff wrote |
+| bounce that found it | the body said | the diff wrote, at that commit |
 | --- | --- | --- |
-| r3 | `scope:` gains `we:skills-src/conveyor/runner.mjs` | `scope:` is `we:skills-src/conveyor/SKILL.md` alone |
-| r4 | this card is now `blockedBy: ["3165"]` | `blockedBy: ["3118", "3165"]` |
-| r5 | *(the same `blockedBy` sentence, still uncorrected)* | `blockedBy: ["3118", "3165"]` |
+| r3 bounce | `scope:` gains `we:skills-src/conveyor/runner.mjs` | `3374b1db` — `scope:` is `we:skills-src/conveyor/SKILL.md` alone |
+| r4 bounce | this card is now `blockedBy: ["3165"]` | `12db3256` — `blockedBy: ["3118", "3165"]` |
 
 Both are the *same shape*: a backticked `key: value` span in the body, naming a real backlog frontmatter key,
 quoting a value the diff contradicts. The r4 bounce is the sharpest evidence that a human pass does not catch
-this — the body **was** edited that round, to fix the `scope:` instance, and the `blockedBy` sentence three
-paragraphs above it was not re-read. Both instances are mechanically detectable from data the transport
-already has.
+this — the body **was** edited at `12db3256`, to fix the `scope:` instance, and the `blockedBy` sentence three
+paragraphs above it was not re-read. The `blockedBy` claim then survived a further round untouched: it entered
+the frontmatter at `e14e41dd` (r2) and was still disagreeing with the body at `12db3256` (r4), three review
+passes later. Both instances are mechanically detectable from data the transport already has.
 
 ## Why a gate rather than a rule
 
@@ -55,9 +56,10 @@ takes only the mechanically-decidable half.
 
 ## Done when
 
-1. **Executable** — a check exists that, given PR #1560's r4 body and r4 head, exits non-zero and names
-   `blockedBy` with both values (`["3165"]` in the body, `["3118", "3165"]` in the diff). Run against a body
-   whose spans all match, it exits 0.
+1. **Executable** — a check exists that, given PR #1560's body as it stood before the r5 push and the card at
+   `12db3256`, exits non-zero and names `blockedBy` with both values (`["3165"]` in the body,
+   `["3118", "3165"]` in the diff). Run against a body whose spans all match — #1560 at `3644b569` and after
+   — it exits 0.
 2. **Mutation** — editing the fixture body's `blockedBy` span to match the diff turns the check green;
    editing the diff's frontmatter instead turns it red again. The check must fail on the *disagreement*, not
    on the presence of the key.
