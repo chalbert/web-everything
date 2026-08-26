@@ -4,53 +4,37 @@ kind: task
 status: resolved
 dateOpened: "2026-08-26"
 dateResolved: "2026-08-26"
-scope:
-  - we:scripts/__tests__/review-set-label.test.mjs
+graduatedTo: "3327"
 tags: []
 ---
 
 # The tmpdir body-file test inverts on every macOS host
 
-`checkBodyFileLocation`'s shared-root case builds its path from the real tmpdir but asserts against synthetic
-roots, so it passes on Linux by coincidence and fails on every Mac.
+**Duplicate of [#3327](/backlog/3327/) — resolved as such, not as work done.** Both cards describe the same
+defect in the same test; #3327 was filed first, carries the fix record, and is the one to read. This file stays
+as the audit trail rather than being deleted, following the same treatment as the other double-minted items the
+standards check reports.
 
-## The defect is in the test; `checkBodyFileLocation` was never wrong
+## How one defect got two cards
 
-`we:scripts/__tests__/review-set-label.test.mjs` — *accepts /tmp on a host whose OS temp dir is somewhere else
-entirely* — built its path with `join(TMP, …)` where `TMP = realpathSync(tmpdir())`, then passed a **synthetic**
-macOS-ish root pair (`/repo`, `/var/folders/ab/T`) via `bodyFileRoots`.
+`x7kopnm` (→ #3327) was filed and sat unnumbered, waiting for the drain. While it was in flight, the session
+fixing the defect grepped its working checkout for `x7kopnm`, found nothing — the land had not reached it —
+and concluded the id was a phantom it had invented. Believing it had cited a nonexistent card in a commit
+message and a PR title, it "corrected" the record by filing this card and rewriting the references to point
+here. The drain then landed both.
 
-- On **Linux**, `TMP` *is* the shared root, so the path matched **by coincidence** — green for a reason
-  unrelated to the property under test.
-- On **macOS**, `TMP` resolves under `/private/var/folders/<hash>/T`, which matches none of the three roots —
-  so the assertion inverted and the suite reddened.
+**The reasoning was sound and the conclusion was still wrong**, which is what makes it worth recording. A hash
+id is unresolvable **by design** between filing and land. `grep` finding nothing is the *expected* state for a
+real card, and it is indistinguishable from the state for an invented one. So the search that felt like
+verification could not have distinguished the two cases.
 
-The claim the case exists to make is *"the shared root is accepted **even when** the OS temp dir is elsewhere"*.
-The path under test must therefore be the literal shared root — the one that rescue exists for. Verified
-directly on macOS: a body file under the shared root is accepted with that root present and refused with it
-absent, on both platforms.
+Two corrections follow from it:
 
-## Why this earned a card and not a drive-by fix
+1. Treat *"I cannot find this id"* as **unknown**, never as **absent**. The remedy for an id you cannot resolve
+   is to leave the citation alone, not to replace it.
+2. Check **`origin/main`**, not the working checkout, before concluding a citation dangles — and even then,
+   expect a lag.
 
-**Three separate agents hit it on 2026-08-26**, and each spent time ruling it out of their own work before
-reporting it — one re-ran the full suite on a quiet tree to be sure the red was not theirs.
-
-That is the cost, and it is not the minutes. A test that reddens for everyone and belongs to no one **teaches
-every reader to discount a red suite**. The next real regression then arrives into a suite whose failures have
-already been trained into background noise.
-
-It also **blocked [#3321](/backlog/3321/)**: a change that makes verification mandatory before a lane lands
-cannot itself land against a red lane marker. #3321 declined to open its own PR — the feature correctly
-refusing its own author — and this was what stood behind that refusal.
-
-## The general shape, worth naming
-
-A test whose **fixture is derived from the host** (`tmpdir()`, `os.platform()`, `process.cwd()`) but whose
-**expectation is hard-coded** only tests the hosts where the two happen to agree. Either derive both or fix
-both; deriving one and fixing the other silently encodes the CI runner's platform into the assertion.
-
-## Done when
-
-1. **Executable** — `npx vitest run review-set-label` passes **on macOS**, where it failed before this item
-   (222 passed, previously 221 + 1 failed). Green on Linux both before and after, which is precisely why the
-   defect survived.
+The machine-checkable half is noted on #3327: `check:standards` errors on a stranded hash-named *file*, but
+nothing warns when a hash cited **in prose** matches no card in the tree or on `origin/main`. That check would
+have caught this at write time instead of after two lands.
