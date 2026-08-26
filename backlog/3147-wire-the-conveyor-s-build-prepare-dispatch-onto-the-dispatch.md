@@ -3,9 +3,11 @@ bornAs: xkxakhz
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: resolved
 relatedTo: ["3037", "3029", "3225", "3096", "3239", "3161", "3118"]
 dateOpened: "2026-08-16"
+dateResolved: "2026-08-26"
+graduatedTo: 3096
 preparedDate: "2026-08-25"
 scope:
   - we:skills-src/conveyor/SKILL.md
@@ -13,6 +15,24 @@ tags: [plateau-loop, conveyor, delivery, operations, dispatch]
 ---
 
 # Wire the conveyor's build/prepare dispatch onto the dispatch-lane operation instead of ad hoc Agent spawns
+
+> **Duplicate of #3096 — resolved as such, not as work done.** Nothing in this card was built. It described
+> the same rewiring of `we:skills-src/conveyor/SKILL.md` as `#3096` (filed 2026-08-13) and `#3239` (filed
+> 2026-08-21); #3096 survives because it was filed FIRST, three days before this one. The work is still open,
+> on #3096.
+>
+> **Everything unique here was folded into #3096 BEFORE this card was collapsed** — the step-3b prepare half,
+> the executable Done-when criteria and their counts, the *Not in scope* spawn-site enumeration, the #3118
+> Fork-1 position and runner boundary, and this card's `preparedDate`. See *What was folded in* on #3096. The
+> body below is kept verbatim as the historical record, including its retraction chain, which is why two
+> corrections are marked inline rather than applied.
+>
+> **Two claims below are FALSE at `origin/main` `9f9cb310` — flagged here because a reader who opens this file
+> will meet them before the corrections.** (1) The marker at `we:skills-src/conveyor/SKILL.md:77` reads
+> `@operation-home-ok: #xbbscm5`, **not** `#3239`, and #3239's frontmatter reads `bornAs: xbbscm5`, **not**
+> `bornAs: 3239`. (2) The quoted four-file grep result below does not reproduce: `grep -rl 3239` now returns
+> `3147`, `3286`, `3288`, `3289` — neither #3239's own card nor the SKILL contains the literal `3239` at all.
+> Both corrections are recorded on #3096, which is the file anyone will actually open again.
 
 `we:skills-src/conveyor/SKILL.md` steps 3 and 3b instruct, in prose, exactly the sequence [#3037]'s
 `dispatch-lane` operation now mechanizes: call the tick core for the dispatch plan, fill the delivery-agent
