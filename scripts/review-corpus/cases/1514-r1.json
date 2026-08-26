@@ -1,0 +1,25 @@
+{
+  "pr": 1514,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "50fb37e61d1b16b01585e7e85e9d0c912fd8c521",
+  "head": "47adac74fa387c039a2267c91c17515bb9c744de",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/x0p5k2q-a-juror-returning-no-findings-and-no-summary-reduces-to-acce.md",
+    "scripts/operations/__tests__/review-pr.test.mjs",
+    "scripts/operations/review-pr.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

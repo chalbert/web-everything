@@ -1,0 +1,41 @@
+{
+  "pr": 1505,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "c71344b816817950ca98575f5406086c2676fd4c",
+  "head": "b56699cb7b8bd7922510e9524b62825eb3cf83cc",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "backlog/3214-where-the-verdict-ledger-lives-once-it-is-the-merge-authorit.md",
+    "docs/agent/platform-decisions.md"
+  ],
+  "findings": [
+    {
+      "path": "docs/agent/platform-decisions.md",
+      "line": 3213,
+      "category": "correctness",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "The new fourth-home clause's closing sentence attributes the #2703 migration-trigger citation to \"clause 3 above,\" but clause 3 of this same addition (append-only/fetch-append-retry) never mentions #2703"
+    },
+    {
+      "path": "backlog/3214-where-the-verdict-ledger-lives-once-it-is-the-merge-authorit.md",
+      "line": 121,
+      "category": "correctness",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "The new \"Why not (a), (c) or (d)\" heading implies a canonical option (d) exists, but the unchanged \"## The fork\" section above only ever enumerates (a), (b), (c)"
+    }
+  ],
+  "missedHere": []
+}

@@ -1,0 +1,35 @@
+{
+  "pr": 1485,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "f1b5ba0001f5addb649cd41c07f9ba55f7cc681c",
+  "head": "02e93aad5e23610784967533b708f66b74266627",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3202-the-drain-now-calls-review-set-label-with-a-repo-it-may-not-.md",
+    "scripts/__tests__/merge-ai-prs.test.mjs",
+    "scripts/merge-ai-prs.mjs",
+    "scripts/review-set-label.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/merge-ai-prs.mjs",
+      "line": null,
+      "category": "test-coverage",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "The rebase loop's one-line call-site addition (`cwd: cloneDir` at the `restampAcceptance` call) has no integration test"
+    }
+  ],
+  "missedHere": []
+}

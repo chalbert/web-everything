@@ -1,0 +1,25 @@
+{
+  "pr": 1494,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "645b1a9299c3d5b624fe4241cab9d06f0329183e",
+  "head": "9634c8810bd4429680e2c88ea3f93705a0704f9b",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3204-the-git-hook-all-scan-resets-quote-state-at-every-physical-l.md",
+    "scripts/__tests__/check-standards-rules.test.mjs",
+    "scripts/check-standards-rules.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

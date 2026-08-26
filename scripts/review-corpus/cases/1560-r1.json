@@ -1,0 +1,56 @@
+{
+  "pr": 1560,
+  "round": 1,
+  "totalRounds": 7,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "5449e0a317cbd87b55eca27767d8921e9fe2ee14",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 4,
+  "changedFiles": [
+    "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+      "line": 65,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "The card's Tasks (#2), Interfaces section, and Done-when #3/#4 instruct pointing runner.mjs's 'dispatch site' at the dispatch-lane operation and test that it 'invokes the operation... and the raw spawn path zero times'"
+    },
+    {
+      "path": "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+      "line": 7,
+      "category": "correctness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "relatedTo (now [\"3037\",\"3029\",\"3225\"]) omits two open, more directly overlapping siblings: #3096 ('Route the conveyor's build dispatch through the declared dispatch-lane operation', open, effectively unblocked since its blockedBy #3037 is resolved) and #3239 ('the conveyor tick executes spawnBuilds by hand instead of through dispatch-lane', open)"
+    },
+    {
+      "path": "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+      "line": 100,
+      "category": "correctness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "Done-when #2's literal grep target ('Spawn it as one background Agent') does not match the actual SKILL.md prose, which reads 'Spawn it as **one background `Agent`**' (bold + backticked, at lines 251 and 279)"
+    },
+    {
+      "path": "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+      "line": 11,
+      "category": "correctness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "scope: (we:skills-src/conveyor/SKILL.md, we:skills-src/conveyor/runner.mjs) omits we:skills-src/conveyor/__tests__/runner.test.mjs, even though Done-when #3 requires a new/modified test in that exact file asserting runner.mjs's dispatch path calls a stubbed operation."
+    }
+  ],
+  "missedHere": []
+}

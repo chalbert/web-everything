@@ -1,0 +1,30 @@
+{
+  "pr": 1459,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "38c2be5e2c8a0aaed1d70e07b4b173c4b9c301b7",
+  "head": "46002b6a494d5e12f5026e5273c7d5a7382fd553",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3178-scantesttampering-re-parks-review-human-on-every-drain-pass-.md",
+    "backlog/xcr24gy-replace-the-forgeable-clear-human-comment-marker-with-a-loca.md",
+    "scripts/lib/__tests__/review-escalation.test.mjs",
+    "scripts/lib/review-escalation.mjs",
+    "scripts/merge-ai-prs.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/lib/review-escalation.mjs",
+      "line": 1327,
+      "category": "security",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "shouldReparkForTestTampering's clearance suppression trusts PR-comment marker content with no authorship check, so a comment-post-only actor can forge a matching reviewed-sha + cleared-human pair to suppress the anti-test-gaming park on a PR that already carries a real review:accepted label."
+    }
+  ],
+  "missedHere": []
+}

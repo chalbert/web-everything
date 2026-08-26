@@ -1,0 +1,39 @@
+{
+  "pr": 1552,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "1203f319668ba9ad0bc7c7813d4078a01f59b9a3",
+  "head": "16763d4236a5239b1fc6265a16e77bb8ff7959a4",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "scripts/operations/__tests__/backlog-ops-integration.test.mjs",
+    "scripts/operations/__tests__/dispatch-lane-integration.test.mjs",
+    "scripts/operations/__tests__/gate-health-integration.test.mjs",
+    "scripts/operations/__tests__/helpers/real-repo.mjs",
+    "scripts/operations/__tests__/mutation-check-integration.test.mjs",
+    "scripts/operations/__tests__/record-verdict-integration.test.mjs",
+    "scripts/operations/__tests__/stage-pr-view-integration.test.mjs",
+    "scripts/operations/__tests__/verify-integration.test.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/__tests__/backlog-ops-integration.test.mjs",
+      "line": 92,
+      "category": "structure",
+      "impact": "cosmetic",
+      "verdict": "CONFIRMED",
+      "summary": "A missing closing brace leaves one describe block unclosed, causing two sibling describe blocks to be accidentally nested inside it, compensated by two extra closing braces at the end of the file."
+    }
+  ],
+  "missedHere": []
+}

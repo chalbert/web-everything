@@ -1,0 +1,28 @@
+{
+  "pr": 1563,
+  "round": 3,
+  "totalRounds": 4,
+  "base": "b914eca28df57b835901519abd49d04b9dbb3979",
+  "head": "dc5f37785c78710f770dbdce3de955ee8587be36",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/x4ongaj-a-pr-description-that-claims-an-item-was-recorded-on-its-car.md",
+    "backlog/x70498i-a-card-claims-its-slices-build-in-parallel-without-naming-a.md",
+    "backlog/xh25i14-a-card-that-names-the-operations-registry-as-a-shared-file-w.md"
+  ],
+  "findings": [
+    {
+      "path": "backlog/x4ongaj-a-pr-description-that-claims-an-item-was-recorded-on-its-car.md",
+      "line": null,
+      "category": "goal-completeness",
+      "impact": "broken",
+      "verdict": "CONFIRMED",
+      "summary": "This PR's own description claims to file \"the preventions ... marked Prevention (OWED"
+    }
+  ],
+  "missedHere": []
+}

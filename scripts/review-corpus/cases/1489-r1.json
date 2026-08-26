@@ -1,0 +1,27 @@
+{
+  "pr": 1489,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "6d3ad31e2202e8f6052bd7fd0002c771f4d813d8",
+  "head": "ed56b895bc66f75639bee99ca1a62afe8abc745d",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3197-the-two-installer-main-orchestrations-are-untested-only-thei.md",
+    "scripts/__tests__/bootstrap-session.test.mjs",
+    "scripts/__tests__/converge-daemon.test.mjs",
+    "scripts/bootstrap-session.mjs",
+    "scripts/converge-daemon-install.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

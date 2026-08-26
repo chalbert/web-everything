@@ -1,0 +1,26 @@
+{
+  "pr": 1560,
+  "round": 7,
+  "totalRounds": 7,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "13f2da58a436d12cf403455449206505b78a2af8",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md",
+    "backlog/x6uyq86-a-done-when-criterion-names-a-fixture-whose-stated-outcome-i.md",
+    "backlog/xaemgqd-a-pr-body-s-frontmatter-claims-are-never-checked-against-the.md",
+    "backlog/xxzs9l7-a-claim-corrected-at-one-site-while-the-same-claim-stands-at.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

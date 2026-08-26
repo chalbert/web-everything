@@ -1,0 +1,28 @@
+{
+  "pr": 1492,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "b0c439bc8bc0c8cab8617767cd48aa87b8f5dd2d",
+  "head": "2e609a6744615a53fccffb8d704981b55aa2880c",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3203-the-600s-juror-wall-is-now-the-binding-constraint-and-it-fai.md",
+    "scripts/lib/__tests__/judge-spawn.test.mjs",
+    "scripts/lib/judge-spawn.mjs",
+    "scripts/operations/__tests__/run-store.test.mjs",
+    "scripts/operations/cli-adapter.mjs",
+    "scripts/operations/run-record.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

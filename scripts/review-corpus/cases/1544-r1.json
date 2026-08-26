@@ -1,0 +1,24 @@
+{
+  "pr": 1544,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "763b1b66df245222aef309b80276ec0b5f8ef526",
+  "head": "4ae7050829eb4bde9cb19571f00c3c3ff8701117",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "scripts/operations/__tests__/record-verdict.test.mjs",
+    "scripts/operations/record-verdict-io.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

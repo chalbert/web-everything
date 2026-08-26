@@ -1,0 +1,25 @@
+{
+  "pr": 1543,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "763b1b66df245222aef309b80276ec0b5f8ef526",
+  "head": "9eb41a2d53aab2d0f3a4513a9b826f5f79a3cfaa",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    ".github/workflows/apply-review-request.yml",
+    "scripts/__tests__/apply-review-request.test.mjs",
+    "scripts/apply-review-request.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

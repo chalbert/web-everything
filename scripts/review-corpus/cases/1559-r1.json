@@ -1,0 +1,33 @@
+{
+  "pr": 1559,
+  "round": 1,
+  "totalRounds": 2,
+  "base": "e9aa38f6eacb7ed0341cdcb4a191c5f9e56f0b15",
+  "head": "3712d4bdcdf93206c53138a375bb615bfe02f541",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "agent-memory-src/full-concurrency-is-the-default-never-a-cost-judgment.md",
+    "agent-memory-src/index-meta.md"
+  ],
+  "findings": [
+    {
+      "path": "agent-memory-src/full-concurrency-is-the-default-never-a-cost-judgment.md",
+      "line": 37,
+      "category": "broken-reference",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The closing cross-reference `[[104-edit-work-runs-in-a-lane-clone]]` does not resolve to any file in the memory corpus."
+    }
+  ],
+  "missedHere": []
+}

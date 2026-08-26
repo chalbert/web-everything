@@ -1,0 +1,41 @@
+{
+  "pr": 1566,
+  "round": 2,
+  "totalRounds": 2,
+  "base": "60acbe5f5ef07c6c6b2ca2aca94d425b9e5a5c08",
+  "head": "bc3a19dbeb4294f5b88c44cad7750ce0c8a13f93",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "changes"
+    }
+  ],
+  "declaredFindings": 2,
+  "changedFiles": [
+    "scripts/__tests__/bootstrap-session.test.mjs",
+    "scripts/bootstrap-session.mjs"
+  ],
+  "findings": [
+    {
+      "path": "scripts/__tests__/bootstrap-session.test.mjs",
+      "line": 857,
+      "category": "test-flakiness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "The new wiring test 'writes nothing when every checkout is already trusted' computes its expected trusted-set with the real `existsSync` (via its own unguarded `trustableDirs(REPO_ROOT)` call) but exercises `main()` through `spyIo`'s default `exists: () => true` stub, so the two derivations of the primary checkout's path can disagree and the test fails on any machine/lane where the `web-everything"
+    },
+    {
+      "path": "scripts/bootstrap-session.mjs",
+      "line": 653,
+      "category": "robustness",
+      "impact": "degraded",
+      "verdict": "PLAUSIBLE",
+      "summary": "`readTrust()` parses `~/.claude.json` with a bare `JSON.parse` and no try/catch, so a transiently-invalid or corrupted read of that actively, concurrently-written CLI state file throws and takes down the entire SessionStart hook (skills, commands, memory, siblings, aliases, gitdir, trust) rather than just the trust step."
+    }
+  ],
+  "missedHere": []
+}

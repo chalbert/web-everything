@@ -1,0 +1,26 @@
+{
+  "pr": 1549,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "b536cbc2b75a163a9304e5d25f3c7d7400d5966f",
+  "head": "2c1e2e4d656a442bb6c68ca13a69e56838abcc8e",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "docs/agent/backlog-workflow.md",
+    "scripts/check-standards.mjs",
+    "scripts/lib/__tests__/operation-io-fidelity.test.mjs",
+    "scripts/lib/operation-io-fidelity.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

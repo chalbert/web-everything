@@ -1,0 +1,27 @@
+{
+  "pr": 1529,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "482405b0660a624ac9880592266463406df17c68",
+  "head": "8dfddff58967b60b49e310378fd2a7d10f7836be",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3067-repair-the-author-stamp-instead-of-forbidding-every-route-th.md",
+    "scripts/__tests__/review-set-label.test.mjs",
+    "scripts/lib/__tests__/review-label-provider.test.mjs",
+    "scripts/lib/review-label-provider.mjs",
+    "scripts/review-set-label.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

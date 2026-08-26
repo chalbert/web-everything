@@ -1,0 +1,28 @@
+{
+  "pr": 1525,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "f01b2285b443de3e09d75a38d9ee7e2837d051a0",
+  "head": "8dd94ded32f558ece381555fbc2410350ae0ff8a",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xd0hvsg-the-claim-hard-stop-fires-for-every-caller-not-just-the-sele.md",
+    "docs/agent/backlog-workflow.md",
+    "scripts/__tests__/backlog-cli-snapshot.test.mjs",
+    "scripts/backlog.mjs",
+    "skills-src/conveyor/prepare-decision-agent-brief.md",
+    "skills-src/next-backlog-item/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

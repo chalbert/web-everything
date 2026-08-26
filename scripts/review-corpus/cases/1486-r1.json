@@ -1,0 +1,25 @@
+{
+  "pr": 1486,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "52a2596fd5b636abaf646d100ecc673b3320e84f",
+  "head": "e8bb4ef185052fe263fc8a49141e3db90c69524c",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3199-bootstrap-session-misidentifies-its-own-repo-when-run-from-a.md",
+    "scripts/__tests__/bootstrap-session.test.mjs",
+    "scripts/bootstrap-session.mjs"
+  ],
+  "findings": [],
+  "missedHere": []
+}

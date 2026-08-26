@@ -1,0 +1,26 @@
+{
+  "pr": 1495,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "645b1a9299c3d5b624fe4241cab9d06f0329183e",
+  "head": "b72d3469bc1358d69dc0732137860a7cd101e9ea",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/2897-review-set-label-s-body-file-allowlist-rejects-the-usual-tem.md",
+    "scripts/__tests__/review-set-label.test.mjs",
+    "scripts/review-set-label.mjs",
+    "skills-src/review/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,25 @@
+{
+  "pr": 1556,
+  "round": 8,
+  "totalRounds": 8,
+  "base": "e7ab2833ede606735105a21576e367c92ddb6ac0",
+  "head": "b644bda3394c5b160735d38dd07fb26a371bfafe",
+  "headline": "changes",
+  "decision": "changes",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/3230-review-prep-reports-a-verdict-recorded-when-the-note-never-r.md",
+    "backlog/3233-review-prep-has-side-effects-nobody-asked-for-commits-branch.md",
+    "backlog/3238-review-prep-note-introduces-883-errors-and-a-false-unverifie.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

@@ -1,0 +1,28 @@
+{
+  "pr": 1502,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "3ef0462c1c73d0cecc8879ae44e01e219198a65d",
+  "head": "7b7ffac8226396219177afadc8bfcf518d4daebb",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 0,
+  "changedFiles": [
+    "backlog/xhhsfnq-give-suggest-next-a-scope-so-a-caller-can-ask-about-one-epic.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/suggest-next.test.mjs",
+    "scripts/operations/suggest-next.mjs",
+    "scripts/readiness/engine.mjs",
+    "skills-src/next-backlog-item/SKILL.md"
+  ],
+  "findings": [],
+  "missedHere": []
+}

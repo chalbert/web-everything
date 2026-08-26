@@ -1,0 +1,38 @@
+{
+  "pr": 1497,
+  "round": 1,
+  "totalRounds": 1,
+  "base": "1f2ae138604e35e144956bdbdb7287beb62fb158",
+  "head": "25a25bad3e7d71dc0d9a93c8fa7bb51912c4f35b",
+  "headline": "accepted",
+  "decision": "accept",
+  "singleLens": true,
+  "lensRows": [
+    {
+      "lens": "correctness",
+      "weight": "mandatory",
+      "verdict": "accept"
+    }
+  ],
+  "declaredFindings": 1,
+  "changedFiles": [
+    "backlog/xrk6hmj-declare-a-record-verdict-operation-to-carry-a-verdict-off-a-.md",
+    "scripts/operations/__tests__/http-adapter.test.mjs",
+    "scripts/operations/__tests__/record-verdict.test.mjs",
+    "scripts/operations/record-verdict-io.mjs",
+    "scripts/operations/record-verdict.mjs",
+    "scripts/operations/run.mjs",
+    "skills-src/review/SKILL.md"
+  ],
+  "findings": [
+    {
+      "path": "scripts/operations/record-verdict.mjs",
+      "line": 33,
+      "category": "correctness",
+      "impact": "degraded",
+      "verdict": "CONFIRMED",
+      "summary": "`factsFromRun` re-implements the applier's own repo-slug and positive-integer-PR validation instead of importing it, directly contradicting this file's own header claim (\"It states no request rule of its own\", \"the operation and the applier cannot disagree about what is legal\")."
+    }
+  ],
+  "missedHere": []
+}
