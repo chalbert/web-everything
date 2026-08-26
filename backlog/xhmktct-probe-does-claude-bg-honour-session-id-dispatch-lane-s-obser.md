@@ -16,7 +16,8 @@ tags: [plateau-loop, delivery, operations, conveyor, dispatch, probe]
 `we:scripts/operations/dispatch-lane-io.mjs` **mints** the session id it dispatches with, then later looks
 for that same id in `claude agents --json` to decide whether the agent is still running. One manual
 observation on 2026-08-25 suggested `claude --bg` **ignores** `--session-id`. If that holds, the comparison
-can never match, and the conveyor cannot see its own agents.
+can never match, and the conveyor cannot see its own agents — **nor address them by id, which is what
+`#3118`'s ratified stop-then-resume steering presupposes.** Two things ride on this probe, not one.
 
 **One manual run is not evidence.** This card's first job is a probe that settles it. Nothing here should be
 fixed before the probe answers, and the probe's answer is the deliverable even if it says the assumption is
@@ -82,13 +83,36 @@ pre-PR life, two minutes after it starts.
 3. **If it is ignored**: the observer stops matching on a minted id — it reads the real id back from the
    listing and stores it on the run entry — and a test covers the case where the listed id differs from the
    dispatched one. The sink's `:509-514` header is corrected in the same change, because it currently states
-   the discarded assumption as the design's load-bearing detail.
+   the discarded assumption as the design's load-bearing detail. **The real id this step recovers is also
+   what any future `claude --resume` would have to address** — see the steering dependency below.
+
+## The `#3118` ruling's hinge depends on this card's answer
+
+Not only the observer rests on the minted handle. `#3118`'s ruling accepts **stop-then-resume** as the
+conveyor's steering mechanism, and clause 3 of
+[#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)
+carries that acceptance into statute. `claude --resume <sessionId>` addresses a session **by its id**, so
+the dispatcher can only resume an agent whose id it knows — the same presupposition this card is probing.
+The two rows of the 2026-08-25 manual run are therefore **coupled, not independent**: the row that says
+context survives a resume is only reachable if the row that says `--session-id` is ignored turns out false,
+or if this card's `Done when` #3 remedy is built.
+
+Nothing implements steering yet, so nothing is broken today — it is a dependency, not a defect.
+`grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
+`we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**
+(re-run 2026-08-26). What this card owes `#3118` is therefore small and concrete: when the probe answers,
+say in the answer **whether the dispatcher ends up able to address the session it started**, because that
+is the fact clause 3's revisit trigger (ii) fires on.
 
 ## Lineage
 
 Filed 2026-08-26 as a named, non-waived cost of the `#3118` ruling
 ([#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)),
 which routes the conveyor's dispatch through this operation and therefore inherits this assumption.
+**This card also owns the `#3118` ruling's hinge** — clause 3's stop-then-resume steering presupposes the
+dispatcher can address the session by its id, which is the very question probed here; see the section above.
+*(Added 2026-08-26 on the PR #1583 review. As first filed, this card was scoped to the observer alone, which
+under-stated it: the ruling's load-bearing acceptance rested on the same unproven fact and had no owner.)*
 **Overlaps `#3096` deliberately, and does not duplicate it:** `#3096` owns the first end-to-end live dispatch
 and what a background session's permission mode and isolation default must be. This card owns one narrower
 question — whether the handle the observer compares against is the handle the CLI actually uses — which can

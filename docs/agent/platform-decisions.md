@@ -3133,14 +3133,26 @@ dispatch decisions; the thing that turns a surfaced decision into a running agen
    operation is declared once and its callers are adapters over that declaration. The conveyor's runner is
    one such caller. It supplies the item and the dispatch kind; the operation owns the argv, the brief, the
    handle, the run record and the observation.
-3. **Steering is stop-then-resume, and that is accepted as sufficient.** The
-   [#agent-runner-cli-backend](#agent-runner-cli-backend) contract names `steer(text)` as a
+3. **Steering is stop-then-resume, and that is accepted as sufficient — but reaching the mechanism is
+   UNVERIFIED.** The [#agent-runner-cli-backend](#agent-runner-cli-backend) contract names `steer(text)` as a
    boundary-delivered write to a live child's stdin. A detached background session reaches the same end by
-   being stopped and resumed with new instructions, which preserves the session's context. The conveyor's
-   requirement is **"steer while keeping the work"**, not **"steer without ever interrupting"** — so the
-   coarser verb satisfies it, and the finer one does not earn a second spawner. **This clause is the hinge:
-   if the requirement ever becomes steering a *running* agent without interrupting it, this rule is the thing
-   that must be revisited**, because no stop-then-resume backend can reach that.
+   being stopped and resumed with new instructions, which preserved the session's context in **one manual
+   observation on 2026-08-25**. The conveyor's requirement is **"steer while keeping the work"**, not **"steer
+   without ever interrupting"** — so the coarser verb satisfies it, and the finer one does not earn a second
+   spawner. *That sufficiency is the operator's ruling and it stands.* What does **not** stand on the same
+   footing is the separate factual claim that the conveyor can reach the mechanism at all:
+   **`claude --resume` addresses a session by its id, so stop-then-resume presupposes that the dispatcher
+   knows the id of the agent it started.** The same 2026-08-25 run recorded the opposite result for that
+   presupposition — `--session-id` was **ignored** on a `--bg` spawn — and `#xhmktct` is the probe that
+   settles it. No code here resumes or steers anything yet:
+   `grep -rnE -- '--resume|resumeAgent|steer'` over `we:scripts/operations/dispatch-lane-io.mjs`,
+   `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/conveyor/tick-core.mjs` returns **nothing**
+   (re-run 2026-08-26 at `3447eb27`). **This clause is the hinge, and two triggers revisit it**, not one:
+   (i) if the requirement ever becomes steering a *running* agent without interrupting it — no
+   stop-then-resume backend can reach that; or (ii) **if `#xhmktct`'s probe comes back negative** — if
+   `claude --bg` really does discard `--session-id`, the dispatcher cannot address the session it started,
+   and stop-then-resume is unreachable as designed until `#xhmktct`'s own remedy (reading the real id back
+   off `claude agents --json`) exists. Trigger (i) is hypothetical; **trigger (ii) is live today.**
 
 **Lineage:** #3118 (ratified 2026-08-26, operator), resolving its single fork as **(c)** over (a) a WE-native
 port of the CLI-spawn runner and (b) a cross-process HTTP call into `plateau-app`'s dev server. (b) was
@@ -3154,8 +3166,9 @@ argument, which forbids two live spawn implementations behind one contract and l
 more caller of one already-declared operation) and
 [#agent-runner-cli-backend](#agent-runner-cli-backend) (that ruling governs what a spawn backend must offer;
 this one governs who is allowed to call it). The costs this ruling accepts rather than waives — the dispatch
-kinds the operation does not yet route, and the handle assumption its observer rests on — are tracked on
-#3118 and the items it links, per
+kinds the operation does not yet route, and the handle assumption that both the observer *and* clause 3's
+stop-then-resume rest on — are tracked on #3118 and the items it links (`#3165`, `#xj86df4`, `#xhmktct`,
+`#3096`), per
 [#statute-anchor-states-rule-not-status](#statute-anchor-states-rule-not-status).
 
 ---
