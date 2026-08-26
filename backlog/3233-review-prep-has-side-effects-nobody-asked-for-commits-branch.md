@@ -23,7 +23,8 @@ Reviewing a card should append a note. Observed on 2026-08-21 across two lanes, 
 
 The refs did not merely accumulate; **the verdicts they carry were lost.** Twenty-one
 `lane/review-prep-*` refs sit on origin with **no PR of any state** behind them (a `gh pr list --state all`
-search on that head prefix returns nine, all MERGED, all from the 2026-08-14 laptop cluster). Their content
+search on that head prefix returns nine, all MERGED, all laptop-identity; **seven** from the 2026-08-14
+cluster, with #1272 merged 08-15 and #1270 on 08-16). Their content
 is real: diffing `origin/main...origin/lane/review-prep-2456-…` carries finished verdicts for #2456, #2459,
 #2852, #2888, #2907 and #561 — "confidence High, corrections recorded" — and **none of that text is on
 `main`** (checked: `git show` of the #2456 card at `origin/main` has no review section).
@@ -268,8 +269,19 @@ card should not be read as closing the loop. It makes the loop *closable*.
 
 ## Tasks
 
-1. Declare `land` in the operation's `input` (boolean, **default true**); read it in `reduce` into the
-   `record` payload. The CLI flag is generated from the declaration, never hand-added.
+1. Declare `land` in the operation's `input` (boolean, **default true**). The CLI flag is generated from the
+   declaration, never hand-added. Then wire it, in three parts — **all three, or the flag is inert**:
+   1. **Add `'input.land'` to the `record` step's `reads`** (`we:scripts/operations/review-prep.mjs:486`,
+      today `['input.item', 'input.repo', 'input.actor', 'verdict', 'findings.read']`).
+      `we:scripts/operations/engine.mjs:95-113`'s `projectReads` projects only DECLARED reads, so without
+      this entry `view.input.land` is `undefined` in the one step that acts on it.
+   2. **Do NOT read it in `reduce`.** That step declares `reads: ['findings.read', 'findings.judge']`
+      (`we:scripts/operations/review-prep.mjs:456`), so `view.input` is undefined there and the expression
+      throws. An earlier draft of this very task said *"read it in `reduce` into the `record` payload"* —
+      which the card refutes in its own Interfaces section, three sections up. A builder working this list
+      top-to-bottom would have written the throwing read and never added the `reads` entry.
+   3. **Coalesce `?? true` at the read site**, so an older run record with no `land` key lands rather than
+      silently skipping.
 2. Add step 0: resolve the effective `land` from the requested value AND credential presence.
 3. Restructure `recordPrepVerdict` to the composed order above.
 4. Return `followUp` whenever the push happens without a land, including the downgrade and push-failure
@@ -293,6 +305,13 @@ stated above. No branch needed.
    asserting the **default** `record` on a credentialed host commits once, shells `we:scripts/pr-land.mjs`
    exactly once, and issues **no `git push` of its own** — pr-land owns the push on this path. Byte-identical
    to today's behaviour, which is what makes the default flip safe.
+
+   **EXTEND the existing case at `we:scripts/operations/__tests__/review-prep-io.test.mjs:150-181`, and make
+   the count exact: `expect(calls).toHaveLength(4)`.** That case already asserts positionally — `calls[0]`
+   `git add`, `calls[1][1][0]` `commit`, `calls[2]` `git rev-parse`, `calls[3]` the pr-land shell — with no
+   length assertion, so a stray `git push` landing at `calls[4]` leaves it **green while violating the very
+   sentence this criterion protects**. Positional asserts without a count are the failure mode here, not a
+   missing test.
 2. **Executable** — a case with an explicit `land: false` asserts pr-land is shelled **zero** times, exactly
    one `git push` is issued, and its **refspec names the recorded `sha`** rather than a branch tip — so the
    pushed ref carries one commit, not the caller's accumulated stack. This is the "six commits under one
@@ -306,14 +325,20 @@ stated above. No branch needed.
    which yields `undefined` and takes the push-only branch.
 5. **Executable** — a case where the push fails asserts `{recorded: true, verified: true, pushed: false}`
    with the commit intact and `followUp` returned — and that it does **not** throw.
-6. **Executable** — three cases, one per gate in `writeBacklogMd`, asserting the returned `reason`
-   distinguishes a lane-ownership refusal from a secret-scrub refusal from a locus refusal. A single
-   `reason: 'guarded-write'` for all three fails this.
-7. **Executable** — a case asserting the **file header** (lines 1–31) no longer describes landing as
+6. **Executable** — a case asserting the **file header** (lines 1–31) no longer describes landing as
    automatic *and* that `recordPrepVerdict`'s JSDoc no longer contains `"LANDS OR PARKS"`. Both asserted
    positively — that they describe the credential downgrade — because a bare string-absence check is green
    today for the header and would be decorative.
-8. **Mutation** — deleting step 7's push reddens case 2; deleting step 0's credential resolution reddens
+7. **Mutation** — deleting step 7's push reddens case 2; deleting step 0's credential resolution reddens
    case 3; changing `?? true` to a plain read reddens case 4; deleting the push-failure branch reddens
-   case 5. Each by name.
-9. `npm run check:standards` shows no new warnings against the 0-error / 1435-warning baseline.
+   case 5; removing `'input.land'` from the `record` step's `reads` reddens cases 2 and 4. Each by name.
+8. `npm run check:standards` shows no new errors and no new warnings **against the baseline at build time**
+   — do not hard-code a number; it has already moved twice while this card was being prepared.
+
+*(An earlier Done-when 6 asked for "three cases, one per gate in `writeBacklogMd`, asserting the returned
+`reason` distinguishes a lane-ownership refusal from a secret-scrub refusal from a locus refusal." It is
+**deleted, not renumbered**, because it was #3238's work: `we:scripts/backlog/guarded-write.mjs` is in
+#3238's `scope:` and not in this card's, #3238's Tasks 4/5 own the routing, and its DW3/DW4/DW4b already
+assert exactly those three reasons. #3238's delivery shape allows it to land in its own PR, so this card
+could have been required to satisfy a criterion against a file it does not scope, at a land where the work
+had not happened.)*
