@@ -72,6 +72,6 @@ needs its own `advance`-driven case" needs the diff and is a heavier item.
    a check that claims coverage it does not have is worse than one whose limit is stated.
 4. `npm run check:standards` — no new errors and no new warnings against the baseline at build time.
 
-Owed as prevention by two independent correctness reviews of PR #1572 (#3035). Sibling of `x5df5nm`, which
+Owed as prevention by two independent correctness reviews of PR #1572 (#3035). Sibling of `3324`, which
 gates the declaration side of the same defect; this one gates the test side, and either alone would have
 caught it.
