@@ -1,0 +1,692 @@
+/**
+ * claim-sweep.mjs — sweep a CORRECTED claim across every site that still carries it, and REPORT the sweep
+ * (#3307, under the review-efficacy watch #3318).
+ *
+ * ── THE DEFECT THIS EXISTS FOR ────────────────────────────────────────────────────────────────────────
+ * A correction lands where the error was NOTICED, and the same claim survives everywhere it was copied.
+ * `3290` records it bouncing one PR four rounds in a row; every round fixed the site the reviewer had
+ * quoted and left a site the reviewer had not reached yet. Four instances from a single day in this repo:
+ *
+ *   • A corpus figure of **84 recorded verdicts** (the measured counts are 92 cases, 87 with a lens row,
+ *     86 of those `correctness`). It was copied from parent card `3318` into child card `3319` and into a
+ *     comment in `we:scripts/lib/jury-core.mjs`. Correcting one did not correct the others.
+ *   • A card id believed nonexistent was "corrected" to a new id across a commit message, a PR title and a
+ *     PR body — and the original turned out to be real and in flight. Three sites rewritten, all wrong.
+ *   • "the gate never runs against backlog cards" — written into a card, quoted into a second card, and
+ *     repeated in a PR body before being refuted. Two of the three had to be chased down separately.
+ *   • A retraction that named its own mistake correctly and then MISNAMED the sibling retraction it cited.
+ *
+ * The shape is always the same: **a claim has more sites than the person correcting it remembers.**
+ *
+ * ── WHY THIS REPORTS AND DOES NOT REWRITE ─────────────────────────────────────────────────────────────
+ * Blind rewriting is what produced the second case above: three sites confidently "corrected" to a value
+ * that was itself wrong, which is strictly worse than the one wrong site it started from. A sweep that
+ * rewrites turns "I remembered one site" into "I damaged N sites" whenever the replacement is wrong, and
+ * whether the replacement is right is exactly the judgment a sweep cannot make (#51 hookable-vs-judgment:
+ * FIND the sites mechanically, leave the RULING to a human). So there is no rewrite path here, not even a
+ * confirmed one — `--fix` / `--rewrite` are recognised and REFUSED with that reason, so a caller reaching
+ * for them gets the argument rather than an "unknown flag".
+ *
+ * ── WHY NOTHING IS SILENTLY FILTERED ──────────────────────────────────────────────────────────────────
+ * A near-match, an ambiguous paraphrase, and a bare number in an unrelated context are precisely what the
+ * human doing the correcting needs to see; a sweep that silently drops them is worse than one that admits
+ * uncertainty, because it reads as completeness. Every site this finds is REPORTED, tiered and labelled:
+ *
+ *   exact       verbatim substring                              → confidence `confirmed`
+ *   normalized  matches once blockquote markers, emphasis,      → confidence `confirmed`
+ *               smart quotes and whitespace are folded (prose
+ *               wraps — pinning a wrap is the `doc-prose.mjs` lesson)
+ *   near        sentence shingle-containment over the threshold → confidence `undecided`
+ *   token       a distinctive token (a numeral, a `#NNNN`, a    → confidence `undecided`
+ *               born-as hash, a `we:` path, a backticked span)
+ *               in a sentence that is otherwise unrelated
+ *
+ * Retraction is an ANNOTATION, never a filter. A site sitting next to "Retracted — it read …" is the
+ * correction quoting the claim, not a survival of it, and the same negation `3299`/`3301` need — but it
+ * is still listed, with `retracted: true`, so the sweep can be seen to have looked at it. Only an
+ * UNRETRACTED `confirmed` site is a survivor, and only survivors drive the exit status.
+ *
+ * ── WHAT THIS CANNOT COVER (stated in every report, never implied away) ───────────────────────────────
+ * The corpus is `git ls-files` over the CURRENT working tree plus any documents the caller supplies with
+ * `--document` (a PR body or title dumped to a file). It therefore does NOT see, and says so:
+ *   • commit messages already written — history is not editable in place, so a surviving claim there is
+ *     found only by re-reading the log, and is corrected by an erratum, not by an edit;
+ *   • PR titles, bodies and review comments on GitHub, unless the caller dumps them in via `--document`;
+ *   • merged PRs, whose bodies are effectively immutable in the same way;
+ *   • the sibling repos in the constellation (Frontier UI, plateau-app) — a separate checkout each;
+ *   • untracked, ignored and binary files, and files past the size cap (all counted, never hidden);
+ *   • a paraphrase that shares no distinctive token with the claim — nothing to key on.
+ * `report.completeness` is therefore ALWAYS `'partial'`. There is no code path that sets it otherwise.
+ *
+ * The module is I/O-free at its core: `sweepDocuments` is pure over an array of `{ path, text }`, and the
+ * filesystem/git side (`collectDocuments`, `sweepRepo`) takes an injected `run`/`readFile` so the whole
+ * thing is exercisable from a fixture with no repo.
+ *
+ * TODO(#3299/#3301): those two rules need the same retraction-marker vocabulary. When the first of them
+ * lands, hoist `RETRACTION_MARKERS` to a shared module rather than letting two copies drift apart — two
+ * lists disagreeing would make one rule fire exactly where the other negates.
+ */
+
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { writeAllSync } from './write-all-sync.mjs';
+
+// ── Vocabulary and tunables ───────────────────────────────────────────────────────────────────────────
+
+/** Phrases that mark a neighbourhood as a RETRACTION — the correction quoting the claim it withdraws.
+ *  Matched case-insensitively against the RAW neighbourhood (normalisation strips `~~`, which is one of
+ *  the markers). See the TODO at the head of this file before adding a second copy of this list. */
+export const RETRACTION_MARKERS = Object.freeze([
+  'retracted', 'retraction', 'withdrawn', 'withdraws', 'superseded', 'no longer true',
+  'this used to read', 'it read', 'used to say', 'this said', 'was wrong', 'were wrong',
+  'corrected to', 'now reads', 'erratum', '~~',
+]);
+
+/** Lines either side of a site that count as its retraction neighbourhood. Six covers a quoted
+ *  blockquote retraction of the shape this repo writes without reaching the next unrelated paragraph. */
+export const RETRACTION_WINDOW = 6;
+
+/** Default sentence shingle-containment above which a sentence is a `near` match. Deliberately loose:
+ *  a false `near` costs one glance, a missed site costs a bounce round. */
+export const NEAR_THRESHOLD = 0.6;
+
+/** Extensions swept by default. Everything else is counted as skipped, never silently dropped. */
+export const TEXT_EXTENSIONS = Object.freeze([
+  '.md', '.mjs', '.js', '.cjs', '.jsx', '.ts', '.tsx', '.json', '.jsonl', '.html', '.css',
+  '.yml', '.yaml', '.txt', '.sh', '.toml',
+]);
+
+/** How many undecided sites the TEXT renderer prints in full before summarising the tail by file. A
+ *  rendering budget only: the report object and `--json` always carry every site. */
+export const DEFAULT_PRINTED_UNDECIDED = 15;
+
+/** Files larger than this are skipped (and counted) rather than read — a lockfile or a bundled asset. */
+export const MAX_FILE_BYTES = 1_000_000;
+
+/** The standing coverage gaps. Emitted with EVERY report; there is no "complete sweep" branch. */
+export const NOT_COVERED = Object.freeze([
+  'commit messages already written — git history is not editable in place; a surviving claim there needs an erratum, not an edit',
+  'PR titles, bodies and review comments on GitHub — supply them with --document=<file> to bring them in range',
+  'merged PRs, whose bodies are immutable in the same practical way as commit messages',
+  'the sibling constellation repos (Frontier UI, plateau-app) — a separate checkout, so a separate sweep',
+  'untracked, git-ignored, binary and over-size files (counted in coverage.skipped, never hidden)',
+  'a paraphrase sharing no distinctive token with the claim — there is nothing to key on',
+]);
+
+// ── Pure text helpers ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fold a span of markdown/source prose to a single comparable line: blockquote markers and comment
+ * leaders dropped, emphasis/backticks/strikethrough removed, smart quotes and dashes flattened,
+ * whitespace collapsed, lowercased. Pure.
+ *
+ * Deliberately small — this must not become a markdown parser. It exists because prose WRAPS, and an
+ * exact-substring-only sweep misses a claim purely because a paragraph was re-flowed or re-indented
+ * (`we:scripts/lib/__tests__/doc-prose.mjs` records that lesson on this repo).
+ * @param {string} s
+ * @returns {string}
+ */
+export function normalizeText(s) {
+  return String(s == null ? '' : s)
+    .replace(/^[ \t]*(?:>+[ \t]?|\/\/[ \t]?|\*[ \t]|#+[ \t])/gm, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Distinctive tokens of a claim — the parts specific enough that their bare appearance elsewhere is worth
+ * a human glance even when the surrounding sentence is unrecognisable. That is the tier that catches the
+ * `84`-figure case, where the three sites share the numeral and almost nothing else.
+ *
+ * Numerals need at least two digits: a lone `3` appears everywhere and would drown the report.
+ * @param {string} text
+ * @returns {string[]} longest-first, so a longer token wins the line over a substring of itself
+ */
+export function distinctiveTokens(text) {
+  const src = String(text == null ? '' : text);
+  const out = new Set();
+  for (const m of src.matchAll(/`([^`\n]{2,})`/g)) out.add(m[1].trim());
+  for (const m of src.matchAll(/#\d{2,}/g)) out.add(m[0]);
+  for (const m of src.matchAll(/\bx[a-z0-9]{6,7}\b/g)) out.add(m[0]);
+  for (const m of src.matchAll(/\bwe:[^\s,;)`'"]+/g)) out.add(m[0]);
+  for (const m of src.matchAll(/(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])/g)) {
+    if (m[0].replace(/\D/g, '').length >= 2) out.add(m[0]);
+  }
+  return [...out].filter(Boolean).sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
+/** Escape a literal for use inside a RegExp. */
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** A word-boundary-ish matcher for a token, tightened for numerals so `84` never matches `184` or `8.42`. */
+export function tokenPattern(token) {
+  const t = String(token);
+  const numeric = /^[\d,.]+$/.test(t);
+  const lead = numeric ? '(?<![\\w.,])' : (/^[\w]/.test(t) ? '(?<![\\w])' : '');
+  const tail = numeric ? '(?![\\w,]|\\.\\d)' : (/[\w]$/.test(t) ? '(?![\\w])' : '');
+  return new RegExp(`${lead}${escapeRe(t)}${tail}`, 'g');
+}
+
+/** Word shingles (n-grams) of a normalized string, as a Set. */
+function shingles(norm, n = 2) {
+  const words = norm.split(' ').filter(Boolean);
+  if (words.length < n) return new Set(words);
+  const out = new Set();
+  for (let i = 0; i + n <= words.length; i += 1) out.add(words.slice(i, i + n).join(' '));
+  return out;
+}
+
+/**
+ * Containment of the claim's shingles in a candidate's — |claim ∩ candidate| / |claim|. Asymmetric on
+ * purpose: a long paragraph that fully restates a short claim should score 1, not be diluted by its own
+ * length (Jaccard would punish exactly the case worth catching).
+ * @returns {number} 0..1
+ */
+export function shingleContainment(claimNorm, candidateNorm) {
+  const a = shingles(claimNorm);
+  if (a.size === 0) return 0;
+  const b = shingles(candidateNorm);
+  let hit = 0;
+  for (const s of a) if (b.has(s)) hit += 1;
+  return hit / a.size;
+}
+
+/** Words carrying no discriminating power — dropped before scoring a token hit's relevance. */
+const STOPWORDS = new Set(('a an the and or but of in on at to for from by with as is are was were be been '
+  + 'it its this that these those not no all any so than then there here we our you your they their he she '
+  + 'i do does did has have had can could should would may might will just only over under out up down '
+  + 'about into per via each every one two some more most').split(' '));
+
+/** Content words of a normalized string, punctuation stripped. */
+export function contentWords(norm) {
+  return String(norm || '').split(/[^a-z0-9#:._/-]+/i)
+    .map((w) => w.replace(/^[.:_/-]+|[.:_/-]+$/g, ''))
+    .filter((w) => w && !STOPWORDS.has(w));
+}
+
+/**
+ * RELEVANCE of a candidate line to the claim — the share of the claim's content words it also carries.
+ * Used ONLY to ORDER the undecided sites, never to drop one: a bare numeral matches everywhere (`84`
+ * lands on two dozen `file:84` citations in this repo), and the human needs the plausible ones first.
+ * @returns {number} 0..1
+ */
+export function relevance(claimNorm, candidateNorm) {
+  const a = new Set(contentWords(claimNorm));
+  if (a.size === 0) return 0;
+  const b = new Set(contentWords(candidateNorm));
+  let hit = 0;
+  for (const w of a) if (b.has(w)) hit += 1;
+  return hit / a.size;
+}
+
+/** Does `token` appear here as part of a `path:NN` / `NN-NN` source citation rather than as a quantity? */
+export function looksLikeLineCitation(rawLine, token) {
+  if (!/^\d+$/.test(String(token))) return false;
+  const t = escapeRe(token);
+  return new RegExp(`[\\w./-]+:\\d*${t}\\b|:\\d+-${t}\\b|\\b${t}-\\d+\\b|\\bline[s]? \\d*${t}\\b`, 'i').test(rawLine);
+}
+
+/** Split a normalized paragraph into sentences (crude, deliberately: `. `, `; `, `! `, `? `). */
+function sentencesOf(norm) {
+  return norm.split(/(?<=[.;!?])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 1-based line number of a character offset. */
+function lineAt(lineStarts, offset) {
+  let lo = 0; let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (lineStarts[mid] <= offset) lo = mid; else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+/** Offsets at which each line starts. */
+function lineStartsOf(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i += 1) if (text[i] === '\n') starts.push(i + 1);
+  return starts;
+}
+
+/**
+ * Paragraph blocks: runs of consecutive non-blank lines. Each block carries its normalized text AND an
+ * offset→line map, so a match found in the folded paragraph can be reported at the line it really starts
+ * on. Without that map a wrapped match is attributed to the paragraph's FIRST line, which on a long
+ * blockquote points the reader at an unrelated sentence — a citation that is precise and wrong.
+ */
+function paragraphsOf(lines) {
+  const blocks = [];
+  let cur = null;
+  lines.forEach((raw, i) => {
+    if (raw.trim() === '') { cur = null; return; }
+    if (!cur) { cur = { startLine: i + 1, endLine: i + 1, lines: [raw], lineNos: [i + 1] }; blocks.push(cur); }
+    else { cur.endLine = i + 1; cur.lines.push(raw); cur.lineNos.push(i + 1); }
+  });
+  return blocks.map((b) => {
+    const pieces = [];
+    const offsets = [];
+    let at = 0;
+    b.lines.forEach((raw, k) => {
+      const n = normalizeText(raw);
+      if (!n) return;
+      if (pieces.length) at += 1; // the joining space
+      offsets.push({ at, line: b.lineNos[k] });
+      pieces.push(n);
+      at += n.length;
+    });
+    return { ...b, raw: b.lines.join('\n'), norm: pieces.join(' '), offsets };
+  });
+}
+
+/** The 1-based source line a character offset into `block.norm` came from. */
+function lineForOffset(block, offset) {
+  let line = block.startLine;
+  for (const o of block.offsets) { if (o.at <= offset) line = o.line; else break; }
+  return line;
+}
+
+/**
+ * Is the neighbourhood of `line` a retraction — i.e. does the correction itself quote the claim here?
+ * Read against the RAW lines (normalisation eats `~~`, one of the markers).
+ * @returns {{retracted:boolean, marker?:string, markerLine?:number}}
+ */
+export function retractionNear(lines, line, window = RETRACTION_WINDOW) {
+  const from = Math.max(0, line - 1 - window);
+  const to = Math.min(lines.length, line + window);
+  for (let i = from; i < to; i += 1) {
+    const low = lines[i].toLowerCase();
+    for (const marker of RETRACTION_MARKERS) {
+      if (low.includes(marker)) return { retracted: true, marker, markerLine: i + 1 };
+    }
+  }
+  return { retracted: false };
+}
+
+// ── The sweep ─────────────────────────────────────────────────────────────────────────────────────────
+
+const TIER_RANK = { exact: 4, normalized: 3, near: 2, token: 1 };
+const TIER_CONFIDENCE = { exact: 'confirmed', normalized: 'confirmed', near: 'undecided', token: 'undecided' };
+
+/**
+ * Every site of `claim` inside ONE document. Pure.
+ * @param {{path:string, text:string, source?:string}} doc
+ * @param {{text:string, tokens?:string[]}} claim
+ * @param {{near?:number}} [opts]
+ * @returns {Array<object>} sites, one per (path, line), highest tier kept
+ */
+export function sweepDocument(doc, claim, opts = {}) {
+  const text = String(doc.text == null ? '' : doc.text);
+  const claimText = String(claim.text == null ? '' : claim.text);
+  if (!claimText.trim()) return [];
+  const near = typeof opts.near === 'number' ? opts.near : NEAR_THRESHOLD;
+  const lines = text.split('\n');
+  const starts = lineStartsOf(text);
+  const claimNorm = normalizeText(claimText);
+  // UNION, never a replacement: an explicit `--token` adds a key to watch, it does not narrow the sweep.
+  // Narrowing is how a site gets silently missed, which is the one outcome this tool exists to prevent.
+  const tokens = [...new Set([...distinctiveTokens(claimText), ...(claim.tokens || [])])]
+    .filter(Boolean).sort((a, b) => b.length - a.length || a.localeCompare(b));
+
+  /** line → best site */
+  const best = new Map();
+  const record = (line, tier, excerpt, reason) => {
+    const prev = best.get(line);
+    if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) return;
+    best.set(line, { line, tier, excerpt, reason });
+  };
+
+  // exact — verbatim substring
+  if (claimText.length > 0) {
+    let at = text.indexOf(claimText);
+    while (at !== -1) {
+      const line = lineAt(starts, at);
+      record(line, 'exact', lines[line - 1].trim(), 'the claim appears verbatim');
+      at = text.indexOf(claimText, at + Math.max(1, claimText.length));
+    }
+  }
+
+  // normalized + near — paragraph-level, so a re-flowed or re-indented copy is still found
+  for (const block of paragraphsOf(lines)) {
+    if (!block.norm || !claimNorm) continue;
+    const exactInBlock = block.norm.indexOf(claimNorm);
+    if (exactInBlock !== -1) {
+      const line = lineForOffset(block, exactInBlock);
+      record(line, 'normalized', (lines[line - 1] || '').trim(),
+        'matches once blockquote markers, emphasis and line wrapping are folded — the claim may continue onto the following lines');
+      continue;
+    }
+    let cursor = 0;
+    for (const sentence of sentencesOf(block.norm)) {
+      const sIdx = block.norm.indexOf(sentence, cursor);
+      if (sIdx !== -1) cursor = sIdx + sentence.length;
+      const score = shingleContainment(claimNorm, sentence);
+      if (score >= near && score < 1) {
+        // The excerpt is the FOLDED sentence that matched, not the raw first line of the paragraph: a
+        // paraphrase is usually mid-blockquote, and quoting the wrong line reads as a false positive.
+        record(sIdx === -1 ? block.startLine : lineForOffset(block, sIdx), 'near', sentence,
+          `paraphrase — ${Math.round(score * 100)}% of the claim's word-pairs appear in this folded sentence`);
+        break;
+      }
+    }
+  }
+
+  // token — a distinctive token standing in otherwise unrelated prose
+  lines.forEach((raw, i) => {
+    const line = i + 1;
+    if (best.has(line)) return;
+    for (const token of tokens) {
+      if (tokenPattern(token).test(raw)) {
+        // Labelled, never dropped: `84` in `platform-decisions.md:84-89` is a source citation, not the
+        // claim's quantity — but deciding that is the reader's call, so it is annotated and still listed.
+        const cite = looksLikeLineCitation(raw, token);
+        record(line, 'token', raw.trim(),
+          `carries the claim's distinctive token \`${token}\` in a sentence that does not otherwise match`
+          + (cite ? ' — and reads as a `path:line` citation here, not as the claim\'s quantity' : ''));
+        return;
+      }
+    }
+  });
+
+  return [...best.values()]
+    .sort((a, b) => a.line - b.line)
+    .map((site) => {
+      const r = retractionNear(lines, site.line);
+      const score = TIER_RANK[site.tier] >= 3 ? 1 : relevance(claimNorm, normalizeText(site.excerpt));
+      return {
+        path: doc.path,
+        source: doc.source || 'working-tree',
+        line: site.line,
+        tier: site.tier,
+        confidence: TIER_CONFIDENCE[site.tier],
+        score: Math.round(score * 100) / 100,
+        retracted: r.retracted,
+        retractionMarker: r.marker || null,
+        retractionLine: r.markerLine || null,
+        excerpt: site.excerpt.length > 220 ? `${site.excerpt.slice(0, 217)}…` : site.excerpt,
+        reason: site.reason,
+      };
+    });
+}
+
+/**
+ * Sweep a whole corpus of already-loaded documents. Pure — this is the testable core.
+ * @param {Array<{path:string, text:string, source?:string}>} documents
+ * @param {{text:string, tokens?:string[]}} claim
+ * @param {{near?:number, skipped?:Array<object>}} [opts]
+ * @returns {object} the report
+ */
+export function sweepDocuments(documents, claim, opts = {}) {
+  const docs = Array.isArray(documents) ? documents : [];
+  const sites = [];
+  for (const doc of docs) sites.push(...sweepDocument(doc, claim, opts));
+
+  const survivors = sites.filter((s) => s.confidence === 'confirmed' && !s.retracted);
+  const retractedSites = sites.filter((s) => s.retracted);
+  // ORDERED by relevance, not trimmed by it — a bare numeral lands on every `file:84` citation in the
+  // tree, so the plausible sites have to come first or the honest ones are unreadable. Every site stays.
+  const undecided = sites.filter((s) => s.confidence === 'undecided' && !s.retracted)
+    .slice().sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line);
+
+  return {
+    claim: {
+      text: String(claim.text == null ? '' : claim.text),
+      tokens: [...new Set([...distinctiveTokens(claim.text || ''), ...(claim.tokens || [])])].filter(Boolean),
+    },
+    // There is no branch that sets this to anything else — see NOT_COVERED and the module header.
+    completeness: 'partial',
+    sites,
+    survivors,
+    undecided,
+    retractedSites,
+    counts: {
+      sites: sites.length,
+      survivors: survivors.length,
+      undecided: undecided.length,
+      retracted: retractedSites.length,
+      files: new Set(sites.map((s) => s.path)).size,
+      filesWithSurvivors: new Set(survivors.map((s) => s.path)).size,
+    },
+    coverage: {
+      documentsScanned: docs.length,
+      sources: [...new Set(docs.map((d) => d.source || 'working-tree'))].sort(),
+      skipped: opts.skipped || [],
+      notCovered: [...NOT_COVERED],
+    },
+    // Report-only, always. No call path in this module writes to any swept file.
+    rewrote: false,
+  };
+}
+
+// ── Filesystem / git side (injected, so the core stays testable) ──────────────────────────────────────
+
+/** Default git runner — spawnSync, non-throwing. */
+export function gitRun(args, opts = {}) {
+  const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+  return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+
+function hasTextExtension(path) {
+  return TEXT_EXTENSIONS.some((ext) => path.toLowerCase().endsWith(ext));
+}
+
+/**
+ * Load the tracked working-tree corpus plus any caller-supplied documents.
+ * @param {{cwd?:string, paths?:string[], extraDocuments?:Array<{path:string, source?:string}>,
+ *          run?:typeof gitRun, readFile?:(p:string)=>string}} [o]
+ * @returns {{documents:Array<object>, skipped:Array<object>}}
+ */
+export function collectDocuments(o = {}) {
+  const run = o.run || gitRun;
+  const readFile = o.readFile || ((p) => readFileSync(p, 'utf8'));
+  const cwd = o.cwd || process.cwd();
+  const paths = o.paths && o.paths.length ? o.paths : [];
+
+  const listed = run(['ls-files', '-z', ...paths], { cwd });
+  const documents = [];
+  const skipped = [];
+  if (listed.status !== 0) {
+    skipped.push({ path: '(git ls-files)', why: `git ls-files failed: ${listed.stderr.trim() || 'non-zero exit'}` });
+  } else {
+    for (const rel of listed.stdout.split('\0').filter(Boolean)) {
+      if (!hasTextExtension(rel)) { skipped.push({ path: rel, why: 'not a swept text extension' }); continue; }
+      let text;
+      try { text = readFile(`${cwd}/${rel}`); } catch (err) {
+        skipped.push({ path: rel, why: `unreadable: ${err && err.code ? err.code : 'error'}` }); continue;
+      }
+      if (text.length > MAX_FILE_BYTES) { skipped.push({ path: rel, why: `over ${MAX_FILE_BYTES} bytes` }); continue; }
+      if (text.includes(' ')) { skipped.push({ path: rel, why: 'binary' }); continue; }
+      documents.push({ path: rel, text, source: 'working-tree' });
+    }
+  }
+
+  for (const extra of o.extraDocuments || []) {
+    try {
+      documents.push({ path: extra.path, text: readFile(extra.path), source: extra.source || 'supplied-document' });
+    } catch (err) {
+      skipped.push({ path: extra.path, why: `unreadable supplied document: ${err && err.code ? err.code : 'error'}` });
+    }
+  }
+  return { documents, skipped };
+}
+
+/**
+ * Sweep the repository for a claim. Thin: collect, then run the pure core.
+ * @param {{text:string, tokens?:string[]}} claim
+ * @param {object} [o] — as `collectDocuments`, plus `near`
+ */
+export function sweepRepo(claim, o = {}) {
+  const { documents, skipped } = collectDocuments(o);
+  return sweepDocuments(documents, claim, { near: o.near, skipped });
+}
+
+// ── Reporting ─────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Render a report as text. Every section is unconditional — a sweep that finds nothing still prints what
+ * it could not cover, because "no output" reads as "nothing to find" and that is the failure mode.
+ * @param {object} report
+ * @returns {string}
+ */
+export function formatReport(report, opts = {}) {
+  // A RENDERING cap on the long undecided tail, never a filter on the report: `--json` and the returned
+  // object always carry every site, and the tail line below names exactly how many were not printed.
+  const max = typeof opts.maxUndecided === 'number' ? opts.maxUndecided : DEFAULT_PRINTED_UNDECIDED;
+  const out = [];
+  const claim = report.claim.text.replace(/\s+/g, ' ').trim();
+  out.push('CLAIM SWEEP — report only, nothing was rewritten.');
+  out.push(`  claim:  ${claim.length > 160 ? `${claim.slice(0, 157)}…` : claim}`);
+  out.push(`  tokens: ${report.claim.tokens.length ? report.claim.tokens.map((t) => `\`${t}\``).join(' ') : '(none)'}`);
+  out.push('');
+
+  const block = (title, sites, note, limit) => {
+    out.push(`${title} — ${sites.length}`);
+    if (note) out.push(`  ${note}`);
+    if (!sites.length) out.push('  (none)');
+    const shown = limit && limit > 0 ? sites.slice(0, limit) : sites;
+    for (const s of shown) {
+      out.push(`  ${s.path}:${s.line}  [${s.tier} ${s.score}]${s.retracted ? ` (retracted near line ${s.retractionLine})` : ''}`);
+      out.push(`      ${s.excerpt}`);
+      out.push(`      ↳ ${s.reason}`);
+    }
+    if (shown.length < sites.length) {
+      const rest = sites.slice(shown.length);
+      const byFile = new Map();
+      for (const s of rest) byFile.set(s.path, (byFile.get(s.path) || 0) + 1);
+      out.push(`  … ${rest.length} lower-relevance site(s) not printed — NOT filtered out; re-run with`);
+      out.push('    --json (or --max-undecided=0) to see every one. Files carrying them:');
+      for (const [path, n] of [...byFile].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+        out.push(`      ${path} (${n})`);
+      }
+    }
+    out.push('');
+  };
+
+  block('SURVIVING SITES (confirmed, unretracted)', report.survivors,
+    'the claim still stands here — correct each, or mark it retracted.');
+  block('UNDECIDED (reported, NOT filtered — a human decides; most relevant first)', report.undecided,
+    'a paraphrase, a near-match, or the claim\'s token in unrelated prose.', max);
+  block('ALREADY RETRACTED (the correction quoting its own claim)', report.retractedSites,
+    'listed so the sweep can be seen to have looked at them; not survivors.');
+
+  out.push('COVERAGE');
+  out.push(`  completeness: ${report.completeness} — this sweep is NOT exhaustive.`);
+  out.push(`  scanned: ${report.coverage.documentsScanned} documents (${report.coverage.sources.join(', ') || 'none'})`);
+  out.push(`  skipped: ${report.coverage.skipped.length} files (wrong extension, binary, over-size or unreadable)`);
+  out.push('  NOT covered by this sweep:');
+  for (const gap of report.coverage.notCovered) out.push(`    • ${gap}`);
+  out.push('');
+  out.push(report.counts.survivors
+    ? `RESULT: ${report.counts.survivors} surviving site(s) across ${report.counts.filesWithSurvivors} file(s), `
+      + `out of ${report.counts.sites} site(s) seen in ${report.counts.files} file(s). Fix each, then re-run.`
+    : 'RESULT: no surviving site in the covered corpus. The gaps above are still unswept.');
+  return `${out.join('\n')}\n`;
+}
+
+// ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
+
+export const USAGE = `usage: node scripts/lib/claim-sweep.mjs --claim="<the corrected claim>" [options]
+
+  --claim=<text>        the claim to sweep for, as it was written at the site you corrected
+  --claim-file=<path>   read the claim from a file instead (use for multi-line claims)
+  --token=<literal>     add a distinctive token to key on (repeatable); defaults are derived
+  --path=<pathspec>     limit the working-tree corpus (repeatable), e.g. --path=backlog --path=docs
+  --document=<path>     sweep an extra document that is not in the tree (repeatable) — dump a PR
+                        body or title to a file and pass it here, or it is NOT covered
+  --near=<0..1>         sentence shingle-containment threshold for the \`near\` tier (default 0.6)
+  --max-undecided=<n>   how many undecided sites the TEXT report prints in full (default 15, 0 = all).
+                        A rendering budget only — the tail is summarised by file and --json is complete
+  --json                emit the report as JSON instead of text
+  --help                this message
+
+REPORT ONLY. There is no rewrite path, deliberately: a sweep that rewrites turns one wrong site into N
+wrong sites whenever the replacement is itself wrong, which is exactly what happened when a card id was
+"corrected" across a commit message, a PR title and a PR body and the original turned out to be real.
+Whether the replacement is right is a human judgment; finding every site is not.
+
+Exit: 0 no surviving site · 1 surviving site(s) found · 2 usage error.`;
+
+/** Parse `--k=v` / `--k` flags, collecting repeats into arrays. Pure over an explicit argv. */
+export function parseFlags(argv) {
+  const flags = {};
+  for (const arg of argv || []) {
+    if (!arg.startsWith('--')) continue;
+    const eq = arg.indexOf('=');
+    const key = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
+    const value = eq === -1 ? true : arg.slice(eq + 1);
+    if (key in flags) flags[key] = [].concat(flags[key], value);
+    else flags[key] = value;
+  }
+  return flags;
+}
+
+const asArray = (v) => (v === undefined ? [] : [].concat(v).filter((x) => typeof x === 'string'));
+
+/**
+ * CLI entry. Pure over `argv` apart from the injected IO — returns an exit code and never calls
+ * `process.exit` itself, so a test can drive it.
+ * @param {string[]} argv
+ * @param {{write?:(s:string)=>void, err?:(s:string)=>void, sweep?:typeof sweepRepo, readFile?:(p:string)=>string}} [io]
+ * @returns {number} exit code
+ */
+export function main(argv, io = {}) {
+  const write = io.write || ((s) => writeAllSync(1, s));
+  const err = io.err || ((s) => process.stderr.write(s));
+  const flags = parseFlags(argv);
+
+  if (flags.help || argv.length === 0) { err(`${USAGE}\n`); return 2; }
+
+  // Recognised and REFUSED, so reaching for it returns the argument rather than "unknown flag".
+  if (flags.fix || flags.rewrite || flags.apply) {
+    err('claim-sweep is REPORT-ONLY and has no rewrite path.\n'
+      + 'Rewriting every site is how one wrong claim becomes N wrong claims: a card id was once "corrected"\n'
+      + 'across a commit message, a PR title and a PR body, and the original turned out to be real — three\n'
+      + 'sites rewritten, all of them wrong. Whether the replacement is right is a judgment this tool cannot\n'
+      + 'make. Read the report, then edit each site yourself.\n');
+    return 2;
+  }
+
+  let claimText = typeof flags.claim === 'string' ? flags.claim : '';
+  if (typeof flags['claim-file'] === 'string') {
+    const readFile = io.readFile || ((p) => readFileSync(p, 'utf8'));
+    try { claimText = readFile(flags['claim-file']); } catch {
+      err(`cannot read --claim-file=${flags['claim-file']}\n`); return 2;
+    }
+  }
+  if (!claimText.trim()) { err(`--claim (or --claim-file) is required.\n\n${USAGE}\n`); return 2; }
+
+  const near = typeof flags.near === 'string' ? Number(flags.near) : undefined;
+  if (near !== undefined && !(near >= 0 && near <= 1)) { err('--near must be between 0 and 1.\n'); return 2; }
+
+  const maxUndecided = typeof flags['max-undecided'] === 'string' ? Number(flags['max-undecided']) : undefined;
+  if (maxUndecided !== undefined && !(Number.isInteger(maxUndecided) && maxUndecided >= 0)) {
+    err('--max-undecided must be a non-negative integer (0 = print all).\n'); return 2;
+  }
+
+  const sweep = io.sweep || sweepRepo;
+  const report = sweep(
+    { text: claimText, tokens: asArray(flags.token) },
+    {
+      paths: asArray(flags.path),
+      extraDocuments: asArray(flags.document).map((p) => ({ path: p, source: 'supplied-document' })),
+      near,
+      readFile: io.readFile,
+    },
+  );
+
+  write(flags.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report, { maxUndecided }));
+  return report.counts.survivors > 0 ? 1 : 0;
+}
+
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] || '.')).href) {
+  // (a) from write-all-sync.mjs: set exitCode and return, so stdout drains before Node exits.
+  process.exitCode = main(process.argv.slice(2));
+}
