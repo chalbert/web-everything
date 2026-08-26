@@ -12,8 +12,20 @@ tags: []
 
 **Duplicate of [#3327](/backlog/3327/) — resolved as such, not as work done.** Both cards describe the same
 defect in the same test; #3327 was filed first, carries the fix record, and is the one to read. This file stays
-as the audit trail rather than being deleted, following the same treatment as the other double-minted items the
-standards check reports.
+as the audit trail rather than being deleted, because `we:scripts/guard-bash.mjs` refuses `rm`/`git rm` of any
+backlog card: *"done items resolve (status:resolved); the file stays."*
+
+> **Retraction.** This paragraph previously gave a different reason — that the file stays *"following the same
+> treatment as the other double-minted items the standards check reports."* **That was wrong.** The rule it
+> appealed to, `duplicateBornAs` (`we:scripts/check-standards-rules.mjs:2180`), groups cards by **identical
+> `bornAs`**. #3327 is `bornAs: x7kopnm` and this card is `bornAs: xuyij7f` — different hashes, so the rule
+> never fires on this pair and never would have. Run in this lane, `check:standards` reports exactly two such
+> pairs — `x2t6cr5` (#3201/#3244) and `xzdi27a` (#3111/#3112) — and says nothing about #3327/#3328.
+>
+> The disposition is unchanged, because the load-bearing reason is the `rm` guard and that one is real. Only
+> the precedent cited for it was invented. And the mistake is itself the record: `duplicateBornAs` catches
+> **one card minted twice**; this was **one defect filed twice, under two hashes**. No check sees that — the
+> same gap #3327 names, hit a second time in the write-up of the first.
 
 ## How one defect got two cards
 

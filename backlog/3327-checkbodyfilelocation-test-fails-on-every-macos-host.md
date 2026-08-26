@@ -5,6 +5,7 @@ size: 2
 status: resolved
 dateOpened: "2026-08-26"
 dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/__tests__/review-set-label.test.mjs
 tags: []
@@ -45,8 +46,20 @@ defect was what stood behind that refusal.
 `x7kopnm` was filed and then JIT-numbered to **#3327** by the drain at land (#2288). While that was in flight,
 the session fixing the defect could not find `x7kopnm` anywhere in its checkout — the land had not reached it —
 concluded the id was a phantom it had invented, and filed a second card for the same defect. That duplicate
-landed and was numbered **#3328** before the correction could be pushed. It is deleted here and its content
-absorbed above.
+landed and was numbered **#3328** before the correction could be pushed. Its content is absorbed above, and
+[#3328](/backlog/3328/) **stays on disk** as a resolved duplicate record pointing here (`graduatedTo: "3327"`).
+
+> **Retraction — this card shipped a false claim of its own.** The sentence above previously read: *"It is
+> deleted here and its content absorbed above."* **That was wrong.** Nothing in this change deletes
+> `we:backlog/3328-the-tmpdir-body-file-test-inverts-on-every-macos-host.md`; the diff rewrites it in place as
+> a duplicate record. The deletion it described is not merely undone but **impossible** —
+> `we:scripts/guard-bash.mjs` refuses `rm`/`git rm` of any backlog card: *"done items resolve
+> (status:resolved); the file stays."* Verified in this lane by reading that guard's banned-command table.
+>
+> It is worth leaving the retraction rather than a silent edit, because the false sentence is the *same*
+> failure this card is about: an assertion written from what its author intended rather than from what the
+> change does. The machine-checkable half sketched below would **not** have caught it — a false claim about a
+> file's disposition is not a dangling id — so nothing here catches this class either.
 
 The lesson is not "grep harder". **A hash id is unresolvable by design between filing and land**, so `grep`
 finding nothing is the expected state for a real card and is indistinguishable from the state for an invented
