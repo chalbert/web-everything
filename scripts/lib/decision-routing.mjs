@@ -24,10 +24,12 @@
  *
  * Pure, unit-tested in `we:scripts/lib/__tests__/decision-routing.test.mjs`.
  */
-import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER } from './review-escalation.mjs';
+import { deriveCareLevel, CARE_LEVELS, CARE_LEVEL_ORDER, scoreEscalation, plainDiffPath } from './review-escalation.mjs';
 import { disposeVerdict, DISPOSITIONS } from './disposition-judge.mjs';
 import { LAND_MODES } from './auto-land-seam.mjs';
-import { DECISION_PROSE_MANDATORY_LENSES } from './decision-prose-adapter.mjs';
+import { DECISION_PROSE_MANDATORY_LENSES, DECISION_PROSE_LENS_SET } from './decision-prose-adapter.mjs';
+import { MANDATORY_LENSES, panelRigorForCareLevel } from './jury-core.mjs';
+import { basenameOf } from './gate-config.mjs';
 
 /**
  * The two multi-agent processes a cleared decision can route to (#2704). A frozen enum so every caller names them
@@ -473,4 +475,267 @@ export function planDecision({ signals = {}, humanRequired = false, ledger = nul
     });
   }
   return { route, disposition, landMode };
+}
+
+// ====================================================================================================================
+// THE REVIEW-SUBJECT ROUTER (#3309, child of #3318). Everything above routes a DECISION CARD. This routes a PR to the
+// right REVIEW SUBJECT — code or prose — from its TOUCH-SET, before any juror is paid.
+//
+// WHY. Measured over the #3318 corpus: planning / card-filing PRs cost **3.20 rounds and 20.6 KB of review text
+// each** against code at **1.19 / 4.3 KB**, and 15 of 18 card findings were degraded or cosmetic. Ten planning PRs
+// cost more review than fifty code PRs. The cause is that the reviewer is fixed before the PR is read — `review-pr`'s
+// `--lens` defaults to `correctness` — so a PR of pure prose is judged by the CODE-correctness juror, which has
+// nothing to find and says so at length. The fix is not a cheaper juror; it is the RIGHT juror. The decision-prose
+// lens set (`root-cause` + `completeness`, #2657) already exists and already judges prose, so this router picks
+// between two SHIPPED lens sets and invents neither.
+//
+// WHY IT LIVES IN THE CALLER, NOT THE OPERATION (#3319's stated residual). #3319 seats a second mandatory juror as a
+// declared `judge` step and records why it could not make that step conditional: *"The step list is fixed at
+// REGISTRATION, before any PR is read; the engine runs every declared step at its cursor … An input cannot gate it
+// either — an input changes what a step ASKS, never whether it RUNS. So a docs-only PR pays for a security juror.
+// Gating belongs to a caller that knows the touch-set before it starts the run."* A conditional declared step is also
+// forbidden outright by the four-kind operation statute (#3031). So this is a PURE function a CALLER runs BEFORE the
+// run command is composed — the same pure-core / thin-shell split the module already follows.
+//
+// SCOPE CARVE vs #3335 ("A review caller must derive its lenses from the PR's touch-set"). #3335 owns the WIRING —
+// a `we:scripts/review-core-cli.mjs` entry point, `read`-time refusal of a declared shape the PR contradicts, and the
+// caller's documented flow (`we:skills-src/review/SKILL.md`). It derives RIGOR (how hard to look) from
+// `scoreEscalation` + `panelRigorForCareLevel`. THIS card owns the orthogonal axis #3335 explicitly does not model:
+// WHICH SUBJECT is under review at all, and therefore which lens VOCABULARY the seats are drawn from. The two
+// compose — `routeReviewShape` below returns #3335's rigor numbers unchanged and only swaps the lens set — and
+// neither file overlaps the other's scope.
+//
+// THE SAFETY DIRECTION, STATED ONCE. Over-reviewing prose wastes tokens; under-reviewing code ships a defect. So the
+// classifier is an ALLOW-LIST that FAILS CLOSED to `code` on every ambiguity: an unreadable or empty touch-set, one
+// non-prose file anywhere in the set, an unknown extension, operative prose an agent executes, or any path-kind
+// escalation signal. `prose` is reachable only when EVERY file is inert text and NOTHING escalated on path.
+// ====================================================================================================================
+
+/**
+ * The two REVIEW SUBJECTS a PR can be routed to (#3309). A frozen enum so every caller names them once.
+ * `code` is the incumbent path and the fail-closed default; `prose` is the cheaper, better-fitting path a PR must
+ * positively EARN by touching nothing but inert text.
+ */
+export const REVIEW_SUBJECTS = Object.freeze({
+  CODE: 'code',   // judged by the PR-review lens set (`MANDATORY_LENSES`: correctness + security)
+  PROSE: 'prose', // judged by the decision-prose lens set (#2657: root-cause + completeness)
+});
+
+/**
+ * File extensions whose content is INERT TEXT — nothing executes it, no gate parses it (#3309). Lower-cased, with
+ * the leading dot. Deliberately short: `.json` / `.yml` / `.toml` are DATA a program reads, so they are code here
+ * however prose-like they look, and anything not on this list is code by default.
+ */
+export const PROSE_TEXT_EXTENSIONS = Object.freeze(new Set(['.md', '.markdown', '.txt', '.rst', '.adoc']));
+
+/**
+ * Directory prefixes whose markdown is OPERATIVE PROSE — an agent EXECUTES it, so it is machinery wearing a `.md`
+ * extension and gets the code panel (#3309). A skill's prose IS its program; agent memory and the Tier-0 docs router
+ * are instructions the whole fleet obeys. Lower-cased, trailing slash, matched as a prefix.
+ */
+export const OPERATIVE_PROSE_PREFIXES = Object.freeze([
+  'skills-src/',       // a skill's prose is its program
+  'agent-memory-src/', // the rules every session loads
+  'docs/agent/',       // the Tier-0 router + the statute layer
+  '.claude/',          // harness configuration, hooks, commands
+  '.github/',          // CI + PR templates
+]);
+
+/**
+ * Basenames that are OPERATIVE PROSE wherever they sit (#3309) — the per-directory instruction files an agent reads
+ * as orders. Lower-cased and matched on the basename, so a nested copy is caught too.
+ */
+export const OPERATIVE_PROSE_BASENAMES = Object.freeze(new Set(['agents.md', 'claude.md']));
+
+/**
+ * `scoreEscalation` signal keys that VETO the prose route (#3309) — every one of them is a statement about the KIND
+ * of path touched, not about how big or contested the change is. A prose file that trips one of these is not inert:
+ * it is the statute, the declarative leash, gate-derivation code, a blast-radius surface, or a cross-repo couple.
+ *
+ * `size` and `dismissedFindings` are DELIBERATELY ABSENT. Both are capacity dials (#3320) — they say how hard to
+ * look, never at what. Vetoing on `size` would send exactly the long planning PR this item exists to re-route back
+ * to the correctness juror, which is the whole measured cost. A large prose PR still gets the extra rounds and
+ * jurors its care level earns; it just gets them from a lens that can find something.
+ */
+export const PROSE_VETO_SIGNALS = Object.freeze(['blastRadius', 'gateSelf', 'gateDerivation', 'statute', 'crossRepo']);
+
+/**
+ * Is this repo-relative path INERT PROSE (#3309)? PURE, total, FAIL-CLOSED — anything it cannot positively confirm
+ * is inert text returns `false` (i.e. code). Accepts the raw `parseNumstat` spellings (`a => b`, brace renames,
+ * C-quoted bytes) by normalizing through the existing `plainDiffPath` rather than re-parsing them here.
+ * @param {string} path a repo-relative changed-file entry
+ * @returns {boolean} true ONLY for a text file no program and no agent reads as instructions
+ */
+export function isProsePath(path) {
+  if (typeof path !== 'string' || !path.trim()) return false; // fail-closed: an unreadable entry is never prose
+  const plain = plainDiffPath(path.trim());
+  if (typeof plain !== 'string' || !plain) return false;
+  const lower = plain.toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  const slash = lower.lastIndexOf('/');
+  // A dot that sits before the last slash belongs to a directory, not the file — and an extension-less file
+  // (`LICENSE`, `Makefile`) is not on the allow-list either way.
+  const ext = dot > slash ? lower.slice(dot) : '';
+  if (!PROSE_TEXT_EXTENSIONS.has(ext)) return false;
+  if (OPERATIVE_PROSE_BASENAMES.has(basenameOf(lower))) return false;
+  if (OPERATIVE_PROSE_PREFIXES.some((prefix) => lower.startsWith(prefix))) return false;
+  return true;
+}
+
+/**
+ * @typedef {Object} ReviewSubjectClassification
+ * @property {'code'|'prose'} subject - the routed review subject.
+ * @property {string[]} codeFiles - the touched files that are NOT inert prose (empty on the prose route).
+ * @property {string[]} vetoes - the `PROSE_VETO_SIGNALS` keys that fired (plus `humanRequired` when the gate did).
+ * @property {string} reason - a short machine token: `unknown-touch-set`, `code-file`, `machinery-path`, `all-prose`.
+ * @property {string} trail - a one-line human-readable why.
+ */
+
+/**
+ * CLASSIFY a PR's touch-set as a code or a prose review subject (#3309). PURE, total, FAIL-CLOSED to `code`.
+ *
+ * Three gates, in order, and `prose` requires passing all three:
+ *   1. **A readable touch-set.** No files (or nothing string-shaped) → `code`. "I could not see what changed" must
+ *      never buy the cheaper review — that is the one input an adversary controls for free.
+ *   2. **Every file inert text.** ONE non-prose path anywhere in the set routes the whole PR to `code`. A PR that
+ *      edits fifty cards and one `.mjs` is a code PR; the code file does not stop being code because it is
+ *      outnumbered.
+ *   3. **No path-kind escalation signal.** Re-uses `scoreEscalation` over the same file list rather than a second
+ *      taxonomy, so the statute / declarative-leash / gate-derivation / blast-radius rosters are the SAME ones the
+ *      rest of the gate agrees on and cannot drift from them.
+ *
+ * @param {{changedFiles?: string[], escalation?: object}} o - `changedFiles` is the PR's touch-set (repo-relative,
+ *   `gh pr view --json files`-shaped); `escalation` is an optional pre-computed `scoreEscalation` verdict over the
+ *   SAME list, so a caller that already scored does not pay for it twice.
+ * @returns {ReviewSubjectClassification}
+ */
+export function classifyReviewSubject({ changedFiles = [], escalation = null } = {}) {
+  const files = (Array.isArray(changedFiles) ? changedFiles : [])
+    .filter((f) => typeof f === 'string' && f.trim().length > 0);
+
+  // GATE 1 — a touch-set we cannot read is CODE. Fail-closed, and the ONLY branch that does not consult the score.
+  if (!files.length) {
+    return Object.freeze({
+      subject: REVIEW_SUBJECTS.CODE,
+      codeFiles: [],
+      vetoes: [],
+      reason: 'unknown-touch-set',
+      trail: 'no readable touch-set → CODE (fail-closed: an unreadable diff never buys the cheaper review).',
+    });
+  }
+
+  // GATE 2 — one non-prose file anywhere routes the whole PR to CODE.
+  const codeFiles = files.filter((f) => !isProsePath(f));
+  if (codeFiles.length) {
+    const shown = codeFiles.slice(0, 3).join(', ');
+    return Object.freeze({
+      subject: REVIEW_SUBJECTS.CODE,
+      codeFiles,
+      vetoes: [],
+      reason: 'code-file',
+      trail: `${codeFiles.length} of ${files.length} touched file(s) are not inert prose (${shown}${codeFiles.length > 3 ? ', …' : ''}) → CODE.`,
+    });
+  }
+
+  // GATE 3 — the REUSED escalation score over the same list. A path-kind signal means this prose is machinery.
+  const score = escalation && typeof escalation === 'object' && escalation.signals
+    ? escalation
+    : scoreEscalation({ changedFiles: files });
+  const signals = (score && score.signals) || {};
+  const vetoes = PROSE_VETO_SIGNALS.filter((key) => {
+    const v = signals[key];
+    return Array.isArray(v) ? v.length > 0 : Boolean(v);
+  });
+  // `humanRequired` is carried separately as its own veto so a future gate that sets it WITHOUT one of the signal
+  // keys above still lands on the code route rather than slipping through a list this module has to keep in sync.
+  if (score && score.humanRequired === true) vetoes.push('humanRequired');
+  if (vetoes.length) {
+    return Object.freeze({
+      subject: REVIEW_SUBJECTS.CODE,
+      codeFiles: [],
+      vetoes,
+      reason: 'machinery-path',
+      trail: `every touched file is text, but the touch-set escalates on path kind (${vetoes.join(', ')}) → CODE.`,
+    });
+  }
+
+  return Object.freeze({
+    subject: REVIEW_SUBJECTS.PROSE,
+    codeFiles: [],
+    vetoes: [],
+    reason: 'all-prose',
+    trail: `all ${files.length} touched file(s) are inert prose and nothing escalated on path kind → PROSE.`,
+  });
+}
+
+/**
+ * @typedef {Object} ReviewShapePlan
+ * @property {'code'|'prose'} subject - the routed review subject.
+ * @property {ReviewSubjectClassification} classification - the touch-set classification that chose it.
+ * @property {'none'|'low'|'elevated'|'high'} careLevel - the REUSED #2567 care level (unchanged by this router).
+ * @property {number} rounds - `panelRigorForCareLevel(careLevel).rounds` — unchanged by this router.
+ * @property {number} jurorsPerLens - `panelRigorForCareLevel(careLevel).jurorsPerLens` — unchanged by this router.
+ * @property {string[]} lenses - the fan-out set for THIS subject at this care level (empty at care `none`, where
+ *   the dial asks for no panel at all).
+ * @property {string[]} mandatoryLenses - the lenses that must accept: `MANDATORY_LENSES` on the code route, the
+ *   #2657 decision-prose set on the prose route.
+ * @property {string} seatLens - the ONE lens a SINGLE-SEAT operation (`review-pr --lens=`) must spend its seat on.
+ * @property {string[]} trail - the human-readable routing trail.
+ */
+
+/**
+ * ROUTE a PR to its review SHAPE from its touch-set (#3309). PURE — the deterministic core a caller runs BEFORE it
+ * composes the run command, which is the only place the gating can live (see the section header).
+ *
+ * IT CHANGES EXACTLY ONE THING: the lens VOCABULARY, and only for a PR that is provably all inert prose. The care
+ * level, `rounds` and `jurorsPerLens` are `panelRigorForCareLevel`'s, passed through untouched — this router never
+ * dials rigor up or down, so it can neither over- nor under-scrutinize relative to today. On the CODE route the
+ * whole plan is the incumbent behaviour restated: `mandatoryLenses` is `MANDATORY_LENSES` and `seatLens` is
+ * `correctness`, exactly what `review-pr` defaults to today.
+ *
+ * @param {{changedFiles?: string[], escalation?: object, careLevel?: string}} o - `changedFiles` is the PR's
+ *   touch-set; `escalation` is an optional pre-computed `scoreEscalation` verdict over the SAME list; `careLevel`
+ *   overrides the derived level (a caller that resolved it elsewhere), and is IGNORED unless it names a real band.
+ * @returns {ReviewShapePlan}
+ */
+export function routeReviewShape({ changedFiles = [], escalation = null, careLevel } = {}) {
+  const files = (Array.isArray(changedFiles) ? changedFiles : [])
+    .filter((f) => typeof f === 'string' && f.trim().length > 0);
+  const score = escalation && typeof escalation === 'object' && escalation.signals
+    ? escalation
+    : scoreEscalation({ changedFiles: files });
+  const classification = classifyReviewSubject({ changedFiles: files, escalation: score });
+
+  // The care level is REUSED, never re-derived: an explicit override wins only when it names a real band, else the
+  // score's own level, else `none`. An unrecognized override can therefore never crash `panelRigorForCareLevel`.
+  const level = CARE_LEVEL_ORDER.includes(careLevel)
+    ? careLevel
+    : (CARE_LEVEL_ORDER.includes(score && score.careLevel) ? score.careLevel : CARE_LEVELS.NONE);
+  const rigor = panelRigorForCareLevel(level);
+
+  const prose = classification.subject === REVIEW_SUBJECTS.PROSE;
+  const mandatoryLenses = prose ? [...DECISION_PROSE_MANDATORY_LENSES] : [...MANDATORY_LENSES];
+  // The fan-out set for this subject. The care dial decides WHETHER a panel sits (`none` → none) and the subject
+  // decides WHICH lenses it is drawn from — so a prose PR at `none` gets no panel exactly as a code PR does.
+  const lenses = rigor.lenses.length === 0
+    ? []
+    : (prose ? [...DECISION_PROSE_LENS_SET] : [...rigor.lenses]);
+
+  return {
+    subject: classification.subject,
+    classification,
+    careLevel: level,
+    rounds: rigor.rounds,
+    jurorsPerLens: rigor.jurorsPerLens,
+    lenses,
+    mandatoryLenses,
+    // `mandatoryLenses[0]` and never a hard-coded name, so #3314 / #3319 re-tuning either set moves this with it.
+    seatLens: mandatoryLenses[0],
+    trail: [
+      classification.trail,
+      prose
+        ? `prose subject → the #2657 decision-prose lenses (${mandatoryLenses.join(' + ')}); rigor unchanged at care=${level} (${rigor.rounds} round(s), ${rigor.jurorsPerLens} juror(s)/lens).`
+        : `code subject → the PR-review mandatory panel (${mandatoryLenses.join(' + ')}); rigor unchanged at care=${level} (${rigor.rounds} round(s), ${rigor.jurorsPerLens} juror(s)/lens).`,
+    ],
+  };
 }

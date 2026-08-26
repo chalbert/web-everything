@@ -21,12 +21,18 @@ import {
   recordShadowOutcome,
   computeAgreementMetric,
   resolveLandMode,
+  REVIEW_SUBJECTS,
+  PROSE_VETO_SIGNALS,
+  isProsePath,
+  classifyReviewSubject,
+  routeReviewShape,
 } from '../decision-routing.mjs';
 import { DISPOSITIONS } from '../disposition-judge.mjs';
 import { LAND_MODES } from '../auto-land-seam.mjs';
 import { resolveDispositionConfig } from '../review-policy.mjs';
-import { VERDICTS } from '../jury-core.mjs';
-import { CARE_LEVELS } from '../review-escalation.mjs';
+import { VERDICTS, MANDATORY_LENSES, PANEL_LENSES, panelRigorForCareLevel } from '../jury-core.mjs';
+import { CARE_LEVELS, scoreEscalation } from '../review-escalation.mjs';
+import { DECISION_PROSE_MANDATORY_LENSES, DECISION_PROSE_LENS_SET } from '../decision-prose-adapter.mjs';
 
 // The lenses a DECISION jury covers (#2657): root-cause + completeness — NOT the PR-review default.
 const DECISION_LENSES = ['root-cause', 'completeness'];
@@ -426,5 +432,209 @@ describe('#2754 planDecision — the flip mechanically gates the disposer', () =
     });
     expect(disposition.action).toBe(RULING_ACTIONS.ESCALATE);
     expect(disposition.apply).toBe(false);
+  });
+});
+
+// ====================================================================================================================
+// #3309 — THE REVIEW-SUBJECT ROUTER. Route a non-code PR off the code reviewer, from its TOUCH-SET, before any juror
+// is paid. The bias under test is asymmetric and deliberate: over-reviewing prose costs tokens, under-reviewing code
+// ships a defect — so every ambiguity must land on `code`, and the code route must be byte-for-byte the incumbent
+// panel. Most of the assertions below defend that direction, not the saving.
+// ====================================================================================================================
+
+/** Every touch-set shape that MUST route to code. Used by the blanket safety sweep below. */
+const CODE_TOUCH_SETS = [
+  ['scripts/lib/decision-routing.mjs'],
+  ['src/components/thing.ts'],
+  ['package.json'],
+  ['scripts/lib/review-policy.contract.json'],
+  ['docs/agent/platform-decisions.md'],                 // statute — prose-shaped, still code
+  ['skills-src/review/SKILL.md'],                       // a skill's prose IS its program
+  ['agent-memory-src/index-arch.md'],
+  ['.claude/settings.json'],
+  ['.github/workflows/test.yml'],
+  ['AGENTS.md'],
+  ['nested/CLAUDE.md'],
+  ['LICENSE'],                                          // no extension → not on the allow-list
+  ['backlog/3309-x.md', 'scripts/lib/decision-routing.mjs'], // one code file outvotes fifty cards
+  ['plateau-app/.claude/skills/drain/SKILL.md'],        // relocated cross-repo skill — caught by the escalation score
+  [],                                                   // unreadable touch-set
+  ['   '],                                              // whitespace-only entry
+];
+
+describe('#3309 isProsePath — the inert-text allow-list, fail-closed', () => {
+  it('#3309 admits a backlog card, a report and a root doc', () => {
+    expect(isProsePath('backlog/3309-route-non-code-prs-off-the-code-reviewer.md')).toBe(true);
+    expect(isProsePath('reports/2026-07-18-human-vs-ai-review-cognitive-science.md')).toBe(true);
+    expect(isProsePath('README.md')).toBe(true);
+    expect(isProsePath('notes/thing.txt')).toBe(true);
+  });
+
+  it('#3309 refuses code, data and extension-less files', () => {
+    for (const p of ['scripts/lib/decision-routing.mjs', 'src/a.ts', 'package.json', 'config/a.yml', 'LICENSE']) {
+      expect(isProsePath(p), p).toBe(false);
+    }
+  });
+
+  it('#3309 refuses OPERATIVE prose — a skill, agent memory, the docs router, AGENTS.md/CLAUDE.md anywhere', () => {
+    for (const p of [
+      'skills-src/review/SKILL.md', 'agent-memory-src/index-dec.md', 'docs/agent/backlog-workflow.md',
+      '.claude/commands/x.md', '.github/PULL_REQUEST_TEMPLATE.md', 'AGENTS.md', 'CLAUDE.md', 'a/b/AGENTS.md',
+    ]) {
+      expect(isProsePath(p), p).toBe(false);
+    }
+  });
+
+  it('#3309 is fail-closed on a malformed entry, and does not read a DIRECTORY dot as an extension', () => {
+    for (const p of [null, undefined, '', '   ', 42, {}]) expect(isProsePath(p)).toBe(false);
+    expect(isProsePath('dir.md/thing.mjs')).toBe(false); // the dot is in the directory, not the file
+  });
+
+  it('#3309 normalizes git rename spellings through plainDiffPath rather than re-parsing them', () => {
+    expect(isProsePath('backlog/{old.md => new.md}')).toBe(true);
+    expect(isProsePath('backlog/a.md => scripts/b.mjs')).toBe(false); // the NEW side is what lands
+  });
+});
+
+describe('#3309 classifyReviewSubject — three gates, prose must pass all three', () => {
+  it('#3309 routes an all-prose card-filing PR to the PROSE subject', () => {
+    const c = classifyReviewSubject({ changedFiles: ['backlog/3309-x.md', 'backlog/3310-y.md', 'README.md'] });
+    expect(c.subject).toBe(REVIEW_SUBJECTS.PROSE);
+    expect(c.reason).toBe('all-prose');
+    expect(c.codeFiles).toEqual([]);
+    expect(c.vetoes).toEqual([]);
+  });
+
+  it('#3309 GATE 1 — an empty or unreadable touch-set is CODE, never the cheaper review', () => {
+    for (const files of [[], undefined, null, ['  '], [42, null]]) {
+      const c = classifyReviewSubject({ changedFiles: files });
+      expect(c.subject).toBe(REVIEW_SUBJECTS.CODE);
+      expect(c.reason).toBe('unknown-touch-set');
+    }
+  });
+
+  it('#3309 GATE 2 — ONE code file among many cards routes the whole PR to CODE and names it', () => {
+    const files = ['backlog/a.md', 'backlog/b.md', 'backlog/c.md', 'scripts/lib/decision-routing.mjs'];
+    const c = classifyReviewSubject({ changedFiles: files });
+    expect(c.subject).toBe(REVIEW_SUBJECTS.CODE);
+    expect(c.reason).toBe('code-file');
+    expect(c.codeFiles).toEqual(['scripts/lib/decision-routing.mjs']);
+    expect(c.trail).toContain('scripts/lib/decision-routing.mjs');
+  });
+
+  it('#3309 GATE 3 — all-text but path-kind-escalating is CODE, over the REUSED scoreEscalation roster', () => {
+    // A relocated cross-repo skill. Its path starts with NEITHER `.claude/` nor `skills-src/`, so gate 2's
+    // `^`-anchored prefix list misses it — `scoreEscalation`'s `(^|/)`-anchored blast-radius roster catches it.
+    // This is the case that proves the two gates are not redundant.
+    const files = ['plateau-app/.claude/skills/drain/SKILL.md'];
+    expect(isProsePath(files[0])).toBe(true);                       // gate 2 lets it through …
+    expect(scoreEscalation({ changedFiles: files }).signals.blastRadius).toBeTruthy();
+    const c = classifyReviewSubject({ changedFiles: files });        // … gate 3 stops it
+    expect(c.subject).toBe(REVIEW_SUBJECTS.CODE);
+    expect(c.reason).toBe('machinery-path');
+    expect(c.vetoes).toContain('blastRadius');
+  });
+
+  it('#3309 GATE 3 — humanRequired alone vetoes prose even with no listed signal key', () => {
+    const c = classifyReviewSubject({
+      changedFiles: ['backlog/a.md'],
+      escalation: { signals: {}, humanRequired: true, careLevel: CARE_LEVELS.HIGH },
+    });
+    expect(c.subject).toBe(REVIEW_SUBJECTS.CODE);
+    expect(c.vetoes).toEqual(['humanRequired']);
+  });
+
+  it('#3309 GATE 3 — a CAPACITY signal (size / dismissed findings) does NOT veto prose', () => {
+    // The measured cost this item exists to cut is the LONG planning PR. Vetoing on size would send exactly that
+    // PR back to the correctness juror and the item would save nothing.
+    const escalation = scoreEscalation({ changedFiles: ['backlog/a.md'], diffLines: 5000, dismissedFindings: 3 });
+    expect(escalation.escalate).toBe(true);
+    expect(escalation.signals.size).toBeTruthy();
+    expect(classifyReviewSubject({ changedFiles: ['backlog/a.md'], escalation }).subject)
+      .toBe(REVIEW_SUBJECTS.PROSE);
+  });
+
+  it('#3309 PROSE_VETO_SIGNALS names only path-KIND signals', () => {
+    expect([...PROSE_VETO_SIGNALS].sort())
+      .toEqual(['blastRadius', 'crossRepo', 'gateDerivation', 'gateSelf', 'statute']);
+    expect(PROSE_VETO_SIGNALS).not.toContain('size');
+    expect(PROSE_VETO_SIGNALS).not.toContain('dismissedFindings');
+  });
+});
+
+describe('#3309 routeReviewShape — a CODE PR still gets the full mandatory panel', () => {
+  it('#3309 every code-shaped touch-set keeps MANDATORY_LENSES and the correctness seat, with no exception', () => {
+    for (const changedFiles of CODE_TOUCH_SETS) {
+      const plan = routeReviewShape({ changedFiles });
+      expect(plan.subject, JSON.stringify(changedFiles)).toBe(REVIEW_SUBJECTS.CODE);
+      expect(plan.mandatoryLenses, JSON.stringify(changedFiles)).toEqual([...MANDATORY_LENSES]);
+      expect(plan.seatLens, JSON.stringify(changedFiles)).toBe(MANDATORY_LENSES[0]);
+      // and the fan-out set is the care dial's OWN lens list, untouched by this router
+      expect(plan.lenses, JSON.stringify(changedFiles))
+        .toEqual([...panelRigorForCareLevel(plan.careLevel).lenses]);
+    }
+  });
+
+  it('#3309 a high-care code PR gets every panel lens, 3 rounds and 2 jurors — the router shrinks nothing', () => {
+    const plan = routeReviewShape({ changedFiles: ['docs/agent/platform-decisions.md', 'scripts/lib/gate-config.mjs'] });
+    expect(plan.subject).toBe(REVIEW_SUBJECTS.CODE);
+    expect(plan.careLevel).toBe(CARE_LEVELS.HIGH);
+    expect(plan.lenses).toEqual([...PANEL_LENSES]);
+    expect(plan.rounds).toBe(3);
+    expect(plan.jurorsPerLens).toBe(2);
+    expect(plan.mandatoryLenses).toEqual([...MANDATORY_LENSES]);
+  });
+
+  it('#3309 the code route is EXACTLY the incumbent: seatLens equals review-pr’s default lens', () => {
+    expect(routeReviewShape({ changedFiles: ['scripts/lib/a.mjs'] }).seatLens).toBe('correctness');
+  });
+});
+
+describe('#3309 routeReviewShape — a PROSE PR swaps the lens VOCABULARY and nothing else', () => {
+  it('#3309 a card-filing PR is judged by the #2657 decision-prose lenses, not correctness', () => {
+    const plan = routeReviewShape({ changedFiles: ['backlog/3309-x.md', 'backlog/3310-y.md'] });
+    expect(plan.subject).toBe(REVIEW_SUBJECTS.PROSE);
+    expect(plan.mandatoryLenses).toEqual([...DECISION_PROSE_MANDATORY_LENSES]);
+    expect(plan.mandatoryLenses).not.toContain('correctness');
+    expect(plan.seatLens).toBe(DECISION_PROSE_MANDATORY_LENSES[0]);
+  });
+
+  it('#3309 RIGOR is passed through untouched — the router never dials care up or down', () => {
+    const escalation = scoreEscalation({ changedFiles: ['backlog/a.md'], diffLines: 5000 });
+    const plan = routeReviewShape({ changedFiles: ['backlog/a.md'], escalation });
+    const rigor = panelRigorForCareLevel(escalation.careLevel);
+    expect(plan.subject).toBe(REVIEW_SUBJECTS.PROSE);
+    expect(plan.careLevel).toBe(escalation.careLevel);
+    expect(plan.rounds).toBe(rigor.rounds);
+    expect(plan.jurorsPerLens).toBe(rigor.jurorsPerLens);
+    // rigor identical, vocabulary different — that is the ENTIRE behavioural delta of this item
+    expect(plan.lenses).toEqual([...DECISION_PROSE_LENS_SET]);
+  });
+
+  it('#3309 care `none` seats no panel on either route — the dial decides WHETHER, the subject decides WHICH', () => {
+    const prose = routeReviewShape({ changedFiles: ['backlog/a.md'] });
+    expect(prose.careLevel).toBe(CARE_LEVELS.NONE);
+    expect(prose.lenses).toEqual([]);
+    expect(prose.rounds).toBe(0);
+    // …but a single-seat caller still learns which lens the seat belongs to
+    expect(prose.seatLens).toBe(DECISION_PROSE_MANDATORY_LENSES[0]);
+  });
+
+  it('#3309 an unrecognized careLevel override is IGNORED rather than crashing the rigor dial', () => {
+    const plan = routeReviewShape({ changedFiles: ['backlog/a.md'], careLevel: 'catastrophic' });
+    expect(plan.careLevel).toBe(CARE_LEVELS.NONE);
+    expect(() => routeReviewShape({ changedFiles: ['backlog/a.md'], careLevel: null })).not.toThrow();
+  });
+
+  it('#3309 an explicit valid careLevel override is honoured', () => {
+    const plan = routeReviewShape({ changedFiles: ['backlog/a.md'], careLevel: CARE_LEVELS.ELEVATED });
+    expect(plan.careLevel).toBe(CARE_LEVELS.ELEVATED);
+    expect(plan.rounds).toBe(2);
+    expect(plan.lenses).toEqual([...DECISION_PROSE_LENS_SET]);
+  });
+
+  it('#3309 REVIEW_SUBJECTS is a frozen two-member enum', () => {
+    expect(Object.isFrozen(REVIEW_SUBJECTS)).toBe(true);
+    expect(Object.values(REVIEW_SUBJECTS).sort()).toEqual(['code', 'prose']);
   });
 });
