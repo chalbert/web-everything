@@ -2214,8 +2214,8 @@ export function computeNetDiffText({ exec, remote = 'origin', base = 'main', rev
  *     whole as well, because the drain reuses that same object for the anti-test-gaming scan.
  * A caller with no clone to read does not call this at all (the drain's `gh pr view --json files` fallback).
  * @param {{exec:Function, remote?:string, base?:string, baseRev?:string|null, rev:string, fetchExtraRefs?:string[]}} o
- * @returns {{changedFiles:string[], diffLines:number, humanBasisFiles:string[], scored:boolean,
- *   netDiffText:{text:string,scored:boolean,reason?:string}, diffHunks:string|null}}
+ * @returns {{changedFiles:string[], diffLines:number, humanBasisFiles:string[], cumulativeDiffLines:number,
+ *   scored:boolean, netDiffText:{text:string,scored:boolean,reason?:string}, diffHunks:string|null}}
  */
 export function computeNetDiffSignals({ exec, remote = 'origin', base = 'main', baseRev = null, rev, fetchExtraRefs = [] } = {}) {
   const basis = resolveNetDiffBasis({ exec, remote, base, rev, fetchExtraRefs });
@@ -2225,6 +2225,13 @@ export function computeNetDiffSignals({ exec, remote = 'origin', base = 'main', 
     changedFiles: net.changedFiles,
     diffLines: net.diffLines,
     humanBasisFiles: net.humanBasisFiles,
+    // #3317 — the CUMULATIVE line count, the twin of `humanBasisFiles`. `basis.humanBasis` is the
+    // `mergeBase(<remote>/<base>, head)…head` numstat, so this is the merge-base measurement of SIZE, which a
+    // stacked/self-declared `baseRev` cannot shrink. It comes off the SAME already-resolved basis as everything
+    // else here (no extra subprocess). `scoreEscalation` floors `diffLines` at it. Zero when the basis did not
+    // resolve — the same degraded posture the other fields take, and `scoreEscalation`'s `max` then leaves the
+    // declared count alone rather than zeroing a real signal.
+    cumulativeDiffLines: basis.ok ? basis.humanBasis.diffLines : 0,
     scored: net.scored,
     netDiffText,
     diffHunks: diffHunksFrom(netDiffText),
@@ -3263,6 +3270,10 @@ async function runCli() {
       // #2390-review-fix — the CUMULATIVE origin/main…head file set the gate-self/human trigger scores over
       // (never de-inflated by a stacked base). `null` → scoreEscalation falls back to `changedFiles`.
       let humanBasisFiles = null;
+      // #3317 — and the cumulative LINE count off that same basis, so SIZE is floored at the merge-base
+      // measurement too (a stacked/self-declared base can raise it, never shrink it). `null` → scoreEscalation
+      // scores the declared `diffLines` alone, exactly as before.
+      let cumulativeDiffLines = null;
       // #2373 — score off the SHARED net-diff basis (`computeNetDiffChangedFiles`, also used by the
       // producer path in pr-land.mjs — the ONE place this basis is computed, #1821's original fix folded
       // in). Best-effort local git read (needs the local clone or a provisioned sibling clone); falls back
@@ -3289,6 +3300,7 @@ async function runCli() {
         changedFiles = sig.changedFiles;
         diffLines = sig.diffLines;
         humanBasisFiles = sig.humanBasisFiles;
+        cumulativeDiffLines = sig.cumulativeDiffLines;
         netScored = sig.scored;
         netDiffText = sig.netDiffText;
         diffHunks = sig.diffHunks;
@@ -3301,6 +3313,8 @@ async function runCli() {
           // The gh files list is the PR's full diff vs its base branch (main) — already cumulative, so it IS the
           // human-gate basis (a stacked base never de-inflates this fallback path).
           humanBasisFiles = changedFiles;
+          // #3317 — and so is its line count: this IS the cumulative measurement on this path.
+          cumulativeDiffLines = diffLines;
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
       // #2890-review-fix finding 1 — `diffHunks` comes from `computeNetDiffSignals` above, which applies
@@ -3308,7 +3322,7 @@ async function runCli() {
       // `null` when it was not — including the no-clone path this block skipped entirely. Finding 4 — the hunks
       // are always CUMULATIVE while `changedFiles` may be de-inflated to `v.base…head`; the verdict's
       // `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is what a detector pairs them with.
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later

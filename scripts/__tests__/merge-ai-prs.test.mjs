@@ -1854,6 +1854,37 @@ describe('computeNetDiffSignals — the ONE net-diff derivation both call sites 
     expect(scoreEscalation({ ...sig }).diffHunksBasisFiles).toEqual(['README.md', 'docs/agent/platform-decisions.md']);
   });
 
+  it('#3317 — publishes the CUMULATIVE line count beside the cumulative file list, off the same resolved basis', () => {
+    const { exec, calls } = fakeExec(script);
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.cumulativeDiffLines).toBe(4);          // 3 added + 1 deleted, merge-base…head
+    expect(calls.filter((c) => c.key.startsWith('git diff --numstat')).length).toBe(1); // no extra subprocess
+  });
+  it('#3317 — a stacked lane de-inflates diffLines but NOT cumulativeDiffLines, so scoreEscalation still sees the honest size', () => {
+    const { exec } = fakeExec({
+      ...script,
+      'git merge-base --is-ancestor abc1234 origin/lane/x': { stdout: '' },
+      'git rev-parse abc1234': { stdout: 'abc1234\n' },
+      'git rev-parse origin/lane/x': { stdout: 'headsha\n' },
+      // the ancestor contributed 600 lines; the child's own delta is 4
+      'git diff --numstat forkpoint origin/lane/x': { stdout: '3\t1\tREADME.md\n500\t100\tdocs/big.md\n' },
+      'git diff --numstat abc1234 origin/lane/x': { stdout: '3\t1\tREADME.md\n' },
+    });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', baseRev: 'abc1234', fetchExtraRefs: ['lane/x'] });
+    expect(sig.diffLines).toBe(4);                    // #2390 de-inflation, preserved
+    expect(sig.cumulativeDiffLines).toBe(604);        // #3317 — the merge-base measurement, un-shrinkable
+    const score = scoreEscalation({ ...sig });
+    expect(score.escalate).toBe(true);
+    expect(score.signals.size).toBe(604);
+    // and it is an escalation, never a refusal (#3320) — agent-clearable
+    expect(score.humanRequired).toBe(false);
+  });
+  it('#3317 — an unresolvable basis degrades to 0, which leaves the declared count alone rather than zeroing it', () => {
+    const { exec } = fakeExec({});
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/gone' });
+    expect(sig.cumulativeDiffLines).toBe(0);
+    expect(scoreEscalation({ diffLines: 900, cumulativeDiffLines: sig.cumulativeDiffLines }).signals.size).toBe(900);
+  });
   it('the drain\'s scoring loop reads the signal off this derivation, never assembling it inline', () => {
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
     const loop = src.slice(src.indexOf('for (const v of verdicts)'));

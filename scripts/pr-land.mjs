@@ -523,18 +523,24 @@ export function classifyChecks(rows) {
  * `scoreEscalation`. Precondition plumbing only: no signal reads it yet. Per `scoreEscalation`'s contract the
  * default is `null` = NOT COMPUTED, distinct from `''` = computed and genuinely empty; callers derive it with
  * `computeNetDiffSignals(...).diffHunks`, never from a raw `.text` (#2890-review-fix finding 1).
- * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, dismissedFindings?:number,
- *          crossRepo?:boolean, currentLabels?:Array, diffHunks?:string|null}} o
+ * #3317 — also accepts `cumulativeDiffLines` (the `mergeBase(origin/main, head)…head` line count) and threads it
+ * into the rubric, which floors SIZE at it. Together with `humanBasisFiles` that makes EVERY signal cumulative,
+ * so a stacked lane's self-declared `base` can no longer de-inflate the size or blast-radius the producer stamps.
+ * `computeNetDiffSignals` supplies it off the already-resolved basis; omitting it is the pre-#3317 behaviour.
+ * @param {{changedFiles?:string[], diffLines?:number, humanBasisFiles?:string[]|null, cumulativeDiffLines?:number|null,
+ *          dismissedFindings?:number, crossRepo?:boolean, currentLabels?:Array, diffHunks?:string|null}} o
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, humanBasisFiles = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null,
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, cumulativeDiffLines = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null,
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, diffHunks });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, diffHunks });
   const label = producerReviewLabel(score);
   // #2635 — expose the advisory care-level too, so the caller can recompute the jury roster (`resolveJuryPlan`)
   // for the SAME care band this rubric scored, then bind + reconcile it against the pre-registered roster.
-  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired, careLevel: score.careLevel };
+  // #3317 — `basisFiles` (the honest cumulative-floored file set the rubric actually scored) rides along too, so
+  // the roster recompute selects lenses over the SAME basis rather than the possibly de-inflated own delta.
+  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired, careLevel: score.careLevel, basisFiles: score.basisFiles };
 }
 
 /**
@@ -842,6 +848,11 @@ function runCli() {
     // #2390-review-fix — the CUMULATIVE origin/main…head basis the gate-self/human trigger scores over; a
     // stacked base de-inflates SIZE (`changedFiles`) but can never shrink this.
     const humanBasisFiles = sig.humanBasisFiles;
+    // #3317 — the cumulative LINE count off that same basis. `humanBasisFiles` alone made only the human gate
+    // un-shrinkable; this makes SIZE un-shrinkable too, so neither a stacked base nor the sanctioned
+    // slice-into-two-PRs route can de-inflate the care level a PR opens with. Measurement only — size still
+    // never refuses a PR (#3320), it only routes more reviewers at it.
+    const cumulativeDiffLines = sig.cumulativeDiffLines;
     // #2890 — that same basis's TEXT (not just the changed-file/line-count shape above). #2890-review-fix
     // finding 1 — the shared derivation applies `diffHunksFrom`, so this is the text when it was really
     // computed and `null` when it was NOT; never a raw `.text`, which is `''` on every failure path and so
@@ -853,7 +864,7 @@ function runCli() {
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, dismissedFindings, crossRepo, currentLabels, diffHunks });
+    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, currentLabels, diffHunks });
 
     // #2635 — BIND + RECONCILE the jury roster against the REAL diff. The pre-registered roster (the item's
     // charter roster) rides the lane manifest when a prepare-time slice recorded it (`preRegisteredLenses`);
@@ -862,7 +873,10 @@ function runCli() {
     // the review label to review:human (never a silent rebind). This only ever ADDS the human trigger; a
     // gate-self / statute change already forces review:human via the rubric and is never relaxed here.
     const preRegistered = manifest && Array.isArray(manifest.preRegisteredLenses) ? manifest.preRegisteredLenses : null;
-    const roster = resolveRosterReconcile({ careLevel: rubric.careLevel, changedFiles, preRegistered });
+    // #3317 — pick lenses over the rubric's own cumulative-floored basis, not the possibly de-inflated own delta:
+    // a lens earned by an ANCESTOR's file is earned by the diff this PR merges. Falls back to `changedFiles` if a
+    // caller ever hands back a verdict without it.
+    const roster = resolveRosterReconcile({ careLevel: rubric.careLevel, changedFiles: rubric.basisFiles || changedFiles, preRegistered });
     const humanRequired = rubric.humanRequired || roster.humanAlignmentRequired;
     const finalLabel = humanRequired ? REVIEW_LABELS.human : rubric.label;
     const reasons = [...rubric.reasons, ...roster.reasons];
