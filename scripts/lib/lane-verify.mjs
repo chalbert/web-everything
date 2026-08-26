@@ -43,8 +43,11 @@
  * exactly two documented ways past the gate — deliberately different in strength:
  *
  *   1. OPT-OUT — `--no-require-verified` (or `--require-verified=0|false|no|off`, or `WE_REQUIRE_VERIFIED=0`).
- *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere (a CI-gated path
- *      whose required GitHub check is the real gate). It relaxes only the two "we never saw a result" cells —
+ *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere — concretely, the
+ *      merge-queue drain (`buildPrLandArgs`, `we:scripts/lane-drain.mjs`), whose required GitHub check is the
+ *      real gate (#1937) and which lands from a checkout where a lane's marker cannot exist. An opt-out with no
+ *      callers would be a claim, not an escape hatch; this one has exactly one, on purpose, and it is tested.
+ *      It relaxes only the two "we never saw a result" cells —
  *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
  *      `corrupt` marker still refuse, because those are evidence of a BROKEN verification, not a missing one.
  *   2. BREAK-GLASS — `WE_LAND_UNVERIFIED=1`. The full override, every cell, including stall and corrupt. For a
@@ -219,8 +222,13 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *     the marker is advisory and the record is allowed (`red-ci-gated`). This is the asymmetry between the two
  *     hazard classes — "never finished" (`running`) is always refused; "finished badly" (`red`) blocks only when
  *     the caller demanded a local green. It matches the "absent/red under `--require-verified`" contract in the
- *     PR body + #2833 resolution, and keeps the CI-gated drain / parallel-workflow paths (which gate the merge
- *     via the required GitHub `test` check — a red tree also fails it) untouched, as documented.
+ *     PR body + #2833 resolution. THIS CLAUSE USED TO END "...and keeps the CI-gated drain / parallel-workflow
+ *     paths (which gate the merge via the required GitHub `test` check — a red tree also fails it) UNTOUCHED, as
+ *     documented." THAT WAS WRONG, and it is the exact error #3321's review caught: those paths passed NOTHING,
+ *     and after the flip "nothing" resolves to `requireVerified: true`, so they were not kept untouched — they
+ *     were silently switched to the strict gate and would have refused every couple. They are untouched only
+ *     NOW, because `we:scripts/lane-drain.mjs` was changed to pass `--no-require-verified` explicitly. Inverting
+ *     a default is a change to every caller that says nothing; it cannot leave them "unchanged" by construction.
  *   - a `corrupt` record (the marker exists but did not parse) → NOT ok (`verify-corrupt`), regardless of
  *     `requireVerified`. A torn/garbled marker must never fold into `absent` and fail OPEN — exactly backwards
  *     for a stall guard (#2833 finding 5). Re-run `verify-lane` (or delete the marker) to recover.
@@ -229,7 +237,11 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *     item exists for: "no marker" used to mean "not tracked here, go ahead", so a lane whose suites had never
  *     run landed on the strength of the gate not knowing. It now means "unverified — run `verify-lane`". The
  *     permissive `untracked` verdict survives only for a caller that explicitly opts out (`--no-require-verified`)
- *     because it verifies elsewhere — e.g. a path gated by the required GitHub check rather than this marker.
+ *     because it verifies elsewhere. That is not hypothetical and must not be left as an "e.g.": the caller is
+ *     `buildPrLandArgs` in `we:scripts/lane-drain.mjs`, which lands from the PRIMARY checkout where a lane
+ *     clone's marker can never appear, and whose merge is gated by the required GitHub check (#1937). If that
+ *     call site ever drops the flag, this cell wedges the whole merge queue — see the test that pins the built
+ *     argv through this function in `we:scripts/__tests__/lane-drain.test.mjs`.
  *     Note a MISSING `headSha` also lands here (nothing can match it), and so is refused by default rather than
  *     waved through: not being able to identify the tree is not evidence that the tree is fine.
  *
