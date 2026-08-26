@@ -189,7 +189,7 @@ describe('the read-only path is given nothing to write WITH', () => {
 
   it('`runReadOnly` takes no store, no sinks and no judge — and refuses a declaration that can suspend', () => {
     expect(() => runReadOnly(REVIEW_PR_DECL(), { input: { pr: 1, repo: 'a/b' }, id: 'r-1', registry: createRegistry() }))
-      .toThrow(/is not `compute`-only — judge\(judge\), confirm\(confirm\), record\(effect\)/);
+      .toThrow(/is not `compute`-only — judge\(judge\), judgeSecurity\(judge\), confirm\(confirm\), record\(effect\)/);
     expect(() => assertReadOnlyDeclaration(REVIEW_PR_DECL())).toThrow(/is not `compute`-only/);
     expect(assertReadOnlyDeclaration(SUGGEST_DECL()).name).toBe(SUGGEST_NEXT_OP);
   });
@@ -411,7 +411,7 @@ describe('describe — one declaration, one description', () => {
   it('the index lists every declared operation and whether it can write', async () => {
     const res = await handleOperationRequest({ method: 'GET', url: '/operations' }, { ...wiring(), newRunId: idMinter() });
     expect(res.body.operations).toEqual([
-      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'reduce(compute)', 'confirm(confirm)', 'record(effect)'] },
+      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'judgeSecurity(judge)', 'reduce(compute)', 'confirm(confirm)', 'record(effect)'] },
       { op: SUGGEST_NEXT_OP, readOnly: true, describe: '/operations/suggest-next', steps: ['board(compute)', 'shortlist(compute)'] },
     ]);
   });
@@ -494,8 +494,9 @@ describe('genericity — the adapter knows nothing about either operation', () =
     // NOTHING RAN. The juror was a stub and no sink was ever reached.
     expect(applied).toEqual([]);
     expect(store.read(started.body.runId).effects).toEqual([]);
-    // The declared judge step DID suspend and its cost rode back on the resume — the generic loop, unchanged.
-    expect(started.body.spend.jurors).toBe(1);
+    // BOTH declared judge steps suspended and each cost rode back on its own resume — the generic loop,
+    // unchanged by #3319 adding a second one. `1` here would mean the adapter had a hard-coded juror count.
+    expect(started.body.spend.jurors).toBe(2);
 
     // The record is readable through the derived GET route.
     const read = await handleOperationRequest({ method: 'GET', url: `/operations/review-pr/runs/${started.body.runId}` }, deps);

@@ -19,9 +19,15 @@
  *   | status             | this adapter                                                                        |
  *   |--------------------|-------------------------------------------------------------------------------------|
  *   | `running`          | `advance` again — no io                                                             |
- *   | `awaiting-judge`   | spawns ONE tool-free juror (`judgeSpawn`, #3028), resumes with its answer + its cost |
+ *   | `awaiting-judge`   | spawns ONE juror PER SUSPEND (`judgeSpawn`, #3028), resumes with its answer + cost  |
  *   | `awaiting-confirm` | **STOPS AND EXITS.** The question is printed; the run id is printed. Nothing else.   |
  *   | `awaiting-effect`  | applies the declared effects through the executor, then `advance` again              |
+ *
+ * TWO NOTES ON THE JUDGE ROW, because both used to read wrong. **"ONE juror" is per SUSPEND, not per RUN** — an
+ * operation declaring N `judge` steps suspends N times and seats N jurors (`review-pr` declares two since
+ * #3319). And the juror is **tool-free only by DEFAULT**: a request carrying a non-empty `allowedTools` gets a
+ * tool-bearing juror, which is what `review-pr` passes (`REVIEW_JUROR_TOOLS`). Reading this row as "one
+ * tool-free juror, once, per run" is wrong on all three counts for the operation most likely to be read here.
  *
  * THE CONFIRM STOP IS THE POINT. `we:skills-src/review/SKILL.md` used to carry it as prose — *"This is a stop
  * point … Do not auto-proceed"* — a rule the model had to hold. Here it is arithmetic: an `--answer` is REFUSED
