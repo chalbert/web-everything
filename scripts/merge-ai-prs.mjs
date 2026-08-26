@@ -1242,12 +1242,29 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
       p.commits = read.commits || [];
       const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
+      // #3308 (round-2 correctness fix) — the PASS-WIDE half of the relief valve, recorded HERE because it is the
+      // only place it is knowable. The scoped `=<pr#>` form stamps `v.reliefWaived` down in the escalation loop,
+      // but that whole loop is gated on `REVIEW_ESCALATION = label && !escalationRelief.passWide` — so under a BARE
+      // `--no-review-escalation` it never runs, nothing was ever stamped, and the `relief-waived` announcement
+      // could not fire for the deprecated form at all. The candidates still merged: `allowPendingReview` above
+      // carries them past their review hold through this separate bypass. That is a review waived in silence,
+      // which is the exact failure #3308 exists to end, so it gets its own gap code (`relief-waived-pass-wide`):
+      // the two forms are NOT the same statement — the scoped one waives ONE named PR's park with the rubric
+      // still live for the rest of the pass, the bare one turns the rubric OFF for EVERY candidate this pass,
+      // including ones that were never scored at all. Conditioned on `relief.passWide && !!label`, the SAME
+      // expression as the bypass it records: with no `--label` the rubric was already off (REVIEW_ESCALATION is
+      // falsy on `label` alone), so the flag waived nothing and claiming otherwise would be its own false record.
+      if (relief.passWide && !!label) v.reliefPassWide = true;
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
       // #3308 — the sha this PR would MERGE, carried onto the verdict so the land path can tell a review
       // recorded against the landing tree from one recorded against an earlier commit. Already in the sweep's
       // `--json` field set (`headRefOid`), so this costs no extra gh call. Null when the listing omitted it,
       // which the coverage reader treats as "staleness unknown", never as "fresh".
+      // SWEEP-TIME value: this is the tip as LISTED. The drain's own in-pass rebase-drop can replace that tip
+      // before the land cascade runs, so the cascade re-stamps this field from the pushed commit (see the
+      // `v.headSha = r.newCommit` refresh in the rebase-drop loop) — without that refresh the "would MERGE"
+      // claim above would be false for exactly the PRs the drain rebased (round-2 review, note 2).
       v.headSha = p.headRefOid || null;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
       v.prLabels = p.labels || [];
@@ -1876,7 +1893,13 @@ export function recordedReviewRecords(comments) {
  * unstructured verdict simply yields nulls, which the gap reader treats as UNKNOWN — never as clean.
  *   · `basis`      — the `Net basis: \`<base>..<head>\`` range the review actually examined, or null.
  *   · `lensRows`   — the `### Panel verdicts` table rows, `{lens, weight, verdict}`.
- *   · `singleLens` — the record's own "a SINGLE-LENS run" self-declaration.
+ *   · `singleLens` — the record's own "a SINGLE-LENS run" self-declaration. LEGACY RECORDS ONLY, and that is
+ *                    not a defect: #3319 landed on this PR's merge base and `review-pr.mjs`'s renderer no
+ *                    longer writes that sentence (it writes "**Lenses:** `a` + `b` — N juror(s)" instead), and
+ *                    the same change seats TWO mandatory lenses, so there is no live single-lens shape left to
+ *                    miss. The string survives on already-posted verdicts, which are exactly the records a PR
+ *                    merging today can still be carrying — so the check keeps earning its place, it just reads
+ *                    history rather than new output. It does NOT false-positive on the new `**Lenses:**` form.
  * The two regexes mirror `we:scripts/review-corpus/mine-review-corpus.mjs#parseVerdict`, which reads the same
  * bytes for the corpus. They are NOT shared with it on purpose: that parser returns `null` for a record with
  * no `Net basis` (corpus policy — a record with no revision range is not replayable, so it is excluded), and
@@ -1916,14 +1939,19 @@ function sameCommit(a, b) {
  *   · `unseated-mandatory-lens` — a verdict whose panel table seats ZERO mandatory rows is an accept nothing
  *                                 could have blocked: the correctness floor was unseated by the lens selection.
  *   · `single-lens`             — the record's own self-declaration that one juror judged and the rest of the
- *                                 panel did not run. Narrower than the default panel, by construction.
+ *                                 panel did not run. Narrower than the default panel, by construction. Reads
+ *                                 LEGACY records only post-#3319 — see `readReviewRecord`'s note.
  *   · `stale-basis`             — the tree the review examined is NOT the tree being merged.
  *   · `unstated-basis`          — a verdict that names no revision range. What it covered is UNKNOWN, and
  *                                 unknown must be announced rather than resolved in the reassuring direction.
  *   · `restamped-acceptance`    — the operative record is a re-stamp, which says "no new review" in its own
  *                                 heading: the accept rode a rebase and no juror looked at the landing tree.
- *   · `relief-waived`           — `--no-review-escalation` waived this PR's park. The review was deliberately
- *                                 turned off for it, and today nothing on the PR records that it was.
+ *   · `relief-waived`           — `--no-review-escalation=<pr#>` waived this PR's park. The review was
+ *                                 deliberately turned off for it, and today nothing on the PR records that it was.
+ *   · `relief-waived-pass-wide` — the DEPRECATED bare `--no-review-escalation` turned the escalation rubric off
+ *                                 for the WHOLE pass, so this PR merged without ever being scored — a strictly
+ *                                 wider statement than the scoped waiver above, and a separate code for that
+ *                                 reason: a reader must not read a pass-wide switch-off as one named exemption.
  *
  * NOT in the set, deliberately: a `clear-human` ceremony clearance (its own durable comment states exactly
  * what it proves and what it does not — #2895), and `dismissedFindings > 0` (already recorded verbatim by the
@@ -1936,7 +1964,8 @@ export const REVIEW_COVERAGE_GAP_META = {
   'stale-basis': 'the recorded verdict examined a different tree than the one being merged',
   'unstated-basis': 'the recorded verdict names no revision range, so which tree it examined cannot be determined from the record',
   'restamped-acceptance': 'the operative record is a re-stamped acceptance carried across a rebase — its own heading says "no new review"',
-  'relief-waived': '`--no-review-escalation` waived this PR\'s review park, so it is merging past a hold the drain would otherwise have enforced',
+  'relief-waived': '`--no-review-escalation=<pr#>` waived this PR\'s review park, so it is merging past a hold the drain would otherwise have enforced',
+  'relief-waived-pass-wide': 'the deprecated bare `--no-review-escalation` waived the escalation rubric PASS-WIDE, so this PR merged without being scored at all — not one named exemption, but the review turned off for every candidate in the pass',
 };
 
 /**
@@ -1949,9 +1978,14 @@ export const REVIEW_COVERAGE_GAP_META = {
  * lens/basis checks below would re-report facts those two record shapes structurally do not carry, which is a
  * false gap, not a found one.
  */
-export function reviewCoverageGaps({ comments = [], headSha = null, reliefWaived = false } = {}) {
+export function reviewCoverageGaps({ comments = [], headSha = null, reliefWaived = false, reliefPassWide = false } = {}) {
   const codes = [];
   if (reliefWaived === true) codes.push('relief-waived');
+  // #3308 (round-2 correctness fix) — the pass-wide waiver is its OWN gap, not a synonym of the scoped one. The
+  // two are mutually exclusive by construction (`reliefWaived` is only ever stamped inside the escalation loop,
+  // which `passWide` switches off), so at most one of these two lines fires; the `else` is deliberately absent
+  // rather than assumed, because a caller passing both should be told both rather than silently told one.
+  if (reliefPassWide === true) codes.push('relief-waived-pass-wide');
   const records = recordedReviewRecords(comments);
   const latest = records[records.length - 1] || null;
   if (!latest) codes.push('no-recorded-review');
@@ -3320,6 +3354,14 @@ async function runCli() {
       v.rebaseDrop = r.action;
       if (r.action === 'rebased') {
         v.decision = 'merge';
+        // #3308 (round-2 review, note 2) — the tip just moved. `v.headSha` was stamped at SWEEP time from the
+        // listing's `headRefOid`, and its own comment calls it "the sha this PR would MERGE" — untrue from here
+        // on unless it is refreshed, and the #3308 coverage reader compares a recorded verdict's `Net basis`
+        // head against exactly this field. Left stale it would compare against the PRE-rebase tip: a verdict
+        // recorded against that old tip would read FRESH when the tree actually merging is a different commit —
+        // the reassuring direction, which is the one error this item may not make. `r.newCommit` is the sha that
+        // was just pushed to the lane ref, so it IS the landing tree.
+        if (r.newCommit) v.headSha = r.newCommit;
         const healTag = r.healed && r.healed.length ? ` (renumbered ${r.healed.map((h) => `#${h.oldNum}→#${h.newNum}`).join('/')})` : '';
         const contentTag = contentResolved ? ` (auto-resolved non-overlapping content conflict in ${r.mergedPaths.join(', ')})` : '';
         v.reason = `rebased onto main${r.dropped || r.droppedManifest ? ' (dropped manifest)' : ''}${healTag}${contentTag}, required check green — landable`;
@@ -3990,7 +4032,7 @@ async function runCli() {
           // `--watch` loop that re-lands nothing re-posts nothing. It cannot affect the merge either — the post
           // swallows every `gh` error internally and returns a bool.
           if (preread.read) {
-            const gaps = reviewCoverageGaps({ comments: preread.comments, headSha: c.headSha, reliefWaived: c.reliefWaived === true });
+            const gaps = reviewCoverageGaps({ comments: preread.comments, headSha: c.headSha, reliefWaived: c.reliefWaived === true, reliefPassWide: c.reliefPassWide === true });
             if (gaps.length) {
               const records = recordedReviewRecords(preread.comments);
               const basisHead = records.length ? (readReviewRecord(records[records.length - 1].body).basis || {}).head || null : null;

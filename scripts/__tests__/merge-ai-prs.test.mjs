@@ -3424,6 +3424,53 @@ describe('merge-ai-prs — #xc7p3q9: couple-join decoupled from the ready-to-mer
     expect(waiver.verdicts.find((v) => v.num === 55).coupleDeferReason).toBe('healthy');
   });
 
+  // #3308 (round-2 correctness fix) — THE REGRESSION TEST THE ROUND-1 REVIEW OWED, and it is deliberately
+  // DRIVEN, not hand-stamped. Every other `reliefWaived` assertion in this file sets the flag by hand and so
+  // could not see the actual bug: `v.reliefWaived` is written ONLY inside the escalation loop, which
+  // `REVIEW_ESCALATION = label && !escalationRelief.passWide` switches OFF for the bare/pass-wide form of
+  // `--no-review-escalation` — so a PR merged past its review hold by that form reached the coverage reader
+  // with NO relief flag set at all and was announced as if nothing had been waived. These cases drive the same
+  // `drivePlan` (→ `planDrainPass` → `buildDrainVerdicts` → `classifyPr`) harness B6 uses, so the flag is
+  // DERIVED from the real wiring; hand-setting it could not have reddened.
+  it('B6b — the PASS-WIDE waiver is recorded on the verdict it waived (#3308), not only the scoped one', () => {
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const listings = [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge', REVIEW_LABELS.pending] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }];
+    const reads = new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]);
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge', REVIEW_LABELS.pending] });
+    const waiver = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: ctx, escalationRelief: { prs: [], passWide: true }, label: 'ready-to-merge' });
+    const carrier = waiver.verdicts.find((v) => v.num === 77);
+    expect(carrier.decision).toBe('merge');           // it really does land past its review:pending hold
+    expect(carrier.reliefPassWide).toBe(true);        // ...and the verdict now says a waiver is why
+    // and the coverage reader, fed from THAT verdict exactly as the land path feeds it, announces the gap.
+    const gaps = reviewCoverageGaps({ comments: [], headSha: null, reliefWaived: carrier.reliefWaived === true, reliefPassWide: carrier.reliefPassWide === true });
+    expect(gaps.map((g) => g.code)).toContain('relief-waived-pass-wide');
+  });
+
+  // The other side of the same wiring: a SCOPED `=<pr#>` run must NOT be tagged pass-wide, or every scoped
+  // relief would be announced as "the rubric was off for the whole pass" — a strictly false statement.
+  it('B6c — a SCOPED --no-review-escalation=<pr#> is NOT recorded as a pass-wide waiver (#3308)', () => {
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const listings = [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge', REVIEW_LABELS.pending] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }];
+    const reads = new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]);
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge', REVIEW_LABELS.pending] });
+    const scoped = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: ctx, escalationRelief: { prs: [77], passWide: false }, label: 'ready-to-merge' });
+    const carrier = scoped.verdicts.find((v) => v.num === 77);
+    expect(carrier.decision).toBe('merge');
+    expect(carrier.reliefPassWide).toBeUndefined();
+  });
+
+  // A bare `--no-review-escalation` with NO `--label` waived nothing: `REVIEW_ESCALATION = label && ...` is
+  // already falsy on the missing label, so the rubric was never going to run and the flag changed no outcome.
+  // Announcing a waiver there would be this item's own error pointed the other way — a false record.
+  it('B6d — a pass-wide flag with NO --label records no waiver, because none happened (#3308)', () => {
+    const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
+    const listings = [{ repo: WE, prs: [ghPr(77, 'lane/xcarr01-we', { labels: ['ready-to-merge'] })] }, { repo: FUI, prs: [ghPr(55, 'lane/xcarr01-fui')] }];
+    const reads = new Map([[`cwd::77`, { commits: [claude, claude], manifest: carrierManifest }], [`${FUI}::55`, { commits: [claude, claude], manifest: null }]]);
+    const ctx = contextWithCarrier({ carrierNum: 77, item: 'xcarr01', manifest: carrierManifest, labels: ['ready-to-merge'] });
+    const unlabelled = drivePlan({ REPOS: [WE, FUI], listings, onlyPr: null, onlyRepo: null, reads, openPrContext: ctx, escalationRelief: { prs: [], passWide: true }, label: null });
+    expect(unlabelled.verdicts.find((v) => v.num === 77).reliefPassWide).toBeUndefined();
+  });
+
   it('B7 — a healthy carrier whose impl fails closed (truncated) DEFERS BOTH halves (never lands WE-first)', () => {
     const carrierManifest = { item: 'xcarr01', repos: [{ repo: 'we', ref: 'lane/xcarr01-we' }, { repo: 'fui', ref: 'lane/xcarr01-fui' }], blockedBy: [], stackParents: [] };
     const res = drivePlan({
@@ -4062,6 +4109,17 @@ describe('#3308 — reviewCoverageGaps: the degraded set', () => {
   });
   it('announces an operator relief that waived this PR\'s review park', () => {
     expect(reviewCoverageGaps({ ...cleanPr, reliefWaived: true }).map((g) => g.code)).toEqual(['relief-waived']);
+  });
+  // #3308 (round-2 correctness fix) — the DEPRECATED bare form gets its OWN code, because it is a wider
+  // statement than the scoped one: the rubric was off for every candidate in the pass, not waived for one
+  // named PR. Collapsing the two would under-report the bare form on exactly the PRs that were never scored.
+  it('announces the DEPRECATED pass-wide waiver as its own gap, distinct from the scoped one', () => {
+    expect(reviewCoverageGaps({ ...cleanPr, reliefPassWide: true }).map((g) => g.code)).toEqual(['relief-waived-pass-wide']);
+    expect(REVIEW_COVERAGE_GAP_META['relief-waived-pass-wide']).not.toBe(REVIEW_COVERAGE_GAP_META['relief-waived']);
+  });
+  it('reports BOTH relief codes rather than silently collapsing them if a caller passes both', () => {
+    expect(reviewCoverageGaps({ ...cleanPr, reliefWaived: true, reliefPassWide: true }).map((g) => g.code).sort())
+      .toEqual(['relief-waived', 'relief-waived-pass-wide']);
   });
   // Two expected states that already carry their own durable record. Re-announcing them here would be volume
   // without information, which is how an announcement channel gets tuned out.
