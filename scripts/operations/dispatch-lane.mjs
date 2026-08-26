@@ -13,7 +13,13 @@
  * IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT. The conveyor's dispatch policy — the in-flight
  * build guard, the lane exclusion, the scope-lease arbitration, the TTLs, the union re-dispatch gate — is
  * `we:scripts/conveyor/tick-core.mjs#planTick`, which is pure and tested. This operation CONSUMES that core's
- * `decisions.spawnBuilds` and refuses to invent a launch of its own:
+ * three launch lists — `decisions.spawnBuilds`, `decisions.spawnPrepareScope` and
+ * `decisions.spawnPrepareDecision` (#3165) — and refuses to invent a launch of its own:
+ *
+ *   - ONE DISPATCH PER CALL, never a batch. `--num=<N>` resolves THAT item's kind and starts THAT item's
+ *     agent. The tick already decides multiplicity; a loop here would be a second scheduler in front of it.
+ *   - the KIND is never an input either. It is whichever of the three lists the core put this num in, and
+ *     it selects the brief, the session slug and the lane scope together — see `shapeDispatchRead`.
  *
  *   - the LANE is never an input. A caller cannot ask for a lane; it dispatches the lane the core assigned, or
  *     it dispatches nothing. That is what makes "the same holds and the same lease arbitration as the current
@@ -84,6 +90,20 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
 
 /** The five `{{PLACEHOLDER}}` tokens `we:skills-src/conveyor/delivery-agent-brief.md` declares. */
 export const BRIEF_PLACEHOLDERS = Object.freeze(['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE']);
+
+/**
+ * THE THREE AGENT KINDS THIS OPERATION CAN START (#3165), in the order the shell resolves them.
+ *
+ * `planTick` returns three launch lists — `spawnBuilds`, `spawnPrepareScope`, `spawnPrepareDecision` — and
+ * until #3165 the operation launched only the first. The other two were planned, surfaced as the operator's
+ * `⚠ N auto-preparing scope: #NNN` note, and then dropped on the floor: `dispatch-lane --num=<one of them>`
+ * came back "not in `decisions.spawnBuilds`" forever, so an out-of-session prepare could only be hand-spawned.
+ *
+ * ONE ITEM IS IN AT MOST ONE LIST — an unscoped held item never reaches `spawnBuilds`, and a decision is never
+ * an unshaped build — so the order below is a tie-break that no real tick exercises, not a precedence rule.
+ * Stated as data anyway, because two files agreeing on the order by coincidence is how they stop agreeing.
+ */
+export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision']);
 
 /**
  * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item
@@ -159,16 +179,31 @@ export function canonicalPlaceholder(name) {
 export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
 
 /**
- * The lane-lease session slug a build carries. It MUST agree with `releaseSessionForNum`
- * (`we:scripts/conveyor/tick-core.mjs`), which derives `conveyor-<num>` for a build PR and hands it to
+ * The lane-lease session slug a dispatched agent carries. It MUST agree with `releaseSessionForNum`
+ * (`we:scripts/conveyor/tick-core.mjs`), which derives the slug a merged PR's watcher hands to
  * `pr-watch --release-session` so the lease is auto-released at merge. A slug that disagreed here would strand
  * the lease: the watcher would release a session nobody acquired.
  *
+ * PER KIND, because the core's side already is (#3165). `releaseSessionForNum` reads the PR's owning
+ * PREPARE GUARD to pick `prepare-<num>` / `prepare-decision-<num>` and falls back to `conveyor-<num>`, so
+ * dispatching a prepare under the build slug arms a watcher that would release a session which was never
+ * created — and the failure is silent on both sides.
+ *
+ * MIRRORED, NOT IMPORTED, and deliberately: this file reaches nothing (its whole import graph is
+ * `./registry.mjs` + `./step-kinds.mjs`), and importing the core here would put the conveyor's tick machinery
+ * inside the pure declaration. The agreement is asserted instead, against the core's OWN function, in
+ * `we:scripts/operations/__tests__/dispatch-lane.test.mjs`.
+ *
  * @param {string|number} num
+ * @param {'build'|'prepare'|'prepare-decision'} [kind] - defaults to `build`, so every pre-#3165 caller is
+ *   byte-identical.
  * @returns {string}
  */
-export function sessionSlugFor(num) {
-  return `conveyor-${String(num).trim()}`;
+export function sessionSlugFor(num, kind = 'build') {
+  const id = String(num).trim();
+  if (kind === 'prepare-decision') return `prepare-decision-${id}`;
+  if (kind === 'prepare') return `prepare-${id}`;
+  return `conveyor-${id}`;
 }
 
 /**
@@ -378,6 +413,18 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   }
   const launch = shapeRow(raw.launch, 'launch');
   const suppressed = shapeRow(raw.suppressed, 'suppressed');
+  // WHICH OF THE CORE'S THREE LAUNCH LISTS this row came out of (#3165). The shell resolved it; this half
+  // REFUSES an unknown one rather than defaulting, for the same reason `briefPath` throws: the fallback would
+  // hand a scope-prep agent the 39 KB delivery mandate — an agent told to build an item whose scope is exactly
+  // what nobody has written yet. An ABSENT kind is the pre-#3165 shape and reads as `build`; a PRESENT but
+  // unrecognized one is a shell that changed under us, and is fatal.
+  const launchKind = raw.launchKind === undefined || raw.launchKind === null ? 'build' : String(raw.launchKind);
+  if (!LAUNCH_KINDS.includes(launchKind)) {
+    throw new Error(
+      `dispatch-lane.read: the injected reader returned an unknown \`launchKind\` ${JSON.stringify(raw.launchKind)} `
+      + `— it must be one of ${LAUNCH_KINDS.join(', ')}. Refusing to guess which agent to start.`,
+    );
+  }
   const resolvedNum = String(raw.resolvedNum ?? '').trim();
   if (!resolvedNum) {
     throw new Error(`dispatch-lane.read: the reader could not resolve ${JSON.stringify(num)} to an item id`);
@@ -391,6 +438,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   const base = {
     asked: String(num ?? ''),
     num: resolvedNum,
+    // WHICH AGENT this call is about, on every exit — a non-dispatch that says "not cleared" is a different
+    // fact depending on whether a build or a prepare was asked for, and the run record has to say which.
+    launchKind,
     // The tick's own one-line status and notes, carried verbatim so an operator reading a run record sees the
     // same sentence the conveyor's status line shows. Display only — nothing downstream decides on them.
     statusLine: String(raw.statusLine || ''),
@@ -488,7 +538,8 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       // what a blocked, unscoped, lease-overlapped or not-cleared item looks like from here.
       holdReason: suppressed
         ? `suppressed by the in-flight build guard (${suppressed.by === 'lane' ? `lane ${suppressed.lane} is held` : 'an agent is already in flight for this item'})`
-        : 'the tick core did not clear this item for build — it is not in `decisions.spawnBuilds`',
+        : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
+          + '`decisions.spawnPrepareScope` or `decisions.spawnPrepareDecision`',
     };
   }
 
@@ -497,18 +548,35 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   }
   const item = raw.item && typeof raw.item === 'object' ? raw.item : null;
   const specPath = String(item?.specPath || '').trim();
-  const scope = Array.isArray(item?.scope) ? item.scope.map(String).filter(Boolean) : [];
+  const itemScope = Array.isArray(item?.scope) ? item.scope.map(String).filter(Boolean) : [];
   if (!specPath) {
     throw new Error(`dispatch-lane.read: no backlog file resolved for #${resolvedNum} — the brief needs the item's spec path`);
   }
-  if (!scope.length) {
+  // THE LANE-LEASE SCOPE, and the word `scope` doing two jobs is what made this look like a blocker (#3165).
+  //
+  //   - a BUILD's lane scope is the item's own `scope:` FRONTMATTER — the paths it will edit;
+  //   - a PREPARE's lane scope is `we:<specPath>`, the item's own backlog file. It is not a choice made here:
+  //     `we:skills-src/conveyor/SKILL.md:272` says a prepare's `--scope` is "a single, distinct backlog file
+  //     … disjoint by construction", and both prepare briefs already run exactly that `acquire`.
+  //
+  // A prepare agent is dispatched PRECISELY BECAUSE the item has no `scope:` — that is the thing it is being
+  // sent to write. So the refusal below is BUILD-ONLY and stays where it is, and the prepare branch routes
+  // past it rather than around it being weakened.
+  //
+  // PINNED RESIDUAL: `prepare-decision-agent-brief.md:68-69`'s own `acquire` declares a WIDER scope than this
+  // one file — it appends `we:src/_data/researchTopics.json` and `we:src/_includes/research-descriptions/`,
+  // the `/research/` files a decision prepare authors. The brief is the thing that actually takes the lease,
+  // so that is the scope the lane ends up holding; this value is what the run record says was declared. The
+  // card (#3165) sets one rule for both prepare kinds, so this is recorded rather than silently widened.
+  const scope = launchKind === 'build' ? itemScope : [`we:${specPath}`];
+  if (launchKind === 'build' && !itemScope.length) {
     // Unreachable through the core (`dispatch-plan` holds an unscoped item `unshaped-no-scope` and auto-prepares
     // it, so it never reaches `spawnBuilds`) — refused anyway, because an empty `--scope` declares a lane that
     // owns no paths and the scope-lease collector would let an overlapping sibling launch beside it.
     throw new Error(`dispatch-lane.read: #${resolvedNum} has no \`scope:\` — the dispatcher never launches an unscoped item to build`);
   }
 
-  const sessionSlug = sessionSlugFor(resolvedNum);
+  const sessionSlug = sessionSlugFor(resolvedNum, launchKind);
   // FILLED HERE, not in the sink. The prompt is a pure function of the item and the core's assignment, so it
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what
   // was dispatched, which is what a restart needs and a sink-side fill would not give.
@@ -590,10 +658,14 @@ export function dispatchLaneOperation({ readTick } = {}) {
         return {
           dispatching: read.dispatching === true,
           num: read.num,
+          // WHICH AGENT WAS STARTED, beside the fact that one was (#3165). Without it a run record of a
+          // prepare dispatch and one of a build are indistinguishable, and they are not the same event: they
+          // run different briefs, take different lane scopes and are retired by different session slugs.
+          launchKind: read.launchKind,
           lane: read.lane,
           sessionSlug: read.sessionSlug,
           reason: read.dispatching
-            ? `cleared for build on lane ${read.lane}`
+            ? `cleared for ${read.launchKind} on lane ${read.lane}`
               + (agedOut.length
                 ? ` (past ${agedOut.length} aged-out in-flight dispatch record(s): ${agedOut.map((r) => r.runId).join(', ')} — `
                   + 'each is still open on disk and still needs closing out)'
@@ -645,6 +717,7 @@ export function dispatchLaneOperation({ readTick } = {}) {
           idempotent: false,
           payload: {
             num: read.num,
+            launchKind: read.launchKind,
             lane: read.lane,
             sessionSlug: read.sessionSlug,
             itemSpecPath: read.itemSpecPath,

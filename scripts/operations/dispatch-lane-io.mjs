@@ -18,13 +18,30 @@
  *     the plan and the core all key on;
  *   - the item's slug and repo-qualified `scope:` come from the canonical backlog loader (`we:src/_data/backlog.js`),
  *     the same source `dispatch-plan.mjs` enriches its queue rows from;
- *   - the brief is `we:skills-src/conveyor/delivery-agent-brief.md`, read as text and filled by the declaration.
+ *   - the brief is whichever of the three authored mandates the launch's KIND names — the delivery brief for
+ *     a build, `prepare-scope-agent-brief.md` / `prepare-decision-agent-brief.md` for a prepare (#3165) —
+ *     read as text and filled by the declaration.
  *
  * THE SINK IS THE ONLY THING IN THIS REPO THAT STARTS AN AGENT. Read {@link createDispatchSinks} before
  * changing it — the handle contract lives there, and it is the reason a restart can still find the build.
  *
  * IMPURE by construction: `node`, `claude`, `fs`.
  */
+
+// @cohesive: ONE operation's io boundary, which is what this repo's pure-core/io-shell pairing makes a single
+// responsibility — `dispatch-lane.mjs` is the WHAT and this is the only place it touches the world, exactly as
+// `review-pr.mjs` / `review-pr-io.mjs` are paired. The three things inside it (the tick READER the `read` step
+// is injected with, the SINK that starts the agent, the OBSERVER that later asks how it is going) are the
+// #3084 effect contract's own three halves for ONE effect type: they are registered under one `DISPATCH_EFFECT`
+// string, they share the handle contract the sink's docblock owns, and every consumer imports them together.
+// Splitting them into three modules would put one operation's io across three lane-lease scopes while leaving
+// that contract split across them — fragmenting a cohesive file to hit a number, which #2678's own ruling says
+// cohesion outranks.
+//
+// WHAT THIS MARKER DOES NOT EXCUSE, stated so it is not read as a blank cheque: the size+collision composite is
+// telling the truth about the CONTENTION — 6 queued items name this file, and they do serialize on it. The
+// answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
+// underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -38,7 +55,7 @@ import { laneRefItemNum } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
-import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES } from './dispatch-lane.mjs';
+import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -48,9 +65,40 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 export function tickCli(root = REPO_ROOT) {
   return join(root, 'scripts', 'conveyor', 'tick-core.mjs');
 }
-/** The delivery-agent brief TEMPLATE the declaration fills. */
-export function briefPath(root = REPO_ROOT) {
-  return join(root, 'skills-src', 'conveyor', 'delivery-agent-brief.md');
+// THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165).
+//
+// All three briefs were authored and only one was reachable: `briefPath` took no kind, so
+// `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md` (18 KB) sat unrouted while
+// the planner kept surfacing prepares nobody could dispatch. This map is the whole connection.
+//
+// ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
+// resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
+// of naming the kind nobody wired.
+const BRIEF_BY_KIND = Object.freeze({
+  build: 'delivery-agent-brief.md',
+  prepare: 'prepare-scope-agent-brief.md',
+  'prepare-decision': 'prepare-decision-agent-brief.md',
+});
+
+// UNKNOWN KIND THROWS; it does NOT fall back to the delivery brief. Handing a scope-prep agent the delivery
+// mandate tells it to BUILD an item whose scope is exactly what it was dispatched to write — it would acquire
+// a lane, read an empty scope and improvise. A loud refusal costs one dispatch; the silent fallback costs a
+// lane and a wrong PR.
+/**
+ * @param {string} [root]
+ * @param {'build'|'prepare'|'prepare-decision'} [kind] - defaults to `build`, so every pre-#3165 caller
+ *   resolves the same path it always did.
+ * @returns {string}
+ */
+export function briefPath(root = REPO_ROOT, kind = 'build') {
+  const file = Object.prototype.hasOwnProperty.call(BRIEF_BY_KIND, kind) ? BRIEF_BY_KIND[kind] : null;
+  if (!file) {
+    throw new Error(
+      `dispatch-lane-io: no agent brief for kind ${JSON.stringify(kind)} — it must be one of `
+      + `${LAUNCH_KINDS.join(', ')}. Refusing to fall back to the delivery brief.`,
+    );
+  }
+  return join(root, 'skills-src', 'conveyor', file);
 }
 
 /**
@@ -89,7 +137,7 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  * @param {() => object[]} [o.listAgents] - injectable `claude agents --json` reader. The double-dispatch
  *   guard's PRIMARY axis is liveness, not age (PR #1211 round 2, G1), so the read asks the same question the
  *   observer asks and stamps the answer onto each in-flight row.
- * @returns {{launch: object|null, suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string}}
+ * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string}}
  */
 export function readTick({
   num,
@@ -132,17 +180,42 @@ export function readTick({
 
   const item = findItem(key, loadItems);
   const nextState = tick && typeof tick.nextState === 'object' ? tick.nextState : null;
+  // THE SELECTION happens here, with the tick's own normalizer — see the declaration's header for why it is
+  // not in the pure half. THREE LISTS, not one (#3165): `planTick` plans builds AND both prepare kinds, and
+  // launching only the first is why `dispatch-lane --num=<an auto-preparing item>` did nothing at all while
+  // the operator's status line kept promising it would.
+  //
+  // FIRST MATCH WINS, and no real tick makes that a decision — an item held as unscoped never reaches
+  // `spawnBuilds`, and a decision is never an unshaped build, so the lists are disjoint by construction.
+  const LAUNCH_LISTS = [
+    ['build', decisions.spawnBuilds],
+    ['prepare', decisions.spawnPrepareScope],
+    ['prepare-decision', decisions.spawnPrepareDecision],
+  ];
+  let launch = null;
+  let launchKind = 'build';
+  for (const [kind, rows] of LAUNCH_LISTS) {
+    const row = match(rows);
+    if (row) { launch = row; launchKind = kind; break; }
+  }
+
   return {
     resolvedNum: key,
-    // The SELECTION happens here, with the tick's own normalizer — see the declaration's header for why it is
-    // not in the pure half.
-    launch: match(decisions.spawnBuilds),
+    launch,
+    // WHICH LIST IT CAME OUT OF. It picks the brief below, and the session slug and the lane scope in the
+    // declaration — one answer, read three times, rather than three re-derivations that can disagree.
+    launchKind,
     suppressed: match(decisions.suppressedBuilds),
-    // THIS launch's guard entry, picked out of the tick's `buildGuards` with the same normalizer. The core
-    // records one per planned spawn; only this one describes work this operation actually starts.
-    dispatchedGuard: match(nextState?.buildGuards),
+    // THIS launch's guard entry, picked out of the tick's guards with the same normalizer. The core records
+    // one per planned spawn, in `buildGuards` for a build and `prepareGuards` for either prepare kind; only
+    // this one describes work this operation actually starts. The prepare match is keyed on the KIND too,
+    // because `prepareGuards` holds both kinds in one list.
+    dispatchedGuard: launchKind === 'build'
+      ? match(nextState?.buildGuards)
+      : (Array.isArray(nextState?.prepareGuards) ? nextState.prepareGuards : [])
+        .find((g) => g && normNum(g.num) === key && (g.kind || 'prepare') === launchKind) || null,
     item,
-    briefTemplate: String(readText(briefPath(root))),
+    briefTemplate: String(readText(briefPath(root, launchKind))),
     nextState,
     statusLine: String(decisions.statusLine || ''),
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
