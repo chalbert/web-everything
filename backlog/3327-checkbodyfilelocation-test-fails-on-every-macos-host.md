@@ -43,8 +43,8 @@ defect was what stood behind that refusal.
 
 ## This item was filed twice, and the near-miss is the more useful record
 
-`x7kopnm` was filed and then JIT-numbered to **#3327** by the drain at land (#2288). While that was in flight,
-the session fixing the defect could not find `x7kopnm` anywhere in its checkout — the land had not reached it —
+`3327` was filed and then JIT-numbered to **#3327** by the drain at land (#2288). While that was in flight,
+the session fixing the defect could not find `3327` anywhere in its checkout — the land had not reached it —
 concluded the id was a phantom it had invented, and filed a second card for the same defect. That duplicate
 landed and was numbered **#3328** before the correction could be pushed. Its content is absorbed above, and
 [#3328](/backlog/3328/) **stays on disk** as a resolved duplicate record pointing here (`graduatedTo: "3327"`).
