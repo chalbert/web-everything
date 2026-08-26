@@ -223,6 +223,11 @@ export function buildCliSpec(declaration) {
       ...(resumable ? [`       run.mjs ${declaration.name} --resume=<run-id> [--answer=<option>]${confirmFlagText} [--json]${judged ? ' [--cwd=<lane>] [--model=<alias>]' : ''}`] : []),
       '',
       `steps: ${steps}`,
+      // #3316 — BEFORE THE RUN, not only after it suspends. The measured failure was an operation invoked
+      // BARE by a caller who did not know a skill owned it; the suspend-time pointer rescues them one stop
+      // late, and this is the same fact at the moment they are reading the usage. Derived from the same
+      // declared field, so the two surfaces cannot disagree.
+      ...(declaration.ownedBy ? ['', `owned by: ${declaration.ownedBy} — the skill that owns the rest of a run of this operation.`] : []),
       ...(judged ? ['', ...JUROR_FLAG_HELP] : []),
       ...(resumable ? [] : ['', 'read-only: every step is `compute` — this operation completes in one call, suspends at nothing and records no run.']),
     ].join('\n'),
@@ -761,12 +766,23 @@ export function renderSpendLines(run) {
  * operation and then two callers describing its OUTCOME two different ways would be the same defect one layer
  * down — a console reading the HTTP route and a terminal reading `--json` must not have to parse two shapes.
  *
- * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[], inFlight?: string[]}} outcome
+ * @param {{run: object, stopped: string, error?: (Error|null), applied?: string[], inFlight?: string[],
+ *          ownedBy?: (string|null)}} outcome
  * @returns {object}
  */
-export function outcomePayload({ run, stopped, error = null, applied = [] }) {
+export function outcomePayload({ run, stopped, error = null, applied = [], ownedBy = null }) {
+  // #3316 — THE SKILL THAT OWNS THE REST OF THE RUN, for the headless caller. The engine stamps it onto
+  // `pending`, so a suspend carries it on the record itself and every route that echoes the record gets it
+  // free. That is not enough on its own: a `step-refused` stop clears `pending`, and a refusal is exactly the
+  // moment the pointer is most needed. So the declaration is the second source, and the record wins when both
+  // are present because the record is what a run was actually suspended with.
+  //
+  // OMITTED, NOT `null`, when nothing is declared — same reason as {@link ../engine.mjs pendingOn}: every
+  // operation that owns no skill emits the byte-identical payload it emitted before this field existed.
+  const owner = run.pending?.ownedBy ?? ownedBy ?? null;
   return {
     runId: run.id, op: run.op, stopped, applied,
+    ...(owner ? { ownedBy: owner } : {}),
     // #3073 — WHICH effects are still going, so a consumer does not have to re-scan `run.effects` to find out
     // why a parked run is parked.
     //
@@ -814,15 +830,22 @@ export function restartCommand(run, declaration = null) {
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
 export function renderOutcome({ outcome, json = false, declaration = null }) {
   const { run, stopped, error, applied } = outcome;
+  // #3316 — the declaration is the fallback source for the pointer, and the ONLY one on a `step-refused` stop,
+  // where `pending` has already been cleared.
+  const ownedBy = run.pending?.ownedBy ?? declaration?.ownedBy ?? null;
   if (json) {
     return {
       // A dispatch park is a SUCCESSFUL stop, exactly like a confirm suspend — the run did what was asked.
       code: stopped === 'complete' || stopped === 'confirm' || stopped === 'effect-in-flight' ? 0 : 1,
-      lines: [JSON.stringify(outcomePayload(outcome), null, 2)],
+      lines: [JSON.stringify(outcomePayload({ ...outcome, ownedBy }), null, 2)],
     };
   }
 
   const spend = renderSpendLines(run);
+  // The one line a caller who has NOT read the skill needs, printed at every stop that leaves them holding a
+  // run they cannot finish from what is on screen. Placed last on purpose: it is where the eye lands, and it
+  // is the pointer out of the dead end rather than one more fact about the run.
+  const ownerLines = ownedBy ? ['', `the rest of this run is owned by ${ownedBy} — read it before deciding.`] : [];
 
   if (stopped === 'confirm') {
     const p = run.pending;
@@ -839,6 +862,7 @@ export function renderOutcome({ outcome, json = false, declaration = null }) {
         '',
         ...(p.options ? [`options: ${p.options.join(' | ')}`, ''] : []),
         `resume with: node scripts/operations/run.mjs ${run.op} --resume=${run.id} --answer=<option>`,
+        ...ownerLines,
       ],
     };
   }
@@ -867,6 +891,7 @@ export function renderOutcome({ outcome, json = false, declaration = null }) {
         `resume with: node scripts/operations/run.mjs ${run.op} --resume=${run.id} — it reports the same park `
         + 'until the work reports back, and never re-dispatches.',
         ...spend,
+        ...ownerLines,
       ],
     };
   }
@@ -878,6 +903,7 @@ export function renderOutcome({ outcome, json = false, declaration = null }) {
         `${applied.length} effect(s) landed and are recorded as applied; a --resume=${run.id} continues from there `
         + 'and never re-applies them.',
         ...spend,
+        ...ownerLines,
       ],
     };
   }
@@ -899,8 +925,9 @@ export function renderOutcome({ outcome, json = false, declaration = null }) {
         ] : []),
         `  ${restartCommand(run, declaration)}`,
         ...spend,
+        ...ownerLines,
       ],
     };
   }
-  return { code: 1, lines: [`run ${run.id} — ${stopped}.`, ...spend] };
+  return { code: 1, lines: [`run ${run.id} — ${stopped}.`, ...spend, ...ownerLines] };
 }
