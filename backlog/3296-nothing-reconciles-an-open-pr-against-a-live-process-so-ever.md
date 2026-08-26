@@ -23,9 +23,9 @@ reconcile pass, and its four refusals.
 ## What was measured — 2026-08-26 **17:34Z**, this lane, at `origin/main` `a517c8f8`
 
 Every number below came from a command run in this lane at that timestamp. **The board moves faster than the
-card does:** the filing snapshot was taken at 15:13Z against `origin/main` `435f3519`, and five of its rows no
-longer hold. They are retracted immediately below the table rather than overwritten, because two of them were
-wrong when written, not merely stale.
+card does:** the filing snapshot was taken at 15:13Z against `origin/main` `435f3519`, and **six** of its
+claims no longer hold. They are retracted immediately below the table rather than overwritten, because
+**three** of them were wrong when written, not merely stale.
 
 | probe | result at 17:34Z |
 | --- | --- |
@@ -79,6 +79,21 @@ filing snapshot claimed: it ran to **twelve** rounds against a cap of five with 
    **Wrong when written.** Re-measured in this lane at `a517c8f8`: **1 error, 1434 warnings, 3297 items**. The
    filing figure `3269` appears to be this card's own number `3296` with two digits transposed, which is the
    signature of a count written from memory rather than run.
+
+6. > "accept a fresh transcript mtime as liveness → reddens case 5's first fixture, and **must not** redden
+   > its third (a fresh mtime with no agent entry still dispatches)"
+
+   **Wrong when written, and it made the criterion unachievable.** The two cases are the wrong way round.
+   The first fixture (now 5(a)) is a live `pid` with a **stale** mtime, so a mutant that accepts a *fresh*
+   mtime as liveness never fires on it — the live `pid` refuses either way and 5(a) stays **green**. The
+   third (now 5(c)) is no agent entry plus a **fresh** mtime, which is precisely what that mutant breaks, so
+   5(c) is the case that goes **red**. No mutation of this family satisfies the pairing as it was written:
+   the only mutant that can redden 5(a) reads liveness *from* the mtime instead of the `pid`, and that one
+   reddens 5(c) as well — which the bullet's own next sentence disqualifies. The bullet now names 5(c) as
+   the red case and 5(a) as the one that must stay green. This mattered because it is the single mutation
+   pinning refusal 4, the card's central refusal: a builder who implemented refusal 4 **correctly** would
+   have run the named mutation, seen 5(c) redden, and been told by this card that they had removed the wrong
+   thing.
 
 ## The six causes, verified against the tree
 
@@ -274,9 +289,18 @@ its entries are one-per-refusal and the refusals *are* the item — dropping one
    - drop the `stood-down` check → reddens case 2 only.
    - drop the empty-findings check → reddens case 3 only.
    - read the attempt count from the in-process tally instead of the PR → reddens case 4 only.
-   - accept a fresh transcript mtime as liveness → reddens case 5(a), and **must not** redden 5(c) (a fresh
-     mtime with no agent entry still dispatches). That asymmetry is the whole point of refusal 4; a mutation
-     that reddens both has removed the wrong thing.
+   - accept a fresh transcript mtime as liveness → reddens case **5(c)** only (a fresh mtime with no agent
+     entry must still dispatch), and **must not** redden **5(a)** — a live `pid` refuses regardless of how
+     stale the transcript is. That asymmetry is the whole point of refusal 4: freshness never grants
+     liveness, and staleness never withdraws it; a mutation that reddens both has removed the wrong thing.
+     For the kill to land on 5(c) alone, 5(b) and 5(d) must carry a **stale** mtime too, so what their
+     refusal turns on is the entry's own fields and nothing else.
+     *Correction: this bullet said the mutation "reddens case 5(a), and **must not** redden 5(c) (a fresh
+     mtime with no agent entry still dispatches)". The pairing was inverted, and so stated the criterion was
+     unachievable: 5(a)'s mtime is stale, so a mutant that accepts a **fresh** mtime as liveness never fires
+     on it — the live `pid` still refuses and 5(a) stays green — while 5(c) is exactly the case it reddens.
+     Carried in this form from the filing snapshot (`4b6e453f`), where it read "case 5's first fixture" /
+     "its third"; this card relabelled the fixtures 5(a)–5(d) without re-checking the pairing.*
 8. `npm run check:standards` — **no new errors and no more than 1434 warnings**, the base measured in this lane
    at `origin/main` `a517c8f8`: **1 error, 1434 warnings, 3297 backlog items**. That one error is pre-existing
    and not this card's to fix — a stranded hash id,
