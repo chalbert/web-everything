@@ -856,7 +856,9 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
 // acquire selects a lane. "Provably dead" = a POSITIVE death signal, never absence-of-activity (the #2267
 // data-loss hazard): the lease's item PR is merged/closed (the live gh axis), OR the item card reads
 // `status: resolved` on origin/main (the offline axis — resolution is MONOTONIC, so a stale local read only
-// MISSES a reap, never wrongly reaps). The reap VERDICT is the standalone reaper's own pure `classifyReap`
+// MISSES a reap, never wrongly reaps) — AND, #3283, the lease is TTL-stale, because a terminal signal about
+// the ITEM says nothing about whether anyone is HOLDING the lane (see `signalsFor` below for the full why).
+// The reap VERDICT is the standalone reaper's own pure `classifyReap`
 // (via `reapPlan`), so this backstop and the periodic reaper can never disagree — and reserved (permanent
 // memory) leases are excluded by `classifyReap` on every axis. TTL-stale reclamation is deliberately LEFT to
 // acquire's existing path (`tryClaimLane` reclaims a >TTL lease for THIS session, unchanged) — this pass only
@@ -892,10 +894,24 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
   };
   const signalsFor = (c) => {
     const num = itemNumFromSession(c.lease?.session);
-    let prState = prStates && num ? (prStates.get(num) ?? null) : null;
+    // #3283 — A TERMINAL SIGNAL ABOUT THE ITEM IS NECESSARY BUT NOT SUFFICIENT. "This lane's item is finished"
+    // — its PR merged, or its card resolved on main — answers *is there unlanded work here?* It never answers
+    // *is anyone holding this lease?*, and this pass used the first as a proxy for the second. The proxy is
+    // sound only once the holder has exited; for every lease whose holder is still working it is simply wrong,
+    // so a lane handed out SECONDS ago was reclaimed by the very next acquire — which then returned that same
+    // lane. Concurrency collapsed to one lane, and where nothing downstream checks, two agents share a clone.
+    //
+    // So both axes below are gated on the lease itself looking dead. The one trustworthy liveness signal in
+    // today's schema is TTL: `pid` records the short-lived `lane-pool acquire` CLI, not the delivery agent
+    // (an LLM has no unix pid — see `lease-reaper.pidAliveForLease`, still the plug-in point for a durable
+    // `agentPid`), and `leaseOwnedByCaller` is string equality on every branch, an ownership proof and never
+    // a liveness test. This NARROWS #2748 rather than undoing it: a TTL-stale lease whose item is terminal is
+    // still reaped HERE, pre-TTL-reclaim and pool-wide, which is the ghost #2748 was built for.
+    const holderPresumedGone = isLeaseStale(c.lease, nowMs, ttlMs);
+    let prState = holderPresumedGone && prStates && num ? (prStates.get(num) ?? null) : null;
     // Item-resolved is a terminal death signal too — but NEVER override a live (open) PR, mirroring the
     // reaper's "open wins" safety (a same-number retry PR still in flight must not be reaped, #2267).
-    if (prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(num)) prState = 'merged';
+    if (holderPresumedGone && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(num)) prState = 'merged';
     return { prState, pidAlive: null }; // the pid axis is dormant under today's lease schema (see lease-reaper.pidAliveForLease)
   };
   const { reap } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
