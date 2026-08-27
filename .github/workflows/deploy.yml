@@ -30,7 +30,7 @@
 #     NAME on the HEAD repo — not the head repository, and not ancestry on main. A fork PR whose source branch
 #     is named `main` satisfied it, and the job `if:` then checked only `conclusion == 'success'`. Nothing
 #     examined `head_repository` or `workflow_run.event`. That is a route to running fork-authored code in a
-#     job holding FUI_READ_TOKEN + CLOUDFLARE_API_TOKEN, in a PUBLIC repo. Closed by the job `if:` above.
+#     job holding FUI_READ_TOKEN + CLOUDFLARE_API_TOKEN, in a PUBLIC repo. Closed by the job `if:` below.
 #
 #   • The re-derive was NOT the guarantee claimed. As originally written it asked only "did this SHA ever have
 #     green test+smoke?", which a PR head satisfies just as well as a merged commit — demonstrated live during
