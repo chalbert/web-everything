@@ -982,10 +982,15 @@ describe('an unbounded juror budget', () => {
  *
  * TWO HALVES, TESTED AS TWO HALVES because they fail independently. (a) `DEFAULT_BUDGET_USD` was `0.5`, sized
  * for a TOOL-FREE juror in #3028 and never revisited when tool-bearing jurors arrived in #3072 — so a caller
- * that declared no budget (which today means `we:scripts/lib/judge-panel.mjs`, the converge panel) inherited a
- * ceiling BELOW every spend a tool-bearing juror actually produces. (b) The kill surfaces as `is_error` with
- * `stop_reason: "tool_use"`, which names nothing about money and which a CONFORMING run also carries — so it
- * read as a crash. On the converge run that exposed this, 6 of 8 seats died this way and the panel escalated
+ * that declared no budget inherited a ceiling BELOW every spend a tool-bearing juror actually produces. WHICH
+ * callers those are is NOT restated here — `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS" is the one list, and
+ * this line previously carried a narrower copy of it (*"which today means `we:scripts/lib/judge-panel.mjs`,
+ * the converge panel"*) that was WRONG: `we:scripts/operations/explore.mjs`'s tool-free `synthesize` seat
+ * inherits it too, through `createDefaultJudge`, and so does anything reaching `judgePanel` without a per-seat
+ * budget. A second copy of a list is a second thing to be wrong; point at the list instead.
+ *
+ * (b) The kill surfaces as `is_error` with `stop_reason: "tool_use"`, which names nothing about money and
+ * which a CONFORMING run also carries — so it read as a crash. On the converge run that exposed this, 6 of 8 seats died this way and the panel escalated
  * `needs-human` on `mandatory-lens-absent`: a spending limit diagnosed as a panel failure.
  *
  * THE SPENDS ARE MEASURED, NOT INVENTED — four real tool-bearing `review-pr` rounds on 2026-08-18, read off

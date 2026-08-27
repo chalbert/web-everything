@@ -369,6 +369,9 @@ export const DEFAULT_EFFORT = 'medium';
  * invisible to `git grep DEFAULT_BUDGET_USD` by construction. #3187's first round learned this the expensive
  * way: it justified a bounded test run by counting this constant's importers, and CI went red on
  * `we:skills-src/jury/__tests__/panel-fanout.test.mjs`, in a consumer that imports nothing from this file.
+ * ROUND 2 THEN GOT IT WRONG AGAIN, one paragraph below that retraction, with a different bad grep — see path
+ * 3. Two rounds, two wrong maps of the same change: TRUST NO COUNT HERE THAT WAS NOT RE-DERIVED BY EXECUTING
+ * THE PATH. Every claim on this list was proved by running it, not by reading for it.
  * The three live paths, as of #3187:
  *
  *   1. `we:scripts/lib/judge-panel.mjs` — the one module that NAMES this constant as a caller default
@@ -380,8 +383,21 @@ export const DEFAULT_EFFORT = 'medium';
  *      caller, which is why raising this value NARROWS what their `--max-total-budget-usd` admits.
  *   3. `createDefaultJudge` (`we:scripts/operations/cli-adapter.mjs`) forwards `budget` unconditionally, so a
  *      `judge` step declaration that OMITS it arrives here as `undefined` and takes this default parameter.
- *      No declaration does today — both `review-pr` and `review-prep` declare `JUDGE_BUDGET_USD = null`
- *      explicitly — but the path is open and no grep for this identifier would show it.
+ *      THIS PATH IS LIVE, AND `we:scripts/operations/explore.mjs`'s `synthesize` seat (`judgeStep`, ~:646) is
+ *      on it: its `request()` returns `{mandate, input, shape, lens}` and the file contains the string
+ *      `budget` ZERO times, so the committee synthesizer for `run.mjs explore` (#3150) seats HERE. #3187
+ *      therefore raised that live operation's ceiling from $0.5 to $1.5 along with everything else. Harmless,
+ *      and arguably intended — that synthesizer is deliberately tool-free, so it was never the seat this card
+ *      was unblocking — but it is a spend ceiling this change moved and it must be on this list.
+ *
+ *      RETRACTED, because getting this wrong twice in two rounds is the point of the section. #3187 round 1
+ *      wrote here: *"No declaration does today — both `review-pr` and `review-prep` declare
+ *      `JUDGE_BUDGET_USD = null` explicitly — but the path is open"*. That was FALSE, and it was false for the
+ *      same reason round 0's importer count was: the grep behind it, `git grep -n "kind: 'judge'"`, matches
+ *      only `engine.mjs` and `step-kinds.mjs` — the machinery that CONSTRUCTS the kind — and never a
+ *      declaration. Declarations are written `judgeStep(`, and `git grep -n "judgeStep("` finds FOUR in live
+ *      operations: `explore.mjs:646`, `review-pr.mjs:913`, `review-pr.mjs:945`, `review-prep.mjs:434`. Only
+ *      the last three name a budget. GREP FOR THE DECLARING HELPER, never for the shape it builds.
  *
  * So: when you change this number, run the FULL suite, and expect the breakage somewhere that never mentions
  * it. Tests that pin an inherited total must DERIVE it from this constant rather than write the product out;

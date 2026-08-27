@@ -63,13 +63,20 @@
  *     the depth cap rejects — and the sum of the seats' per-juror budgets is checked BEFORE THE FIRST SPAWN,
  *     so a panel that cannot afford its roster bills nothing at all rather than half a roster.
  *
- *     THIS PANEL IS THE MODULE THAT NAMES THAT DEFAULT, and #3187 is why the number moved. The two declared
- *     operations set their own `JUDGE_BUDGET_USD`; nothing here does, so every seat that omits `budget` gets
- *     whatever `judge-spawn.mjs` calls the default. It is NOT the only thing that inherits it — anything
- *     reaching `judgePanel` without a per-seat budget inherits it THROUGH here while importing nothing (see
- *     `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS", which lists all three paths; #3187 round 1 shipped a
- *     red CI check by assuming an importer count answered this). While that default was `0.5`, sized for a
- *     TOOL-FREE juror, a tool-bearing seat here was killed mid-run — 6 of 8 seats on one converge run,
+ *     THIS PANEL IS THE MODULE THAT NAMES THAT DEFAULT, and #3187 is why the number moved. Nothing here sets
+ *     a `JUDGE_BUDGET_USD` of its own, so every seat that omits `budget` gets whatever `judge-spawn.mjs` calls
+ *     the default. (This line said *"the two declared operations set their own `JUDGE_BUDGET_USD`"* — wrong:
+ *     `git grep -n "judgeStep("` finds FOUR live declarations, and `explore.mjs`'s `synthesize` sets no budget
+ *     at all. The count is not this file's to keep; see the list named below.)
+ *
+ *     IT IS NOT THE ONLY THING THAT INHERITS THAT DEFAULT — anything reaching `judgePanel` without a per-seat
+ *     budget inherits it THROUGH here while importing nothing, and a third path reaches `judgeSpawn` without
+ *     coming through here at all. `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS" is the ONE list of all three;
+ *     do not answer "what does this reach" from this file. #3187 got that question wrong twice — once by
+ *     counting importers (red CI), once by grepping for `kind: 'judge'` instead of `judgeStep(`.
+ *
+ *     While that default was `0.5`, sized for a TOOL-FREE juror, a tool-bearing seat here was killed
+ *     mid-run — 6 of 8 seats on one converge run,
  *     escalating `needs-human` on `mandatory-lens-absent` as though the panel had failed. Raising the default
  *     is what unblocked this path; `JudgeBudgetError` is what stops the next one costing a misdiagnosis.
  *
