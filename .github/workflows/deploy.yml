@@ -1,4 +1,48 @@
-# Auto-deploy the gated WE site to its Cloudflare Worker on every push to main (#1137).
+# Deploy the gated WE site to its Cloudflare Worker — ONLY for a commit whose required checks are green (#1137).
+#
+# WHY THIS IS NOT `on: push` ANY MORE (#xmiuo0r). The push trigger fired this workflow in PARALLEL with CI, on
+# every push to `main`, and deployed whatever `main` happened to be at deploy time — regardless of whether CI
+# passed, and regardless of whether the tree it built was the tree CI tested. Under a fast drain those are
+# routinely DIFFERENT commits. Branch protection never covered this: `strict`/required checks gate a MERGE,
+# not a push-triggered deploy, so the hole existed at `strict: true` too and simply became more likely to be
+# hit once `strict` was turned off.
+#
+# THE TWO HALVES, and why both are needed:
+#   1. TRIGGER — `workflow_run` on a SUCCESSFUL CI run, and check out `workflow_run.head_sha`. This is what
+#      makes the deploy build the exact commit CI verified rather than the branch tip. The job `if:` ALSO
+#      requires `workflow_run.event == 'push'` and a head repository equal to this one; see the admission
+#      comment on the job — those clauses are load-bearing security, not tidiness.
+#   2. ENFORCEMENT — the "Refuse an unverified SHA" step below re-derives, from the API, BOTH that the SHA is
+#      an ancestor of `main` and that `test`/`smoke` are green on their LATEST run for it. It exits non-zero
+#      unless both hold. This mirrors the sole-writer rule the drain already follows
+#      (`docs/agent/platform-decisions.md#event-driven-land-is-wake-only` clause 1): *a wake signal is never a
+#      trusted land order — the gate is still re-derived server-side*. Same principle, applied to deploy.
+#
+# WHAT ACTUALLY GUARDS THIS — a RETRACTION (review of PR #1611). An earlier revision of this header said:
+#
+#     "The trigger is wiring and can be mis-configured or bypassed (`workflow_dispatch`); the re-derive is
+#      the actual guarantee."
+#
+# THAT WAS WRONG, and it was wrong in the direction that matters — it dismissed as "wiring" the half that was
+# in fact the only thing standing between a fork and this job's production secrets. Two corrections:
+#
+#   • The trigger filter is NOT merely wiring. `workflow_run.branches: [main]` matches `head_branch`, a branch
+#     NAME on the HEAD repo — not the head repository, and not ancestry on main. A fork PR whose source branch
+#     is named `main` satisfied it, and the job `if:` then checked only `conclusion == 'success'`. Nothing
+#     examined `head_repository` or `workflow_run.event`. That is a route to running fork-authored code in a
+#     job holding FUI_READ_TOKEN + CLOUDFLARE_API_TOKEN, in a PUBLIC repo. Closed by the job `if:` below.
+#
+#   • The re-derive was NOT the guarantee claimed. As originally written it asked only "did this SHA ever have
+#     green test+smoke?", which a PR head satisfies just as well as a merged commit — demonstrated live during
+#     review against a non-ancestor PR SHA. It is a guarantee of green checks, never of being a commit on
+#     main. The ancestry assertion added to the gate is what makes the re-derive mean what this file claims.
+#
+# Stated correctly: the trigger filter and the re-derive are BOTH load-bearing, and neither subsumes the other.
+#
+# KNOWN GAP, deliberately not fixed here (#xd6hbxe): the FUI sibling is checked out at its DEFAULT branch with no
+# `ref:`, so the build is not reproducible on the FUI side — a FUI change can alter what this deploys without
+# any WE commit. Pinning it needs its own decision (which FUI ref is "the" one for a WE deploy), so it stays a
+# separate item rather than a silent choice made here.
 #
 # CROSS-REPO build: WE's `build:docs` shells out to FUI's component-render tool
 # (../frontierui/dist/tools/component-render/cli.mjs, ratified ordering #1946/#2016), so CI must
@@ -11,18 +55,99 @@
 name: Deploy WE site (Cloudflare Worker)
 
 on:
-  push:
+  # Fires when the CI workflow COMPLETES on main. The `conclusion == 'success'` filter is on the job below;
+  # `types: [completed]` is the only type that carries a conclusion.
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
-  workflow_dispatch: {}
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      break_glass:
+        description: "Deploy even if the SHA's required checks are not green (emergency only — say why in the run notes)"
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-worker
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  checks: read
+  statuses: read
+
 jobs:
   deploy:
+    # ADMISSION: a successful CI run is NOT sufficient on its own — see the "WHAT ACTUALLY GUARDS THIS"
+    # note in the header. `workflow_run.branches: [main]` filters on `head_branch`, a BRANCH NAME on the HEAD
+    # repo, so a FORK pull request whose source branch is literally named `main` matches it. Without the two
+    # extra clauses below, that fork's SHA would reach `Checkout WE` and its code would run in a job holding
+    # FUI_READ_TOKEN + CLOUDFLARE_API_TOKEN. This repo is PUBLIC. Same class the repo already refuses by name
+    # in `apply-review-request.yml:26` and `stage-pr-view.yml:20` ("Deliberately NOT pull_request_target, and
+    # it never checks out a fork's ref: both are the classic routes to running untrusted code with a write
+    # token"). `event == 'push'` excludes PR-triggered CI runs; `head_repository.full_name == repository`
+    # excludes forks outright.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    env:
+      # workflow_run → the commit CI actually tested. workflow_dispatch → the branch tip at dispatch time.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
+      # ── THE GATE ─────────────────────────────────────────────────────────────────────────────────────────
+      # Re-derive BOTH properties for DEPLOY_SHA instead of trusting how this workflow was triggered. Deploy-time
+      # admission control: the deployer verifies the artifact, it does not take the caller's word for it.
+      #
+      # Two independent assertions, because green-checks alone does NOT mean "a commit on main":
+      #   A. ANCESTRY — DEPLOY_SHA is an ancestor of (or identical to) `main`. Without this, ANY sha in the repo
+      #      that happens to carry green `test`/`smoke` check-runs passes — including a pull-request HEAD that
+      #      was never merged. Verified empirically during review: the checks-only pipeline returned ok=true for
+      #      `fff10d794baeee884950a820e774b9acdaa830a5`, a PR head that is NOT an ancestor of main. The compare
+      #      API's `status` is `behind` when the head is an ancestor of the base, `identical` when equal.
+      #   B. REQUIRED CHECKS — `test` and `smoke` are both green for that sha, taking the LATEST check-run per
+      #      name. `filter=latest` is the API default and is passed explicitly here, and the jq additionally
+      #      reduces per name via `max_by(.started_at)`, so a green-then-red RE-RUN cannot be read as green by
+      #      finding the stale success earlier in the list.
+      - name: Refuse an unverified SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BREAK_GLASS: ${{ inputs.break_glass }}
+        run: |
+          set -euo pipefail
+          echo "candidate: $DEPLOY_SHA"
+
+          # A. Ancestry — is this sha actually ON main?
+          rel=$(gh api "repos/${{ github.repository }}/compare/main...$DEPLOY_SHA" --jq '.status')
+          echo "position vs main: $rel"
+          case "$rel" in
+            behind|identical) on_main=true ;;
+            *)                on_main=false ;;
+          esac
+
+          # B. Required checks — LATEST run per required name must be success.
+          got=$(gh api "repos/${{ github.repository }}/commits/$DEPLOY_SHA/check-runs?filter=latest" \
+                  --jq '[.check_runs[] | select(.name=="test" or .name=="smoke")
+                         | {name, conclusion, started_at}] | sort_by(.name)')
+          echo "required check-runs (latest per name): $got"
+          checks_ok=$(printf '%s' "$got" | jq -r '
+                 (group_by(.name) | map(max_by(.started_at))
+                  | map(select(.conclusion=="success") | .name) | unique) == ["smoke","test"]')
+
+          if [ "$on_main" = "true" ] && [ "$checks_ok" = "true" ]; then
+            echo "✓ $DEPLOY_SHA is on main and verified green — proceeding"
+          elif [ "${BREAK_GLASS:-false}" = "true" ]; then
+            echo "::warning::BREAK GLASS — deploying $DEPLOY_SHA (on_main=$on_main, checks_ok=$checks_ok)"
+          else
+            [ "$on_main"    = "true" ] || echo "::error::refusing to deploy $DEPLOY_SHA — it is not an ancestor of main (compare status: $rel)"
+            [ "$checks_ok"  = "true" ] || echo "::error::refusing to deploy $DEPLOY_SHA — required checks are not both green"
+            exit 1
+          fi
+      # ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
       # Sibling layout under $GITHUB_WORKSPACE so WE's hardcoded `../frontierui` resolves:
       #   $GITHUB_WORKSPACE/web-everything  (this repo)
       #   $GITHUB_WORKSPACE/frontierui      (the tool sibling)
@@ -30,6 +155,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: web-everything
+          # THE POINT OF THIS CHANGE: build the commit CI verified, not the branch tip.
+          ref: ${{ env.DEPLOY_SHA }}
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
@@ -69,3 +196,6 @@ jobs:
           # a version mismatch here previously served content un-gated). Bump only after re-verifying the gate.
           wranglerVersion: "4.106.0"
           command: deploy
+
+      - name: Record what shipped
+        run: echo "deployed $DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
