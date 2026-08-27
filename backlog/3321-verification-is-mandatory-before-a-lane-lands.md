@@ -207,7 +207,7 @@ It is a real added cost, and the item pays it deliberately: the marker is what t
 whole-repo error would record a RED marker for this item's commit and the strict gate would then refuse to land work
 that is fine. The `/batch` instruction therefore forwards
 `--gate="npm run test:unit && npm run check:standards -- --scope=<batch-slug>"`, the same #952 demotion the in-locus
-gate two lines above it already relies on. (The `verify` operation has carried a `gate` input since #xvj8sj0; this
+gate two lines above it already relies on. (The `verify` operation has carried a `gate` input since #3240; this
 uses a flag it already supports.)
 
 ## Done when

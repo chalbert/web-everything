@@ -177,7 +177,7 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    1438 lines each and byte-identical (`diff` empty), and no warning names either new file
    (`grep -c claim-sweep` → 0).
    > **Retracted — this item read "4 error(s), 1438 warning(s)" on both sides, and named four
-   > `number-stranded` strays (`xd6hbxe`, `xmit46t`, `xmiuo0r`, `xu9c4q4`) as deliberately not bundled.**
+   > `number-stranded` strays (`3358`, `3359`, `3360`, `3361`) as deliberately not bundled.**
    > True when written and false now: those four were JIT-numbered and healed on `main` at `6fbecfe1`
    > (→ `#3358`, `#3359`, `#3360`, `#3361`), so the rule no longer fires. Re-measured in this lane in
    > this session, both sides are **0 errors**. The strays needed no action from this PR and got none;

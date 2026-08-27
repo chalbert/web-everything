@@ -154,7 +154,7 @@ independent pieces of evidence, all checked in the build lane:
    `we:scripts/__tests__/guard-bash.test.mjs` — verified against `isBlastRadiusPath`). An inflated basis would
    have rendered three plus an ellipsis. It rendered one. **The basis was narrow.**
 3. **The rebase explains the disappearance without any re-derivation bug.** `781af3d3`
-   (*"drain: JIT-number xvdhiro→#3329, xay586h→#3330 at land"*) had already made the identical numbering on
+   (*"drain: JIT-number 3329→#3329, 3330→#3330 at land"*) had already made the identical numbering on
    `main`. Rebasing #1595 onto that dropped the lane's duplicate commit as empty, leaving three cards. The
    label did not "fail to re-evaluate a wrong verdict" — the verdict was right when made, and the edit it was
    about went away afterwards.
