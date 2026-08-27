@@ -544,15 +544,19 @@ export function classifyChecks(rows) {
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, humanBasisFiles = null, cumulativeDiffLines = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null,
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, cumulativeDiffLines = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null, basisNarrowed = true,
 } = {}) {
-  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, diffHunks });
+  // #3343 — `basisNarrowed` comes from `computeNetDiffSignals`: `false` means the cumulative file set is the
+  // un-narrowed base TIP, so it may name files only upstream touched. It never relaxes the human gate (see
+  // `scoreEscalation`); it only makes that fact visible on the verdict. Default `true` — a caller that supplies
+  // nothing scores exactly as before.
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, diffHunks, basisNarrowed });
   const label = producerReviewLabel(score);
   // #2635 — expose the advisory care-level too, so the caller can recompute the jury roster (`resolveJuryPlan`)
   // for the SAME care band this rubric scored, then bind + reconcile it against the pre-registered roster.
   // #3317 — `basisFiles` (the honest cumulative-floored file set the rubric actually scored) rides along too, so
   // the roster recompute selects lenses over the SAME basis rather than the possibly de-inflated own delta.
-  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired, careLevel: score.careLevel, basisFiles: score.basisFiles };
+  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired, careLevel: score.careLevel, basisFiles: score.basisFiles, basisUntrusted: !!score.basisUntrusted };
 }
 
 /**
@@ -888,7 +892,11 @@ function runCli() {
     const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
     let currentLabels = [];
     try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
-    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, currentLabels, diffHunks });
+    // #3343 — whether that cumulative basis is provably this PR's file set (merge-base / ancestry) or the
+    // un-narrowed base TIP. `scored:false` means nothing was measured at all, which is a different fact from a
+    // measurement taken on the wrong basis — don't stamp the un-narrowed reason on an empty score.
+    const basisNarrowed = sig.scored ? sig.basisNarrowed !== false : true;
+    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, currentLabels, diffHunks, basisNarrowed });
 
     // #2635 — BIND + RECONCILE the jury roster against the REAL diff. The pre-registered roster (the item's
     // charter roster) rides the lane manifest when a prepare-time slice recorded it (`preRegisteredLenses`);

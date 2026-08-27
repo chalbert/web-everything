@@ -1186,6 +1186,11 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
       // (unknown revision) rather than silently returning '' — so an invalid candidate (e.g. the producer's
       // `<remote>/<sha>`) fails fast and the fallthrough is exercised as it would be against real git.
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -1495,6 +1500,91 @@ describe('computeNetDiffChangedFiles (#2373 — SHARED net-diff basis, producer 
     expect(r).toEqual({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 4, scored: true, humanBasisFiles: ['scripts/pr-land.mjs'] });
   });
 
+  // ── #3343 — the base-TIP fallback above is safe for SIZE and blast-radius (they buy reviewer attention) and
+  //    NOT safe for the STATUTE / declarative-leash terms, which force `review:human`: `decideSetLabel` then
+  //    refuses `accepted` on that PR and only the human ceremony clears it. One upstream commit touching
+  //    `docs/agent/platform-decisions.md` is enough to spend a person on a PR of three backlog cards. So before
+  //    settling for the base tip, the basis asks the ANCESTRY question instead — which needs no merge-base. ───
+  it("#3343 — a FAILED merge-base lookup no longer falls straight back to the base TIP for the human-gate basis: the ancestry set (`origin/main..head`) is used, so a head merely BEHIND main is not scored on the upstream commits it lacks", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      // The base-TIP diff — three cards this head really added, PLUS two files upstream advanced on while it sat
+      // behind. `docs/agent/platform-decisions.md` is a STATUTE path, and any statute touch forces review:human.
+      'git diff --numstat origin/main deadbeef': { stdout: '2\t0\tbacklog/a.md\n2\t0\tbacklog/b.md\n2\t0\tbacklog/c.md\n4\t4\tdocs/agent/platform-decisions.md\n3\t1\tscripts/guard-bash.mjs\n' },
+      // The ANCESTRY set — the commits on this head and not on main. The three cards; nothing upstream-only.
+      'git log --numstat --diff-merges=first-parent --pretty=format: origin/main..deadbeef --': { stdout: '2\t0\tbacklog/a.md\n2\t0\tbacklog/b.md\n2\t0\tbacklog/c.md\n' },
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(basis.ok).toBe(true);
+    expect(basis.basisKind).toBe('ancestry');
+    expect(basis.basisNarrowed).toBe(true);
+    expect(basis.humanBasis.changedFiles).toEqual(['backlog/a.md', 'backlog/b.md', 'backlog/c.md']);
+    expect(basis.humanBasis.changedFiles).not.toContain('docs/agent/platform-decisions.md');
+    // The whole point: no `review:human` on a PR of three backlog cards.
+    const score = scoreEscalation({ changedFiles: basis.humanBasis.changedFiles, diffLines: basis.humanBasis.diffLines, humanBasisFiles: basis.humanBasis.changedFiles });
+    expect(score.humanRequired).toBe(false);
+  });
+
+  it("#3343 NEGATIVE DIRECTION — a head that GENUINELY edits a statute file still earns review:human when the merge-base lookup fails: one of its own commits touches the file, so the ancestry set contains it", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main deadbeef': { stdout: '2\t0\tbacklog/a.md\n9\t3\tdocs/agent/platform-decisions.md\n' },
+      // This head's OWN commits include the statute edit — the ancestry set reports it, exactly as it must.
+      'git log --numstat --diff-merges=first-parent --pretty=format: origin/main..deadbeef --': { stdout: '2\t0\tbacklog/a.md\n9\t3\tdocs/agent/platform-decisions.md\n' },
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(basis.basisKind).toBe('ancestry');
+    expect(basis.humanBasis.changedFiles).toContain('docs/agent/platform-decisions.md');
+    const score = scoreEscalation({ changedFiles: basis.humanBasis.changedFiles, diffLines: basis.humanBasis.diffLines, humanBasisFiles: basis.humanBasis.changedFiles });
+    expect(score.humanRequired).toBe(true);
+    expect(score.reasons.some((r) => r.startsWith('statute ('))).toBe(true);
+  });
+
+  it("#3343 NEGATIVE DIRECTION — a declarative-leash (gate-self) edit likewise still forces review:human off the ancestry basis", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main deadbeef': { stdout: '5\t1\tscripts/lib/gate-config.mjs\n' },
+      'git log --numstat --diff-merges=first-parent --pretty=format: origin/main..deadbeef --': { stdout: '5\t1\tscripts/lib/gate-config.mjs\n' },
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(scoreEscalation({ changedFiles: basis.humanBasis.changedFiles, humanBasisFiles: basis.humanBasis.changedFiles }).humanRequired).toBe(true);
+  });
+
+  it("#3343 — when the ancestry probe cannot answer either, the legacy base-TIP fallback is kept AND SAID: `basisKind:'base-tip'`, `basisNarrowed:false` — no longer byte-identical to a narrowed basis", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main deadbeef': { stdout: '3\t1\tscripts/pr-land.mjs\n' },
+      // `git log` deliberately unstubbed → this fake throws, as real git does on a range it cannot resolve.
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(basis.ok).toBe(true); // still a basis — the fallback is not a scoring failure
+    expect(basis.basisKind).toBe('base-tip');
+    expect(basis.basisNarrowed).toBe(false);
+    expect(basis.humanBasis.changedFiles).toEqual(['scripts/pr-land.mjs']); // unchanged over-scoring content
+  });
+
+  it("#3343 — a merge-base that RESOLVES is untouched: the ancestry probe never runs, and the basis reports `basisKind:'merge-base'`", () => {
+    const { exec, calls } = fakeExec({
+      'git merge-base origin/main deadbeef': { stdout: 'forkpoint1234\n' },
+      'git diff --numstat forkpoint1234 deadbeef': { stdout: '2\t0\tbacklog/a.md\n' },
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(basis.basisKind).toBe('merge-base');
+    expect(basis.basisNarrowed).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'log')).toBe(false); // no extra subprocess on the hot path
+  });
+
+  it("#3343 — the ancestry set is DEDUPLICATED by path across commits (a file edited in two commits is one entry, its lines summed — churn, the over-scoring direction)", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main deadbeef': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main deadbeef': { stdout: '1\t1\tbacklog/a.md\n' },
+      'git log --numstat --diff-merges=first-parent --pretty=format: origin/main..deadbeef --': { stdout: '\n3\t1\tbacklog/a.md\n\n2\t0\tbacklog/a.md\n' },
+    });
+    const basis = resolveNetDiffBasis({ exec, rev: 'deadbeef' });
+    expect(basis.humanBasis.changedFiles).toEqual(['backlog/a.md']);
+    expect(basis.humanBasis.diffLines).toBe(6); // 3+1 then 2+0 — summed across commits, never a net count
+  });
+
   it('#2404 — the merge-base narrowing benefits `own` too when a lane is ALSO stacked (baseRev): the strict-ancestor own-delta wins over the merge-base cumulative basis, as before', () => {
     const { exec } = fakeExec({
       'git merge-base origin/main origin/lane/child': { stdout: 'forkpoint\n' },
@@ -1531,6 +1621,11 @@ describe('computeNetDiffText (#2450 — reviewer-facing NET diff TEXT, SAME basi
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -1620,6 +1715,11 @@ describe('resolveNetDiffBasis shared across both helpers (#2890-review-fix findi
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -1688,6 +1788,11 @@ describe('#2890-review-r2 finding 1 — a basis resolved for a DIFFERENT request
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -1783,6 +1888,11 @@ describe('computeNetDiffSignals — the ONE net-diff derivation both call sites 
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -1931,6 +2041,11 @@ describe('computeNetDiffPaths (#2901/#1031 — NET changed-file list as plain pa
       if (h && h.throw) throw new Error(h.throw);
       if (h && 'stdout' in h) return h.stdout;
       if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      // #3343 — same faithfulness for the ancestry probe (`git log <base>..<head>`): real git exits 128 on a
+      // range whose refs it cannot resolve, it does not print an empty log. Returning '' here would hand
+      // `resolveNetDiffBasis` a CONFIDENT empty file set for every fixture that never stubbed the probe —
+      // an under-score, the one direction the basis must never take.
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
       return '';
     };
     return { exec, calls };
@@ -4289,5 +4404,67 @@ describe('#3184 — the drain records a fingerprint READ MISS instead of collaps
     // — which suppression deliberately leaves true. Re-key that guard to the label and a suppressed park
     // becomes a silent one, which is the #xmnl36p defect coming back by another door.
     expect(src).toMatch(/if \(gate\.humanRequired && !DRY_RUN\) \{/);
+  });
+});
+
+// ── #3343 — the basis's trust question has to REACH the scorer. `computeNetDiffSignals` is the one derivation
+//    both production callers use (pr-land's `applyReviewEscalationLabel` and the drain's scoring loop), so the
+//    `basisKind` / `basisNarrowed` the basis resolved must ride out of it — otherwise the distinction exists
+//    only inside a function nobody in production calls directly. ────────────────────────────────────────────
+describe('computeNetDiffSignals carries the basis trust question (#3343)', () => {
+  const fakeExec = (script = {}) => {
+    const exec = (cmd, args) => {
+      const intent = args.filter((a) => a !== '--end-of-options' && a !== '--verify' && a !== '--no-ext-diff');
+      const h = script[`${cmd} ${intent.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      if (h && 'stdout' in h) return h.stdout;
+      if (args[0] === 'diff') throw new Error('unknown revision (unstubbed)');
+      if (args[0] === 'log') throw new Error('unknown revision range (unstubbed)');
+      return '';
+    };
+    return { exec };
+  };
+
+  it("a merge-base basis reports `basisKind:'merge-base'` and `basisNarrowed:true`", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main origin/lane/x': { stdout: 'forkpoint\n' },
+      'git diff --numstat forkpoint origin/lane/x': { stdout: '3\t1\tREADME.md\n' },
+      'git diff forkpoint origin/lane/x': { stdout: 'diff --git a/README.md b/README.md\n' },
+    });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.scored).toBe(true);
+    expect(sig.basisKind).toBe('merge-base');
+    expect(sig.basisNarrowed).toBe(true);
+  });
+
+  it("an ancestry basis reports `basisKind:'ancestry'` and is still NARROWED — it is the PR's own file set", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main origin/lane/x': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t0\tbacklog/a.md\n4\t4\tdocs/agent/platform-decisions.md\n' },
+      'git log --numstat --diff-merges=first-parent --pretty=format: origin/main..origin/lane/x --': { stdout: '2\t0\tbacklog/a.md\n' },
+      'git diff origin/main origin/lane/x': { stdout: 'diff --git a/backlog/a.md b/backlog/a.md\n' },
+    });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.basisKind).toBe('ancestry');
+    expect(sig.basisNarrowed).toBe(true);
+    expect(sig.humanBasisFiles).toEqual(['backlog/a.md']);
+  });
+
+  it("a base-tip basis reports `basisNarrowed:false` — the signal the producer threads into the human gate", () => {
+    const { exec } = fakeExec({
+      'git merge-base origin/main origin/lane/x': { throw: 'no common ancestors' },
+      'git diff --numstat origin/main origin/lane/x': { stdout: '2\t0\tbacklog/a.md\n4\t4\tdocs/agent/platform-decisions.md\n' },
+      'git diff origin/main origin/lane/x': { stdout: 'diff --git a/backlog/a.md b/backlog/a.md\n' },
+    });
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/x', fetchExtraRefs: ['lane/x'] });
+    expect(sig.basisKind).toBe('base-tip');
+    expect(sig.basisNarrowed).toBe(false);
+  });
+
+  it('an UNRESOLVED basis is not reported as un-narrowed — nothing was measured, which is a different fact', () => {
+    const { exec } = fakeExec({});
+    const sig = computeNetDiffSignals({ exec, rev: 'lane/gone' });
+    expect(sig.scored).toBe(false);
+    expect(sig.basisKind).toBe(null);
   });
 });

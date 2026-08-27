@@ -584,6 +584,7 @@ export function scoreEscalation({
   crossRepo = false,
   thresholds = {},
   diffHunks = null,
+  basisNarrowed = true,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -643,6 +644,31 @@ export function scoreEscalation({
   if (derivationFiles.length) { signals.gateDerivation = derivationFiles; reasons.push(`gate-derivation (${derivationFiles.join(', ')}) — gate derivation code, independent committee review`); }
   if (statuteFiles.length) { signals.statute = statuteFiles; reasons.push(`statute (${statuteFiles.join(', ')}) — human review required`); }
 
+  // #3343 — DID THE BASIS EVEN NARROW TO THIS PR? `basisNarrowed:false` means the caller's cumulative file set
+  // is the un-narrowed base-TIP diff (`resolveNetDiffBasis`'s merge-base lookup fell through and its ancestry
+  // stand-in could not answer either), so `gateBasis` may name files only UPSTREAM touched. That is exactly the
+  // input the one-way gate must not be handed blind: a false `review:human` costs a person and clears only by
+  // the human ceremony.
+  //
+  // WHAT THIS DOES: it makes the un-narrowed basis VISIBLE — on `signals`, in the reasons, and (via
+  // `resolveProducerReviewLabel`) on the producer's verdict — so a human clearing the label can see that the
+  // scored file set was not provably this PR's.
+  //
+  // WHAT THIS DELIBERATELY DOES NOT DO: it does not suppress `humanRequired`. Suppression is the strictly worse
+  // failure. The base-tip set is a SUPERSET of the PR's own files, so a branch that genuinely edits a statute
+  // file is in it too — dropping the gate on an un-narrowed basis would agent-clear that real statute edit,
+  // which no later pass recovers. Over-firing costs a person once and is caught by the person; under-firing is
+  // silent. So the gate keeps firing and the narrowing itself was fixed upstream (the ancestry basis), where an
+  // over-fire can be prevented without ever weakening the rule.
+  //
+  // Default `true`: every caller that supplies no flag (including every pre-#3343 one) scores exactly as before.
+  // Flagged only when something was actually scored — an empty basis has no verdict to qualify.
+  const basisUntrusted = basisNarrowed === false && basisFiles.length > 0;
+  if (basisUntrusted) {
+    signals.basisUntrusted = true;
+    reasons.push('basis un-narrowed (merge-base unresolved) — the scored file set may include upstream-only changes');
+  }
+
   // #3317 — SIZE scores over the cumulative line count too, floored at the declared own-delta count. Same
   // monotone rule as the file basis above: a stacked/self-declared base can raise this number, never lower it.
   // Still a CAPACITY dial and never a refusal (#3320) — crossing the threshold adds a reason and lifts the care
@@ -678,7 +704,9 @@ export function scoreEscalation({
   const diffHunksBasisFiles = hunks === null ? null : cumulativeFiles.map(plainDiffPath);
   // #3317 — `basisFiles` rides the verdict so a downstream consumer that picks reviewers from the diff (the
   // #2635 roster recompute) can select over the SAME honest basis this scored, instead of the own-delta.
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, basisFiles, diffHunks: hunks, diffHunksBasisFiles };
+  // #3343 — `basisUntrusted` rides the verdict so a consumer (and the human who has to clear a `review:human`)
+  // can tell a verdict scored on the PR's own file set from one scored on the base tip. Never a permission.
+  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, basisFiles, basisUntrusted, diffHunks: hunks, diffHunksBasisFiles };
 }
 
 /**

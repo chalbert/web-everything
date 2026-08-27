@@ -703,3 +703,28 @@ describe('resolveRosterReconcile — #2635 bind + reconcile the jury roster from
     expect(r.humanAlignmentRequired).toBe(false);
   });
 });
+
+// ── #3343 — the producer is where a `review:human` is FIRST applied, and it is the expensive one to get wrong:
+//    `decideSetLabel` refuses `accepted` on such a PR and only the human ceremony removes it. So the basis's
+//    trust question has to survive the trip from `computeNetDiffSignals` through this verdict. ─────────────
+describe('resolveProducerReviewLabel — the basis trust question (#3343)', () => {
+  const statute = ['docs/agent/platform-decisions.md'];
+
+  it('threads `basisNarrowed:false` onto the verdict as `basisUntrusted`, so a human clearing the label can see the scored file set was not provably this PR\'s', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['backlog/a.md'], humanBasisFiles: ['backlog/a.md'], diffLines: 4, basisNarrowed: false });
+    expect(v.basisUntrusted).toBe(true);
+    expect(v.reasons.some((r) => r.startsWith('basis un-narrowed'))).toBe(true);
+  });
+
+  it('NEGATIVE DIRECTION — an un-narrowed basis still labels a genuine statute edit `review:human`; the flag never buys a PR its way past the gate', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12, basisNarrowed: false });
+    expect(v.humanRequired).toBe(true);
+    expect(v.label).toBe('review:human');
+  });
+
+  it('defaults to TRUSTED — a caller supplying no `basisNarrowed` produces the same verdict as before', () => {
+    expect(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12 }))
+      .toEqual(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12, basisNarrowed: true }));
+    expect(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12 }).basisUntrusted).toBe(false);
+  });
+});

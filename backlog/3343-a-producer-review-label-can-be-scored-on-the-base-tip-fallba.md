@@ -3,12 +3,17 @@ bornAs: xvkn1jd
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
+graduatedTo: none
 scope:
   - we:scripts/merge-ai-prs.mjs
   - we:scripts/lib/review-escalation.mjs
   - we:scripts/pr-land.mjs
+  - we:scripts/__tests__/merge-ai-prs.test.mjs
+  - we:scripts/__tests__/review-escalation.test.mjs
+  - we:scripts/__tests__/pr-land.test.mjs
 tags: []
 ---
 
@@ -131,6 +136,58 @@ The first version of this card said *"Check whether that already closes this bef
 framing: it does not cover it.** [#3317](/backlog/3317/) widens `changedFiles`/`diffLines` to a cumulative
 merge-base measurement because only `humanBasisFiles` is forced cumulative today — the opposite direction from
 this card, and it does not touch the merge-base-fails fallback at all. Build this on its own.
+
+## RETRACTED at build time: the #1595 repro. That label was CORRECT.
+
+The section above ("The symptom is real — reproduced in this lane") is **wrong**, and the diagnosis it says it
+still owes — *why* the merge-base lookup failed for #1595 — is owed no longer: **it never failed.** Three
+independent pieces of evidence, all checked in the build lane:
+
+1. **#1595's own PR body says it edited a statute file.** Quoted from the body `pr-land` embedded at open:
+   *"Ran the command the error message itself prescribes — `node we:scripts/backlog.mjs number-stranded` —
+   which numbered them to #3329 and #3330 and self-committed."* `number-stranded` **rewrites**
+   `we:docs/agent/platform-decisions.md`. So the branch carried a real statute edit in its own commit.
+2. **The recorded reason names exactly ONE blast-radius file.** `scoreEscalation` renders
+   `blast-radius (${blastFiles.slice(0, 3).join(', ')}…)` — up to three, then `, …`. #1595's stamped reason is
+   `blast-radius (we:docs/agent/platform-decisions.md)`, one file. The card's own inflated 9-file base-tip set
+   contains **three** blast-radius paths (`we:docs/agent/platform-decisions.md`, `we:scripts/guard-bash.mjs`,
+   `we:scripts/__tests__/guard-bash.test.mjs` — verified against `isBlastRadiusPath`). An inflated basis would
+   have rendered three plus an ellipsis. It rendered one. **The basis was narrow.**
+3. **The rebase explains the disappearance without any re-derivation bug.** `781af3d3`
+   (*"drain: JIT-number xvdhiro→#3329, xay586h→#3330 at land"*) had already made the identical numbering on
+   `main`. Rebasing #1595 onto that dropped the lane's duplicate commit as empty, leaving three cards. The
+   label did not "fail to re-evaluate a wrong verdict" — the verdict was right when made, and the edit it was
+   about went away afterwards.
+
+The card's reconstruction assumed the pre-rebase head was `08953e25`'s tree plus three cards. It never had the
+real pre-rebase head (force-pushed away; GitHub's timeline records only the after-SHA), and that assumption is
+what produced the 3-vs-12 table.
+
+**What survives the retraction:** the base-tip fallback is real code on a real path, it is genuinely silent, and
+it genuinely feeds the one-way human gate. It is a LATENT defect, and this card fixed it. What is not
+established — and what nothing in the record supports — is that it has ever fired in production.
+
+## What was built
+
+- `resolveNetDiffBasis` (`we:scripts/merge-ai-prs.mjs`) now reports `basisKind`
+  (`'merge-base' | 'ancestry' | 'base-tip'`) and `basisNarrowed`, so a fallen-through lookup is no longer
+  byte-identical to a narrowed one.
+- Before settling for the base tip it asks the **ancestry** question instead — `git log --numstat
+  --diff-merges=first-parent origin/main..head` — which needs no merge-base and is right in both directions: a
+  head merely BEHIND reports only its own commits' files, a head that genuinely edits a statute file still has
+  a commit that touches it. Only when that also cannot answer does the legacy base-tip basis stand, now labelled.
+- `computeNetDiffSignals` carries `basisKind`/`basisNarrowed` out to both production callers;
+  `we:scripts/pr-land.mjs`'s `resolveProducerReviewLabel` and the drain's scoring loop thread it into
+  `scoreEscalation`.
+- `scoreEscalation` records `signals.basisUntrusted` + a reason for an un-narrowed basis, and **deliberately
+  does not suppress `humanRequired`** — the base-tip set is a superset of the PR's own files, so dropping the
+  gate on it would agent-clear a real statute edit, which no later pass recovers. Over-firing costs a person
+  once and the person catches it; under-firing is silent.
+
+**Not done here — re-derivation when the head moves.** Left out on purpose. The one case that motivated it
+(#1595) turned out to need no re-derivation, and the mechanism it would need — letting a later pass REMOVE a
+`review:human` — means weakening `decideSetLabel`'s INVARIANT 2, the property that makes the label one-way.
+That is a governance change, not a size-2 basis fix, and it belongs in its own card with its own ruling.
 
 ## Done when
 

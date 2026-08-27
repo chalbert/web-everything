@@ -2244,6 +2244,42 @@ function basisAnswersRequest(basis, { remote, base, rev }) {
   return !!f && f.rev === rev && f.remote === remote && f.base === base;
 }
 
+/**
+ * #3343 — the ANCESTRY-derived changed-file set for `<baseRef>..<candidate>`: the numstat of the commits that
+ * are reachable from the head and NOT from the base. Used ONLY when `resolveNetDiffBasis`'s merge-base lookup
+ * falls through, as a narrower stand-in for the base-TIP diff (see the call site for why the base tip is unsafe
+ * for the one-way human gate). `null` when git can't answer, so the caller keeps the legacy base-tip basis.
+ *
+ * WHAT IT MEASURES, precisely: the per-commit numstat of `baseRef..candidate`, deduplicated by path, with the
+ * line counts SUMMED across commits. That is branch CHURN, not a net two-tree diff — a file edited in two
+ * commits counts its lines twice, and a file edited then reverted within the branch still appears. Both are the
+ * over-scoring direction (more reviewers, never fewer), which is the direction this path is allowed to err in.
+ * It is NOT a replacement for the merge-base basis and is never used when that one resolves.
+ *
+ * `--diff-merges=first-parent` so a merge commit contributes the files it BROUGHT IN rather than nothing —
+ * without it git shows no diff for a merge at all, and a lane that merged `main` in would under-report, which is
+ * the one direction this must never take. Renames render exactly as `git diff --numstat` renders them (the
+ * same `parseNumstat` display encoding, normalised downstream by `newPathFromNumstatEntry`).
+ * A trailing `--` so a refname that also names a path can't be re-read as a pathspec.
+ * @param {Function} exec  `execFileSync`-shaped
+ * @param {string} baseRef
+ * @param {string} candidate
+ * @returns {{changedFiles:string[], diffLines:number}|null}
+ */
+function ancestryNetDiff(exec, baseRef, candidate) {
+  let parsed;
+  try {
+    parsed = parseNumstat(exec('git', ['log', '--numstat', '--diff-merges=first-parent', '--pretty=format:', '--end-of-options', `${baseRef}..${candidate}`, '--'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  } catch (err) {
+    if (isExecContractError(err)) throw err; // let the caller's own contract short-circuit classify it
+    return null; // git can't answer (old git, unresolvable range) — caller keeps the base-tip basis
+  }
+  const seen = new Set();
+  const changedFiles = [];
+  for (const f of parsed.changedFiles) { if (!seen.has(f)) { seen.add(f); changedFiles.push(f); } }
+  return { changedFiles, diffLines: parsed.diffLines };
+}
+
 function isExecContractError(err) {
   // A shape-violating `exec` (wrong arity / wrong positional meaning) fails inside Node's own argument
   // validation or the caller's body dereferencing the wrong thing — both surface as a `TypeError`. A real git
@@ -2297,6 +2333,9 @@ export function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', re
     // failure (no common history / candidate unresolvable) is swallowed here and falls back to `baseRef`
     // itself — the diff call right after is still the real candidate-resolves probe.
     let diffBase = baseRef;
+    // #3343 — WHICH left side this basis actually got. `'merge-base'` is the #2404 fork point; `'base-tip'` is
+    // the un-narrowed fallback below, which is a DIFFERENT measurement wearing the same shape.
+    let basisKind = 'base-tip';
     try {
       // `git merge-base A B` can print MORE THAN ONE line (a criss-cross-merge history can have several
       // equally-valid best common ancestors) — take only the first; `.trim()` alone would leave an embedded
@@ -2304,7 +2343,7 @@ export function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', re
       // the next candidate, or a `null` resolve if both candidates hit it — always the safe over-scoring
       // fallback, never wrong data, but avoidable).
       const mb = String(exec('git', ['merge-base', '--end-of-options', baseRef, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) || '').split('\n')[0].trim();
-      if (mb) diffBase = mb;
+      if (mb) { diffBase = mb; basisKind = 'merge-base'; }
     } catch (err) {
       if (isExecContractError(err)) return { ok: false, reason: 'exec-contract', requestedFor };
       /* no common history, or candidate doesn't resolve yet — the diff below is the real probe */
@@ -2321,7 +2360,28 @@ export function resolveNetDiffBasis({ exec, remote = 'origin', base = 'main', re
       if (isExecContractError(err)) return { ok: false, reason: 'exec-contract', requestedFor };
       continue; /* candidate doesn't resolve — try the next one */
     }
-    return { ok: true, baseRef, diffBase, candidate, humanBasis, requestedFor };
+    // #3343 — the merge-base lookup fell through, so `humanBasis` above is the base-TIP diff: it reports every
+    // file UPSTREAM has advanced on since this head forked as if the head touched it. The #2404 comment calls
+    // that "the prior, safe over-scoring behavior", and it IS safe for the size/blast terms (they buy reviewer
+    // attention). It is NOT safe for the STATUTE / declarative-leash terms, which are the one-way half: they
+    // force `review:human`, `decideSetLabel` then refuses `accepted` on such a PR, and only the human ceremony
+    // clears it. One upstream commit touching `docs/agent/platform-decisions.md` is enough to spend a person on
+    // a PR of three backlog cards.
+    //
+    // So before settling for the base tip, derive the file set by ANCESTRY instead: the numstat of the commits
+    // that are on `candidate` and NOT on `baseRef`. That question needs no merge-base, and it is right in BOTH
+    // directions — a head that is merely BEHIND reports only its own commits' files (no upstream statute file),
+    // while a head that genuinely EDITS a statute file has a commit that touches it, so the gate still fires.
+    // Only if that also fails do we keep the base tip (unchanged legacy behaviour).
+    if (basisKind === 'base-tip') {
+      let ancestry = null;
+      // Unreachable in practice — the `git diff` above already proved this `exec` is well-shaped — but the
+      // short-circuit is stated rather than assumed, so the contract violation can never arrive as a raw throw.
+      try { ancestry = ancestryNetDiff(exec, baseRef, candidate); }
+      catch (err) { if (isExecContractError(err)) return { ok: false, reason: 'exec-contract', requestedFor }; }
+      if (ancestry) { humanBasis = ancestry; basisKind = 'ancestry'; }
+    }
+    return { ok: true, baseRef, diffBase, candidate, humanBasis, basisKind, basisNarrowed: basisKind !== 'base-tip', requestedFor };
   }
   return { ok: false, reason: 'ref-unresolved', requestedFor };
 }
@@ -2352,6 +2412,10 @@ export function computeNetDiffChangedFiles({ exec, remote = 'origin', base = 'ma
     try { own = parseNumstat(exec('git', ['diff', '--numstat', '--end-of-options', baseRev, candidate], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
     catch { own = humanBasis; /* own-delta diff failed → fall back to the cumulative basis */ }
   }
+  // #3343 — the basis's `basisKind` / `basisNarrowed` are DELIBERATELY not re-exported here. This function's
+  // return shape is the SIZE/blast-radius payload, asserted whole (`toEqual`) at a dozen call sites; the
+  // trust question belongs to the basis object itself (`resolveNetDiffBasis`) and to `computeNetDiffSignals`,
+  // which is what both production callers actually use.
   return { changedFiles: own.changedFiles, diffLines: own.diffLines, scored: true, humanBasisFiles: humanBasis.changedFiles };
 }
 
@@ -2444,6 +2508,10 @@ export function computeNetDiffSignals({ exec, remote = 'origin', base = 'main', 
     // resolve — the same degraded posture the other fields take, and `scoreEscalation`'s `max` then leaves the
     // declared count alone rather than zeroing a real signal.
     cumulativeDiffLines: basis.ok ? basis.humanBasis.diffLines : 0,
+    // #3343 — which left side the cumulative basis got (`'merge-base'` | `'ancestry'` | `'base-tip'`), and
+    // whether it is the PR's own file set at all. `false` ONLY for the un-narrowed base-tip fallback.
+    basisKind: basis.ok ? basis.basisKind : null,
+    basisNarrowed: basis.ok ? basis.basisNarrowed !== false : false,
     scored: net.scored,
     netDiffText,
     diffHunks: diffHunksFrom(netDiffText),
@@ -3513,6 +3581,10 @@ async function runCli() {
       // how a content-reading detector silently concludes "no principle touch".
       let netDiffText = { text: '', scored: false, reason: 'no-clone' };
       let diffHunks = null;
+      // #3343 — whether the cumulative basis below is provably this PR's file set. `true` on the paths where the
+      // question does not arise: the `gh pr view --json files` fallback IS the PR's own file list (three-dot,
+      // already narrowed by GitHub), and an unscored basis has no verdict to qualify.
+      let basisNarrowed = true;
       if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
         const exec = (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts });
         const sig = computeNetDiffSignals({ exec, rev: v.headRef, baseRev: v.base, fetchExtraRefs: [v.headRef] });
@@ -3523,6 +3595,7 @@ async function runCli() {
         netScored = sig.scored;
         netDiffText = sig.netDiffText;
         diffHunks = sig.diffHunks;
+        basisNarrowed = sig.scored ? sig.basisNarrowed !== false : true; // #3343
       }
       if (!netScored) {
         try {
@@ -3534,6 +3607,7 @@ async function runCli() {
           humanBasisFiles = changedFiles;
           // #3317 — and so is its line count: this IS the cumulative measurement on this path.
           cumulativeDiffLines = diffLines;
+          basisNarrowed = true; // #3343 — the gh files list is already the PR's own (three-dot) file set
         } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       }
       // #2890-review-fix finding 1 — `diffHunks` comes from `computeNetDiffSignals` above, which applies
@@ -3541,7 +3615,7 @@ async function runCli() {
       // `null` when it was not — including the no-clone path this block skipped entirely. Finding 4 — the hunks
       // are always CUMULATIVE while `changedFiles` may be de-inflated to `v.base…head`; the verdict's
       // `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is what a detector pairs them with.
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks, basisNarrowed });
       // #2414 — first-drain-sighting manifest baseline gate. The manifest values (`v.hasManifest`/
       // `dismissedFindings`/`crossRepo`/`blockedBy`) are re-read from the LIVE PR body every pass
       // (readPrManifest), so we can capture what the drain FIRST saw for a ready-to-merge PR and diff a later
