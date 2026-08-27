@@ -14,6 +14,28 @@ tags: []
 
 guard-lane protects a lane only when its occupant was DECLARED via adopt. A consumer that pins lanes by hand without leasing is invisible to the pool, so acquire hands its lane to another session and the contested-lease guard cannot fire.
 
+## Second occurrence, hours later — and it carries a symptom the first did not
+
+An agent holding **lane-35** had its working tree discarded mid-task: a sibling process ran
+`git reset --hard` onto `origin/lane/3344-lens-must-refuse`, then rebased. The agent recovered its commit from
+the reflog into a fresh lane, so **nothing was lost** — again by recovery, not by design.
+
+**The new symptom is the important part.** A `npm run check:standards` run the agent performed shortly before
+the reset **reported the other lane's tree** — 1439 warnings, not its own 1438. The command succeeded, printed a
+plausible number, and described a tree the agent was not working in.
+
+That makes this more than a lost-work risk. **A gate reading can be silently attributed to the wrong tree**, so
+"I ran the gate and it was clean" stops being evidence about the change in hand. It is the same
+quiet-degradation signature as everything else in this cluster: the command exits 0, the output looks normal,
+and only the attribution is wrong.
+
+It is also a candidate explanation for an earlier observation in this session — `check:standards` appearing to
+return different counts (3 errors then 0, later 1 then 0) on what looked like an unchanged tree. That was
+attributed at the time to a malformed-card loader path being non-deterministic. **Both explanations are now
+live and neither is confirmed**; a later run of the same gate four times in one lane produced identical output,
+which fits cross-contamination better than a loader bug. Whoever builds this should settle which, rather than
+inheriting either.
+
 ## Observed
 
 Two sessions worked in **lane-7 at the same time**, in both directions:
