@@ -213,6 +213,24 @@ export function normalizeText(s) {
 }
 
 /**
+ * A numeral, with a comma treated as INTERNAL only where it is a thousands separator — i.e. followed by
+ * exactly three digits. `300,929` is one token; the `84` in `84, and that changed later` is `84`, and the
+ * sentence comma is left where it belongs, outside the token.
+ *
+ * RETRACTED — this used to be `/(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])/g`, whose `[\d,]*` swallowed ANY
+ * following comma, sentence punctuation included. Found by review #1620 round 5, reproduced against the
+ * shipped module before touching it:
+ *
+ *     distinctiveTokens('the count moved 84, and that changed later')  ->  ['84,']
+ *     tokenPattern('84,').test('the 84 verdicts are correct')          ->  false
+ *
+ * so a claim that happened to put a comma after its distinguishing numeral could no longer see that
+ * numeral written bare anywhere else — the token tier reported NOTHING, with no `coverage.skipped` entry
+ * to show for it. The fourth instance of this module's one recurring failure class; see the header.
+ */
+const NUMERAL_RE = /(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?(?![\w])/g;
+
+/**
  * Distinctive tokens of a claim — the parts specific enough that their bare appearance elsewhere is worth
  * a human glance even when the surrounding sentence is unrecognisable. That is the tier that catches the
  * `84`-figure case, where the three sites share the numeral and almost nothing else.
@@ -228,7 +246,7 @@ export function distinctiveTokens(text) {
   for (const m of src.matchAll(/#\d{2,}/g)) out.add(m[0]);
   for (const m of src.matchAll(/\bx[a-z0-9]{6,7}\b/g)) out.add(m[0]);
   for (const m of src.matchAll(/\bwe:[^\s,;)`'"]+/g)) out.add(m[0]);
-  for (const m of src.matchAll(/(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])/g)) {
+  for (const m of src.matchAll(NUMERAL_RE)) {
     if (m[0].replace(/\D/g, '').length >= 2) out.add(m[0]);
   }
   return [...out].filter(Boolean).sort((a, b) => b.length - a.length || a.localeCompare(b));
@@ -239,12 +257,24 @@ function escapeRe(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** A word-boundary-ish matcher for a token, tightened for numerals so `84` never matches `184` or `8.42`. */
+/**
+ * A word-boundary-ish matcher for a token, tightened for numerals so `84` never matches `184` or `8.42`.
+ *
+ * RETRACTED — the numeric tail used to be `(?![\w,]|\.\d)`, which rejected a match followed by ANY comma.
+ * That was the MIRROR of the `NUMERAL_RE` defect above and had to be fixed with it: even once the claim
+ * yields a clean `84`, `tokenPattern('84').test('the value is 84, roughly')` was `false`, so a SITE that
+ * put a comma after the numeral was dropped just as silently as a CLAIM that did. Review #1620 round 5
+ * prescribed only the `NUMERAL_RE` half; the half below was found by testing the fix and is fixed here
+ * too, because either one alone leaves the same silent drop reachable from the other side.
+ *
+ * A comma now blocks the match only where it is a thousands separator (`84` inside `84,000`), never where
+ * it is sentence punctuation.
+ */
 export function tokenPattern(token) {
   const t = String(token);
   const numeric = /^[\d,.]+$/.test(t);
   const lead = numeric ? '(?<![\\w.,])' : (/^[\w]/.test(t) ? '(?<![\\w])' : '');
-  const tail = numeric ? '(?![\\w,]|\\.\\d)' : (/[\w]$/.test(t) ? '(?![\\w])' : '');
+  const tail = numeric ? '(?!\\w|,\\d{3}|\\.\\d)' : (/[\w]$/.test(t) ? '(?![\\w])' : '');
   return new RegExp(`${lead}${escapeRe(t)}${tail}`, 'g');
 }
 

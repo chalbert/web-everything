@@ -865,3 +865,79 @@ describe('#3307 claim-sweep — the module can sweep its own source', () => {
     expect(argv).toEqual(['ls-files', '-z', '--', '-weird-pathspec']);
   });
 });
+
+describe('#3307 claim-sweep — a sentence comma is not part of the number', () => {
+  // Review #1620 round 5. The FOURTH instance of this module's one recurring failure class: a site that
+  // scores into no tier at all, with nothing in `coverage.skipped` to show for it.
+  //
+  // WAS: the numeral scanner read `/(?<![\w.])\d[\d,]*(?:\.\d+)?(?![\w])/g`, whose `[\d,]*` swallowed any
+  // following comma — sentence punctuation included. A claim that happened to write `84,` produced the
+  // token `84,`, and `tokenPattern('84,')` then demanded that exact comma-adjacency at every site.
+  //
+  // Both DIRECTIONS are pinned below, because either fix alone leaves the same silent drop reachable
+  // from the other side. The review prescribed only the first.
+
+  it('#3307 a claim comma does not enter the token — `84,` yields `84`', () => {
+    expect(distinctiveTokens('the count moved 84, and that changed later')).toEqual(['84']);
+  });
+
+  it('#3307 thousands grouping is still ONE token — the comma there is internal', () => {
+    expect(distinctiveTokens('measured 300,929 lines, and more')).toEqual(['300,929']);
+    expect(distinctiveTokens('saw 1,438 warnings, then stopped')).toEqual(['1,438']);
+    expect(distinctiveTokens('a run of 1,438,000 items, roughly')).toEqual(['1,438,000']);
+  });
+
+  // label, claim, document line, must the token tier see it?
+  const COMMA = [
+    ['claim writes the comma, site writes it bare',
+      'the count moved 84, and that changed later',
+      'the number 84 appears here in an unrelated sentence about verdicts', true],
+    ['site writes the comma, claim writes it bare (the MIRROR half)',
+      'the corpus holds 84 recorded verdicts',
+      'an unrelated sentence mentioning 84, which changed later', true],
+    ['both write the comma',
+      'the count moved 84, and that changed later',
+      'an unrelated sentence mentioning 84, which changed later', true],
+    ['neither writes the comma',
+      'the corpus holds 84 recorded verdicts',
+      'the number 84 appears in unrelated prose', true],
+    // The protection the fix must NOT cost: `84` is not an occurrence of the quantity inside `84,000`.
+    ['a thousands-grouped number is NOT an occurrence of its leading group',
+      'the corpus holds 84 recorded verdicts', 'a run of 84,000 items here', false],
+    ['nor is a longer number that merely starts the same way',
+      'the corpus holds 84 recorded verdicts', 'the value is 184 here', false],
+    ['nor a decimal',
+      'the corpus holds 84 recorded verdicts', 'the value is 84.5 here', false],
+  ];
+
+  it.each(COMMA)('#3307 the token tier sees the numeral regardless of an adjacent comma: %s',
+    (_label, claim, line, seen) => {
+      const sites = sweepDocument({ path: 'c.md', text: `${line}\n` }, { text: claim });
+      expect(sites.map((s) => s.tier)).toEqual(seen ? ['token'] : []);
+    });
+
+  it('#3307 MUTATION — the comma-swallowing regex drops a real site with no trace anywhere', () => {
+    // The consequence that made this blocking: not a mislabelled site, an ABSENT one. It is not in
+    // survivors, not in undecided, not in retractedSites, and not in `coverage.skipped` either — which
+    // is the promise `coverage.skipped` exists to make. This row reddens if `NUMERAL_RE` is reverted.
+    const report = sweepDocuments(
+      [{ path: 'c.md', text: 'the number 84 appears here in an unrelated sentence about verdicts\n' }],
+      { text: 'the count moved 84, and that changed later' },
+    );
+    expect(report.counts.sites).toBe(1);
+    expect(report.counts.undecided).toBe(1);
+    expect(report.coverage.skipped).toEqual([]);
+  });
+
+  it('#3307 MUTATION — the tokenPattern tail: a comma at the SITE drops it just as silently', () => {
+    // Reverting only the `tokenPattern` tail to `(?![\w,]|\.\d)` reddens here and nowhere else, which is
+    // why the mirror half needed its own pin rather than riding on the regex fix.
+    expect(tokenPattern('84').test('the value is 84, roughly')).toBe(true);
+    expect(tokenPattern('84').test('a run of 84,000 items')).toBe(false);
+    const report = sweepDocuments(
+      [{ path: 'c.md', text: 'an unrelated sentence mentioning 84, which changed later\n' }],
+      { text: 'the corpus holds 84 recorded verdicts' },
+    );
+    expect(report.counts.sites).toBe(1);
+  });
+});
