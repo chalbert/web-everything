@@ -3,8 +3,9 @@ bornAs: xchz076
 kind: story
 size: 5
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 scope:
   - we:scripts/lib/jury-core.mjs
   - we:scripts/lib/__tests__/jury-core.test.mjs

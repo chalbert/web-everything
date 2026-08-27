@@ -3,8 +3,9 @@ bornAs: x9nkmoz
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 scope: ["we:scripts/review-corpus/stability.mjs", "we:scripts/review-corpus/__tests__/stability.test.mjs"]
 tags: []
 ---

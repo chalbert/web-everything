@@ -3,8 +3,9 @@ bornAs: xvdhiro
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 tags: [review, ledger, delivery]
 scope:
   - we:scripts/lib/verdict-ledger.mjs
