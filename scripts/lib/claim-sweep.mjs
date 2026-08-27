@@ -503,7 +503,7 @@ export function collectDocuments(o = {}) {
         skipped.push({ path: rel, why: `unreadable: ${err && err.code ? err.code : 'error'}` }); continue;
       }
       if (text.length > MAX_FILE_BYTES) { skipped.push({ path: rel, why: `over ${MAX_FILE_BYTES} bytes` }); continue; }
-      if (text.includes(' ')) { skipped.push({ path: rel, why: 'binary' }); continue; }
+      if (text.includes('\u0000')) { skipped.push({ path: rel, why: 'binary' }); continue; }
       documents.push({ path: rel, text, source: 'working-tree' });
     }
   }
