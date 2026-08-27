@@ -18,7 +18,9 @@ A calibrated severity-and-disposition model for review findings: whether severit
 **Five forks, two dissolved concerns, one edge set on a neighbouring decision.**
 
 **Fork 1** — does `severity` exist as a second typed axis? **Recommended: no — one axis, and delete the four
-dangling `severity` references that name a field the code has never had.**
+dangling `severity` references, which name a field *a jury finding* has never had.** (Scoped deliberately: a
+required `severity` field does exist in the unrelated Web Reporting model at
+`we:scripts/lib/buildReport.mjs:42`, so the deletion is by filename, never directory-wide.)
 
 **Fork 2** — is `impactIfUnfixed` asserted by the juror or derived in code? **Recommended: derived, from
 three factual answers read off `IMPACT_GLOSS`'s own ladder — but SHADOW-FIRST. The derivation is computed
@@ -34,8 +36,10 @@ authority is `IMPACT_GLOSS` and whose level is computed, never typed — with ke
 reported alongside.**
 
 **Fork 5** — does `unrecoverable` stay, given it has never once fired in 42 recorded labels? **Recommended:
-yes — Fork 2 is precisely the change that makes it reachable, and dropping it would quietly widen an
-evidence exemption.**
+yes — dropping it makes *"irreversible only"* inexpressible, because `EVIDENCE_EXEMPT_IMPACT_BAR` cannot
+point at a rung that does not exist, so (b) forcibly widens the evidence floor's exemption.** (The
+*"Fork 2 revives it"* argument is a **contested prediction**, not a ground — both later passes attacked it —
+and it carries a measured re-open trigger.)
 
 **Dissolved (not forks):**
 - *Should the agreement number gate anything?* Not this item's to rule — [`#3315`](/backlog/3315/) already
@@ -168,9 +172,20 @@ version drift. That separation is [`#3363`](/backlog/3363/), already filed.
 cannot measure label agreement on findings that do not recur. What it establishes is narrower, and is the
 premise this decision actually needs: **the review has no demonstrated test-retest floor, so no property of
 a juror's output may be assumed stable without being measured, and `broken` is a property of a juror's
-output.** `#3314` has already made `impactIfUnfixed >= broken` blocking for one lens and `#3339` is filed to
-build the scan — so an unmeasured level is *already* load-bearing, not prospectively so. **This is a repair
-to a rule in force, not an enabler for a possible future one**, and that is what sets its priority.
+output.**
+
+**And the level is load-bearing *today* — but state which predicate makes it so, because the obvious answer
+is wrong.** It is **not** `#3314`: that anchor says on its own face that its blocking half is **inert**
+until `#3339` ships (*"this rule's blocking half is inert and the lens behaves as plain advisory"*), and
+`#3338` separately records that `claim-accuracy` is not seated on the land path at all. What reads the level
+on every verdict today is **`blocksAcceptance` (#2942)** — and `#3314` will add a second reader the moment
+`#3339` lands. So an unmeasured level is already deciding lands, through a predicate the first draft of this
+paragraph misnamed.
+
+> *Corrected after the skeptic pass.* This paragraph read *"`#3314` has already made `impactIfUnfixed >=
+> broken` blocking for one lens… **this is a repair to a rule in force, not an enabler for a possible future
+> one**."* The priority conclusion survives; the citation behind it did not. Full quote of the anchor's
+> inertness paragraph in the statute-overlap check.
 
 **Two quantities, and the trap of conflating them.** *Churn* is about which findings are raised; *agreement*
 is about what a level means given a finding. They are independent. Fork 4's held-out half measures the
