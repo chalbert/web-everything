@@ -353,9 +353,12 @@ export const DEFAULT_EFFORT = 'medium';
  * multiplier is applied to, because the honest reading matters: those four runs were themselves produced
  * UNDER a 1.5 ceiling, so the distribution is censored at 1.5 and $0.9042 is a lower bound on the real tail
  * rather than an estimate of it. `1.5` is therefore a value MEASURED AS SUFFICIENT FOR THE LENSES OBSERVED,
- * not one proven sufficient for the widest lens — which is exactly why the two declared operations
- * (`we:scripts/operations/review-pr.mjs`, `we:scripts/operations/review-prep.mjs`) went further and now
- * declare `JUDGE_BUDGET_USD = null`, no ceiling at all, under the same 2026-08-18 operator ruling.
+ * not one proven sufficient for the widest lens — which is exactly why the two operations that DECLARE a
+ * budget at all (`we:scripts/operations/review-pr.mjs`, `we:scripts/operations/review-prep.mjs`) went further
+ * and now declare `JUDGE_BUDGET_USD = null`, no ceiling at all, under the same 2026-08-18 operator ruling.
+ * "THE TWO THAT DECLARE ONE" IS NOT "THE TWO THAT EXIST" — a third, `we:scripts/operations/explore.mjs`,
+ * declares a `judge` step and no budget, and so lands on THIS value. See "WHO INHERITS THIS" below; an
+ * earlier draft of this docblock elided that distinction and was wrong because of it.
  *
  * WHY THIS DEFAULT IS NOT ALSO `null`, since that is the obvious question. `we:scripts/lib/judge-panel.mjs`
  * inherits this value as its per-seat default and feeds it to `assertPanelBudget`, which REFUSES any
