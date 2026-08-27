@@ -49,3 +49,18 @@ skipping the pool ("costs an `npm ci` and buys nothing") does not survive contac
    override and no manual `fetch --unshallow`, and `we:scripts/guard-lane.mjs` then admits an edit inside the lane.
 5. `we:docs/agent/vm-sessions.md` no longer tells the reader to skip the pool. (Corrected ahead of this item in
    the #1537 lane; keep the two consistent.)
+
+## Still open after PR #1539 (closeout check, 2026-08-27)
+
+PR #1539 landed criteria 1 and 2 — `we:scripts/lib/lane-pool-paths.mjs` plus
+`we:scripts/__tests__/lane-pool-root-and-shallow.test.mjs` pin the derived pool root and the
+shallow-`--reference` drop — and criterion 5 holds (`we:docs/agent/vm-sessions.md` now says the pool needs no
+overrides). Two criteria remain:
+
+- **3 — not addressed.** `ensureOneSibling` in `we:scripts/lane-pool.mjs` still catches a failed sibling clone,
+  logs `⚠ … sibling clone failed`, removes the partial and returns. That is the warn-and-continue this
+  criterion asks to replace with a drift the caller can act on; PR #1539 changed only the `--reference` flag on
+  the line above the `try`, and its body does not claim otherwise.
+- **4 — not observed as specified.** The PR verified a `--depth 1` clone into a scratch workspace with
+  `provision --count=1`, not `provision --count=2` on a cloud VM, and did not exercise
+  `we:scripts/guard-lane.mjs` admitting an edit inside the resulting lane.
