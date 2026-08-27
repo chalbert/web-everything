@@ -40,6 +40,7 @@ import {
   LAUNCH_KINDS,
   canonicalPlaceholder,
   dispatchLaneOperation,
+  DISPATCH_GUARD_LISTING_GRACE_MINUTES,
   dispatchStillHolds,
   fillBrief,
   sessionSlugFor,
@@ -289,13 +290,23 @@ describe('the lane comes from the tick core or nowhere', () => {
 
   it('G1: ABSENT but too YOUNG to be listed still holds — `--bg` returns before the session is visible', () => {
     // The listing grace IS the spawn→claim window the whole guard exists for, so "not in the listing" must not
-    // mean "gone" inside it. Written with the LITERAL two minutes as well as the constant.
+    // mean "gone" inside it. Written with the LITERAL as well as the constant.
+    //
+    // WHICH WINDOW, corrected by #3353's hardening 5. This used to age against the OBSERVER's two minutes,
+    // because both readers shared one constant. They no longer do: the guard reads its own, larger
+    // `DISPATCH_GUARD_LISTING_GRACE_MINUTES`, on the grounds that the observer's wrong answer writes nothing
+    // while the guard's starts a SECOND agent in an occupied lane clone. The property under test is unchanged
+    // — absent-and-young holds, absent-and-old does not — only the width of "young".
     const started = isoPlus(NOW, -1); // one minute old, and not in the listing
     const young = goneRun({ startedAt: started, expectedBy: isoPlus(started, 90) });
     expect(DISPATCH_LISTING_GRACE_MINUTES).toBe(2);
+    expect(DISPATCH_GUARD_LISTING_GRACE_MINUTES).toBe(10);
     expect(dispatchStillHolds(young, NOW)).toBe(true);
-    expect(dispatchStillHolds(young, isoPlus(started, 1.5))).toBe(true);
-    expect(dispatchStillHolds(young, isoPlus(started, 2.5))).toBe(false);
+    expect(dispatchStillHolds(young, isoPlus(started, 9.5))).toBe(true);
+    expect(dispatchStillHolds(young, isoPlus(started, 10.5))).toBe(false);
+    // The observer's two minutes no longer release it — the exact assertion that reddens if the two constants
+    // are ever collapsed back into one.
+    expect(dispatchStillHolds(young, isoPlus(started, 2.5))).toBe(true);
     // …and an absent handle whose `startedAt` cannot be read cannot be told from a just-started one → holds.
     expect(dispatchStillHolds(goneRun({ startedAt: null }), NOW)).toBe(true);
   });

@@ -187,11 +187,18 @@ describe('the PR discovery query — the one thing fixtures cannot prove', () =>
 
 describe('LISTING_GRACE_MS is DERIVED, not a second literal that can drift from DISPATCH_LISTING_GRACE_MINUTES', () => {
   it('stays the minutes constant times 60_000 — reddens if either side is ever re-literalised', () => {
-    // The docblock on `LISTING_GRACE_MS` (dispatch-lane-io.mjs) says this derivation exists so the pure guard's
-    // own copy of the same window (`dispatch-lane.mjs#dispatchStillHolds`'s default) cannot drift from it. That
-    // claim was asserted by nothing: mutating `LISTING_GRACE_MS` back to a bare `2 * 60 * 1000` literal left
-    // every test in this directory green. This is the identical defect class as round 2's G5
-    // (`DISPATCH_HOLD_GRACE_MINUTES`), pinned the same way — with the LITERAL, not only the constant.
+    // The docblock on `LISTING_GRACE_MS` (dispatch-lane-io.mjs) says this derivation exists so the OBSERVER's
+    // two constants cannot drift apart. That claim was asserted by nothing: mutating `LISTING_GRACE_MS` back to
+    // a bare `2 * 60 * 1000` literal left every test in this directory green. This is the identical defect
+    // class as round 2's G5 (`DISPATCH_HOLD_GRACE_MINUTES`), pinned the same way — with the LITERAL, not only
+    // the constant.
+    //
+    // WHAT THIS NO LONGER SPANS, corrected by #3353. The sentence above used to say the derivation kept the
+    // PURE GUARD's copy of the window from drifting — `dispatchStillHolds`'s default. It does not any more:
+    // hardening 5 gave the guard its own, larger `DISPATCH_GUARD_LISTING_GRACE_MINUTES`, on the grounds that
+    // the observer's wrong answer writes nothing while the guard's starts a second agent in an occupied lane.
+    // Nothing here reddened when that changed, because this assertion only ever bound the observer's two
+    // constants. The guard's side is pinned in `dispatch-liveness-hardening.test.mjs` instead.
     expect(DISPATCH_LISTING_GRACE_MINUTES).toBe(2);
     expect(LISTING_GRACE_MS).toBe(DISPATCH_LISTING_GRACE_MINUTES * 60_000);
   });

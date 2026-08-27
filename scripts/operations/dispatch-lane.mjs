@@ -122,13 +122,42 @@ export const DISPATCH_HOLD_GRACE_MINUTES = 30;
  * absence meaning the agent is gone.
  *
  * `claude --bg` returns before its session is necessarily visible, so a listing taken inside this window
- * cannot tell *not yet listed* from *already finished*. The guard treats "absent and young" as HOLDING — the
- * fail-closed direction, and the exact seconds the double-dispatch guard exists to cover.
+ * cannot tell *not yet listed* from *already finished*. The OBSERVER treats "absent and young" as still
+ * `running` — the fail-closed direction for a reader whose wrong answer writes nothing.
+ *
+ * THIS IS THE OBSERVER'S WINDOW ONLY. It used to be the guard's too; it is not any more. The double-dispatch
+ * guard reads {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES} instead, because the two readers pay very different
+ * prices for the same wrong answer — see that constant.
  *
  * ONE SOURCE OF TRUTH with the observer's own grace: `we:scripts/operations/dispatch-lane-io.mjs` derives its
- * `LISTING_GRACE_MS` from this constant rather than carrying a second number that could drift from it.
+ * `LISTING_GRACE_MS` from this constant rather than carrying a second number that could drift from it. That
+ * derivation is still correct and still wanted; the guard is the one deliberate EXCEPTION to it, and it states
+ * its own reason rather than silently carrying a second copy of this number.
  */
 export const DISPATCH_LISTING_GRACE_MINUTES = 2;
+
+/**
+ * The same window as {@link DISPATCH_LISTING_GRACE_MINUTES}, for the DOUBLE-DISPATCH GUARD, and deliberately
+ * larger.
+ *
+ * WHY TWO NUMBERS, when the comment above says two numbers that must agree eventually will not: these two must
+ * NOT agree. They answer the same question — "how long is a session's absence from the listing still just *not
+ * yet listed*?" — for two readers whose cost of being wrong differs by roughly 100x:
+ *
+ *   - THE OBSERVER is wrong → it reports `unresolved`. Nothing is written, nothing is started, and an operator
+ *     looks at an entry that needed looking at anyway.
+ *   - THE GUARD is wrong → it releases the item, and the next dispatch starts a SECOND agent in the same lane
+ *     clone, racing one working tree, both opening a PR. That is the entire failure this guard exists for.
+ *
+ * An asymmetric cost gets an asymmetric window. Waiting longer costs the guard only latency on a dispatch that
+ * was going to be re-attempted anyway; waiting too little costs a double-dispatch. Ten minutes is still far
+ * below any real build and five times the slowest spawn→listed gap the observer needs to cover.
+ *
+ * IT MUST STAY GREATER THAN THE OBSERVER'S. Equal or smaller and the guard is back to trusting a single bad
+ * read as fast as the reader whose wrong answer is free — the exact state this constant exists to end.
+ * Asserted, not merely written down: `we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs`.
+ */
+export const DISPATCH_GUARD_LISTING_GRACE_MINUTES = 10;
 
 /**
  * DETECTION is wider than SUBSTITUTION, and the gap is the whole point (PR #1211 review, F3 → round 2, G4).
@@ -321,9 +350,19 @@ export function fillBrief(template, values = {}) {
  * still ages out (in MINUTES now, not hours), and a record whose session is alive is never released on a clock.
  *
  * WHY `false` STILL WAITS OUT A GRACE. `claude --bg` returns before its session is necessarily listed, so
- * "absent" inside {@link DISPATCH_LISTING_GRACE_MINUTES} of `startedAt` is *not yet visible*, not *gone* — and
- * those seconds are exactly the spawn→claim window this guard exists for. Absent with an unreadable
- * `startedAt` cannot be told apart from either, so it holds.
+ * "absent" inside {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES} of the anchor below is *not yet visible*, not
+ * *gone* — and those seconds are exactly the spawn→claim window this guard exists for. Absent with no usable
+ * anchor at all cannot be told apart from either, so it holds. The guard's window is its OWN and is larger
+ * than the observer's {@link DISPATCH_LISTING_GRACE_MINUTES}; that constant's docblock says why.
+ *
+ * AND WHY IT AGES FROM `lastSeenLiveAt`, NOT `startedAt`. `startedAt` answers "how long ago did this begin?",
+ * which is the wrong question for an agent that has been confirmed alive since. Anchored on `startedAt`, ONE
+ * bad listing read against a long-running build is instantly past the grace and releases the lane — the age
+ * that matters is the age of the last CONFIRMATION, not of the dispatch. `lastSeenLiveAt` is stamped every
+ * time a listing read answers `live: true` (`dispatch-lane-io.mjs#persistLastSeenLive`), so a bad read
+ * arriving straight after a real "seen alive" cannot release the item, while two bad reads spaced by the
+ * window still can. It falls back to `startedAt` only when it was never set — a dispatch never yet seen alive,
+ * which is the case the original window was written for and where the two anchors agree.
  *
  * WHY THE CLOCK IS SOUND FOR THE NULLISH CASE AND ONLY THERE. A handle-less INDETERMINATE entry can never be
  * observed at all, and an unreadable listing means the system has NO liveness signal — so the `running` answer
@@ -335,8 +374,9 @@ export function fillBrief(template, values = {}) {
  * two agents in one clone and the cost of a wrong "still holding" is a refusal an operator can see and act on
  * (`wake.mjs --resolve`, which now refuses to close out a LIVE handle without `--force`).
  *
- * @param {{expectedBy?: string|null, startedAt?: string|null, live?: boolean|null}} entry - an in-flight
- *   dispatch record summary, with the liveness answer the io shell stamped onto it.
+ * @param {{expectedBy?: string|null, startedAt?: string|null, lastSeenLiveAt?: string|null, live?: boolean|null}} entry -
+ *   an in-flight dispatch record summary, with the liveness answer the io shell stamped onto it and the
+ *   instant a listing read last confirmed it alive.
  * @param {string} at - the instant the read was taken, ISO. The io shell supplies it; this stays pure.
  * @param {{expectedWithinMinutes?: number, graceMinutes?: number, listingGraceMinutes?: number}} [o]
  * @returns {boolean}
@@ -344,7 +384,7 @@ export function fillBrief(template, values = {}) {
 export function dispatchStillHolds(entry, at, {
   expectedWithinMinutes = DEFAULT_EXPECTED_WITHIN_MINUTES,
   graceMinutes = DISPATCH_HOLD_GRACE_MINUTES,
-  listingGraceMinutes = DISPATCH_LISTING_GRACE_MINUTES,
+  listingGraceMinutes = DISPATCH_GUARD_LISTING_GRACE_MINUTES,
 } = {}) {
   const now = Date.parse(String(at ?? ''));
   if (Number.isNaN(now)) return true;
@@ -356,9 +396,15 @@ export function dispatchStillHolds(entry, at, {
   // THE AGENT IS GONE from a listing that WAS read. Nothing can collide with a session that does not exist, so
   // the hold ends as soon as the record is too old for "absent" to mean "not listed yet".
   if (entry?.live === false) {
-    if (Number.isNaN(startedAt)) return true;
-    const listingGrace = Number(listingGraceMinutes) >= 0 ? Number(listingGraceMinutes) : DISPATCH_LISTING_GRACE_MINUTES;
-    return now < startedAt + listingGrace * 60_000;
+    // THE ANCHOR IS THE LAST CONFIRMATION, falling back to the start only for a dispatch never seen alive.
+    const lastSeenLive = Date.parse(String(entry?.lastSeenLiveAt ?? ''));
+    const anchor = Number.isNaN(lastSeenLive) ? startedAt : lastSeenLive;
+    if (Number.isNaN(anchor)) return true;
+    // THE FALLBACK IS THE GUARD'S WINDOW TOO. Reading the observer's constant here would hand a caller that
+    // passed a malformed or negative `listingGraceMinutes` the smaller number back — the guard's default
+    // quietly downgraded to the observer's by a bad argument, which is the hole the default alone leaves open.
+    const listingGrace = Number(listingGraceMinutes) >= 0 ? Number(listingGraceMinutes) : DISPATCH_GUARD_LISTING_GRACE_MINUTES;
+    return now < anchor + listingGrace * 60_000;
   }
 
   // LIVENESS IS UNKNOWN — the clock backstop, and the only case it is sound for.
