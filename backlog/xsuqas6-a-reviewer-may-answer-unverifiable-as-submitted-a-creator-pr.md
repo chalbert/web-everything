@@ -1,10 +1,11 @@
 ---
 kind: decision
 parent: "3318"
-status: active
+status: open
 scaffoldedBy: "prepare-burden-of-proof-lane-23-a394d37f"
 dateScaffolded: "2026-08-27"
 dateOpened: "2026-08-27"
+preparedDate: "2026-08-27"
 relatedTo: ["2950", "3312", "3341", "3362", "3354", "3314"]
 relatedReport: reports/2026-08-27-creator-owed-proof-burden-shift.md
 tags: [review, jury, evidence, burden-of-proof, governance, decision-prep]
