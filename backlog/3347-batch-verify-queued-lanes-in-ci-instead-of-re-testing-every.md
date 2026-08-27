@@ -220,11 +220,11 @@ card.
 
 ## Spawned
 
-- **#xmiuo0r** — deploy only a CI-verified SHA (`workflow_run` + `head_sha` + re-derive the verdict).
+- **#3360** — deploy only a CI-verified SHA (`workflow_run` + `head_sha` + re-derive the verdict).
   Delivered alongside this ruling.
-- **#xd6hbxe** — pin the FUI sibling ref so a deploy is reproducible.
-- **#xmit46t** — stamp the deployed SHA into the Worker; settle the rollback path.
-- **#xu9c4q4** — arm the red-main stop-the-line. **Deferred by the operator**: recover manually until it hurts.
+- **#3358** — pin the FUI sibling ref so a deploy is reproducible.
+- **#3359** — stamp the deployed SHA into the Worker; settle the rollback path.
+- **#3361** — arm the red-main stop-the-line. **Deferred by the operator**: recover manually until it hurts.
 - **#3348** — take `check:standards` and shard imbalance off the per-PR critical path (attacks `firstCi`, the
   binding term).
 

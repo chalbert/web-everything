@@ -1,4 +1,5 @@
 ---
+bornAs: xd6hbxe
 kind: decision
 status: open
 scope: ["we:.github/workflows/deploy.yml"]
@@ -23,7 +24,7 @@ agent-readiness. The wiring is trivial once the ref is chosen; the whole item is
 - **a WE-pinned sha** — maximally reproducible and WE-controlled, at the cost of a bump step (probably
   automated) whenever WE wants a newer FUI.
 
-Deliberately left out of the #xmiuo0r deploy-gate change rather than settled silently there.
+Deliberately left out of the #3360 deploy-gate change rather than settled silently there.
 
 ## Done when
 
