@@ -55,6 +55,32 @@ thought about it, which is exactly the condition that made both misses invisible
 **Refuse rather than warn.** These call sites are added by agents in headless runs; a warning on stderr reaches
 nobody at the moment it matters. Same reasoning as [#3344](/backlog/3344/).
 
+## The harvest must be the tracked file set, not an enumeration — demonstrated, not hypothetical
+
+A first attempt at this guard shipped on #3321's branch as a test in `we:scripts/__tests__/lane-verify.test.mjs`
+that reads **two hard-coded paths**:
+
+```js
+const WORKFLOW = 'skills-src/batch-backlog-items/parallel-execute.workflow.js';
+const DRAIN = 'scripts/lane-drain.mjs';
+const srcOf = (f) => readFileSync(resolve(REPO, f), 'utf8');
+```
+
+A reviewer refuted it by mutation: it added a non-compliant invocation to a **third** file and the check stayed
+green. Verified independently here by reading the branch.
+
+**That is this card's own argument landing on its own fix.** "A hand sweep that has been wrong twice will be
+wrong a third time" applies exactly as much to a check that enumerates the files it knows about. Such a check is
+a hand sweep wearing a guard's clothes — it encodes the two callers someone *remembered*, which is the failure
+being closed, now frozen into source and reporting success.
+
+So the harvest is not an implementation detail: **enumerate from the tracked file set** (`git ls-files`), never
+from a literal list. A guard whose coverage is a constant can only ever be as complete as the sweep that wrote
+it.
+
+The mechanism in that attempt was sound — argv inspection plus the compliant-spellings set. The **scope was the
+whole defect**, and widening it is small.
+
 ## The test that decides whether this is the durable fix
 
 **Replay the guard against rounds 1 and 2.** A guard that would not have caught `buildPrLandArgs` and the four
@@ -83,5 +109,8 @@ deciding it is finished, and record the number. If it flags every call site, the
    invocations in `we:parallel-execute.workflow.js`) and asserting **both are caught**, plus that every landing
    invocation currently committed in this repo **passes**. Both directions: the negative half is what keeps the
    check from being annotated into uselessness.
-2. The count of call sites flagged across the tree at landing is recorded here.
-3. `npm run check:standards` — 0 errors.
+2. **The third-file mutation** — a non-compliant invocation added to a file the guard was never told about is
+   caught. This is the criterion the first attempt failed, and it is the one that distinguishes a guard from an
+   enumeration. Assert it against a file created by the test, not a file already in the tree.
+3. The count of call sites flagged across the tree at landing is recorded here.
+4. `npm run check:standards` — 0 errors.
