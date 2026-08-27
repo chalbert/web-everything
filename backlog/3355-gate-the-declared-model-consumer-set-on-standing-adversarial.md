@@ -5,7 +5,6 @@ size: 5
 status: open
 scope: ["we:scripts/lib/", "we:scripts/check-standards.mjs", "we:scripts/operations/__tests__/helpers/"]
 dateOpened: "2026-08-26"
-blockedBy: ["3354"]
 relatedReport: reports/2026-08-26-adversarial-fixtures-model-output-consumers.md
 tags:
   - testing

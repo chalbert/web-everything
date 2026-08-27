@@ -293,6 +293,39 @@ still earns its keep — the bug was never in what the code decided. The qualifi
 criterion, on the mechanics, and only where mechanics is what the item changes. Rewriting a suite of decision
 tests as integration tests is the ceremony the 3–5 cap above exists to prevent.
 
+### A second qualifier — code that reads a model's answer owes adversarial fixtures (#3354)
+
+**Ratified 2026-08-27 by the operator (Nicolas Gilbert).** Codified as a clause-2 amendment to
+[`#agent-convergence-independent-validation`](platform-decisions.md#agent-convergence-independent-validation);
+this is the author-facing form of the same rule.
+
+The qualifier above is about a **real mechanism** — a shell-out, a filesystem effect — where a double has no
+geometry. This one is about a **real adversary**, and it is the opposite remedy: the model is *faked*
+deliberately, because what you need to exercise is not the mechanism but the shape of a wrong answer.
+
+**When an item changes code that acts on a value which came from a model, at least one criterion must drive a
+fixture whose input is structurally valid and semantically wrong.** Not malformed — *wrong*. That is the
+distinction the evidence turns on: 25 such fixtures were added to the review pipeline and **six found real
+defects, none of which was a parse failure.** Every input was valid JSON. A non-array `findings` coerced to
+`[]`, so a juror that narrated its blockers in prose recorded an **accept**; a cited file that was not in the
+diff; a valid enum member that would have let a juror withhold its own finding. A schema check catches none of
+these, and neither does constrained decoding — **structural validity is not the untrusted part; meaning is.**
+
+**The obligation binds on the consumer existing, not only on a fix.** Clause 2's original requirement — a test
+that fails on pre-change behaviour — fires when someone is repairing something. None of those six defects had a
+bug report or a fix in flight; they were latent, and the pre-emptive fixture set is what surfaced them. So a
+module in the class carries a **standing** fixture set rather than earning one at repair time.
+
+**What counts as a fixture, stated so it cannot be satisfied by decoration:** one counts only if **a named line
+of guard code, removed, makes it fail.** A fixture that passes whatever the guard does asserts nothing, and a
+tag naming a failure kind is not evidence that anything was checked.
+
+The bound class is the **trust boundary** — code acting on a model-supplied value — never the failure shape.
+"Anything whose failure mode is silent" was rejected as undecidable from a diff, which is the same bar the
+ladder above already sets. Note the predicate is **not** reliably decidable from a single file: a helper taking
+an opaque parameter, or a CLI reading JSON from stdin, is in the class only by virtue of its caller. The rule
+states the class; a gate works from a declared set (#3355).
+
 <!-- provenance-lint: off — the real-repo harness's three exports are a fixed cross-track contract agreed with the lane building it (#3264 follow-up). They are asserted against that agreement, not against this checkout, so they will not resolve here until that lane lands. -->
 
 `check:standards` enforces the operations half (`we:scripts/lib/operation-io-fidelity.mjs`): every
