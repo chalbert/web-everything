@@ -1,8 +1,9 @@
 ---
 bornAs: xnnehes
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-24"
+dateResolved: "2026-08-27"
 tags: []
 ---
 

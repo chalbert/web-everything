@@ -144,3 +144,17 @@ the first waits and the second does not.
 2. **Executable** — a check derives this census rather than trusting the table: it recomputes the raw
    call sites and fails when a script listed here as uncovered has since gained an operation, so the card
    cannot silently rot. It must RED against a deliberately stale table.
+
+## Still open after PR #1562 (closeout check, 2026-08-27)
+
+PR #1562 was the **prepare** pass: it removed the duplicate placeholder `## Done when` and added the
+"HOW to slice it" section above. It changed only this card, `3165` and two agent-memory files. Neither
+acceptance criterion is delivered:
+
+- **1** — no per-script or per-verb stay-raw reasons have been written onto the tables above.
+  `we:scripts/progress-board.mjs`, `we:scripts/merge-ai-prs.mjs`, `we:scripts/lane-resume.mjs`,
+  `we:scripts/conveyor/learnings-drop.mjs`, `we:scripts/gap-sweep-status.mjs` and `we:scripts/lane-stack.mjs`
+  are still bare **none** rows, and the twelve `we:scripts/backlog.mjs` verbs carry no reason either.
+- **2** — no census-deriving check exists. `we:scripts/check-standards-rules.mjs` and
+  `we:scripts/__tests__/check-standards-rules.test.mjs` — both named in this card's `scope:` — contain no
+  reference to this card, so nothing reddens against a deliberately stale table.
