@@ -502,9 +502,10 @@ const USAGE = `review-log-claims — re-derive a quantitative review-log claim f
   node scripts/lib/review-log-claims.mjs derive <pr>...        read the record; write your figure from THIS
   node scripts/lib/review-log-claims.mjs check <file.md>...    verify the <!-- claim: --> markers in a document
 
+  -h, --help  print this usage and exit 0
   --json      machine-readable output
   --strict    an unreadable record fails instead of warning (only where the network is guaranteed)
-  --repo O/R  pass through to \`gh pr view --repo\`
+  --repo O/R  pass through to \`gh pr view --repo\` (\`--repo=O/R\` works too)
 
 Marker grammar, the only thing \`check\` recognises in prose:
 
@@ -536,16 +537,61 @@ function renderRecord(record) {
   return lines.join('\n');
 }
 
-export function main(argv, { fetch, log = console.log, err = console.error } = {}) {
-  const flags = new Set(argv.filter((a) => a.startsWith('--') && !a.startsWith('--repo')));
-  const repoArg = argv.find((a) => a.startsWith('--repo='));
-  const rest = argv.filter((a) => !a.startsWith('--'));
+const VALUELESS_FLAGS = new Set(['--json', '--strict', '--help', '-h']);
+
+/**
+ * Split argv into `{ flags, repo, operands }`, or `{ error }`.
+ *
+ * `--repo` takes its value in EITHER form — `--repo O/R` (what USAGE documents) or `--repo=O/R`. The first
+ * parser here recognised only the `=` form: the bare `--repo` token was dropped as a flag and `O/R` was left
+ * behind as an operand, which `derive` then discarded via `Number.isFinite`. `derive 1 --repo cli/cli` read
+ * THIS repo and exited 0 — no warning, no error. That is this module's own stated failure class ("an empty
+ * array would derive `rounds = 0` and turn an outage into a confident wrong answer") arriving by a different
+ * route, on the command the header calls the primary deliverable, so the space form is now consumed properly.
+ *
+ * An unrecognised dash-prefixed token is an ERROR, never a silently-ignored flag and never an operand — the
+ * same reason an unreadable marker errors rather than skipping: a typo must not quietly disable a check.
+ */
+export function parseArgv(argv) {
+  const flags = new Set();
+  const operands = [];
+  let repo = null;
+  const needsValue = '--repo needs a value — `--repo O/R` or `--repo=O/R`';
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--repo') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) return { error: needsValue };
+      repo = value;
+      i += 1;
+    } else if (arg.startsWith('--repo=')) {
+      repo = arg.slice('--repo='.length);
+      if (!repo) return { error: needsValue };
+    } else if (arg.startsWith('-')) {
+      if (!VALUELESS_FLAGS.has(arg)) return { error: `unknown flag \`${arg}\`` };
+      flags.add(arg);
+    } else {
+      operands.push(arg);
+    }
+  }
+  return { flags, repo, operands };
+}
+
+// `run` is injectable so a test can prove `--repo` REACHES `gh` — the half that was untested when the space
+// form silently read the wrong repository. Left undefined it falls through to ghCommentFetcher's execFileSync.
+export function main(argv, { fetch, run, log = console.log, err = console.error } = {}) {
+  const parsed = parseArgv(argv);
+  if (parsed.error) { err(`${parsed.error}\n\n${USAGE}`); return 1; }
+  const { flags, repo, operands: rest } = parsed;
   const [command, ...operands] = rest;
   const json = flags.has('--json');
   const strict = flags.has('--strict');
-  const fetcher = fetch ?? ghCommentFetcher({ repo: repoArg ? repoArg.slice('--repo='.length) : null });
+  const fetcher = fetch ?? ghCommentFetcher({ repo, run });
 
-  if (!command || flags.has('--help') || flags.has('-h')) { log(USAGE); return command ? 0 : 1; }
+  // An EXPLICIT help request succeeds; a bare invocation with no command at all is misuse and still exits 1.
+  if (flags.has('--help') || flags.has('-h')) { log(USAGE); return 0; }
+  if (!command) { log(USAGE); return 1; }
 
   if (command === 'derive') {
     const prs = operands.map(Number).filter((n) => Number.isFinite(n) && n > 0);

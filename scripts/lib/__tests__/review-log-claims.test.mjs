@@ -13,6 +13,7 @@ import {
   normalizeNumberWords,
   ghCommentFetcher,
   prsReferenced,
+  parseArgv,
   METRICS,
   main,
 } from '../review-log-claims.mjs';
@@ -315,6 +316,65 @@ describe('#3336 — the CLI: derive reads, check asserts', () => {
     const out = [];
     expect(main(['check', fileWith('The split cleared in one round each.')], { fetch, log: (m) => out.push(m) })).toBe(0);
     expect(out.join('\n')).toMatch(/nothing asserted, nothing checked/);
+  });
+
+  it('#3336 `-h` prints usage and exits 0, like `--help`', () => {
+    for (const flag of ['-h', '--help']) {
+      const out = [];
+      const errs = [];
+      expect(main([flag], { fetch, log: (m) => out.push(m), err: (m) => errs.push(m) })).toBe(0);
+      expect(out.join('\n')).toMatch(/^review-log-claims — re-derive a quantitative review-log claim/);
+      expect(errs).toEqual([]); // never the unknown-command branch
+    }
+  });
+
+  it('#3336 a bare invocation still prints usage and exits 1 — no command is misuse', () => {
+    const out = [];
+    expect(main([], { fetch, log: (m) => out.push(m) })).toBe(1);
+    expect(out.join('\n')).toMatch(/Marker grammar/);
+  });
+
+  it('#3336 `--repo` reaches `gh` in BOTH the space form and the `=` form', () => {
+    // The regression: `--repo O/R` was dropped and `O/R` fell through to `derive`'s Number filter, so the
+    // command read THIS repo and exited 0 — a confident answer about the wrong repository.
+    for (const argv of [['derive', '1572', '--repo', 'cli/cli'], ['derive', '1572', '--repo=cli/cli']]) {
+      const calls = [];
+      const run = (bin, args) => { calls.push([bin, args]); return JSON.stringify({ comments: PR_1572 }); };
+      const out = [];
+      expect(main(argv, { run, log: (m) => out.push(m) })).toBe(0);
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toBe('gh');
+      expect(calls[0][1]).toEqual(['pr', 'view', '1572', '--json', 'comments', '--repo', 'cli/cli']);
+      expect(out.join('\n')).toMatch(/PR #1572 — 5 recorded review round\(s\)/);
+    }
+  });
+
+  it('#3336 without `--repo`, `gh` is given no repo flag at all', () => {
+    const calls = [];
+    const run = (bin, args) => { calls.push(args); return JSON.stringify({ comments: PR_1572 }); };
+    expect(main(['derive', '1572'], { run, log: () => {} })).toBe(0);
+    expect(calls[0]).toEqual(['pr', 'view', '1572', '--json', 'comments']);
+  });
+
+  it('#3336 a valueless or mistyped flag is an ERROR, never a silent no-op', () => {
+    for (const argv of [['derive', '1572', '--repo'], ['derive', '1572', '--repo='], ['derive', '1572', '--repo', '--json']]) {
+      const errs = [];
+      expect(main(argv, { fetch, log: () => {}, err: (m) => errs.push(m) })).toBe(1);
+      expect(errs.join('\n')).toMatch(/--repo needs a value/);
+    }
+    const errs = [];
+    expect(main(['derive', '1572', '--reppo=cli/cli'], { fetch, log: () => {}, err: (m) => errs.push(m) })).toBe(1);
+    expect(errs.join('\n')).toMatch(/unknown flag `--reppo=cli\/cli`/);
+  });
+
+  it('#3336 parseArgv separates operands, flags and the repo value', () => {
+    expect(parseArgv(['derive', '1', '2', '--json'])).toMatchObject({ repo: null, operands: ['derive', '1', '2'] });
+    expect(parseArgv(['check', 'a.md', '--repo', 'o/r', '--strict']).operands).toEqual(['check', 'a.md']);
+    expect(parseArgv(['check', 'a.md', '--repo', 'o/r']).repo).toBe('o/r');
+    expect(parseArgv(['check', 'a.md', '--repo=o/r']).repo).toBe('o/r');
+    // The value after `--repo` is consumed, so it can never be mistaken for a file to check.
+    expect(parseArgv(['check', 'a.md', '--repo', 'o/r']).operands).not.toContain('o/r');
+    expect([...parseArgv(['derive', '1', '--json', '--strict']).flags]).toEqual(['--json', '--strict']);
   });
 
   it('#3336 fetches each PR exactly once however many markers name it', () => {
