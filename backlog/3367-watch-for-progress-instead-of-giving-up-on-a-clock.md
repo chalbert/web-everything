@@ -69,5 +69,5 @@ not "pick better numbers" or "compare instead of bound": it is to stop asking th
 
 ## Lineage
 
-Filed 2026-08-27. Pairs with `#xxogfx8` (step timings): every threshold named here is currently a guess, and
+Filed 2026-08-27. Pairs with `#3368` (step timings): every threshold named here is currently a guess, and
 tuning any of them honestly needs the duration data that card records.
