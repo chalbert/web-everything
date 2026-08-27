@@ -63,12 +63,15 @@
  *     the depth cap rejects — and the sum of the seats' per-juror budgets is checked BEFORE THE FIRST SPAWN,
  *     so a panel that cannot afford its roster bills nothing at all rather than half a roster.
  *
- *     THIS PANEL IS THE PATH THAT INHERITS THAT DEFAULT, and #3187 is why the number moved. The two declared
+ *     THIS PANEL IS THE MODULE THAT NAMES THAT DEFAULT, and #3187 is why the number moved. The two declared
  *     operations set their own `JUDGE_BUDGET_USD`; nothing here does, so every seat that omits `budget` gets
- *     whatever `judge-spawn.mjs` calls the default. While that was `0.5`, sized for a TOOL-FREE juror, a
- *     tool-bearing seat here was killed mid-run — 6 of 8 seats on one converge run, escalating `needs-human`
- *     on `mandatory-lens-absent` as though the panel had failed. Raising the default is what unblocked this
- *     path; `JudgeBudgetError` is what stops the next one costing a misdiagnosis.
+ *     whatever `judge-spawn.mjs` calls the default. It is NOT the only thing that inherits it — anything
+ *     reaching `judgePanel` without a per-seat budget inherits it THROUGH here while importing nothing (see
+ *     `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS", which lists all three paths; #3187 round 1 shipped a
+ *     red CI check by assuming an importer count answered this). While that default was `0.5`, sized for a
+ *     TOOL-FREE juror, a tool-bearing seat here was killed mid-run — 6 of 8 seats on one converge run,
+ *     escalating `needs-human` on `mandatory-lens-absent` as though the panel had failed. Raising the default
+ *     is what unblocked this path; `JudgeBudgetError` is what stops the next one costing a misdiagnosis.
  *
  *     WHY THE DEFAULT CANNOT SIMPLY BE `null` HERE, unlike in those operations: `assertPanelBudget` refuses a
  *     non-positive-finite per-juror budget, because an aggregate ceiling is not checkable over a roster of
