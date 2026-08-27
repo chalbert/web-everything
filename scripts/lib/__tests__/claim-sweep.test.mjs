@@ -721,6 +721,12 @@ describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not l
     // `covers` is the folded SENTENCE for `near` and the TOKEN for `token`, so the same question is
     // asked of every tier: does the strike cover what THIS site matched on?
     const near = 'the gate never runs quickly against backlog cards.';
+    // Retracted — the claim text below is FALSE (the gate does run against backlog cards). It is reused
+    // here because `3307`'s evidence names it as the no-distinctive-token specimen, not as an assertion.
+    // This label was MISSING when round 4 added this test, and the tool caught it: sweeping the branch
+    // for that specimen reported this line as a SURVIVING site, the only one outside `3350`. Every other
+    // copy in this file already carried the label — a claim labelled in one place and left bare in
+    // another, inside the suite that exists to catch exactly that.
     const claim = 'the gate never runs against backlog cards';
     expect(sweepDocument({ path: 'd.md', text: `${near} ~~an unrelated aside~~\n` }, { text: claim })[0])
       .toMatchObject({ tier: 'near', retracted: false });
