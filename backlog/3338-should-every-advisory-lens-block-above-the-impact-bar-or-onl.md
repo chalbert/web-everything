@@ -30,9 +30,18 @@ alone rather than take the general form. The general form is the obvious next qu
 > **lens-independent**: a `simplicity` juror answers them exactly as a `correctness` juror does. So the
 > criterion stops discriminating between lenses, and this item's *"permanent"* half loses its ground.
 >
-> Two things sharpen this rather than soften it. **(1)** Measured in that item's lane, the artifact does not
-> exist for **any** lens — the corpus holds 42 impact labels and zero anchors — so read strictly the
-> criterion currently admits `claim-accuracy` on no more evidence than it excludes `simplicity` on.
+> Two things sharpen this rather than soften it. **(1)** Measured in that item's lane, `claim-accuracy`
+> already has an anchor — `#claim-accuracy-advisory-blocks-on-impact` carries two ratified, level-assigned
+> worked examples — while the corpus holds 42 impact labels and zero anchors for any other lens. Read
+> strictly, the criterion **does** still discriminate today: `claim-accuracy` is admitted on evidence
+> `simplicity` has nothing comparable to.
+>
+> *Corrected this round.* An earlier draft of this point read *"the artifact does not exist for any lens —
+> the corpus holds 42 impact labels and zero anchors — so read strictly the criterion currently admits
+> `claim-accuracy` on no more evidence than it excludes `simplicity` on."* That was wrong, and it
+> repeats a prop [`#xg7hrd5`](/backlog/xg7hrd5-calibrate-the-finding-consequence-scale-one-axis-or-two-asse/)
+> itself withdrew after its skeptic pass for the identical reason: `claim-accuracy`'s anchor already exists.
+>
 > **(2)** That item's Fork 2 predicts a `simplicity` finding will usually derive to `cosmetic`, which would
 > make generalising safe **for a reason this card never argued** — the rubric, not the roster, holding low
 > consequence below the bar. A decider ratifying this card today would not see that case.

@@ -670,37 +670,44 @@ export function deriveFindingImpact({ breaksSomething, reversible, selfEvident }
   return selfEvident ? IMPACT_LEVELS.DEGRADED : IMPACT_LEVELS.BROKEN;
 }
 
-// …and in normalizeFinding, replacing the bare membership test — the SAME contract as `disposition`
-// (`we:scripts/lib/jury-core.mjs:446-451`), which DISCARDS a self-declared non-blocking word when the facts
-// are absent. A declared level may only ever make a finding MORE blocking, never less.
+// …and in normalizeFinding, alongside the EXISTING membership test (`we:scripts/lib/jury-core.mjs:396`),
+// which is UNTOUCHED and remains the ONLY writer of `out.impactIfUnfixed` — SHADOW-FIRST means the declared
+// level keeps governing until a later, separate decision arms the flip.
 for (const k of ['breaksSomething', 'reversible', 'selfEvident']) {
   if (typeof raw[k] === 'boolean') out[k] = raw[k];
 }
-const derived = deriveFindingImpact(out);
-const declared = raw.impactIfUnfixed != null && Object.hasOwn(IMPACT_STRICTNESS, String(raw.impactIfUnfixed))
-  ? String(raw.impactIfUnfixed)
-  : undefined;
-if (derived && declared) {
-  // Both present: the STRICTER wins, so a juror may escalate its own finding but never soften the routing.
-  out.impactIfUnfixed = impactStrictness(declared) > impactStrictness(derived) ? declared : derived;
-} else if (derived) {
-  out.impactIfUnfixed = derived;
-} else if (declared && impactStrictness(declared) >= impactStrictness(PREVENTION_IMPACT_BAR)) {
-  // No answers, but a declared level AT OR ABOVE the bar — honoured, because it is the safe direction.
-  out.impactIfUnfixed = declared;
+if (raw.impactIfUnfixed != null && Object.hasOwn(IMPACT_STRICTNESS, String(raw.impactIfUnfixed))) {
+  out.impactIfUnfixed = String(raw.impactIfUnfixed);
 }
-// else: no answers and a BELOW-BAR declared level ⇒ the word is DROPPED ON THE FLOOR and the field stays
-// UNDECLARED, which `blocksAcceptance` reads as blocking. Silence costs a block rather than saving one.
+const derived = deriveFindingImpact(out);
+const declared = out.impactIfUnfixed;
+// SHADOW ONLY — read by no reducer, not consulted by `blocksAcceptance`. Records the paired
+// (derived, declared) pair Fork 4's measurement needs, plus what WOULD govern once armed: the STRICTER of
+// the two, the same contract `normalizeFinding` already applies to `disposition` — a juror may escalate its
+// own finding but never soften the routing, once this is live.
+out.impactShadow = {
+  derived,
+  declared,
+  wouldGovern:
+    derived && declared
+      ? (impactStrictness(declared) > impactStrictness(derived) ? declared : derived)
+      : derived ?? declared,
+};
+// `impactIfUnfixed` itself is exactly what the membership test above wrote — nothing in this block touches
+// it. A missing declared level stays UNDECLARED, which `blocksAcceptance` already reads as blocking; the
+// derivation opens no new escape hatch and closes none, because it does not govern yet.
 ```
 
-> **Corrected after the skeptic pass, which found the first draft's snippet left open the exact seam ground 1
-> claims to close.** It read
+> **Corrected after the skeptic pass, which found the first draft's snippet let the derivation write
+> `out.impactIfUnfixed` directly, governing on day one instead of shadow-first as the ruling above requires.**
+> The `wouldGovern` computation itself also read
 > `[derivedImpact, declaredImpact].filter(Boolean).sort(…)[0]` — and `filter(Boolean)` drops the `undefined`
-> a missing answer produces, so **a juror that wrote `impactIfUnfixed: 'cosmetic'` and answered nothing got
-> `cosmetic`**, byte-identical to today. It was also not *"the exact contract `normalizeFinding` already
-> applies to `disposition`"*, as the draft claimed: that contract **discards** a bare non-blocking word
-> (`:450-451` — *"a bare `carve-out`/`nit` with no answers is dropped on the floor"*), where "strictest of
-> the two" merely ranks it. The branch above is the faithful analogue.
+> a missing answer produces, so **a juror that wrote `impactIfUnfixed: 'cosmetic'` and answered nothing would
+> have had `wouldGovern` resolve to `cosmetic`**, byte-identical to today. It was also not *"the exact
+> contract `normalizeFinding` already applies to `disposition`"*, as the draft claimed: that contract
+> **discards** a bare non-blocking word (`:450-451` — *"a bare `carve-out`/`nit` with no answers is dropped on
+> the floor"*), where "strictest of the two" merely ranks it. The branch above is the faithful analogue, and
+> — because it now writes only to the shadow field — it cannot touch `impactIfUnfixed` even if it were wrong.
 
 **(b), the alternative** — the mandate grows worked examples, `normalizeFinding` keeps its membership test,
 and nothing about the write changes.
@@ -1098,7 +1105,7 @@ it**:
 
 **The measured trigger that re-opens this fork**, since ground 1 is now a prediction rather than a ground —
 **stated with its number and its owner**, because a trigger named only in form is a deferral in disguise:
-once Fork 2's shadow record holds **40 or more findings carrying all three answers** — the size of the
+once Fork 2's shadow record holds **42 or more findings carrying all three answers** — the size of the
 existing labelled population, so the two are comparable — and **`reversible: false` has still never been
 answered**, Fork 5 re-opens as a merge-the-levels decision, and `EVIDENCE_EXEMPT_IMPACT_BAR` is ruled on its
 own merits at the same time rather than as a side effect. **Owner: the `#3318` watch**, whose conformance
@@ -1124,7 +1131,7 @@ of one line from `IMPACT_LEVELS` plus a re-point of `EVIDENCE_EXEMPT_IMPACT_BAR`
 
 `Skeptic:` **SURVIVES-WITH-AMENDMENT — the default `(a) keep` stands, but on ground 3 alone; ground 1 was demoted.** The pass argued `reversible: false` is near-unreachable for a git-tracked code-review subject (every one of the 11 recorded `broken` findings is revertable), so Fork 2 would **not** revive the level — attacking the ground the first draft leaned on hardest. The prior-art survey reached the same place independently from the other side: where mass sits in two of four categories, *"two of your levels are doing almost no work"*. **Both accepted.** Ground 1 is now recorded as a contested prediction with a measured re-open trigger, and the default rests on ground 3 — that dropping the level silently widens `EVIDENCE_EXEMPT_IMPACT_BAR` (`we:scripts/lib/jury-core.mjs:734`) from *irreversible-only* to *anything at the bar*, which is a real loosening of the `#3312` evidence floor and must not ride a vocabulary tidy-up.
 
-`Screen:` **clear — and this fork exists BECAUSE of the screen.** It found the `unrecoverable` question sitting in the prose outside every fork (*"a finding in search of a ruling"*): the item mined *"0 of 42 … the top level is decorative in practice"*, conceded the consequence in a code comment, and never ruled. Q1: an enum's membership is observable to every consumer that ranks a finding. Q2: at zero cost the choice still turns on whether an empty level should stay, which is a taxonomy-merit question, not a schedule. **Second screen, fresh context: `clear` on both questions**, with the ruling confirmed and its *argument* corrected — *"Fork 5's conclusion is right but is argued in a way that makes it sound like postponing rather than deciding."* Two fixes applied: ground 3 now leads with **inexpressibility** (with the level gone, *"irreversible only"* cannot be stated at any budget) rather than with the don't-bundle framing, which at zero cost costs nothing; and the re-open trigger now carries **a number (40 findings carrying all three answers) and an owner (the `#3318` watch)**, where it previously said only *"a stated number of reviews"* with the number stated nowhere.
+`Screen:` **clear — and this fork exists BECAUSE of the screen.** It found the `unrecoverable` question sitting in the prose outside every fork (*"a finding in search of a ruling"*): the item mined *"0 of 42 … the top level is decorative in practice"*, conceded the consequence in a code comment, and never ruled. Q1: an enum's membership is observable to every consumer that ranks a finding. Q2: at zero cost the choice still turns on whether an empty level should stay, which is a taxonomy-merit question, not a schedule. **Second screen, fresh context: `clear` on both questions**, with the ruling confirmed and its *argument* corrected — *"Fork 5's conclusion is right but is argued in a way that makes it sound like postponing rather than deciding."* Two fixes applied: ground 3 now leads with **inexpressibility** (with the level gone, *"irreversible only"* cannot be stated at any budget) rather than with the don't-bundle framing, which at zero cost costs nothing; and the re-open trigger now carries **a number (42 findings carrying all three answers) and an owner (the `#3318` watch)**, where it previously said only *"a stated number of reviews"* with the number stated nowhere. *Corrected again this round: the number was first stated as 40, off by two against the 42-item labelled population it is meant to match ("the size of the existing labelled population, so the two are comparable"); fixed to 42.*
 
 ## Does this dissolve #3338? — No. Its ground dissolves; its question survives. Edge set.
 
@@ -1245,13 +1252,15 @@ Recorded so a later reader does not re-litigate them as forks.
 The rule this decision would codify, drafted:
 
 > **A jury finding carries exactly one graded consequence axis — `impactIfUnfixed` — and its level is
-> derived in code from three factual answers, never asserted by the juror. There is no `severity` field
-> *on a jury finding*; the design-critique rubric's own Nielsen scale is a separate surface this rule does
-> not reach. Reach and likelihood stay narrative and enter no derivation. `IMPACT_LEVELS` keeps all four
-> members. What a level means is fixed by a two-part anchor set — a teaching half rendered into the mandate
-> from data, and a disjoint held-out half — whose answer key is authored against `IMPACT_GLOSS` and whose
-> level is computed, never typed. The agreement number it produces gates nothing. If any future extension
-> folds a *change-level* signal into the impact derivation,
+> derived in code from three factual answers, SHADOW-FIRST: the derivation is computed and recorded, and the
+> declared word a juror writes keeps governing until the Fork 4 measurement says the derivation is faithful,
+> at which point a later, separate decision may arm the flip. There is no `severity` field *on a jury
+> finding*; the design-critique rubric's own Nielsen scale is a separate surface this rule does not reach.
+> Reach and likelihood are typed, DISPLAY/AUDIT-ONLY fields carried on the finding and read by no reducer.
+> `IMPACT_LEVELS` keeps all four members. What a level means is fixed by a two-part anchor set — a teaching
+> half rendered into the mandate from data, and a disjoint held-out half — whose answer key is authored
+> against `IMPACT_GLOSS` and whose level is computed, never typed. The agreement number it produces gates
+> nothing. If any future extension folds a *change-level* signal into the impact derivation,
 > [`#blast-radius-advisory-care-not-a-gate`](../docs/agent/platform-decisions.md#blast-radius-advisory-care-not-a-gate)
 > clause 1 governs and that extension must re-convene #2563.**
 
@@ -1259,6 +1268,12 @@ The rule this decision would codify, drafted:
 > the item's own scope note confined the deletion to `we:scripts/lib/` — an unscoped statute line over a
 > scoped intent, which is the exact failure class this item opens by citing (`#3314`'s anchor had to retract
 > a field name twice).
+>
+> *Re-synced after this round.* Two more clauses had drifted from the forks they codify: this paragraph
+> previously read *"derived in code from three factual answers, never asserted by the juror"* with no
+> shadow-first qualifier, contradicting Fork 2's actual ruling; and *"Reach and likelihood stay narrative and
+> enter no derivation"*, contradicting Fork 3's default of typed, display/audit-only fields. Both are
+> corrected above to match the Digest and the forks themselves.
 
 `we:docs/agent/platform-decisions.md` was grepped for same-subject anchors. Four neighbours; each quoted at
 the clause the rule would live in, not summarised.
