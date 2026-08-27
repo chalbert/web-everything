@@ -594,9 +594,22 @@ describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not l
     expect(stripLineLeaders('#3319 is a card id, not a heading')).toBe('#3319 is a card id, not a heading');
   });
 
-  it('#3307 lead words are word-bounded — `retracts` leads, `retractable` does not', () => {
-    expect(retractionNear(['Retracts the earlier figure.', SURVIVOR], 2).retracted).toBe(true);
+  it('#3307 a lead word counts as a LABEL, not as the subject of a sentence', () => {
+    // Both of these are REAL lines from this PR's own card, and an earlier cut of the anchor read both
+    // as retractions — laundering two live sites while fixing the ones the review had quoted. A wrapped
+    // paragraph can start a line with any word; a retraction LABELS itself.
+    expect(retractionNear(["retraction's own neighbourhood is listed with `retracted: true`.", SURVIVOR], 2)
+      .retracted).toBe(false);
+    expect(retractionNear(['correction was half applied: parent `3318` already retracted,', SURVIVOR], 2)
+      .retracted).toBe(false);
+    // The label shapes, all of which this repo actually writes:
+    expect(retractionNear(['Retracted:', SURVIVOR], 2).retracted).toBe(true);
+    expect(retractionNear(['**Retracted**', SURVIVOR], 2).retracted).toBe(true);
+    expect(retractionNear(['Superseded by #1234', SURVIVOR], 2).retracted).toBe(true);
+    // ...and the word is still bounded: `retractable` is not `retract`.
     expect(retractionNear(['Retractable landing gear is out of scope.', SURVIVOR], 2).retracted).toBe(false);
+    // The reported marker is the bare word, not the word plus its separator.
+    expect(retractionNear(['**Retracted** — it read ...', SURVIVOR], 2).marker).toBe('retracted');
   });
 
   it('#3307 the two halves of the vocabulary are anchored differently, and both are exported', () => {

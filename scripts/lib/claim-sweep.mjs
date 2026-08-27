@@ -348,7 +348,15 @@ export function stripLineLeaders(line) {
   return s;
 }
 
-const LEAD_RE = new RegExp(`^(?:${RETRACTION_LEAD_WORDS.map(escapeRe).join('|')})\\b`, 'i');
+// A lead word only counts as a LABEL, not as the subject of a sentence. `Retracted — …`, `RETRACTED:`,
+// `**Retracted**`, `Superseded by #1234` are labels; `retraction's own neighbourhood is listed …` and
+// `correction was half applied` are prose ABOUT retraction, and both of those really do occur in this
+// PR's own card — an earlier cut of this anchor read them as retractions and laundered two live sites.
+// So the word must be followed by a separator, an emphasis close, ` by `, or end of line.
+const LEAD_RE = new RegExp(
+  `^(${RETRACTION_LEAD_WORDS.map(escapeRe).join('|')})(?:\\s*[:\\-\u2013\u2014*_~)\\].,]|\\s+by\\b|\\s*$)`,
+  'i',
+);
 const PHRASE_RE = new RegExp(`\\b(?:${RETRACTION_PHRASES.map(escapeRe).join('|')})\\b`, 'i');
 /** A struck-through span, e.g. `~~All 84 recorded verdicts~~`. */
 const STRUCK_RE = /~~[^~]+~~/;
@@ -378,7 +386,7 @@ export function retractionNear(lines, line, window = RETRACTION_WINDOW) {
   for (let i = from; i < to; i += 1) {
     const raw = String(lines[i] == null ? '' : lines[i]);
     const lead = LEAD_RE.exec(stripLineLeaders(raw));
-    if (lead) return { retracted: true, marker: lead[0].toLowerCase(), markerLine: i + 1 };
+    if (lead) return { retracted: true, marker: lead[1].toLowerCase(), markerLine: i + 1 };
     const phrase = PHRASE_RE.exec(raw);
     if (phrase) return { retracted: true, marker: phrase[0].toLowerCase(), markerLine: i + 1 };
   }
