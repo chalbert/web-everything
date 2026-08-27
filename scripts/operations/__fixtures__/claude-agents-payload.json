@@ -1,0 +1,130 @@
+[
+  {
+    "id": "5a6c2584",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1786982625823,
+    "sessionId": "5a6c2584-70c5-424f-ae67-0d4230bb2916",
+    "name": "conveyor-3154",
+    "state": "blocked"
+  },
+  {
+    "id": "f75499d4",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1786986282912,
+    "sessionId": "f75499d4-d9c6-4f2c-b5fa-0fce8a7f2f2f",
+    "name": "conveyor-3151",
+    "state": "blocked"
+  },
+  {
+    "pid": 18278,
+    "id": "180c38b8",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1787004649412,
+    "sessionId": "180c38b8-cfbd-4a6f-8dae-e18c941c22d0",
+    "name": "conveyor-3151",
+    "status": "waiting",
+    "waitingFor": "permission prompt",
+    "state": "blocked"
+  },
+  {
+    "pid": 32933,
+    "id": "e18e6ab6",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1787004733986,
+    "sessionId": "e18e6ab6-32a3-4b5e-84c2-8ed04f1bb44c",
+    "name": "conveyor-3150",
+    "status": "waiting",
+    "waitingFor": "permission prompt",
+    "state": "blocked"
+  },
+  {
+    "pid": 32934,
+    "id": "0a47bb36",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1787004734000,
+    "sessionId": "0a47bb36-c4f4-47e9-b841-8d04891e2870",
+    "name": "conveyor-3154",
+    "status": "waiting",
+    "waitingFor": "permission prompt",
+    "state": "blocked"
+  },
+  {
+    "id": "7b4a2df7",
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "background",
+    "startedAt": 1787004812482,
+    "sessionId": "7b4a2df7-dc0c-4634-b028-d87a137496ae",
+    "name": "conveyor-3154",
+    "state": "blocked"
+  },
+  {
+    "pid": 61780,
+    "cwd": "/Users/nicolasgilbert",
+    "kind": "interactive",
+    "startedAt": 1787665582022,
+    "sessionId": "e2b2ac16-4f85-4447-9c15-be62dbc4026f",
+    "name": "nicolasgilbert-70"
+  },
+  {
+    "pid": 20739,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1787673859053,
+    "sessionId": "359c40cd-5116-4e3a-aa8d-e71bda082410",
+    "name": "webeverything-b0"
+  },
+  {
+    "id": "48bbceae",
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-25",
+    "kind": "background",
+    "startedAt": 1787702062282,
+    "sessionId": "48bbceae-f686-47f5-9312-84bf5c0ea7f5",
+    "name": "conveyor-3",
+    "state": "blocked"
+  },
+  {
+    "pid": 75405,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1787705266950,
+    "sessionId": "08747002-63e5-403d-a92c-7fe187ca5e3d",
+    "name": "webeverything-67"
+  },
+  {
+    "pid": 26290,
+    "cwd": "/Users/nicolasgilbert/workspace/webeverything",
+    "kind": "interactive",
+    "startedAt": 1787774625146,
+    "sessionId": "551c3801-a7a5-4806-93e7-00562c453f83",
+    "name": "webeverything-6c"
+  },
+  {
+    "pid": 8929,
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-5",
+    "kind": "interactive",
+    "startedAt": 1787794007741,
+    "sessionId": "3624d24a-5e28-4dd5-b611-4a591902aaad",
+    "name": "lane-5-8f"
+  },
+  {
+    "pid": 13353,
+    "cwd": "/Users/nicolasgilbert/workspace/.lanes/web-everything/lane-27",
+    "kind": "interactive",
+    "startedAt": 1787794357074,
+    "sessionId": "235477df-fc43-4250-a8d6-db1ea4150165",
+    "name": "lane-27-81"
+  },
+  {
+    "pid": 13451,
+    "cwd": "/private/tmp/claude-501/-Users-nicolasgilbert-workspace-webeverything/359c40cd-5116-4e3a-aa8d-e71bda082410/scratchpad",
+    "kind": "interactive",
+    "startedAt": 1787795333995,
+    "sessionId": "01d8f67c-0e0b-4fbf-b63b-efa82fc242ed",
+    "name": "scratchpad-b3"
+  }
+]

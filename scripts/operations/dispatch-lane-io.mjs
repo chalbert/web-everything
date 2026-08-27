@@ -108,9 +108,14 @@ export function briefPath(root = REPO_ROOT, kind = 'build') {
  * "absent" branch is TERMINAL — so without a grace window the first poll after a dispatch could close out a
  * build that had not finished starting. Two minutes is far below any real build and far above process startup.
  *
- * DERIVED, not a second literal: the double-dispatch guard needs the same window in the pure half (an absent
- * session inside it must HOLD the item rather than release it — `dispatch-lane.mjs#dispatchStillHolds`), and
- * two numbers that must agree are two numbers that eventually will not.
+ * DERIVED, not a second literal: this is the observer's copy of `DISPATCH_LISTING_GRACE_MINUTES`, and two
+ * numbers that must agree are two numbers that eventually will not.
+ *
+ * THE GUARD NO LONGER SHARES IT. This sentence used to read "the double-dispatch guard needs the same window
+ * in the pure half" — it did, and it does not any more. `dispatch-lane.mjs#dispatchStillHolds` reads its own
+ * larger `DISPATCH_GUARD_LISTING_GRACE_MINUTES` on purpose, because the observer's wrong answer writes nothing
+ * while the guard's starts a second agent in an occupied lane. The derivation above is still the right shape
+ * for the OBSERVER's two constants; it just no longer spans both readers.
  */
 export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
 
@@ -137,6 +142,10 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  * @param {() => object[]} [o.listAgents] - injectable `claude agents --json` reader. The double-dispatch
  *   guard's PRIMARY axis is liveness, not age (PR #1211 round 2, G1), so the read asks the same question the
  *   observer asks and stamps the answer onto each in-flight row.
+ * @param {(stamped: object) => object} [o.recordLiveness] - the write-back hook. Defaults to
+ *   {@link persistLastSeenLive}, which stamps `lastSeenLiveAt` onto every entry this read just confirmed
+ *   alive. A seam, not decoration: it is the one WRITE on an otherwise read-only path, and a test that wants
+ *   the read without touching a run store overrides it with the identity.
  * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string}}
  */
 export function readTick({
@@ -149,6 +158,7 @@ export function readTick({
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
+  recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -223,7 +233,7 @@ export function readTick({
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
     // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
-    inFlightDispatches: stampLiveness(listInFlightDispatches(key), { listAgents }),
+    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents })),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
     // ages out and every in-flight record holds, which is the fail-closed direction.
@@ -290,10 +300,56 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
       runs.push({
         runId: String(run.id), key: String(e.key), handle: e.handle ?? null,
         startedAt: e.startedAt ?? null, expectedBy: e.expectedBy ?? null,
+        // WHEN A LISTING LAST CONFIRMED THIS ONE ALIVE. `dispatchStillHolds` ages a `live: false` reading from
+        // here rather than from `startedAt`, so it has to ride the row for the same reason `expectedBy` does:
+        // the declaration is pure and can only use what it is handed. Absent on any entry never yet seen
+        // alive, and the guard falls back to `startedAt` there.
+        lastSeenLiveAt: e.lastSeenLiveAt ?? null,
       });
     }
   }
   return { runs, unreadable };
+}
+
+/**
+ * ONE session-id comparison, shared by all three readers of `claude agents --json`.
+ *
+ * DRIFT-DEFENCE, NOT AN OBSERVED BUG. CLI **2.1.246** emits every `sessionId` as a lower-case v4 UUID — that
+ * was measured, not assumed (14 rows, 14 lower-case, {@link file://./__fixtures__/claude-agents-payload.json}),
+ * and the same shape was seen in the prepare's 19-row listing. So no case or whitespace mismatch has ever been
+ * seen, and this normalization fixes nothing that is broken today. It is here because of what the CURRENT
+ * exact match would cost if a later CLI ever echoed the id back in a different case: every handle would miss
+ * its own row, every dispatch would read `live: false`, and the guard would hand the same lane to a SECOND
+ * agent. A comparison whose failure mode is a double-dispatch is worth making shape-independent while it is
+ * free (PR #1211 round-3 review, H1 case G).
+ *
+ * BOTH SIDES, ALWAYS. Normalizing only the listing would leave a stored handle's own case free to break it.
+ *
+ * @param {unknown} x
+ * @returns {string} the comparable form, `''` when there is nothing usable to compare.
+ */
+export function normalizeHandle(x) {
+  return String(x ?? '').trim().toLowerCase();
+}
+
+/**
+ * THE USABLE SESSION IDS in a `claude agents --json` listing, normalized for comparison.
+ *
+ * The listing carries THREE element shapes in one response — measured, see the fixture: rows with
+ * `cwd+id+kind+name+sessionId+startedAt+state`, rows that add `pid+status+waitingFor`, and rows carrying
+ * neither `state` nor `status` nor `id` at all. `sessionId` is the ONE field present on every one of them, and
+ * it is the only field anything here reads; `id` in particular is absent from half the listing and is NOT
+ * reliably the `sessionId` prefix, so nothing should key off it.
+ *
+ * An EMPTY result from a NON-EMPTY listing is the signal the callers act on: the response parsed, and not one
+ * element yielded an id — which is a shape this code does not understand, not a machine with no agents on it.
+ *
+ * @param {unknown[]} sessions
+ * @returns {Set<string>}
+ */
+export function listedSessionIds(sessions) {
+  const ids = (Array.isArray(sessions) ? sessions : []).map((s) => normalizeHandle(s?.sessionId)).filter(Boolean);
+  return new Set(ids);
 }
 
 /**
@@ -337,12 +393,76 @@ export function stampLiveness(inFlight, { listAgents } = {}) {
   if (!Array.isArray(sessions)) {
     return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
-  const listed = new Set(sessions.map((s) => String(s?.sessionId ?? '')).filter(Boolean));
+  const listed = listedSessionIds(sessions);
+  // A NON-EMPTY LISTING THAT YIELDED NOTHING MATCHABLE IS A READ THAT FAILED, not a world with no agents in
+  // it. Falling through to the compare below would stamp `live: false` on EVERY row from a listing whose shape
+  // this code did not understand — and `live: false` is the one answer that lets the guard release a lane, so
+  // the weakest possible read would produce the most permissive possible verdict while still reporting
+  // `livenessSource: 'claude-agents'`, the label for "checked against a real listing and found clear". Degrade
+  // to the same `unreadable` answer the not-an-array branch gives (PR #1211 round-3 review, H1/H2).
+  //
+  // GATED ON `sessions.length`, and that gate is load-bearing. A genuinely EMPTY listing is a read that
+  // SUCCEEDED and found nothing running — the ordinary state of an idle machine — and must still stamp
+  // `live: false`. Only elements-in, ids-out is the shape nobody understands.
+  if (sessions.length && !listed.size) {
+    return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
+  }
   return {
-    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(String(r.handle)) : null })),
+    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(normalizeHandle(r.handle)) : null })),
     unreadable,
     livenessSource: 'claude-agents',
   };
+}
+
+/**
+ * STAMP `lastSeenLiveAt` BACK ONTO EVERY EFFECT ENTRY A LISTING READ JUST CONFIRMED ALIVE.
+ *
+ * WHY THIS HAS TO BE PERSISTED AT ALL. {@link stampLiveness}'s answer lives for one read. The guard that acts
+ * on it (`dispatch-lane.mjs#dispatchStillHolds`) is pure and sees only what rides the row, so without a
+ * durable record of "a real listing said `true` at this instant" the only age it can measure is the age of the
+ * DISPATCH — and a build that has been running for an hour is then one bad read away from having its lane
+ * released, because an hour is past any grace window. The confirmation is the thing worth remembering.
+ *
+ * IT IS `last`, NOT `first`. Every confirmation overwrites: the property being bought is *"a bad read arriving
+ * right after a real seen-alive cannot release the item"*, and only the MOST RECENT confirmation can buy it.
+ * Stamping once and never again would leave a long-lived agent anchored on a timestamp from its first minute,
+ * which is the `startedAt` failure this replaces wearing a different field name.
+ *
+ * BEST-EFFORT, AND SILENT ON FAILURE — deliberately. This is a bookkeeping improvement on a READ path that is
+ * also the dispatch path; a store that cannot be written must not take down the dispatch read. The cost of the
+ * write not landing is the previous behaviour (the guard falls back to `startedAt`), which is fail-closed in
+ * the direction that matters: a missing anchor makes the guard age from an EARLIER instant, so it releases
+ * sooner, never later than before this change.
+ *
+ * ONLY `live === true` IS WRITTEN. `false` and `null` are the answers this field exists to survive; recording
+ * them would defeat it.
+ *
+ * @param {{runs?: object[]}} stamped - what {@link stampLiveness} returned.
+ * @param {{store?: {read: Function, write: Function}, now?: () => Date}} [o]
+ * @returns {number} how many entries were stamped — for tests and for a caller that wants to say so.
+ */
+export function persistLastSeenLive(stamped, { store = createFileRunStore(), now = () => new Date() } = {}) {
+  const rows = (Array.isArray(stamped?.runs) ? stamped.runs : []).filter((r) => r?.live === true && r.runId);
+  if (!rows.length) return 0;
+  const at = now().toISOString();
+  let written = 0;
+  for (const runId of new Set(rows.map((r) => String(r.runId)))) {
+    const keys = new Set(rows.filter((r) => String(r.runId) === runId).map((r) => String(r.key)));
+    try {
+      const run = store.read(runId);
+      const effects = run && Array.isArray(run.effects) ? run.effects : null;
+      if (!effects) continue;
+      let touched = false;
+      for (const e of effects) {
+        if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || !keys.has(String(e.key))) continue;
+        e.lastSeenLiveAt = at;
+        touched = true;
+        written += 1;
+      }
+      if (touched) store.write(run);
+    } catch { /* see BEST-EFFORT above — a store that will not take the note is not a reason to fail the read. */ }
+  }
+  return written;
 }
 
 /**
@@ -808,7 +928,20 @@ export function createDispatchObservers({
       if (!Array.isArray(sessions)) {
         throw new TypeError('dispatch-lane-io: `claude agents --json` did not return an array');
       }
-      const live = sessions.find((s) => s && String(s.sessionId) === handle);
+      // PARSED FINE, YIELDED NOTHING MATCHABLE — the same refusal as not-an-array, and for the same reason.
+      // A listing with elements in it but no usable `sessionId` on any of them is a shape this reader does not
+      // understand. Falling through would put the entry into the `unresolved` branch below on the strength of
+      // a read that told us nothing, so it raises instead and the observer's caller sees the read failed
+      // (PR #1211 round-3 review, H1/H2).
+      const listedIds = listedSessionIds(sessions);
+      if (sessions.length && !listedIds.size) {
+        throw new TypeError(
+          'dispatch-lane-io: `claude agents --json` returned '
+          + `${sessions.length} element(s) but not one carried a usable \`sessionId\` — the listing was read and `
+          + 'not understood, which is not evidence that any session ended',
+        );
+      }
+      const live = listedIds.has(normalizeHandle(handle));
       if (live) return { status: 'running', result: null };
 
       // NOT-YET-LISTED IS NOT GONE. `--bg` returns before the session is necessarily visible, so a poll inside

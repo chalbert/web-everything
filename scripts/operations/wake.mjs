@@ -39,7 +39,7 @@ import { applyPendingEffects, resolveInFlight } from './effect-executor.mjs';
 import { observeRun } from './effect-observer.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
-import { createDispatchObservers, defaultListAgents } from './dispatch-lane-io.mjs';
+import { createDispatchObservers, defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
 import { createExploreObservers } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
@@ -317,7 +317,7 @@ export function closeOutEntry({ runId, key, status, note = '', force = false, st
  * @param {{listAgents?: () => object[]}} [o]
  */
 export function assertHandleNotLive(entry, { listAgents } = {}) {
-  const handle = String(entry?.handle ?? '');
+  const handle = normalizeHandle(entry?.handle);
   if (!handle) return; // INDETERMINATE — no handle exists to check, and that is why a person is here.
   const advice = `Stop that session first, or re-run with --force if you know it is not running. Closing out a LIVE `
     + 'dispatch un-parks the run, and the executor then retries it — which for a dispatch means starting a SECOND agent '
@@ -337,7 +337,21 @@ export function assertHandleNotLive(entry, { listAgents } = {}) {
       + `cannot be told — refusing to close out an entry whose agent MIGHT be alive. ${advice}`,
     );
   }
-  if (sessions.some((s) => s && String(s.sessionId) === handle)) {
+  // PARSED FINE, YIELDED NOTHING MATCHABLE. A listing with elements in it but no usable `sessionId` on any of
+  // them was READ and NOT UNDERSTOOD — it says nothing about this handle. Without this branch the `.some()`
+  // below returns false and `--resolve` closes the entry out on the strength of that read, un-parking a run
+  // whose agent may be alive; the executor then retries, which for a dispatch means a SECOND agent in the same
+  // lane clone. Refuse exactly as the not-an-array branch does, and leave `--force` as the way through
+  // (PR #1211 round-3 review, H1/H2).
+  const listed = listedSessionIds(sessions);
+  if (sessions.length && !listed.size) {
+    throw new Error(
+      `wake --resolve: \`claude agents --json\` returned ${sessions.length} element(s) but not one carried a usable `
+      + `\`sessionId\`, so whether ${handle} is still running cannot be told — refusing to close out an entry whose `
+      + `agent MIGHT be alive. ${advice}`,
+    );
+  }
+  if (listed.has(handle)) {
     throw new Error(
       `wake --resolve: session ${handle} is STILL LISTED by \`claude agents\` — the agent is ALIVE. ${advice}`,
     );
