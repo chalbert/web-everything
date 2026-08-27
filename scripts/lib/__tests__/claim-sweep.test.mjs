@@ -11,12 +11,15 @@
  * They are frozen strings rather than reads of the live tree on purpose: the live sites have since been
  * corrected, and a test that re-read them would go green for the wrong reason.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   normalizeText, distinctiveTokens, tokenPattern, shingleContainment, retractionNear,
-  relevance, looksLikeLineCitation,
+  relevance, looksLikeLineCitation, stripLineLeaders,
   sweepDocument, sweepDocuments, collectDocuments, sweepRepo, formatReport, parseFlags, main,
-  NOT_COVERED, RETRACTION_MARKERS,
+  NOT_COVERED, RETRACTION_MARKERS, RETRACTION_PHRASES, RETRACTION_LEAD_WORDS,
 } from '../claim-sweep.mjs';
 
 // ── The real specimen, frozen at the half-applied moment ──────────────────────────────────────────────
@@ -335,9 +338,15 @@ describe('#3307 claim-sweep — text units', () => {
     expect(looksLikeLineCitation('the `correctness` lens', 'correctness')).toBe(false);
   });
 
-  it('#3307 retractionNear reads the RAW neighbourhood so `~~` survives', () => {
-    const lines = ['~~old claim~~', 'the claim'];
-    expect(retractionNear(lines, 2).retracted).toBe(true);
+  it('#3307 retractionNear reads the RAW neighbourhood so `~~` survives — on the SITE\'s own line', () => {
+    // RETRACTED — this case used to read:
+    //     const lines = ['~~old claim~~', 'the claim'];
+    //     expect(retractionNear(lines, 2).retracted).toBe(true);
+    // i.e. a strike-through ANYWHERE in the +/-6-line window retracted the site. That was wrong: a struck
+    // span on some other line says nothing about THIS one, and reading one as covering the other is how a
+    // live claim got filed under ALREADY RETRACTED. A strike now counts only on the site's own line.
+    expect(retractionNear(['~~old claim~~', 'other text'], 1).retracted).toBe(true);
+    expect(retractionNear(['~~struck elsewhere~~', 'the claim'], 2).retracted).toBe(false);
     expect(retractionNear(['plain', 'the claim'], 2).retracted).toBe(false);
     expect(RETRACTION_MARKERS).toContain('retracted');
   });
@@ -481,5 +490,200 @@ describe('#3307 claim-sweep — CLI', () => {
     });
     expect(seen.extraDocuments).toEqual([{ path: '/tmp/body.md', source: 'supplied-document' }]);
     expect(seen.paths).toEqual(['backlog']);
+  });
+});
+
+// ── #3307 review round 2 — the four defects the review found, each with a test that reddens without its fix ──
+
+describe('#3307 claim-sweep — the near tier reports the TOP of its own range', () => {
+  // Juror finding, claim-sweep.mjs near tier. `score >= near && score < 1` excluded a containment of
+  // exactly 1 on the assumption that only a literal substring can score 1 — but containment counts
+  // DISTINCT claim shingles, so a sentence repeating a clause contains all of them without being a
+  // substring, and the block-level `indexOf` has already `continue`d past every block that IS one.
+  // Such a site matched NO tier and vanished from the report. Prevention the review marked OWED.
+  const CLAIM = 'the gate never runs against backlog cards';
+  // A duplicated clause: every shingle of the claim is present, but the claim is no substring of it.
+  const DUPED = 'the gate never runs never runs against backlog cards';
+
+  it('#3307 a NON-SUBSTRING sentence scoring exactly 1 is a reported site, not a silent drop', () => {
+    expect(shingleContainment(normalizeText(CLAIM), normalizeText(DUPED))).toBe(1);
+    expect(normalizeText(DUPED).includes(normalizeText(CLAIM))).toBe(false); // not a substring
+    const sites = sweepDocument({ path: 'a.md', text: `${DUPED}\n` }, { text: CLAIM });
+    expect(sites).toHaveLength(1);
+    expect(sites[0].tier).toBe('near');
+    expect(sites[0].confidence).toBe('undecided');
+    expect(sites[0].score).toBe(1);
+  });
+
+  it('#3307 MUTATION — restoring the `score < 1` exclusion loses the site entirely', () => {
+    // The invariant in one line: across the near tier's whole range, containment at or above the
+    // threshold ALWAYS yields a site. Re-adding `&& score < 1` reddens this at the top of the range.
+    for (const candidate of [DUPED, 'the gate never runs against backlog cards in practice', CLAIM]) {
+      const score = shingleContainment(normalizeText(CLAIM), normalizeText(candidate));
+      const sites = sweepDocument({ path: 'a.md', text: `${candidate}\n` }, { text: CLAIM });
+      expect({ candidate, score, sites: sites.length }).toEqual({ candidate, score, sites: 1 });
+    }
+  });
+
+  it('#3307 a paragraph restating the claim TWICE reports both lines, not just the first', () => {
+    // The near tier used to `break` after the first matching sentence in a block — the same
+    // silent-drop family. Two restatements on two lines of one paragraph are two sites.
+    const doc = {
+      path: 'a.md',
+      text: 'the gate never runs against backlog cards here.\nAnd the gate never runs against backlog cards there.\n',
+    };
+    expect(sweepDocument(doc, { text: CLAIM }).map((x) => x.line)).toEqual([1, 2]);
+  });
+});
+
+describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not launder a survivor', () => {
+  // Juror finding, claim-sweep.mjs retractionNear. Prevention the review marked OWED: ordinary prose
+  // using a marker phrase in a NON-retraction sense, placed beside a genuine unretracted claim.
+  const SURVIVOR = 'All 84 recorded verdicts ran correctness alone.';
+
+  /** Ordinary English that the old bare-substring rule read as a retraction. Each is a real prose shape. */
+  const INNOCENT = [
+    ['it read', '...on the old display it read as a jumble of digits.'],
+    ['was wrong', 'The estimate was wrong for reasons unrelated to this table.'],
+    ['were wrong', 'We were wrong about the layout, which is a different card.'],
+    ['this said', 'This said nothing about latency either way.'],
+    ['superseded', 'The superseded design used a modal instead of a drawer.'],
+    ['now reads', 'The status field now reads `open` in the new schema.'],
+    ['withdrawn', 'Funding for the unrelated pilot was quietly withdrawn last year.'],
+  ];
+
+  it.each(INNOCENT)('#3307 `%s` in a non-retraction sense leaves the claim a SURVIVOR', (_marker, prose) => {
+    const sites = sweepDocument({ path: 'b.md', text: `${prose}\n\n${SURVIVOR}\n` }, { text: SURVIVOR });
+    expect(sites).toHaveLength(1);
+    expect(sites[0].tier).toBe('exact');
+    expect(sites[0].retracted).toBe(false);
+    expect(sites[0].retractionMarker).toBe(null);
+  });
+
+  it('#3307 an innocent marker phrase does NOT drop the exit code to clean', () => {
+    // The consequence that makes this blocking rather than cosmetic: a laundered survivor exits 0.
+    const report = sweepDocuments(
+      [{ path: 'b.md', text: `...on the old display it read as a jumble of digits.\n\n${SURVIVOR}\n` }],
+      { text: SURVIVOR },
+    );
+    expect(report.counts.survivors).toBe(1);
+    expect(report.counts.retracted).toBe(0);
+    expect(formatReport(report)).toMatch(/RESULT: 1 surviving site/);
+  });
+
+  /** The shapes a retraction is ACTUALLY written in here — tightening must not cost any of them. */
+  const REAL = [
+    ['repo blockquote convention', ['> **Retracted — three more rows of this table were wrong.**', '> It still read "84 of 84".', SURVIVOR], 3],
+    ['bold lead', ['**Retracted** — it read ...', SURVIVOR], 2],
+    ['code-comment lead', ['// RETRACTED: the figure was 84', `const X = 1; // ${SURVIVOR}`], 2],
+    ['list lead', ['- Superseded by #1234', SURVIVOR], 2],
+    ['plain lead', ['Retraction: the count was re-measured.', SURVIVOR], 2],
+    ['unambiguous phrase anywhere', ['That is no longer true.', SURVIVOR], 2],
+    ['struck site line', [`~~${SURVIVOR}~~`], 1],
+  ];
+
+  it.each(REAL)('#3307 still detects a real retraction: %s', (_label, lines, line) => {
+    expect(retractionNear(lines, line).retracted).toBe(true);
+  });
+
+  it('#3307 stripLineLeaders reduces nested blockquote/list/emphasis leaders to the bare word', () => {
+    expect(stripLineLeaders('> - **Retracted:** it read ...')).toMatch(/^Retracted:/);
+    expect(stripLineLeaders('   // RETRACTED: ...')).toMatch(/^RETRACTED:/);
+    expect(stripLineLeaders('1. ~~Superseded~~')).toMatch(/^Superseded/);
+    // A card id is not a heading leader — `#` only leads when whitespace follows.
+    expect(stripLineLeaders('#3319 is a card id, not a heading')).toBe('#3319 is a card id, not a heading');
+  });
+
+  it('#3307 lead words are word-bounded — `retracts` leads, `retractable` does not', () => {
+    expect(retractionNear(['Retracts the earlier figure.', SURVIVOR], 2).retracted).toBe(true);
+    expect(retractionNear(['Retractable landing gear is out of scope.', SURVIVOR], 2).retracted).toBe(false);
+  });
+
+  it('#3307 the two halves of the vocabulary are anchored differently, and both are exported', () => {
+    expect(RETRACTION_LEAD_WORDS).toContain('superseded');
+    expect(RETRACTION_PHRASES).toContain('no longer true');
+    // The combined export `3299`/`3301` will import is the union of both halves.
+    expect(RETRACTION_MARKERS).toEqual([...RETRACTION_LEAD_WORDS, ...RETRACTION_PHRASES]);
+    // ...and membership alone is NOT a match: `superseded` mid-sentence is not a retraction.
+    expect(retractionNear(['The superseded design used a modal.', SURVIVOR], 2).retracted).toBe(false);
+  });
+});
+
+describe('#3307 claim-sweep — the two first-cut fixes, now actually protected', () => {
+  // Operator finding (a): the PR body listed both of these as "found in the live run, fixed here", and
+  // reverting EITHER left the suite 42/42 green. Both mutations were re-run in this lane to confirm.
+
+  it('#3307 MUTATION — an explicit --token ADDS to the derived tokens instead of REPLACING them', () => {
+    // The old case used a claim carrying NO derived tokens, so replace-semantics and union-semantics
+    // were indistinguishable and its assertions held either way. This claim carries `#3319` and `84` of
+    // its own; the caller adds `x7kopnm`. Under replace-semantics the derived two are LOST — which is
+    // narrowing, the one outcome this tool exists to prevent.
+    const claim = { text: 'card #3319 repeats the 84 figure', tokens: ['x7kopnm'] };
+    const doc = {
+      path: 'a.md',
+      text: 'a line naming #3319 alone\nan unrelated line quoting 84 rows\nthe id x7kopnm was believed nonexistent\n',
+    };
+    const sites = sweepDocument(doc, claim);
+    expect(sites.map((x) => x.line)).toEqual([1, 2, 3]); // derived #3319, derived 84, AND supplied x7kopnm
+    expect(sites.every((x) => x.tier === 'token')).toBe(true);
+    // Stated as the invariant too, so no mutation can satisfy it by coincidence:
+    const report = sweepDocuments([doc], claim);
+    for (const t of [...distinctiveTokens(claim.text), 'x7kopnm']) expect(report.claim.tokens).toContain(t);
+  });
+
+  it('#3307 MUTATION — a match inside a wrapped paragraph is reported at ITS line, not the block start', () => {
+    // Reverting `lineForOffset` to `return block.startLine` used to keep the suite green. A citation
+    // that is precise and points at an unrelated sentence is worse than none: it reads as a false hit.
+    const doc = {
+      path: 'a.md',
+      text: [
+        '> Some unrelated opening sentence in the same blockquote.',
+        '> Another line that has nothing to do with it.',
+        '> All 84 recorded',
+        '> verdicts ran correctness alone.',
+      ].join('\n') + '\n',
+    };
+    const sites = sweepDocument(doc, { text: 'All 84 recorded verdicts ran correctness alone.' });
+    const normalized = sites.find((x) => x.tier === 'normalized');
+    expect(normalized).toBeDefined();
+    expect(normalized.line).toBe(3);      // where the claim really starts
+    expect(normalized.line).not.toBe(1);  // NOT the block's first line
+  });
+});
+
+describe('#3307 claim-sweep — the module can sweep its own source', () => {
+  // Operator finding (b): the module carried a RAW NUL byte, so `collectDocuments` classified it as
+  // binary and skipped it — while its own header carries the 84-verdicts claim. grep exited 1 silently.
+  it('#3307 the shipped module contains no raw NUL, so it is not self-excluded as binary', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'claim-sweep.mjs'), 'utf8');
+    expect(src.includes('\u0000')).toBe(false);
+    const { documents, skipped } = collectDocuments({
+      cwd: '/repo',
+      run: () => ({ status: 0, stdout: 'scripts/lib/claim-sweep.mjs\u0000', stderr: '' }),
+      readFile: () => src,
+    });
+    expect(documents.map((d) => d.path)).toEqual(['scripts/lib/claim-sweep.mjs']);
+    expect(skipped).toEqual([]);
+  });
+
+  it('#3307 binary detection itself still works — a real NUL is still skipped and COUNTED', () => {
+    const { documents, skipped } = collectDocuments({
+      cwd: '/repo',
+      run: () => ({ status: 0, stdout: 'a.md\u0000b.md\u0000', stderr: '' }),
+      readFile: (path) => (path.endsWith('b.md') ? 'bin\u0000ary' : 'hello'),
+    });
+    expect(documents.map((d) => d.path)).toEqual(['a.md']);
+    expect(skipped).toEqual([{ path: 'b.md', why: 'binary' }]);
+  });
+
+  it('#3307 a pathspec is passed after `--`, so one starting with `-` is not read as a git option', () => {
+    let argv = null;
+    collectDocuments({
+      cwd: '/repo',
+      paths: ['-weird-pathspec'],
+      run: (args) => { argv = args; return { status: 0, stdout: '', stderr: '' }; },
+      readFile: () => '',
+    });
+    expect(argv).toEqual(['ls-files', '-z', '--', '-weird-pathspec']);
   });
 });

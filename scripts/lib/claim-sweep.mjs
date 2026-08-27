@@ -75,14 +75,49 @@ import { writeAllSync } from './write-all-sync.mjs';
 
 // ── Vocabulary and tunables ───────────────────────────────────────────────────────────────────────────
 
-/** Phrases that mark a neighbourhood as a RETRACTION — the correction quoting the claim it withdraws.
- *  Matched case-insensitively against the RAW neighbourhood (normalisation strips `~~`, which is one of
- *  the markers). See the TODO at the head of this file before adding a second copy of this list. */
-export const RETRACTION_MARKERS = Object.freeze([
-  'retracted', 'retraction', 'withdrawn', 'withdraws', 'superseded', 'no longer true',
-  'this used to read', 'it read', 'used to say', 'this said', 'was wrong', 'were wrong',
-  'corrected to', 'now reads', 'erratum', '~~',
+/**
+ * RETRACTED — this list used to be matched as a bare substring ANYWHERE in the neighbourhood:
+ *
+ *     export const RETRACTION_MARKERS = Object.freeze([
+ *       'retracted', 'retraction', 'withdrawn', 'withdraws', 'superseded', 'no longer true',
+ *       'this used to read', 'it read', 'used to say', 'this said', 'was wrong', 'were wrong',
+ *       'corrected to', 'now reads', 'erratum', '~~',
+ *     ]);
+ *
+ * That was wrong, and wrong in the one direction this tool cannot afford. Half those entries are ordinary
+ * English. Measured over this repo's tracked markdown on 2026-08-26 (4132 files, 300720 lines): the
+ * substring rule put 11619 lines — 3.9% — inside a "retraction" window across 536 files, and the three
+ * commonest markers were `superseded` (424), `it read` (133) and `was wrong` (124), EACH outnumbering
+ * `retracted` (95) itself. So an exact, verbatim, never-retracted claim sitting six lines from a sentence
+ * like "on the old display it read as a jumble of digits" was reported under ALREADY RETRACTED and the CLI
+ * exited 0 "clean" — the tool laundering the very miss it exists to catch.
+ *
+ * Detection is now ANCHORED, in the direction that fails loud: a neighbourhood is a retraction only when
+ * it carries one of the shapes a retraction is actually written in. When in doubt the site stays a
+ * SURVIVOR, because an over-reported survivor costs one glance and a laundered one costs a bounce round.
+ */
+
+/** Phrases specific enough to mark a retraction ANYWHERE in the neighbourhood. Word-bounded, never a
+ *  bare substring — `no longer true` cannot be said by accident, `it read` can. */
+export const RETRACTION_PHRASES = Object.freeze([
+  'no longer true', 'no longer accurate', 'this used to read', 'this used to say',
+  'used to read', 'used to say', 'corrected to', 'erratum',
 ]);
+
+/** Words that mark a retraction only when the line LEADS with one, once blockquote, list, comment and
+ *  emphasis leaders are stripped — the shape this repo actually writes:
+ *    `**Retracted — it read …**`   `> Retracted:`   `// RETRACTED:`   `- Superseded by #1234`
+ *  `superseded` in the middle of a sentence ("the superseded design") is NOT a retraction of the claim
+ *  beside it; leading a line with it is. */
+export const RETRACTION_LEAD_WORDS = Object.freeze([
+  'retracted', 'retraction', 'retract', 'retracts', 'withdrawn', 'withdraws', 'withdrawal',
+  'superseded', 'supersedes', 'erratum', 'correction',
+]);
+
+/** The combined vocabulary, kept as one export because `3299`/`3301` need to import exactly this and the
+ *  TODO at the head of the file is about hoisting it. Membership here is NOT on its own a match — see
+ *  `retractionNear` for which half is anchored how. */
+export const RETRACTION_MARKERS = Object.freeze([...RETRACTION_LEAD_WORDS, ...RETRACTION_PHRASES]);
 
 /** Lines either side of a site that count as its retraction neighbourhood. Six covers a quoted
  *  blockquote retraction of the shape this repo writes without reaching the next unrelated paragraph. */
@@ -294,19 +329,58 @@ function lineForOffset(block, offset) {
   return line;
 }
 
+/** Strip the leaders a retraction line can sit behind — blockquote, list bullet, ordered marker, comment
+ *  leader, markdown heading, and up to two emphasis characters — so `> - **Retracted:` reduces to
+ *  `Retracted:`. Applied to a fixpoint, because these nest in any order. Pure. */
+export function stripLineLeaders(line) {
+  let s = String(line == null ? '' : line);
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/^\s+/, '')
+      .replace(/^>+/, '')
+      .replace(/^<!--/, '')
+      .replace(/^(?:\/\/+|\/\*+|#{1,6}(?=\s))/, '')
+      .replace(/^(?:[-+]|\*(?!\*))\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .replace(/^[*_~]{1,2}/, '');
+  } while (s !== prev);
+  return s;
+}
+
+const LEAD_RE = new RegExp(`^(?:${RETRACTION_LEAD_WORDS.map(escapeRe).join('|')})\\b`, 'i');
+const PHRASE_RE = new RegExp(`\\b(?:${RETRACTION_PHRASES.map(escapeRe).join('|')})\\b`, 'i');
+/** A struck-through span, e.g. `~~All 84 recorded verdicts~~`. */
+const STRUCK_RE = /~~[^~]+~~/;
+
 /**
  * Is the neighbourhood of `line` a retraction — i.e. does the correction itself quote the claim here?
- * Read against the RAW lines (normalisation eats `~~`, one of the markers).
+ * Read against the RAW lines (normalisation eats `~~` and the emphasis the anchors key on).
+ *
+ * ANCHORED, not a substring scan. Exactly three shapes count, and nothing else does:
+ *   1. a line in the window that LEADS with a retraction word once its leaders are stripped
+ *      (`**Retracted — it read …**`, `> Retracted:`, `- Superseded by #1234`);
+ *   2. an unambiguous retraction PHRASE anywhere in the window, word-bounded (`no longer true`);
+ *   3. the SITE'S OWN line being struck through (`~~the old claim~~`) — a strike elsewhere in the window
+ *      says nothing about this line, and the old rule read one as covering the other.
+ * Anything short of those leaves the site a SURVIVOR. See RETRACTION_MARKERS above for the measurement
+ * that forced this, and `3299`/`3301` before adding a fourth shape.
+ *
  * @returns {{retracted:boolean, marker?:string, markerLine?:number}}
  */
 export function retractionNear(lines, line, window = RETRACTION_WINDOW) {
+  const own = lines[line - 1];
+  if (own !== undefined && STRUCK_RE.test(own)) {
+    return { retracted: true, marker: '~~', markerLine: line };
+  }
   const from = Math.max(0, line - 1 - window);
   const to = Math.min(lines.length, line + window);
   for (let i = from; i < to; i += 1) {
-    const low = lines[i].toLowerCase();
-    for (const marker of RETRACTION_MARKERS) {
-      if (low.includes(marker)) return { retracted: true, marker, markerLine: i + 1 };
-    }
+    const raw = String(lines[i] == null ? '' : lines[i]);
+    const lead = LEAD_RE.exec(stripLineLeaders(raw));
+    if (lead) return { retracted: true, marker: lead[0].toLowerCase(), markerLine: i + 1 };
+    const phrase = PHRASE_RE.exec(raw);
+    if (phrase) return { retracted: true, marker: phrase[0].toLowerCase(), markerLine: i + 1 };
   }
   return { retracted: false };
 }
@@ -369,12 +443,22 @@ export function sweepDocument(doc, claim, opts = {}) {
       const sIdx = block.norm.indexOf(sentence, cursor);
       if (sIdx !== -1) cursor = sIdx + sentence.length;
       const score = shingleContainment(claimNorm, sentence);
-      if (score >= near && score < 1) {
+      // The TOP of the range is IN it. This used to read `score >= near && score < 1`, on the unstated
+      // assumption that a containment of exactly 1 can only mean the claim is a literal substring and was
+      // therefore already caught above as `normalized`. That is false: containment counts DISTINCT claim
+      // shingles, so a sentence that repeats a clause ("the gate never runs never runs against backlog
+      // cards") contains every one of them while being no substring at all — and the block-level
+      // `indexOf` above has already `continue`d past any block that IS a substring match. Such a site
+      // scored 1, matched no other tier, and vanished from a report whose whole promise is that nothing
+      // is silently filtered. It is the STRONGEST paraphrase the near tier can see; it is now recorded.
+      if (score >= near) {
         // The excerpt is the FOLDED sentence that matched, not the raw first line of the paragraph: a
         // paraphrase is usually mid-blockquote, and quoting the wrong line reads as a false positive.
+        // No `break`: a paragraph can restate the claim twice, and stopping at the first sentence hid
+        // the second — the same silent-drop family as the `score < 1` bug above. `record` already keeps
+        // one site per line, so a repeated sentence on one line still collapses to one entry.
         record(sIdx === -1 ? block.startLine : lineForOffset(block, sIdx), 'near', sentence,
           `paraphrase — ${Math.round(score * 100)}% of the claim's word-pairs appear in this folded sentence`);
-        break;
       }
     }
   }
@@ -490,7 +574,9 @@ export function collectDocuments(o = {}) {
   const cwd = o.cwd || process.cwd();
   const paths = o.paths && o.paths.length ? o.paths : [];
 
-  const listed = run(['ls-files', '-z', ...paths], { cwd });
+  // `--` first: without it a pathspec beginning with `-` is read by git as an OPTION, and a sweep
+  // narrowed with `--path=-foo` would silently run against the wrong corpus.
+  const listed = run(['ls-files', '-z', '--', ...paths], { cwd });
   const documents = [];
   const skipped = [];
   if (listed.status !== 0) {
