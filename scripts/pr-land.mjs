@@ -138,8 +138,14 @@ const AS_JSON = !!flags.json;
 // in we:scripts/lane-drain.mjs) and the parallel `/workflow` producer's four argvs
 // (we:skills-src/batch-backlog-items/parallel-execute.workflow.js) — because they land from the PRIMARY checkout
 // against a lane ref, where a lane clone's marker cannot exist. Which callers say what is not left to a comment:
-// the caller sweep in we:scripts/__tests__/lane-verify.test.mjs harvests every `pr-land` invocation in the tracked
-// file set and requires each to declare a posture (a verify flag, or an adjacent `verify-lane` run).
+// the caller sweep in we:scripts/__tests__/lane-verify.test.mjs harvests `pr-land` COMMAND STRINGS from the
+// tracked file set and requires each to declare a posture (a verify flag, or an adjacent `verify-lane` run).
+// #3321 round 5 — THIS SENTENCE READ "harvests EVERY `pr-land` invocation in the tracked file set". That was a
+// completeness claim larger than the check, which is the exact defect this PR was bounced for five rounds
+// running: round 4's harvest regex knew only the bare `node scripts/pr-land.mjs` spelling, so a live emitter
+// written with this repo's own `we:` locus prefix was invisible to it. The sweep's real scope and its stated
+// limits (which path spellings it knows, that array-built argvs need their own case, that source adjacency is a
+// proxy and not proof of order) live beside the sweep itself — read them there, do not infer them from here.
 // An UNFINISHED (`running`) marker for that HEAD is refused UNCONDITIONALLY (it is the exact observed stall — a
 // backgrounded run that yielded mid-flight), and the opt-out does NOT relax that. The documented break-glass
 // WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).
