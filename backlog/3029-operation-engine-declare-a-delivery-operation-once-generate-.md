@@ -116,3 +116,11 @@ a UI surface managing standards-conformant automated development, with provable 
 This epic is what makes that surface *possible*: every operation the console needs to expose has to be declared
 here first, so the operation registry is the conveyor product's supply of features, and an undeclared operation
 is a feature the product cannot ship.
+
+## Closeout note — 2026-08-27: LEFT OPEN
+
+PR #1555, the PR filed against this epic, is a **backlog card only** — it filed [#3273]'s census of the
+still-uncovered operation surface. It delivered no engine work. The epic's Acceptance is unmet on its own
+slice list: **[#3033] (`declare ratify` — the do-effects-generalise test) is still `status: open`**, and it
+is one of the two conversions the Acceptance paragraph names. Roughly seventy other children under this epic
+are also open. Remains: build [#3033], then re-check the Acceptance paragraph against the slice list.

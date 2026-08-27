@@ -87,3 +87,17 @@ N repos means N workflow files. A reusable/called workflow keeps that to one def
 2. **Executable** — the request filename needs no repo component, because per-board PR numbers are unique. `#3257` is closed as dissolved rather than fixed.
 3. The applier workflow is defined once and called per repo, not copied N times.
 4. `#3255` states which home the ledger takes, with this ruling cited either way.
+
+## Closeout note — 2026-08-27: LEFT OPEN
+
+PR #1534 is titled "#3261 fallout" but is a **backlog-card-only** PR: it filed the two transport gaps found
+while onboarding plateau-app (`xdiub6l` → #3263, `xnnehes` → #3264) and changed no transport code.
+Separately, **Done-when 1 HAS landed** on `main` via `93c41eaf` — *"record-verdict: stage a verdict on its
+OWN repo's board, and refuse the wrong one (#3261)"*. Three of the four criteria remain, each checked on
+`main` at `6b03a7bd`:
+
+- **DW2** — `#3257` is still `status: open`, so it is neither closed as dissolved nor fixed.
+- **DW3** — `we:.github/workflows/apply-review-request.yml` has no `workflow_call` trigger; it is still a
+  single `push`-triggered workflow that a second repo can only obtain by copying.
+- **DW4** — `#3255` is still open and its body cites this ruling nowhere, so the ledger's home (per-repo
+  boards vs one designated board) is still undecided.

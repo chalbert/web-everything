@@ -359,3 +359,12 @@ that actually exists — order, not co-location.)*
 assert exactly those three reasons. #3238's delivery shape allows it to land in its own PR, so this card
 could have been required to satisfy a criterion against a file it does not scope, at a land where the work
 had not happened.)*
+
+## Closeout note — 2026-08-27: LEFT OPEN
+
+PR #1556 landed **preparation only**. It added this card's `scope:`, its `preparedDate` and the eight
+Done-when criteria above (alongside the same for #3230 and #3238); its diff touches `backlog/*.md` and
+`we:agent-memory-src/` and no source file at all. None of the build has landed, measured on `main`:
+`we:scripts/operations/review-prep.mjs` declares no `land` input, `'input.land'` is absent from the `record`
+step's `reads`, and `we:scripts/operations/review-prep-io.mjs` contains the string `followUp` zero times.
+Remains: **all of Tasks 1–7 and all eight Done-when criteria** — the card is ready to build, not built.
