@@ -1,0 +1,150 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  PR #1607 (landed as card <a href="/backlog/3351-validate-a-juror-s-cited-file-against-the-net-diff-and-cover/">#3351</a>)
+  added 25 adversarial fixtures to the review pipeline. <strong>Six found real defects.</strong> Should Web
+  Everything carry a durable, cite-able acceptance criterion requiring adversarial fixtures for machinery that
+  consumes model output — and if so, what is the <strong>bound class</strong>, how is <strong>membership</strong>
+  established, and what <strong>qualifies</strong> a fixture set? This topic grounds that decision.
+</p>
+
+<h2>The load-bearing observation — none of the six was a parse failure</h2>
+<p>
+  Every one of the six inputs was <strong>structurally valid JSON</strong>. Conventional malformed-input
+  testing would have caught none of them. The defects lived in output that was
+  <strong>semantically wrong but structurally valid</strong> — which is exactly what a real model produces when
+  it is confidently wrong. Any criterion that reduces to "test malformed input" has missed the class entirely.
+</p>
+
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>#</th><th>Defect</th><th>Input</th><th>Caught by a JSON-schema check?</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>A juror cited a file not in the diff; the verdict acted on it and bounced the PR for a round</td><td>valid</td><td><strong>No</strong> — <code>file</code> is a string</td></tr>
+    <tr><td>2</td><td><code>line: 0</code>, <code>-12</code> and <code>3.7</code> passed a <code>Number.isFinite</code> check and rendered into the posted comment</td><td>valid</td><td><strong>No</strong> — <code>line</code> is a number</td></tr>
+    <tr><td>3</td><td><code>normalizeFindings</code> coerced a non-array to <code>[]</code>, so a juror that narrated its blockers in prose recorded an <strong>accept</strong></td><td>valid</td><td><strong>No</strong> — prose is a string</td></tr>
+    <tr><td>4</td><td>Same coercion for an object-valued <code>findings</code></td><td>valid</td><td><strong>No</strong> — an object is an object</td></tr>
+    <tr><td>5</td><td>A forged <code>citationScope</code> would have let a juror withhold its own finding</td><td>valid</td><td><strong>No</strong> — a valid enum member</td></tr>
+    <tr><td>6</td><td>An off-scope downgrade was undone one gate later by <code>prevention-outstanding</code></td><td>valid</td><td><strong>No</strong> — no field was wrong at all</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>Prior art — four bodies of work, none of which covers this</h2>
+
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Body of work</th><th>What it shares</th><th>What it lacks (the delta)</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Structured-output tooling</strong> — Instructor, Outlines, Pydantic AI, OpenAI structured outputs, GBNF grammars</td>
+      <td>Treats the model's response as a thing to validate before use</td>
+      <td>Converged on <em>constrained decoding</em>: schema-invalid output becomes impossible <em>by construction</em>. That closes the entire parse-failure family and <strong>none</strong> of the six. The practitioner literature already names the residue — "valid structure, meaningless data" — and prescribes semantic validators plus <strong>verbatim evidence spans</strong>, because a quote is hard to hallucinate.</td>
+    </tr>
+    <tr>
+      <td><strong>OWASP LLM05:2025 Improper Output Handling</strong> (LLM02 in the 2023/2024 revision)</td>
+      <td>The correct posture, stated plainly: <em>treat LLM output as untrusted data</em>; the model is an interpreter of untrusted input</td>
+      <td>The wrong <em>threat model</em>. Its mitigations are injection sinks — escape SQL/HTML, strip command patterns, constrain formats — because the assumed harm is <strong>code execution</strong>. Here the harm is that the machinery <strong>reaches a wrong verdict and acts on it</strong>. No sink is involved in any of the six.</td>
+    </tr>
+    <tr>
+      <td><strong>LLM eval / golden-set practice</strong> — a version-controlled set of 50–200 stratified cases with an adversarial bucket and a shipped-failure replay bucket, gated in CI</td>
+      <td>A mature fixture discipline with an explicitly <em>adversarial</em> bucket</td>
+      <td>Its subject is invariably <strong>the model or the prompt</strong> — does the model still answer well. The subject here is the <strong>consumer</strong> — does the pipeline behave correctly when the model answers badly. The two need <em>opposite</em> fixtures: an eval set holds <em>good</em> answers to compare against; an adversarial consumer fixture holds <em>bad</em> answers the pipeline must survive. "We already have evals" is therefore not an answer.</td>
+    </tr>
+    <tr>
+      <td><strong>Metamorphic testing</strong> (MORTAR and the wider AI-testing line)</td>
+      <td>Tests systems whose exact correct output cannot be predicted, via relations between inputs and outputs</td>
+      <td>Relations over the <em>model's</em> behaviour (paraphrase-invariance, multi-turn consistency). It says nothing about a downstream reducer that silently discards a field.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>The coercion is Postel's law at a trust boundary</h2>
+<p>
+  The defect at the heart of #3 and #4 is <code>Array.isArray(rawList) ? rawList : []</code> — "be liberal in
+  what you accept," applied at the exact seam where liberality is harmful. The standing critique of the
+  robustness principle is that <strong>liberal acceptance removes the feedback that would correct bad
+  behaviour</strong>: a receiver that silently accepts bad input means the sender never learns. With a model as
+  the sender there is no feedback loop at all within the run, so the blocker is not merely delayed — it is
+  destroyed. "I would not merge this" sat unread in the summary while the pipeline recorded an accept.
+</p>
+
+<h2>The qualifying test — mutation, not taxonomy</h2>
+<p>
+  A named minimum set of fixture kinds (hallucinated reference · silent coercion · summary-vs-detail
+  contradiction · volume · cross-seat disagreement) is <em>checkable</em> but ages with the model failure
+  landscape, and admits a fixture that carries the right tag while asserting nothing. "Adversarial, author's
+  judgement" is durable but unfalsifiable, and an unfalsifiable criterion is not a criterion.
+</p>
+<p>
+  <strong>Discrimination</strong> is the third option and it is both: a fixture counts <em>iff</em> there is a
+  named line of guard code whose removal makes it fail. That definition cannot go stale (it references no
+  taxonomy) and cannot be gamed (a fixture that discriminates nothing does not count). It is mutation testing's
+  premise — <em>put the bug back and see whether anything goes red</em> — used as an admission test rather than
+  as a coverage score.
+</p>
+<p>
+  Web Everything has already reached this conclusion twice, independently: the tier-1 determinism qualifier
+  ("if the criterion would still pass against a double that returns <code>''</code> for everything, it is not
+  proving the mechanism") and a <strong>shipped</strong> <code>mutation-check</code> operation whose
+  three-valued <code>killed</code> / <code>survived</code> / <code>unrun</code> outcome already handles the
+  obvious gaming case — a find-pattern that matched nothing must never be reported as <code>killed</code>,
+  because that "would certify a guard as sound on the strength of a test run that examined the unmodified
+  code."
+</p>
+
+<h2>Placement — this discharges a documented hole, it does not open a new one</h2>
+<p>
+  The existing operation-IO fidelity gate enforces the tier-1 qualifier across the operations tree with a
+  shrinking allowlist. Its debt register permanently exempts two modules with the reason stated in the source:
+  <em>"declares a <code>judge</code> step: the real mechanism needs a model, not a repo."</em> Those two are
+  exactly the modules a model-output rule would govern. So the proposed rule is the <strong>complement</strong>
+  of the existing gate — the half that a real repo cannot prove and a fake model can — not a rival to it.
+</p>
+
+<h2>Every mechanism the ruling needs already exists</h2>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Needed</th><th>Already shipped</th></tr></thead>
+  <tbody>
+    <tr><td>A mechanical "consumes model output" predicate</td><td>A declaration scan for a step of kind <code>judge</code>, already used by the CLI adapter</td></tr>
+    <tr><td>A closed step vocabulary that makes <code>judge</code> load-bearing</td><td>Four kinds and no fifth, refused at registration rather than at run time</td></tr>
+    <tr><td>A model-side test harness</td><td>A fake <code>claude</code> executable placed on <code>PATH</code>, so the real spawn path runs unmodified</td></tr>
+    <tr><td>The discrimination proof</td><td>The three-valued <code>mutation-check</code> operation</td></tr>
+    <tr><td>A rollout shape that resists both evasion and false positives</td><td>Detect-plus-shrinking-allowlist, with the list closed by construction to modules written after the rule</td></tr>
+    <tr><td>The register-a-new-gate-rule shape</td><td>Scan in the lib, three lines at the call site, outside any try/catch (a catch-all that demotes a scan failure to a warning is a gate that fails open)</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  The fake-model harness's own header already names the gap and leaves the hook: <em>"It does not run a
+  model… The quality of what an agent produces is a different test and a different budget — this is the
+  harness that makes that test a swap of one binding rather than a new build."</em>
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>Codify it as an amendment to an existing anchor, not a new one.</strong> The gap a new anchor would
+  have claimed is already half-filled: the convergence-validation anchor's second clause requires
+  <em>"a test that fails on pre-change behavior for logic fixes"</em>, scoped to <em>"any
+  AI-review/convergence surface in the constellation"</em>. What that clause cannot reach is the
+  <strong>trigger</strong> — it fires on a fix, and none of the six defects had one. So the amendment binds
+  the same requirement to the consumer's <strong>existence</strong>.
+</p>
+<p>
+  The <strong>class</strong> is defined by the trust boundary, never by failure shape — a scope that asks "is
+  this failure silent?" is undecidable from a diff and will be argued away at review time. But the class is
+  not reliably decidable from a single file either, so the <strong>enforced set is declared</strong>, widened
+  by <strong>import-graph reachability from the single seam where a model response is parsed</strong>, and
+  ratcheted with reasons on the line. A source scan for the semantic property was run against the tree and
+  got it wrong in both directions — missing both motivating files while flagging a documented pure leaf —
+  which is the same result this repo's existing fidelity gate had already recorded against itself.
+</p>
+<p>
+  A fixture <strong>qualifies by discrimination</strong>, which is the convergence clause's own before/after
+  bar restated in the form that works when no change is in flight. The five-kind failure taxonomy is
+  therefore <em>not</em> part of the rule: a fixture carrying the right tag while asserting nothing would
+  pass a taxonomy check and prove nothing. It stays here, as a prompt for an author.
+</p>
+{% endraw %}
