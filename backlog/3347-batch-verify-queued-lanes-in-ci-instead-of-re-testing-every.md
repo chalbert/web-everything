@@ -163,25 +163,38 @@ The rebuild guard (`we:scripts/lib/rebase-drop-manifest.mjs:177-186`) skips only
 not-behind **and** already manifest-free. The comment immediately above it
 (`we:scripts/lib/rebase-drop-manifest.mjs:168-176`) states outright that *"a genuinely BEHIND tip has
 `isAncestor === false` and still gets the real rebase"*. With the manifest condition permanently satisfied,
-**every one of the 153 rebases measured over 10 days fired on `BEHIND` alone** — i.e. on `strict: true`.
+**every one of the 208 rebases measured over the window below fired on `BEHIND` alone** — i.e. on `strict: true`.
 
-Measured cost over the 10 days to 2026-08-26: **153** `drain: rebase` commits on `origin/main`, **~4.6** CI
-runs per PR, ≈ **15.5 hours of CI** spent re-testing unchanged trees.
+Measured cost over the 10 days **2026-08-16 → 2026-08-26** (window pinned below): **208** `drain: rebase`
+commits on `origin/main`, **~4.5** CI runs per PR, ≈ **20.5 hours of CI** spent re-testing unchanged trees.
 
-#### Correction to the figures above (review of PR #1611)
+#### Correction to the figures above (review of PR #1611, and a second correction after it)
 
-Two numbers in the first draft of this section were wrong, and one citation pointed at the wrong lines. All
-three are retracted here rather than quietly overwritten, and every replacement was re-measured in-lane:
+**Three** numbers in the first draft of this section were wrong, and one citation pointed at the wrong lines
+— **four** corrections in all. They are retracted here rather than quietly overwritten.
+
+**A second pass was then needed, and it is the more important one.** The first round of corrections replaced
+the figures but measured them with a **rolling** `--since=10.days`, whose start moves with the clock. That
+made the recorded numbers unreproducible: re-running the card's own stated command in-lane on
+2026-08-27T00:13Z returned **151 / 153**, not the **153 / 155** the card recorded hours earlier — and the
+calendar window the card *named* (`2026-08-16 → 2026-08-26`) returns **208**. The command and the stated
+window disagreed by 55. A figure that cannot be re-derived from the method printed beside it is not a
+measurement, so the window is now **pinned to absolute, already-closed bounds** and every figure re-derived
+against it.
+
+Window, used for every row below: **`2026-08-16T00:00:00-04:00` … `2026-08-26T00:00:00-04:00`** — ten full
+calendar days, both bounds in the past, so the counts are stable rather than drifting with the clock.
 
 | claim as first written | corrected to | how it was re-measured |
 |---|---|---|
-| *"167 `drain: rebase` commits in 10 days"* (stated twice) | **153** on `origin/main` (155 across all refs) | `git log origin/main --since=10.days --grep='^drain: rebase' \| wc -l`, on a freshly fetched `origin/main`; window 2026-08-16 → 2026-08-26 |
-| *"≈ **17 hours of CI**"* | **≈ 15.5 hours** | derived, not independent: 153 × mean CI wall-clock on `main` of **365 s** (median 364 s, n = 107 completed runs, via `gh run list --workflow=CI --branch=main`) = 55 845 s |
-| *"~4.9 CI runs per PR"* | **~4.6** | 930 CI runs vs 203 PRs created in the same 10-day window (`gh run list` / `gh pr list`; the run fetch's oldest entry predates the window, so the window is fully covered) |
-| the rebuild-guard citation, first written as `we:scripts/lib/rebase-drop-manifest.mjs:172-176` | **`we:scripts/lib/rebase-drop-manifest.mjs:177-186`** | `172-176` is the tail of the explanatory comment; the guard code is `const curTreeOid` (`177`) through the closing brace (`186`). The separate `we:scripts/lib/rebase-drop-manifest.mjs:189` citation for the fixed commit-subject template is **correct** and unchanged. |
+| *"167 `drain: rebase` commits in 10 days"* (stated twice), then *"**153** on `origin/main` (155 across all refs)"* | **208** on `origin/main` (**209** across all refs) | `git log origin/main --since=2026-08-16T00:00:00-04:00 --until=2026-08-26T00:00:00-04:00 --grep='^drain: rebase' \| wc -l` on a freshly fetched `origin/main` (`--all` for the all-refs figure). Both `167` and `153` are retracted: `167` was never measured, and `153` came from a rolling window that no longer reproduces. |
+| *"≈ **17 hours of CI**"*, then *"≈ **15.5 hours**"* | **≈ 20.5 hours** | derived, not independent: 208 × mean CI wall-clock on `main` of **354 s** (median **353 s**, n = **154** completed successful runs created in the window, via `gh run list --workflow=CI --branch=main`) = 73 632 s. The earlier `365 s` / n = 107 came from the unpinned window. |
+| *"~4.9 CI runs per PR"*, then *"~4.6"* | **~4.5** | **857** CI runs (all branches) vs **192** PRs created in the same pinned window (`gh run list --workflow=CI --limit 1500` / `gh pr list --state all --limit 1000`; both fetches reach back past the window start, so it is fully covered). |
+| the rebuild-guard citation, first written as `we:scripts/lib/rebase-drop-manifest.mjs:172-176` | **`we:scripts/lib/rebase-drop-manifest.mjs:177-186`** | `172-176` is the tail of the explanatory comment; the guard code is `const curTreeOid` (`177`) through the closing brace (`186`). Re-verified in-lane this round, along with the `:168-176` comment span cited above and the `:189` commit-subject template — all three are **correct** as they now stand. |
 
 The ruling below is unaffected: the direction and order of magnitude are identical, and `BEHIND` remains the
-sole live trigger regardless of which of these counts is used.
+sole live trigger regardless of which of these counts is used. The count moved **up**, not down, so the
+measured waste that motivated the ruling is larger than either earlier figure — not smaller.
 
 ### The ruling
 
