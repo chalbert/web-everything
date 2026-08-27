@@ -16,6 +16,7 @@ import {
   coupleEscalation,
   hasReviewLabel,
   decideReviewGate,
+  decideParkReadyStrip,
   producerReviewLabel,
   shouldApplyReviewLabel,
   CARE_LEVELS,
@@ -1945,5 +1946,191 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
       reason: gate.reason.replace('e97d6c3b2652', 'ffffffffffff'), pr: 1106, repo: 'chalbert/web-everything',
     });
     expect(nextHead).not.toBe(body);
+  });
+});
+
+describe('#3184 — a fingerprint READ MISS is not proven staleness, and never revokes a clearance (WE PR #1445)', () => {
+  // THE REPRODUCED CASE, from the card's measured table for WE PR #1445 at the seventh `--to=clear-human`
+  // ceremony (01:07 on 2026-08-18). The two SHAs are that PR's real recorded/live values; the gate renders them
+  // through `.slice(0, 12)`, so the strings below are what its reason text actually contains.
+  const ACCEPTED_SHA = '2d4cc065';
+  const HEAD_SHA = 'ed32bba83fee';
+  // The DIGESTS are stand-ins, NOT PR #1445's measured values — the card records only their 8-hex prefixes
+  // (`ba771e33…`, `cdd74ab0…`) and inventing the other 56 characters would put a fabricated number in a test
+  // that reads like a measurement. Nothing here depends on WHICH digest it is: the tier under test keys on
+  // "a fingerprint was recorded" and on whether the live side could be read. `normalizeDiffFingerprint` passes
+  // a 64-hex string through unhashed, so these behave exactly like real stored markers.
+  const RECORDED_DIFF = 'a'.repeat(64);
+  const RECORDED_CONTRIBUTION = 'b'.repeat(64);
+  // The state at the moment of the re-hold: the operator cleared `review:human`, so the PR carries the accept
+  // and NOT the hold — which is what makes re-adding the hold a revocation rather than a reconcile.
+  const CLEARED_LABELS = ['review:accepted', 'ready-to-merge'];
+  const CLEARANCE = { actor: 'Nicolas Gilbert' };
+  // The accept recorded both markers and the head moved — so the drain owed a live read this pass.
+  const base = {
+    escalate: true,
+    humanRequired: true,
+    acceptedSha: ACCEPTED_SHA,
+    headSha: HEAD_SHA,
+    acceptedDiff: RECORDED_DIFF,
+    acceptedContribution: RECORDED_CONTRIBUTION,
+    labels: CLEARED_LABELS,
+    operatorClearance: CLEARANCE,
+  };
+  // The read MISSED: no live fingerprint on either side, and the drain says so explicitly.
+  const readMissed = { ...base, headDiff: null, headContribution: null, headReadFailed: true };
+  // The read SUCCEEDED and the content is byte-identical — the content-preserving rebase the escape exists for.
+  const readSucceeded = {
+    ...base, headDiff: RECORDED_DIFF, headContribution: RECORDED_CONTRIBUTION, headReadFailed: false,
+  };
+
+  it('THE REGRESSION — a read miss does NOT re-impose review:human over the recorded clearance', () => {
+    const gate = decideReviewGate(readMissed);
+    // Done-when 1. Before #3184 this returned `review:human`, revoking the clearance on a staleness the gate
+    // never verified — and since every rebase moves the SHA, it re-fired on every pass, forever.
+    expect(gate.applyLabel).not.toBe(REVIEW_LABELS.human);
+    expect(gate.applyLabel).toBe(null);
+    expect(gate.revokesClearance).toBe(false);
+    expect(gate.clearance).toBe(null);
+  });
+
+  it('THE PARK IS UNCHANGED — nothing merges, and the relief valve still cannot waive it', () => {
+    const gate = decideReviewGate(readMissed);
+    // Done-when 2. Suppression removes a LABEL WRITE, not the refusal. `action` is byte-identical to the
+    // proven-stale park, `staleAcceptance` still holds (so `applyEscalationRelief` still refuses to waive it),
+    // and `humanRequired` still holds (so no agent panel is dispatched and the #2324 body block still records
+    // the why). Failing OPEN — the #3047 direction — is not on this path at all.
+    expect(gate.action).toBe('park');
+    expect(gate.staleAcceptance).toBe(true);
+    expect(gate.humanRequired).toBe(true);
+    expect(gate.staleVerified).toBe(false);
+  });
+
+  it('THE REASON NAMES THE FAILED VERIFICATION, and asserts nothing it did not observe', () => {
+    const gate = decideReviewGate(readMissed);
+    // Done-when 3. The old text — "head advanced past the reviewed commit" — states an observation. On a read
+    // miss nothing was compared, and on PR #1445 that statement was false: the content was byte-identical.
+    expect(gate.reason).not.toContain('head advanced to');
+    expect(gate.reason).not.toContain('past the reviewed commit');
+    expect(gate.reason).toContain('could not be read this pass');
+    expect(gate.reason).toContain('UNVERIFIED, not proven stale');
+    expect(gate.reason).toContain('WITHOUT re-imposing review:human');
+    expect(gate.reason).toContain('Nicolas Gilbert');
+    // It still says the accept was not honoured — the operator must not read this as a merge.
+    expect(gate.reason).toContain('the merge is still refused');
+  });
+
+  it('THE PR #1445 REPRODUCTION — the two outcomes now differ only where they should', () => {
+    // Done-when 5, run through the real function rather than read off the source. The card's measured pair was
+    //   read SUCCEEDS -> merge | review:accepted — reviewer accepted, merge
+    //   read MISSES   -> park  | applyLabel: review:human | review:accepted is STALE — head advanced …
+    // The first is unchanged. The second keeps its `park` and loses only the unearned label and the false claim.
+    const ok = decideReviewGate(readSucceeded);
+    expect(ok.action).toBe('merge');
+    expect(ok.reason).toBe('review:accepted — reviewer accepted, merge');
+
+    const miss = decideReviewGate(readMissed);
+    expect(miss.action).toBe('park');
+    expect(miss.applyLabel).toBe(null);
+    expect(miss.revokesClearance).toBe(false);
+  });
+
+  it('A PROVEN stale head still re-holds and still revokes — the #2409/PR #368 hole stays shut', () => {
+    // The narrowing must not disarm the gate. Same clearance, same labels: the ONLY difference is that the
+    // live side was read and genuinely differs, so the staleness is observed rather than guessed.
+    const proven = decideReviewGate({
+      ...base, headDiff: 'c'.repeat(64), headContribution: 'd'.repeat(64), headReadFailed: false,
+    });
+    expect(proven.action).toBe('park');
+    expect(proven.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(proven.staleVerified).toBe(true);
+    expect(proven.revokesClearance).toBe(true);
+    expect(proven.clearance).toEqual(CLEARANCE);
+    expect(proven.reason).toContain('head advanced to ed32bba83fee past the reviewed commit 2d4cc065');
+    expect(proven.reason).toContain('REVOKES the review:human clearance recorded by Nicolas Gilbert');
+  });
+
+  it('NO MARKER RECORDED is not a read miss — every pre-#x169fqe accept behaves exactly as before', () => {
+    // Done-when 4's distinction, on the pure side. An accept that stamped no fingerprint has nothing to
+    // compare, so there was no read to miss: it must fall through to the verified SHA-identity verdict and
+    // keep its re-hold. `headReadFailed` cannot promote it — which is why the flag is a caller signal and not
+    // an inference from `headDiff == null`, a shape these two cases share.
+    const noMarker = decideReviewGate({
+      ...base, acceptedDiff: null, acceptedContribution: null,
+      headDiff: null, headContribution: null, headReadFailed: true,
+    });
+    expect(noMarker.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(noMarker.staleVerified).toBe(true);
+    expect(noMarker.revokesClearance).toBe(true);
+    expect(noMarker.reason).toContain('head advanced to');
+    // An unparseable marker is the same case — nothing usable was recorded, so nothing was owed.
+    const unusable = decideReviewGate({
+      ...base, acceptedDiff: '  ', acceptedContribution: '', headReadFailed: true,
+    });
+    expect(unusable.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(unusable.staleVerified).toBe(true);
+  });
+
+  it('KEEPING a live review:human is a reconcile, not a revocation — the label survives a read miss', () => {
+    // The second conjunct of `wouldRevoke`. This PR was never cleared, so re-applying the hold destroys
+    // nothing; suppressing the write here would drop a hold the PR is entitled to keep.
+    const stillHeld = decideReviewGate({
+      ...readMissed, labels: ['review:accepted', 'review:human'],
+    });
+    expect(stillHeld.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(stillHeld.revokesClearance).toBe(false);
+    // The reason still tells the truth about what was (not) verified.
+    expect(stillHeld.reason).toContain('could not be read this pass');
+    expect(stillHeld.reason).not.toContain('head advanced to');
+  });
+
+  it('an agent-reviewable read-miss park keeps review:pending — suppression is scoped to the human tier', () => {
+    // No clearance to revoke and no human gate: `review:pending` is agent-clearable, so this park has a
+    // release that does not need an operator. It is unchanged apart from the honest reason.
+    const pending = decideReviewGate({
+      ...readMissed, humanRequired: false, labels: ['review:accepted'], operatorClearance: null,
+    });
+    expect(pending.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(pending.revokesClearance).toBe(false);
+    expect(pending.reason).toContain('could not be read this pass');
+  });
+
+  it('acceptanceCoversHead itself stays FAIL-CLOSED on the new tier — covers is false either way', () => {
+    // The tier reports a different story, never a different coverage answer. `covers:true` on a read miss is
+    // the #3047 direction this item explicitly does not take.
+    const miss = acceptanceCoversHead({
+      acceptedSha: ACCEPTED_SHA, headSha: HEAD_SHA,
+      acceptedDiff: RECORDED_DIFF, headDiff: null, headReadFailed: true,
+    });
+    expect(miss.covers).toBe(false);
+    expect(miss.staleVerified).toBe(false);
+    // Default-off: every existing caller that passes no flag gets byte-identical behaviour.
+    const unflagged = acceptanceCoversHead({
+      acceptedSha: ACCEPTED_SHA, headSha: HEAD_SHA, acceptedDiff: RECORDED_DIFF, headDiff: null,
+    });
+    expect(unflagged.covers).toBe(false);
+    expect(unflagged.staleVerified).toBe(true);
+    expect(unflagged.reason).toContain('head advanced to');
+    // A matching fingerprint still wins outright, flag or no flag — the escape is checked first.
+    expect(acceptanceCoversHead({
+      acceptedSha: ACCEPTED_SHA, headSha: HEAD_SHA,
+      acceptedDiff: RECORDED_DIFF, headDiff: RECORDED_DIFF, headReadFailed: true,
+    }).covers).toBe(true);
+  });
+
+  it('the suppressed park strips no `ready-to-merge` it did not need to — no hold is being written', () => {
+    // `decideParkReadyStrip` is fed this park's own writes. With `applyLabel: null` the effective set is the
+    // observed labels minus the accept, which carries no hold, so nothing is stripped. That is correct here
+    // and ONLY here: the proven-stale park below writes `review:human` and does strip.
+    const gate = decideReviewGate(readMissed);
+    expect(decideParkReadyStrip(CLEARED_LABELS, {
+      applyLabel: gate.applyLabel, staleAcceptance: gate.staleAcceptance,
+    })).toBe(false);
+    const proven = decideReviewGate({
+      ...base, headDiff: 'c'.repeat(64), headContribution: 'd'.repeat(64), headReadFailed: false,
+    });
+    expect(decideParkReadyStrip(CLEARED_LABELS, {
+      applyLabel: proven.applyLabel, staleAcceptance: proven.staleAcceptance,
+    })).toBe(true);
   });
 });

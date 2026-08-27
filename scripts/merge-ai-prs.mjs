@@ -3656,6 +3656,12 @@ async function runCli() {
       // from the same live net-diff text as their `*Diff` siblings (no extra gh or git hop).
       let acceptedContribution = null;
       let liveHeadContribution = null;
+      // #3184 — DID THIS PASS OWE A LIVE COMPARISON AND FAIL TO MAKE IT? `liveHeadDiff === null` cannot answer
+      // that: it is equally the shape of "this accept recorded no fingerprint, so there was nothing to read".
+      // Collapsing the two is the whole defect — the gate then reports an unread head as a head it watched
+      // advance, and revokes an operator clearance on that. Set true ONLY for the second case: a marker WAS
+      // recorded, the head HAS moved, and we still hold no live fingerprint.
+      let liveDiffReadFailed = false;
       // #xmnl36p — the OPERATOR CLEARANCE record, read from the SAME comment scan (no extra gh hop). It never
       // permits a merge; it only lets the gate know that a re-imposed `review:human` is overriding a human's
       // recorded clearance, so the re-hold can be announced instead of landing silently.
@@ -3673,8 +3679,10 @@ async function runCli() {
         // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
         // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
         // (no fingerprint) never pays the hop, and neither does an accept whose head never moved. A miss leaves
-        // the live diff null, which fails CLOSED into the SHA-identity verdict — a false re-park, never a false
-        // honour.
+        // the live diff null, which still fails CLOSED — the accept is not honoured, a false re-park and never
+        // a false honour. #3184 — but the miss is now RECORDED (`liveDiffReadFailed`) rather than collapsed
+        // into the same `null` a marker-less accept produces, because the gate's re-park writes a label the
+        // operator cannot undo, and it may only write it on staleness it actually observed.
         // THE REPO GUARD IS LOAD-BEARING (PR #1087 review, blocker 1). The drain sweeps PRs from THREE repos in
         // one process with no `chdir`, so every git read must be pinned to that PR's own clone via `escCwd` —
         // exactly as the two `computeNetDiff*` calls above already do. The first cut of this block omitted both
@@ -3686,9 +3694,15 @@ async function runCli() {
         // #x9xqexm — `|| acceptedContribution`: an accept that recorded ONLY the contribution marker (or, later,
         // only that one) must still pay for the live read, or its escape can never fire. Either marker present
         // is enough; neither present still costs nothing.
-        if ((acceptedDiff || acceptedContribution) && liveHeadRef && liveHeadSha && acceptedSha
-            && (isLocalRepo(v.repo) || escCwd)
-            && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha)) {
+        // #3184 — the read is OWED whenever a recorded marker could still rescue this accept and the head has
+        // actually moved. Split out of the `if` below (whose condition is otherwise unchanged, repo guard and
+        // all) purely so the miss can be recorded: the guard's own failure — a sibling-repo PR with no clone to
+        // read from — is ALSO "could not read the live side", and it must not be reported as proven staleness
+        // either. Every clause here was already in the shipped condition; only `isLocalRepo(v.repo) || escCwd`
+        // is held back, because it decides whether the read is POSSIBLE, not whether it is owed.
+        const liveDiffReadOwed = !!((acceptedDiff || acceptedContribution) && liveHeadRef && liveHeadSha && acceptedSha
+            && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha));
+        if (liveDiffReadOwed && (isLocalRepo(v.repo) || escCwd)) {
           try {
             // #2979 — the NET diff, matching what `review-set-label.mjs` fingerprinted at accept time. It MUST be
             // the same basis on both sides: `gh pr diff`'s three-dot output still lists a sibling lane's file
@@ -3702,10 +3716,15 @@ async function runCli() {
             liveHeadDiff = net && net.scored ? net.text : null;
             // Same bytes, second digest — `acceptanceCoversHead` normalizes each with its own function.
             liveHeadContribution = liveHeadDiff;
-          } catch { /* miss → null → SHA-identity verdict (the stricter path) */ }
+          } catch { /* miss → null → recorded as a read failure just below, NOT as proven staleness */ }
         }
+        // Covers all three ways the live side can be missing after an owed read: the `computeNetDiffText` throw
+        // above, an unscored result (`net.scored` false → `liveHeadDiff` null with no exception), and the repo
+        // guard refusing the read outright. The verdict is `park` in every one of them, exactly as before —
+        // this flag changes only the REASON and, for a re-hold that would revoke a clearance, the label write.
+        liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to
