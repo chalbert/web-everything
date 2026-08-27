@@ -8,6 +8,8 @@
  *   (`scripts/verify-lane.mjs`) and pr-land's finish-guard calls `verifyGateDecision` here.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   VERIFY_FILENAME,
   DEFAULT_VERIFY_TTL_MINUTES,
@@ -431,6 +433,84 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
         expect(v.reason).toBe('break-glass');
       }
     });
+  });
+});
+
+// ── #3321 — THE CALLER SWEEP, as a test instead of an assertion in a comment ──────────────────────────────────
+//
+// The residual this item's round-3 fix named and deferred, built here instead. Twice now, a docblock has asserted
+// a completed sweep of the callers the flipped default re-points, and twice the sweep had missed one: round 1
+// missed `we:scripts/lane-drain.mjs`, round 2 missed
+// `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (four flag-free argvs, so every `/workflow`
+// lane died at pr-land's step-1b gate with exit 3 / `unverified`).
+//
+// The lesson is not "remember the workflow" — it is that a caller list maintained BY HAND in a comment is a claim
+// that rots the moment someone adds a caller. So the sweep runs here, over the real committed source: every
+// `node scripts/pr-land.mjs …` command string this repo ships must state its verification posture explicitly, and
+// each is driven through pr-land's own flag parser, `resolveVerifyOptions`, and `verifyGateDecision` against the
+// marker state that path actually sees. Add a fifth flag-free invocation and this reddens instead of shipping.
+describe('#3321 — every committed pr-land invocation declares its verification posture (caller sweep)', () => {
+  const REPO = process.cwd();
+  const WORKFLOW = 'skills-src/batch-backlog-items/parallel-execute.workflow.js';
+  const DRAIN = 'scripts/lane-drain.mjs';
+
+  // pr-land's OWN flag parser (`scripts/pr-land.mjs`, the argv loop) — the same regex, not a re-implementation.
+  const parseArgv = (cmd) => {
+    const flags = {};
+    for (const a of cmd.split(/\s+/).slice(2)) {
+      const m = a.match(/^--([^=]+)(?:=(.*))?$/);
+      if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+    }
+    return flags;
+  };
+  // A REAL invocation, not the prose form: at least one `--flag` must follow, so a docblock's
+  // "the `node scripts/pr-land.mjs …` argv" is not mistaken for a call site that forgot its posture.
+  const PR_LAND_CMD = /node scripts\/pr-land\.mjs(?:\s+--[^\s`\\]+)+/g;
+  const VERIFY_FLAGS = ['require-verified', 'no-require-verified'];
+  const srcOf = (f) => readFileSync(resolve(REPO, f), 'utf8');
+  const invocationsIn = (f) => [...srcOf(f).matchAll(PR_LAND_CMD)].map((m) => m[0].trim());
+
+  it('the parallel /workflow producer passes the opt-out on EVERY argv it emits', () => {
+    const invocations = invocationsIn(WORKFLOW);
+    // Step 8 emits two (the WE PR and the impl-repo PR); the #2216 label-reconcile pass emits two more.
+    expect(invocations.length).toBe(4);
+    for (const cmd of invocations) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(cmd), env: {} });
+      expect(opts, cmd).toEqual({ requireVerified: false, breakGlass: false });
+      // The marker state this path REALLY has: absent. Its step-4 gate shells the suites directly and never
+      // writes `.git/.lane-verify`, and the reconcile pass runs from the PRIMARY checkout against a lane ref,
+      // where a lane clone's marker is structurally unreachable.
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), cmd)
+        .toMatchObject({ ok: true, reason: 'untracked' });
+    }
+  });
+
+  it('the same argvs WITHOUT the flag are the wedge — so the flag is provably load-bearing', () => {
+    const stripped = invocationsIn(WORKFLOW).map((c) => c.replace(/\s--no-require-verified\b/g, ''));
+    expect(stripped.length).toBe(4);
+    for (const cmd of stripped) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(cmd), env: {} });
+      expect(opts.requireVerified, cmd).toBe(true);
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), cmd)
+        .toMatchObject({ ok: false, reason: 'unverified' });
+    }
+  });
+
+  it('no emitter ships a pr-land invocation that says nothing about verification', () => {
+    const silent = [];
+    for (const file of [WORKFLOW, DRAIN]) {
+      for (const cmd of invocationsIn(file)) {
+        if (!VERIFY_FLAGS.some((f) => f in parseArgv(cmd))) silent.push(`${file}: ${cmd.slice(0, 80)}`);
+      }
+    }
+    expect(silent).toEqual([]);
+  });
+
+  it('the drain builds its argv as an ARRAY, and that array declares the posture too', () => {
+    // `buildPrLandArgs` is an array literal, not a command string, so the regex above cannot see it. Pinned here
+    // as well, so the sweep has no hole the drain could slip back through. (`lane-drain.test.mjs` pins the
+    // resolved behaviour; this pins that the sweep itself covers the shape.)
+    expect(srcOf(DRAIN)).toMatch(/const args = \['scripts\/pr-land\.mjs',[^\]]*'--no-require-verified'/);
   });
 });
 

@@ -55,6 +55,12 @@
  *      An earlier revision of this comment claimed the list had "exactly one" entry, on the strength of a caller
  *      sweep that had missed the workflow — review round 2 caught it. Anything added to this list must be added
  *      HERE too, or the next reader inherits the same false completeness claim.
+ *      AND THE LIST IS NO LONGER LOAD-BEARING ON ITS OWN. A hand-maintained caller list is a claim that rots the
+ *      moment someone adds a caller, and this one was wrong twice. The sweep now RUNS, in
+ *      `we:scripts/__tests__/lane-verify.test.mjs` ("caller sweep"): it harvests every committed `pr-land`
+ *      invocation straight from source and drives each through this resolver and `verifyGateDecision` on the
+ *      marker state that path really sees. A new flag-free call site reddens the suite instead of reaching the
+ *      gate — so this comment can now only go stale, never silently wrong.
  *      It relaxes only the two "we never saw a result" cells —
  *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
  *      `corrupt` marker still refuse, because those are evidence of a BROKEN verification, not a missing one.

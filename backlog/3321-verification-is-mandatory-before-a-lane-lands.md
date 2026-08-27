@@ -70,10 +70,24 @@ step-4 gate already runs the same suite pair `verify-lane` runs, but the marker 
 (resolve commit, manifest, review amend) move HEAD afterwards — recording a marker there needs a verification step
 sequenced after the final amend, which is a workflow change this card does not make (see #3212).
 
-**The caller sweep is still a hand sweep, and that is the residual risk.** It has now been wrong twice. The
-durable fix is a source-level guard asserting that every repo-committed `we:scripts/pr-land.mjs` invocation either
-carries a verify flag or is preceded by a `verify-lane` run — the same shape as the existing `lane-drain` contract
-guard. Not built here; owed as a follow-up.
+**The caller sweep is no longer a hand sweep.** An earlier revision of this section read:
+
+> **The caller sweep is still a hand sweep, and that is the residual risk.** It has now been wrong twice. The
+> durable fix is a source-level guard asserting that every repo-committed `we:scripts/pr-land.mjs` invocation
+> either carries a verify flag or is preceded by a `verify-lane` run — the same shape as the existing `lane-drain`
+> contract guard. Not built here; owed as a follow-up.
+
+**That residual is closed in this card rather than deferred**, because deferring it leaves the item's own failure
+mode live: a hand-maintained caller list in a docblock is a claim, and this one was wrong in round 1 (missed the
+drain) and again in round 2 (missed the workflow). Filing a follow-up would have shipped a third revision of the
+same claim with nothing enforcing it.
+
+The guard is the described one, as a test — `we:scripts/__tests__/lane-verify.test.mjs`, "caller sweep". It reads
+the committed source of each emitter, harvests every real `pr-land` command string (a match needs at least one
+`--flag`, so a docblock's prose mention is not counted as a call site), and drives each one through
+`we:scripts/pr-land.mjs`'s own flag parser, `resolveVerifyOptions` and `verifyGateDecision` against the marker
+state that path actually sees. It also pins the drain's array-literal argv, which no command-string scan can see.
+A new `pr-land` invocation that says nothing about verification reddens the suite instead of reaching the gate.
 
 ## Done when
 
@@ -118,8 +132,14 @@ guard. Not built here; owed as a follow-up.
    marker through (`ok`/`untracked`) — that is the marker state the drain actually sees. Pinned in
    `we:scripts/__tests__/lane-drain.test.mjs`, together with the same call *without* the flag asserted as
    `unverified`, so the flag is provably load-bearing rather than decorative. The `/workflow` producer's four
-   invocations carry the same flag (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`); those are
-   prompt strings, so they are pinned by inspection and by the completeness note above, not by a test.
+   invocations carry the same flag (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`).
+   An earlier revision of this criterion added of those four: *"those are prompt strings, so they are pinned by
+   inspection and by the completeness note above, not by a test."* **No longer true, and it was the weak spot** —
+   "pinned by inspection" is the same hand-sweep that had already been wrong twice. They are now pinned by the
+   caller sweep in `we:scripts/__tests__/lane-verify.test.mjs`, which harvests them from the file's own source and
+   runs each through the real resolver and gate; being prompt strings is no obstacle, since the sweep reads the
+   source text rather than executing the workflow. The same test asserts the count is **four**, so an invocation
+   added or removed without thought reddens too.
 
 4. **The escapes are distinguishable** — under the opt-out, a fresh `running` marker still returns
    `verify-unfinished` and a corrupt marker still returns `verify-corrupt`; only `WE_LAND_UNVERIFIED=1` returns

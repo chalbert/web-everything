@@ -207,7 +207,12 @@ export function planDrain(manifest, queuedState) {
  * file (the #2170 dismissals PR body) is forwarded when supplied. `--json` so the drain reads the result.
  *
  * #3321 — `--no-require-verified` IS MANDATORY ON THIS ARGV, and it is not a weakening of that item's gate; it is
- * the one call site that item's opt-out exists for. #3321 flipped `resolveVerifyOptions`'s default to "verification
+ * ONE OF THE TWO call sites that item's opt-out exists for. THIS CLAUSE USED TO READ "the one call site", which was
+ * wrong: review round 2 of PR #1609 found the parallel `/workflow` producer
+ * (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`) still emitting four flag-free `pr-land` argvs.
+ * The complete, swept list lives in the OPT-OUT entry of `we:scripts/lib/lane-verify.mjs`'s header — add to it
+ * there, and the caller-sweep test in `we:scripts/__tests__/lane-verify.test.mjs` will hold you to it.
+ * #3321 flipped `resolveVerifyOptions`'s default to "verification
  * required", which is right for a lane session landing its OWN clone — the clone is where `verify-lane.mjs` writes
  * `.git/.lane-verify`, so the marker is reachable and demanding it is meaningful. The drain is the opposite shape on
  * BOTH counts, so a flag-free argv here is a gate that can only ever fail:
@@ -217,8 +222,11 @@ export function planDrain(manifest, queuedState) {
  *     for every queued couple, forever, and `reopenStrandedItem` would send each item back to `open`.
  *   - the drain does not need it: the PR's required GitHub check is the per-repo landing authority (#1937, stated
  *     on `DRAIN_REPOS` above), and a couple only reaches here already labelled `ready-to-merge` — i.e. green.
- * This is exactly the "verifies elsewhere" caller #3321's opt-out was written for, and the standing #2833 contract
- * ("the CI-gated drain / parallel-workflow paths verify via the required GitHub check") says so. It is the NARROW
+ * This is exactly the "verifies elsewhere" caller #3321's opt-out was written for. #2833's resolution said the same
+ * of this path ("the CI-gated drain / parallel-workflow paths verify via the required GitHub check") — but read that
+ * as WHY the opt-out is right here, NOT as evidence those paths are already wired for it. Under #3321's default they
+ * are unblocked only where the flag is actually passed; reading that sentence the other way is what produced the
+ * wedge #1609's review caught, twice. It is the NARROW
  * opt-out, never the `WE_LAND_UNVERIFIED=1` break-glass: a fresh `running` marker (the #2833 stall) and a corrupt
  * marker still refuse under it, so a genuinely half-run verification is still caught here.
  */
