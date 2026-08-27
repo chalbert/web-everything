@@ -42,7 +42,7 @@
  *   | `read`   | `compute` | `readPrep` (`we:scripts/operations/review-prep-io.mjs`) — frontmatter + body + scope |
  *   | `judge`  | `judge`   | `buildPrepMandate` (below), on `buildSubjectMandate` — DECLARED, never spawned here   |
  *   | `reduce` | `compute` | pulls `confidence` + named `risks` + `corrections` DIRECTLY off the juror's answer    |
- *   | `record` | `effect`  | `recordPrepVerdict` (`review-prep-io.mjs`) — append, commit, land or park             |
+ *   | `record` | `effect`  | `recordPrepVerdict` (`review-prep-io.mjs`) — append, verify, commit, land or push     |
  *
  * NO `confirm` STEP. A prep review's verdict is a note + a commit, not a GitHub label a human gate-self path
  * cares about — if a human stop turns out to be needed once this is used for real, that is its own item,
@@ -415,6 +415,12 @@ export function reviewPrepOperation({ readPrep } = {}) {
       item: 'string',
       repo: 'string',
       actor: { type: 'string', required: false, default: 'operator' },
+      // #3233 — LAND IS A DECLARED INPUT, not an effect-payload key. The CLI flag (`--land=false`) is
+      // GENERATED from this line by `we:scripts/operations/cli-adapter.mjs`; a flag that is not declared here
+      // cannot exist, per the operations-declared-once statute quoted in this file's header. DEFAULT TRUE, so
+      // every existing caller — none of which passes it — keeps exactly today's behaviour. Turning it off
+      // would have stopped every laptop review that lands today.
+      land: { type: 'boolean', required: false, default: true },
     },
     verdictFrom: 'reduce',
 
@@ -483,13 +489,26 @@ export function reviewPrepOperation({ readPrep } = {}) {
     // compares against `expectedContentHash` captured here at `read` time — see that file's header for why the
     // guard cannot live in this pure declaration (it needs a live re-read, which is io).
     record: effectStep({
-      reads: ['input.item', 'input.repo', 'input.actor', 'verdict', 'findings.read'],
+      // `input.land` MUST be declared here or it is invisible: `projectReads`
+      // (`we:scripts/operations/engine.mjs`) projects ONLY declared reads, so without this entry
+      // `view.input.land` is `undefined` for every run and the `?? true` below would make `land: false`
+      // unreachable — the flag inert and the tests green anyway. NOT read in `reduce`: that step declares
+      // `reads: ['findings.read', 'findings.judge']`, so `view.input` is undefined there and the expression
+      // would throw.
+      reads: ['input.item', 'input.repo', 'input.actor', 'input.land', 'verdict', 'findings.read'],
       effects: (view) => {
         const v = view.verdict || {};
         const read = view.findings.read;
         const item = view.input.item;
         const repo = view.input.repo;
         const actor = view.input.actor;
+        // `?? true` IS THE MIGRATION, and it is not a `land`-specific accident: a declaration default is
+        // applied ONCE at `startRun` (`we:scripts/operations/engine.mjs`) and never re-applied on resume, so a
+        // run record written before this field existed has no `land` key at all and reads `undefined`, not
+        // `true`. `actor` has the identical exposure and is unbroken today only because every existing run
+        // record happens to carry it. Coalescing here means an old record resumes into exactly what it would
+        // have done before this change — no contract-version stamp, no resume refusal.
+        const land = view.input.land ?? true;
         const clean = isCleanPrepReview({ confidence: v.confidence, risks: v.risks, fixApplied: v.fixApplied });
         return [
           // 0 — THE REVIEW ITSELF: append, commit, land or park. NON-idempotent: a replay must not append a
@@ -506,6 +525,7 @@ export function reviewPrepOperation({ readPrep } = {}) {
               fixApplied: v.fixApplied,
               note: v.summary,
               actor,
+              land,
               expectedContentHash: read.contentHash,
             },
             idempotent: false,

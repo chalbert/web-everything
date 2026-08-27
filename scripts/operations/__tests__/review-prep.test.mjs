@@ -303,6 +303,29 @@ describe('the record step', () => {
     const { declaration } = registryFor({});
     expect(declaration.stepNames).toEqual(['read', 'judge', 'reduce', 'record']);
   });
+
+  // ── #3233 — WHERE `land` IS READ, AND WHERE IT IS NOT ───────────────────────────────────────────────────
+  it('`record` DECLARES `input.land` and `reduce` does NOT — reading it in `reduce` would throw', () => {
+    const { declaration } = registryFor({});
+    const stepReads = (name) => declaration.steps.find((s) => s.name === name).step.reads;
+    expect(stepReads('record')).toContain('input.land');
+    // `reduce` sees only its two declared findings, so `view.input` is undefined there — an earlier draft of
+    // this card's task list said to read `land` in `reduce`, which cannot work.
+    expect(stepReads('reduce')).toEqual(['findings.read', 'findings.judge']);
+    expect(stepReads('reduce')).not.toContain('input.land');
+  });
+
+  it('a run started WITHOUT `--land` carries `land: true` into the RECORD payload', () => {
+    const { registry } = registryFor({});
+    const declared = atRecord({ registry });
+    expect(declared.effects[0].payload.land).toBe(true);
+  });
+
+  it('a run started with `land: false` carries it through to the RECORD payload', () => {
+    const { registry } = registryFor({});
+    const declared = atRecord({ registry, input: { ...BASE_INPUT, land: false } });
+    expect(declared.effects[0].payload.land).toBe(false);
+  });
 });
 
 // ── renderJudgeInput ───────────────────────────────────────────────────────────────────────────────────────
@@ -317,12 +340,16 @@ describe('renderJudgeInput', () => {
 
 // ── THE DERIVED COMMAND LINE ──────────────────────────────────────────────────────────────────────────────
 describe('the derived command line', () => {
-  it('derives its flags from the declaration — item/repo/actor, no hand-written parser', () => {
+  it('derives its flags from the declaration — item/repo/actor/land, no hand-written parser', () => {
     const { declaration } = registryFor({});
     const spec = buildCliSpec(declaration);
-    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'item', 'repo']);
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'item', 'land', 'repo']);
     expect(spec.usage).toContain('--item=<string>');
     expect(spec.usage).toContain('--repo=<string>');
+    // #3233 — `--land` EXISTS because the input declares it. A flag the declaration does not carry cannot be
+    // hand-added to the adapter (the operations-declared-once statute), so this line is the flag's whole
+    // provenance.
+    expect(spec.usage).toContain('--land=<boolean>');
     expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → record(effect)');
   });
 });
