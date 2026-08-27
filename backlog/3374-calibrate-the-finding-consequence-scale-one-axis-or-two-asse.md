@@ -1,4 +1,5 @@
 ---
+bornAs: xg7hrd5
 kind: decision
 parent: "3318"
 status: open
@@ -390,12 +391,12 @@ included"* (`we:scripts/lib/jury-core.mjs:2028`), unconditionally and deliberate
 
 ```js
 // we:scripts/lib/jury-core.mjs:184 — BEFORE
- * IMPACT IF UNFIXED (#xdompzx) — what it COSTS to ship this finding, as distinct from `severity` (how bad the defect
+ * IMPACT IF UNFIXED (#2942) — what it COSTS to ship this finding, as distinct from `severity` (how bad the defect
  * looks to the lens that found it).
 
 // AFTER — the distinction survives; the phantom field name does not.
- * IMPACT IF UNFIXED (#xdompzx) — what it COSTS to ship this finding. Deliberately NOT how bad the defect
- * looks to the lens that found it: there is no second graded axis and none is planned (#xg7hrd5 Fork 1).
+ * IMPACT IF UNFIXED (#2942) — what it COSTS to ship this finding. Deliberately NOT how bad the defect
+ * looks to the lens that found it: there is no second graded axis and none is planned (#3374 Fork 1).
  * A severe-looking defect that costs nothing to ship is `cosmetic`, and the weight a reviewer wants to put
  * on it goes in the (unconditional) `prevention` field, never in a rank.
 ```
@@ -831,7 +832,7 @@ under the same `IMPACT_GLOSS` single-sourcing discipline, so the reviewer's mand
 map a maintainer reads.
 
 ```js
-// we:scripts/lib/jury-core.mjs — #xg7hrd5 Fork 3. Coarse by ruling, glossed as data.
+// we:scripts/lib/jury-core.mjs — #3374 Fork 3. Coarse by ruling, glossed as data.
 export const REACH_LEVELS = Object.freeze({
   ONE_SITE: 'one-site',       // one call site or one path
   ONE_SURFACE: 'one-surface', // one command, page, or module's consumers
