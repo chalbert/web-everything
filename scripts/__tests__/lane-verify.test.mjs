@@ -439,12 +439,13 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
 
 // ── #3321 — THE CALLER SWEEP, as a test instead of an assertion in a comment ──────────────────────────────────
 //
-// The residual this item's round-3 fix named and deferred, built here instead. Three times now, a docblock has
-// asserted a completed sweep of the callers the flipped default re-points, and three times the sweep had missed
-// one: round 1 missed `we:scripts/lane-drain.mjs`, round 2 missed
+// The residual this item's round-3 fix named and deferred, built here instead. FOUR times now, a docblock or a
+// test name has asserted a completed sweep of the callers the flipped default re-points, and four times the
+// sweep had missed one: round 1 missed `we:scripts/lane-drain.mjs`, round 2 missed
 // `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (four flag-free argvs, so every `/workflow`
-// lane died at pr-land's step-1b gate with exit 3 / `unverified`), and round 3 missed the three DOC emitters
-// below.
+// lane died at pr-land's step-1b gate with exit 3 / `unverified`), round 3 missed the three DOC emitters
+// below, and round 4 missed `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md` — see THE PREFIX
+// ARM on `PR_LAND_CMD`.
 //
 // RETRACTION — this comment used to end: "So the sweep runs here, over the real committed source: every
 // `node scripts/pr-land.mjs …` command string this repo ships must state its verification posture explicitly …
@@ -473,7 +474,24 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
 //     the verify AFTER the item commit rather than leaving it where it already sat, hundreds of lines up.
 // Each harvested invocation is then driven through pr-land's own flag parser, `resolveVerifyOptions`, and
 // `verifyGateDecision` against the marker state that path really sees.
-describe('#3321 — every committed pr-land invocation declares its verification posture (caller sweep)', () => {
+//
+// RETRACTION — THE TITLE BELOW READ "#3321 — every committed pr-land invocation declares its verification
+// posture (caller sweep)". FALSE WHEN WRITTEN, for the fifth time in this PR's history and by the same
+// mechanism: the sweep's stated scope was larger than its actual scope. Round 4's `PR_LAND_CMD` matched only
+// `node scripts/pr-land.mjs …`, so an invocation written with this repo's own `we:` locus prefix was not
+// "a committed pr-land invocation" as far as the sweep was concerned — and exactly one such invocation was
+// shipping, flag-free, in a loaded agent memory. The title now says what the sweep IS, and the limits below
+// say what it is not, rather than a name doing the claiming.
+//
+// WHAT THE SWEEP IS NOT — the stated limits, so the next round need not discover them:
+//   · It harvests COMMAND STRINGS carrying at least one `--flag`. A bare `node we:scripts/pr-land.mjs` with no
+//     flags at all (e.g. `we:backlog/2219…:222`) is prose about the tool, not an argv, and is NOT harvested.
+//   · It knows three spellings of the path — bare, `we:`-prefixed, `./`-prefixed. A fourth spelling would be
+//     invisible again; the mutation probes below are the defence against that, not the regex.
+//   · Argvs built as ARRAYS (`we:scripts/lane-drain.mjs#buildPrLandArgs`) are invisible to any command-string
+//     scan and are pinned by a separate case.
+//   · Source adjacency is a checkable proxy for "the verify precedes the land", never a proof of execution order.
+describe('#3321 — every pr-land COMMAND STRING the tracked file set ships declares its posture (caller sweep)', () => {
   const REPO = process.cwd();
   const WORKFLOW = 'skills-src/batch-backlog-items/parallel-execute.workflow.js';
   const DRAIN = 'scripts/lane-drain.mjs';
@@ -492,7 +510,22 @@ describe('#3321 — every committed pr-land invocation declares its verification
   };
   // A REAL invocation, not the prose form: at least one `--flag` must follow, so a docblock's
   // "the `node scripts/pr-land.mjs …` argv" is not mistaken for a call site that forgot its posture.
-  const PR_LAND_CMD = /node scripts\/pr-land\.mjs(?:\s+--[^\s`\\]+)+/g;
+  //
+  // THE PREFIX ARM (review round 5, the CONFIRMED coverage-gap finding). This regex used to read
+  // `/node scripts\/pr-land\.mjs…/` — a bare path and nothing else — while this repo's own documentation
+  // convention writes cross-repo paths with the constellation locus prefix, `node we:scripts/pr-land.mjs …`.
+  // So the sweep's harvest was blind to exactly the spelling the docs are written in. Measured in this lane,
+  // not assumed: running this describe's own predicate over `git grep -lF pr-land.mjs` (213 candidate files)
+  // with and without the prefix arm harvested 8 invocations vs 7, and the one invocation only the widened
+  // regex sees is `agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:16` — a `type: feedback` agent
+  // memory, i.e. a LOADED INSTRUCTION, and the canonical cross-repo delivery arc for Frontier UI and
+  // plateau-app. It carried no verify flag and no adjacent verify run, so after this item's flip an agent
+  // following it would have hit `pr-land`'s step-1b gate with exit 3 / `unverified`. That arc is fixed in this
+  // round, and the `we:`-prefixed shape is now a named mutation probe below so the prefix cannot go blind again.
+  //
+  // The `./` arm harvests NOTHING today — measured: 0 additional invocations over the same 213 files. It is
+  // here because "the sweep did not know that spelling" is the failure mode of record, five rounds running.
+  const PR_LAND_CMD = /node (?:we:|\.\/)?scripts\/pr-land\.mjs(?:\s+--[^\s`\\]+)+/g;
   const VERIFY_FLAGS = ['require-verified', 'no-require-verified'];
   // The second arm: a recorded verification for the commit about to land. `verify-lane.mjs` is the ONLY writer of
   // `.git/.lane-verify`; `run.mjs verify` is the operation that shells it.
@@ -510,18 +543,28 @@ describe('#3321 — every committed pr-land invocation declares its verification
       .split('\n')
       .filter(Boolean);
 
-  /** Harvest one file's invocations WITH the line context the verify-arm needs. */
-  const invocationsIn = (f) => {
-    const lines = srcOf(f).split('\n');
+  /**
+   * Harvest one source TEXT's invocations WITH the line context the verify-arm needs. PURE over `(name, src)`,
+   * which is what lets the mutation probes below run the REAL predicate over a real file's source plus one
+   * injected line — no temp clone, no file written, no `git checkout` to undo.
+   */
+  const scanSource = (name, src) => {
+    const lines = src.split('\n');
     const out = [];
     lines.forEach((line, i) => {
       for (const m of line.matchAll(PR_LAND_CMD)) {
         const before = lines.slice(Math.max(0, i - VERIFY_WINDOW), i + 1).join('\n');
-        out.push({ file: f, line: i + 1, cmd: m[0].trim(), precededByVerify: VERIFY_RUN.test(before) });
+        out.push({ file: name, line: i + 1, cmd: m[0].trim(), precededByVerify: VERIFY_RUN.test(before) });
       }
     });
     return out;
   };
+  /** The same predicate `no emitter ships …` applies, factored out so a probe asserts the REAL rule. */
+  const silentIn = (invocations) => invocations
+    .filter((v) => !VERIFY_FLAGS.some((f) => f in parseArgv(v.cmd)))
+    .filter((v) => !v.precededByVerify)
+    .map((v) => `${v.file}:${v.line}: ${v.cmd.slice(0, 90)}`);
+  const invocationsIn = (f) => scanSource(f, srcOf(f));
   const cmdsIn = (f) => invocationsIn(f).map((v) => v.cmd);
 
   const harvest = () =>
@@ -536,12 +579,15 @@ describe('#3321 — every committed pr-land invocation declares its verification
     expect(files).toContain(WORKFLOW);
     expect(files).toContain(DRAIN);
     expect(files.length).toBeGreaterThan(3);
-    // And the emitters review round 3 missed are inside the harvest now, by construction rather than by name.
+    // And the emitters the review rounds missed are inside the harvest now, by construction rather than by name.
     const harvested = harvest().map((v) => v.file);
     for (const missed of [
+      // round 3 missed these three
       'skills-src/batch-backlog-items/SKILL.md',
       'docs/agent/backlog-workflow.md',
       'agent-memory-src/single-session-should-use-a-lane.md',
+      // round 4 missed this one, because it is written with the `we:` locus prefix (see PR_LAND_CMD above)
+      'agent-memory-src/lane-pr-is-universal-delivery-all-repos.md',
     ]) expect(harvested).toContain(missed);
   });
 
@@ -558,12 +604,74 @@ describe('#3321 — every committed pr-land invocation declares its verification
     for (const h of hits) expect(h.index, h[0]).toBeLessThan(programStart);
   });
 
-  it('no emitter ships a pr-land invocation that says nothing about verification', () => {
-    const silent = harvest()
-      .filter((v) => !VERIFY_FLAGS.some((f) => f in parseArgv(v.cmd)))
-      .filter((v) => !v.precededByVerify)
-      .map((v) => `${v.file}:${v.line}: ${v.cmd.slice(0, 90)}`);
-    expect(silent).toEqual([]);
+  it('no HARVESTED emitter ships a pr-land invocation that says nothing about verification', () => {
+    // RETRACTION — this case was named "no emitter ships a pr-land invocation that says nothing about
+    // verification". FALSE WHEN WRITTEN, and false for the specific reason the describe block above records:
+    // `PR_LAND_CMD` matched only the bare `node scripts/pr-land.mjs` spelling, so an emitter writing the same
+    // command with this repo's own `we:` locus prefix was not an emitter as far as this case was concerned. It
+    // says "HARVESTED" now, and what the harvest is — and is not — is stated in the describe title and pinned by
+    // the mutation probes below, rather than asserted by a name.
+    expect(silentIn(harvest())).toEqual([]);
+  });
+
+  /**
+   * THE MUTATION PROBES. Every round of this PR that widened the sweep also claimed the widening was complete,
+   * and three times a reviewer disproved the claim the same way: append one flag-free `pr-land` invocation to a
+   * real tracked file and watch the suite stay green. So the probe is a TEST now, not a reviewer's manual step.
+   *
+   * Each probe runs the REAL predicate (`scanSource` + `silentIn` — the same functions the harvest case above
+   * uses) over a real tracked file's real source with ONE line appended. Nothing is written to disk.
+   */
+  describe('mutation probes — a flag-free invocation in a file nobody listed must be SEEN', () => {
+    // THE PROBE COMMANDS ARE COMPOSED, NEVER WRITTEN AS ONE LITERAL. This test file is itself in the harvest's
+    // candidate set (it mentions `pr-land.mjs` throughout), so a probe spelled as a single string literal would
+    // be harvested from THIS file and reported as a silent emitter — the sweep would redden on its own probes.
+    // Splitting `node` off the front means no committed pr-land COMMAND STRING exists here for `PR_LAND_CMD` to
+    // match, while the string the probe actually injects is byte-identical to the real shape. The alternative —
+    // excluding this file from the harvest — would have made the sweep blind inside the one file most likely to
+    // grow a `pr-land` invocation, and would have grown the stated exclusion list from one to two.
+    const NODE = 'node';
+    const PROBE_ARGV = '--ref=lane/mutation-probe-999 --label-on-green';
+    const PROBES = [
+      {
+        // Review round 3's probe, against a file that was outside the round-3 two-filename sweep entirely.
+        name: 'the PLAIN shape, in scripts/lane-review.mjs (review round 3\'s probe)',
+        file: 'scripts/lane-review.mjs',
+        cmd: `${NODE} scripts/pr-land.mjs ${PROBE_ARGV} --json`,
+      },
+      {
+        // Review round 5's probe. The round-4 regex saw NOTHING here: it is the identical shape, spelled with
+        // the `we:` locus prefix this repo's documentation uses everywhere.
+        name: 'the we:-PREFIXED shape, in skills-src/pr/SKILL.md (review round 5\'s probe)',
+        file: 'skills-src/pr/SKILL.md',
+        cmd: `${NODE} we:scripts/pr-land.mjs ${PROBE_ARGV}`,
+      },
+    ];
+
+    for (const probe of PROBES) {
+      it(`#3321 ${probe.name} is harvested, and reddens the silent-emitter rule`, () => {
+        // The file is a real tracked file, and a real candidate: it mentions pr-land.mjs, so the harvest's own
+        // `git grep -lF` already returns it. A probe against a file the grep never reaches would prove nothing.
+        expect(trackedMentioningPrLand(), probe.file).toContain(probe.file);
+
+        const clean = srcOf(probe.file);
+        expect(silentIn(scanSource(probe.file, clean)), 'the unmutated file must be clean').toEqual([]);
+
+        const found = scanSource(probe.file, `${clean}\n\`${probe.cmd}\`\n`);
+        expect(found.map((v) => v.cmd), 'the injected invocation must be HARVESTED').toContainEqual(probe.cmd);
+        expect(silentIn(found), 'and must be reported as declaring nothing').toHaveLength(1);
+      });
+
+      it(`#3321 ${probe.name}, WITH an adjacent verify, passes — the rule is posture, not "no pr-land here"`, () => {
+        // The counter-direction. Without this a probe only proves the sweep dislikes the word `pr-land`; with it,
+        // the probe proves the sweep is reading the DECLARED POSTURE — which is the contract the item states.
+        const clean = srcOf(probe.file);
+        const verify = `${NODE} scripts/operations/run.mjs verify --checkout=<lane> --json`;
+        expect(silentIn(scanSource(probe.file, `${clean}\n\`${verify}\`\n\`${probe.cmd}\`\n`))).toEqual([]);
+        // …and the flag arm passes too, on the same injected line.
+        expect(silentIn(scanSource(probe.file, `${clean}\n\`${probe.cmd} --no-require-verified\`\n`))).toEqual([]);
+      });
+    }
   });
 
   it('every harvested invocation reaches ok:true on the marker state its own path really has', () => {
