@@ -185,6 +185,43 @@ export class JudgeTimeoutError extends Error {
 }
 
 /**
+ * A juror the CLI killed for running out of SPEND — the budget analogue of {@link JudgeTimeoutError} (#3187).
+ *
+ * A DISTINCT TYPE for the same reason the timeout one is: the run record must distinguish "hit the bound"
+ * from "crashed", and for the budget bound it could not. `--max-budget-usd` terminates the juror mid-turn and
+ * the CLI reports it as `is_error: true` with `stop_reason: "tool_use"` — a stop reason that NAMES NOTHING
+ * ABOUT MONEY, and which a CONFORMING run also carries (a forced-tool-call answer stops for `tool_use` too;
+ * see guarantee 2 in this file's header). So the failure was indistinguishable from a crash by inspection.
+ *
+ * WHAT THAT COST, recorded because it is the expensive half of #3187 and not the obvious half: on the converge
+ * run that exposed this, 6 of 8 juror seats died this way and the panel escalated `needs-human` on
+ * `mandatory-lens-absent`. That reads as a panel failure. It was a spending limit. The diagnosis went into the
+ * wrong place entirely, which is what an error that does not report itself buys you.
+ *
+ * The ceiling and the spend are BOTH on the message and BOTH on the instance, because either alone leaves the
+ * reader guessing: the ceiling without the spend does not show it was reached, and the spend without the
+ * ceiling does not show what stopped it.
+ */
+export class JudgeBudgetError extends Error {
+  constructor({ budget, costUsd = 0, stopReason = '', result = '', stderr = '' }) {
+    super(
+      `judge-spawn: the juror was KILLED BY ITS SPEND CEILING — it spent $${costUsd} against a `
+      + `--max-budget-usd of $${budget}. This is a BOUND being hit, not a crash: the CLI reports it as `
+      + `is_error with stop_reason=${JSON.stringify(stopReason)}, which names nothing about money, and that `
+      + 'is the whole reason this error exists. Raise the ceiling for this caller, or pass `budget: null` for '
+      + 'no ceiling (see DEFAULT_BUDGET_USD for what the inherited default was sized against).\n'
+      + `result: ${String(result).slice(0, 400) || '<empty>'}\n`
+      + `stderr[-600..]: ${String(stderr).trim().slice(-600) || '<empty>'}`,
+    );
+    this.name = 'JudgeBudgetError';
+    this.budgetExceeded = true;
+    this.budget = budget;
+    this.costUsd = costUsd;
+    this.stopReason = stopReason;
+  }
+}
+
+/**
  * Flags this helper must NEVER emit, with the reason it is banned. `--bare` forces key-based auth and
  * cannot see a subscription login (#3028's recorded trap) — a spawn using it fails "Not logged in".
  */
@@ -295,7 +332,41 @@ export const EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'm
 /** Defaults for the care→rigor dial. Per-lens callers override all three; these are the cheap middle. */
 export const DEFAULT_MODEL = 'sonnet';
 export const DEFAULT_EFFORT = 'medium';
-export const DEFAULT_BUDGET_USD = 0.5;
+
+/**
+ * The per-juror spend ceiling a caller inherits when it declares none — DERIVED, with the measurement it was
+ * derived from recorded here, the same way `JUDGE_TIMEOUT_MS` records its own (#3187).
+ *
+ * WHY THE PREVIOUS VALUE WAS WRONG. `0.5` landed with #3028 sized for a TOOL-FREE juror, and was never
+ * revisited when tool-bearing jurors arrived (#3072). A tool-bearing seat reads files, so it spends more, and
+ * the inherited ceiling killed it MID-RUN. That is not a cost control; it is a silent truncation of the
+ * review, and it does not even report itself as one — see `JudgeBudgetError` for the other half of this fix.
+ *
+ * THE MEASUREMENT, 2026-08-18, four real tool-bearing `review-pr` rounds: $0.6152, $0.6597, $0.6997 and
+ * $0.9042. EVERY ONE EXCEEDS 0.5, so at the inherited default all four would have been killed — and between
+ * them they produced ten findings, nine of them real defects a green suite and `check:standards` both missed.
+ * Observed separately the same day on the converge path: a seat killed having spent $0.596, then re-run
+ * identically at a 3.0 ceiling and finishing at $0.69. Same seat, same input; the ceiling was the only
+ * variable.
+ *
+ * THE DERIVATION: `1.5`, which is ~1.66x the largest surviving observation ($0.9042). Note what that
+ * multiplier is applied to, because the honest reading matters: those four runs were themselves produced
+ * UNDER a 1.5 ceiling, so the distribution is censored at 1.5 and $0.9042 is a lower bound on the real tail
+ * rather than an estimate of it. `1.5` is therefore a value MEASURED AS SUFFICIENT FOR THE LENSES OBSERVED,
+ * not one proven sufficient for the widest lens — which is exactly why the two declared operations
+ * (`we:scripts/operations/review-pr.mjs`, `we:scripts/operations/review-prep.mjs`) went further and now
+ * declare `JUDGE_BUDGET_USD = null`, no ceiling at all, under the same 2026-08-18 operator ruling.
+ *
+ * WHY THIS DEFAULT IS NOT ALSO `null`, since that is the obvious question. `we:scripts/lib/judge-panel.mjs`
+ * inherits this value as its per-seat default and feeds it to `assertPanelBudget`, which REFUSES any
+ * non-positive-finite per-juror budget — an aggregate ceiling cannot be checked over a roster of `null`s. A
+ * caller that genuinely wants no ceiling passes `budget: null` per spawn, as both operations do. So the
+ * default stays a NUMBER, and its job is to be large enough that inheriting it is never the thing that kills
+ * a juror.
+ *
+ * RE-DERIVE THIS when the juror's work changes — a new lens, a wider tool set, a bigger diff corpus.
+ */
+export const DEFAULT_BUDGET_USD = 1.5;
 
 /**
  * THE ONE SEED ENCODING — the single place a multi-field identity becomes a `deriveSessionId` seed (#3058).
@@ -479,12 +550,19 @@ export function buildJudgeArgv({
  * in `result` (that is how the `--bare` trap surfaces as "Not logged in · Please run /login"), and this
  * function throws exactly that rather than a paraphrase.
  *
+ * IT ALSO NAMES THE BUDGET KILL, which is the one failure the CLI's own words do NOT explain (#3187). That
+ * needs the ceiling, which is not in stdout — so `budget` is passed in. It is OPTIONAL and defaults to `null`
+ * ("no ceiling was declared, or the caller does not know one"), which switches the branch off: with no ceiling
+ * there is nothing to have been killed by, and inventing one in the message would be a guess.
+ *
  * @param {string} stdout - the CLI's raw stdout.
  * @param {string} [stderr] - the CLI's stderr, folded into the message when stdout is unparseable.
+ * @param {number|null} [budget] - the `--max-budget-usd` this spawn declared, so a budget kill can name it.
  * @returns {{value: object, sessionId: string, costUsd: number, durationMs: number, numTurns: number,
  *            stopReason: string, usage: object}}
+ * @throws {JudgeBudgetError} when the juror was terminated by that ceiling.
  */
-export function parseJudgeOutcome(stdout, stderr = '') {
+export function parseJudgeOutcome(stdout, stderr = '', budget = null) {
   let parsed;
   try {
     parsed = JSON.parse(String(stdout));
@@ -498,6 +576,33 @@ export function parseJudgeOutcome(stdout, stderr = '') {
   }
 
   if (parsed?.is_error) {
+    // THE BUDGET KILL, CHECKED FIRST — because it is the one case where the CLI's own error text (below) does
+    // not explain what happened, and the branch that would otherwise swallow it is the verbatim-passthrough.
+    //
+    // THE PREDICATE, and why each conjunct is load-bearing:
+    //   `is_error`        — we are already inside it; a CONFORMING run also stops for `tool_use` (header
+    //                       guarantee 2: `--json-schema` is a FORCED TOOL CALL), so the error flag is the only
+    //                       thing separating a budget kill from a successful answer.
+    //   `stop_reason`     — `"tool_use"` is how the CLI surfaces a mid-turn budget termination. An `is_error`
+    //                       with any other stop reason is a different failure and keeps its existing message
+    //                       (the `end_turn` empty-result case below is a real one, reproduced twice).
+    //   `budget !== null` — with no ceiling declared there is no ceiling to have been killed by, and the
+    //                       message would have to invent a number. Both declared operations run this way.
+    //
+    // DELIBERATELY NOT PART OF THE PREDICATE: any comparison of `total_cost_usd` against `budget`. The
+    // observed kills straddle it — $0.596 against a 0.5 ceiling is over, and a kill recorded at or just under
+    // its ceiling is equally possible since the CLI stops the turn rather than the billing. Gating on an
+    // inequality that is not guaranteed would silently drop the case back into the unlabelled branch, which is
+    // the exact failure this exists to end. The two numbers are REPORTED, not used as the test.
+    if (parsed.stop_reason === 'tool_use' && budget !== null) {
+      throw new JudgeBudgetError({
+        budget,
+        costUsd: typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : 0,
+        stopReason: parsed.stop_reason,
+        result: parsed.result ?? '',
+        stderr,
+      });
+    }
     if (parsed.result) {
       // The CLI's OWN error text, verbatim — never reworded.
       throw new Error(`judge-spawn: the juror failed: ${parsed.result}`);
@@ -675,11 +780,11 @@ export async function judgeSpawn({
   // happened, because "hit the bound" and "crashed" are different facts about a review.
   if (timedOut) {
     let outcome = null;
-    try { outcome = parseJudgeOutcome(stdout, stderr); } catch { outcome = null; }
+    try { outcome = parseJudgeOutcome(stdout, stderr, budget); } catch { outcome = null; }
     if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout, stderr });
     return { ...outcome, wallMs, timedOut: true, loadedContextTokens: loadedContextTokens(outcome.usage), argv };
   }
   // `parseJudgeOutcome` throws with the CLI's own words; a non-zero exit with unparseable stdout lands there too.
-  const outcome = parseJudgeOutcome(stdout, stderr || (code === 0 ? '' : `exit code ${code}`));
+  const outcome = parseJudgeOutcome(stdout, stderr || (code === 0 ? '' : `exit code ${code}`), budget);
   return { ...outcome, wallMs, timedOut: false, loadedContextTokens: loadedContextTokens(outcome.usage), argv };
 }

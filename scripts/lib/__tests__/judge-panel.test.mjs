@@ -421,9 +421,13 @@ describe('REFUSAL 1 — depth fails closed, over the cap AND when the depth is u
 describe('REFUSAL 2 — the aggregate budget, checked BEFORE the first spawn (#3050 constraint 2)', () => {
   it('refuses when the roster\'s declared budgets exceed the ceiling, with ZERO spawns', async () => {
     const { fn, seen } = forbiddenSpawn();
-    // Four seats at the judge-spawn default of $0.50 is $2.00 declared against a $1.00 ceiling.
-    await expect(judgePanel({ ...BASE, maxTotalBudgetUsd: 1, jurors: FOUR_SEATS, spawnFn: fn }))
-      .rejects.toThrow(/total \$2 against a maxTotalBudgetUsd of \$1/);
+    // FOUR SEATS AT THE INHERITED DEFAULT, against a ceiling set just under what they declare. Derived from
+    // `DEFAULT_BUDGET_USD` rather than written out: this case is about `>` firing, not about the number, and
+    // the literal `$0.50`/`$2` it used to carry went stale the moment #3187 raised that default.
+    const declared = 4 * DEFAULT_BUDGET_USD;
+    const ceiling = declared - 0.5;
+    await expect(judgePanel({ ...BASE, maxTotalBudgetUsd: ceiling, jurors: FOUR_SEATS, spawnFn: fn }))
+      .rejects.toThrow(new RegExp(`total \\$${declared} against a maxTotalBudgetUsd of \\$${ceiling}`));
     expect(seen.count).toBe(0);
   });
 
@@ -465,8 +469,10 @@ describe('REFUSAL 2 — the aggregate budget, checked BEFORE the first spawn (#3
     const spy = panelSpawn();
     const panel = await judgePanel({
       ...BASE,
-      maxTotalBudgetUsd: 2,
-      jurors: FOUR_SEATS, // 4 × the $0.50 default
+      // EXACTLY the roster's declared total, which is the boundary this case exists to probe — so it is
+      // computed from the default rather than pinned to whatever that default happens to be today.
+      maxTotalBudgetUsd: 4 * DEFAULT_BUDGET_USD,
+      jurors: FOUR_SEATS, // 4 × the inherited default
       spawnFn: spy.fn,
     });
     expect(panel.totalBudgetUsd).toBe(4 * DEFAULT_BUDGET_USD);
@@ -476,7 +482,7 @@ describe('REFUSAL 2 — the aggregate budget, checked BEFORE the first spawn (#3
   it('reports the declared total and the OBSERVED total separately — one is admission control, one is spend', async () => {
     const spy = panelSpawn((sid) => ({ stdout: okJson(sid, { costUsd: 0.11 }) }));
     const panel = await judgePanel({ ...BASE, jurors: FOUR_SEATS, spawnFn: spy.fn });
-    expect(panel.totalBudgetUsd).toBe(2);
+    expect(panel.totalBudgetUsd).toBe(4 * DEFAULT_BUDGET_USD); // DECLARED — four seats at the inherited default
     expect(panel.maxTotalBudgetUsd).toBe(10);
     expect(panel.totalCostUsd).toBeCloseTo(0.44, 10);
   });
