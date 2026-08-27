@@ -121,7 +121,7 @@ invocation", and that is the sentence review round 5 disproved.** The round-4 re
 spelling, while this repo's own documentation convention writes the `we:` locus prefix. Measured in this lane rather
 than taken from the review: running the sweep's own predicate over the same 213 candidate files, with and without an
 optional `we:`/`./` prefix arm, harvests **8** invocations vs **7**, and the whole difference is one line —
-`we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:16`, a `type: feedback` agent memory (a *loaded
+`we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:20`, a `type: feedback` agent memory (a *loaded
 instruction*, not prose) carrying the canonical cross-repo delivery arc for Frontier UI and plateau-app, flag-free
 and with no adjacent verify. After the flip, an agent following it would have met `pr-land`'s step-1b gate with
 exit 3 / `unverified`. The regex now tolerates `we:` and `./`, that arc is fixed below, and two named **mutation
@@ -129,6 +129,13 @@ probes** — the plain shape injected into `we:scripts/lane-review.mjs`, the `we
 `we:skills-src/pr/SKILL.md` — are tests now, so the prefix cannot go blind again. Mutation-checked here: narrowing
 the regex back to the bare spelling gives `2 failed | 58 passed`; reverting only the agent-memory arc gives the
 same `2 failed | 58 passed` on two different cases.
+
+**CITATION CORRECTED (round 6) — this paragraph cited that invocation at `:16` for three rounds.** It is at
+**`:20`**. `:16` was accurate when written and went stale in-round, because this round's own verify step was
+inserted into that same file above the invocation. The claim it supports is unchanged — the invocation never
+moved file, and it is still the whole difference between the 7- and 8-invocation harvests. Re-measured in this
+lane rather than adjusted by arithmetic: `grep -n pr-land we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md`
+puts the harvested argv on line 20.
 
 **STATED LIMITS, so the next round need not discover them.** The sweep is not, and no longer claims to be, a
 statement about every `pr-land` mention in the repo:

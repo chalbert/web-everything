@@ -517,7 +517,11 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
   // So the sweep's harvest was blind to exactly the spelling the docs are written in. Measured in this lane,
   // not assumed: running this describe's own predicate over `git grep -lF pr-land.mjs` (213 candidate files)
   // with and without the prefix arm harvested 8 invocations vs 7, and the one invocation only the widened
-  // regex sees is `agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:16` — a `type: feedback` agent
+  // regex sees is `agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:20` — a `type: feedback` agent
+  // (CITATION CORRECTED, round 6: this read `:16` for three rounds. The line number drifted when this round's own
+  // verify step was inserted into that file; `:16` was right when written and stale by the time it was read. The
+  // invocation itself never moved file. Re-measured here, not adjusted by arithmetic: `grep -n pr-land` on that
+  // file puts the harvested argv at line 20.)
   // memory, i.e. a LOADED INSTRUCTION, and the canonical cross-repo delivery arc for Frontier UI and
   // plateau-app. It carried no verify flag and no adjacent verify run, so after this item's flip an agent
   // following it would have hit `pr-land`'s step-1b gate with exit 3 / `unverified`. That arc is fixed in this
