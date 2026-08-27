@@ -61,6 +61,11 @@
  *
  * Output: `<out>/<pr>-r<round>.json` per verdict + `<out>/index.json` (counts, provenance, corpus as-of
  * marker taken from the newest mined commit date — never a wall clock, so a rerun is byte-stable).
+ *
+ * WHO REVIEWED (#3363) — every case carries `reviewerIdentity`, and `index.json` carries the roll-up. Read
+ * the block comment above `IDENTITY_FIELDS` before comparing two rounds: the comment body records the
+ * roster, the panel shape and the care level, and does NOT record the model id, the effort or the prompt
+ * revision, so `sameReviewer` answers `unknown` — never `same` — for every pair in the corpus today.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
@@ -209,8 +214,256 @@ export const PROVENANCE = 'Mined read-only from recorded review-pr verdict comme
   + 'individually and incomplete collectively, so rates derived from them are sound only as a RELATIVE '
   + 'comparison between reviewers scored on this same pool, never as an absolute catch rate.';
 
+/* ------------------------------------------------------------------ reviewer identity (#3363) */
+
+/**
+ * WHO REVIEWED — the field #3310's number cannot be read without.
+ *
+ * #3310 measured, on this corpus, 5 pairs of rounds that ran against a BYTE-IDENTICAL head sha and found
+ * 0 of 7 pooled findings recurring under the headline `defect` matcher (1 of 6 under the loosest `locus`
+ * matcher), with 1 of the 5 pairs flipping its verdict — #1556 r6→r7 answered `accept` and then `changes`
+ * on the same diff. Re-derived here 2026-08-27 by running `stability.mjs --mode=live-pairs`, not copied.
+ *
+ * That number has TWO readings and the corpus could not tell them apart: juror nondeterminism, or a
+ * DIFFERENT REVIEWER between the two rounds — a changed model, a changed prompt, a different lens roster.
+ * They call for opposite responses. So each round now carries what the record actually says about who
+ * reviewed it, and — this is the half that matters — says `unknown` for the rest instead of leaving a
+ * reader to assume sameness.
+ *
+ * WHAT THE MINER CAN ACTUALLY SEE, AND WHAT IT CANNOT. The miner's ONLY source is the verdict comment
+ * body. Checked against live comment bodies on PRs #1556, #1580, #1632, #1635, #1638, #1641 and #1643
+ * (2026-08-27):
+ *
+ *   OBSERVABLE — parsed below
+ *     roster            the `**Lens:**` / `**Lenses:**` line and the panel table rows: which lenses sat.
+ *     panelShape        `single-lens` vs `multi-lens`, as the write-up itself declares it.
+ *     careLevel         the derived care level from the `**Earned vs seated:**` line (#3335).
+ *     declaredCareLevel what the caller declared on that same line, or `none` when it declared nothing.
+ *     operation         the `_Recorded through the declared \`<op>\` operation_` footer.
+ *     writeUpMarkers    the `#NNNN` refs in the write-up's FIXED boilerplate lines. A coarse build
+ *                       fingerprint of the RENDERER, nothing more: `review-pr.mjs` holds both the
+ *                       renderer and the juror's model/mandate, so a changed marker set is evidence the
+ *                       emitting build moved. It does NOT identify the prompt, and must not be read as
+ *                       doing so — identical markers are entirely compatible with a changed mandate.
+ *
+ *   NOT OBSERVABLE — permanently `null`, because it is NEVER EMITTED
+ *     model             `JUDGE_MODEL` (`we:scripts/operations/review-pr.mjs`) is a module literal that
+ *                       reaches the juror's argv and never the comment body. No recorded verdict comment
+ *                       contains it.
+ *     effort            `JUDGE_EFFORT`, same story.
+ *     promptRevision    the panel mandate is built per run and never echoed into the write-up.
+ *
+ * SO THIS CARD DOES NOT, BY ITSELF, MAKE #3310 READABLE. The model id is the field that would settle it
+ * and it is not in the miner's input. Fixing that is a change at the EMITTING end
+ * (`we:scripts/operations/review-pr.mjs` must write the model into the write-up), which is a different
+ * file and a different item. What this file does is make the gap EXPLICIT and machine-checkable rather
+ * than a caveat in prose: `sameReviewer` answers `unknown`, never `same`, for every round in the corpus
+ * today, and starts answering `same` on its own the moment the emitter records a model id.
+ *
+ * BACK-FILL, STATED PRECISELY. The card says already-mined rounds cannot be back-filled. That is true of
+ * the NOT-OBSERVABLE fields and only of those: the miner rebuilds `cases/` from scratch on every run, so
+ * the OBSERVABLE fields are re-derived for every historical round on the next mine. The model id, effort
+ * and prompt revision of every round recorded before the emitter changes are lost for good.
+ */
+export const IDENTITY_FIELDS = Object.freeze([
+  'model', 'effort', 'promptRevision', 'roster', 'panelShape', 'careLevel', 'declaredCareLevel',
+  'operation', 'writeUpMarkers',
+]);
+
+/**
+ * The fields that must BOTH be recorded before two rounds may be called the same reviewer. Deliberately
+ * the two that identify the reviewing SOFTWARE rather than the run's shape: an identical roster proves
+ * nothing about which model read the diff, and it is the model that #3310's ambiguity turns on.
+ *
+ * Every one of them is `null` on every round in the corpus today (see the note above), which is why
+ * `sameReviewer` returns `unknown` corpus-wide and why that is the CORRECT answer rather than a defect.
+ */
+export const IDENTITY_REQUIRED_FOR_SAMENESS = Object.freeze(['model', 'promptRevision']);
+
+/** Fields the emitter never writes, so no amount of re-mining will recover them. Exported for the report. */
+export const IDENTITY_NEVER_EMITTED = Object.freeze(['model', 'effort', 'promptRevision']);
+
+/** The caveat stamped into `index.json`, so a reader of the mined tree alone gets it (same reason as `PROVENANCE`). */
+export const IDENTITY_NOTE = 'Per-round reviewer identity (#3363). Parsed from the verdict comment body, the '
+  + "miner's only source. The comment records the lens roster, the panel shape, the care level (when the "
+  + 'write-up carries an "Earned vs seated" line) and a coarse renderer-build marker set. It does NOT record '
+  + 'the model id, the reasoning effort or the prompt revision — those are module literals in '
+  + 'scripts/operations/review-pr.mjs that never reach the comment — so `sameReviewer` answers `unknown` for '
+  + 'every pair in this corpus and MUST NOT be read as `same`. A differing observable field still proves '
+  + '`different`. Recording the model at the emitting end is a separate change to a separate file.';
+
 const VERDICT_ACCEPT = '✅ review — accepted';
 const VERDICT_CHANGES = '🔁 review — changes requested';
+
+/**
+ * The write-up's FIXED boilerplate lines — the ones whose text is a literal in `renderVerdictWriteUp`
+ * rather than run data. The `#NNNN` refs inside them move when that renderer is edited, which is the only
+ * build signal the comment carries. Anchored per-line so a finding that happens to cite `#3050` in its
+ * prose cannot contaminate the fingerprint.
+ */
+const BOILERPLATE_LINE_PATTERNS = Object.freeze([
+  /^\*\*Lens(?:es)?:\*\* .*$/gm,
+  /^\*\*Earned vs seated:\*\* .*$/gm,
+  /^Net basis: .*$/gm,
+  /^_Recorded through the declared .*_$/gm,
+]);
+
+/**
+ * What one verdict comment says about who reviewed it. PURE. Every field is either a value or `null`;
+ * `unknown` lists the `null` ones by name, so a consumer can report the gap instead of inferring over it.
+ *
+ * `comparable` is false whenever ANY of `IDENTITY_REQUIRED_FOR_SAMENESS` is null — i.e. always, today.
+ * It is a separate flag rather than a derived truthiness check because the failure this card exists to
+ * prevent is precisely a consumer treating "no differences found" as "same reviewer".
+ *
+ * @param {string} body the verdict comment body.
+ * @returns {{model: null, effort: null, promptRevision: null, roster: string[]|null,
+ *   panelShape: string|null, careLevel: string|null, declaredCareLevel: string|null,
+ *   operation: string|null, writeUpMarkers: string[]|null, unknown: string[], comparable: boolean}}
+ */
+export function parseReviewerIdentity(body = '') {
+  const text = String(body ?? '');
+
+  // The roster line, in both spellings the renderer has used. `**Lens:** \`correctness\` — a SINGLE-LENS
+  // run.` (one seat) and `**Lenses:** \`correctness\` + \`security\` — 2 juror(s)…` (the #3319 panel).
+  // ONLY the head of the line, before the em-dash. Everything after it is PROSE that also contains
+  // backticked lowercase words — `judge`, `judgePanel` — and a naive sweep of the whole line mined
+  // `["correctness", "judge"]` as the roster of a single-lens run. Verified against the committed
+  // fixtures: the first cut of this parser did exactly that on `cases/1561-r2.json`.
+  const lensLine = text.match(/^\*\*Lens(?:es)?:\*\* (.+)$/m);
+  const seatHead = lensLine ? lensLine[1].split(/\s+—\s+/)[0] : '';
+  const fromLine = [...seatHead.matchAll(/`([a-z][a-z-]*)`/g)].map((m) => m[1]);
+  // The panel table is the fallback: an older write-up with no lens line still lists its rows.
+  const fromRows = [...text.matchAll(/^\|\s*([a-z][a-z-]+)\s*\|\s*(?:mandatory|advisory)\s*\|/gm)].map((m) => m[1]);
+  const roster = fromLine.length ? fromLine : (fromRows.length ? [...new Set(fromRows)] : null);
+
+  const panelShape = /a SINGLE-LENS run/.test(text)
+    ? 'single-lens'
+    : (lensLine && /^\*\*Lenses:\*\*/.test(lensLine[0]) ? 'multi-lens' : null);
+
+  // #3335's earned-vs-seated line. Absent from every round recorded so far, so both care fields read
+  // `unknown` on today's corpus — which is the honest answer, not a parse failure.
+  const care = text.match(/\*\*Earned vs seated:\*\* .*?touch-set scores care `([a-z-]+)`/);
+  const declaredHit = text.match(/The caller declared `--careLevel=([a-z-]+)`/);
+  const declaredNone = /The caller declared no `--careLevel`/.test(text);
+  const declaredCareLevel = declaredHit ? declaredHit[1] : (declaredNone ? 'none' : null);
+
+  const op = text.match(/_Recorded through the declared `([\w-]+)` operation/);
+
+  const markers = new Set();
+  for (const re of BOILERPLATE_LINE_PATTERNS) {
+    for (const line of text.match(re) ?? []) {
+      for (const m of line.matchAll(/#(\d{3,5})\b/g)) markers.add(`#${m[1]}`);
+    }
+  }
+
+  const identity = {
+    // NEVER EMITTED — see the block comment above. Present as explicit nulls so the shape is stable and
+    // a later emitter change fills them in without any consumer having to learn a new field name.
+    model: null,
+    effort: null,
+    promptRevision: null,
+    roster,
+    panelShape,
+    careLevel: care ? care[1] : null,
+    declaredCareLevel,
+    operation: op ? op[1] : null,
+    writeUpMarkers: markers.size ? [...markers].sort() : null,
+  };
+  identity.unknown = IDENTITY_FIELDS.filter((f) => identity[f] == null);
+  identity.comparable = IDENTITY_REQUIRED_FOR_SAMENESS.every((f) => identity[f] != null);
+  return identity;
+}
+
+/** True when two recorded identity values are equal. Arrays compare as ordered element lists. */
+function identityValueEquals(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((x, i) => x === b[i]);
+  }
+  return a === b;
+}
+
+/**
+ * THE THREE-VALUED ANSWER. Were these two rounds reviewed by the same reviewer? PURE.
+ *
+ * Returns `same` | `different` | `unknown` — never a boolean, because a boolean has nowhere to put the
+ * third case and every caller would then spell it `false`, i.e. "different", which is the exact wrong
+ * answer for a round with no identity recorded.
+ *
+ * THE ASYMMETRY IS DELIBERATE, and it is the whole logic:
+ *   - a field recorded on BOTH sides and DIFFERING proves `different`. One difference is enough, and it
+ *     is sound even with every other field unknown.
+ *   - `same` requires every field in `IDENTITY_REQUIRED_FOR_SAMENESS` recorded on both sides and equal.
+ *     Absence never proves sameness, so "no differences found" reduces to `unknown`, not to `same`.
+ *
+ * On today's corpus this returns `unknown` for every pair, because `model` and `promptRevision` are not
+ * emitted. That is the point: #3310's churn figure is reported against rounds whose reviewer sameness is
+ * NOT established, and this makes a consumer say so rather than assume it.
+ *
+ * @param {object|null} a the first round's `reviewerIdentity` (or the case object itself).
+ * @param {object|null} b the second round's.
+ * @returns {{answer: 'same'|'different'|'unknown', differing: string[], agreeing: string[], unknown: string[]}}
+ */
+export function sameReviewer(a, b) {
+  const idA = a && typeof a === 'object' ? (a.reviewerIdentity ?? a) : null;
+  const idB = b && typeof b === 'object' ? (b.reviewerIdentity ?? b) : null;
+  if (!idA || !idB || typeof idA !== 'object' || typeof idB !== 'object') {
+    return { answer: 'unknown', differing: [], agreeing: [], unknown: [...IDENTITY_FIELDS] };
+  }
+  const differing = []; const agreeing = []; const unknown = [];
+  for (const f of IDENTITY_FIELDS) {
+    const va = idA[f]; const vb = idB[f];
+    if (va == null || vb == null) { unknown.push(f); continue; }
+    if (identityValueEquals(va, vb)) agreeing.push(f); else differing.push(f);
+  }
+  if (differing.length) return { answer: 'different', differing, agreeing, unknown };
+  const proven = IDENTITY_REQUIRED_FOR_SAMENESS.every((f) => idA[f] != null && idB[f] != null);
+  return { answer: proven ? 'same' : 'unknown', differing, agreeing, unknown };
+}
+
+/**
+ * The corpus-level identity roll-up written into `index.json`. PURE.
+ *
+ * It reports how many rounds carry each field and — the number a reader of #3310 needs — how many of the
+ * repeated-head pairs can actually be attributed to one reviewer. It deliberately does NOT compute a
+ * churn rate; that is `we:scripts/review-corpus/stability.mjs`'s job and this file must not grow a second
+ * copy of it.
+ *
+ * @param {object[]} cases every mined case.
+ */
+export function summariseIdentity(cases = []) {
+  const recorded = Object.fromEntries(IDENTITY_FIELDS.map((f) => [f, 0]));
+  let withIdentity = 0;
+  for (const k of cases) {
+    const id = k && k.reviewerIdentity;
+    if (!id) continue;
+    withIdentity += 1;
+    for (const f of IDENTITY_FIELDS) if (id[f] != null) recorded[f] += 1;
+  }
+  // Repeated-head pairs, the population #3310's headline rests on, classified by the three-valued answer.
+  const byPr = new Map();
+  for (const k of cases) {
+    if (!byPr.has(k.pr)) byPr.set(k.pr, []);
+    byPr.get(k.pr).push(k);
+  }
+  const pairAnswers = { same: 0, different: 0, unknown: 0 };
+  for (const rounds of byPr.values()) {
+    rounds.sort((x, y) => x.round - y.round);
+    for (let i = 1; i < rounds.length; i += 1) {
+      if (rounds[i].head !== rounds[i - 1].head) continue;
+      pairAnswers[sameReviewer(rounds[i - 1], rounds[i]).answer] += 1;
+    }
+  }
+  return {
+    rounds: cases.length,
+    roundsWithIdentity: withIdentity,
+    recorded,
+    neverEmitted: [...IDENTITY_NEVER_EMITTED],
+    sameHeadPairs: pairAnswers,
+    note: IDENTITY_NOTE,
+  };
+}
 
 /** Split a raw comment body stream into individual verdict comments, in recorded order. */
 export function verdictComments(bodies) {
@@ -240,6 +493,10 @@ export function parseVerdict(body) {
     declaredFindings: findingsCount ? Number(findingsCount[1]) : null,
     singleLens,
     lensRows,
+    // #3363 — WHO reviewed, beside WHAT they found. Never omitted: a round the parser can say nothing
+    // about still gets the object, with every field null and `unknown` naming them, so a consumer meets
+    // an explicit gap rather than a missing key it can read as "same as the other one".
+    reviewerIdentity: parseReviewerIdentity(body),
     findings: parseFindings(body),
   };
 }
@@ -350,6 +607,9 @@ export function buildCases(pr, verdicts, { cwd = ROOT } = {}) {
       decision: v.decision,
       singleLens: v.singleLens,
       lensRows: v.lensRows,
+      // #3363 — travels ON the case, so a scorer comparing two rounds has the identity in the same object
+      // as the findings and cannot compare one without the other being in reach.
+      reviewerIdentity: v.reviewerIdentity ?? parseReviewerIdentity(''),
       declaredFindings: v.declaredFindings,
       changedFiles: changedFiles(v.base, v.head, { cwd }),
       findings: v.findings,
@@ -397,6 +657,7 @@ async function main() {
   let kept = 0; let skippedUnreachable = 0; let skippedUnstructured = 0;
   let newestDate = null;
   const perPr = [];
+  const allCases = []; // #3363 — kept so the identity roll-up is computed over what was actually written.
 
   for (const n of prNumbers) {
     let bodies;
@@ -414,6 +675,7 @@ async function main() {
     const cases = buildCases(n, reachable);
     for (const c of cases) {
       writeFileSync(join(outDir, `${c.pr}-r${c.round}.json`), `${JSON.stringify(c, null, 2)}\n`);
+      allCases.push(c);
       kept += 1;
       const d = commitDate(c.head);
       if (d && (!newestDate || d > newestDate)) newestDate = d;
@@ -421,8 +683,13 @@ async function main() {
     perPr.push({ pr: n, rounds: cases.length, findings: cases.reduce((a, c) => a + c.findings.length, 0), missed: cases.reduce((a, c) => a + c.missedHere.length, 0) });
   }
 
+  const identity = summariseIdentity(allCases);
   const index = {
-    schema: 1,
+    // 2 since #3363 — every case now carries `reviewerIdentity`. The committed `cases/` tree on the
+    // branch that added this still reads `schema: 1`; it was NOT re-mined here, so a reader who sees 1
+    // is looking at a corpus mined before the field existed and gets no identity block at all, which is
+    // the correct signal rather than a silent absence.
+    schema: 2,
     repo: opts.repo,
     corpusAsOf: newestDate,
     cases: kept,
@@ -433,12 +700,21 @@ async function main() {
       provenMissed: perPr.reduce((a, p) => a + p.missed, 0),
     },
     provenance: PROVENANCE,
+    reviewerIdentity: identity,
     perPr,
   };
   writeFileSync(join(outDir, 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
   process.stdout.write(`mined ${kept} cases across ${perPr.length} PRs → ${opts.out}\n`);
   process.stdout.write(`  findings labelled: ${index.totals.findings}   proven-missed labels: ${index.totals.provenMissed}\n`);
   process.stdout.write(`  skipped: ${skippedUnreachable} unreachable, ${skippedUnstructured} unstructured\n`);
+  // #3363 — printed, not buried in the index, because the number that matters is how many same-head pairs
+  // are attributable to ONE reviewer. `unknown` is expected here until the emitter records a model id.
+  const p = identity.sameHeadPairs;
+  process.stdout.write(`  reviewer identity: roster on ${identity.recorded.roster}/${kept} rounds, `
+    + `care level on ${identity.recorded.careLevel}/${kept}; `
+    + `model/effort/prompt never emitted (${identity.neverEmitted.join(', ')})\n`);
+  process.stdout.write(`  same-head pairs by reviewer sameness: ${p.same} same, ${p.different} different, `
+    + `${p.unknown} UNKNOWN — an unknown pair must not be quoted as a repeated run of ONE reviewer.\n`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
