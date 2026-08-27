@@ -67,26 +67,51 @@
  *      green at 53 passed with one added to `we:scripts/lane-review.mjs`). And "every repo-committed invocation"
  *      was false by the sweep's own predicate — run over `git ls-files` it found three further emitters saying
  *      nothing about verification. What is written above is therefore NOT a completeness claim about `pr-land`
- *      call sites; it is the list of callers that take THIS ESCAPE, and it is the sweep, not this comment, that
- *      is now authoritative about the rest.
+ *      call sites; it is the list of callers that take THIS ESCAPE.
  *
- *      THE SWEEP IS WHAT HOLDS, AND IT NOW READS THE TRACKED FILE SET. `we:scripts/__tests__/lane-verify.test.mjs`
- *      ("caller sweep") harvests every `node scripts/pr-land.mjs …` invocation from `git grep -lF pr-land.mjs`
- *      over tracked files — minus one stated, count-pinned exclusion (`pr-land.mjs`'s own `--help` banner) — and
- *      requires each to DECLARE ITS POSTURE: carry a verify flag, or be preceded within 3 lines by a
- *      `verify-lane.mjs` / `run.mjs verify` run. Each is then driven through this resolver and
- *      `verifyGateDecision` on the marker state that path really sees. A flag-free call site in a file nobody
- *      listed reddens the suite — which is what the sentence above claimed before it was true.
+ *      RETRACTION, ROUND 5 — the sentence that used to finish that paragraph read: "and it is the sweep, not
+ *      this comment, that is now authoritative about the rest." FALSE WHEN WRITTEN, and false by the sweep's own
+ *      predicate for the fourth consecutive round. Round 4's sweep matched only the bare spelling
+ *      `node scripts/pr-land.mjs …`, while this repo's documentation convention writes `node we:scripts/…`, so
+ *      one live emitter was invisible to it: `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md` —
+ *      a `type: feedback` agent memory, i.e. a loaded instruction, carrying the canonical cross-repo delivery arc
+ *      for Frontier UI and plateau-app, flag-free and with no adjacent verify. An agent following it would have
+ *      met this gate at `pr-land` step 1b with exit 3 / `unverified`. Measured, not assumed: running the sweep's
+ *      own predicate over `git grep -lF pr-land.mjs` (213 candidate files) with and without an optional `we:`
+ *      prefix harvested 8 invocations vs 7, and that file's line was the whole difference.
+ *
+ *      THE SWEEP IS WHAT HOLDS — WITHIN ITS STATED SCOPE, WHICH IS NOT "EVERYTHING".
+ *      `we:scripts/__tests__/lane-verify.test.mjs` ("caller sweep") harvests every `pr-land` COMMAND STRING it
+ *      can see from `git grep -lF pr-land.mjs` over tracked files — minus one stated, count-pinned exclusion
+ *      (`pr-land.mjs`'s own `--help` banner) — and requires each to DECLARE ITS POSTURE: carry a verify flag, or
+ *      be preceded within 3 lines by a `verify-lane.mjs` / `run.mjs verify` run. Each is then driven through this
+ *      resolver and `verifyGateDecision` on the marker state that path really sees. Its LIMITS are stated there
+ *      rather than left for the next round to discover: it reads command strings carrying at least one `--flag`
+ *      (a bare flagless `node …pr-land.mjs` in prose is not harvested), it knows three spellings of the path
+ *      (bare, `we:`, `./`), array-built argvs are pinned by a separate case, and source adjacency is a proxy for
+ *      "the verify precedes the land", never a proof of execution order. Two named MUTATION PROBES — the plain
+ *      shape and the `we:`-prefixed shape, each injected into a real tracked file — pin that a flag-free call
+ *      site in a file nobody listed reddens the suite.
  *
  *      THE OTHER ARM IS THE POINT OF THE ITEM. The lane-local emitters (the serial `/batch` close-out in
  *      `we:skills-src/batch-backlog-items/SKILL.md`, the canonical per-item arc in
- *      `we:docs/agent/backlog-workflow.md`, and `we:agent-memory-src/single-session-should-use-a-lane.md`) do NOT
+ *      `we:docs/agent/backlog-workflow.md`, `we:agent-memory-src/single-session-should-use-a-lane.md`, and — added
+ *      in round 5 — the cross-repo arc in `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md`) do NOT
  *      take this opt-out and must not: they run `pr-land` from the LANE, where the marker IS reachable, so the
  *      strict gate is the correct answer and a blanket opt-out would gut the gate on the one path where it can
- *      engage. They were nevertheless BROKEN before round 4 — their verify ran before `resolve` and before the
- *      item commit, so the sha-keyed marker was already STALE at land (the #3212 shape; measured `ok:false` /
- *      `unverified` on a stale green, same as on an absent one). Each now records the verification AFTER the
- *      item commit, immediately before `pr-land`.
+ *      engage. They were nevertheless BROKEN, in two different ways. `we:docs/agent/backlog-workflow.md` ran the
+ *      `verify` operation BEFORE `resolve` and before the item commit, so the sha-keyed marker it wrote was
+ *      already STALE at land (the #3212 shape; measured `ok:false` / `unverified` on a stale green, same as on an
+ *      absent one). The other three named no marker-writing verification at all — `/batch`'s SKILL.md ran the
+ *      item's in-locus gate directly (`npm run check:standards --scope=…`, which writes no marker), and neither
+ *      agent memory mentioned verification. Each now records the verification AFTER the item commit, immediately
+ *      before `pr-land`.
+ *
+ *      WHAT THAT COSTS, STATED HONESTLY. An earlier cut of this paragraph, and of the card, called it "one suite
+ *      run per item, relocated — not a second one". WRONG. Measured against `origin/main`'s copies: the earlier
+ *      check in `backlog-workflow.md` and `/batch`'s in-locus gate are both still instructed, so for those two
+ *      arcs this is an ADDITIONAL run of `verify-lane`'s gate, not a moved one; and for the two agent memories
+ *      there was no verification before at all, so it is a FIRST.
  *
  *      The opt-out relaxes only the two "we never saw a result" cells —
  *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
