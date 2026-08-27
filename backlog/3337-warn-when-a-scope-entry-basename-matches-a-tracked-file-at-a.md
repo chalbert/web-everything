@@ -3,8 +3,9 @@ bornAs: xtqsqeg
 kind: story
 size: 1
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 scope:
   - we:scripts/check-standards-rules.mjs
   - we:scripts/check-standards.mjs

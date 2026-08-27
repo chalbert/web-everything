@@ -3,8 +3,9 @@ bornAs: x8xlz6v
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 scope:
   - we:scripts/lib/review-log-claims.mjs
 tags: []

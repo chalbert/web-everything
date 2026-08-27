@@ -3,8 +3,9 @@ bornAs: xx7ipdw
 kind: story
 size: 5
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
 relatedTo: ["3319", "3314"]
 scope:
   - we:scripts/review-core-cli.mjs
