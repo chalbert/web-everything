@@ -11,6 +11,7 @@ scope:
   - we:scripts/lane-drain.mjs
   - we:scripts/__tests__/lane-drain.test.mjs
   - we:scripts/pr-land.mjs
+  - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
 tags: []
 ---
 
@@ -56,6 +57,24 @@ written for, and #1937 already makes the PR's required GitHub check its landing 
 The general rule this item is the instance of: **a gate's default is a statement about callers that say nothing,
 so flipping it is a change to all of them.** An opt-out with zero callers is not an escape hatch, it is a claim.
 
+**And the first correction applied that rule to one caller.** Review round 2 caught the rest:
+`we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — live behind `/workflow` — invokes `pr-land`
+**four** times with no verify flag (the WE and impl per-lane PR opens, and the two Finalize label-reconcile calls,
+the latter from the primary root against a lane ref: the drain's shape exactly). It never runs
+`we:scripts/verify-lane.mjs` at all, so no marker exists for any of them and every `/workflow` lane would have
+died at PR-open. Worse than the miss: three sentences across this card and the two scripts asserted the sweep was
+*complete* while it was not. A retraction that fixes one of the two callers it names is still a false claim.
+
+All four now pass `--no-require-verified`, and the file records why the opt-out rather than a verify step: its
+step-4 gate already runs the same suite pair `verify-lane` runs, but the marker is **sha-keyed** while steps 5–7
+(resolve commit, manifest, review amend) move HEAD afterwards — recording a marker there needs a verification step
+sequenced after the final amend, which is a workflow change this card does not make (see #3212).
+
+**The caller sweep is still a hand sweep, and that is the residual risk.** It has now been wrong twice. The
+durable fix is a source-level guard asserting that every repo-committed `we:scripts/pr-land.mjs` invocation either
+carries a verify flag or is preceded by a `verify-lane` run — the same shape as the existing `lane-drain` contract
+guard. Not built here; owed as a follow-up.
+
 ## Done when
 
 1. **Executable** —
@@ -68,12 +87,14 @@ so flipping it is a change to all of them.** An opt-out with zero callers is not
 
    | tree | vitest's own summary line | criterion exit |
    | --- | --- | --- |
-   | `origin/main` (`379cf93c`) | `Tests  32 skipped (32)` | **1** |
-   | this branch | `Tests  16 passed \| 32 skipped (48)` | **0** |
+   | `origin/main` (`5634f078`) | `Tests  32 skipped (32)` | **1** |
+   | this branch | `Tests  17 passed \| 32 skipped (49)` | **0** |
 
-   *(Re-measured after the review round. The first cut of this table read `14 passed \| 32 skipped (46)` against
-   `origin/main` at `1c293a0f`; both numbers are now stale — the review's fixes added two resolver-precedence
-   cases, and `origin/main` has advanced. The RED side was re-run against the current tip, not carried over.)*
+   *(Re-measured on every round rather than carried over, because both sides move: `origin/main` advances under a
+   live drain, and each round adds cases. Earlier cuts of this table read `14 passed` against `1c293a0f` and
+   `16 passed` against `379cf93c`. The RED side is re-run against the tip each time — never assumed from the
+   previous reading. The verdict has been identical at all three tips, which is the point: the criterion depends
+   on this branch's tests existing, not on which commit main happens to be at.)*
 
    **THE `grep` IS THE CRITERION, NOT DECORATION.** `npx vitest run lane-verify -t "#3321"` on its own exits
    **0** on `origin/main` — measured, not assumed: a `-t` filter that matches nothing is a selection of zero, and
@@ -81,17 +102,30 @@ so flipping it is a change to all of them.** An opt-out with zero callers is not
    `Tests +[0-9]+ passed` asserts that tests actually RAN, which is the property the criterion means to state.
 
 2. **The gate still lets a verified lane through** — a gate that refuses everything is worse than the hole it
-   closes, so the same 16 tests pin the PASS direction, not just the refusal: a `green` marker for THIS head is
+   closes, so the same 17 tests pin the PASS direction, not just the refusal: a `green` marker for THIS head is
    `ok`/`verified` with **no options passed at all**, and stays `ok` long past the TTL (sha-identity is the
-   freshness test, not the clock). Proven end to end by this item's own PR, which was opened by a `pr-land` run
-   whose finish-guard read a real `.git/.lane-verify` green marker written by `we:scripts/verify-lane.mjs`.
+   freshness test, not the clock). Confirmed at the CLI too: with a real green marker written by
+   `we:scripts/verify-lane.mjs` for the lane's exact HEAD, `verify-lane check` with no flags returns
+   `ok:true` / `verified`, exit 0.
 
-4. **The CI-gated caller still lands** — the half the first cut missed. `buildPrLandArgs`'s real argv, parsed with
+   *Not claimed: that this item's own PR proves it. The standard invocation runs `pr-land` from the PRIMARY
+   checkout, so the finish-guard that admitted the PR was `origin/main`'s pre-flip copy — it read the lane's
+   marker and needed no escape, but it is not evidence about the flipped gate. An earlier cut of this line said
+   otherwise.*
+
+3. **The CI-gated callers still land** — the half the first cut missed. `buildPrLandArgs`'s real argv, parsed with
    `pr-land`'s own parser and fed through `resolveVerifyOptions` + `verifyGateDecision`, must let an **absent**
    marker through (`ok`/`untracked`) — that is the marker state the drain actually sees. Pinned in
    `we:scripts/__tests__/lane-drain.test.mjs`, together with the same call *without* the flag asserted as
-   `unverified`, so the flag is provably load-bearing rather than decorative.
+   `unverified`, so the flag is provably load-bearing rather than decorative. The `/workflow` producer's four
+   invocations carry the same flag (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`); those are
+   prompt strings, so they are pinned by inspection and by the completeness note above, not by a test.
 
-3. **The escapes are distinguishable** — under the opt-out, a fresh `running` marker still returns
+4. **The escapes are distinguishable** — under the opt-out, a fresh `running` marker still returns
    `verify-unfinished` and a corrupt marker still returns `verify-corrupt`; only `WE_LAND_UNVERIFIED=1` returns
    `break-glass` for those. Collapsing the two would silently promote the narrow opt-out into the full bypass.
+
+5. **The resolver's stated contract is exhaustively pinned** — all 27 combinations of
+   `--require-verified` × `--no-require-verified` × `WE_REQUIRE_VERIFIED` (each of absent / affirmative /
+   negative) are asserted against the documented rule, including the negated-negative spellings the comments
+   claim resolve toward *required*. Documented-and-untested is how a stated contract becomes an accidental one.

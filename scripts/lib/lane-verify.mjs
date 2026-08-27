@@ -43,10 +43,18 @@
  * exactly two documented ways past the gate — deliberately different in strength:
  *
  *   1. OPT-OUT — `--no-require-verified` (or `--require-verified=0|false|no|off`, or `WE_REQUIRE_VERIFIED=0`).
- *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere — concretely, the
- *      merge-queue drain (`buildPrLandArgs`, `we:scripts/lane-drain.mjs`), whose required GitHub check is the
- *      real gate (#1937) and which lands from a checkout where a lane's marker cannot exist. An opt-out with no
- *      callers would be a claim, not an escape hatch; this one has exactly one, on purpose, and it is tested.
+ *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere. An opt-out with no
+ *      callers would be a claim, not an escape hatch. THE COMPLETE LIST, swept from every repo-committed
+ *      `pr-land.mjs` invocation carrying a `--ref=`/`--repo=`, and it is two files, not one:
+ *        · `we:scripts/lane-drain.mjs#buildPrLandArgs` — the merge-queue drain. Lands from the PRIMARY checkout,
+ *          where a lane clone's marker cannot exist; its required GitHub check is the real gate (#1937).
+ *        · `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — all FOUR invocations (the WE and
+ *          impl per-lane PR opens, and the two Finalize label-reconcile calls, the latter from PRIMARY_ROOT
+ *          against a lane ref — the same unreachable-marker shape as the drain). That workflow already runs the
+ *          full gate at its step 4; it verifies without RECORDING, and its file says why it cannot simply record.
+ *      An earlier revision of this comment claimed the list had "exactly one" entry, on the strength of a caller
+ *      sweep that had missed the workflow — review round 2 caught it. Anything added to this list must be added
+ *      HERE too, or the next reader inherits the same false completeness claim.
  *      It relaxes only the two "we never saw a result" cells —
  *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
  *      `corrupt` marker still refuse, because those are evidence of a BROKEN verification, not a missing one.
@@ -227,8 +235,13 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *     documented." THAT WAS WRONG, and it is the exact error #3321's review caught: those paths passed NOTHING,
  *     and after the flip "nothing" resolves to `requireVerified: true`, so they were not kept untouched — they
  *     were silently switched to the strict gate and would have refused every couple. They are untouched only
- *     NOW, because `we:scripts/lane-drain.mjs` was changed to pass `--no-require-verified` explicitly. Inverting
- *     a default is a change to every caller that says nothing; it cannot leave them "unchanged" by construction.
+ *     NOW, because BOTH were changed to pass `--no-require-verified` explicitly: `we:scripts/lane-drain.mjs`
+ *     (in `buildPrLandArgs`) and `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (all four
+ *     pr-land invocations — the two per-lane PR opens and the two Finalize label-reconcile calls). The first
+ *     retraction of this clause named only the drain and left the parallel-workflow half asserted-but-unfixed,
+ *     which review round 2 caught: a retraction that fixes one of the two callers it names is still a false
+ *     claim. Inverting a default is a change to every caller that says nothing; it cannot leave them "unchanged"
+ *     by construction.
  *   - a `corrupt` record (the marker exists but did not parse) → NOT ok (`verify-corrupt`), regardless of
  *     `requireVerified`. A torn/garbled marker must never fold into `absent` and fail OPEN — exactly backwards
  *     for a stall guard (#2833 finding 5). Re-run `verify-lane` (or delete the marker) to recover.
@@ -237,11 +250,12 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *     item exists for: "no marker" used to mean "not tracked here, go ahead", so a lane whose suites had never
  *     run landed on the strength of the gate not knowing. It now means "unverified — run `verify-lane`". The
  *     permissive `untracked` verdict survives only for a caller that explicitly opts out (`--no-require-verified`)
- *     because it verifies elsewhere. That is not hypothetical and must not be left as an "e.g.": the caller is
- *     `buildPrLandArgs` in `we:scripts/lane-drain.mjs`, which lands from the PRIMARY checkout where a lane
- *     clone's marker can never appear, and whose merge is gated by the required GitHub check (#1937). If that
- *     call site ever drops the flag, this cell wedges the whole merge queue — see the test that pins the built
- *     argv through this function in `we:scripts/__tests__/lane-drain.test.mjs`.
+ *     because it verifies elsewhere. That is not hypothetical and must not be left as an "e.g.": the callers are
+ *     `buildPrLandArgs` in `we:scripts/lane-drain.mjs` and the four pr-land invocations in
+ *     `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — both land from a checkout where a lane
+ *     clone's marker can never appear, and both are gated by the required GitHub check (#1937). If either call
+ *     site drops the flag, this cell wedges that whole path — see the test that pins the built argv through this
+ *     function in `we:scripts/__tests__/lane-drain.test.mjs`.
  *     Note a MISSING `headSha` also lands here (nothing can match it), and so is refused by default rather than
  *     waved through: not being able to identify the tree is not evidence that the tree is fine.
  *

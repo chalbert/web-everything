@@ -472,6 +472,23 @@ function laneItemPrompt(it, laneDirs) {
     `     escalation rubric sees its strongest signal: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --dismissed=<count> --out=/tmp/lane-manifest-${laneKeyOf(it)}.json\``,
     `     (overwrite the scratch file — no commit; it rides the PR body via pr-land's --manifest-file in step 8).`,
     ``,
+    // #3321 — WHY EVERY pr-land CALL IN THIS FILE CARRIES `--no-require-verified`. #3321 made pr-land's #2833
+    // finish-guard mandatory by default: saying nothing now means "verified, please". The guard is satisfied only
+    // by a `.git/.lane-verify` marker keyed to the EXACT head being pushed, and `scripts/verify-lane.mjs` is its
+    // only writer — which this workflow never runs. Two independent reasons the flag is the right answer here
+    // rather than "just run verify-lane":
+    //   1. The Finalize label-reconcile pass (below) runs pr-land from PRIMARY_ROOT against a LANE ref. That is
+    //      the same structurally-unreachable-marker shape as the drain wedge: the marker lives in another clone
+    //      and no amount of verifying could put it where that call would read it.
+    //   2. This workflow ALREADY runs the full gate — step 4 makes each lane run `npm run check:standards` plus
+    //      `npm test -- run`, the same pair `verify-lane`'s default gate runs. It verifies; it just does not
+    //      RECORD. And it cannot simply be re-pointed at `verify-lane` in place, because the marker is sha-keyed
+    //      while steps 5–7 (resolve commit, manifest, review amend) move HEAD after step 4 runs — the marker
+    //      would be stale by step 8. Recording a marker here needs a verification step sequenced AFTER the final
+    //      amend, which is a workflow change this card does not make (see #3212 for the re-verify friction).
+    // So this path takes the NARROW opt-out, exactly as `scripts/lane-drain.mjs` does, and its landing authority
+    // stays the PR's required GitHub check (#1937). A stranded `running` marker or a corrupt one still refuses
+    // through these calls — the opt-out never relaxes those, so #2833's stall guard is untouched.
     `8. OPEN A READY-TO-MERGE PR PER REPO (#2199 — labelled ONLY when green). For EACH repo in ${JSON.stringify(repos)}`,
     `   (impl first, WE last), run pr-land in \`--label-on-green\` mode: it opens a self-approved PR, WAITS for the`,
     `   required checks, and applies the ready-to-merge label ONLY once they pass — it does NOT merge (the drain`,
@@ -479,7 +496,7 @@ function laneItemPrompt(it, laneDirs) {
     `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
     `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
     `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`), \`labelApplied\`, and \`held\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
@@ -494,7 +511,7 @@ function laneItemPrompt(it, laneDirs) {
     `     wait you need — never build a self-matching process poll.`,
   );
   for (const r of implRepos) {
-    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
+    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --no-require-verified --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
   }
   lines.push(
     labelReady
@@ -627,8 +644,8 @@ if (toReconcile.length) {
       `For EACH PR, from its repo's checkout dir:`,
       `1. Read its required-check state — \`gh pr view <pr> --json statusCheckRollup\` (or \`gh pr checks <pr>\`).`,
       `2. If the required \`test\` check is GREEN now: run pr-land in label-on-green mode — WE:`,
-      `   \`node scripts/pr-land.mjs --ref=<ref> --label-on-green --json\` (from ${PRIMARY_ROOT}); impl repo <r>:`,
-      `   \`node scripts/pr-land.mjs --repo=<path> --ref=<ref> --label-on-green --json\`. This LABELS ready-to-merge`,
+      `   \`node scripts/pr-land.mjs --ref=<ref> --label-on-green --no-require-verified --json\` (from ${PRIMARY_ROOT}); impl repo <r>:`,
+      `   \`node scripts/pr-land.mjs --repo=<path> --ref=<ref> --label-on-green --no-require-verified --json\`. This LABELS ready-to-merge`,
       `   and STOPS — it never merges (pure producer) and is idempotent on an already-labelled PR. Record <pr>`,
       `   under \`labelled\`.`,
       `3. If the check is RED or still PENDING (not green yet): do NOT label — record { pr, reason } under`,

@@ -306,6 +306,47 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
       // requireVerified would silently turn the narrow opt-out into the full bypass.
       expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: true });
     });
+
+    /**
+     * #3321 — THE DOUBLE-NEGATIVE CORNER (PR #1609 r2, the correctness juror's CONFIRMED finding). The resolver's
+     * comments state that `--no-require-verified=0` is "a double negative nobody means" and resolves toward
+     * REQUIRED. That was documented, hand-traced and correct — and untested, which is how a stated contract turns
+     * into an accidental one. It is a real corner even if `pr-land`'s regex parser is unlikely to emit it: the
+     * parser accepts `--flag=<anything>`, so a caller CAN produce every row below, and the whole subject of this
+     * card is a gate that must never resolve an input it cannot read as "go ahead".
+     *
+     * Exhaustive over the resolver's inputs: {absent, affirmative, negative} for each of the two flag spellings ×
+     * {absent, '1', negative} for the env var = 27 rows, each asserted against the documented rule
+     * (affirmative flag → required; else any explicit negative → opt-out; else required).
+     */
+    it('#3321 every flag×flag×env combination resolves exactly as the comments claim (27 rows, negated negatives included)', () => {
+      const FLAG = { absent: undefined, affirmative: true, negative: '0' };
+      const ENV = { absent: undefined, on: '1', negative: '0' };
+      for (const [rvName, rv] of Object.entries(FLAG)) {
+        for (const [nrvName, nrv] of Object.entries(FLAG)) {
+          for (const [envName, ev] of Object.entries(ENV)) {
+            const flags = {};
+            if (rv !== undefined) flags['require-verified'] = rv;
+            if (nrv !== undefined) flags['no-require-verified'] = nrv;
+            const env = ev === undefined ? {} : { WE_REQUIRE_VERIFIED: ev };
+
+            // The documented rule, restated independently of the implementation.
+            const expected = rvName === 'affirmative' ? true
+              : !(nrvName === 'affirmative' || rvName === 'negative' || envName === 'negative');
+
+            const label = `require-verified:${rvName} no-require-verified:${nrvName} env:${envName}`;
+            expect(resolveVerifyOptions({ flags, env }).requireVerified, label).toBe(expected);
+          }
+        }
+      }
+      // The two rows the finding named, called out by name so a regression reads as itself in the failure output:
+      // a NEGATED negative is not an opt-out (it cancels, leaving the mandatory default)...
+      expect(resolveVerifyOptions({ flags: { 'no-require-verified': '0' }, env: {} }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: { 'no-require-verified': 'false' }, env: {} }).requireVerified).toBe(true);
+      // ...and a negated `--require-verified` still opts out even against WE_REQUIRE_VERIFIED=1, because the
+      // command line is the deliberate signal and it said "no".
+      expect(resolveVerifyOptions({ flags: { 'require-verified': 'off' }, env: { WE_REQUIRE_VERIFIED: '1' } }).requireVerified).toBe(false);
+    });
   });
 
   describe('the decision: a caller that omits the option gets the STRICT gate', () => {

@@ -717,8 +717,11 @@ function runCli() {
   //     #3321 — THE PARENTHETICAL HERE USED TO READ "a missing marker only blocks when verification is required
   //     (the CI-gated drain / parallel-workflow paths verify via the required GitHub check, not this marker, so
   //     they are not blocked)". That stated the mechanism BACKWARDS once the default flipped: those paths are not
-  //     blocked because they now PASS `--no-require-verified` (the drain does so in `buildPrLandArgs`,
-  //     we:scripts/lane-drain.mjs) — NOT because saying nothing is read as "not tracked here, go ahead". Saying
+  //     blocked because they now PASS `--no-require-verified` — the drain in `buildPrLandArgs`
+  //     (we:scripts/lane-drain.mjs) and the parallel workflow at all four of its invocations
+  //     (we:skills-src/batch-backlog-items/parallel-execute.workflow.js) — NOT because saying nothing is read as
+  //     "not tracked here, go ahead". (This retraction itself named only the drain at first, while asserting both
+  //     were handled; review round 2 caught that and the workflow was wired to match.) Saying
   //     nothing now means "verified, please". Left as written, the sentence would tell the next reader that a
   //     CI-gated caller needs no flag, which is exactly the wedge #3321's review caught.
   //     WE_LAND_UNVERIFIED=1 is the documented break-glass. Runs AFTER the dry-run block (a dry run reports the
