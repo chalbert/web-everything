@@ -145,6 +145,13 @@ import {
 } from '../lib/review-independence.mjs';
 // THE GUARD, IMPORTED NOT INJECTED — see property 2 in the header.
 import { decideSetLabel, presentRemoveLabels } from '../review-set-label.mjs';
+// #3335 — THE CALLER'S OWN DERIVATION, IMPORTED. `buildShapePlan` is the pure function behind
+// `review-core-cli.mjs shape`, i.e. the exact thing the caller ran to produce the `careLevel` it declares. The
+// check below re-runs THAT function over the NET file list, so a disagreement can only ever mean the two file
+// lists differ — never that the caller and the operation hold two different derivations. `CARE_LEVEL_ORDER` is
+// the band ordering the comparison is made on; both are pure, and neither is restated here.
+import { buildShapePlan } from '../review-core-cli.mjs';
+import { CARE_LEVELS, CARE_LEVEL_ORDER } from '../lib/review-escalation.mjs';
 
 /** The operation's stable id. Adapters resolve it by this name. */
 export const REVIEW_PR_OP = 'review-pr';
@@ -295,6 +302,91 @@ export function assertMandatoryLensSeated({ lens, seats = JUDGE_SEATS } = {}) {
 }
 
 /**
+ * #3335 — REFUSE AN ADVISORY SEAT ON A PR THAT ESCALATES. THROWS. PURE, and decidable from the INPUT alone, so
+ * it sits beside {@link assertMandatoryLensSeated} at the top of `read` — before the `gh` round trip, before any
+ * juror.
+ *
+ * IT IS A DIFFERENT QUESTION FROM #3344's, AND DOES NOT WEAKEN IT. `decideLensFloor` asks whether ANY mandatory
+ * lens sits across ALL judge seats; with `judgeSecurity` pinned that is satisfied by `security` no matter what
+ * `--lens` says, which is why its own docblock calls it dormant. This asks the narrower question the dormancy
+ * leaves open: on a PR whose touch-set the CALLER ITSELF scored as escalated, is the ONE seat the caller gets to
+ * choose being spent on a lens that can block? PR #1569 round 2 is the case — `--lens=claim-accuracy` on a
+ * declarative-leash change. The floor held (`security` sat), and the caller-chosen seat still went to an advisory
+ * lens on a PR the dial wanted five lenses and two jurors on. Both guards run; this one runs second.
+ *
+ * IT BINDS ONLY ON A DECLARED SHAPE. No `--careLevel`, or a declared `none`, and this passes: the operation
+ * cannot score a touch-set it has not read yet (that is the whole reason the derivation belongs to the caller),
+ * and inventing a band here would be the re-taxonomizing this item exists to avoid. A caller that declares
+ * nothing is unchanged, byte for byte — see `assertDeclaredShapeHolds` for the half that catches the declaration
+ * being WRONG once `read` can see the net files.
+ *
+ * @param {{lens?: string, careLevel?: string}} o
+ * @returns {{declared: string|null, escalated: boolean, lens: string|undefined, advisory: boolean}}
+ */
+export function assertSeatSpentOnMandatoryLens({ lens, careLevel } = {}) {
+  const declared = CARE_LEVEL_ORDER.includes(careLevel) ? careLevel : null;
+  const escalated = declared !== null && declared !== CARE_LEVELS.NONE;
+  const advisory = typeof lens === 'string' && ADVISORY_LENSES.includes(lens);
+  const decision = Object.freeze({ declared, escalated, lens, advisory });
+  if (!escalated || !advisory) return decision;
+  throw new Error(
+    `review-pr.read: \`--lens=${lens}\` spends the one caller-chosen seat on an ADVISORY lens while `
+    + `\`--careLevel=${declared}\` declares this PR's touch-set as escalated. \`ADVISORY_LENSES\` is `
+    + `[${ADVISORY_LENSES.join(', ')}] — an advisory lens INFORMS and cannot block, so on an escalated PR the `
+    + `seat must go to \`MANDATORY_LENSES\` [${MANDATORY_LENSES.join(', ')}]. \`--lens\` SUBSTITUTES this seat's `
+    + `lens, it does NOT add one: passing \`${lens}\` DISPLACES \`${DEFAULT_LENS}\`, it does not check `
+    + `\`${lens}\` in addition to it. Re-run with a mandatory lens (or omit \`--lens\`, which takes `
+    + `\`${DEFAULT_LENS}\`) and ask for \`${lens}\` as a separate review. Refusing BEFORE the PR is read and `
+    + 'before any juror is spawned, so nothing is billed.',
+  );
+}
+
+/**
+ * #3335 — REFUSE A DECLARED SHAPE THE PR CONTRADICTS. THROWS. PURE. Called from {@link shapeReadFinding}, at the
+ * one moment both halves exist: the caller's declared `careLevel` and the NET changed-file list `read` has just
+ * computed. `shapeReadFinding` already refuses this way for a mis-shaped net basis (`exec-contract`), so the
+ * mechanism is established rather than invented here.
+ *
+ * IT RE-RUNS THE CALLER'S OWN DERIVATION, not a second one: `buildShapePlan` is the pure function behind
+ * `review-core-cli.mjs shape`. So the only thing this can catch is the two FILE LISTS disagreeing — the caller
+ * scored `gh pr view --json files`, this scores the net `origin/main…head` list — which is exactly the drift
+ * worth catching, because the net list is the one the juror is shown as ground truth (#2450).
+ *
+ * IT REFUSES UNDER-DECLARATION ONLY, AND THAT NARROWING IS DELIBERATE. The two directions are not symmetric:
+ *   • derived HIGHER than declared → REFUSE. The run was dialled for less care than the diff that will land
+ *     earns. This is #1580's case and the one that ships a defect.
+ *   • derived LOWER than declared → PROCEED. The caller asked for MORE care than the net diff earns, which costs
+ *     tokens and never a defect — and it is the ordinary outcome whenever `gh`'s three-dot list is inflated by
+ *     sibling-lane content this PR does not touch (#2450/#2901). Refusing it would turn a routine inflation into
+ *     a blocked review, which is the false-refusal failure #3344's docblock argues against at length.
+ * The derived band is recorded on the finding either way (`earnedShape`), so the over-declaring case is visible
+ * in the record rather than silently swallowed.
+ *
+ * @param {{careLevel?: string, netChangedFiles?: string[], pr?: number|string, repo?: string}} o
+ * @returns {object|null} the derived shape plan, or `null` when there is nothing to check against.
+ */
+export function assertDeclaredShapeHolds({ careLevel, netChangedFiles = [], pr, repo } = {}) {
+  const files = Array.isArray(netChangedFiles) ? netChangedFiles : [];
+  if (!files.length) return null; // nothing to score — the degraded-basis note on the finding already says so
+  const derived = buildShapePlan({ changedFiles: files });
+  const declared = CARE_LEVEL_ORDER.includes(careLevel) ? careLevel : null;
+  if (declared === null) return derived; // no declaration to contradict
+  if (CARE_LEVEL_ORDER.indexOf(derived.careLevel) <= CARE_LEVEL_ORDER.indexOf(declared)) return derived;
+  throw new Error(
+    `review-pr.read: the declared shape \`--careLevel=${declared}\` is contradicted by what ${repo}#${pr} actually `
+    + `touches — scoring its ${files.length} NET changed file(s) gives care \`${derived.careLevel}\``
+    + `${derived.reasons.length ? ` (${derived.reasons.join('; ')})` : ''}. At \`${derived.careLevel}\` the dial asks `
+    + `for ${derived.earnedLenses.length} lens(es) × ${derived.jurorsPerLens} juror(s)/lens × ${derived.rounds} `
+    + `round(s); \`${declared}\` was declared, so this run was dialled for less care than the diff that will land `
+    + 'earns. The declaration is the CALLER\'s: re-derive it from the touch-set with `node '
+    + 'scripts/review-core-cli.mjs shape` and re-run. Refusing BEFORE the `judge` step, so no juror is paid for a '
+    + 'review shaped by a touch-set nobody read. (Only UNDER-declaration refuses: declaring MORE care than the '
+    + 'net diff earns proceeds, because `gh`\'s three-dot file list is routinely inflated by sibling-lane content '
+    + 'this PR does not touch, and that costs tokens rather than a defect.)',
+  );
+}
+
+/**
  * The juror's model / effort / budget. LITERALS, deliberately — never sourced from an input field.
  *
  * THE FOOTGUN THIS CLOSES (#3028, just fixed there): an option *value* shaped like a flag (`model: '--bare'`)
@@ -419,10 +511,12 @@ function pinnedSha(value) {
  * that renders it says the basis is degraded, which is what the skill asked a human to remember to write down.
  *
  * @param {object} raw - what {@link ./review-pr-io.mjs}'s `readPr` returns.
- * @param {{pr: number, repo: string}} asked - what the run asked for, so a mismatched read is caught here.
+ * @param {{pr: number, repo: string, careLevel?: string}} asked - what the run asked for, so a mismatched read is
+ *   caught here. `careLevel` (#3335) is the shape the CALLER declared from the touch-set; see
+ *   {@link assertDeclaredShapeHolds} for what it is checked against and which direction refuses.
  * @returns {object} the `read` finding.
  */
-export function shapeReadFinding(raw, { pr, repo } = {}) {
+export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   if (!raw || typeof raw !== 'object') {
     throw new Error(`review-pr.read: the injected reader returned ${typeof raw}, not a PR context object`);
   }
@@ -507,6 +601,11 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
   const netChangedFiles = Array.isArray(net.paths) ? net.paths.map(String) : [];
   const degradedReason = net.scored === true ? '' : String(net.reason || 'unscored');
 
+  // #3335 — THE DECLARED SHAPE MEETS THE TOUCH-SET, at the first moment both exist. Refuses an UNDER-declaration
+  // (see `assertDeclaredShapeHolds` for why only that direction), and returns the derived shape either way so
+  // the write-up can state what the touch-set EARNED beside what actually SAT.
+  const earnedShape = assertDeclaredShapeHolds({ careLevel, netChangedFiles, pr, repo });
+
   return {
     priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
@@ -549,6 +648,24 @@ export function shapeReadFinding(raw, { pr, repo } = {}) {
     //    downstream of here may hand it to a juror. (#2901 — the console diff stat that disagreed with what the
     //    agent saw is this list, and naming it differently is what stops the two being confused.)
     ghDiffStat: Array.isArray(detail.diffStat) ? detail.diffStat : [],
+    // #3335 — WHAT THE TOUCH-SET EARNED, recorded on the finding whether or not a shape was declared. `null`
+    // only when there is no net file list to score (a degraded basis, which `degraded`/`degradedReason` already
+    // report). The write-up reads it to state the shortfall; a reader of a verdict must be able to tell
+    // "4 lenses did not run" apart from "this was a `high`-care statute change that got one of the thirty
+    // juror-runs its dial asks for".
+    earnedShape: earnedShape && {
+      careLevel: earnedShape.careLevel,
+      reasons: earnedShape.reasons,
+      humanRequired: earnedShape.humanRequired,
+      earnedLenses: earnedShape.earnedLenses,
+      mandatoryFloor: earnedShape.mandatoryFloor,
+      rounds: earnedShape.rounds,
+      jurorsPerLens: earnedShape.jurorsPerLens,
+      subject: earnedShape.subject,
+      // What the CALLER declared, beside what the files score — so the record shows both, including the
+      // over-declaring case that proceeds and the absent-declaration case that this item cannot force.
+      declaredCareLevel: CARE_LEVEL_ORDER.includes(careLevel) ? careLevel : null,
+    },
     degraded: degradedReason !== '',
     degradedReason,
   };
@@ -726,10 +843,58 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
       + (absent.length
         ? `The other ${absent.length} panel lens(es) (${absent.join(', ')}) did NOT run and are not reported as unjudged.`
         : 'Every panel lens judged.'),
+    // #3335 — WHAT THE TOUCH-SET EARNED, BESIDE WHAT SAT. The line above says which lenses did not run; it has
+    // never said whether the PR EARNED them. A reader of #1580 saw "4 lenses did not run" and could not tell a
+    // proportionate review from a `high`-care statute change that got one of the thirty juror-runs its dial
+    // asks for. Both halves are now stated, and both are defended by named tests — the "did NOT run" sentence
+    // above is exactly the kind of true sentence a later edit deletes by accident.
+    renderEarnedShortfall({ read, lenses }),
     basis,
     '',
     `_Recorded through the declared \`${REVIEW_PR_OP}\` operation (#3035)._`,
   ].join('\n');
+}
+
+/**
+ * #3335 — THE EARNED-VS-SEATED LINE. PURE.
+ *
+ * The write-up already names the lenses that did not run. This names what the PR's own touch-set EARNED, so the
+ * two can be compared: the derived care level, the fan-out its dial asks for, what this run actually seated, and
+ * the SHORTFALL between them. Without it, "the other 3 panel lenses did NOT run" is a true sentence a reader
+ * cannot act on — it is identical text on a card-only PR that earned no panel at all and on a statute change
+ * that earned five lenses, two jurors and three rounds.
+ *
+ * IT NEVER ASSERTS A SHAPE IT DOES NOT HAVE. `read.earnedShape` is `null` when the net file list could not be
+ * scored (a degraded basis), and this then says exactly that rather than printing a `none` it did not derive.
+ *
+ * WHAT IT DOES *NOT* CLAIM: that the shortfall was avoidable. It is structural — the step list is fixed at
+ * REGISTRATION (#3319's residual), so this operation seats the seats it declares whatever the dial asks. The
+ * line records the gap; closing it is #3050/#3158's panel, not this.
+ *
+ * @param {{read: object, lenses: string[]}} o
+ * @returns {string} one markdown line.
+ */
+export function renderEarnedShortfall({ read, lenses = [] } = {}) {
+  const shape = read && read.earnedShape;
+  if (!shape) {
+    return '**Earned vs seated:** the touch-set could not be scored (no net changed-file list — see the basis '
+      + 'note below), so what this PR EARNED is UNKNOWN and the seats above must not be read as proportionate.';
+  }
+  const seated = Array.isArray(lenses) ? lenses : [];
+  const shortfall = (shape.earnedLenses || []).filter((l) => !seated.includes(l));
+  const declared = shape.declaredCareLevel
+    ? `The caller declared \`--careLevel=${shape.declaredCareLevel}\`.`
+    : 'The caller declared no `--careLevel`, so nothing checked the shape this run was dialled for against the '
+      + 'files it actually judged (#3335).';
+  return `**Earned vs seated:** this PR's ${shape.subject} touch-set scores care \`${shape.careLevel}\``
+    + `${shape.reasons.length ? ` (${shape.reasons.join('; ')})` : ''}, for which the care dial asks for `
+    + `${(shape.earnedLenses || []).length} lens(es) × ${shape.jurorsPerLens} juror(s)/lens × ${shape.rounds} `
+    + `round(s). This run seated ${seated.length} lens(es) (${seated.join(', ') || 'none'}), 1 juror each, in `
+    + `1 round. ${shortfall.length
+      ? `SHORTFALL: ${shortfall.length} earned lens(es) (${shortfall.join(', ')}) did not sit.`
+      : 'No lens shortfall: every lens the touch-set earned sat.'} `
+    + `${declared} The shortfall is structural — the step list is fixed at registration (#3319) — so it is `
+    + 'RECORDED here rather than implied away: do not read the seats above as the whole review this PR earned.';
 }
 
 /**
@@ -815,6 +980,29 @@ export function reviewPrOperation({ readPr } = {}) {
       // juror only inside the mandate TEXT and inside a #2438 data fence — never a flag position in argv (the
       // `JUDGE_MODEL` note above is the general form of that property).
       aim: { type: 'string', required: false },
+      // THE SHAPE THE CALLER DERIVED FROM THE TOUCH-SET (#3335). The caller runs
+      // `node scripts/review-core-cli.mjs shape` over `gh pr view <pr> --json files --jq '[.files[].path]'`
+      // BEFORE it composes this command line, and passes the care level it got back here.
+      //
+      // WHY THE CALLER AND NOT THIS OPERATION. `read` is step 1 and is what computes `netChangedFiles`, so the
+      // touch-set does not exist when the command line is typed; and `--resume` refuses input flags on purpose
+      // (`we:scripts/operations/cli-adapter.mjs`), so a shape cannot be revised once the run has started.
+      // Whoever types the command has therefore already decided how hard the review looks — the only question
+      // is whether they decided it from the file list or from habit. #1580 changed the statute and was reviewed
+      // under `correctness` alone; the same file list scores care `high` (five lenses, two jurors, three rounds).
+      //
+      // WHAT IT ACTUALLY DOES, STATED NARROWLY — it is a DECLARATION that is CHECKED, not a dial:
+      //   • it cannot add a seat. The step list is fixed at REGISTRATION (#3319's residual, and the whole
+      //     reason this is caller-side), so declaring `high` does not seat five lenses. It records what was
+      //     earned so the verdict can state the shortfall.
+      //   • an escalated declaration REFUSES an advisory `--lens` (`assertSeatSpentOnMandatoryLens`) — the
+      //     #1569 hole, where the one caller-chosen seat went to `claim-accuracy` on a leash change.
+      //   • `read` re-derives it over the NET file list and REFUSES an under-declaration
+      //     (`assertDeclaredShapeHolds`) — the #1580 hole.
+      // OMITTING IT IS STILL LEGAL and behaves exactly as before this item: nothing here can force a caller to
+      // declare, because a default would be the operation inventing a band from a touch-set it has not read.
+      // What the SKILL does is make deriving it the first step of the documented flow.
+      careLevel: { type: 'string', required: false, enum: [...CARE_LEVEL_ORDER] },
       // A CONFIRM-TIME INPUT (`atConfirm`, #3035) — a declared field of this operation, but one that rides the
       // `--resume` that answers the confirm rather than the call that starts the run. Every other field here
       // describes the SUBJECT and is known before a step has run; this one qualifies the operator's DECISION,
@@ -889,7 +1077,7 @@ export function reviewPrOperation({ readPr } = {}) {
       // `input.lens` is DECLARED here even though the `read` finding does not carry it: the floor refusal
       // below consumes it, and a step that reads an input without declaring it is reading state the run
       // record does not record it as depending on.
-      reads: ['input.pr', 'input.repo', 'input.lens'],
+      reads: ['input.pr', 'input.repo', 'input.lens', 'input.careLevel'],
       fn: (view) => {
         // #3344 — THE LENS-FLOOR REFUSAL, FIRST IN THE STEP AND THEREFORE FIRST IN THE RUN. Ahead of the
         // injected read, not merely ahead of `judge`: whether the seated lenses include a mandatory one is
@@ -899,9 +1087,15 @@ export function reviewPrOperation({ readPr } = {}) {
         // a machine. See `decideLensFloor` for why the condition reads across ALL judge seats, and for the
         // honest note that today's step list makes it dormant.
         assertMandatoryLensSeated({ lens: view.input.lens });
+        // #3335 — THE SECOND INPUT-ONLY REFUSAL, right behind it and for the same reason it is here rather
+        // than at `judge`: whether the ONE caller-chosen seat is being spent on a lens that can block, given
+        // a touch-set the CALLER says escalates, is decidable before a single `gh` call. It is a strictly
+        // narrower question than the floor above (see `assertSeatSpentOnMandatoryLens`) and does not weaken
+        // it: both run, in this order, and #3344's is still the one that can never be satisfied by an input.
+        assertSeatSpentOnMandatoryLens({ lens: view.input.lens, careLevel: view.input.careLevel });
         return shapeReadFinding(
           readPr({ pr: view.input.pr, repo: view.input.repo }),
-          { pr: view.input.pr, repo: view.input.repo },
+          { pr: view.input.pr, repo: view.input.repo, careLevel: view.input.careLevel },
         );
       },
     }),

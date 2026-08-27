@@ -52,6 +52,10 @@ import {
   assertMandatoryLensSeated,
   decideLensFloor,
   seatedLenses,
+  // #3335 — the caller-declared shape, its two refusals, and the earned-vs-seated line.
+  assertSeatSpentOnMandatoryLens,
+  assertDeclaredShapeHolds,
+  renderEarnedShortfall,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
@@ -859,7 +863,9 @@ describe('the derived command line', () => {
     // to read *"`reason` is deliberately absent — it is a CONFIRM-TIME control flag, not an input"* and
     // omitted it from the expectation. That was the shape PR #1572 round 5 proved unworkable: a value no
     // declaration names is a value `projectReads` strips before any step can read it.
-    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'lens', 'pr', 'reason', 'repo']);
+    // `careLevel` joined the list in #3335 — the shape the CALLER derived from the touch-set, declared as an
+    // ordinary input so `read` can check it against the net file list.
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'aim', 'careLevel', 'lens', 'pr', 'reason', 'repo']);
     expect(spec.usage).toContain('--pr=<number>');
     // THE LENSES ARE NAMED, NOT TYPED. `[--lens=<string>]` told the operator nothing they could act on while
     // the four valid values sat in the declaration unread — asserted against `PANEL_LENSES` itself so a fifth
@@ -2161,5 +2167,175 @@ describe('#x6t2z6h — the two seats disagree', () => {
 
   it('BOTH seats clean is the only route to `accept`', () => {
     expect(driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER }).run.verdict.verdict).toBe('accept');
+  });
+});
+
+// ── #3335 — A REVIEW CALLER MUST DERIVE ITS LENSES FROM THE PR'S TOUCH-SET ────────────────────────────────
+//
+// #3319's stated residual: the step list is fixed at REGISTRATION, so the operation cannot decline to judge —
+// gating belongs to a caller that knows the touch-set before it starts the run. This is the operation's half
+// of that: a declared `--careLevel` the caller derived from the touch-set, two refusals that bind it, and a
+// write-up that states what the touch-set EARNED beside what actually SAT.
+//
+// WHAT THESE TESTS SCAN, so the coverage claim stays the size of the code: they drive the real declaration
+// and the real `shapeReadFinding` over hand-built stub views, exercising the REAL `scoreEscalation` (no
+// double). They do NOT sweep call sites, do NOT prove that every caller passes `--careLevel` — nothing here
+// can, because omitting it is still legal — and do NOT assert anything about live PRs.
+describe('#3335 the caller declares the shape its touch-set earns', () => {
+  /** A `read` view whose NET file list is exactly #1580's — the statute, which scores care `high`. */
+  const statuteRead = () => {
+    const raw = stubReader({})({ pr: 1580, repo: 'chalbert/web-everything' });
+    return { ...raw, net: { ...raw.net, paths: ['docs/agent/platform-decisions.md'] } };
+  };
+
+  it('#3335 — `read` REFUSES a declared shape the PR contradicts, naming BOTH values', () => {
+    // CRITERION 3. The stub's net list scores `high` (statute); the run declares `none`. The refusal runs the
+    // REAL `scoreEscalation` over those files — there is no injected scorer and no double.
+    const shape = () => shapeReadFinding(statuteRead(), { pr: 1580, repo: 'o/n', careLevel: 'none' });
+    expect(shape).toThrow(/declared shape/);
+    expect(shape).toThrow(/--careLevel=none/);           // what the caller said
+    expect(shape).toThrow(/gives care `high`/);           // what the files score
+    expect(shape).toThrow(/statute/);                     // and why
+    expect(shape).toThrow(/dialled for less care than the diff that will land earns/);
+  });
+
+  it('#3335 — it refuses UNDER-declaration only: declaring MORE care than the net diff earns PROCEEDS', () => {
+    // THE NEGATIVE HALF, and the narrowing stated as a test rather than only in prose. `gh`'s three-dot file
+    // list is routinely inflated by sibling-lane content, so an over-declaration is the ordinary outcome of an
+    // honest caller; refusing it would be a false refusal on a routine run. Over-declaring costs tokens, never
+    // a defect — and the DERIVED band is still recorded, so the gap is visible rather than swallowed.
+    const raw = stubReader({})({ pr: 9, repo: 'o/n' });
+    const overDeclared = { ...raw, net: { ...raw.net, paths: ['backlog/9-a-card.md'] } };
+    const shaped = shapeReadFinding(overDeclared, { pr: 9, repo: 'o/n', careLevel: 'high' });
+    expect(shaped.earnedShape.careLevel).toBe('none');
+    expect(shaped.earnedShape.declaredCareLevel).toBe('high');
+  });
+
+  it('#3335 — a run that declares nothing is byte-stable: no refusal, and the earned shape is still recorded', () => {
+    // Nothing here can force a caller to declare — a default would be the operation inventing a band from a
+    // touch-set it has not read. What it CAN do is record what the files earned either way, and say in the
+    // write-up that no shape was declared. Both are asserted.
+    const shaped = shapeReadFinding(statuteRead(), { pr: 1580, repo: 'o/n' });
+    expect(shaped.earnedShape.careLevel).toBe('high');
+    expect(shaped.earnedShape.declaredCareLevel).toBe(null);
+    expect(shaped.earnedShape.earnedLenses).toHaveLength(5);
+  });
+
+  it('#3335 — an ESCALATED declared shape refuses an advisory `--lens`, by name, before any juror', () => {
+    // CRITERION 2, driven through the REAL declaration. #1569 round 2 is the case: the one caller-chosen seat
+    // spent on `claim-accuracy` while the touch-set scored escalated. #3344's floor held there (`security`
+    // sat), which is exactly why this narrower guard is needed and does not weaken that one.
+    const { registry } = registryFor({});
+    const started = startRun({
+      op: REVIEW_PR_OP,
+      id: 'run-3335-advisory',
+      input: { ...BASE_INPUT, lens: 'claim-accuracy', careLevel: 'high' },
+      registry,
+    });
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(/spends the one caller-chosen seat on an ADVISORY lens/);
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(/--careLevel=high/);
+    // IT SAYS WHAT `--lens` DISPLACES. Two sessions were burned in one day reading `--lens=` as additive.
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(/SUBSTITUTES this seat's lens, it does NOT add one/);
+    expect(() => advanceWhileRunning(started, { registry })).toThrow(new RegExp(`DISPLACES \\\`${DEFAULT_LENS}\\\``));
+    // …and it never reached a juror.
+    expect(runStatus(started, { registry })).not.toBe('awaiting-judge');
+  });
+
+  it('#3335 — every advisory lens refuses on an escalated declaration; every mandatory one proceeds', () => {
+    for (const lens of ADVISORY_LENSES) {
+      expect(() => assertSeatSpentOnMandatoryLens({ lens, careLevel: 'high' })).toThrow(/ADVISORY lens/);
+      expect(() => assertSeatSpentOnMandatoryLens({ lens, careLevel: 'elevated' })).toThrow(/ADVISORY lens/);
+      expect(() => assertSeatSpentOnMandatoryLens({ lens, careLevel: 'low' })).toThrow(/ADVISORY lens/);
+      // …and at care `none` the dial asks for no panel at all, so the floor lens is proportionate: no refusal.
+      expect(assertSeatSpentOnMandatoryLens({ lens, careLevel: 'none' }).escalated).toBe(false);
+      // No declaration at all is also no refusal — the operation cannot score what it has not read.
+      expect(assertSeatSpentOnMandatoryLens({ lens }).declared).toBe(null);
+    }
+    for (const lens of MANDATORY_LENSES) {
+      expect(assertSeatSpentOnMandatoryLens({ lens, careLevel: 'high' }).advisory).toBe(false);
+    }
+  });
+
+  it('#3335 — a CODE PR still gets the full mandatory panel: both seats run, both lenses judge', () => {
+    // THE REGRESSION THIS ITEM MUST NOT CAUSE. Deriving the shape from the touch-set must never NARROW a code
+    // PR's review. Driven end-to-end over the real declaration with a declared shape that matches the stub's
+    // own net list (`scripts/operations/review-pr.mjs` + `skills-src/review/SKILL.md` → blast-radius).
+    const { registry } = registryFor({});
+    const { run, requests } = atConfirm({
+      registry, input: { ...BASE_INPUT, careLevel: 'elevated' }, id: 'run-3335-code',
+    });
+    expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+    expect(requests[JUDGE_STEPS[0]].lens).toBe(DEFAULT_LENS);
+    expect(requests[JUDGE_STEPS[1]].lens).toBe(SECURITY_LENS);
+    expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS]);
+    // The earned shape names the FULL mandatory floor — the derivation never trims it.
+    expect(run.findings.read.earnedShape.mandatoryFloor).toEqual([...MANDATORY_LENSES]);
+  });
+
+  it('#3335 — the `read` step DECLARES the `careLevel` input both refusals consume', () => {
+    const { declaration } = registryFor({});
+    const read = declaration.steps.find((s) => s.name === 'read');
+    expect(read.step.reads).toContain('input.careLevel');
+    expect(read.index).toBe(0);
+  });
+});
+
+// ── #3335 THE WRITE-UP'S TWO HALVES ──────────────────────────────────────────────────────────────────────
+// Criterion 4 is a MUTATION criterion, and both halves are defended here. Deleting `renderEarnedShortfall`'s
+// call from `renderVerdictWriteUp` reddens the first test; deleting the "did NOT run and are not reported as
+// unjudged" footer reddens the second. The second sentence is one this item INHERITED and must keep — it is
+// exactly the kind of true sentence a later edit deletes by accident, so it gets its own named defence.
+describe('#3335 the write-up states what was EARNED beside what SAT', () => {
+  const writeUpFor = (careLevel, id) => {
+    const { registry } = registryFor({});
+    const { run } = atConfirm({ registry, input: { ...BASE_INPUT, careLevel }, id });
+    return renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op' });
+  };
+
+  it('#3335 — names the derived care level and the SHORTFALL between earned and seated lenses', () => {
+    const body = writeUpFor('elevated', 'run-3335-wu');
+    expect(body).toContain('**Earned vs seated:**');
+    expect(body).toContain('scores care `elevated`');
+    // The stub's net list is `scripts/operations/review-pr.mjs` + `skills-src/review/SKILL.md` — blast-radius.
+    expect(body).toContain('blast-radius');
+    // What the dial asks for, and what actually sat.
+    expect(body).toContain(`${PANEL_LENSES.length} lens(es) ×`);
+    expect(body).toContain(`This run seated ${MANDATORY_LENSES.length} lens(es)`);
+    // The shortfall is NAMED, lens by lens — the advisory three that the care band earned and no seat filled.
+    expect(body).toMatch(/SHORTFALL: 3 earned lens\(es\)/);
+    for (const advisory of PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l))) {
+      expect(body).toContain(advisory);
+    }
+    expect(body).toContain('The caller declared `--careLevel=elevated`.');
+    // …and it does NOT claim the gap was avoidable: the step list is fixed at registration (#3319).
+    expect(body).toContain('The shortfall is structural');
+  });
+
+  it('#3335 — says so when the caller declared no shape at all, rather than implying one was checked', () => {
+    const body = writeUpFor(undefined, 'run-3335-wu-undeclared');
+    expect(body).toContain('**Earned vs seated:**');
+    expect(body).toContain('The caller declared no `--careLevel`');
+    expect(body).toContain('scores care `elevated`');
+  });
+
+  it('#3335 — and it never asserts a shape it does not have: a degraded basis says UNKNOWN', () => {
+    // `earnedShape` is `null` when there is no net file list to score. The line must then say the earned shape
+    // is unknown — printing a `none` it did not derive would be the exact false-proportionality claim this
+    // whole line exists to prevent.
+    const line = renderEarnedShortfall({ read: { earnedShape: null }, lenses: [DEFAULT_LENS] });
+    expect(line).toContain('could not be scored');
+    expect(line).toContain('UNKNOWN');
+    expect(line).not.toContain('scores care `none`');
+  });
+
+  it('#3335 — KEEPS the inherited footer naming the panel lenses that did NOT run', () => {
+    // THE HALF THAT ALREADY HELD. #1580's live comment carries it verbatim; this item extends that sentence
+    // rather than replacing it, so both are defended. Deleting the footer reddens THIS test as well as the
+    // #3319 one it duplicates on purpose — a single defence for a sentence two items depend on is one edit
+    // away from being none.
+    const body = writeUpFor('elevated', 'run-3335-wu-footer');
+    expect(body).toContain('did NOT run and are not reported as unjudged');
+    const absent = PANEL_LENSES.filter((l) => !MANDATORY_LENSES.includes(l));
+    expect(body).toContain(`The other ${absent.length} panel lens(es) (${absent.join(', ')})`);
   });
 });
