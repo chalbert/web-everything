@@ -1,0 +1,24 @@
+{
+  "id": "creator-owed-proof-not-reviewer-rederivation",
+  "title": "Creator-owed proof, not reviewer re-derivation — the burden of proof in code review",
+  "summary": "Prep research for the decision 'A reviewer may answer unverifiable as submitted — a creator-proof gap, not a verdict.' The operator's complaint: reviewers do a lot of verification work that should have been the creator's to discharge, sometimes going very far to check a claim the creator could have proven cheaply at write time. Six bodies of prior art surveyed, reported at the strength the evidence actually supports rather than by reputation. FINDING 1 (Design by Contract, Meyer) — the sharpest structural precedent: the client (caller) is obligated to satisfy preconditions before calling, the supplier (callee) is obligated to satisfy postconditions given the precondition holds and is explicitly NOT obligated to re-check it; DbC treats double-checking as a violation of the discipline, not an extra safety margin. Caveat: corroborated across independent secondary sources and matches OOSC2's Design by Contract chapter as widely cited, but a clean page-cited verbatim quote from Meyer's own text could not be pulled from the scanned PDF sources in this pass; the analogy is about runtime obligation, not review-time evidence — the SHAPE of the argument transfers, not a literal review-process precedent. FINDING 2 (TDD/red-green, Beck) — Test-Driven Development By Example's two rules (write new code only if an automated test has failed; eliminate duplication) make the failing-then-passing test the creator's proof artifact, produced before the claim, machine-checkable by a third party without hand-verification; the strongest fit for the machine-checkable-evidence requirement specifically. FINDING 3 (falsifiability, Dijkstra confirmed / Popper corroborated) — Dijkstra's EWD249 (1970), section 'On The Reliability of Mechanisms': 'Program testing can be used to show the presence of bugs, but never to show their absence!' confirmed via primary-source transcription; a related phrasing in 'The Humble Programmer' (1972 Turing lecture). Popper's falsifiability connected to software testing via Kaner/Bach/Pettichord's Lessons Learned in Software Testing (2001) is corroborated across secondary sources but not pinned to a verbatim page, and NO literature was found explicitly framing code REVIEW (as opposed to testing) in Popperian terms — 'a reviewer's job is to falsify, not verify exhaustively' is this session's synthesis, flagged as such rather than oversold. FINDING 4 (author-supplied-test-as-gate policy) — Google's public eng-practices docs state plainly that developers are expected to 'test CLs well-enough that they work correctly by the time they get to code review,' putting initial proof burden on the author; no explicit language was found stating a CL may be rejected SOLELY for missing tests, nor a documented reviewer right to decline re-derivation — the docs assume shared responsibility, not the specific unverifiable-as-submitted verdict this item proposes. Bacchelli and Bird's ICSE 2013 modern-code-review paper was confirmed to exist and scope but its findings text was not retrievable in this pass. FINDING 5 (Google Tricorder, Sadowski et al.) — effective false-positive rate is user-centric (any report the user did not want to see), held under 5% against a 10% target; the predecessor FindBugs effort saw 84% of filed bugs go unfixed. The lesson runs OPPOSITE to a naive reading of this item: Tricorder's fix was to put the burden of making a finding actionable on the tool/process side, not to push more unverified claims onto a human — cite it for the actionability principle (an unactionable assertion may legitimately be rejected), not as direct support for the burden-shift DIRECTION, since it is about tool-generated claims a developer triages, not human-generated claims a reviewer adjudicates. FINDING 6 (self-certification effectiveness) — no software-specific, code-review-focused study was found demonstrating that forced self-certification gets gamed or rubber-stamped; the strongest documented analogy is NYC's Department of Buildings Self-Certification program (a real, adjacent-domain case of self-attestation abuse, not software). Recorded as an open gap: the item's requirement that proof mean machine-checkable evidence rather than a checkbox rests on general principle (Popper/Dijkstra) and the adjacent-domain case, not a dedicated study. Full grounding in we:reports/2026-08-27-creator-owed-proof-burden-shift.md.",
+  "status": "open",
+  "dateOpened": "2026-08-27",
+  "lastReviewed": "2026-08-27",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "testing",
+    "code-review",
+    "burden-of-proof",
+    "design-by-contract",
+    "tdd",
+    "falsifiability",
+    "jury",
+    "evidence",
+    "governance",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcases"
+}
