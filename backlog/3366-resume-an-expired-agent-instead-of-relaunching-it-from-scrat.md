@@ -1,4 +1,5 @@
 ---
+bornAs: x4iwn55
 kind: story
 size: 3
 parent: "3029"
@@ -70,10 +71,10 @@ its successor's `reset --hard` would otherwise destroy the uncommitted work the 
 
 - **Steering an agent mid-flight** (sending it new instructions). This card only restores an agent that
   stopped; deliberate stop-then-resume steering is `#3118`'s own follow-on.
-- **The watchdog that decides an agent expired** — that is `#xnukacf`. This card is only what happens after.
+- **The watchdog that decides an agent expired** — that is `#3367`. This card is only what happens after.
 
 ## Lineage
 
-Filed 2026-08-27 at the user's request, alongside `#xnukacf`: *"make sure we do not relaunch from scratch
+Filed 2026-08-27 at the user's request, alongside `#3367`: *"make sure we do not relaunch from scratch
 sessions that expired if they can be restored from context."* The probe that makes it actionable — and that
 blocks it — is `#3331`.

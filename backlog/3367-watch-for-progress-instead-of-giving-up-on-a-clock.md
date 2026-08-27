@@ -1,4 +1,5 @@
 ---
+bornAs: xnukacf
 kind: story
 size: 3
 parent: "3029"
@@ -64,7 +65,7 @@ not "pick better numbers" or "compare instead of bound": it is to stop asking th
   express it. It needs serialisation or repeated measurement, which is a separate and smaller card.
 - **Test-runner concurrency.** How many suites run at once is a different lever; this item makes the guards
   robust rather than making the machine quieter.
-- **What to DO when the watchdog fires.** Resuming rather than relaunching is `#x4iwn55`.
+- **What to DO when the watchdog fires.** Resuming rather than relaunching is `#3366`.
 
 ## Lineage
 
