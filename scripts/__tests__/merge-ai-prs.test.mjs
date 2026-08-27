@@ -1063,6 +1063,80 @@ describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () =
   });
 });
 
+describe('#3350 — the rebase livelock is documented where the precondition lives', () => {
+  const SRC_3350 = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+  const ANCHOR = 'export function isRebaseDropCandidate';
+  const INVARIANT = /do not rebase a queued PR from outside the drain/i;
+  const WINDOW = 1200;
+
+  /**
+   * The card's own shell probe, hardened. It answers ONE question about ONE file: does the invariant sentence
+   * appear in the `WINDOW` characters immediately before the `isRebaseDropCandidate` declaration?
+   *
+   * The hardening matters: the card's snippet used `s.slice(Math.max(0, i - 1200), i)` with an un-checked `i`,
+   * so on a file with no such declaration `i === -1` and it slices `s.slice(0, -1)` — very nearly the WHOLE
+   * file. That variant reports "documented" for any file that merely mentions the sentence anywhere. Returning
+   * false on a missing anchor is what makes this a real check rather than one that passes on any file; the
+   * `no anchor` case below pins it.
+   */
+  const noteNearPredicate = (src) => {
+    const i = src.indexOf(ANCHOR);
+    if (i < 0) return false;
+    return INVARIANT.test(src.slice(Math.max(0, i - WINDOW), i));
+  };
+
+  it('states the invariant in the predicate\'s own docblock', () => {
+    expect(noteNearPredicate(SRC_3350)).toBe(true);
+  });
+
+  it('states the REASON too — the bare instruction reads as territorial and gets routed around', () => {
+    const i = SRC_3350.indexOf(ANCHOR);
+    const doc = SRC_3350.slice(Math.max(0, i - WINDOW), i);
+    // A rebase moves the head → `test` restarts → `testGreen` is false → not a candidate → the drain skips it.
+    expect(doc).toMatch(/restarts?\b[^.]*\btest\b/i);
+    expect(doc).toMatch(/testGreen/);
+    expect(doc).toMatch(/livelock/i);
+  });
+
+  it('the note discriminates — removing the sentence makes the check FAIL', () => {
+    const stripped = SRC_3350.replace(INVARIANT, 'this predicate is gated on the required check');
+    expect(stripped).not.toBe(SRC_3350);
+    expect(noteNearPredicate(stripped)).toBe(false);
+  });
+
+  it('proximity is load-bearing — the sentence far from the predicate does NOT satisfy the check', () => {
+    const far = `// do not rebase a queued PR from outside the drain\n${'// filler\n'.repeat(400)}${ANCHOR}(v) {}\n`;
+    expect(INVARIANT.test(far)).toBe(true);
+    expect(noteNearPredicate(far)).toBe(false);
+  });
+
+  it('no anchor ⇒ false (the un-hardened slice would have said true)', () => {
+    const noAnchor = 'do not rebase a queued PR from outside the drain\n';
+    expect(noteNearPredicate(noAnchor)).toBe(false);
+    // The card's un-hardened form, shown failing on the same input.
+    const j = noAnchor.indexOf(ANCHOR);
+    expect(INVARIANT.test(noAnchor.slice(Math.max(0, j - WINDOW), j))).toBe(true);
+  });
+
+  it('the rebase pass itself carries the invariant at its call site', () => {
+    const pass = SRC_3350.indexOf('const rebased = [];');
+    expect(pass).toBeGreaterThan(0);
+    expect(SRC_3350.slice(Math.max(0, pass - WINDOW), pass)).toMatch(INVARIANT);
+  });
+
+  // What the note protects, stated as behaviour on ONE PR through the red→green transition a rebase causes.
+  // The standing coverage is the '#2198' block above (a red `test` is NOT a candidate / a BEHIND certified+green
+  // PR IS one); this restates it as the livelock's two ends so the block reads on its own.
+  it('a certified BEHIND PR is NOT a candidate while `test` re-runs, and IS one once green', () => {
+    const rerunning = classifyPr(aiPr({ number: 3350, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND', statusCheckRollup: [{ name: 'test', status: 'IN_PROGRESS', conclusion: null }] }), {});
+    expect(rerunning.testGreen).toBe(false);
+    expect(isRebaseDropCandidate(rerunning)).toBe(false);
+    const green = classifyPr(aiPr({ number: 3350, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }), {});
+    expect(green.testGreen).toBe(true);
+    expect(isRebaseDropCandidate(green)).toBe(true);
+  });
+});
+
 describe('#2684 — isStackedWeCoupleHalf (which manifest PRs get the couple re-CI regime tag)', () => {
   const SHA_A = 'a'.repeat(40);
 

@@ -605,6 +605,17 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
  * is rebuilt onto main (manifest dropped) and it becomes landable. A real code conflict is left as the skip.
  * NOT a candidate: an un-certified PR (never auto-resolve someone's un-blessed branch), a red `test` (a real
  * bug, not a manifest artefact), or a non-rebasable state (BLOCKED/DRAFT — a human/branch-protection concern).
+ *
+ * #3350 — INVARIANT: **do not rebase a queued PR from outside the drain.** The reason is the load-bearing half,
+ * not the instruction: this gate requires `certified && testGreen`, and a rebase MOVES THE HEAD, which restarts
+ * the required `test` check. For the duration of that run `testGreen` is false, the PR is not a candidate, and
+ * the drain skips it. A helper that rebases waiting PRs on a timer re-arms that condition before CI can ever
+ * finish, so **the precondition can never hold** and the self-healing queue becomes a livelock. Observed live:
+ * eight accepted PRs, one merged in thirty minutes, with such a helper running throughout — and the queue
+ * drained the moment merges started, because PRs finally sat still long enough for CI to go green. Nothing
+ * fires: the drain correctly skips, the helper correctly rebases, CI correctly runs; only the elapsed time is
+ * wrong. Generally — any automation that touches a waiting branch restarts its checks, so it must never run
+ * against a precondition gated on those checks being green.
  */
 export function isRebaseDropCandidate(v) {
   if (!v || v.decision !== 'skip') return false;
@@ -3356,6 +3367,17 @@ async function runCli() {
   // main×lane; if the ONLY conflict is the manifest, rebuild its tip onto main (manifest dropped) via pure
   // plumbing (no checkout) and push to the lane/* ref — then it is CLEAN and the cascade merges it. A real code
   // conflict stays a skip. Dry-run only ANNOTATES (no push). Disable with `--no-rebase-drop`.
+  //
+  // #3350 — REBASING A QUEUED PR IS THE DRAIN'S OWN JOB, and this pass is where it happens (the id-collision
+  // heal just above rebuilds a tip too, and its `if (REBASE_DROP && isRebaseDropCandidate(v)) continue` defers
+  // any rebase-drop candidate to this pass).
+  // Invariant: do not rebase a queued PR from outside the drain.
+  // Reason: `isRebaseDropCandidate` gates on `testGreen`, and a rebase restarts the required `test` check, so an
+  // outside helper rebasing waiting PRs on a timer holds `testGreen` false forever — the candidacy precondition
+  // never holds and the queue livelocks with every component reporting success. Both rebuilds HERE are ordered
+  // against that gate and leave the PR skipped for the pass ("awaiting re-run of checks"), so the wait is
+  // bounded; an outside timer is not ordered against anything and re-arms the condition indefinitely.
+  // See the predicate's docblock.
   const rebased = [];
   if (REBASE_DROP) {
     for (const v of verdicts) {
