@@ -242,10 +242,15 @@ Prep's second draft read #2678 plus [`#blast-radius-advisory-care-not-a-gate`](.
 never-deny is scoped to **the size-plus-collision composite**, and its stated reason — "a footgun on
 high-churn files … a blocking gate there would deny the very edits that split them" — has no purchase on card
 prose. #2563 clause 1's subject is **scored signals**, and #3314's own retraction is a standing warning
-against stretching exactly that clause. Decisively, **card gates already error today**:
+against stretching exactly that clause. Decisively, **a card *validator* already errors today** — a different
+class of check from the card *gates* this library builds, so named to keep the two apart:
 `we:scripts/check-standards.mjs:586` walks every backlog item through `validateBacklogItem` and routes its
-findings to `err`. So "no card rule may block" is not the repo's posture, and asserting it would have been the
-same over-generalized-anchor defect this entry exists to retract.
+findings to `err`, but that is deterministic frontmatter/structural validation (a missing required field, an
+invalid `kind`, an unresolved reference) — not the fuzzy content-heuristic detection `we:review-corpus/gates.mjs`
+performs. It refutes "no card rule may ever block" as the repo's posture; it does **not** establish that a
+heuristic detector erroring is already an accepted posture — that is a different question, and it is the one
+Fork 1 below rules on. So "no card rule may block" is not the repo's posture, and asserting it would have been
+the same over-generalized-anchor defect this entry exists to retract.
 **What survives from entry 3 and this one:** scope is diff-scoped, and **warn is the default posture**, with
 an inline escape hatch. What licenses the exception is Fork 1.
 
@@ -299,8 +304,11 @@ one in the tree settle that it is not:**
   `blocksAcceptance`, it names *"the already-existing `check:standards` locus gate"* as a **prevention** a
   lens finding is measured against. An anchor that treats those gates as the backdrop is not legislating
   them.
-- **Card gates already block.** `we:scripts/check-standards.mjs:586` routes `validateBacklogItem`'s findings
-  to `err`, so a deterministic error on a backlog card is the status quo #3314 was ratified alongside.
+- **A card *validator* already blocks — not a card *gate* in this library's sense.**
+  `we:scripts/check-standards.mjs:586` routes `validateBacklogItem`'s findings to `err`, which is
+  deterministic structural validation, not the heuristic content detection `we:review-corpus/gates.mjs`
+  performs. It shows a deterministic error on a backlog card is the status quo #3314 was ratified alongside;
+  it is not evidence that a heuristic gate erroring is an accepted posture, which is what Fork 1 rules on.
 
 **Adopted regardless:** #3314's forward-facing clause — *"any future rule of this shape must name a typed
 field or take plain advisory instead"* — is good design whether or not it binds, and the registry's `impact`
@@ -322,8 +330,9 @@ free-and-instant counterfactual does not touch.
 
 **Why this is the residue and not a build choice.** Entry 6 closes the statute-reach question, entries 1–3
 and 5 close call site, scope and derivation, and entry 4 establishes that warn is the default posture while
-also establishing — against prep's own earlier draft — that card gates *already* error today
-(`we:scripts/check-standards.mjs:586`). So the exception exists and has no stated rule. Writing one is a
+also establishing — against prep's own earlier draft — that a card *validator*, not a card *gate* in this
+library's sense, *already* errors today (`we:scripts/check-standards.mjs:586`). So the exception exists and
+has no stated rule. Writing one is a
 permission call: an ERROR here blocks a land with **no reviewer**, on a heuristic, over a corpus of 3339
 cards.
 

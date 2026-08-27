@@ -197,8 +197,12 @@ silently skipped".
 - **It presupposes deterministic gates as a separate thing.** Arguing its bar may not be built on
   `blocksAcceptance`, it names *"the already-existing `check:standards` locus gate"* as a **prevention** that
   a lens finding is measured against.
-- **Card gates already block.** `we:scripts/check-standards.mjs:586` routes `validateBacklogItem`'s findings
-  to `err`, so a deterministic error on a backlog card is the status quo #3314 was ratified alongside.
+- **A card *validator* already blocks — not a card *gate* in this library's sense.**
+  `we:scripts/check-standards.mjs:586` routes `validateBacklogItem`'s findings to `err`, which is
+  deterministic structural validation, not the heuristic content detection `we:review-corpus/gates.mjs`
+  performs. It shows a deterministic error on a backlog card is the status quo #3314 was ratified alongside;
+  it is not evidence that a heuristic gate erroring is an accepted posture, which is what #3364's Fork 1
+  rules on.
 
 So the collision dissolves. What #3314 leaves behind is a **discipline worth adopting anyway** — its
 forward-facing clause, *"any future rule of this shape must name a typed field or take plain advisory
