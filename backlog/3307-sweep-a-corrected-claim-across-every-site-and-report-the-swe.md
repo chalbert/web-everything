@@ -28,11 +28,25 @@ The three: r1 fixed the epic card and left the PR description; r2 fixed the desc
 > the edit stays with a human. `--fix` / `--rewrite` / `--apply` are recognised and REFUSED with that
 > reason, rather than failing as unknown flags.
 
-Nothing is silently filtered either. A near-match, an ambiguous paraphrase and a bare numeral in
-unrelated prose are exactly what the person doing the correcting needs to see, so every site is reported
-and *labelled* — `exact`/`normalized` are `confirmed`, `near`/`token` are `undecided`, and a site inside a
-retraction's own neighbourhood is listed with `retracted: true` rather than dropped. Only an unretracted
-`confirmed` site is a survivor, and only survivors set the exit status.
+> **Retracted — this paragraph opened "Nothing is silently filtered either." That was false as built, in
+> the two ways review #1620 found.** The `near` tier excluded a shingle-containment of exactly 1, so the
+> strongest non-substring paraphrase it could see reached no tier and left no trace in the report; and
+> `retractionNear` matched a dozen short English phrases as bare substrings anywhere in a ±6-line window,
+> so an unretracted claim sitting beside "…on the old display it read as a jumble of digits" was filed
+> under ALREADY RETRACTED and the CLI exited 0 "clean". Measured over the tracked markdown at
+> `origin/main` (4133 files, 300929 lines), that rule put **11620 lines — 3.86%** inside a "retraction"
+> window across **536 files**, with `superseded` (424), `it read` (133) and `was wrong` (124) each
+> outnumbering `retracted` (91) itself. Both defects are fixed and pinned by tests that redden on
+> reversion. The corpus figures are quoted at `origin/main` rather than at this branch's tree on purpose:
+> the branch's own retraction prose moves them, and a reviewer can reproduce the `origin/main` numbers.
+
+What is reported, accurately: a near-match, an ambiguous paraphrase and a bare numeral in unrelated prose
+are exactly what the person doing the correcting needs to see, so every site that reaches a tier is
+reported and *labelled* — `exact`/`normalized` are `confirmed`, `near`/`token` are `undecided`, and a site
+under a retraction *label* is listed with `retracted: true` rather than dropped. Only an unretracted
+`confirmed` site is a survivor, and only survivors set the exit status. Retraction detection is anchored
+to the shapes a retraction is actually written in and errs toward leaving a site a SURVIVOR, because an
+over-reported survivor costs one glance and a laundered one costs a bounce round.
 
 The corpus is `git ls-files` over the working tree plus any document supplied with `--document`, so
 `report.completeness` is **always** `partial` — there is no branch that sets it otherwise. Every report
@@ -43,7 +57,10 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 
 1. **Executable** — `npx vitest run claim-sweep -t "#3307" | grep -qE "Tests +[0-9]+ passed"`. Fails
    before this item lands — `we:scripts/lib/claim-sweep.mjs` and its suite do not exist, so the filter
-   selects nothing and there is no `Tests N passed` line to match — and passes after (42 passed).
+   selects nothing and there is no `Tests N passed` line to match — and passes after (68 passed).
+   > **Retracted — this line read "(42 passed)".** That was the count at the first cut. Review #1620
+   > bounced the PR for two silent-drop defects and two untested first-cut fixes; the prevention for all
+   > four took the suite from 42 to **68**. Re-measured on this branch, not carried over.
    The `grep` is load-bearing: a `-t` filter matching nothing is an empty selection, and vitest exits
    **0** on one, so the bare form would be green before the work (`3319`'s criterion records the same
    trap).
@@ -54,4 +71,14 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 3. **Mutation** — correcting only the quoted site drops the survivor count to 0 while the code comment
    is still named; re-introducing the claim in a fourth file raises it there; deleting the retraction
    marker turns the parent card's quotation back into a survivor.
-4. `npm run check:standards` — 0 errors.
+4. **No silent drop, either way** — the two directions a sweep can lie, each pinned by a test that
+   reddens when its fix is reverted:
+   - a site that reaches the top of the `near` tier (shingle-containment exactly 1 on a NON-substring)
+     is reported, not dropped for scoring too well;
+   - a claim beside ordinary prose using a marker phrase in a non-retraction sense (`it read`,
+     `was wrong`, `superseded`, …) stays a **survivor** and the CLI still exits 1.
+   Every fix in this card is re-reverted and the suite re-run; the mutation log is in the commit that
+   made it. A green suite over an unreverted fix proves nothing, which is how the first cut shipped two
+   "fixed here" defects with no test on either.
+5. `npm run check:standards` — 0 new errors and 0 new warnings vs this lane's `main`, measured both ways
+   in the same session rather than compared against a number written on a card.

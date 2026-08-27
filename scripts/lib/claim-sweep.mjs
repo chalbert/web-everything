@@ -27,24 +27,39 @@
  * confirmed one — `--fix` / `--rewrite` are recognised and REFUSED with that reason, so a caller reaching
  * for them gets the argument rather than an "unknown flag".
  *
- * ── WHY NOTHING IS SILENTLY FILTERED ──────────────────────────────────────────────────────────────────
+ * ── WHAT IS AND IS NOT FILTERED (this section used to overclaim; see the retraction below) ────────────
  * A near-match, an ambiguous paraphrase, and a bare number in an unrelated context are precisely what the
  * human doing the correcting needs to see; a sweep that silently drops them is worse than one that admits
- * uncertainty, because it reads as completeness. Every site this finds is REPORTED, tiered and labelled:
+ * uncertainty, because it reads as completeness. Every site that reaches a tier is REPORTED and labelled:
  *
  *   exact       verbatim substring                              → confidence `confirmed`
  *   normalized  matches once blockquote markers, emphasis,      → confidence `confirmed`
  *               smart quotes and whitespace are folded (prose
  *               wraps — pinning a wrap is the `doc-prose.mjs` lesson)
- *   near        sentence shingle-containment over the threshold → confidence `undecided`
+ *   near        sentence shingle-containment AT OR ABOVE the    → confidence `undecided`
+ *               threshold, top of the range included
  *   token       a distinctive token (a numeral, a `#NNNN`, a    → confidence `undecided`
  *               born-as hash, a `we:` path, a backticked span)
  *               in a sentence that is otherwise unrelated
  *
- * Retraction is an ANNOTATION, never a filter. A site sitting next to "Retracted — it read …" is the
- * correction quoting the claim, not a survival of it, and the same negation `3299`/`3301` need — but it
- * is still listed, with `retracted: true`, so the sweep can be seen to have looked at it. Only an
- * UNRETRACTED `confirmed` site is a survivor, and only survivors drive the exit status.
+ * RETRACTED — this section used to head itself "WHY NOTHING IS SILENTLY FILTERED" and to promise, flatly,
+ * "Every site this finds is REPORTED". Both were false when written, in the two ways review #1620 found:
+ *   • the `near` tier excluded a containment of exactly 1, so the STRONGEST non-substring paraphrase it
+ *     could see reached no tier at all and left no trace in the report;
+ *   • `retractionNear` matched a dozen short English phrases as bare substrings anywhere in a ±6-line
+ *     window, so an unretracted claim beside "…on the old display it read as a jumble of digits" was
+ *     filed under ALREADY RETRACTED and the CLI exited 0 "clean".
+ * A promise of completeness is exactly the thing this module must not make loosely, because the whole
+ * point of it is that "no output" reads as "nothing to find". Both are fixed and both are pinned by
+ * tests that redden on reversion; the wording is now scoped to what the code actually does.
+ *
+ * Retraction is an annotation rather than a filter, but it is NOT free of judgment: marking a site
+ * retracted removes it from `survivors` and can take the exit code to 0, so the detector is deliberately
+ * ANCHORED (see `retractionNear`) and errs toward leaving a site a SURVIVOR. An over-reported survivor
+ * costs one glance; a laundered one costs a bounce round. A site sitting under a retraction LABEL is the
+ * correction quoting the claim, not a survival of it — and it is still listed, with `retracted: true`, so
+ * the sweep can be seen to have looked at it. Only an UNRETRACTED `confirmed` site is a survivor, and
+ * only survivors drive the exit status.
  *
  * ── WHAT THIS CANNOT COVER (stated in every report, never implied away) ───────────────────────────────
  * The corpus is `git ls-files` over the CURRENT working tree plus any documents the caller supplies with
@@ -85,10 +100,11 @@ import { writeAllSync } from './write-all-sync.mjs';
  *     ]);
  *
  * That was wrong, and wrong in the one direction this tool cannot afford. Half those entries are ordinary
- * English. Measured over this repo's tracked markdown on 2026-08-26 (4132 files, 300720 lines): the
- * substring rule put 11619 lines — 3.9% — inside a "retraction" window across 536 files, and the three
- * commonest markers were `superseded` (424), `it read` (133) and `was wrong` (124), EACH outnumbering
- * `retracted` (95) itself. So an exact, verbatim, never-retracted claim sitting six lines from a sentence
+ * English. Measured over the tracked markdown at `origin/main` (4133 files, 300929 lines): the substring
+ * rule put 11620 lines — 3.86% — inside a "retraction" window across 536 files, and the three commonest
+ * markers were `superseded` (424), `it read` (133) and `was wrong` (124), EACH outnumbering `retracted`
+ * (91) itself. (Quoted at `origin/main`, not at this branch: the branch's own retraction prose moves the
+ * figures.) So an exact, verbatim, never-retracted claim sitting six lines from a sentence
  * like "on the old display it read as a jumble of digits" was reported under ALREADY RETRACTED and the CLI
  * exited 0 "clean" — the tool laundering the very miss it exists to catch.
  *
