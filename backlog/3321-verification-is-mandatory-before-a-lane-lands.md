@@ -12,6 +12,7 @@ scope:
   - we:scripts/__tests__/lane-drain.test.mjs
   - we:scripts/pr-land.mjs
   - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
+  - we:backlog/2833-subagent-stall-reaping-detect-a-subagent-blocked-on-a-backgr.md
 tags: []
 ---
 
@@ -102,13 +103,14 @@ A new `pr-land` invocation that says nothing about verification reddens the suit
    | tree | vitest's own summary line | criterion exit |
    | --- | --- | --- |
    | `origin/main` (`5634f078`) | `Tests  32 skipped (32)` | **1** |
-   | this branch | `Tests  17 passed \| 32 skipped (49)` | **0** |
+   | this branch (`027fe1fe`) | `Tests  21 passed \| 32 skipped (53)` | **0** |
 
    *(Re-measured on every round rather than carried over, because both sides move: `origin/main` advances under a
-   live drain, and each round adds cases. Earlier cuts of this table read `14 passed` against `1c293a0f` and
-   `16 passed` against `379cf93c`. The RED side is re-run against the tip each time — never assumed from the
-   previous reading. The verdict has been identical at all three tips, which is the point: the criterion depends
-   on this branch's tests existing, not on which commit main happens to be at.)*
+   live drain, and each round adds cases. Earlier cuts of this table read `14 passed` against `1c293a0f`,
+   `16 passed` against `379cf93c`, and `17 passed \| 32 skipped (49)` earlier in round 3 — that last is superseded
+   by the four caller-sweep cases added after it. The RED side is re-run against the tip each time — never assumed
+   from the previous reading. The verdict has been identical at all four tips, which is the point: the criterion
+   depends on this branch's tests existing, not on which commit main happens to be at.)*
 
    **THE `grep` IS THE CRITERION, NOT DECORATION.** `npx vitest run lane-verify -t "#3321"` on its own exits
    **0** on `origin/main` — measured, not assumed: a `-t` filter that matches nothing is a selection of zero, and
