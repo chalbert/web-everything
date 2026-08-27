@@ -14,7 +14,23 @@ tags: []
 
 A `## Review log` entry records this programme's own results under a header promising the next reader need not re-derive them, so a wrong number there is read as settled. Two rounds on PR #1576 bounced on exactly that: a count, a comparison and a lesson, each written from memory, not from the verdict comments they described. Give the author a command that takes a claim's PR numbers and re-derives the counts from `gh pr view <n> --json comments`, so the figure comes from a run, not a recollection.
 
-The three wrong claims, all in one entry: *"cleared in one round each"* (zero of four did — 2 / 2 / 3 / 5); *"found nine wrong figures"* (the record produces four); and *"no test finding at all"* (both pre-split verdicts recorded one, and one of them was the same finding credited to the later round). Each was corrected only where quoted, and the next round found the next one.
+The three wrong claims, all in one entry: *"cleared in one round each"* (zero of four did — 4 / 2 / 3 / 5); *"found nine wrong figures"* (the record produces four); and *"no test finding at all"* (both pre-split verdicts recorded one, and one of them was the same finding credited to the later round). Each was corrected only where quoted, and the next round found the next one.
+
+**RETRACTED 2026-08-27 (PR #1617 review round 1, operator finding 1).** The paragraph above previously read:
+
+> *"cleared in one round each"* (zero of four did — **2** / 2 / 3 / 5)
+
+The `2` was **wrong for the basis this card's own tool derives**. It counted only #1569's two *post-split* rounds; `rounds(1569)` counts every recorded review round in the verdict comments and gives **4**. Re-derived in this lane on 2026-08-27:
+
+```
+$ node scripts/lib/review-log-claims.mjs derive 1569 1570 1571 1572
+PR #1569 — 4 recorded review round(s), 9 comment(s)
+PR #1570 — 2 recorded review round(s), 6 comment(s)
+PR #1571 — 3 recorded review round(s), 9 comment(s)
+PR #1572 — 5 recorded review round(s), 10 comment(s)
+```
+
+The correction of a wrong figure was itself a figure the shipped checker would flag — which is precisely the defect this item exists to stop. "Rounds since the split" is not a basis `METRICS.rounds` can express, because the verdict record does not carry one; the figure now matches the metric. *(Zero of four still cleared in one round, so the sentence's point is unchanged.)*
 
 Adjacent but not this: #3314 asks whether `claim-accuracy` should be mandatory — a question about who looks. #3307 sweeps an already-corrected claim to its other sites — a question about completeness. This one is about deriving the figure correctly the first time.
 

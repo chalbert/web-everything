@@ -151,10 +151,12 @@ describe('#3336 — reading the verdict record out of the comment stream', () =>
 });
 
 describe('#3336 — re-deriving the three claims the entry got wrong', () => {
-  it('#3336 contradicts "cleared in one round each": the record gives 2 / 2 / 3 / 5', () => {
+  // This title previously said "the record gives 2 / 2 / 3 / 5" while the assertion below it read
+  // toEqual([4, 2, 3, 5]) — a title contradicted by its own test. The 2 counted only #1569's two post-split
+  // rounds; `rounds()` counts all four. The title now states the figure the assertion actually pins.
+  it('#3336 contradicts "cleared in one round each": the record gives 4 / 2 / 3 / 5', () => {
     expect([1569, 1570, 1571, 1572].map((p) => METRICS.rounds.of(RECORDS.get(p).rounds)))
       .toEqual([4, 2, 3, 5]);
-    // Counted from the moment the split existed, #1569 carries the last two of its four.
     const wrong = one('the split cleared in **one** round each <!-- claim: rounds(1570)=1 -->');
     expect(wrong.status).toBe('mismatch');
     expect(wrong.derived).toBe(2);

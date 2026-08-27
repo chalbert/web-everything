@@ -7,10 +7,17 @@
  * WHY IT EXISTS. A `## Review log` entry records this programme's own results under a header promising the
  * next reader need not re-derive them, so a wrong number there is read as settled. Two rounds on PR #1576
  * bounced on exactly that, three wrong claims in one entry: *"cleared in one round each"* (zero of four did —
- * 2 / 2 / 3 / 5), *"found nine wrong figures"* (the record produces four), *"no test finding at all"* (both
+ * 4 / 2 / 3 / 5), *"found nine wrong figures"* (the record produces four), *"no test finding at all"* (both
  * pre-split verdicts recorded one). A fourth, *"100 files"*, was 120 then 123. Every one was written from
  * memory about material that is machine-readable: the structured verdict comments
  * `we:scripts/review-set-label.mjs` renders and `gh pr view <n> --json comments` returns verbatim.
+ *
+ * RETRACTED 2026-08-27 (PR #1617 review round 1, operator finding 1). The line above previously read
+ * *"zero of four did — **2** / 2 / 3 / 5"*. That 2 was **wrong for the basis this module ships**: it counted
+ * only #1569's two POST-SPLIT rounds, while `rounds(1569)` counts every recorded review round and gives
+ * **4** — as `derive 1569 1570 1571 1572` prints. A correction that the shipped checker would itself flag is
+ * the defect this item exists to stop, so the figure now matches the metric. `METRICS.rounds` deliberately
+ * cannot express "rounds since some event": there is no such basis in the verdict record.
  *
  * ── THE TWO HALVES, AND WHY BOTH ────────────────────────────────────────────────────────────────────────────
  *
