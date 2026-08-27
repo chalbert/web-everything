@@ -1444,16 +1444,24 @@ export function parseReviewedContribution(comments) {
  *   • SHAs match (prefix-compare, tolerant of abbreviation) → `{ covers: true }`.
  *   • Head advanced past the reviewed SHA → `{ covers: false, reason }` — a STALE acceptance; the drain
  *     refuses the auto-land and re-parks for a fresh look.
+ *   • #3184 — head moved, a reviewed FINGERPRINT was recorded, but `headReadFailed` says this pass could not
+ *     read the live side → `{ covers: false, staleVerified: false, reason }`. Still fails CLOSED (`covers` is
+ *     false, byte-identically), but the reason names the failed VERIFICATION rather than asserting the head
+ *     advanced — nothing was compared, so that assertion would be a guess. `staleVerified` separates the two
+ *     `covers:false` tiers for a caller whose re-hold destroys state (see `decideReviewGate`).
  * The gate keys on head-SHA IDENTITY, so ANY head change re-parks — including a benign rebase-onto-main /
  * force-push of an already-accepted branch that adds no review-worthy content. That is stricter than the
  * motivating "an unrelated commit rode in" case, but defensible: a rebase DOES change the tree, and the
  * re-park self-corrects on a fresh accept. We prefer the false-park over honouring an accept against a tree the
  * reviewer never saw.
- * @param {{acceptedSha?:string|null, headSha?:string|null}} o
+ * @param {{acceptedSha?:string|null, headSha?:string|null, headReadFailed?:boolean}} o - `headReadFailed`
+ *   (#3184) is the caller's explicit "I had a marker to compare and could not read the live side this pass"
+ *   signal. It is NOT inferable from `headDiff: null` alone, which also spells "this accept recorded no
+ *   fingerprint" — the two must stay distinguishable or a read miss is reported as proven staleness.
  */
 export function acceptanceCoversHead({
   acceptedSha = null, headSha = null, acceptedDiff = null, headDiff = null,
-  acceptedContribution = null, headContribution = null,
+  acceptedContribution = null, headContribution = null, headReadFailed = false,
 } = {}) {
   const a = typeof acceptedSha === 'string' ? acceptedSha.trim().toLowerCase() : '';
   const h = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
@@ -1498,8 +1506,30 @@ export function acceptanceCoversHead({
       reason: `head moved to ${h.slice(0, 12)} but the PR's own added/removed lines are unchanged (contribution ${ac.slice(0, 12)}) — the base moved underneath it, the acceptance still covers this contribution`,
     };
   }
+  // #3184 — A READ MISS IS NOT A FINDING. The two escapes above are fail-CLOSED on an absent live fingerprint,
+  // which is right for the LAND decision and stays exactly as it was: `covers` is false here too, so nothing
+  // unreviewed merges. But the caller renders `reason` as an OBSERVATION and keys a state-destroying re-label
+  // on it, and on this path nothing was observed — the accept recorded a fingerprint, the live side could not
+  // be read, so the two were never compared. "head advanced past the reviewed commit" would state a fact this
+  // call did not check; on WE PR #1445 it was false, the content being byte-identical across seven re-holds.
+  // Report the failed VERIFICATION instead and flag the tier, so a caller can tell unproven from proven.
+  //
+  // GUARDED ON A RECORDED MARKER, which is the distinction #3184 exists to stop the drain collapsing: an accept
+  // with NO usable fingerprint (every pre-#x169fqe accept, or an unparseable marker) has nothing to compare, so
+  // it falls through to the verified verdict below exactly as before. `headReadFailed` cannot promote it —
+  // there was no read to miss. This is why the signal is a caller flag and not `headDiff == null`.
+  if (headReadFailed && (ad || ac)) {
+    return {
+      covers: false,
+      staleVerified: false,
+      reason: `head moved to ${h.slice(0, 12)} from the reviewed commit ${a.slice(0, 12)}, but the live diff `
+        + `could not be read this pass — the recorded reviewed fingerprint (${(ad || ac).slice(0, 12)}) was `
+        + `never compared, so this head is UNVERIFIED, not proven stale`,
+    };
+  }
   return {
     covers: false,
+    staleVerified: true,
     reason: `head advanced to ${h.slice(0, 12)} past the reviewed commit ${a.slice(0, 12)} — the acceptance did not cover the current tree`,
   };
 }
@@ -1649,7 +1679,11 @@ export function readyMergeConflictsWithHold(labels) {
  * @param {Array} observedLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{applyLabel?:(string|null), staleAcceptance?:boolean}} [o] - the park's own writes this operation:
  *   the hold label it is applying (if any), and whether this is a #2409 STALE-ACCEPTANCE re-park — one whose
- *   `review:accepted` is known-stale because the head advanced past the reviewed tree. It does NOT drop that
+ *   `review:accepted` is not being honoured this pass, because the head advanced past the reviewed tree OR
+ *   (#3184) because the live side could not be read to check. Both re-parks set the flag; the #3184 one passes
+ *   `applyLabel: null` when it suppresses the re-hold, so the filter simply leaves an empty effective set and
+ *   nothing is stripped — correct, since that park writes no hold for `ready-to-merge` to conflict with. It
+ *   does NOT drop that
  *   accept, and NO DRAIN PATH does (#x9xqexm — see the `staleAcceptance` paragraph above). Retracting an
  *   acceptance is a REVIEWER action and stays one: `review-set-label.mjs --to=changes` strips it deliberately.
  *   This line said "drops `review:accepted`" until #3053, contradicting its own docblock body six lines up; it
@@ -2075,7 +2109,7 @@ export function decideDurableEscalationRecord({ changed, verified, liveBody, rea
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
-  operatorClearance = null,
+  operatorClearance = null, headReadFailed = false,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -2090,7 +2124,7 @@ export function decideReviewGate({
     // manifest-drop pass, which fires seconds after an accept) no longer invalidates the accept. Absent
     // fingerprints reduce this to the pre-#x169fqe SHA-identity test exactly.
     const fresh = acceptanceCoversHead({
-      acceptedSha, headSha, acceptedDiff, headDiff, acceptedContribution, headContribution,
+      acceptedSha, headSha, acceptedDiff, headDiff, acceptedContribution, headContribution, headReadFailed,
     });
     if (!fresh.covers) {
       // Re-park for a fresh review: review:pending re-arms an agent panel; a gate-self/human-gated PR (fresh
@@ -2124,15 +2158,48 @@ export function decideReviewGate({
       // `review:accepted` unattended in `enforce` mode), so it would hand an agent the gate-self clearance the
       // whole tier exists to withhold. Making the re-hold impossible needs a hold label that is neither
       // operator-only nor agent-clearable, which is a new tier across ~10 consumers, not a change here.
-      const revokesClearance = !!(toHuman && operatorClearance && !hasReviewLabel(labels, REVIEW_LABELS.human));
+      const wouldRevoke = !!(toHuman && operatorClearance && !hasReviewLabel(labels, REVIEW_LABELS.human));
+      // #3184 — SUPPRESSION, the fail-CLOSED twin of #3047. `acceptanceCoversHead` reports `staleVerified:false`
+      // when it had a recorded fingerprint and this pass could not read the live side to compare it. On that
+      // tier the staleness is a GUESS, and the one consequence a guess may not have is destroying a human's
+      // recorded decision: re-imposing `review:human` on a PR the `--to=clear-human` ceremony had cleared makes
+      // another operator ceremony the only way out, and since every rebase moves the SHA it re-fires forever
+      // (WE PR #1445: seven clearances between 22:50 on 2026-08-17 and 01:07 on 2026-08-18, on byte-identical
+      // content). So on `unverified && wouldRevoke` the re-park writes NO label — the cleared state stands.
+      //
+      // WHAT SUPPRESSION IS NOT. `action` stays `park`, byte-identically: the merge is still refused, the
+      // recorded accept still does not land, and `staleAcceptance` still holds — so `applyEscalationRelief`
+      // still refuses to waive this park and the caller still prepends this reason to the durable record. No
+      // agent gains a clearance, and failing OPEN (`covers:true`) — the direction #3047 is filed to close — is
+      // not on this path at all. The only thing suppression removes is a WRITE the gate never earned.
+      //
+      // NARROW ON PURPOSE, three ways. It needs `unverified` (a proven-stale head still re-holds, PR #368
+      // stays shut); it needs `wouldRevoke`, so a PR still CARRYING `review:human` keeps its no-op reconcile
+      // and a PR with no recorded clearance keeps its ordinary `review:pending` park; and it takes the
+      // one-line SUPPRESSION fork rather than a distinct unproven hold tier — that tier is the ~10-consumer
+      // label change #3053 ruled REJECTED, and re-opening it here would be casual.
+      const unverified = fresh.staleVerified === false;
+      const suppressRehold = unverified && wouldRevoke;
+      // Nothing is revoked when nothing is re-imposed, so the #xmnl36p revocation notice must NOT fire here —
+      // it would announce a revocation that did not happen. The park's own reason (below) carries the why, and
+      // reaches the PR body through the #2324 block, which the caller writes off `humanRequired`, not off the
+      // label. `clearance` follows `revokesClearance` as it always did.
+      const revokesClearance = wouldRevoke && !suppressRehold;
       return {
         action: 'park',
-        reason: revokesClearance
-          ? `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review. This REVOKES the `
-            + `review:human clearance recorded by ${operatorClearance.actor} — a re-clear is required`
-          : `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review`,
-        applyLabel: toHuman ? REVIEW_LABELS.human : REVIEW_LABELS.pending,
+        reason: suppressRehold
+          ? `review:accepted could NOT be re-verified this pass — ${fresh.reason}; parking (the merge is still `
+            + `refused) WITHOUT re-imposing review:human, so the clearance recorded by ${operatorClearance.actor} `
+            + `stands — an unproven staleness may not revoke it`
+          : unverified
+            ? `review:accepted could NOT be re-verified this pass — ${fresh.reason}; re-parking for a fresh review`
+            : revokesClearance
+              ? `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review. This REVOKES the `
+                + `review:human clearance recorded by ${operatorClearance.actor} — a re-clear is required`
+              : `review:accepted is STALE — ${fresh.reason}; re-parking for a fresh review`,
+        applyLabel: suppressRehold ? null : (toHuman ? REVIEW_LABELS.human : REVIEW_LABELS.pending),
         staleAcceptance: true,
+        staleVerified: !unverified,
         humanRequired: !!toHuman,
         revokesClearance,
         clearance: revokesClearance ? operatorClearance : null,
