@@ -9,6 +9,10 @@
  *
  * What lives here (the four method pieces epic #2649 names):
  *   • the FINDING CONTRACT — `normalizeFinding` / `normalizeFindings` / `deriveVerdict` + the `VERDICTS` enum.
+ *   • the two ADMISSION gates over that contract, orthogonal and composable in either order:
+ *     `scopeFindingsToCitedFiles` (#3351) withholds on DISPROOF — a citation the run checked and found false, and
+ *     it enforces by default; `admitFindingsByEvidence` (#3312) withholds on ABSENCE — nothing machine-checkable
+ *     to check at all — and it demotes NOTHING until a caller raises `EVIDENCE_FLOOR`. See that constant for why.
  *   • the ROUND LOOP — `NEGOTIATION_ROUND_CAP` + `deriveNegotiationOutcome` (+ `NEGOTIATION_OUTCOMES`).
  *   • the DIVERSITY-SELECTION reduction — `derivePanelVerdict` + `buildPanelFindings` +
  *     `AGGREGATION.DIVERSITY_SELECTION`, over the lens vocabulary (`MANDATE_LENSES` / `MANDATORY_LENSES` /
@@ -55,6 +59,9 @@ import { FENCED_DATA_RULE, fenceUntrusted } from './mandate-fence.mjs';
  * @property {boolean} [introduced] - #2950 direction test (a): did THIS change introduce the problem (vs. pre-existing on untouched material)?
  * @property {boolean} [worseThanBase] - #2950 direction test (b): is the result NET WORSE than the base — not merely less than ideal?
  * @property {boolean} [parallelizable] - #2950 direction test (c): can it be fixed independently, in a parallel lane, without holding this change?
+ * @property {string} [quote] - #3312 verbatim text the finding claims is in the cited file. CONFIRMED against supplied source text by `classifyFindingEvidence`; never taken on trust.
+ * @property {string} [reproCommand] - #3312 a single re-runnable command that exercises the defect. Shape-checked by `isReproCommand`; NOT executed anywhere in this module.
+ * @property {'assertion'|'resolved-citation'|'repro'|'quoted-citation'} [evidenceKind] - #3312 what a machine could actually check about this finding (an `EVIDENCE_KINDS` member). DISPLAY/AUDIT data here; `admitFindingsByEvidence` recomputes it from ground truth and is the only thing that acts on it.
  */
 
 /** The review verdicts (#2325). `needs-human` is the #2285 conflict-of-interest escalation: humanRequired
@@ -415,6 +422,16 @@ export function normalizeFinding(raw) {
   if (raw.citationScope != null && Object.hasOwn(CITATION_SCOPE_ADMITS, String(raw.citationScope))) {
     out.citationScope = String(raw.citationScope);
   }
+  // #3312 — THE EVIDENCE FIELDS. `quote` and `reproCommand` are the juror's raw INPUT to the classifier and are
+  // carried verbatim (trimmed, string-coerced); `evidenceKind` is carried for the same narrow reason
+  // `citationScope` is — `renderPanelComment` re-normalizes before rendering, so a key dropped here never reaches
+  // the posted comment. It is DISPLAY/AUDIT data: `admitFindingsByEvidence` RECOMPUTES it from ground truth and
+  // discards whatever arrived, so a juror writing the field cannot pin its own finding above a floor.
+  if (raw.quote != null && String(raw.quote).trim()) out.quote = String(raw.quote);
+  if (raw.reproCommand != null && String(raw.reproCommand).trim()) out.reproCommand = String(raw.reproCommand).trim();
+  if (raw.evidenceKind != null && Object.hasOwn(EVIDENCE_STRENGTH, String(raw.evidenceKind))) {
+    out.evidenceKind = String(raw.evidenceKind);
+  }
   // THE ROUTING DECIDES; A SELF-DECLARED WORD MAY ONLY EVER MAKE A FINDING *MORE* BLOCKING (PR #1082 review,
   // blocker 1). A juror that answered the three questions has already said everything that decides this, so its
   // own `disposition` word cannot override them — that is self-certification, the anchoring problem the
@@ -523,11 +540,34 @@ export function citedPathCandidates(file) {
 }
 
 /**
- * #x6t2z6h — classify ONE finding's citation against a ground-truth changed-file list. Pure.
+ * #x6t2z6h — WHICH ground-truth path a cited path matches, or `''` for none. Pure, and the ONE matcher both the
+ * citation gate and the #3312 evidence classifier read through, so "does this citation resolve" cannot answer one
+ * way for the scope marker and another for the source lookup.
  *
  * A candidate matches a scope path when it EQUALS it, or when either ends with `/` + the other — so a juror that
- * wrote only the basename (`review-pr.mjs`), or an absolute path with a checkout prefix, is IMPRECISE and admitted,
- * not fabricated. Only a path that matches nothing in the set under any candidate form is `unverifiable`.
+ * wrote only the basename (`review-pr.mjs`), or an absolute path with a checkout prefix, is IMPRECISE and matched,
+ * not fabricated.
+ *
+ * @param {string} cited - the path as the juror wrote it.
+ * @param {string[]} paths - already-trimmed ground-truth paths.
+ * @returns {string} the matched ground-truth path, or `''`.
+ */
+function matchCitedPath(cited, paths) {
+  for (const candidate of citedPathCandidates(cited)) {
+    for (const path of paths) {
+      if (path === candidate) return path;
+      if (path.endsWith(`/${candidate}`) || candidate.endsWith(`/${path}`)) return path;
+    }
+  }
+  return '';
+}
+
+/**
+ * #x6t2z6h — classify ONE finding's citation against a ground-truth changed-file list. Pure.
+ *
+ * Matching goes through `matchCitedPath`: an imprecise citation (a bare basename, an absolute path with a checkout
+ * prefix) is admitted, not fabricated. Only a path that matches nothing in the set under any candidate form is
+ * `unverifiable`.
  *
  * @param {{file?: string}|null|undefined} finding
  * @param {{scope?: string[]}} [o] - the ground-truth changed-file list. An EMPTY list is not ground truth; every
@@ -539,13 +579,7 @@ export function findingCitationScope(finding, { scope = [] } = {}) {
   if (!cited) return CITATION_SCOPES.UNCITED;
   const paths = (Array.isArray(scope) ? scope : []).filter(Boolean).map((p) => String(p).trim()).filter(Boolean);
   if (!paths.length) return CITATION_SCOPES.UNCITED;
-  for (const candidate of citedPathCandidates(cited)) {
-    for (const path of paths) {
-      if (path === candidate) return CITATION_SCOPES.IN_SCOPE;
-      if (path.endsWith(`/${candidate}`) || candidate.endsWith(`/${path}`)) return CITATION_SCOPES.IN_SCOPE;
-    }
-  }
-  return CITATION_SCOPES.UNVERIFIABLE;
+  return matchCitedPath(cited, paths) ? CITATION_SCOPES.IN_SCOPE : CITATION_SCOPES.UNVERIFIABLE;
 }
 
 /**
@@ -587,6 +621,251 @@ export function scopeFindingsToCitedFiles(findings, { scope = [] } = {}) {
     admitted: marked.filter((f) => admitsCitation(f.citationScope)),
     unverifiable: marked.filter((f) => !admitsCitation(f.citationScope)),
     enforced: true,
+  };
+}
+
+/**
+ * EVIDENCE KIND (#3312) — WHAT A MACHINE COULD ACTUALLY CHECK ABOUT THIS FINDING, ranked least to most.
+ *
+ * The ladder is defined by how much of the claim THIS PURE FUNCTION confirmed, not by how convincing the finding
+ * reads. That distinction is the whole point: a juror's prose confidence is self-rated and the epic (#3318) records
+ * it as a poor predictor, so nothing here reads `verdict`, `severity` or `impactIfUnfixed` to place a rung.
+ *
+ *   • `assertion`          — nothing checkable. Prose, possibly entirely correct. This is the DEFAULT and the
+ *                            majority rung; see `EVIDENCE_FLOOR` for why it is not treated as worthless.
+ *   • `resolved-citation`  — the finding names a file and that file IS in the subject's changed set. ONE fact is
+ *                            confirmed: the location exists. It says NOTHING about whether the claim is true, and
+ *                            calling this "evidence" at all is generous — it is the weakest rung above prose.
+ *   • `repro`              — the finding carries a single-line, command-shaped `reproCommand`. NOT EXECUTED HERE
+ *                            (this module is pure and holds no runner), so this rung means "falsifiable on demand
+ *                            by anyone", never "observed to fail". A well-formed command that does not reproduce
+ *                            anything sits on this rung.
+ *   • `quoted-citation`    — a resolved citation PLUS a `quote` that literally occurs in the supplied source text
+ *                            for the matched file. The strongest thing a pure function can confirm — and it
+ *                            confirms only that THE SOURCE SAYS THE QUOTED WORDS, never that those words imply the
+ *                            defect. A juror can quote a real line and draw a false conclusion from it, and this
+ *                            rung will not notice.
+ *
+ * WHAT THIS IS DELIBERATELY NOT: a red-before/green-after test run. That is the card's strongest evidence kind and
+ * it is out of reach here for the reason epic #3318 records against this element — `test:unit` is ~693s against a
+ * 20-minute juror kill, so a juror cannot run the suite inside its own budget. Do not read `repro` as covering it.
+ */
+export const EVIDENCE_KINDS = Object.freeze({
+  ASSERTION: 'assertion',
+  RESOLVED_CITATION: 'resolved-citation',
+  REPRO: 'repro',
+  QUOTED_CITATION: 'quoted-citation',
+});
+
+/** The evidence ordering, weakest first. Same fail-loud contract as `IMPACT_STRICTNESS`: total over
+ *  `EVIDENCE_KINDS`, asserted at module load, and NULL-PROTOTYPE (`frozenLookup`) because the key can arrive as
+ *  free-form model JSON — on a normal literal `TABLE['constructor']` would validate as a real rung and then compare
+ *  as `NaN`, losing every `>=` comparison in both directions.
+ *  @evidence-total — every `EVIDENCE_KINDS` member must be a key. */
+export const EVIDENCE_STRENGTH = frozenLookup({
+  [EVIDENCE_KINDS.ASSERTION]: 0,
+  [EVIDENCE_KINDS.RESOLVED_CITATION]: 1,
+  [EVIDENCE_KINDS.REPRO]: 2,
+  [EVIDENCE_KINDS.QUOTED_CITATION]: 3,
+});
+
+/** WHAT EACH RUNG MEANS, as DATA — same single-sourcing discipline as `IMPACT_GLOSS` (#xdompzx finding 6): a prose
+ *  copy elsewhere drifts, so every doc and any future mandate text renders from here.
+ *  @evidence-total — every `EVIDENCE_KINDS` member must be a key. */
+export const EVIDENCE_GLOSS = frozenLookup({
+  [EVIDENCE_KINDS.ASSERTION]: 'prose only — nothing here is machine-checkable',
+  [EVIDENCE_KINDS.RESOLVED_CITATION]: 'names a file that is really in the subject; the claim itself is unchecked',
+  [EVIDENCE_KINDS.REPRO]: 'carries a single-line, command-shaped repro — falsifiable on demand, NOT run here',
+  [EVIDENCE_KINDS.QUOTED_CITATION]: 'quotes text that really appears in the cited source; the inference from it is still unchecked',
+});
+
+// ENFORCE TOTALITY at module load over both structures total over `EVIDENCE_KINDS`, exactly as `IMPACT_LEVELS`
+// does above. A rung added without a rank would compare as `undefined` at every floor test.
+for (const kind of Object.values(EVIDENCE_KINDS)) {
+  if (!Object.hasOwn(EVIDENCE_STRENGTH, kind)) {
+    throw new Error(`EVIDENCE_STRENGTH is not total over EVIDENCE_KINDS: kind "${kind}" has no rank — add it (the table must rank every EVIDENCE_KINDS member).`);
+  }
+  if (!Object.hasOwn(EVIDENCE_GLOSS, kind)) {
+    throw new Error(`EVIDENCE_GLOSS is not total over EVIDENCE_KINDS: kind "${kind}" has no gloss — add it (every doc surface renders the definition from this map).`);
+  }
+}
+
+/** Rank an evidence kind. THROWS on an unranked kind rather than yielding `undefined` — the fail-loud backstop for
+ *  every floor comparison, shared with `impactStrictness`/`verdictStrictness` through `rankIn`.
+ *  @param {string} kind
+ *  @returns {number} */
+export function evidenceStrength(kind) {
+  return rankIn(EVIDENCE_STRENGTH, kind, 'evidenceStrength: no rank for evidence kind');
+}
+
+/**
+ * THE DEFAULT FLOOR IS THE BOTTOM RUNG, AND THAT IS THE RULING — NOT AN OVERSIGHT (#3312).
+ *
+ * The card asks that "assertion-only findings advise and never block". Shipped as the DEFAULT, that is the DROP
+ * direction, and this repo has already ruled against the drop direction twice on the same seam:
+ *
+ *   1. #3351 (`scopeFindingsToCitedFiles`, above) chose DOWNGRADE-AND-DISCLOSE over dropping a finding whose cited
+ *      path is *demonstrably false*, on the reasoning that an escaped defect costs more than a wasted round.
+ *   2. `admitsCitation` fails OPEN on an unrecognised scope word for the same stated reason.
+ *
+ * Those two withhold on DISPROOF — a fact the run checked and found false. An evidence floor withholds on ABSENCE —
+ * the run had nothing to check. Absence is a far weaker basis, and the parent programme's own record says so: on
+ * PR #1569 the `claim-accuracy` juror found a real test defect TWO ROUNDS before anyone else and rated it
+ * `PLAUSIBLE`/`cosmetic`, saying "I did not execute this in a live clone". Under a default-on assertion floor that
+ * real, early, correct finding would have been demoted to advisory. Epic #3318 draws the opposite lesson from it in
+ * as many words: what belongs in the brief is the mutation probe, "not a ranking of lenses".
+ *
+ * So the floor SHIPS AT `assertion`, where it demotes nothing and every finding blocks exactly as it does on
+ * `main`. This is a strict relaxation, in the same sense `earnsRound`'s `disposition` is: a dial the caller turns
+ * on deliberately, never a verdict change nobody opted into. Raising it is a one-line change here — but it should
+ * be made on MEASURED per-category precision (front A of #3318), not on the intuition that prose is weak.
+ */
+export const EVIDENCE_FLOOR = EVIDENCE_KINDS.ASSERTION;
+
+/**
+ * The impact level at which a finding is EXEMPT from the evidence floor however high the caller raises it (#3312).
+ *
+ * Set to `unrecoverable`: "data or work is destroyed with no way back". Yes, `impactIfUnfixed` is self-rated, and
+ * the card is right that self-rating is a poor gate — but this uses it in the ONE direction `normalizeFinding`
+ * already honours a self-declared word (see the `disposition` block: a self-declaration may only ever make a finding
+ * MORE blocking, never less). A juror over-claiming `unrecoverable` costs a round. Under-claiming it costs the
+ * defect, and this floor is the only thing in the file that could silence it.
+ */
+export const EVIDENCE_EXEMPT_IMPACT_BAR = IMPACT_LEVELS.UNRECOVERABLE;
+
+/** The shortest `quote` that can confirm a rung, in non-whitespace characters. A 3-character quote occurs in almost
+ *  any source file by accident, which would make `quoted-citation` free to claim. 12 is a judgement call, not a
+ *  measured threshold — say so rather than implying it was tuned. */
+const MIN_CONFIRMABLE_QUOTE_CHARS = 12;
+
+/** Collapse every whitespace run to one space and trim, so a quote that survived a re-wrap or an indent change still
+ *  matches the source. Applied to BOTH sides. */
+const flattenWhitespace = (s) => String(s).replace(/\s+/g, ' ').trim();
+
+/**
+ * Does this string LOOK like a single re-runnable command? Pure, and deliberately shallow.
+ *
+ * WHAT IT SCANS, exactly — do not describe it as more (#3362): the value must be a string; non-empty after trim;
+ * hold no newline; be at most 500 characters; NOT end in a sentence terminator (`.`, `!`, `?`, `:`, `;`); and its
+ * FIRST whitespace-delimited token must match `/^[A-Za-z_./][\w.\-/]*$/` — a bare command word or a path to one.
+ *
+ * WHAT IT DOES NOT DO, and the gap is real: it does not run the command, resolve the binary, check the flags, or
+ * verify that it reproduces anything. `npx vitest run nothing-at-all` passes. Nor is it a PROSE DETECTOR — the
+ * terminator rule catches an English sentence written as one, and nothing catches an unpunctuated fragment like
+ * `Run the suite and watch it fail`, whose first token is command-shaped. It separates "something command-shaped
+ * was attached" from "a paragraph was attached", and that is the whole claim.
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isReproCommand(value) {
+  if (typeof value !== 'string') return false;
+  const t = value.trim();
+  if (!t || t.length > 500 || t.includes('\n')) return false;
+  if (/[.!?:;]$/.test(t) && /\s/.test(t)) return false; // a sentence, not a command (a single dotted token is fine)
+  const [first] = t.split(/\s+/);
+  return /^[A-Za-z_./][\w.\-/]*$/.test(first);
+}
+
+/**
+ * #3312 — classify ONE finding's evidence against whatever ground truth the caller supplied. Pure.
+ *
+ * MONOTONE IN THE GROUND TRUTH, deliberately, and it is the safety argument here exactly as
+ * `citedPathCandidates`'s "candidates, never a canonical form" is there: supplying MORE ground truth can only ever
+ * raise a finding's rung, never lower it. So a caller that forgets to pass `sources` understates evidence — and
+ * because a lower rung is the one a floor demotes, `admitFindingsByEvidence` refuses to enforce a floor whose
+ * ground truth is missing rather than quietly demoting the world.
+ *
+ * @param {{file?: string, quote?: string, reproCommand?: string}|null|undefined} finding
+ * @param {{scope?: string[], sources?: Object<string, string>}} [o] - `scope` is the subject's changed-file list;
+ *   `sources` maps a path in that list to its text. Both optional; each one absent simply caps the rung reachable.
+ * @returns {'assertion'|'resolved-citation'|'repro'|'quoted-citation'}
+ */
+export function classifyFindingEvidence(finding, { scope = [], sources = {} } = {}) {
+  if (!finding || typeof finding !== 'object') return EVIDENCE_KINDS.ASSERTION;
+  const paths = (Array.isArray(scope) ? scope : []).filter(Boolean).map((p) => String(p).trim()).filter(Boolean);
+  const cited = finding.file != null ? String(finding.file).trim() : '';
+  const matched = cited && paths.length ? matchCitedPath(cited, paths) : '';
+  // TOP RUNG FIRST. A resolved citation whose quote is really in that file's text.
+  const quote = finding.quote != null ? String(finding.quote) : '';
+  if (matched && flattenWhitespace(quote).replace(/\s/g, '').length >= MIN_CONFIRMABLE_QUOTE_CHARS) {
+    // The source is looked up by the MATCHED ground-truth path first, then by any candidate form of what the juror
+    // wrote — so a `sources` map keyed the way the juror cited still resolves.
+    const source = Object.hasOwn(sources ?? {}, matched)
+      ? sources[matched]
+      : citedPathCandidates(cited).map((c) => (Object.hasOwn(sources ?? {}, c) ? sources[c] : undefined)).find((v) => v != null);
+    if (typeof source === 'string' && flattenWhitespace(source).includes(flattenWhitespace(quote))) {
+      return EVIDENCE_KINDS.QUOTED_CITATION;
+    }
+  }
+  if (isReproCommand(finding.reproCommand)) return EVIDENCE_KINDS.REPRO;
+  if (matched) return EVIDENCE_KINDS.RESOLVED_CITATION;
+  return EVIDENCE_KINDS.ASSERTION;
+}
+
+/**
+ * #3312 — THE EVIDENCE FLOOR. Classify every finding, mark it, and split off the round-earning ones whose evidence
+ * sits BELOW the caller's floor. Pure.
+ *
+ * SAME RULING AS #3351, APPLIED TO A WEAKER BASIS: publish everything, demote some. `findings` — the PUBLISHED
+ * list — keeps every finding, each carrying its `evidenceKind` so the demotion is disclosed rather than silent.
+ * `admitted` is what a verdict reduces. `advisory` is what was withheld, kept so a caller can name the count in the
+ * confirm question the way `unverifiableCitations` already is.
+ *
+ * IT DEMOTES NOTHING UNLESS ASKED. `floor` defaults to `EVIDENCE_FLOOR` (`assertion`, the bottom rung) — read that
+ * constant's doc for why the card's "assertion-only never blocks" is NOT the shipped default. Every other
+ * not-enforced case is the same fail-open instinct as `admitsCitation`'s:
+ *
+ *   - an unrecognised or unrankable `floor` → not enforced (never "demote everything on a typo");
+ *   - a floor above `assertion` with an EMPTY `scope` → not enforced. Without the changed-file list every citation
+ *     classifies `assertion`, so enforcing there demotes every legitimate finding at once — the drop direction
+ *     arrived at by omission, which is precisely the trap `scopeFindingsToCitedFiles` guards with `enforced: false`;
+ *   - a floor of `quoted-citation` with no `sources` → not enforced, for the same reason one rung up.
+ *
+ * TWO MORE THINGS ARE NEVER DEMOTED, whatever the floor: a finding at or above `EVIDENCE_EXEMPT_IMPACT_BAR`, and a
+ * finding that does not earn a round anyway (a `carve-out`/`nit` is already non-blocking, so listing it as demoted
+ * would inflate the withheld count with findings the floor did not touch).
+ *
+ * ORTHOGONAL TO THE CITATION GATE, and the two compose in either order: that gate withholds on DISPROOF (a checked
+ * fact came back false), this one on ABSENCE (there was nothing to check). Do not fold them together — their
+ * defaults differ for that exact reason.
+ *
+ * NOT FORGEABLE. `evidenceKind` is RECOMPUTED here and any inbound value discarded, so a juror cannot pin its own
+ * finding above the floor.
+ *
+ * @param {Array<object>} findings - raw or normalized; normalized here either way.
+ * @param {{scope?: string[], sources?: Object<string, string>, floor?: string}} [o]
+ * @returns {{findings: Finding[], admitted: Finding[], advisory: Finding[], enforced: boolean, floor: string, reason: string}}
+ */
+export function admitFindingsByEvidence(findings, { scope = [], sources = {}, floor = EVIDENCE_FLOOR } = {}) {
+  const paths = (Array.isArray(scope) ? scope : []).filter(Boolean).map((p) => String(p).trim()).filter(Boolean);
+  const sourceMap = sources && typeof sources === 'object' ? sources : {};
+  // Strip any inbound `evidenceKind` UNCONDITIONALLY, enforced or not — a field only this function may write.
+  const list = normalizeFindings(findings).map(({ evidenceKind: _inbound, ...rest }) => rest);
+  const marked = list.map((f) => ({ ...f, evidenceKind: classifyFindingEvidence(f, { scope: paths, sources: sourceMap }) }));
+  const floorKey = floor == null ? '' : String(floor);
+  const notEnforced = (reason) => ({ findings: marked, admitted: marked, advisory: [], enforced: false, floor: floorKey, reason });
+
+  if (!Object.hasOwn(EVIDENCE_STRENGTH, floorKey)) return notEnforced(`unrecognised evidence floor "${floorKey}" — nothing demoted`);
+  const bar = evidenceStrength(floorKey);
+  if (bar <= 0) return notEnforced('the floor is the bottom rung — every finding clears it');
+  if (!paths.length) return notEnforced('no changed-file list, so no citation can resolve — enforcing would demote every finding');
+  if (bar >= evidenceStrength(EVIDENCE_KINDS.QUOTED_CITATION) && !Object.keys(sourceMap).length) {
+    return notEnforced('the floor requires quoted source text but no `sources` were supplied — enforcing would demote every finding');
+  }
+
+  const exemptBar = impactStrictness(EVIDENCE_EXEMPT_IMPACT_BAR);
+  const demoted = (f) => {
+    if (!earnsRound(f)) return false; // already non-blocking; the floor is not what stops it
+    if (f.impactIfUnfixed && impactStrictness(f.impactIfUnfixed) >= exemptBar) return false;
+    return evidenceStrength(f.evidenceKind) < bar;
+  };
+  return {
+    findings: marked,
+    admitted: marked.filter((f) => !demoted(f)),
+    advisory: marked.filter(demoted),
+    enforced: true,
+    floor: floorKey,
+    reason: '',
   };
 }
 

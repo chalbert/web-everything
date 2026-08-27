@@ -57,7 +57,16 @@ import {
   DISPOSITIONS,
   earnsRound,
   deriveFindingDisposition,
-  deriveLoopOutcome
+  deriveLoopOutcome,
+  EVIDENCE_KINDS,
+  EVIDENCE_STRENGTH,
+  EVIDENCE_GLOSS,
+  EVIDENCE_FLOOR,
+  EVIDENCE_EXEMPT_IMPACT_BAR,
+  evidenceStrength,
+  isReproCommand,
+  classifyFindingEvidence,
+  admitFindingsByEvidence
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -1242,5 +1251,278 @@ describe('deriveLoopOutcome', () => {
     // round on a typo — louder than looping forever, but wrong in the direction that destroys work.
     expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 3, cap: 0 }).cap).toBe(5);
     expect(deriveLoopOutcome({ verdict: VERDICTS.CHANGES, round: 3, cap: NaN }).outcome).toBe('in-progress');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #3312 — FINDINGS ADMITTED BY EVIDENCE KIND. The ladder, the classifier, and the floor that ships OFF.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The one file every fixture below cites, and its text. */
+const SUBJECT_SCOPE = ['scripts/lib/jury-core.mjs', 'scripts/operations/review-pr.mjs'];
+const SUBJECT_SOURCES = {
+  'scripts/lib/jury-core.mjs': 'export function admitsCitation(scope) {\n  if (scope === undefined || scope === null) return true;\n}\n',
+};
+
+describe('#3312 — the EVIDENCE_KINDS ladder is a total, prototype-proof rank table', () => {
+  it('names exactly the four rungs, weakest first', () => {
+    expect(Object.values(EVIDENCE_KINDS)).toEqual(['assertion', 'resolved-citation', 'repro', 'quoted-citation']);
+    expect(evidenceStrength('assertion')).toBe(0);
+    expect(evidenceStrength('quoted-citation')).toBe(3);
+    expect(evidenceStrength('resolved-citation')).toBeLessThan(evidenceStrength('repro'));
+  });
+
+  it('the rank and gloss tables are TOTAL over the enum', () => {
+    for (const kind of Object.values(EVIDENCE_KINDS)) {
+      expect(Object.hasOwn(EVIDENCE_STRENGTH, kind), `rank for ${kind}`).toBe(true);
+      expect(String(EVIDENCE_GLOSS[kind]).length, `gloss for ${kind}`).toBeGreaterThan(10);
+    }
+  });
+
+  it('an inherited key is not a rung — the tables are null-prototype (#xdompzx blocker 2, same hole)', () => {
+    for (const key of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(EVIDENCE_STRENGTH[key], key).toBeUndefined();
+      expect(EVIDENCE_GLOSS[key], key).toBeUndefined();
+    }
+    expect(() => evidenceStrength('constructor')).toThrow();
+  });
+});
+
+describe('#3312 — isReproCommand separates an attached COMMAND from an attached PARAGRAPH', () => {
+  it('accepts a bare command word and a path to one', () => {
+    expect(isReproCommand('npx vitest run jury-core -t "#3312"')).toBe(true);
+    expect(isReproCommand('./scripts/check-standards.mjs --fix')).toBe(true);
+    expect(isReproCommand('node scripts/lib/jury-core.mjs')).toBe(true);
+  });
+
+  it('rejects a written sentence, a multi-line block, an empty string, an over-long value and a non-string', () => {
+    expect(isReproCommand('Run the suite and you will see it fail.')).toBe(false); // ends in a sentence terminator
+    expect(isReproCommand('npm test\nnpm run build')).toBe(false);
+    expect(isReproCommand('   ')).toBe(false);
+    expect(isReproCommand(null)).toBe(false);
+    expect(isReproCommand(42)).toBe(false);
+    expect(isReproCommand('x'.repeat(501))).toBe(false);
+  });
+
+  // STATE THE LIMIT RATHER THAN IMPLYING MORE (#3362). Two gaps, asserted so nobody reads this as more than it is.
+  it('does NOT claim the command works — a command that reproduces nothing still passes the shape check', () => {
+    expect(isReproCommand('npx vitest run this-suite-does-not-exist')).toBe(true);
+  });
+
+  it('is NOT a prose detector — an unpunctuated English fragment still passes, and that is a known gap', () => {
+    expect(isReproCommand('Run the suite and watch it fail')).toBe(true);
+  });
+});
+
+describe('#3312 — classifyFindingEvidence ranks by what a MACHINE confirmed, not by how the finding reads', () => {
+  const ctx = { scope: SUBJECT_SCOPE, sources: SUBJECT_SOURCES };
+
+  it('prose with no file, no quote and no command is an assertion', () => {
+    expect(classifyFindingEvidence({ summary: 'this drops the auth check' }, ctx)).toBe(EVIDENCE_KINDS.ASSERTION);
+  });
+
+  it('a file that is really in the subject buys the WEAKEST rung above prose, and nothing more', () => {
+    expect(classifyFindingEvidence({ file: 'scripts/lib/jury-core.mjs' }, ctx)).toBe(EVIDENCE_KINDS.RESOLVED_CITATION);
+    // …and an imprecise citation (a bare basename) resolves the same way `findingCitationScope` resolves it.
+    expect(classifyFindingEvidence({ file: 'review-pr.mjs' }, ctx)).toBe(EVIDENCE_KINDS.RESOLVED_CITATION);
+    // A `we:`-prefixed markdown locus resolves too.
+    expect(classifyFindingEvidence({ file: 'we:scripts/lib/jury-core.mjs:480' }, ctx)).toBe(EVIDENCE_KINDS.RESOLVED_CITATION);
+  });
+
+  it('a citation to a file NOT in the subject buys nothing — it is an assertion, not a rung', () => {
+    expect(classifyFindingEvidence({ file: 'scripts/lib/invented.mjs' }, ctx)).toBe(EVIDENCE_KINDS.ASSERTION);
+  });
+
+  it('an embedded re-runnable command outranks a bare resolved citation', () => {
+    expect(classifyFindingEvidence({ file: 'scripts/lib/jury-core.mjs', reproCommand: 'npx vitest run jury-core' }, ctx))
+      .toBe(EVIDENCE_KINDS.REPRO);
+    // …and stands on its own with no citation at all.
+    expect(classifyFindingEvidence({ reproCommand: 'npm run check:standards' }, ctx)).toBe(EVIDENCE_KINDS.REPRO);
+  });
+
+  // THE LOAD-BEARING ONE. "The citation resolves" is much weaker than "the source says what the finding claims",
+  // and only the second reaches the top rung.
+  it('the TOP rung needs the source text to really contain the quote', () => {
+    expect(classifyFindingEvidence(
+      { file: 'scripts/lib/jury-core.mjs', quote: 'export function admitsCitation(scope) {' }, ctx,
+    )).toBe(EVIDENCE_KINDS.QUOTED_CITATION);
+  });
+
+  it('a FABRICATED quote falls back to the resolved-citation rung — a real file cannot launder invented text', () => {
+    expect(classifyFindingEvidence(
+      { file: 'scripts/lib/jury-core.mjs', quote: 'export function admitsNothingEverAtAll(scope) {' }, ctx,
+    )).toBe(EVIDENCE_KINDS.RESOLVED_CITATION);
+  });
+
+  it('a quote that survived a re-wrap or an indent change still matches (whitespace is flattened on BOTH sides)', () => {
+    expect(classifyFindingEvidence(
+      { file: 'scripts/lib/jury-core.mjs', quote: '  if (scope === undefined\n     || scope === null) return true;  ' }, ctx,
+    )).toBe(EVIDENCE_KINDS.QUOTED_CITATION);
+  });
+
+  it('a quote too short to be distinctive does not buy the top rung', () => {
+    expect(classifyFindingEvidence({ file: 'scripts/lib/jury-core.mjs', quote: 'scope' }, ctx))
+      .toBe(EVIDENCE_KINDS.RESOLVED_CITATION);
+  });
+
+  it('MONOTONE IN GROUND TRUTH — supplying more can only ever RAISE a rung, never lower it', () => {
+    const f = { file: 'scripts/lib/jury-core.mjs', quote: 'export function admitsCitation(scope) {' };
+    expect(evidenceStrength(classifyFindingEvidence(f, {}))).toBeLessThanOrEqual(
+      evidenceStrength(classifyFindingEvidence(f, { scope: SUBJECT_SCOPE })));
+    expect(evidenceStrength(classifyFindingEvidence(f, { scope: SUBJECT_SCOPE }))).toBeLessThanOrEqual(
+      evidenceStrength(classifyFindingEvidence(f, ctx)));
+  });
+
+  it('never throws on junk', () => {
+    expect(classifyFindingEvidence(null)).toBe(EVIDENCE_KINDS.ASSERTION);
+    expect(classifyFindingEvidence('nope', ctx)).toBe(EVIDENCE_KINDS.ASSERTION);
+    expect(classifyFindingEvidence({ file: 7, quote: {}, reproCommand: [] }, ctx)).toBe(EVIDENCE_KINDS.ASSERTION);
+  });
+});
+
+describe('#3312 — the floor SHIPS OFF: the default demotes nothing, reconciling with #3351 and admitsCitation', () => {
+  /** An assertion-only blocker: real, prose-only, no command attached. The exact finding the card would silence. */
+  const PROSE_BLOCKER = {
+    summary: 'the retry path drops the idempotency key, so a replayed request double-charges',
+    introduced: true, worseThanBase: true, parallelizable: false,
+  };
+
+  it('the shipped default floor is the BOTTOM rung', () => {
+    expect(EVIDENCE_FLOOR).toBe(EVIDENCE_KINDS.ASSERTION);
+    expect(evidenceStrength(EVIDENCE_FLOOR)).toBe(0);
+  });
+
+  // THE RECONCILIATION, ASSERTED. #3351 chose downgrade-and-disclose over dropping a finding whose citation is
+  // DISPROVED, and `admitsCitation` fails open on an unknown word for the same reason. Withholding on ABSENCE of
+  // evidence is a weaker basis than either, so by default it withholds nothing at all.
+  it('by default an assertion-only blocker STILL BLOCKS — byte-identical to main', () => {
+    const out = admitFindingsByEvidence([PROSE_BLOCKER], { scope: SUBJECT_SCOPE, sources: SUBJECT_SOURCES });
+    expect(out.enforced).toBe(false);
+    expect(out.advisory).toEqual([]);
+    expect(out.admitted).toHaveLength(1);
+    expect(deriveVerdict({ findings: out.admitted })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('the classification is published even when nothing is demoted — disclose always, demote only if asked', () => {
+    const out = admitFindingsByEvidence([PROSE_BLOCKER], { scope: SUBJECT_SCOPE });
+    expect(out.findings[0].evidenceKind).toBe(EVIDENCE_KINDS.ASSERTION);
+    expect(out.reason).toMatch(/bottom rung/);
+  });
+});
+
+describe('#3312 — with the floor RAISED, weak evidence advises and strong evidence still blocks', () => {
+  const PROSE_BLOCKER = {
+    summary: 'the retry path drops the idempotency key, so a replayed request double-charges',
+    introduced: true, worseThanBase: true, parallelizable: false,
+  };
+  const QUOTED_BLOCKER = {
+    summary: 'admitsCitation returns true on an unknown scope word',
+    file: 'scripts/lib/jury-core.mjs',
+    quote: 'if (scope === undefined || scope === null) return true;',
+    introduced: true, worseThanBase: true, parallelizable: false,
+  };
+  const RAISED = { scope: SUBJECT_SCOPE, sources: SUBJECT_SOURCES, floor: EVIDENCE_KINDS.RESOLVED_CITATION };
+
+  it('demotes the assertion-only blocker to advisory and keeps the well-evidenced one blocking', () => {
+    const out = admitFindingsByEvidence([PROSE_BLOCKER, QUOTED_BLOCKER], RAISED);
+    expect(out.enforced).toBe(true);
+    expect(out.advisory.map((f) => f.summary)).toEqual([PROSE_BLOCKER.summary]);
+    expect(out.admitted.map((f) => f.summary)).toEqual([QUOTED_BLOCKER.summary]);
+    // The VERDICT is what changes, and only over `admitted`.
+    expect(deriveVerdict({ findings: out.admitted })).toBe(VERDICTS.CHANGES);
+    expect(deriveVerdict({ findings: [PROSE_BLOCKER] })).toBe(VERDICTS.CHANGES);
+    expect(deriveVerdict({ findings: admitFindingsByEvidence([PROSE_BLOCKER], RAISED).admitted })).toBe(VERDICTS.ACCEPT);
+  });
+
+  // NOT DROP — the #3351 ruling, inherited verbatim. The demoted finding is still PUBLISHED, marked, and countable.
+  it('a demoted finding is never dropped — it is published, marked, and counted', () => {
+    const out = admitFindingsByEvidence([PROSE_BLOCKER, QUOTED_BLOCKER], RAISED);
+    expect(out.findings).toHaveLength(2);
+    expect(out.findings.map((f) => f.evidenceKind)).toEqual([EVIDENCE_KINDS.ASSERTION, EVIDENCE_KINDS.QUOTED_CITATION]);
+    expect(out.advisory).toHaveLength(1);
+  });
+
+  it('a repro command alone clears a resolved-citation floor — evidence, not a file name, is what is asked for', () => {
+    const withRepro = { ...PROSE_BLOCKER, reproCommand: 'npx vitest run jury-core -t "#3312"' };
+    expect(admitFindingsByEvidence([withRepro], RAISED).advisory).toEqual([]);
+  });
+
+  it('a floor at the TOP rung demands the quote, not merely the file', () => {
+    const cited = { ...PROSE_BLOCKER, file: 'scripts/lib/jury-core.mjs' };
+    const out = admitFindingsByEvidence([cited, QUOTED_BLOCKER], { ...RAISED, floor: EVIDENCE_KINDS.QUOTED_CITATION });
+    expect(out.advisory.map((f) => f.summary)).toEqual([cited.summary]);
+    expect(out.admitted.map((f) => f.summary)).toEqual([QUOTED_BLOCKER.summary]);
+  });
+
+  // THE FALSE-NEGATIVE BRAKE. A juror that did not think to attach a command, on a defect that destroys work with
+  // no way back, is exactly what must not be silenced. Self-declaration in the MORE-blocking direction is honoured
+  // here for the same reason `normalizeFinding` honours a self-declared `blocker`.
+  it('an `unrecoverable` finding is EXEMPT from the floor however high it is raised', () => {
+    expect(EVIDENCE_EXEMPT_IMPACT_BAR).toBe(IMPACT_LEVELS.UNRECOVERABLE);
+    const grave = { ...PROSE_BLOCKER, impactIfUnfixed: IMPACT_LEVELS.UNRECOVERABLE };
+    const out = admitFindingsByEvidence([grave], { ...RAISED, floor: EVIDENCE_KINDS.QUOTED_CITATION });
+    expect(out.advisory).toEqual([]);
+    expect(deriveVerdict({ findings: out.admitted })).toBe(VERDICTS.CHANGES);
+    // …and `broken`, one rung below the bar, is NOT exempt. State the boundary rather than implying a wider one.
+    const broken = { ...PROSE_BLOCKER, impactIfUnfixed: IMPACT_LEVELS.BROKEN };
+    expect(admitFindingsByEvidence([broken], RAISED).advisory).toHaveLength(1);
+  });
+
+  it('a finding that never earned a round is not counted as demoted — the withheld count stays honest', () => {
+    const carveOut = { summary: 'a pre-existing typo', introduced: false, worseThanBase: false, parallelizable: true };
+    const out = admitFindingsByEvidence([carveOut], RAISED);
+    expect(out.advisory).toEqual([]);
+    expect(out.admitted).toHaveLength(1);
+  });
+});
+
+describe('#3312 — the floor REFUSES to enforce without the ground truth it needs (fail open, like admitsCitation)', () => {
+  const F = { summary: 'a real defect', introduced: true, worseThanBase: true, parallelizable: false };
+
+  it('no changed-file list → not enforced, nothing demoted', () => {
+    const out = admitFindingsByEvidence([F], { floor: EVIDENCE_KINDS.RESOLVED_CITATION });
+    expect(out.enforced).toBe(false);
+    expect(out.advisory).toEqual([]);
+    expect(out.reason).toMatch(/changed-file list/);
+  });
+
+  it('a top-rung floor with no `sources` → not enforced, nothing demoted', () => {
+    const out = admitFindingsByEvidence([F], { scope: SUBJECT_SCOPE, floor: EVIDENCE_KINDS.QUOTED_CITATION });
+    expect(out.enforced).toBe(false);
+    expect(out.reason).toMatch(/sources/);
+  });
+
+  it('an unrecognised floor demotes nothing — a typo must never silence a review', () => {
+    for (const floor of ['high', '', null, undefined, 'constructor', '__proto__']) {
+      const out = admitFindingsByEvidence([F], { scope: SUBJECT_SCOPE, sources: SUBJECT_SOURCES, floor });
+      // `undefined` takes the default (`assertion`); everything else is unrecognised. Both demote nothing.
+      expect(out.enforced, String(floor)).toBe(false);
+      expect(out.advisory, String(floor)).toEqual([]);
+    }
+  });
+});
+
+describe('#3312 — evidenceKind is NOT FORGEABLE', () => {
+  it('an inbound evidenceKind is discarded and recomputed from ground truth', () => {
+    const liar = {
+      summary: 'trust me', evidenceKind: EVIDENCE_KINDS.QUOTED_CITATION,
+      introduced: true, worseThanBase: true, parallelizable: false,
+    };
+    const out = admitFindingsByEvidence([liar], {
+      scope: SUBJECT_SCOPE, sources: SUBJECT_SOURCES, floor: EVIDENCE_KINDS.RESOLVED_CITATION,
+    });
+    expect(out.findings[0].evidenceKind).toBe(EVIDENCE_KINDS.ASSERTION);
+    expect(out.advisory).toHaveLength(1);
+  });
+
+  it('normalizeFinding carries the juror-supplied evidence INPUTS and validates the kind against the enum', () => {
+    const n = normalizeFinding({
+      summary: 's', quote: 'some quoted text', reproCommand: '  npm test  ', evidenceKind: 'repro',
+    });
+    expect(n.quote).toBe('some quoted text');
+    expect(n.reproCommand).toBe('npm test');
+    expect(n.evidenceKind).toBe('repro');
+    expect(normalizeFinding({ summary: 's', evidenceKind: 'invented' }).evidenceKind).toBeUndefined();
+    expect(normalizeFinding({ summary: 's', evidenceKind: 'constructor' }).evidenceKind).toBeUndefined();
   });
 });
