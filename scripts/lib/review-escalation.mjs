@@ -2149,14 +2149,22 @@ export function decideReviewGate({
       // no-op reconcile, not a revocation.
       //
       // WHAT THIS FLAG DOES AND DOES NOT DO, so nobody reads it as a loosening. It does NOT change `action`
-      // (still `park` — the merge stays refused), it does NOT change `applyLabel` (still `review:human` — an
-      // agent still cannot clear a gate-self edit, #2285/INVARIANT 2), and it does NOT change `humanRequired`.
-      // The verdict is byte-identical to before. What it adds is an OBLIGATION on the caller: a re-hold that
-      // overrides a recorded human clearance must SAY SO, durably, every time it happens. Downgrading the label
-      // instead (to `review:pending`) was considered and REJECTED — `review:pending` is agent-clearable
-      // (`decideSetLabel` refuses `--to=accepted` only on a `review:human` PR, and `auto-land-seam.mjs` writes
-      // `review:accepted` unattended in `enforce` mode), so it would hand an agent the gate-self clearance the
-      // whole tier exists to withhold. Making the re-hold impossible needs a hold label that is neither
+      // (still `park` — the merge stays refused), it does NOT change `applyLabel`, and it does NOT change
+      // `humanRequired`. What it adds is an OBLIGATION on the caller: a re-hold that overrides a recorded human
+      // clearance must SAY SO, durably, every time it happens.
+      //
+      // #3184 CORRECTS ONE SENTENCE OF THIS, and only where it was reasoning from an unchecked premise. This
+      // paragraph used to read "still `review:human` — an agent still cannot clear a gate-self edit" and "the
+      // verdict is byte-identical to before". Both were written for a re-hold whose staleness had been
+      // OBSERVED, which #xmnl36p assumed every re-hold was. It is not: on a fingerprint read miss nothing was
+      // compared, and there `applyLabel` is now `null` and the label write is suppressed (see below). The
+      // #2285/INVARIANT 2 property the old sentence was protecting is untouched — a suppressed park writes no
+      // label at all, so it can never write an agent-clearable one, and `action` stays `park` either way.
+      //
+      // Downgrading the label instead (to `review:pending`) was considered and REJECTED — `review:pending` is
+      // agent-clearable (`decideSetLabel` refuses `--to=accepted` only on a `review:human` PR, and
+      // `auto-land-seam.mjs` writes `review:accepted` unattended in `enforce` mode), so it would hand an agent
+      // the gate-self clearance the whole tier exists to withhold. Making the re-hold impossible needs a hold label that is neither
       // operator-only nor agent-clearable, which is a new tier across ~10 consumers, not a change here.
       const wouldRevoke = !!(toHuman && operatorClearance && !hasReviewLabel(labels, REVIEW_LABELS.human));
       // #3184 — SUPPRESSION, the fail-CLOSED twin of #3047. `acceptanceCoversHead` reports `staleVerified:false`
