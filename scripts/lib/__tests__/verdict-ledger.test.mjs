@@ -19,15 +19,22 @@ import {
   buildVerdictRecord, validateVerdictRecord, serializeVerdictRecord, parseVerdictLog,
   verdictClears, verdictLabel, verdictForLabelTarget, labelVerdictOf, foldVerdictLedger, ledgerCoversHead,
   compareLedgerToLabels, summarizeAgreement,
+  NON_BEARING, verdictBears,
   appendVerdict, readVerdictLedger, foldRepo, verdictLedgerPath, verdictLedgerDir, defaultVerdictLedgerDir,
   listLedgerRepos,
 } from '../verdict-ledger.mjs';
-import { REVIEW_LABELS, normalizeContributionFingerprint } from '../review-escalation.mjs';
+import { REVIEW_LABELS, normalizeContributionFingerprint, decideReviewGate } from '../review-escalation.mjs';
 import { REVIEW_LABEL_TARGETS } from '../../review-set-label.mjs';
 import { lockDirFor, makeLockEntry } from '../../readiness/file-locks.mjs';
+import { buildRows } from '../../review-ledger-check.mjs';
+import { ROUND_VERDICTS, reviewRoundsFromVerdictLedger, owedFromLedgerVerdict } from '../../pr-status.mjs';
 
 const REPO = 'chalbert/web-everything';
 const AT = '2026-08-10T12:00:00.000Z';
+
+/** #3329 — the BEARING subset, DERIVED from the module's own two exports rather than listed here. A local
+ *  list would be a third copy of the enum and would drift the first time a seventh member lands. */
+const BEARING_VERDICTS = VERDICT_VALUES.filter((v) => !NON_BEARING.includes(v));
 
 /** A minimal valid record, with overrides. */
 const rec = (over = {}) => buildVerdictRecord({
@@ -91,8 +98,13 @@ describe('#3007 schema — versioned, closed, and total over the label targets',
     }
   });
 
-  it('verdictLabel is total over the closed set and matches decideSetLabel\'s applied labels', () => {
-    for (const v of VERDICT_VALUES) expect(verdictLabel(v)).toBeTruthy();
+  it('verdictLabel is total over the BEARING set and matches decideSetLabel\'s applied labels', () => {
+    // #3329 narrowed this from VERDICT_VALUES to BEARING_VERDICTS, and the narrowing is the claim, not a
+    // weakening: every verdict that bears on the merge still MUST mirror a label, and the one that does not
+    // bear is asserted to have no label just below. Derived from the enum + NON_BEARING so a seventh member
+    // lands on one side or the other rather than escaping both.
+    expect(BEARING_VERDICTS).toEqual(VERDICT_VALUES.filter((v) => v !== VERDICTS.OBSERVED));
+    for (const v of BEARING_VERDICTS) expect(verdictLabel(v), `no label for bearing verdict ${v}`).toBeTruthy();
     expect(verdictLabel(VERDICTS.ACCEPTED)).toBe(REVIEW_LABELS.accepted);
     // `clear-human` ADDS review:accepted (decideSetLabel), so it mirrors to the same label.
     expect(verdictLabel(VERDICTS.CLEAR_HUMAN)).toBe(REVIEW_LABELS.accepted);
@@ -501,5 +513,267 @@ describe('#3007 IO — the machine-global home, the locked append, the tolerant 
   it('a missing ledger reads as empty rather than throwing', () => {
     expect(readVerdictLedger('someone/else')).toEqual([]);
     expect(foldRepo('someone/else').size).toBe(0);
+  });
+
+  it('#3329 — an observed row round-trips through the real append/read/fold path', () => {
+    expect(appendVerdict(rec({ pr: 60, verdict: VERDICTS.ACCEPTED })).ok).toBe(true);
+    expect(appendVerdict(rec({ pr: 60, verdict: VERDICTS.OBSERVED, reason: 'advisory look' })).ok).toBe(true);
+    expect(readVerdictLedger(REPO)).toHaveLength(2);
+    const folded = foldRepo(REPO).get(60);
+    expect(folded.history.map((r) => r.verdict)).toEqual([VERDICTS.ACCEPTED, VERDICTS.OBSERVED]);
+    expect(folded.current.verdict).toBe(VERDICTS.ACCEPTED);
+    expect(folded.clears).toBe(true);
+    expect(folded.outstandingHolds).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #3329 — THE NON-BEARING `observed` VERDICT.
+//
+// The happy path (the enum validates, the label is null) is the easy half and would ship the bug on its own.
+// The half that matters is the ENFORCEMENT: `observed` must not satisfy anything `accepted` satisfies, and it
+// must not create a hold either. Every question this repo asks of the verdict ledger is enumerated below and
+// answered for `observed` — including the ones asked from OUTSIDE this module, which is where a "soft accept"
+// would actually do its damage.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A label array in the `{name}` shape `hasReviewLabel` reads. */
+const LBL = (...names) => names.map((name) => ({ name }));
+
+describe('#3329 `observed` — the vocabulary', () => {
+  it('buildVerdictRecord accepts it and stamps clears:false', () => {
+    const r = rec({ pr: 3329, verdict: VERDICTS.OBSERVED, reason: 'advisory look, nothing actionable' });
+    expect(r.verdict).toBe('observed');
+    expect(r.clears).toBe(false);
+    expect(VERDICT_VALUES).toContain(VERDICTS.OBSERVED);
+    // A review that ran and found nothing still says so: zero findings is a number, not an absence.
+    expect(rec({ verdict: VERDICTS.OBSERVED, findingCount: 0 }).findingCount).toBe(0);
+  });
+
+  it('is NON-BEARING, and bearingness fails closed the opposite way to clearing', () => {
+    expect(verdictBears(VERDICTS.OBSERVED)).toBe(false);
+    expect(NON_BEARING).toEqual([VERDICTS.OBSERVED]);
+    for (const v of BEARING_VERDICTS) expect(verdictBears(v), `${v} must bear`).toBe(true);
+    // The export is a genuinely immutable list, not a frozen Set an importer could still `.add()` to — which
+    // would be a public handle for making a CLEARING verdict non-bearing.
+    expect(Object.isFrozen(NON_BEARING)).toBe(true);
+    expect(() => { NON_BEARING.push(VERDICTS.ACCEPTED); }).toThrow();
+    expect(verdictBears(VERDICTS.ACCEPTED)).toBe(true);
+    // Only an ENROLLED member is non-bearing. An unknown word BEARS (→ a hold, since it does not clear), which
+    // is the safe direction: a typo'd verdict must not vanish from the disposition.
+    expect(verdictBears('observd')).toBe(true);
+    expect(verdictClears('observd')).toBe(false);
+  });
+
+  it('does not clear, by any spelling', () => {
+    expect(verdictClears(VERDICTS.OBSERVED)).toBe(false);
+    expect(verdictClears('observed')).toBe(false);
+  });
+
+  it('mirrors NO label — explicitly, not by falling through the default', () => {
+    expect(verdictLabel(VERDICTS.OBSERVED)).toBeNull();
+    // …and no review label projects BACK to it either, so the label side cannot manufacture one.
+    for (const label of Object.values(REVIEW_LABELS)) {
+      expect(labelVerdictOf(LBL(label)), `${label} must not project to observed`).not.toBe(VERDICTS.OBSERVED);
+    }
+  });
+
+  it('has no label-swap target — an invented `--to=observed` fails closed to null', () => {
+    // The single home derives a row's verdict from `--to` through THIS function, and the reconciling sink
+    // (`we:scripts/operations/review-pr-io.mjs`) refuses a null verdict rather than guessing — so there is no
+    // path by which a label swap writes an `observed` row. The producer (#3330) writes it directly.
+    expect(verdictForLabelTarget('observed')).toBeNull();
+    expect(REVIEW_LABEL_TARGETS).not.toContain('observed');
+  });
+});
+
+describe('#3329 `observed` — the fold, which is where non-bearing is ENFORCED', () => {
+  it('THE REGRESSION THAT MATTERS: [accepted, observed] stays cleared with no phantom hold', () => {
+    // Marking `observed` merely non-CLEARING would have shipped this bug. The fold assigns clears for EVERY
+    // row, last-wins, then calls every non-clearing row after the last clear an outstanding hold — so an
+    // advisory note appended after an acceptance would have re-held a cleared PR.
+    const folded = foldVerdictLedger([
+      rec({ pr: 100, verdict: VERDICTS.ACCEPTED, at: '2026-08-26T10:00:00.000Z' }),
+      rec({ pr: 100, verdict: VERDICTS.OBSERVED, at: '2026-08-26T11:00:00.000Z', reason: 'advisory look' }),
+    ]).get(100);
+    expect(folded.clears).toBe(true);
+    expect(folded.outstandingHolds).toEqual([]);
+    expect(folded.current.verdict).toBe(VERDICTS.ACCEPTED);
+    // It IS recorded — it is simply invisible to the disposition. That is the whole shape of the item.
+    expect(folded.history.map((r) => r.verdict)).toEqual([VERDICTS.ACCEPTED, VERDICTS.OBSERVED]);
+  });
+
+  it('never becomes `current`, however many of them are appended', () => {
+    const folded = foldVerdictLedger([
+      rec({ pr: 101, verdict: VERDICTS.ACCEPTED, at: '2026-08-26T10:00:00.000Z' }),
+      rec({ pr: 101, verdict: VERDICTS.OBSERVED, at: '2026-08-26T11:00:00.000Z' }),
+      rec({ pr: 101, verdict: VERDICTS.OBSERVED, at: '2026-08-26T12:00:00.000Z' }),
+    ]).get(101);
+    expect(folded.current.verdict).toBe(VERDICTS.ACCEPTED);
+    expect(folded.clears).toBe(true);
+    expect(folded.history).toHaveLength(3);
+  });
+
+  it('does not ANSWER a standing hold either — a hold is only ever ended by a clearing row', () => {
+    const folded = foldVerdictLedger([
+      rec({ pr: 102, verdict: VERDICTS.CHANGES, at: '2026-08-26T10:00:00.000Z', reason: 'fix the guard' }),
+      rec({ pr: 102, verdict: VERDICTS.OBSERVED, at: '2026-08-26T11:00:00.000Z' }),
+    ]).get(102);
+    expect(folded.clears).toBe(false);
+    expect(folded.current.verdict).toBe(VERDICTS.CHANGES);
+    // Exactly ONE outstanding hold: the `changes`. The observed row is neither a second hold nor an answer.
+    expect(folded.outstandingHolds.map((r) => r.verdict)).toEqual([VERDICTS.CHANGES]);
+  });
+
+  it('a PR with ONLY observed rows has no live verdict and does not clear', () => {
+    const folded = foldVerdictLedger([
+      rec({ pr: 103, verdict: VERDICTS.OBSERVED, at: '2026-08-26T10:00:00.000Z', reason: 'reviewed, nothing actionable' }),
+    ]).get(103);
+    expect(folded.current).toBeNull();
+    expect(folded.clears).toBe(false);
+    expect(folded.outstandingHolds).toEqual([]);
+    // The review IS on the record — this is the situation the item exists for: a review ran and, before this,
+    // the ledger held no evidence it had happened at all.
+    expect(folded.history).toHaveLength(1);
+    expect(folded.history[0].reason).toBe('reviewed, nothing actionable');
+  });
+
+  it('an observed-only PR is not made mergeable by the Phase-2 coverage affordance', () => {
+    // `ledgerCoversHead({record: null})` answers `covers: true`, and that is safe: coverage is the SECOND
+    // question, asked of a verdict that already clears. The folded `clears` is what gates, and it says no.
+    const folded = foldVerdictLedger([rec({ pr: 104, verdict: VERDICTS.OBSERVED })]).get(104);
+    expect(ledgerCoversHead({ record: folded.current, headSha: 'a'.repeat(40) }).covers).toBe(true);
+    expect(folded.clears).toBe(false);
+  });
+});
+
+describe('#3329 `observed` satisfies NOTHING that `accepted` satisfies', () => {
+  // Each row is one live question meaning "has this been reviewed / may this land?". `accepted` answers yes;
+  // `observed` must answer no to every one of them. Written as a table so a NEW gate added later is a one-line
+  // addition here rather than a question nobody re-asked.
+  const asked = [
+    ['verdictClears', (v) => verdictClears(v)],
+    ['fold → clears', (v) => foldVerdictLedger([rec({ pr: 200, verdict: v })]).get(200).clears],
+    ['fold → current is a verdict', (v) => foldVerdictLedger([rec({ pr: 201, verdict: v })]).get(201).current != null],
+    ['verdictLabel (mirrors any label)', (v) => verdictLabel(v) != null],
+    ['verdictLabel === review:accepted', (v) => verdictLabel(v) === REVIEW_LABELS.accepted],
+    ['pr-status ROUND_VERDICTS (counts as a review round)', (v) => ROUND_VERDICTS.includes(v)],
+    ['pr-status owedFromLedgerVerdict === none (nothing owed)', (v) => owedFromLedgerVerdict(v) === 'none'],
+  ];
+
+  for (const [name, ask] of asked) {
+    it(`${name}: accepted → yes, observed → no`, () => {
+      expect(ask(VERDICTS.ACCEPTED), `accepted must satisfy: ${name}`).toBe(true);
+      expect(ask(VERDICTS.OBSERVED), `observed must NOT satisfy: ${name}`).toBe(false);
+    });
+  }
+
+  it('the drain\'s real merge gate is label-driven, and observed writes no label to drive it', () => {
+    // `decideReviewGate` (`we:scripts/lib/review-escalation.mjs`) is what actually decides whether the drain
+    // lands a PR today, and it reads ONLY labels. An `observed` row mirrors no label, so the gate cannot see
+    // it however many rows exist — the PR parks exactly as it would with an empty ledger.
+    expect(decideReviewGate({ escalate: true, labels: LBL(REVIEW_LABELS.accepted) }).action).toBe('merge');
+    expect(decideReviewGate({ escalate: true, labels: [] }).action).toBe('park');
+    expect(verdictLabel(VERDICTS.OBSERVED)).toBeNull();
+  });
+
+  it('does not inflate the review-round count either consumer reports', () => {
+    // pr-status counts one qualifying ROW as one round. An advisory look is a review that happened, but it is
+    // not a round of the fix loop, and counting it would put a round on the board against a cap.
+    const records = [
+      rec({ pr: 300, verdict: VERDICTS.CHANGES }),
+      rec({ pr: 300, verdict: VERDICTS.OBSERVED }),
+      rec({ pr: 300, verdict: VERDICTS.OBSERVED }),
+    ];
+    expect(reviewRoundsFromVerdictLedger(records, 300)).toBe(1);
+    // …and the review-pr operation's own round count (`priorRoundsFor`) reads `outstandingHolds`, which holds
+    // exactly the one `changes` row.
+    expect(foldVerdictLedger(records).get(300).outstandingHolds).toHaveLength(1);
+  });
+});
+
+describe('#3329 `observed` and the Phase-1 drift checker', () => {
+  it('is never reported as a disagreement or as an orphan row', () => {
+    const folded = foldVerdictLedger([
+      rec({ pr: 400, verdict: VERDICTS.ACCEPTED }),
+      rec({ pr: 400, verdict: VERDICTS.OBSERVED }),
+    ]);
+    const row = compareLedgerToLabels({ pr: 400, labels: LBL(REVIEW_LABELS.accepted), folded: folded.get(400) });
+    expect(row.status).toBe(AGREEMENT.AGREE);
+    expect(row.ledgerVerdict).toBe(VERDICTS.ACCEPTED);
+    expect(summarizeAgreement([row]).counts.disagree).toBe(0);
+  });
+
+  it('an observed-only PR with NO label is kept out of the comparison set entirely', () => {
+    // Admitting it would add a row whose ledger side is empty and whose label side is empty — scored `agree`,
+    // inflating the total with a PR that was never a comparison and diluting the ratio Phase 2 is decided on.
+    const folded = foldVerdictLedger([rec({ pr: 401, verdict: VERDICTS.OBSERVED })]);
+    expect(folded.has(401)).toBe(true);
+    expect(buildRows({ prs: [{ number: 401, labels: [] }], folded })).toEqual([]);
+    // The control: the same PR with a BEARING row IS admitted, so the filter narrows on bearingness and not on
+    // something incidental.
+    const bearing = foldVerdictLedger([rec({ pr: 401, verdict: VERDICTS.CHANGES })]);
+    expect(buildRows({ prs: [{ number: 401, labels: [] }], folded: bearing })).toHaveLength(1);
+  });
+
+  it('an observed row does not excuse a label that has no verdict behind it', () => {
+    // The label side is still unbacked, and `unledgered` is a Phase-2 precondition count. An advisory look
+    // must not quietly discharge it.
+    const folded = foldVerdictLedger([rec({ pr: 402, verdict: VERDICTS.OBSERVED })]);
+    const rows = buildRows({ prs: [{ number: 402, labels: LBL(REVIEW_LABELS.pending) }], folded });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe(AGREEMENT.UNLEDGERED);
+    expect(summarizeAgreement(rows).owedBeforePhase2).toBe(1);
+    expect(summarizeAgreement(rows).phase2Safe).toBe(false);
+  });
+});
+
+describe('#3329 a MALFORMED observed row is caught by the ledger check', () => {
+  const wellFormed = () => JSON.parse(JSON.stringify(rec({ pr: 500, verdict: VERDICTS.OBSERVED })));
+
+  it('the well-formed row validates, so the negatives below are about the defect and not the shape', () => {
+    const { valid, errors } = validateVerdictRecord(wellFormed());
+    expect(valid).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  it.each([
+    ['bad kind', (r) => { r.kind = 'we.something-else'; }, /kind/],
+    ['bad repo', (r) => { r.repo = 'not-a-repo'; }, /repo/],
+    ['bad pr', (r) => { r.pr = 0; }, /pr/],
+    ['bad timestamp', (r) => { r.at = 'yesterday'; }, /at/],
+    ['near-miss verdict', (r) => { r.verdict = 'observe'; }, /verdict/],
+    ['missing version', (r) => { delete r.v; }, /v/],
+  ])('rejects an observed row with a %s', (_name, mangle, pattern) => {
+    const raw = wellFormed();
+    mangle(raw);
+    const { valid, errors } = validateVerdictRecord(raw);
+    expect(valid).toBe(false);
+    expect(errors.join(' ')).toMatch(pattern);
+    // …nothing is serialized for it, and a file containing it folds to nothing for that PR.
+    expect(serializeVerdictRecord(raw).ok).toBe(false);
+    expect(parseVerdictLog(JSON.stringify(raw))).toEqual([]);
+  });
+
+  it('a FORGED observed row claiming clears:true is neutralized on read AND on write', () => {
+    // This is the one malformation that would matter: a hand-edited or forged row asserting that an advisory
+    // look cleared the merge. `clears` is DERIVED, never trusted from the line, in both directions.
+    const forged = { ...wellFormed(), clears: true };
+    expect(validateVerdictRecord(forged).record.clears).toBe(false);
+    expect(JSON.parse(serializeVerdictRecord(forged).line).clears).toBe(false);
+    expect(parseVerdictLog(JSON.stringify(forged))[0].clears).toBe(false);
+    // And the fold ignores the claim whatever the line says, because bearingness is read off the VERDICT.
+    expect(foldVerdictLedger(parseVerdictLog(JSON.stringify(forged))).get(500).clears).toBe(false);
+  });
+
+  it('a malformed observed row never takes a valid neighbour down with it', () => {
+    const text = [
+      JSON.stringify(rec({ pr: 501, verdict: VERDICTS.ACCEPTED })),
+      JSON.stringify({ ...wellFormed(), pr: 501, verdict: 'observe' }),
+      JSON.stringify(rec({ pr: 501, verdict: VERDICTS.OBSERVED })),
+    ].join('\n');
+    const parsed = parseVerdictLog(text);
+    expect(parsed.map((r) => r.verdict)).toEqual([VERDICTS.ACCEPTED, VERDICTS.OBSERVED]);
+    expect(foldVerdictLedger(parsed).get(501).clears).toBe(true);
   });
 });
