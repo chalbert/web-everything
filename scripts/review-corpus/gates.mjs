@@ -446,6 +446,270 @@ function sentenceAround(text, offset) {
   return text.slice(start, end);
 }
 
+/* ------------------------------------------------------------------ G3 (#3341) */
+
+/**
+ * MECHANISM VERBS, in the third-person singular ONLY. The `-s` restriction is not stylistic: it is the
+ * whole prescription filter. A modal takes the BARE form ("must derive", "should read", "will resolve"),
+ * so requiring `-s` excludes every "what this card wants built" sentence without a modal blocklist. It
+ * also disambiguates the many stems that are equally nouns — "the `pr-land` call" reads `call` as a noun,
+ * "`pr-land` calls" cannot.
+ */
+const MECHANISM_VERBS = [
+  'derives', 'computes', 'reads', 'calls', 'invokes', 'scores', 'resolves', 'parses', 'queries',
+  'fetches', 'filters', 'narrows', 'matches', 'strips', 'greps', 'delegates', 'dispatches', 'emits',
+  'writes', 'passes', 'sends', 'loads', 'spawns', 'scans', 'applies', 'maps', 'sets', 'returns',
+];
+
+/** Adverbs allowed to sit between the module subject and its verb. Anything else breaks the subject bond. */
+const SUBJECT_ADVERBS = '(?:already|still|now|only|silently|always|never|then|also|itself|deliberately|currently|explicitly|actually|simply|just|therefore|instead)';
+
+const MECHANISM_VERB_RX = new RegExp(
+  `^(?:\\s+${SUBJECT_ADVERBS})*\\s+(?:(?:does|did)\\s+not\\s+(\\w+)|(${MECHANISM_VERBS.join('|')}))\\b`,
+  'i',
+);
+
+/**
+ * Is `w` the BARE form of a mechanism verb, as it appears after a negating auxiliary ("does not pass")?
+ * Spelled as three inflections rather than by de-suffixing the list: de-suffixing turns `parses` into
+ * `pars` and `passes` into `pass` by the same rule, so one of the two is always wrong.
+ */
+const isMechanismStem = (w) => MECHANISM_VERBS.some((v) => v === `${w}s` || v === `${w}es` || v === w.replace(/y$/, 'ies'));
+
+/** A `path:line` locus — the strongest citation, and the only one the sibling gate can then check. */
+const LOCUS_RX = /(?:^|[\s`([])(?:we:|fui:|plateau:)?[\w.-]+(?:\/[\w.-]+)+\.(?:mjs|js|ts|md|njk|json|css|html):\d+/;
+
+/** A bare path with no line — the archetype's own non-citation, so it must NOT count as one. */
+const BARE_PATH_RX = /^(?:we:|fui:|plateau:)?[\w.@-]+(?:\/[\w.@-]+)+(?::\d+)?$/;
+
+/**
+ * Strip everything that is not the card's OWN assertion about the CURRENT tree: frontmatter, fenced code,
+ * headings, table rows, the Done-when section, and — the one that matters most — blockquoted lines.
+ *
+ * Two of those exclusions are load-bearing rather than tidying:
+ *   - BLOCKQUOTES. This repo's retraction convention is to QUOTE the wrong sentence and then correct it,
+ *     so a gate that fired inside `>` blocks would punish exactly the practice this card exists to
+ *     reinforce — and would fire on `backlog/3343-…md`, the very card whose revision is the fixed form.
+ *   - DONE-WHEN. A criterion describes the tree AFTER the work ("a subsequent `X` still reads it"), so a
+ *     present-tense verb there is a prescription wearing an indicative's clothes. Measured, not assumed:
+ *     leaving the section in added 5 findings to the sweep across `backlog/`, 4 of which were false.
+ *
+ * Excluded lines are replaced by blank ones rather than dropped, so line numbers stay true AND an
+ * excluded line still terminates the sentence either side of it.
+ */
+export function ownProseLines(text) {
+  const lines = text.split('\n');
+  const out = new Array(lines.length).fill('');
+  let inFence = false;
+  let fmEnd = -1;
+  if (lines[0] === '---') {
+    for (let i = 1; i < lines.length; i += 1) if (lines[i] === '---') { fmEnd = i; break; }
+  }
+  const dw = doneWhenSection(text);
+  const dwFrom = dw ? dw.startLine - 1 : Infinity;
+  const dwTo = dw ? dwFrom + dw.body.split('\n').length : -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const l = lines[i];
+    if (i <= fmEnd) continue;
+    if (/^\s*(?:```|~~~)/.test(l)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (i >= dwFrom && i <= dwTo) continue;
+    if (/^\s*>/.test(l)) continue;      // quoted / retracted material, not this card's claim
+    if (/^\s*#{1,6}\s/.test(l)) continue;
+    if (/^\s*\|/.test(l)) continue;     // table rows are evidence grids, not sentences
+    out[i] = l;
+  }
+  return out;
+}
+
+/**
+ * Split prose into sentences, carrying each one's 1-based start and end line.
+ *
+ * Inline-code runs are MASKED before the split, not after: a `.` or `?` inside `` `pr-land.mjs` `` or
+ * `` `typeof flags.transport === 'string' ?` `` is not a sentence end, and splitting there strands the
+ * citation outside the sentence it belongs to — which is how this gate flagged a card that quoted the
+ * source on the same line.
+ */
+function sentencesWithLines(lines) {
+  const text = lines.join('\n');
+  const masked = text.replace(/`{1,2}[^`\n]{0,400}`{1,2}/g, (m) => ' '.repeat(m.length));
+  const out = [];
+  let start = 0;
+  const push = (end) => {
+    const raw = text.slice(start, end);
+    const lead = raw.length - raw.trimStart().length;
+    if (raw.trim()) out.push({ text: raw, line: lineOf(text, start + lead), endLine: lineOf(text, end - 1) });
+    start = end;
+  };
+  for (let i = 0; i < masked.length; i += 1) {
+    const c = masked[i];
+    if ((c === '.' || c === '!' || c === '?') && (i + 1 >= masked.length || /\s/.test(masked[i + 1]))) push(i + 1);
+    else if (c === '\n' && masked[i + 1] === '\n') push(i + 1);
+  }
+  push(masked.length);
+  return out;
+}
+
+/**
+ * Line indexes (0-based) whose sentence is immediately followed by a fenced code block. The block IS the
+ * citation — "`X` spawns the label CLI with an explicit `cwd`:" followed by the quoted source is the
+ * behaviour this gate wants, not the behaviour it flags.
+ */
+function fenceIntroLines(text) {
+  const lines = text.split('\n');
+  const out = new Set();
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*(?:```|~~~)/.test(lines[i])) continue;
+    if (inFence) { inFence = false; continue; }
+    inFence = true;
+    for (let j = i - 1; j >= 0 && j >= i - 3; j -= 1) {
+      if (lines[j].trim()) { out.add(j); break; }
+    }
+  }
+  return out;
+}
+
+/** A determiner or quantifier before a bare module STEM makes it an attributive noun — "multiple
+ * dispatch-lane calls" is a count of calls, not a claim that dispatch-lane calls anything. */
+const ATTRIBUTIVE_RX = /\b(?:the|a|an|its|their|his|her|our|this|that|these|those|each|every|any|some|no|other|another|multiple|several|many|few|two|three|four|five|both|all|per|one)\s+$/i;
+
+/** Verb readings that are not invocations of a mechanism at all — naming, describing, characterising. */
+const NON_MECHANISM_PHRASE_RX = /^(?:reads\s+as|calls\s+(?:out|for|that|this)|maps\s+onto|passes\s+\d)/i;
+
+/** Every module path this card names — its `scope:` plus every `we:`/bare locus in the body. */
+function namedModules(text) {
+  const paths = new Set();
+  const fm = frontmatter(text) || '';
+  for (const m of fm.matchAll(/(?:we:)?((?:scripts|skills-src|blocks|plugs|src|docs|agent-memory-src|tools|hooks)\/[\w.@/-]+\.\w+)/g)) paths.add(m[1]);
+  for (const m of text.matchAll(/\bwe:([\w.@-]+(?:\/[\w.@-]+)+\.\w+)/g)) paths.add(m[1]);
+  return [...paths];
+}
+
+/**
+ * Does this sentence carry EVIDENCE for the mechanism it asserts? Deliberately GENEROUS — the gate asks
+ * *where is your evidence*, never *is your evidence right*. Whether the cited line says what the sentence
+ * claims is `citation-line-content`'s job above and, past that, a review convention the card says is not
+ * gateable at all. A gate that also judged the narrative would be a detector whose real aperture is
+ * invisible from its name (#3340).
+ */
+function carriesCitation(sentence, moduleSource, introducesFence) {
+  if (introducesFence) return true;                               // the quoted block below IS the citation
+  if (LOCUS_RX.test(sentence)) return true;                       // path:line
+  if (/\blines?\s+\d+/i.test(sentence)) return true;              // "at line 839"
+  if (/\b[a-z][a-z0-9]*[A-Z][\w$]*\b/.test(sentence.replace(/`[^`]*`/g, ''))) return true; // bare camelCase symbol
+  for (const m of sentence.matchAll(/`{1,2}([^`]{3,200})`{1,2}/g)) {
+    const run = m[1].trim();
+    if (BARE_PATH_RX.test(run)) continue;                         // the subject itself is not its evidence
+    if (/[a-z][A-Z]|_|\(\)|\(\s*\w/.test(run)) return true;       // a named function / identifier
+    if (moduleSource && run.length >= 4 && moduleSource.includes(run)) return true; // a literal that appears
+  }
+  // A straight or curly quotation that is VERBATIM in the module — the card's third accepted form.
+  if (moduleSource) {
+    for (const m of sentence.matchAll(/["“]([^"“”]{6,240})["”]/g)) {
+      if (moduleSource.includes(m[1].trim())) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * An UNCITED MECHANISM CLAIM: a sentence whose subject is a repo module the card itself names, whose verb
+ * asserts how that module behaves, and which points at nothing a reader can open.
+ *
+ * WHERE THIS CAME FROM. `backlog/3343-…md` opened *"pr-land derives the review label from GitHub's
+ * three-dot file list"* and concluded the producer-side derivation *"did not get the same treatment"* as
+ * the review side. Both false, the second exactly backwards: the code scores off a local computation, and
+ * the basis has been merge-base-narrowed since #2404 with a named regression test. The symptom was real;
+ * the mechanism was invented, and it cost a build round. Nothing in the repo asked the author to open the
+ * file — `citation-line-content` only fires on citations that EXIST.
+ *
+ * WHAT THIS GATE SCANS AND WHAT IT MATCHES (stated this way on purpose — #3362): it scans the prose of
+ * files under `backlog/`, minus frontmatter, fenced code, headings, table rows and blockquotes, and it
+ * matches a sentence in which a module reference is followed — across whitespace and a closed list of
+ * adverbs only — by one of the third-person-singular verbs in `MECHANISM_VERBS` (or its bare form under
+ * a negating auxiliary), with no `path:line`, no named function and no verbatim source literal anywhere
+ * in that sentence. It does not claim to find every uncited mechanism claim, and the exclusions below are
+ * deliberate. Swept over `backlog/` at 3336 cards it produced 17 findings, adjudicated on the card.
+ *
+ * DELIBERATELY OUT OF SCOPE:
+ *   - A STATE claim — "X is slow", "X is broken", "X has three callers". Not "does Y by Z", no mechanism
+ *     to cite, and including it would turn the gate into noise on a 3300-card board.
+ *   - A PRESCRIPTION — "X must derive", "X should read". Modals take the bare verb, so the `-s` form
+ *     excludes them structurally rather than by blocklist.
+ *   - A sentence whose SUBJECT is a function rather than a file — "`resolveNetDiffBasis` falls back to
+ *     the base tip". Naming the function IS the locus; there is nothing further to cite.
+ *   - The archetype's SECOND sentence, "the producer-side derivation … did not get the same treatment".
+ *     That asserts a comparison, not a mechanism, and the verb that would catch it ("get") catches
+ *     hundreds of ordinary sentences. Caught by the convention, not by this gate.
+ *   - COMPLETENESS claims — "every X does Y". A citation is not their remedy, and they are #3362's.
+ */
+export function uncitedMechanismClaim(text, { path, read } = {}) {
+  if (!/^backlog\//.test(path || '') || typeof read !== 'function') return [];
+  // Read each named module ONCE. `carriesCitation` needs the source to judge a quoted literal, and it
+  // runs per sentence per alias — an un-memoised `read` would be a file read per pair.
+  const src = new Map();
+  const modules = namedModules(text).filter((p) => {
+    const body = read(p);
+    if (body == null) return false;
+    src.set(p, body);
+    return true;
+  });
+  if (!modules.length) return [];
+  // Address each module by every form the prose uses for it: full locus, bare path, basename, and the
+  // basename with its extension dropped — "pr-land", which is how the archetype named it.
+  const aliases = [];
+  for (const rel of modules) {
+    const base = rel.split('/').pop();
+    const stem = base.replace(/\.\w+$/, '');
+    aliases.push({ rel, form: `we:${rel}` }, { rel, form: rel }, { rel, form: base });
+    if (stem.length >= 4 && /[-_]/.test(stem)) aliases.push({ rel, form: stem });
+  }
+  aliases.sort((a, b) => b.form.length - a.form.length);
+
+  const out = [];
+  const seen = new Set();
+  const fenceIntro = fenceIntroLines(text);
+  for (const s of sentencesWithLines(ownProseLines(text))) {
+    if (/^\s*(?:if|whether|suppose|were)\b/i.test(s.text)) continue; // hypothetical, not an assertion
+    const introducesFence = fenceIntro.has(s.endLine - 1);
+    for (const { rel, form } of aliases) {
+      let idx = -1;
+      const needle = form;
+      const bareStem = !/[/.]/.test(form);
+      for (let from = 0; ; ) {
+        idx = s.text.indexOf(needle, from);
+        if (idx === -1) break;
+        from = idx + needle.length;
+        const before = s.text[idx - 1];
+        if (before && /[\w./:-]/.test(before)) continue;           // mid-word or mid-path
+        if (bareStem && ATTRIBUTIVE_RX.test(s.text.slice(0, idx))) continue;
+        const after = s.text.slice(idx + needle.length).replace(/^`+/, '');
+        const vm = after.match(MECHANISM_VERB_RX);
+        if (!vm) continue;
+        if (vm[1] && !isMechanismStem(vm[1].toLowerCase())) continue;  // "does not <non-verb>"
+        const verbWord = vm[2] || vm[1];
+        if (NON_MECHANISM_PHRASE_RX.test(after.slice(vm[0].length - verbWord.length))) continue;
+        if (carriesCitation(s.text, src.get(rel), introducesFence)) { idx = -2; break; }
+        const key = `${s.line}:${rel}`;
+        if (seen.has(key)) { idx = -2; break; }
+        seen.add(key);
+        out.push({
+          gate: 'uncited-mechanism-claim',
+          path,
+          line: s.line,
+          subject: form.length >= 3 ? form : rel,
+          message: `"${form}${vm[0].replace(/\s+/g, ' ')}…" asserts how ${rel} behaves and cites nothing — no path:line, no named function, no quoted source. Open the file and cite the line, or drop the mechanism and keep the symptom.`,
+        });
+        idx = -2;
+        break;
+      }
+      if (idx === -2) break;
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ registry */
 
 export const GATES = Object.freeze([
@@ -457,6 +721,7 @@ export const GATES = Object.freeze([
   { name: 'vacuous-executable-criterion', fn: vacuousExecutableCriterion, targets: 'backlog card' },
   { name: 'scope-omits-donewhen-file', fn: scopeOmitsDoneWhenFile, targets: 'backlog card' },
   { name: 'citation-line-content', fn: citationLineContent, targets: 'any prose' },
+  { name: 'uncited-mechanism-claim', fn: uncitedMechanismClaim, targets: 'backlog card' },
 ]);
 
 /** Run every registered gate over one file. */

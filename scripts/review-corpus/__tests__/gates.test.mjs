@@ -11,11 +11,12 @@ import {
   vacuousExecutableCriterion,
   scopeOmitsDoneWhenFile,
   citationLineContent,
+  uncitedMechanismClaim,
 } from '../gates.mjs';
-import { GATES } from '../gates.mjs';
+import { GATES, runGates } from '../gates.mjs';
 import { covers } from '../replay-gates.mjs';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -212,6 +213,114 @@ describe('citationLineContent', () => {
   });
 });
 
+// ── #3341: a card's mechanism claim must cite the function or line that backs it ──────────────────────
+// The specimen is `backlog/3343-…md`'s ORIGINAL opening sentence, reconstructed here from the verbatim
+// quotation in `backlog/3341-…md` and the scope its own retraction section records. It asserted that
+// pr-land derives the label from GitHub's three-dot file list; the code scores off a LOCAL computation,
+// merge-base-narrowed since #2404 with a named regression test. The symptom was real, the mechanism
+// invented, and it cost a build round. The negative half is the SAME CARD after revision, read live off
+// disk — the fixed form has to stay silent or the gate punishes the fix.
+describe('uncitedMechanismClaim — #3341', () => {
+  const ROOT = resolve(HERE, '..', '..', '..');
+  /** A reader over the real tree, so "the module resolves to a real file" is a real question. */
+  const read = (p) => {
+    const f = resolve(ROOT, p);
+    return existsSync(f) && !p.includes('..') ? readFileSync(f, 'utf8') : null;
+  };
+
+  /** `backlog/3343-…md` as it was first filed, per its own "What this card first claimed" section. */
+  const PRE_FIX_3343 = [
+    '---', 'kind: story', 'status: open', 'scope:',
+    '  - we:scripts/merge-ai-prs.mjs', '  - we:scripts/pr-land.mjs', '---', '',
+    '# A producer review label is decided on the inflated three-dot basis', '',
+    "pr-land derives the review label from GitHub's three-dot file list, so a branch merely BEHIND main",
+    "is labelled from other people's changes.", '',
+  ].join('\n');
+
+  it('#3341 reports the pre-fix #3343 opening sentence, through runGates', () => {
+    // Through the registry's REAL calling convention, not the bare function — a gate that only works
+    // when called directly is a gate that never runs.
+    const out = runGates(PRE_FIX_3343, { path: 'backlog/3343-x.md', read });
+    const mine = out.filter((f) => f.gate === 'uncited-mechanism-claim');
+    expect(mine).toHaveLength(1);
+    expect(mine[0].subject).toBe('pr-land');
+    expect(mine[0].message).toMatch(/cites nothing/);
+  });
+
+  it('#3341 reports nothing on the revised card, which cites we:scripts/pr-land.mjs:839', () => {
+    const name = readdirSync(join(ROOT, 'backlog')).find((f) => /^3343-/.test(f));
+    expect(name, 'backlog/3343-*.md must exist — it is this gate\'s negative specimen').toBeTruthy();
+    const rel = `backlog/${name}`;
+    const text = readFileSync(join(ROOT, rel), 'utf8');
+    // Pin what makes it the fixed form, so a future edit that strips the citations reddens here too.
+    expect(text).toContain('we:scripts/pr-land.mjs:839');
+    expect(runGates(text, { path: rel, read }).filter((f) => f.gate === 'uncited-mechanism-claim')).toEqual([]);
+  });
+
+  const fire = (body, opts = {}) => uncitedMechanismClaim(
+    `---\nkind: story\nstatus: open\nscope:\n  - we:scripts/pr-land.mjs\n---\n\n# A card\n\n${body}\n`,
+    { path: 'backlog/x.md', read, ...opts },
+  );
+
+  it('#3341 accepts each of the three citation forms', () => {
+    expect(fire('`we:scripts/pr-land.mjs:839` derives the review label.')).toEqual([]);      // path:line
+    expect(fire('pr-land derives the label in `computeNetDiffSignals`.')).toEqual([]);        // named function
+    expect(fire('pr-land derives the label at line 839.')).toEqual([]);                       // a line number
+  });
+
+  it('#3341 does not accept a BARE path as its own citation — that is the archetype', () => {
+    // `we:scripts/pr-land.mjs` with no line points at 1200 lines. It is a subject, not evidence.
+    expect(fire('`we:scripts/pr-land.mjs` derives the review label from the three-dot file list.')).toHaveLength(1);
+  });
+
+  it('#3341 stays out of the shapes it deliberately excludes', () => {
+    expect(fire('pr-land is slow and its report line is confusing.')).toEqual([]);            // a STATE claim
+    expect(fire('pr-land must derive the label from a local diff.')).toEqual([]);             // a PRESCRIPTION
+    expect(fire('pr-land should read the merge-base basis instead.')).toEqual([]);
+    expect(fire('If pr-land derives the label from a stale basis, the PR is mislabelled.')).toEqual([]);
+    // A COMPLETENESS claim is #3362's species, not this one: a citation is not its remedy.
+    expect(fire('Every lander declares its verification posture.')).toEqual([]);
+  });
+
+  it('#3341 catches the NEGATED form, including the -es and -ies inflections', () => {
+    // The archetype's own second half was a negative claim, and the wrong ones are as costly: a builder
+    // greps for the absence, finds it present, and hardens a path that was never soft.
+    expect(fire('pr-land does not derive the label from a local diff.')).toHaveLength(1);
+    expect(fire('pr-land never reads the merge-base basis.')).toHaveLength(1);
+    // `passes`/`queries` de-suffix differently from `parses`; spelled out rather than stripped.
+    expect(fire('pr-land does not pass the basis down.')).toHaveLength(1);
+    expect(fire('pr-land does not query the label endpoint.')).toHaveLength(1);
+    // And a non-verb after the auxiliary is still not a mechanism claim.
+    expect(fire('pr-land does not exist on this branch.')).toEqual([]);
+  });
+
+  it('#3341 does not fire inside a blockquote — the retraction convention quotes the wrong sentence', () => {
+    // Firing here would flag every correctly-retracted card, including #3343 itself.
+    expect(fire('The first version said:\n\n> pr-land derives the review label from the three-dot list.\n')).toEqual([]);
+    expect(fire('```\npr-land derives the review label from the three-dot list.\n```\n')).toEqual([]);
+  });
+
+  it('#3341 treats a fenced quotation of the source as the citation it is', () => {
+    expect(fire('pr-land derives the label like this:\n\n```js\nconst signals = local(base, rev);\n```\n')).toEqual([]);
+  });
+
+  it('#3341 ignores a module name used attributively rather than as a subject', () => {
+    // "multiple dispatch-lane calls" counts calls; it does not claim dispatch-lane calls anything.
+    expect(fire('The plan showed multiple pr-land calls that never happened.')).toEqual([]);
+  });
+
+  it('#3341 stays silent on a card that names no module of its own', () => {
+    expect(fire('The board derives its ordering from nothing in particular.')).toEqual([]);
+  });
+
+  it('#3341 emits a subject the default matcher can score on', () => {
+    for (const f of uncitedMechanismClaim(PRE_FIX_3343, { path: 'backlog/3343-x.md', read })) {
+      expect(f.subject.trim().length).toBeGreaterThanOrEqual(3);
+      expect(covers({ ...f }, { path: f.path, line: f.line, summary: f.subject }, 3, 'content')).toBe(true);
+    }
+  });
+});
+
 describe('covers — the scoring matcher', () => {
   const label = { path: 'backlog/x.md', line: 102, summary: 'criterion 1 claims grepping SKILL.md for `dispatch-lane` returns nothing today' };
 
@@ -264,6 +373,7 @@ describe('every gate emits the `subject` the default matcher scores on', () => {
     ['stale-gate-count', () => staleGateCount(card('## Done when\n\n1. no new warnings against the 0-error / 1435-warning baseline.\n'), { path: 'backlog/x.md' })],
     ['scope-omits-donewhen-file', () => scopeOmitsDoneWhenFile('---\nscope:\n  - we:skills-src/conveyor/SKILL.md\n---\n\n## Done when\n\n1. a test in `we:skills-src/conveyor/__tests__/runner.test.mjs` asserts it.\n', { path: 'backlog/x.md' })],
     ['citation-line-content', () => citationLineContent('the push it does itself (`we:scripts/pr-land.mjs:5`) calls `realPush` first.', { path: 'backlog/x.md', read: () => `${'x\n'.repeat(20)}function gitPushMain() {}\n${'y\n'.repeat(20)}function realPush() {}\n` })],
+    ['uncited-mechanism-claim', () => uncitedMechanismClaim('---\nscope:\n  - we:scripts/pr-land.mjs\n---\n\n# A card\n\npr-land derives the review label from the three-dot file list.\n', { path: 'backlog/x.md', read: () => 'anything\n' })],
   ];
 
   it.each(SAMPLES)('%s emits a subject of at least 3 characters on every finding', (_name, fire) => {
@@ -276,14 +386,14 @@ describe('every gate emits the `subject` the default matcher scores on', () => {
     }
   });
 
-  it('every gate in the registry has a sample above, so a ninth gate cannot skip this check unnoticed', () => {
+  it('every gate in the registry has a sample above, so a tenth gate cannot skip this check unnoticed', () => {
     // The other four gates are exercised with `subject` assertions in their own describes higher up; this
     // pins the REGISTRY size, so adding a gate without adding coverage for its subject reddens here.
-    expect(GATES).toHaveLength(8);
+    expect(GATES).toHaveLength(9);
     expect(GATES.map((g) => g.name)).toEqual([
       'resolved-with-todo', 'stale-gate-count', 'dangling-wikilink', 'dangling-hash-id',
       'grep-literal-mismatch', 'vacuous-executable-criterion', 'scope-omits-donewhen-file',
-      'citation-line-content',
+      'citation-line-content', 'uncited-mechanism-claim',
     ]);
   });
 
