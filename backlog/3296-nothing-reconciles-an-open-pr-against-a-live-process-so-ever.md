@@ -3,10 +3,11 @@ bornAs: x7tu0nh
 kind: story
 size: 5
 parent: "2612"
-status: open
+status: resolved
 relatedTo: ["3283", "3247", "3072", "3279", "2643", "3095"]
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/stand-down.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/stand-down.test.mjs", "we:skills-src/conveyor/fix-agent-brief.md"]
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
 preparedDate: "2026-08-26"
 tags: [conveyor, delivery, reconcile, liveness, plateau-loop]
 ---
