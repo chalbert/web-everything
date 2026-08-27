@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock, reconcileEscalationReasonBlock, decideDurableEscalationRecord } from '../lib/review-escalation.mjs';
+import { scoreEscalation, buildEscalationReasonBlock, bodyHasEscalationReason, ESCALATION_REASON_MARKER, hasUnclearedReviewLabel, REVIEW_LABELS, READY_TO_MERGE_LABEL, REVIEW_HOLD_LABELS, isReviewHoldLabel, readyMergeConflictsWithHold, decideParkReadyStrip, decideReviewGate, parsePolicyStamp, bodyAlreadyCarriesReasonBlock, reconcileEscalationReasonBlock, decideDurableEscalationRecord } from '../lib/review-escalation.mjs';
 import { POLICY_VERSION, POLICY_DIGEST } from '../lib/review-policy.mjs';
 import { buildAuthorActorMarker } from '../lib/review-independence.mjs';
 
@@ -800,5 +800,49 @@ describe('review-escalation — #2366 hasUnclearedReviewLabel { allowPending } (
   it('default (allowPending omitted / false) is the bare-sweep behaviour — review:pending still refuses', () => {
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }])).toBe(true);
     expect(hasUnclearedReviewLabel([{ name: REVIEW_LABELS.pending }], { allowPending: false })).toBe(true);
+  });
+});
+
+// ── #3343 — the basis a verdict is scored on can be the PR's own file set (merge-base or ancestry) or the
+//    un-narrowed base TIP, which may name files only UPSTREAM touched. Those two used to be byte-identical at
+//    this gate. They are the input to the ONE-WAY half of the rubric: statute / declarative-leash force
+//    `review:human`, `decideSetLabel` then refuses `accepted` on that PR, and only the human ceremony clears
+//    it. So the scorer is told which basis it got. ────────────────────────────────────────────────────────
+describe('scoreEscalation — an un-narrowed basis is visible, and never relaxes the gate (#3343)', () => {
+  const statute = ['docs/agent/platform-decisions.md'];
+
+  it('an un-narrowed basis is REPORTED — `signals.basisUntrusted` plus a reason — instead of being indistinguishable from a narrowed one', () => {
+    const v = scoreEscalation({ changedFiles: ['backlog/a.md'], humanBasisFiles: ['backlog/a.md'], basisNarrowed: false });
+    expect(v.basisUntrusted).toBe(true);
+    expect(v.signals.basisUntrusted).toBe(true);
+    expect(v.reasons.some((r) => r.startsWith('basis un-narrowed'))).toBe(true);
+  });
+
+  it('NEGATIVE DIRECTION — an un-narrowed basis does NOT suppress the statute gate: a real statute edit still earns review:human', () => {
+    const v = scoreEscalation({ changedFiles: statute, humanBasisFiles: statute, basisNarrowed: false });
+    expect(v.humanRequired).toBe(true);
+    expect(v.reasons.some((r) => r.startsWith('statute ('))).toBe(true);
+    expect(v.careLevel).toBe('high');
+  });
+
+  it('NEGATIVE DIRECTION — nor does it suppress the declarative-leash (gate-self) half of the gate', () => {
+    const leash = ['scripts/lib/gate-config.mjs'];
+    const v = scoreEscalation({ changedFiles: leash, humanBasisFiles: leash, basisNarrowed: false });
+    expect(v.humanRequired).toBe(true);
+  });
+
+  it('the default is TRUSTED — a caller that supplies no `basisNarrowed` scores exactly as before, with no extra reason and no `basisUntrusted`', () => {
+    const before = scoreEscalation({ changedFiles: statute, humanBasisFiles: statute });
+    expect(before.basisUntrusted).toBe(false);
+    expect(before.signals.basisUntrusted).toBeUndefined();
+    expect(before.reasons.some((r) => r.startsWith('basis un-narrowed'))).toBe(false);
+    expect(before).toEqual(scoreEscalation({ changedFiles: statute, humanBasisFiles: statute, basisNarrowed: true }));
+  });
+
+  it('an EMPTY basis is never flagged — there is no verdict to qualify, so an unscored PR gains no reason', () => {
+    const v = scoreEscalation({ changedFiles: [], humanBasisFiles: [], basisNarrowed: false });
+    expect(v.basisUntrusted).toBe(false);
+    expect(v.escalate).toBe(false);
+    expect(v.reasons).toEqual([]);
   });
 });
