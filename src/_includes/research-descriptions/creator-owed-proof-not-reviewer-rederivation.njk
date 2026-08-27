@@ -1,0 +1,120 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The operator's complaint: reviewers do a lot of verification work that should have been the creator's to
+  discharge — sometimes going <em>"very far"</em> to check a claim the creator could have proven cheaply at
+  write time. Should a reviewer be able to answer <strong>"unverifiable as submitted"</strong> — distinct from
+  accept/changes, a refusal to do the creator's proof work rather than a verdict on correctness — and should
+  that refusal be captured as a structured, attributable creator-side gap that harvests forward into dispatch
+  briefs, prep checklists, and gates? This topic grounds the decision
+  <a href="/backlog/xsuqas6-a-reviewer-may-answer-unverifiable-as-submitted-a-creator-pr/">a reviewer may answer
+  "unverifiable as submitted"</a>.
+</p>
+
+<h2>Six bodies of prior art, reported at the strength the evidence supports</h2>
+<p>
+  This survey follows the same rule its own subject argues for: report what a source <em>actually says</em>,
+  named and specific, not what its reputation suggests — and say plainly where the fit is loose rather than
+  stretch a citation to cover a gap.
+</p>
+
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Body of work</th><th>What it actually says</th><th>Fit to this decision</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Design by Contract</strong> (Bertrand Meyer, <em>Object-Oriented Software Construction</em>)</td>
+      <td>The client (caller) must satisfy preconditions before calling; the supplier (callee) must satisfy
+        postconditions <em>given the precondition holds</em>, and is explicitly not obligated to re-check it.
+        Paraphrased consistently across independent secondary sources: "either the condition is part of the
+        precondition and must be guaranteed by the client, or it is not stated in the precondition and must be
+        handled by the supplier … never in both" — an absolute rule against defensive double-checking.</td>
+      <td><strong>Strong, structural.</strong> The sharpest precedent for a division of proof labor where one
+        party is entitled not to re-derive what the other owed. Gap: about <em>runtime</em> obligation, not
+        review-time evidence — the shape of the argument transfers, not a literal review-process precedent. A
+        clean page-cited verbatim quote could not be pulled from Meyer's scanned source PDFs in this pass;
+        treat the paraphrase as high-confidence, not verbatim.</td>
+    </tr>
+    <tr>
+      <td><strong>TDD / red-green</strong> (Kent Beck, <em>Test-Driven Development: By Example</em>)</td>
+      <td>Two rules, widely and consistently quoted: "write new code only if an automated test has failed" and
+        "eliminate duplication."</td>
+      <td><strong>Strong fit for machine-checkable evidence specifically.</strong> The failing-then-passing test
+        is the creator's proof artifact — produced before/alongside the claim, checkable by a third party
+        without hand-verification. Beck's own "done-ness" framing in exactly that language was not located;
+        the restatement above is reasonable but not a confirmed quote.</td>
+    </tr>
+    <tr>
+      <td><strong>Falsifiability</strong> (Karl Popper) and <strong>Dijkstra</strong></td>
+      <td>Dijkstra, confirmed via primary-source transcription — <strong>EWD249</strong> ("Notes on Structured
+        Programming," 1970), "On The Reliability of Mechanisms": <em>"Program testing can be used to show the
+        presence of bugs, but never to show their absence!"</em> A related phrasing appears in "The Humble
+        Programmer" (1972 Turing lecture, <em>CACM</em> 15(10)). Popper's falsifiability is connected to
+        software testing via Kaner, Bach &amp; Pettichord's <em>Lessons Learned in Software Testing</em>
+        (2001), corroborated across secondary sources but not pinned to a verbatim page.</td>
+      <td><strong>Dijkstra: confirmed and citable.</strong> <strong>Popper-to-review: not found.</strong> No
+        literature was located that explicitly frames code <em>review</em> (as opposed to testing) in
+        Popperian terms — "a reviewer's job is to falsify, not verify exhaustively" is this session's
+        synthesis of the testing literature, not a documented claim about review. Flagged rather than
+        oversold.</td>
+    </tr>
+    <tr>
+      <td><strong>Author-supplied-test-as-gate policy</strong> (Google eng-practices)</td>
+      <td><code>google.github.io/eng-practices</code>: <em>"we expect developers to test CLs well-enough that
+        they work correctly by the time they get to code review."</em></td>
+      <td><strong>Moderate.</strong> Puts initial proof burden on the author, as a real, named, public policy.
+        No explicit language was found stating a CL may be rejected <em>solely</em> for missing tests, nor a
+        documented reviewer right to decline re-derivation — this decision's specific verdict has no direct
+        precedent here. Bacchelli &amp; Bird's ICSE 2013 modern-code-review paper (Microsoft) was confirmed to
+        exist and scope, but its findings text was not retrievable in this pass — not cited as direct
+        support.</td>
+    </tr>
+    <tr>
+      <td><strong>Google Tricorder</strong> (Sadowski et al., ICSE 2015 / <em>CACM</em> 2018)</td>
+      <td>"Effective false positive rate" is user-centric — "any report a user did not want to see" — held
+        under 5% against a 10% target. The predecessor FindBugs effort saw 84% of filed bugs go unfixed.</td>
+      <td><strong>Real, but runs opposite to a naive reading.</strong> Tricorder's fix was to put the burden of
+        making a finding <em>actionable</em> on the tool/process side, not to push more unverified claims onto
+        a human triaging them. Cited here for the actionability principle (an unactionable assertion may
+        legitimately be rejected), not as direct support for this item's burden-shift <em>direction</em> — it
+        governs tool-generated claims a developer triages, not human-generated claims a reviewer
+        adjudicates.</td>
+    </tr>
+    <tr>
+      <td><strong>Self-certification effectiveness</strong></td>
+      <td>No software-specific, code-review-focused study was located demonstrating that forced self-certification
+        gets gamed or rubber-stamped.</td>
+      <td><strong>Open gap, named rather than papered over.</strong> The strongest documented analogy is NYC's
+        Department of Buildings Self-Certification program, criticized and investigated for abuse — a real
+        case, but a building-code domain, not software. This decision's requirement that "prove it" mean
+        machine-checkable evidence, never a bare checkbox, rests on general principle (Dijkstra/Popper: an
+        untested claim is unfalsified, not verified) and this adjacent-domain case, not a dedicated study.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>A concrete, everyday occurrence of the same third answer</h2>
+<p>
+  Outside the academic literature, the pattern this decision proposes is already ubiquitous in bug trackers:
+  a maintainer's <strong>"needs more info" / "can't reproduce"</strong> resolution is a well-known third answer
+  distinct from "confirmed bug" and "works as intended" — a refusal to keep investigating until the reporter
+  supplies reproduction steps, not a verdict on whether the bug is real. GitHub's <code>needs-repro</code> /
+  <code>needs-info</code> label convention and Bugzilla's <code>INCOMPLETE</code> resolution are the same
+  move this decision proposes for code review: the burden of making the claim checkable returns to whoever
+  made it.
+</p>
+
+<h2>What this decision does with the survey</h2>
+<p>
+  Four of six areas (Design by Contract, TDD, Dijkstra's half of falsifiability, and Google's author-test
+  policy) give solid, citable support for the general shape: the party making a claim is the cheaper, more
+  natural place for its proof to originate, and machine-checkable evidence (a test, a resolved citation, a
+  quoted source) is what actually discharges that obligation — a self-declared assurance is not. Two areas
+  (Tricorder, and the Popper-to-review connection) are real but do not say exactly what a naive citation
+  would want, and are reported at that honest strength rather than stretched — the same discipline this
+  program has already ratified against overclaiming
+  (<a href="/backlog/3362-state-a-check-s-predicate-and-candidate-set-never-assert-com/">#3362</a>). Full
+  detail in the linked session report.
+</p>
+{% endraw %}
