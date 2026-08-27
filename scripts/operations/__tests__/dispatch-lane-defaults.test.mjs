@@ -65,7 +65,7 @@ describe('the default subprocess calls are BOUNDED — every one of them', () =>
 
   it('the agent spawn is bounded — `claude --bg` returns immediately, so a hang here is a hang in the executor', () => {
     const { exec, calls } = spyExec('');
-    defaultSpawnAgent(['--bg', '--session-id', 'sess-x', '-n', 'conveyor-3037', 'go'], { cwd: '/repo' }, { exec });
+    defaultSpawnAgent(['--bg', '-n', 'conveyor-3037-abcd1234', 'go'], { cwd: '/repo' }, { exec });
     expect(calls[0].file).toBe('claude');
     expect(calls[0].opts).toMatchObject({ timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL' });
     expect(calls[0].opts.cwd).toBe('/repo');
@@ -280,10 +280,10 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
 
   it('the sink goes through `defaultSpawnAgent`, timeout and all', async () => {
     const { exec, calls } = spyExec('');
-    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintToken: () => 'zzzz9999' });
     await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go', expectedWithinMinutes: 90 });
     expect(calls[0].file).toBe('claude');
-    expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '--session-id', 'sess-z9']);
+    expect(calls[0].argv.slice(0, 3)).toEqual(['--bg', '-n', 'conveyor-3037-zzzz9999']);
     expect(calls[0].opts).toMatchObject({ timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL' });
   });
 

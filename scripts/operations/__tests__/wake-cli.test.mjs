@@ -39,7 +39,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WAKE_CLI = resolve(HERE, '..', 'wake.mjs');
 const RUN_ID = 'run-wake-cli';
 const KEY = `${RUN_ID}#2#0`;
-const HANDLE = 'ffffffff-1111-2222-3333-444444444444';
+// THE DISPATCH HANDLE is the `-n` name the sink mints — slug + per-attempt token (#3331) — not a session id.
+const HANDLE_TOKEN = 'ffff1111';
+const HANDLE = `conveyor-3037-${HANDLE_TOKEN}`;
+/** What `claude agents --json` reports for that session: an id the CLI chose, which the dispatcher never saw. */
+const LISTED_ID = 'ffffffff-1111-2222-3333-444444444444';
 /** A PRIMARY checkout — the sink refuses to dispatch from a lane clone, which is what the default resolves to. */
 const PRIMARY = '/primary/webeverything';
 const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
@@ -95,7 +99,7 @@ async function parkOneDispatch({ ageMs = 10 * 60 * 1000 } = {}) {
   let run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: RUN_ID, input: { num: '3037' }, registry }), { registry });
   expect(runStatus(run, { registry })).toBe('awaiting-effect');
   // `claude --bg` is not run on this side either; the in-flight write, the handle and the deadline are real.
-  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => HANDLE });
+  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintToken: () => HANDLE_TOKEN });
   run = (await applyPendingEffects(run, { sinks, store })).run;
   expect(run.effects[0].status).toBe('in-flight');
 
@@ -269,7 +273,7 @@ describe('a wedged `claude` is bounded by a REAL ceiling, not only by vitest\'s 
 describe('the waker CLI registers the dispatch observer — the half of the feature no test reached', () => {
   it('OBSERVES a parked dispatch with the real observer, not with an empty table', async () => {
     await parkOneDispatch();
-    const out = runWakeCli([], { agents: JSON.stringify([{ sessionId: HANDLE, kind: 'background' }]) });
+    const out = runWakeCli([], { agents: JSON.stringify([{ name: HANDLE, sessionId: LISTED_ID, kind: 'background' }]) });
 
     // The session is live, so the observer says `running`. An UNREGISTERED observer cannot produce this: the
     // entry would come back `skipped` with reason `no-observer`, which is the mutation the review ran (M23).
@@ -284,7 +288,7 @@ describe('the waker CLI registers the dispatch observer — the half of the feat
 
   it('reads the live sessions as `claude agents --json`, and NEVER with `--all`', async () => {
     await parkOneDispatch();
-    runWakeCli([], { agents: JSON.stringify([{ sessionId: HANDLE }]) });
+    runWakeCli([], { agents: JSON.stringify([{ name: HANDLE, sessionId: LISTED_ID }]) });
     // The argv the CLI actually handed `claude`, recorded by the stub across a real process boundary.
     expect(readFileSync(argvFile, 'utf8').trim()).toBe('agents --json');
   }, CHILD_PROCESS_TIMEOUT_MS);
@@ -428,7 +432,7 @@ describe('--resolve refuses a LIVE handle, and a retry never orphans the handle 
     let stdout = '';
     try {
       runWakeCli([`--resolve=${RUN_ID}`, `--key=${KEY}`, '--status=failed'], {
-        agents: JSON.stringify([{ sessionId: HANDLE, kind: 'background' }]),
+        agents: JSON.stringify([{ name: HANDLE, sessionId: LISTED_ID, kind: 'background' }]),
       });
       expect.unreachable('closing out a live dispatch must be refused');
     } catch (e) {
@@ -445,7 +449,7 @@ describe('--resolve refuses a LIVE handle, and a retry never orphans the handle 
   it('G2: `--force` gets through, and says on the line that liveness was not checked', async () => {
     await parkOneDispatch();
     const out = runWakeCli([`--resolve=${RUN_ID}`, `--key=${KEY}`, '--status=failed', '--force'], {
-      agents: JSON.stringify([{ sessionId: HANDLE }]),
+      agents: JSON.stringify([{ name: HANDLE, sessionId: LISTED_ID }]),
     });
     expect(out).toMatch(/liveness not checked/);
     expect(createFileRunStore(dir).read(RUN_ID).effects[0].status).toBe('failed');
@@ -473,11 +477,11 @@ describe('--resolve refuses a LIVE handle, and a retry never orphans the handle 
     const store = createFileRunStore(dir);
     // Close it out under --force, exactly as an operator who was sure would — then let the retry run.
     closeOutEntry({ runId: RUN_ID, key: KEY, status: 'failed', force: true, store });
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-2' });
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintToken: () => 'ffff2222' });
     const after = (await applyPendingEffects(store.read(RUN_ID), { sinks, store })).run;
 
     const entry = after.effects[0];
-    expect(entry.handle).toBe('sess-2');
+    expect(entry.handle).toBe('conveyor-3037-ffff2222');
     expect(entry.status).toBe('in-flight');
     // sess-1 IS STILL FINDABLE — the whole point. The review's reproduction asked exactly this question of the
     // record and got `false`.

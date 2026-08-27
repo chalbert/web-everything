@@ -29,7 +29,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { withFakeClaude } from './helpers/fake-claude.mjs';
-import { buildAgentArgv, defaultSpawnAgent, defaultListAgents } from '../dispatch-lane-io.mjs';
+import { buildAgentArgv, defaultSpawnAgent, defaultListAgents, findListedSession, mintDispatchHandle } from '../dispatch-lane-io.mjs';
 
 /**
  * Spawn through the REAL default path, with the fake first on PATH.
@@ -56,17 +56,17 @@ afterEach(() => { if (fake) fake.cleanup(); fake = null; });
 describe('dispatching an agent, against a real process', () => {
   it('the argv the dispatcher builds is ACCEPTED by a CLI that parses like the real one', () => {
     fake = withFakeClaude();
-    const argv = buildAgentArgv({
-      sessionId: '11111111-2222-3333-4444-555555555555',
-      payload: { num: '4242', sessionSlug: 'conveyor-4242', prompt: '# Deliver item 4242\n\nDo the thing.' },
-    });
+    const payload = { num: '4242', sessionSlug: 'conveyor-4242', prompt: '# Deliver item 4242\n\nDo the thing.' };
+    const handle = mintDispatchHandle({ payload, mintToken: () => '11111111' });
+    const argv = buildAgentArgv({ handle, payload });
 
     expect(() => spawnVia(fake, argv)).not.toThrow();
 
     const seen = fake.lastArgv();
     expect(seen).toContain('--bg');
-    expect(seen[seen.indexOf('--session-id') + 1]).toBe('11111111-2222-3333-4444-555555555555');
-    expect(seen[seen.indexOf('-n') + 1]).toBe('conveyor-4242');
+    // The HANDLE rides `-n`, and no `--session-id` is emitted at all — #3331 measured that `--bg` discards it.
+    expect(seen[seen.indexOf('-n') + 1]).toBe('conveyor-4242-11111111');
+    expect(seen).not.toContain('--session-id');
     // The prompt survives as the trailing operand rather than being eaten as a flag — the thing the sink's
     // own comment says was never checked against a real parser.
     expect(seen[seen.length - 1]).toBe('# Deliver item 4242\n\nDo the thing.');
@@ -74,12 +74,10 @@ describe('dispatching an agent, against a real process', () => {
 
   it('the spawn-to-observe round trip, through BOTH production seams', () => {
     fake = withFakeClaude();
-    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const payload = { num: '77', sessionSlug: 'conveyor-77', prompt: '# brief' };
+    const handle = mintDispatchHandle({ payload, mintToken: () => 'aaaa7777' });
     const env = { ...process.env, ...fake.env };
-    spawnVia(fake, buildAgentArgv({
-      sessionId,
-      payload: { num: '77', sessionSlug: 'conveyor-77', prompt: '# brief' },
-    }));
+    spawnVia(fake, buildAgentArgv({ handle, payload }));
 
     // PRODUCTION'S OBSERVER, not a re-implementation of it. An earlier cut hand-rolled
     // `execFileSync('claude', ['agents','--json'])` here and its comment claimed that was "exactly as
@@ -90,10 +88,31 @@ describe('dispatching an agent, against a real process', () => {
     // this change, and this case is what holds it.
     const listing = defaultListAgents({ env });
 
-    // Both ends of the chain were previously modelled. This is the one assertion that ties them: the id the
-    // dispatcher pinned is the id the liveness listing reports back.
-    expect(listing.map((s) => s.sessionId)).toContain(sessionId);
-    expect(listing.find((s) => s.sessionId === sessionId).name).toBe('conveyor-77');
+    // Both ends of the chain were previously modelled. This is the one assertion that ties them — and #3331
+    // moved WHICH end. It used to read "the id the dispatcher pinned is the id the listing reports back",
+    // which the real CLI does not do; the shim only made it true by echoing the flag. What the CLI really
+    // carries through is the `-n` NAME, so that is what the round trip is now on, through the same two seams.
+    const { row, matches } = findListedSession(listing, { handle });
+    expect(matches).toBe(1);
+    expect(row.name).toBe(handle);
+    // THE DISCOVERY, which is the other half of #3331: the listing hands back a session id the dispatcher
+    // never chose, and that id — not the handle — is what `claude --resume` would address.
+    expect(row.sessionId).toBeTruthy();
+    expect(row.sessionId).not.toBe(handle);
+  });
+
+  it('the CLI DISCARDS --session-id under --bg — the fact the whole handle design turns on', () => {
+    fake = withFakeClaude();
+    const env = { ...process.env, ...fake.env };
+    // Hand-built, because production no longer emits this flag. The shim models 2.1.246: it warns and mints
+    // its own id. If a future CLI starts honouring the flag this case goes red and the design can be revisited
+    // with evidence, rather than the repo quietly carrying the old assumption again.
+    const minted = '99999999-8888-7777-6666-555555555555';
+    spawnVia(fake, ['--bg', '--session-id', minted, '-n', 'probe-honours-session-id', '# brief']);
+    const listing = defaultListAgents({ env });
+    const row = listing.find((sn) => sn.name === 'probe-honours-session-id');
+    expect(row).toBeTruthy();
+    expect(row.sessionId).not.toBe(minted);
   });
 
   it('a leading-dash brief is refused by the dispatcher — and the parser proves the refusal is load-bearing', () => {
@@ -104,19 +123,19 @@ describe('dispatching an agent, against a real process', () => {
     const hazard = '--help me, my first heading starts with a dash';
 
     expect(() => buildAgentArgv({
-      sessionId: 'x', payload: { num: '1', prompt: hazard },
+      handle: 'conveyor-1-0000000x', payload: { num: '1', prompt: hazard },
     })).toThrow(/begins with/);
 
     // Hand-built argv, bypassing the guard, to show what it prevents. Without this half the guard's value is
     // asserted rather than demonstrated: the parser really does read that element as an unknown option and
     // reject the whole invocation, so the dispatch would have failed rather than arriving mangled.
-    expect(() => spawnVia(fake, ['--bg', '--session-id', 'z', '-n', 'n', hazard])).toThrow();
+    expect(() => spawnVia(fake, ['--bg', '-n', 'n', hazard])).toThrow();
     expect(fake.lastArgv()).toContain(hazard);
   });
 
   it('a spawn failure surfaces as a throw rather than a silent non-dispatch', () => {
     fake = withFakeClaude();
-    const argv = buildAgentArgv({ sessionId: 'q', payload: { num: '9', prompt: '# brief' } });
+    const argv = buildAgentArgv({ handle: 'conveyor-9-qqqqqqqq', payload: { num: '9', prompt: '# brief' } });
     expect(() => spawnVia(fake, argv, { FAKE_CLAUDE_FAIL: '1' })).toThrow();
   });
 
@@ -128,11 +147,11 @@ describe('dispatching an agent, against a real process', () => {
     const work = { FAKE_CLAUDE_WORK_MS: '1500' };
 
     const fgStart = Date.now();
-    spawnVia(fake, ['--session-id', 'fg', '-n', 'fg', '# brief'], work);
+    spawnVia(fake, ['-n', 'fg', '# brief'], work);
     const foreground = Date.now() - fgStart;
 
     const bgStart = Date.now();
-    spawnVia(fake, buildAgentArgv({ sessionId: 'r', payload: { num: '5', prompt: '# brief' } }), work);
+    spawnVia(fake, buildAgentArgv({ handle: 'conveyor-5-rrrrrrrr', payload: { num: '5', prompt: '# brief' } }), work);
     const background = Date.now() - bgStart;
 
     // COMPARATIVE, not an absolute bound. The property is "one waits for the session and the other does not",
@@ -175,7 +194,7 @@ describe('dispatching an agent, against a real process', () => {
     // THE CALL SITE, which is the half a test of the function alone leaves uncovered — deleting
     // `fake.assertWins(env)` from `spawnVia` would otherwise redden nothing. The message must be the
     // GUARD'S, not a spawn failure: the point is that it stops BEFORE the process starts.
-    const argv = buildAgentArgv({ sessionId: 's', payload: { num: '3', prompt: '# brief' } });
+    const argv = buildAgentArgv({ handle: 'conveyor-3-ssssssss', payload: { num: '3', prompt: '# brief' } });
     expect(() => spawnVia(fake, argv, { PATH: process.env.PATH })).toThrow(/did not win PATH/);
   });
 });

@@ -60,9 +60,13 @@ import {
   forwardableBookkeeping,
   inFlightDispatchesFor,
   isPreSpawnRefusal,
+  findListedSession,
+  mintDispatchHandle,
+  persistDiscoveredSessionId,
   readTick,
   stampLiveness,
 } from '../dispatch-lane-io.mjs';
+import { itemNumFromSession } from '../../conveyor/lease-reaper.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 /**
@@ -626,13 +630,18 @@ describe('the declared effect is a dispatch', () => {
     const sinks = createDispatchSinks({
       root: PRIMARY,
       spawnAgent: () => '',
-      mintSessionId: () => '11111111-2222-3333-4444-555555555555',
+      mintToken: () => '11111111-2222-3333-4444-555555555555',
       now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     const entry = outcome.run.effects[0];
     expect(entry.status).toBe('in-flight');
-    expect(entry.handle).toBe('11111111-2222-3333-4444-555555555555');
+    // THE HANDLE IS THE `-n` NAME, slug + token (#3331) — the one field `claude --bg` carries into
+    // `claude agents --json`. The token is what stops a second attempt at this item sharing it.
+    expect(entry.handle).toBe('conveyor-3037-11111111');
+    // NO session id yet, and that absence is the design: the CLI mints the id and does not report it back to
+    // the spawning process, so the entry learns it from the first listing read that matches its handle.
+    expect(entry.sessionId ?? null).toBeNull();
     expect(entry.expectedBy).toBe('2026-08-13T11:30:00.000Z'); // 90 minutes, the declared default
     expect(entry.startedAt).toBeTruthy();
     expect(outcome.inFlight).toEqual([entry.key]);
@@ -647,19 +656,19 @@ describe('the declared effect is a dispatch', () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
     let spawns = 0;
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => { spawns += 1; return ''; }, mintSessionId: () => 'sess-a1' });
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => { spawns += 1; return ''; }, mintToken: () => 'aaaa1111' });
     const first = await applyPendingEffects(run, { sinks, store });
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(spawns).toBe(1);
     expect(second.inFlight).toEqual([first.run.effects[0].key]);
-    expect(second.run.effects[0].handle).toBe('sess-a1');
+    expect(second.run.effects[0].handle).toBe('conveyor-3037-aaaa1111');
   });
 
   it('honours a caller\'s own expectedWithinMinutes', async () => {
     const { run } = runTo(tickRead(), { num: '3037', expectedWithinMinutes: 15 });
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
-      root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
+      root: PRIMARY, spawnAgent: () => '', mintToken: () => 'bbbb2222', now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].expectedBy).toBe('2026-08-13T10:15:00.000Z');
@@ -671,25 +680,49 @@ describe('the declared effect is a dispatch', () => {
 describe('what the sink actually runs', () => {
   const payload = { num: '3037', sessionSlug: 'conveyor-3037', prompt: '# build #3037' };
 
-  it('pins the handle with --session-id instead of racing to discover it', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).toEqual([
-      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037', '# build #3037',
+  it('carries the minted handle on `-n`, and emits NO --session-id — the CLI discards it under --bg', () => {
+    expect(buildAgentArgv({ handle: 'conveyor-3037-cccc3333', payload })).toEqual([
+      '--bg', '-n', 'conveyor-3037-cccc3333', '# build #3037',
     ]);
+    // #3331: `claude --bg` answers `--session-id` with `warning: --bg manages the session id; ignoring
+    // --session-id`. Emitting it anyway would keep telling the next reader the handle is a session id.
+    expect(buildAgentArgv({ handle: 'conveyor-3037-cccc3333', payload })).not.toContain('--session-id');
+  });
+
+  it('REFUSES to dispatch with no handle rather than falling back to the per-ITEM slug', () => {
+    // The old default was the bare slug, which every attempt at one item shares — the ambiguity
+    // `findListedSession` now has to refuse on. A caller with no handle has not minted one.
+    expect(() => buildAgentArgv({ payload })).toThrow(/no handle/);
+    expect(() => buildAgentArgv({ handle: '   ', payload })).toThrow(/no handle/);
+  });
+
+  it('mints a handle that is unique PER ATTEMPT, not per item', () => {
+    const a = mintDispatchHandle({ payload, mintToken: () => 'd4d4d4d4' });
+    const b = mintDispatchHandle({ payload, mintToken: () => 'e5e5e5e5' });
+    expect(a).toBe('conveyor-3037-d4d4d4d4');
+    expect(a).not.toBe(b);
+    // It stays legible in `claude agents` — the slug is still the front of it.
+    expect(a.startsWith('conveyor-3037')).toBe(true);
+    // …and it is anchored OUT of the lease reaper's session grammar, so it can never alias onto an item id.
+    expect(itemNumFromSession(a)).toBeNull();
+    expect(itemNumFromSession('conveyor-3037')).toBe('3037');
+    // A minter with nothing usable in it is refused, never defaulted to the ambiguous bare slug.
+    expect(() => mintDispatchHandle({ payload, mintToken: () => '----' })).toThrow(/nothing usable/);
   });
 
   it('REFUSES a brief beginning with a dash — position alone does not stop a parser reading it as a flag', () => {
-    expect(() => buildAgentArgv({ sessionId: 'sess-c3', payload: { ...payload, prompt: '--bare and hostile' } }))
+    expect(() => buildAgentArgv({ handle: 'h-1', payload: { ...payload, prompt: '--bare and hostile' } }))
       .toThrow(/begins with `-`/);
   });
 
   it('forwards the operator\'s extra flags ahead of the prompt', () => {
-    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, extraArgs: ['--model', 'sonnet'] });
+    const argv = buildAgentArgv({ handle: 'h-1', payload, extraArgs: ['--model', 'sonnet'] });
     expect(argv[argv.length - 1]).toBe(payload.prompt);
     expect(argv.slice(-3, -1)).toEqual(['--model', 'sonnet']);
   });
 
   it('bakes in no permission flag — widening every agent is the operator\'s call, not this file\'s', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload }).join(' ')).not.toMatch(/permission|dangerous/i);
+    expect(buildAgentArgv({ handle: 'h-1', payload }).join(' ')).not.toMatch(/permission|dangerous/i);
     expect(agentArgsFromEnv({})).toEqual([]);
   });
 
@@ -713,7 +746,7 @@ describe('what the sink actually runs', () => {
   });
 
   it('refuses an empty prompt', () => {
-    expect(() => buildAgentArgv({ sessionId: 'sess-c3', payload: { prompt: '  ' } })).toThrow(/empty prompt/);
+    expect(() => buildAgentArgv({ handle: 'h-1', payload: { prompt: '  ' } })).toThrow(/empty prompt/);
   });
 
   it('a missing binary PROVES nothing started → `failed`, which is retried', async () => {
@@ -740,7 +773,7 @@ describe('what the sink actually runs', () => {
   });
 
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintToken: () => 'dddd4444' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
   });
 });
@@ -795,6 +828,118 @@ describe('observing a dispatched agent', () => {
     await observers[DISPATCH_EFFECT](entry, { handle: 'sess-live' });
     await observers[DISPATCH_EFFECT](entry, { handle: 'sess-live' });
     expect(calls).toBe(1);
+  });
+
+  // ── #3331: THE LISTED ID IS NOT THE DISPATCHED ONE ───────────────────────────────────────────────────────
+  //
+  // THE REGRESSION THAT WAS NEVER CAUGHT, and it went uncaught for the most ordinary reason: every fixture in
+  // this file used to put the dispatcher's own handle in the listing's `sessionId`, so the matcher was only
+  // ever asked about a world the CLI does not produce. `claude --bg` DISCARDS `--session-id` — measured on
+  // 2.1.246, three runs, 3 of 3 mismatched, with the CLI printing `warning: --bg manages the session id;
+  // ignoring --session-id`. What it does carry through is the `-n` name. Every case below therefore hands the
+  // observer a listing whose `sessionId` is a value the dispatcher has never seen, which is the real shape.
+  describe('when the listing reports a session id the dispatcher never chose', () => {
+    const HANDLE = 'conveyor-3037-a1b2c3d4';
+    const CLI_ID = '45707cbb-f6dc-4600-9159-2d9ff1829674';
+    const dispatched = {
+      key: 'k', type: DISPATCH_EFFECT, handle: HANDLE, startedAt: '2026-08-13T10:00:00.000Z',
+    };
+    /** The listing shape the probe actually read back: the name is ours, the id is the CLI's. */
+    const listing = () => [{
+      id: CLI_ID.slice(0, 8), cwd: '/primary/webeverything', kind: 'background',
+      sessionId: CLI_ID, name: HANDLE, state: 'running',
+    }];
+
+    it('the observer FINDS it — the pre-#3331 id-only compare could not, and reported it `unresolved`', async () => {
+      const observers = createDispatchObservers({
+        listAgents: listing, recordSessionId: () => {}, now: later,
+      });
+      expect(await observers[DISPATCH_EFFECT](dispatched, { handle: HANDLE, runId: 'r', key: 'k' }))
+        .toMatchObject({ status: 'running' });
+    });
+
+    it('and it STORES the real id, which is the only thing `claude --resume` can address', async () => {
+      const written = [];
+      const observers = createDispatchObservers({
+        listAgents: listing, recordSessionId: (o) => written.push(o), now: later,
+      });
+      await observers[DISPATCH_EFFECT](dispatched, { handle: HANDLE, runId: 'run-1', key: 'k' });
+      expect(written).toEqual([{ runId: 'run-1', key: 'k', sessionId: CLI_ID }]);
+
+      // …and it does not write it twice. An entry that already carries the id is matched BY the id.
+      const again = [];
+      const second = createDispatchObservers({
+        listAgents: listing, recordSessionId: (o) => again.push(o), now: later,
+      });
+      expect(await second[DISPATCH_EFFECT]({ ...dispatched, sessionId: CLI_ID }, { handle: HANDLE, runId: 'run-1', key: 'k' }))
+        .toMatchObject({ status: 'running' });
+      expect(again).toEqual([]);
+    });
+
+    it('the write lands on the run record, and never overwrites an id already there', () => {
+      const run = {
+        v: 1, id: 'run-p', op: DISPATCH_LANE_OP, input: {}, cursor: 2, findings: {}, verdict: null, pending: null,
+        effects: [{
+          key: 'k', stepIndex: 2, step: 'dispatch', index: 0, type: DISPATCH_EFFECT,
+          payload: {}, idempotent: false, dispatch: true, status: 'in-flight', handle: HANDLE,
+          startedAt: '2026-08-13T10:00:00.000Z', expectedBy: null, result: null, error: null,
+        }],
+      };
+      const store = createMemoryRunStore();
+      store.write(run);
+      expect(persistDiscoveredSessionId({ runId: 'run-p', key: 'k', sessionId: CLI_ID, store })).toBe(true);
+      expect(store.read('run-p').effects[0].sessionId).toBe(CLI_ID);
+      // A second, DIFFERENT id means the handle matched a session this entry did not start — the thing
+      // `findListedSession` refuses on. Recording it would launder that into a fact.
+      expect(persistDiscoveredSessionId({ runId: 'run-p', key: 'k', sessionId: 'some-other-id', store })).toBe(false);
+      expect(store.read('run-p').effects[0].sessionId).toBe(CLI_ID);
+      // A store that will not take the note is not a reason to fail the read.
+      expect(persistDiscoveredSessionId({
+        runId: 'run-p', key: 'k', sessionId: CLI_ID, store: { read: () => { throw new Error('nope'); }, write: () => {} },
+      })).toBe(false);
+    });
+
+    it('the double-dispatch guard finds it too — `stampLiveness` reads the same way', () => {
+      const out = stampLiveness(
+        { runs: [{ runId: 'r', key: 'k', handle: HANDLE, sessionId: null }], unreadable: 0 },
+        { listAgents: listing },
+      );
+      expect(out.livenessSource).toBe('claude-agents');
+      expect(out.runs[0].live).toBe(true);
+      // The discovery rides the row, which is how the tick read's write-back gets hold of it.
+      expect(out.runs[0].sessionId).toBe(CLI_ID);
+    });
+
+    it('TWO sessions answering to one handle is refused, not resolved to the first', async () => {
+      // NOT HYPOTHETICAL. `__fixtures__/claude-agents-payload.json` is a real listing and carries three
+      // `conveyor-3154` rows, because the pre-#3331 dispatcher named every attempt at one item identically.
+      // Reporting the first would attribute a live agent to a DIFFERENT dispatch — worse than reporting
+      // nothing, since it is indistinguishable from a correct answer.
+      const ambiguous = () => [
+        { sessionId: 'aaaaaaaa-0000-4000-8000-000000000001', name: HANDLE, kind: 'background' },
+        { sessionId: 'bbbbbbbb-0000-4000-8000-000000000002', name: HANDLE, kind: 'background' },
+      ];
+      expect(findListedSession(ambiguous(), { handle: HANDLE })).toMatchObject({ row: null, matches: 2 });
+
+      const observers = createDispatchObservers({ listAgents: ambiguous, recordSessionId: () => {}, now: later });
+      await expect(observers[DISPATCH_EFFECT](dispatched, { handle: HANDLE, runId: 'r', key: 'k' }))
+        .rejects.toThrow(/2 sessions .* answer to the handle/);
+
+      // The guard degrades to its clock backstop rather than guessing either way.
+      const out = stampLiveness({ runs: [{ runId: 'r', key: 'k', handle: HANDLE }], unreadable: 0 }, { listAgents: ambiguous });
+      expect(out.runs[0].live).toBeNull();
+    });
+
+    it('a listing that names OTHER sessions still answers `unresolved` — no match is still no match', async () => {
+      const observers = createDispatchObservers({
+        listAgents: () => [{ sessionId: CLI_ID, name: 'conveyor-3037-99999999', kind: 'background' }],
+        recordSessionId: () => {},
+        now: later,
+      });
+      const answer = await observers[DISPATCH_EFFECT](dispatched, { handle: HANDLE, runId: 'r', key: 'k' });
+      expect(answer.status).toBe('unresolved');
+      expect(answer.error).toMatch(/liveness and not outcome/);
+    });
   });
 
   it('does NOT memoize a failed read — a transient fault must not poison the rest of the pass', async () => {
@@ -1281,7 +1426,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
       sinks: createDispatchSinks({
         root: PRIMARY,
         spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
-        mintSessionId: () => 'sess-3165',
+        mintToken: () => 'f316f316',
         now: () => new Date(NOW),
       }),
       store: createMemoryRunStore(),
@@ -1347,8 +1492,13 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(briefPath(REPO_ROOT)).toMatch(/skills-src\/conveyor\/delivery-agent-brief\.md$/);
     // THE ARGV IS THE CONTRACT, and it is pinned whole — the prompt is the delivery brief filled with the
     // item's OWN `scope:` frontmatter, not the one-file prepare scope.
+    //
+    // TWO NAMES, ONE ITEM, AND THEY ARE NOT THE SAME THING (#3331). The `-n` value is the dispatch HANDLE —
+    // slug + per-attempt token, the thing `claude agents --json` echoes back and the observer matches on. The
+    // brief's `SESSION_SLUG` is the LANE LEASE session, whose grammar the reaper parses; it is unchanged, and
+    // this assertion is where that stays visible.
     expect(spawned[0].argv).toEqual([
-      '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
+      '--bg', '-n', 'conveyor-3037-f316f316',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/',
@@ -1405,7 +1555,9 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     tick.decisions.spawnPrepareScope.push({ num: '9999', lane: 7 });
     const { spawned } = await dispatchThrough({ num: '3150', tick, items: [UNSCOPED, { num: '9999', slug: 'other' }] });
     expect(spawned).toHaveLength(1);
-    expect(spawned[0].argv[4]).toBe('prepare-3150');
+    // argv[2] is the `-n` value — the handle, which is the prepare slug plus this attempt's token (#3331).
+    expect(spawned[0].argv.slice(0, 2)).toEqual(['--bg', '-n']);
+    expect(spawned[0].argv[2]).toBe('prepare-3150-f316f316');
   });
 
   it('a num in NO list still says so, and now names all three', async () => {

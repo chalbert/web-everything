@@ -39,7 +39,7 @@ import { applyPendingEffects, resolveInFlight } from './effect-executor.mjs';
 import { observeRun } from './effect-observer.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
-import { createDispatchObservers, defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
+import { createDispatchObservers, defaultListAgents, findListedSession, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
 import { createExploreObservers } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
@@ -351,7 +351,13 @@ export function assertHandleNotLive(entry, { listAgents } = {}) {
       + `agent MIGHT be alive. ${advice}`,
     );
   }
-  if (listed.has(handle)) {
+  // THROUGH THE SHARED MATCHER (#3331), not a set of session ids. A dispatch handle is the `-n` NAME the CLI
+  // echoes back, because `claude --bg` discards `--session-id`; an id-only compare could never find a live
+  // dispatch, so this refusal would have waved every one of them through. `matches > 0` rather than a single
+  // row is the right test HERE and only here: this asks "might an agent be alive", and two rows answering to
+  // one handle is more reason to refuse, not less. An operator who pasted a session id still matches, because
+  // the matcher compares that too.
+  if (findListedSession(sessions, { handle, sessionId: entry?.sessionId }).matches > 0) {
     throw new Error(
       `wake --resolve: session ${handle} is STILL LISTED by \`claude agents\` — the agent is ALIVE. ${advice}`,
     );

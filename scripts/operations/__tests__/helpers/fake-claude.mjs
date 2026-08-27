@@ -23,8 +23,17 @@
  * leading dash. A shim that parses its argv the same way a real CLI would turns that bet into an assertion.
  *
  * WHAT THIS IS NOT. It does not run a model, spend a token, or prove an agent does useful work. It proves
- * the PLUMBING: that the argv parses, that `--bg` returns immediately rather than blocking, that the session
- * id the dispatcher pins is the id the observer later finds, and that a spawn failure surfaces as a failure.
+ * the PLUMBING: that the argv parses, that `--bg` returns immediately rather than blocking, that the HANDLE
+ * the dispatcher pins on `-n` is the handle the observer later finds, and that a spawn failure surfaces as a
+ * failure.
+ *
+ * IT USED TO SAY "the session id the dispatcher pins is the id the observer later finds", and the shim was
+ * built to make that true — it echoed `--session-id` straight back into its listing. The real CLI does not:
+ * `claude --bg` discards the flag (#3331, CLI 2.1.246, 3 runs, 3/3 mismatched, with a stderr warning saying
+ * so). So the shim modelled the assumption under test, which is the one thing a stand-in must never do — it
+ * turned a suite that starts a real process into a suite that could not have caught the bug. The `--bg` branch
+ * now mints its OWN id and warns, exactly as measured.
+ *
  * The quality of what an agent produces is a different test and a different budget — this is the harness that
  * makes that test a swap of one binding rather than a new build.
  *
@@ -91,9 +100,16 @@ if (process.env.FAKE_CLAUDE_FAIL === '1') {
 }
 
 if (bg) {
+  // \`--bg\` DISCARDS \`--session-id\`, and this shim discards it too — MEASURED on 2.1.246 over three runs,
+  // 3 of 3 mismatched (#3331). The earlier shim honoured the flag, which is why a suite that ran a real
+  // process still could not catch the one bug that mattered: a stand-in modelling the assumption under test
+  // can only ever confirm it. The warning text below is the real CLI's, verbatim.
+  if (sessionId) {
+    process.stderr.write('warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)\\n');
+  }
   // The real CLI returns IMMEDIATELY and the session may not be listed yet. It is listed here so the round
   // trip is assertable; the not-yet-listed grace window is the dispatcher's own concern and is unit-tested.
-  const id = sessionId || 'generated-' + state.sessions.length;
+  const id = 'cl1' + String(state.sessions.length).padStart(5, '0') + '-0000-4000-8000-000000000000';
   state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, kind: 'background', state: 'running', cwd: process.cwd() });
   write(state);
   process.stdout.write('  claude attach ' + id.slice(0, 8) + '    open in this terminal\\n');

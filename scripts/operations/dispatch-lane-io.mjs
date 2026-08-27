@@ -158,7 +158,17 @@ export function readTick({
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
-  recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
+  recordLiveness = (stamped) => {
+    persistLastSeenLive(stamped, { now });
+    // AND THE OTHER FACT THIS READ ESTABLISHED (#3331). A row confirmed live carries the REAL session id off
+    // the listing, which nothing else on this path can learn. Two store passes rather than one, deliberately:
+    // `persistLastSeenLive` is referenced by name in three cards and a sibling docblock, and widening what it
+    // writes behind its name is how a function stops meaning what it is called.
+    for (const r of Array.isArray(stamped?.runs) ? stamped.runs : []) {
+      if (r?.live === true && r.sessionId) persistDiscoveredSessionId({ runId: r.runId, key: r.key, sessionId: r.sessionId });
+    }
+    return stamped;
+  },
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -299,6 +309,9 @@ export function inFlightDispatchesFor(key, { store = createFileRunStore() } = {}
       if (normNum(e.payload?.num) !== key) continue;
       runs.push({
         runId: String(run.id), key: String(e.key), handle: e.handle ?? null,
+        // THE REAL SESSION ID, once a listing read has discovered it — see {@link persistDiscoveredSessionId}.
+        // Null on every entry no listing has answered for yet, and on every entry written before #3331.
+        sessionId: e.sessionId ?? null,
         startedAt: e.startedAt ?? null, expectedBy: e.expectedBy ?? null,
         // WHEN A LISTING LAST CONFIRMED THIS ONE ALIVE. `dispatchStillHolds` ages a `live: false` reading from
         // here rather than from `startedAt`, so it has to ride the row for the same reason `expectedBy` does:
@@ -350,6 +363,105 @@ export function normalizeHandle(x) {
 export function listedSessionIds(sessions) {
   const ids = (Array.isArray(sessions) ? sessions : []).map((s) => normalizeHandle(s?.sessionId)).filter(Boolean);
   return new Set(ids);
+}
+
+/**
+ * THE ONE LISTING ROW A DISPATCH HANDLE NAMES, or null — the single matcher every reader of
+ * `claude agents --json` goes through (#3331).
+ *
+ * WHY IT MATCHES ON `name` AT ALL. The #3331 probe settled it: `claude --bg` **DISCARDS** `--session-id`, and
+ * says so on stderr — `warning: --bg manages the session id; ignoring --session-id`. Three runs on CLI
+ * 2.1.246, three mismatches. So the id this repo used to mint was never in the listing, and the
+ * `sessionId === handle` compare these readers all shared could not have been true for ANY dispatch it ever
+ * started. What the CLI *does* keep verbatim is the `-n` name — the same probe read `probe-3331-1` straight
+ * back off the listing — so the dispatcher's chosen handle now rides the NAME, and this compares against it.
+ * See {@link mintDispatchHandle} for the mint that makes that handle unique.
+ *
+ * `sessionId` IS STILL COMPARED, for two live reasons rather than for symmetry. An entry whose real id has
+ * already been discovered ({@link persistDiscoveredSessionId} writes it onto the entry) is matched by that id,
+ * which is the strongest key there is and the one `claude --resume` takes — and when it is present it is the
+ * ONLY key used, because adding name matches on top could only turn a unique answer ambiguous. An operator
+ * running `wake --resolve` on a handle they copied out of `claude agents --json` is holding a session id
+ * rather than a name, and the `handle` branch accepts that too.
+ *
+ * MORE THAN ONE MATCH IS NOT A MATCH, and that half is load-bearing. Names are NOT unique in a real listing:
+ * `./__fixtures__/claude-agents-payload.json` — 14 rows, measured off a live machine — carries
+ * `conveyor-3154` THREE times and `conveyor-3151` twice, because the pre-#3331 dispatcher named every attempt
+ * for one item identically. Returning the first would report a DIFFERENT dispatch's liveness under this
+ * entry's handle, which is strictly worse than reporting nothing: the double-dispatch guard would hold a lane
+ * on another agent's life, or release one that is still occupied. So the count rides the answer out and every
+ * caller fails closed on it.
+ *
+ * @param {unknown[]} sessions - a parsed `claude agents --json` listing.
+ * @param {{handle?: unknown, sessionId?: unknown}} [want] - the entry's minted handle and, once known, its
+ *   real session id.
+ * @returns {{row: object|null, matches: number}} `row` is null unless EXACTLY one row answered.
+ */
+export function findListedSession(sessions, { handle, sessionId } = {}) {
+  const wantName = normalizeHandle(handle);
+  const wantId = normalizeHandle(sessionId);
+  if (!wantName && !wantId) return { row: null, matches: 0 };
+  const rows = (Array.isArray(sessions) ? sessions : []).filter((s) => s && typeof s === 'object');
+  // A KNOWN ID WINS OUTRIGHT, and does not merely rank first. A session id is unique in the listing where a
+  // name is demonstrably not, so once an entry has one, ALSO accepting name matches could only ever widen a
+  // one-row answer into an ambiguous one — the entry whose id is row A would go unresolved because rows B
+  // and C happen to share its name. The name exists to find the session BEFORE the id is known; after that it
+  // has nothing left to add.
+  if (wantId) {
+    const byId = rows.filter((s) => normalizeHandle(s.sessionId) === wantId);
+    return { row: byId.length === 1 ? byId[0] : null, matches: byId.length };
+  }
+  const hits = rows.filter((s) => {
+    const id = normalizeHandle(s.sessionId);
+    const name = normalizeHandle(s.name);
+    return (!!name && name === wantName) || (!!id && id === wantName);
+  });
+  return { row: hits.length === 1 ? hits[0] : null, matches: hits.length };
+}
+
+/**
+ * How many characters of the minted token ride the handle. Eight hex is 32 bits — the point is not
+ * cryptographic uniqueness but that two dispatches of the SAME item never share a name, which one token of any
+ * width buys; the width only sets how unlucky a genuine collision has to be, and a collision degrades to
+ * {@link findListedSession} refusing rather than to a wrong match.
+ */
+export const HANDLE_TOKEN_CHARS = 8;
+
+/**
+ * THE HANDLE ONE DISPATCH IS KNOWN BY — `<session slug>-<token>`, minted before the agent exists.
+ *
+ * THE MINT SURVIVED #3331; ONLY ITS CARRIER CHANGED. The #3030 property this design rests on is that the
+ * dispatcher CHOOSES the handle, so it is known before the session exists and can never be attributed to
+ * whatever else started in the same instant. `--session-id` was the wrong carrier for it under `--bg` — the
+ * CLI discards it — and `-n` is the right one, because the listing echoes it verbatim. Nothing about the mint
+ * became a discovery.
+ *
+ * WHY THE SLUG ALONE WOULD NOT DO, which is the whole reason a token is here. `payload.sessionSlug ||
+ * 'conveyor-<num>'` is per-ITEM, not per-ATTEMPT, and re-dispatch of one item is a designed path (the executor
+ * keeps `supersededHandles` precisely because a retry mints a fresh handle while the old one may still be
+ * alive). Two attempts would carry one name, and the fixture proves that is not hypothetical — three live
+ * `conveyor-3154` rows in one real listing. The token is what makes the name identify an ATTEMPT.
+ *
+ * IT IS NOT THE LEASE SESSION, and the two must not be confused. The lane lease the agent acquires still uses
+ * the bare `sessionSlug` (the brief's `SESSION_SLUG`), whose grammar the reaper parses
+ * (`we:scripts/conveyor/lease-reaper.mjs#itemNumFromSession`, `^(?:conveyor|fix|prepare-decision|prepare)-(\d+)[a-z]?$`).
+ * This handle is anchored-out of that grammar, so even if one were ever fed to the reaper it yields NO key
+ * rather than a wrong one — the #3283 failure mode, checked rather than assumed.
+ *
+ * @param {object} o
+ * @param {{sessionSlug?: string, num?: string|number}} o.payload
+ * @param {() => string} [o.mintToken] - injectable entropy; only its alphanumerics are used.
+ * @returns {string}
+ */
+export function mintDispatchHandle({ payload, mintToken = () => randomUUID() } = {}) {
+  const slug = String(payload?.sessionSlug || `conveyor-${payload?.num}`).trim();
+  if (!slug) throw new TypeError('dispatch-lane-io: a dispatch needs a session slug to build its handle from');
+  const token = String(mintToken()).replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, HANDLE_TOKEN_CHARS);
+  if (!token) {
+    throw new TypeError('dispatch-lane-io: the token minter returned nothing usable — a handle with no token '
+      + 'would be shared by every attempt at this item, which is the collision `findListedSession` refuses on');
+  }
+  return `${slug}-${token}`;
 }
 
 /**
@@ -408,7 +520,19 @@ export function stampLiveness(inFlight, { listAgents } = {}) {
     return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
   return {
-    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(normalizeHandle(r.handle)) : null })),
+    runs: rows.map((r) => {
+      if (!r.handle && !r.sessionId) return { ...r, live: null };
+      const { row, matches } = findListedSession(sessions, { handle: r.handle, sessionId: r.sessionId });
+      // AMBIGUOUS IS NOT `false`, and it is not `true` either (#3331). Two rows answering to one handle means
+      // this read cannot say which of them is this entry's, so it says nothing and the guard falls to its
+      // clock backstop — the same answer an unreadable listing gets, for the same reason. `true` would hold a
+      // lane on another agent's life; `false` would release one that may still be occupied. It is the third
+      // cause of `live: null`, and {@link mintDispatchHandle} is why it should never fire.
+      if (matches > 1) return { ...r, live: null };
+      // THE DISCOVERY RIDES THE ROW. A live match carries the real `sessionId` the listing reported, which is
+      // what `persistDiscoveredSessionId` writes back and what `claude --resume` would address.
+      return { ...r, live: !!row, sessionId: row?.sessionId ?? r.sessionId ?? null };
+    }),
     unreadable,
     livenessSource: 'claude-agents',
   };
@@ -463,6 +587,59 @@ export function persistLastSeenLive(stamped, { store = createFileRunStore(), now
     } catch { /* see BEST-EFFORT above — a store that will not take the note is not a reason to fail the read. */ }
   }
   return written;
+}
+
+/**
+ * WRITE THE REAL SESSION ID A LISTING READ JUST DISCOVERED ONTO THE IN-FLIGHT ENTRY (#3331).
+ *
+ * WHY THE ENTRY CANNOT ALREADY HAVE IT. The sink mints the handle and never learns the id: `claude --bg`
+ * discards `--session-id`, prints its own short id to stderr and returns. So the only place the real id is
+ * ever available is a LISTING row matched back to this entry — which happens on a read, several seconds to
+ * several minutes later.
+ *
+ * WHY IT IS WORTH STORING AT ALL, since {@link findListedSession} already matches on the name. Because the
+ * name is only good for *finding* the session, and `claude --resume <sessionId>` addresses it by ID. `#3118`'s
+ * ruling accepts stop-then-resume as the conveyor's steering mechanism (clause 3 of
+ * `#conveyor-dispatch-calls-the-declared-operation`), and a resume needs this field and nothing else. Storing
+ * it is what turns "the dispatcher can see its agent" into "the dispatcher can address its agent".
+ *
+ * BEST-EFFORT AND SILENT, exactly like {@link persistLastSeenLive} and for the same reason: this is a
+ * bookkeeping write on a READ path, and a store that will not take it must not take down the read. The cost of
+ * a lost write is one more pass — the entry is still in flight, so the next listing read discovers the same id
+ * again. It is self-healing, which is also what makes the one clobber window harmless: a `wakeRun` that writes
+ * its own copy of the run in the same pass can drop this note, and the next pass writes it back.
+ *
+ * IT NEVER OVERWRITES A DIFFERENT ID SILENTLY — it writes only when the field is absent or already equal.
+ * A stored id that disagrees with the listing means the handle matched a session this entry did not start,
+ * which is the thing `findListedSession` refuses on; recording it here would launder that into a fact.
+ *
+ * @param {object} o
+ * @param {string} o.runId
+ * @param {string} o.key - the effect key.
+ * @param {string} o.sessionId - the id the listing reported.
+ * @param {{read: Function, write: Function}} [o.store]
+ * @returns {boolean} whether anything was written.
+ */
+export function persistDiscoveredSessionId({ runId, key, sessionId, store = createFileRunStore() } = {}) {
+  const id = String(sessionId ?? '').trim();
+  if (!runId || !key || !id) return false;
+  try {
+    const run = store.read(String(runId));
+    const effects = run && Array.isArray(run.effects) ? run.effects : null;
+    if (!effects) return false;
+    let touched = false;
+    for (const e of effects) {
+      if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || String(e.key) !== String(key)) continue;
+      const known = String(e.sessionId ?? '').trim();
+      if (known) continue;
+      e.sessionId = id;
+      touched = true;
+    }
+    if (touched) store.write(run);
+    return touched;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -699,12 +876,23 @@ export function isPreSpawnRefusal(error) {
 /**
  * THE SINK — the one thing in this repo that starts a delivery agent.
  *
- * THE HANDLE IS MINTED, NOT DISCOVERED, and that is the load-bearing detail. The #3030 spike established that
- * `sessionId` is the durable handle and `pid` must never be one (the OS reuses it), and read the id back out of
- * `claude agents --json`. Reading it back needs a before/after diff of the live session list and races every
- * other session that starts in the same instant. `claude --session-id <uuid>` removes the race outright: the
- * dispatcher CHOOSES the id, so the handle is known before the agent exists and cannot be attributed to the
- * wrong session. (The spike did not have this; it is the one place its account was narrower than the CLI.)
+ * THE HANDLE IS MINTED, NOT DISCOVERED, and that is still the load-bearing detail — but it is minted into a
+ * field the CLI actually keeps (#3331). The #3030 spike established that `sessionId` is the durable handle and
+ * `pid` must never be one (the OS reuses it), and read the id back out of `claude agents --json`. Reading it
+ * back needs a before/after diff of the live session list and races every other session that starts in the
+ * same instant, so this file mints instead of racing, and that has not changed.
+ *
+ * WHAT CHANGED IS THE CARRIER, AND THE OLD ONE WAS A NO-OP. An earlier version of this comment said
+ * `claude --session-id <uuid>` "removes the race outright". It does not: `claude --bg` **DISCARDS**
+ * `--session-id` and prints `warning: --bg manages the session id; ignoring --session-id (use --resume <id> to
+ * continue an existing session)`. Measured on CLI 2.1.246 over three runs, 3 of 3 mismatched — the #3331
+ * probe, whose table is in `we:backlog/3331-*.md`. Every handle this file minted was therefore unfindable, and
+ * the observer's liveness axis could never match. The mint now rides `-n` ({@link mintDispatchHandle}), which
+ * the listing echoes verbatim, and {@link findListedSession} is the one place anything compares against it.
+ *
+ * `--session-id` IS NOT BROKEN IN GENERAL, and the narrower claim is the true one: the warning is specific to
+ * `--bg`. `we:scripts/lib/judge-spawn.mjs` pins a juror's id with the same flag on a HEADLESS (`-p`) spawn and
+ * that is untouched by this. Only the backgrounded spawn discards it.
  *
  * WHAT IS STILL NOT COVERED, stated rather than papered over: a sink killed between `claude --bg` returning and
  * this function returning loses the handle, and the executor then refuses the entry on replay (it is
@@ -718,13 +906,18 @@ export function isPreSpawnRefusal(error) {
  * {@link AGENT_ARGS_ENV} at the `run.mjs` binding so an operator can actually set it, rather than being a
  * parameter only a test can reach.
  *
- * PROVEN AGAINST A PROCESS, NOT AGAINST THE REAL CLI. `./__tests__/dispatch-spawn-live.test.mjs` starts a
- * `claude` executable — a fake first on `PATH` that parses options the way a commander-style CLI does — and
- * asserts this argv is ACCEPTED, that `--bg` returns instead of blocking, and that the session id pinned here
- * is the id `defaultListAgents` later reports back. What is still NOT proven: no dispatch has been fired end
- * to end, and the REAL CLI's response to this argv remains unasserted. A background session's permission mode
- * and the isolation default are the two things a first live run has to settle; #xaibmeu, which routes the
- * conveyor through this operation, is where that happens.
+ * THE REAL CLI'S RESPONSE TO THIS ARGV IS NOW ASSERTED — it used to say "remains unasserted", and #3331
+ * closed that. Three bare `claude --bg` spawns on 2.1.246 established two facts and nothing wider: the CLI
+ * DISCARDS `--session-id` under `--bg` (3/3 mismatches, with a stderr warning saying so), and it carries the
+ * `-n` name through to `claude agents --json` VERBATIM. That is what this argv is built on now. The evidence
+ * table lives in `we:backlog/3331-*.md`.
+ *
+ * WHAT IS STILL NOT PROVEN, stated as narrowly as the probe allows. No dispatch has been fired end to end:
+ * the probe ran a one-line prompt with no conveyor, no lane and no brief. A background session's permission
+ * mode and the isolation default are the two things a first live run still has to settle; #xaibmeu, which
+ * routes the conveyor through this operation, is where that happens. `./__tests__/dispatch-spawn-live.test.mjs`
+ * continues to hold the argv against a fake `claude` first on `PATH` — that proves the spelling parses and
+ * that `--bg` returns instead of blocking, which is all a stand-in can ever prove.
  *
  * @param {object} [o]
  * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
@@ -732,7 +925,9 @@ export function isPreSpawnRefusal(error) {
  * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
  *   {@link readTick} for why this is a second seam and not the same one.
- * @param {() => string} [o.mintSessionId] - injectable UUID minter.
+ * @param {() => string} [o.mintToken] - injectable entropy for {@link mintDispatchHandle}. It is no longer a
+ *   session-id minter: the CLI mints the session id itself under `--bg`, and this only disambiguates the NAME
+ *   two attempts at one item would otherwise share.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
@@ -741,20 +936,20 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
-  mintSessionId = () => randomUUID(),
+  mintToken = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
-      const sessionId = String(mintSessionId());
-      const argv = buildAgentArgv({ sessionId, payload, extraArgs });
+      const handle = mintDispatchHandle({ payload, mintToken });
+      const argv = buildAgentArgv({ handle, payload, extraArgs });
       try {
         spawnAgent(argv, { cwd: root });
       } catch (e) {
         if (isPreSpawnRefusal(e)) {
-          throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { sessionId });
+          throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { handle });
         }
         // INDETERMINATE. The entry stays `in-flight` with a NULL handle: something may be running and cannot be
         // observed. The replay guard refuses it and `inFlightEntries` reports it under `unknown`, which is
@@ -766,8 +961,12 @@ export function createDispatchSinks({
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
+      // NO `sessionId` IS RECORDED HERE, and that absence is the honest one. The CLI mints the id itself and
+      // does not tell this process what it chose (`--bg` prints a SHORT id to stderr and returns), so the
+      // entry carries the handle it can prove and learns the real id on the first listing read that matches
+      // it — {@link persistDiscoveredSessionId}. Writing a made-up id here is exactly what #3331 undid.
       return inFlight({
-        handle: sessionId,
+        handle,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });
     },
@@ -794,8 +993,15 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
  * The `claude` argv for one dispatch. PURE and exported, because the argv IS the contract with the CLI and a
  * test that asserts it is the only thing standing between a flag rename and a silent non-dispatch.
  *
- * `--bg` starts the session and returns immediately; `--session-id` pins the handle; `-n` names the session so
- * `claude agents` is legible to an operator watching the pool.
+ * `--bg` starts the session and returns immediately; `-n` carries the HANDLE — the one field the CLI echoes
+ * back into `claude agents --json` unchanged, so it is both what an operator reads in the pool and what
+ * {@link findListedSession} matches on.
+ *
+ * `--session-id` IS DELIBERATELY ABSENT, and its removal is the point of #3331 rather than a tidy-up. Under
+ * `--bg` the CLI discards it and warns: `--bg manages the session id; ignoring --session-id`. Emitting a flag
+ * whose only effect is a warning line would keep telling the next reader that the handle is a session id — the
+ * belief that made the observer's liveness axis unmatchable for its whole life. The id is DISCOVERED later,
+ * off the listing row this name finds.
  *
  * THE PROMPT'S POSITION GUARANTEES NOTHING, which the first cut of this comment got wrong. `claude` parses with
  * commander, and commander accepts options intermixed with operands — a last positional beginning with `-` is
@@ -803,7 +1009,16 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
  * real CLI, and a wrong bet turns into a dispatch with a mangled prompt), the dash is REFUSED outright. Every
  * legitimate brief starts with markdown, so the refusal costs nothing and proves what the position could not.
  */
-export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
+export function buildAgentArgv({ handle, payload, extraArgs = [] }) {
+  const name = String(handle ?? '').trim();
+  // REFUSED RATHER THAN DEFAULTED. The old default here was `payload.sessionSlug || \`conveyor-${num}\``, which
+  // is per-ITEM and so is shared by every attempt at it — the collision `findListedSession` now has to refuse
+  // on. A caller with no handle has not minted one, and quietly re-inventing the ambiguous form would put the
+  // dispatch back where #3331 found it.
+  if (!name) {
+    throw notApplied('dispatch-lane: refusing to start an agent with no handle — `mintDispatchHandle` mints the '
+      + 'one thing that can find the session again, and a dispatch nothing can find is a dispatch nothing can close');
+  }
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
@@ -811,8 +1026,7 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
   }
   return [
     '--bg',
-    '--session-id', String(sessionId),
-    '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
+    '-n', name,
     ...extraArgs.map(String),
     prompt,
   ];
@@ -822,12 +1036,20 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
  * THE OBSERVER — the #3084 half that asks how a dispatched build is going, on TWO axes (#x9ylkp7).
  *
  * WHY LIVENESS ALONE COULD NEVER ANSWER `succeeded`. `claude agents --json` reports LIVENESS: a session is in
- * the list or it is not. It carries no exit status, no outcome, and (measured on 2.1.220, with `--all`) no
- * terminal record for a completed session at all. So "the session is gone" collapses *finished cleanly* and
- * *died* into one observation, and the vocabulary has exactly one honest word for that: `unresolved` —
- * terminal for the observer, actionable by a person, WRITES NOTHING. Answering `succeeded` on liveness alone
- * would record `applied` for a build that may have crashed, and the run would advance past the step that
- * exists to react to it. That has not changed and must not.
+ * the list or it is not. It carries no exit status and no outcome. So "the session is gone" collapses
+ * *finished cleanly* and *died* into one observation, and the vocabulary has exactly one honest word for that:
+ * `unresolved` — terminal for the observer, actionable by a person, WRITES NOTHING. Answering `succeeded` on
+ * liveness alone would record `applied` for a build that may have crashed, and the run would advance past the
+ * step that exists to react to it. That has not changed and must not.
+ *
+ * THERE IS A `state` FIELD, AND THIS DELIBERATELY DOES NOT USE IT. An earlier version of the paragraph above
+ * said the listing carried "no terminal record for a completed session at all"; that was measured on **2.1.220**
+ * and is stale. On **2.1.246** every row carries `state`, and the #3331 probe read `done` on all three of its
+ * finished sessions. That is the whole of what was measured. Whether a CRASHED session also reads `done` was
+ * NOT probed — and that is precisely the distinction `unresolved` exists to keep, so building on `state`
+ * without probing a crash would reintroduce the exact conflation this axis was written to refuse. Probe a
+ * crash first; until then `state` is unread, and this comment says why rather than pretending the field is
+ * absent.
  *
  * THIS IS WHY `--all` IS NOT PASSED. It also lists COMPLETED sessions, so a finished build would keep reading
  * as `running` forever — the one mistake that makes an observer worse than none.
@@ -868,12 +1090,17 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT readers go through. See
  *   {@link readTick} for why this is a second seam and not the same one.
  * @param {() => Date} [o.now]
+ * @param {Function} [o.recordSessionId] - the write-back hook for the real session id a listing read
+ *   discovers. Defaults to {@link persistDiscoveredSessionId}; a seam for the same reason `readTick`'s
+ *   `recordLiveness` is one — it is the single WRITE on an otherwise read-only path, and a test that wants the
+ *   observation without touching a run store overrides it with a no-op.
  * @returns {Record<string, Function>} effect type → `async (entry, ctx) => {status, result?, error?}`.
  */
 export function createDispatchObservers({
   exec = execFileSync,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
+  recordSessionId = (o) => persistDiscoveredSessionId(o),
   now = () => new Date(),
 } = {}) {
   // `undefined` is the not-yet-read sentinel, NOT `null`: a reader that returns `null` (or anything else the
@@ -884,6 +1111,9 @@ export function createDispatchObservers({
   return {
     [DISPATCH_EFFECT]: async (entry, ctx) => {
       const handle = String(ctx?.handle ?? entry?.handle ?? '');
+      // THE REAL ID, IF A PREVIOUS PASS ALREADY FOUND IT. Absent on a fresh dispatch and on every entry
+      // written before #3331; {@link findListedSession} falls back to the handle in both cases.
+      const knownSessionId = String(entry?.sessionId ?? '');
 
       // ── AXIS 1: THE PR. The only axis that can ever say `succeeded`. ─────────────────────────────────────
       //
@@ -921,8 +1151,9 @@ export function createDispatchObservers({
         }
       }
 
-      // ── AXIS 2: LIVENESS. Unchanged — it is what answers while no PR exists yet, which is every dispatch
-      //    for most of its life, and the dominant case until real dispatch lands.
+      // ── AXIS 2: LIVENESS. What answers while no PR exists yet, which is every dispatch for most of its
+      //    life, and the dominant case until real dispatch lands. #3331 changed WHAT it compares — the `-n`
+      //    handle rather than a minted session id — and nothing about when it runs or what it may conclude.
       if (listed === undefined) listed = listAgents();
       const sessions = listed;
       if (!Array.isArray(sessions)) {
@@ -941,8 +1172,29 @@ export function createDispatchObservers({
           + 'not understood, which is not evidence that any session ended',
         );
       }
-      const live = listedIds.has(normalizeHandle(handle));
-      if (live) return { status: 'running', result: null };
+      const { row, matches } = findListedSession(sessions, { handle, sessionId: knownSessionId });
+      // TWO SESSIONS ANSWERING TO ONE HANDLE IS A READ THAT FAILED, not a running build (#3331). Picking
+      // either would report ANOTHER dispatch's liveness under this entry's key — a wrong match is worse than
+      // no match, because it is indistinguishable from a right one. It THROWS for the same reason the two
+      // refusals above throw: the pass reports the read failed, fails soft, and asks again next time.
+      // {@link mintDispatchHandle} is what makes this unreachable for anything this dispatcher started.
+      if (matches > 1) {
+        throw new TypeError(
+          `dispatch-lane-io: ${matches} sessions in \`claude agents --json\` answer to the handle `
+          + `${JSON.stringify(handle)} — this observer cannot tell which one this dispatch started, and `
+          + 'attributing a running agent to the wrong entry is worse than reporting nothing',
+        );
+      }
+      if (row) {
+        // THE ONE WRITE ON THIS PATH, and the reason the handle being findable is not the whole of #3331.
+        // `claude --resume` addresses a session by ID, so a dispatcher that can SEE its agent still cannot
+        // STEER it until the id is on the entry. This is where it lands. Best-effort and silent — see
+        // {@link persistDiscoveredSessionId}.
+        if (row.sessionId && !knownSessionId) {
+          recordSessionId({ runId: ctx?.runId, key: ctx?.key ?? entry?.key, sessionId: String(row.sessionId) });
+        }
+        return { status: 'running', result: null };
+      }
 
       // NOT-YET-LISTED IS NOT GONE. `--bg` returns before the session is necessarily visible, so a poll inside
       // the grace window still reads as running rather than closing out a build that is still starting.
@@ -952,7 +1204,7 @@ export function createDispatchObservers({
       }
       return {
         status: 'unresolved',
-        error: `session ${handle} is no longer listed by \`claude agents\`, which reports liveness and not outcome, `
+        error: `no session answering to ${handle} is listed by \`claude agents\`, which reports liveness and not outcome, `
           + 'and no MERGED PR for this item can be attributed to this dispatch — whether the build finished cleanly '
           + 'cannot be told from here. Check its PR, then close the entry out.',
       };

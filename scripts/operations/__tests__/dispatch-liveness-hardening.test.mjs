@@ -36,6 +36,7 @@ import {
 } from '../dispatch-lane.mjs';
 import {
   createDispatchObservers,
+  findListedSession,
   listedSessionIds,
   normalizeHandle,
   persistLastSeenLive,
@@ -289,6 +290,59 @@ describe('hardening 5: the guard has its own listing grace, larger than the obse
   it('an explicit, well-formed window is still honoured — this narrows no caller', () => {
     expect(dispatchStillHolds({ live: false, startedAt: NOW }, isoPlus(NOW, 3), { listingGraceMinutes: 5 })).toBe(true);
     expect(dispatchStillHolds({ live: false, startedAt: NOW }, isoPlus(NOW, 6), { listingGraceMinutes: 5 })).toBe(false);
+  });
+});
+
+// ── #3331 — the same real payload, read the way a dispatch handle is actually keyed ───────────────────────────
+
+describe('#3331: names are NOT unique in a real listing, and the matcher refuses rather than guessing', () => {
+  it('the pinned payload carries the SAME name three times — this is measured, not hypothesised', () => {
+    const counts = new Map();
+    for (const r of payload()) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
+    // `conveyor-3154` × 3 and `conveyor-3151` × 2, because the pre-#3331 dispatcher named every attempt at one
+    // item identically (`payload.sessionSlug || 'conveyor-<num>'` is per-ITEM). This is exactly why the handle
+    // now carries a per-attempt token, and why matching on the bare slug would have been a wrong-match bug.
+    expect(counts.get('conveyor-3154')).toBe(3);
+    expect(counts.get('conveyor-3151')).toBe(2);
+    expect([...counts.values()].some((n) => n > 1)).toBe(true);
+  });
+
+  it('a bare slug matches THREE rows, so it resolves to none of them', () => {
+    expect(findListedSession(payload(), { handle: 'conveyor-3154' })).toMatchObject({ row: null, matches: 3 });
+    // …and every reader fails closed on that count, each in its own safe direction.
+    const out = stampLiveness({ runs: [{ runId: 'a', key: '3154', handle: 'conveyor-3154' }], unreadable: 0 }, { listAgents: payload });
+    expect(out.runs[0].live).toBeNull();
+    // `--resolve` REFUSES: "might one of these be alive" is answered yes by an ambiguous match, not no.
+    expect(() => assertHandleNotLive({ handle: 'conveyor-3154' }, { listAgents: payload })).toThrow(/STILL LISTED/);
+  });
+
+  it('a UNIQUELY named row resolves, and hands back the id the CLI chose', () => {
+    const one = payload().find((r) => r.name === 'conveyor-3150');
+    const { row, matches } = findListedSession(payload(), { handle: 'conveyor-3150' });
+    expect(matches).toBe(1);
+    expect(row.sessionId).toBe(one.sessionId);
+    // The id is nothing the dispatcher could have minted — that is the whole of #3331 in one assertion.
+    expect(row.sessionId).not.toBe('conveyor-3150');
+  });
+
+  it('an entry that already knows its real id is matched BY the id, and the ambiguous name stops mattering', () => {
+    const rows = payload();
+    const one = rows.find((r) => r.name === 'conveyor-3154');
+    expect(findListedSession(rows, { sessionId: one.sessionId }).row).toBe(one);
+    // …even though its NAME is one of the three ambiguous ones. A known id wins OUTRIGHT rather than ranking
+    // first: also accepting name matches here would widen this unique answer back out to three and strand an
+    // entry that had already been identified exactly.
+    expect(findListedSession(rows, { handle: 'conveyor-3154', sessionId: one.sessionId }))
+      .toEqual({ row: one, matches: 1 });
+    // And a stored id that is simply not listed is NOT rescued by a name that is — the session is gone.
+    expect(findListedSession(rows, { handle: 'conveyor-3154', sessionId: 'no-such-id' }))
+      .toEqual({ row: null, matches: 0 });
+  });
+
+  it('nothing to compare is not a match — an entry with neither key never attaches to a row', () => {
+    expect(findListedSession(payload(), {})).toEqual({ row: null, matches: 0 });
+    expect(findListedSession(payload(), { handle: '  ' })).toEqual({ row: null, matches: 0 });
+    expect(findListedSession(null, { handle: 'conveyor-3150' })).toEqual({ row: null, matches: 0 });
   });
 });
 

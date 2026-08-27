@@ -30,7 +30,11 @@ import { createDispatchSinks } from '../dispatch-lane-io.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OBSERVE_SCRIPT = resolve(HERE, '..', '__fixtures__', 'observe-dispatch.mjs');
 const RUN_ID = 'run-dispatch-xproc';
-const HANDLE = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+// THE HANDLE is the `-n` name the sink mints (#3331), and `LISTED_ID` is the id the CLI chose for it — the
+// two are different values on purpose, because `claude --bg` discards the id the dispatcher would pin.
+const HANDLE_TOKEN = 'aaaabbbb';
+const HANDLE = `conveyor-3037-${HANDLE_TOKEN}`;
+const LISTED_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
 /** A PRIMARY checkout — the sink refuses to dispatch from a lane clone, which is what the default resolves to here. */
@@ -63,7 +67,7 @@ async function dispatchAndPark({ startedAt = '2026-08-13T09:00:00.000Z' } = {}) 
 
   // The one thing stubbed on THIS side: `claude --bg` is not run. Everything else — the in-flight write, the
   // handle, the deadline — is the real executor and the real sink.
-  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => HANDLE, now: () => new Date('2026-08-13T09:00:00.000Z') });
+  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintToken: () => HANDLE_TOKEN, now: () => new Date('2026-08-13T09:00:00.000Z') });
   const outcome = await applyPendingEffects(run, { sinks, store });
   run = outcome.run;
   expect(run.effects[0].status).toBe('in-flight');
@@ -92,7 +96,7 @@ function observeInChild(env = {}) {
 describe('a dispatch started here is found by a process that never saw it', () => {
   it('the second process reads the handle, the lane and the brief off disk', async () => {
     await dispatchAndPark();
-    const seen = observeInChild({ FIXTURE_AGENTS: JSON.stringify([{ sessionId: HANDLE, kind: 'background' }]) });
+    const seen = observeInChild({ FIXTURE_AGENTS: JSON.stringify([{ name: HANDLE, sessionId: LISTED_ID, kind: 'background' }]) });
 
     // THE ACCEPTANCE CLAUSE: nothing but a run id crossed the boundary, and the handle came back.
     expect(seen.handle).toBe(HANDLE);
