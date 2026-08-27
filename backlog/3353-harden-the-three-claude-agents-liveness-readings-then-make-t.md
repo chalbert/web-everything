@@ -171,7 +171,7 @@ run 2: 0 error(s), 1447 warning(s)   exit 0
 
 Byte-identical across both runs — **no loader non-determinism at this commit**, because the malformed card that
 caused it is gone. `backlog/3350-*.md`'s stranded hash was healed at land by the drain's JIT-numbering
-(`fad31663 drain: JIT-number x10eju0→#3350 at land (#2288)`). The *Not in scope* note about it and Done-when 8's
+(`fad31663 drain: JIT-number 3350→#3350 at land (#2288)`). The *Not in scope* note about it and Done-when 8's
 parenthetical are stale and are corrected below. **There is no longer a stranded-hash heal to accidentally
 bundle.** Re-measure at build time anyway; the warning count moves most days (1438 → 1447 in one day).
 
@@ -399,7 +399,7 @@ interpreted), so #3331 is `relatedTo`, not a `blockedBy` — but do not fire the
 - **The skill-side rewiring** — steps 3 and 3b of `we:skills-src/conveyor/SKILL.md`. That is #3096.
 - **The stranded-hash heal** (`backlog/3350-*.md`) — **already healed on `main`, so there is nothing here to
   bundle.** *(Corrected 2026-08-26.)* It was the one pre-existing `check:standards` error when this card was
-  written; the drain's JIT-numbering healed it at land (`fad31663 drain: JIT-number x10eju0→#3350 at land
+  written; the drain's JIT-numbering healed it at land (`fad31663 drain: JIT-number 3350→#3350 at land
   (#2288)`), and the gate is now **0 errors** — see *Prepared 2026-08-26*. The original reason to keep it out
   still stands if a similar heal ever appears: it rewrites `we:docs/agent/platform-decisions.md` and turns any
   card that bundles it into a statute edit.

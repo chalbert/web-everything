@@ -67,7 +67,7 @@ Reading them in order:
   passing tests are all about `carryForward` / `shouldStop` / `tickSurface` / `runLoop`.
 - **The board's session-only publish seam is still there**, one hit at `we:skills-src/conveyor/SKILL.md:835`.
 - **The gate's one error** is the pre-existing stranded-hash card
-  `we:backlog/xv3nqsg-guard-that-every-committed-pr-land-invocation-declares-its-v.md`, unrelated to this item
+  `we:backlog/3357-guard-that-every-committed-pr-land-invocation-declares-its-v.md`, unrelated to this item
   and deliberately left alone (see *Not in scope*).
 
 **The runner really does only print — read, not inferred from a comment.** `tickSurface`
@@ -171,7 +171,7 @@ it. S4 is independent of all three and can go any time.
   Replacing chat as the operator surface is those epics' work.
 - **`converge-pr` (#3323) and the delivery reconciler (#3296).** Both landed as cards under #3029 on
   2026-08-26. They make delivery self-healing; they are not session residue.
-- **Healing the stranded-hash card.** `backlog/xv3nqsg-*.md` is `check:standards`'s one error today. Numbering
+- **Healing the stranded-hash card.** `backlog/3357-*.md` is `check:standards`'s one error today. Numbering
   it rewrites `we:docs/agent/platform-decisions.md` and would make this a statute edit. Left alone deliberately.
 
 ## Done when
