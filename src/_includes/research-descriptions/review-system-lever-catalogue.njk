@@ -1,0 +1,296 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The review system has accumulated dozens of tuning knobs — care levels, lens rosters, juror counts, round
+  caps, impact bars, evidence floors, land modes — added one ruling at a time, each argued on its own merits.
+  Nobody has ever listed them together. <strong>What are all the levers, what is each one's range, who sets
+  it today, and which of them is a platform invariant rather than a per-consumer setting?</strong>
+</p>
+<p>
+  The framing is not new here. It is
+  <a href="/backlog/">the repo's own <code>#config-extends-platform-default</code> rule</a> — a concern with
+  more than one legitimate end-state is a configurable dimension, not a fork — applied to the whole review
+  system at once rather than to one question at a time.
+</p>
+
+<h2>The proposed test — and why it was withdrawn</h2>
+<p class="note">
+  <strong>Read this section as a failed proposal, not a rule.</strong> The four-question test below was drafted
+  as this survey's main deliverable and <strong>refuted by its own validation</strong>: run on a ruling made one
+  day earlier in the same cluster, it returns the opposite answer. It is kept in full, with the refutation,
+  because a discarded classifier is worth more on the record than a silent deletion — and because the reason it
+  failed names a third exclusion ground the repo was already using and had never written down.
+</p>
+<p>
+  The natural test is binary: <em>a lever is a setting when two consumers choosing differently both produce
+  coherent systems; it is an invariant when one choice makes the system contradict itself.</em> That test
+  fails on the first real case.
+</p>
+<p>
+  The advisory-blocking decision found that per-<strong>surface</strong> variation in <em>seating</em> is
+  legitimate and already ruled, while per-surface variation in <em>blocking power</em> would "let one gate
+  stop a PR that another gate clears on the identical finding, which is incoherence rather than
+  configurability". Under the binary test, blocking power therefore comes out an <strong>invariant</strong>.
+  But that is wrong: a different repository, whose pull requests never touch this one's land path, may set
+  its own blocking set freely and be entirely coherent. The binary test cannot say so, because it never asks
+  <strong>over what scope</strong> the two consumers differ.
+</p>
+<p>
+  So the answer is not binary. <strong>Every lever is a setting at some scope.</strong> The question is
+  <em>which scope it is pinned at</em>, and "platform invariant" is the special case where the pin sits above
+  every scope any consumer controls.
+</p>
+
+<h3>Four questions, in order</h3>
+<ol>
+  <li>
+    <strong>Is it a lever at all?</strong> Can you name one consumer who could coherently set it to a value
+    other than ours? If yes, it belongs in the catalogue.
+    <p>
+      <strong>Cost and local fit are not answers to this question.</strong> "We would not use it" and "it is
+      too expensive here" are <em>setting values</em>, not membership tests. The only admissible exclusion is
+      <strong>incoherence</strong> — a value no consumer could hold without the system contradicting itself.
+      The two rejections must stay visibly apart, because collapsing them is how a cost argument returns
+      wearing a merit costume.
+    </p>
+  </li>
+  <li>
+    <strong>Name the two scopes.</strong> The <em>decision scope</em> is the object whose fate the lever
+    decides (this finding, this pull request, this repo's policy). The <em>setting scope</em> is where a
+    consumer would turn the knob (per juror, per run, per surface, per repo).
+  </li>
+  <li>
+    <strong>Push the pin up until the conflict clears.</strong> If varying the lever across the setting scope
+    could give <strong>one object two conflicting fates</strong>, the lever is pinned one scope up. Repeat.
+  </li>
+  <li>
+    <strong>Is the pin above every consumer scope?</strong> It is a <strong>platform invariant</strong> if and
+    only if varying it anywhere would make the system's own output vocabulary <strong>mean different things
+    in two places that share it</strong>. Not "would be a worse policy" — <em>would make the word
+    unreadable</em>.
+  </li>
+</ol>
+
+<h3>Two riders the evidence forces</h3>
+<p>
+  <strong>Rider A — an axis is ordered by value, never by goodness.</strong> Recording a range must not imply
+  that turning it up is better. The only controlled experiment on change decomposition (di Biase et al.,
+  PeerJ CS 2019, n=28) found <strong>no</strong> effect on defects found (p=0.6), <strong>no</strong> effect on
+  review time (p=0.66) and <strong>no</strong> effect on rationale understanding; its single significant
+  result was false positives falling 6 to 1 (p=0.03, Cliff's δ=0.36). Ribeiro measured a plain union of three
+  analyzers dropping precision from <strong>0.57 to 0.39</strong> against the best single member. So
+  <em>more reviewers</em> is not itself a quality lever, and every row carries what it is evidenced to buy —
+  or an honest blank.
+</p>
+<p>
+  <strong>Rider B — a null result travels with its lever</strong>, recorded in the same row, so a consumer
+  setting the lever sees both sides.
+</p>
+
+<h3>The refutation — it mis-classifies a ruling made one day earlier</h3>
+<p>
+  Run the four questions on the diff-size <em>refuse</em> threshold. Q1 admits it (a refuse-at-900 threshold is
+  coherent, and cost is inadmissible). Q2: decision scope is the pull request, setting scope is the repo. Q3: no
+  pull request gets two conflicting fates, so the pin stays. Q4: no shared word becomes unreadable.
+  <strong>Verdict: a repo-scope consumer setting.</strong>
+</p>
+<p>
+  The actual ruling was the opposite, and not on cost: <em>"It is not even a config dimension… a
+  supported-but-unset refuse threshold invites a future reader to switch it on for the wrong reason.
+  <strong>There is no value of it that is correct, so the knob is not built.</strong>"</em> The ground was that
+  the 400-line figure is a <strong>human attention</strong> ceiling, and attention is the one property an agent
+  panel does not share with a human reviewer.
+</p>
+<p>
+  <strong>So there is a third exclusion ground, and the test's first question forbids it:
+  domain-misapplication of the underlying proxy.</strong> A lever may be excluded not because it is expensive
+  (never admissible), and not because no consumer could hold any value coherently, but because
+  <strong>the quantity it measures does not exist in this domain</strong>. That ground survives with cost set to
+  zero, so it is not a cost argument in disguise — and it is this survey's one durable contribution to
+  classification. The test itself is <strong>withdrawn rather than patched</strong>: a classifier that gets the
+  neighbouring ratified case wrong has not earned reuse on a case nobody has decided.
+</p>
+
+<h2>Worked examples of the invariant side — illustrative, not ruled</h2>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Lever</th><th>Why the pin is above every consumer</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>An <strong>unrun</strong> adversary never ratifies</td>
+      <td>If a consumer could set this fail-open, the word <em>accept</em> stops meaning "survived an adversary". The vocabulary becomes unreadable across the two consumers who share it.</td>
+    </tr>
+    <tr>
+      <td>Machinery consuming model output is bound to adversarial fixtures</td>
+      <td>Vary it and "this gate is validated" is true in one place and vacuous in another, while both report the same green.</td>
+    </tr>
+    <tr>
+      <td>Every block carries a reviewer</td>
+      <td>A block with no reviewer is the system asserting a verdict nobody rendered. Note the shape: the size <em>dial</em> is a setting (any consumer may move 400 lines); the rule that it never becomes a veto is not.</td>
+    </tr>
+    <tr>
+      <td>Aggregation is strictest-wins, never a majority vote</td>
+      <td>A "panel verdict" that means strictest-wins here and majority-wins there is two different measurements sharing one name.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>What the catalogue found that nobody had named</h2>
+<ol>
+  <li>
+    <strong>Three homes, three different change-clearances, and the assignment does not track how
+    load-bearing the lever is.</strong> The policy contract is human-gated; the escalation rubric is
+    agent-clearable; the jury core sits in no policy tier at all. So a 400-line size threshold that was ruled
+    unable to refuse anything is human-gated, while the eight numbers that <em>consume</em> it are not.
+    <strong>The genuinely escaped set is exactly three constants</strong> — the impact bar that stops a land,
+    the evidence floor, and mandatory-lens <em>membership</em>.
+    <em>Corrected:</em> an earlier draft added "and every round cap", reasoning from the path roster alone.
+    The care-to-jury conformance suite is itself spec-leashed and pins each band's lenses, jurors-per-lens and
+    round cap, so the caps have an indirect but real human backstop. Membership escapes because the suite pins
+    band lenses as a <em>subset of the five-lens panel set</em>, and that set is the <strong>union</strong> of
+    the mandatory and advisory lists — so moving the security lens from one list to the other leaves the union
+    byte-identical and the suite green, while removing that lens's power to block.
+  </li>
+  <li>
+    <strong>The mandatory-lens set is a free parameter, not a ruled constant.</strong> The panel reducer
+    defaults it and validates only that it is non-empty, so any caller may seat a panel in which no lens holds
+    the any-impact veto.
+  </li>
+  <li>
+    <strong>Seating already varies by surface; blocking power varies nowhere.</strong> The parked-PR loop's
+    own mandatory literal is <em>identical</em> to the core's — what differs is the <em>seated</em> roster,
+    four lenses against five. The seating-versus-blocking split is therefore observable in the tree, not just
+    asserted in a ruling.
+  </li>
+  <li>
+    <strong>There are two independent impact bars, not one</strong> — one governing which findings block, one
+    governing which findings escape the evidence floor. They can be set in opposite directions and nothing
+    relates them.
+  </li>
+  <li><strong>Three round-cap constants</strong>, plus an editor round floor that interacts with all three.</li>
+  <li>
+    <strong>Per-reviewer change size is the best-evidenced axis in the literature — and the use this survey
+    first made of it was wrong.</strong> Baum et al. (EMSE 2019, n=50 professionals) measured review
+    effectiveness at <strong>59% on small changes versus 35% on large</strong>, efficiency 15.65 against 9.47
+    defects/hour, and a delocalized defect found in <strong>76%</strong> of small reviews against
+    <strong>36%</strong> of large ones (McNemar p = 0.002 / 0.001 / 0.0117 / 0.0034, all surviving
+    Bonferroni-Holm).
+    <em>Retracted in full:</em> this originally claimed to reconcile the size ruling with the scoped-fan-out
+    story, and that <em>"neither card says this"</em>. Both halves are false. That story's opening line already
+    states the reconciliation, and it explicitly <strong>forbids</strong> the remedy the argument implied —
+    <em>"truncating a juror's diff to its shard would reintroduce exactly the blindness the fan-out exists to
+    remove"</em>. Every juror in that design is deliberately still a whole-diff reviewer. Worse, the size
+    ruling's own anchor states that the 400-line figure is an <em>attention</em> ceiling and that attention is
+    the one property an agent panel does not share with a human — so citing a human-attention study to size an
+    agent panel commits the exact error that anchor was written to prevent.
+    <strong>What survives:</strong> the numbers are real evidence about <em>human</em> reviewers, and whether
+    they transfer to an agent panel is precisely the question already answered <em>no</em>.
+  </li>
+  <li>
+    <strong>Seat accountability is not modelled at all.</strong> Jurors are anonymous positions. Meta
+    (arXiv 2312.17169) measured assigning a named individual rather than a pool at <strong>11.6% less
+    time-in-review with no quality-guardrail regression</strong>; pooling causes diffusion of responsibility.
+  </li>
+  <li>
+    <strong>What occupies the first position of a diff is an accident</strong> of alphabetical ordering — and
+    the evidence narrows the lever rather than endorsing the obvious fix. Fregnan et al. (ESEC/FSE 2022,
+    n=106, Distinguished Paper) found <strong>64% lower odds</strong> of catching a seeded defect when its
+    file was shown <em>last</em>, and hot-spot-first ordering yielded <strong>+23% review comments</strong>
+    (n=29). But Baum (EMSE 2019, n=50) tested general dependency-optimal reordering against deliberately bad
+    orders and found <strong>no statistical confirmation</strong> (p = 0.2587 / 0.1084 / 0.0537) —
+    participants <em>perceived</em> bad orders as chaos without performing better under good ones. The
+    evidenced lever is therefore <em>which subset leads</em>, not how the whole diff is sorted.
+  </li>
+</ol>
+
+<h2>Membership: what stays in the space, and the one thing that does not</h2>
+<p>
+  Four options had been struck from the design space on <strong>cost</strong> or <strong>local fit</strong>.
+  Three are re-admitted as range values, because neither is a membership test:
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Struck as</th><th>Re-admitted as</th></tr></thead>
+  <tbody>
+    <tr><td>"about $0.43 per run is too expensive" — live-repeated stability measurement</td><td>A range value on <em>how stability is measured</em>. This project happens to set it to "replayed".</td></tr>
+    <tr><td>"needs symbol-level analysis, deliberately out of scope" — dependency-graph shard cutting</td><td>A range value on <em>shard cut basis</em>. Whether its merit argument survives belongs to the fan-out item; the cost half must not remove it from the space.</td></tr>
+    <tr><td>"built the dial and shipped it off" — the evidence floor</td><td>Not a removal at all: this is the <strong>correct</strong> shape, and the worked example of it — lever present, setting permissive.</td></tr>
+    <tr><td>the cheap/expensive framing was struck — a named minimum fixture set</td><td><strong>No axis survives underneath it.</strong> Checked and reported as a negative result rather than a manufactured row.</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  <strong>The exclusion that still stands, kept visibly distinct:</strong> a value <em>no consumer could
+  coherently hold</em> is not a lever. "An unrun adversary ratifies" is the example. That is incoherence, not
+  expense — and keeping the two rejections apart is the whole point, because collapsing them is how a cost
+  argument comes back disguised as merit.
+</p>
+
+<h2>Honest verdict on the framing — it is not load-bearing</h2>
+<p>
+  A skeptic pass, instructed to try exactly this attack, argued that "levers and settings" is a tidy
+  re-description that changes no decision. <strong>Every load-bearing claim it made was then checked against
+  the tree, and it was right.</strong> Three claimed leverage points, all failed:
+</p>
+<ol>
+  <li>
+    <em>"It changes what the blocking-scan build should do."</em> <strong>Manufactured.</strong> The
+    instruction to home that list in the contract was already written by the sibling decision that
+    <em>gates</em> that build. The delta predates this survey; claiming it is claiming credit for a change this
+    work did not cause.
+  </li>
+  <li>
+    <em>"It exposes the clearance asymmetry."</em> <strong>Half true, and the wrong half was claimed.</strong>
+    The asymmetry is real and was found here — but finding it required <em>reading the files</em>, not
+    classifying them, and the repo's ratified contract-split rule already supplies both the diagnosis and the
+    fix.
+  </li>
+  <li>
+    <em>"It reconciles the size ruling with scoped fan-out."</em> <strong>Retracted</strong> — see finding 6.
+  </li>
+</ol>
+<p>
+  <strong>Run against the four open cards it was meant to help, the score is zero of four.</strong> One had
+  already performed the scope analysis in its own words and dated earlier; the second changes only through the
+  first; the third's blocker is an unwritten executable criterion, which no classification supplies; and the
+  fourth turns entirely on measured false-positive rates, which the test's first question rules inadmissible —
+  so it would return nothing about the only axis that card turns on.
+</p>
+<p>
+  <strong>What the work is worth, without inflation.</strong> Reading 222 constants end-to-end found two real
+  defects in a ratified trust boundary, one of which is a hole in the <em>pattern</em> rather than in this
+  instance, plus a third exclusion ground the repo was using without having written down. Those are the
+  deliverables. The vocabulary contributed nothing to them, and about forty-five of the sixty-five rows are
+  inventory with no consequence attached. <strong>A survey worth its cost, wrapped in a framing that was
+  not</strong> — reported that way because shipping the framing on the strength of the survey it happens to sit
+  next to is precisely the overclaim this programme exists to catch.
+</p>
+
+<h2>Coverage — what this survey read, and what it did not</h2>
+<p>
+  <strong>Predicate:</strong> a lever is a named identifier or contract field the review pipeline reads, whose
+  value would change what gets looked at, by whom, what a finding must carry, how findings reduce, or what the
+  verdict does. <strong>Candidate set:</strong> the jury core, the escalation rubric, the policy contract, the
+  gate config, the review CLI, the pull-request review operation, the parked-PR workflow, the convergence CLI,
+  the review anchors in the platform-decisions statute, and the open cards under the review-efficacy watch.
+</p>
+<p>
+  <strong>Not covered.</strong> Merge mechanics and drain scheduling; CI configuration; anything outside this
+  repository; <strong>prompt wording</strong> — every juror mandate is a lever and this survey counts "the
+  mandate" as one row rather than enumerating its sentences, which is the largest single gap; surfaces that
+  consume review output rather than produce it; and any lever whose only home is a lane clone or a
+  machine-local ledger. Sixty-five rows — rolled up from 222 individually-tunable constants and parameters —
+  is a count produced by that predicate, not a claim of completeness. Where the roll-up hides a divergence,
+  that is a defect of this write-up, not of the pipeline; the divergences are called out individually above
+  rather than smoothed away.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Grounding report: <code>we:reports/2026-08-27-review-system-lever-catalogue.md</code></li>
+  <li>Sibling research: <a href="/research/adversarial-fixtures-model-output-consumers/">Adversarial fixtures for machinery that consumes model output</a> — the worked invariant.</li>
+  <li>Sibling research: <a href="/research/blast-radius-advisory-review-gating/">Blast-radius advisory review gating</a> and <a href="/research/risk-based-care-scaled-review-gating/">Risk-based care-scaled review gating</a> — the care dial this catalogue enumerates.</li>
+  <li>Sibling research: <a href="/research/human-vs-ai-review-cognitive-science/">Human versus AI review, the cognitive science</a>.</li>
+</ul>
+{% endraw %}
