@@ -1,10 +1,11 @@
 ---
+bornAs: xsbchju
 kind: story
 size: 5
 status: open
 scope: ["we:scripts/lib/", "we:scripts/check-standards.mjs", "we:scripts/operations/__tests__/helpers/"]
 dateOpened: "2026-08-26"
-blockedBy: ["xuhxkqz"]
+blockedBy: ["3354"]
 relatedReport: reports/2026-08-26-adversarial-fixtures-model-output-consumers.md
 tags:
   - testing
@@ -16,7 +17,7 @@ tags:
 # Gate the declared model-consumer set on standing adversarial fixtures
 
 Build the check that enforces the model-consumer clause ruled by
-[#xuhxkqz](/backlog/xuhxkqz-require-adversarial-fixtures-for-machinery-that-consumes-mod/): a **declared**
+[#3354](/backlog/3354-require-adversarial-fixtures-for-machinery-that-consumes-mod/): a **declared**
 member set widened by **import-graph reachability** from the single model-entry seam, a **two-exit** ratchet,
 and a shared fake-juror fixture module. **Blocked on that decision being ratified and its anchor landing** —
 the two-PR rule ([#principle-and-impl-two-pr](/docs/agent/platform-decisions.md#principle-and-impl-two-pr))

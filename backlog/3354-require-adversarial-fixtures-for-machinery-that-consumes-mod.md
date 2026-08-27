@@ -1,4 +1,5 @@
 ---
+bornAs: xuhxkqz
 kind: decision
 status: open
 scaffoldedBy: "prepare-fixture-statute-lane-24-b65dbaef"
@@ -123,7 +124,7 @@ certify a guard as sound on the strength of a test run that examined the unmodif
 
 ## Delegated — the enforcement mechanism
 
-**→ delegated to [#xsbchju](/backlog/xsbchju-gate-the-declared-model-consumer-set-on-standing-adversarial/)
+**→ delegated to [#3355](/backlog/3355-gate-the-declared-model-consumer-set-on-standing-adversarial/)
 (prepared, `blockedBy` this decision).** *How* the gate identifies members — declared markers plus an
 import-graph widener from the single model-entry seam, a two-exit ratchet, the shared fixture module, the
 registration shape — is an implementation choice with **no statute output**, and the fresh-context screen
@@ -178,7 +179,7 @@ fixture. All three findings are carried into the child's recommended approach, i
 is attached, both branches aim at the same target set, so the whole remaining argument is technique accuracy
 inside `we:scripts/check-standards.mjs` — a call with no statute output, which the item's own text conceded
 by keeping the mechanism out of the anchor. Fix applied: carved to
-[#xsbchju](/backlog/xsbchju-gate-the-declared-model-consumer-set-on-standing-adversarial/) with the
+[#3355](/backlog/3355-gate-the-declared-model-consumer-set-on-standing-adversarial/) with the
 recommendation and evidence attached, and removed from the human's desk.
 
 ### Candidate 3 — "what must the fixtures contain?" → dissolved to **precedent**, and its residue became Ratify 2
@@ -304,7 +305,7 @@ only cite an anchor already `status: resolved` on `main`.
    `we:docs/agent/backlog-workflow.md`, and this item carries `codifiedIn:` pointing at the anchor. No
    `we:scripts/` file is touched by that PR.
 2. **Observable (this decision's PR)** —
-   [#xsbchju](/backlog/xsbchju-gate-the-declared-model-consumer-set-on-standing-adversarial/) is unblocked
+   [#3355](/backlog/3355-gate-the-declared-model-consumer-set-on-standing-adversarial/) is unblocked
    (its `blockedBy` on this item clears) and carries the mechanism, its scope and its own executable
    criteria.
 3. **Not tier-1, and why** — which invariant the human ratifies is design judgment with no executable form.
@@ -318,7 +319,7 @@ re-checked against the real diff at PR open. Per the two-PR rule the touch-set i
 PR touches `we:docs/agent/platform-decisions.md` and `we:docs/agent/backlog-workflow.md` only; the mechanism's
 touch-set (`we:scripts/lib/`, `we:scripts/check-standards.mjs`,
 `we:scripts/operations/__tests__/helpers/`) sits on
-[#xsbchju](/backlog/xsbchju-gate-the-declared-model-consumer-set-on-standing-adversarial/) as its `scope:`.
+[#3355](/backlog/3355-gate-the-declared-model-consumer-set-on-standing-adversarial/) as its `scope:`.
 
 | juror | lens | grounding method | pre-registered expectation |
 | --- | --- | --- | --- |
