@@ -14,6 +14,30 @@
       "verdict": "accept"
     }
   ],
+  "reviewerIdentity": {
+    "model": null,
+    "effort": null,
+    "promptRevision": null,
+    "roster": [
+      "correctness"
+    ],
+    "panelShape": "single-lens",
+    "careLevel": null,
+    "declaredCareLevel": null,
+    "operation": "review-pr",
+    "writeUpMarkers": [
+      "#2450",
+      "#3035"
+    ],
+    "unknown": [
+      "model",
+      "effort",
+      "promptRevision",
+      "careLevel",
+      "declaredCareLevel"
+    ],
+    "comparable": false
+  },
   "declaredFindings": 2,
   "changedFiles": [
     "scripts/operations/__tests__/dispatch-lane-integration.test.mjs",
