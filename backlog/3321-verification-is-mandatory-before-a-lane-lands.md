@@ -222,8 +222,8 @@ uses a flag it already supports.)
 
    | tree | vitest's own summary line | criterion exit |
    | --- | --- | --- |
-   | `origin/main` (`481f6915`) | `Tests  32 skipped (32)` | **1** |
-   | this branch (`11ae7037`) | `Tests  28 passed \| 32 skipped (60)` | **0** |
+   | `origin/main` (`f2940278`) | `Tests  32 skipped (32)` | **1** |
+   | this branch (`1f28d35f`) | `Tests  28 passed \| 32 skipped (60)` | **0** |
 
    *(Re-measured on every round rather than carried over, because both sides move: `origin/main` advances under a
    live drain, and each round adds cases. Earlier cuts of this table read `14 passed` against `1c293a0f`,
@@ -233,14 +233,18 @@ uses a flag it already supports.)
    `origin/main` at `32b66578` earlier in round 5. All superseded, not contradicted: round 5 widened the sweep's
    regex and added the four mutation-probe cases, and `origin/main` moved from `32b66578` to `481f6915` under the
    live drain **during** this round, which is exactly why this row is re-run rather than renumbered.
-   The RED side is re-run against the tip each time — never assumed from the previous reading. `481f6915` was
+   **RETRACTED AGAIN IN ROUND 6, for the same reason: this table read `481f6915` / `11ae7037`, and BOTH were stale
+   by the time they were read.** `origin/main` moved on under the drain — it is `f2940278` as measured this
+   session — and the branch tip advanced with round 6's commits. Re-run, not renumbered: the two readings are
+   character-for-character what they were, only the trees they name changed.
+   The RED side is re-run against the tip each time — never assumed from the previous reading. `f2940278` was
    re-measured in this lane by checking `origin/main`'s copies of the two files into the working
    tree, running, reading the exit code, and restoring (`git status --porcelain` empty afterwards);
    `origin/main`'s copy of `we:scripts/__tests__/lane-verify.test.mjs` contains **0**
    occurrences of `#3321`, so the `-t` filter selects nothing there and vitest prints a skipped-only summary line
-   the `grep` cannot match. The verdict has been identical at all **seven** tips,
+   the `grep` cannot match. The verdict has been identical at all **eight** tips,
    which is the point: the criterion depends on this branch's tests existing, not on which commit main happens to be
-   at. The `11ae7037` reading is the last commit before this card revision and the PR body, which are the only
+   at. The `1f28d35f` reading is the last commit before this card revision and the PR body, which are the only
    things the commits after it touch.)*
 
    **THE `grep` IS THE CRITERION, NOT DECORATION.** `npx vitest run lane-verify -t "#3321"` on its own exits
