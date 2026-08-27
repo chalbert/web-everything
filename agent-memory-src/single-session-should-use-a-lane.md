@@ -23,7 +23,10 @@ instruction on the strength of it. Run in an acquired lane, `git branch <new>` i
 
 `git checkout -b`, `git switch` and `git worktree add` are denied the same way. **The sanctioned route needs no
 local branch at all:** commit on the lane's own `main`, then publish the ref directly —
-`git push origin HEAD:refs/heads/lane/<slug>` — and land it with `node scripts/pr-land.mjs --ref=…`. The lane
+`git push origin HEAD:refs/heads/lane/<slug>` — then record the verification for that commit with
+`node scripts/operations/run.mjs verify --checkout=<lane> --json` (it shells `we:scripts/verify-lane.mjs`, the only
+writer of the marker `pr-land`'s finish-guard demands by default since #3321) and land it with
+`node scripts/pr-land.mjs --ref=…`. The lane
 ref exists only on the remote; nothing local is ever branched. (Recovery for a stray branch, per the guard's own
 text: fast-forward main with `git branch -f main <tip>`, never `reset`.)
 

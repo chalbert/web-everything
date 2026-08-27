@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
   VERIFY_FILENAME,
@@ -438,21 +439,47 @@ describe('#3321 — the gate no longer passes when it cannot tell (requireVerifi
 
 // ── #3321 — THE CALLER SWEEP, as a test instead of an assertion in a comment ──────────────────────────────────
 //
-// The residual this item's round-3 fix named and deferred, built here instead. Twice now, a docblock has asserted
-// a completed sweep of the callers the flipped default re-points, and twice the sweep had missed one: round 1
-// missed `we:scripts/lane-drain.mjs`, round 2 missed
+// The residual this item's round-3 fix named and deferred, built here instead. Three times now, a docblock has
+// asserted a completed sweep of the callers the flipped default re-points, and three times the sweep had missed
+// one: round 1 missed `we:scripts/lane-drain.mjs`, round 2 missed
 // `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (four flag-free argvs, so every `/workflow`
-// lane died at pr-land's step-1b gate with exit 3 / `unverified`).
+// lane died at pr-land's step-1b gate with exit 3 / `unverified`), and round 3 missed the three DOC emitters
+// below.
 //
-// The lesson is not "remember the workflow" — it is that a caller list maintained BY HAND in a comment is a claim
-// that rots the moment someone adds a caller. So the sweep runs here, over the real committed source: every
-// `node scripts/pr-land.mjs …` command string this repo ships must state its verification posture explicitly, and
-// each is driven through pr-land's own flag parser, `resolveVerifyOptions`, and `verifyGateDecision` against the
-// marker state that path actually sees. Add a fifth flag-free invocation and this reddens instead of shipping.
+// RETRACTION — this comment used to end: "So the sweep runs here, over the real committed source: every
+// `node scripts/pr-land.mjs …` command string this repo ships must state its verification posture explicitly …
+// Add a fifth flag-free invocation and this reddens instead of shipping." THAT WAS FALSE WHEN WRITTEN. The
+// round-3 sweep iterated TWO HARD-CODED FILENAMES (`for (const file of [WORKFLOW, DRAIN])`) — the same
+// hand-maintained caller list it claimed to be replacing, relocated from a comment into a test. Measured by
+// review round 3, in this lane at `ff8088e4`: appending a flag-free `node scripts/pr-land.mjs` invocation
+// (argv `--ref=lane/x --label-on-green --json`) to a THIRD emitter (`scripts/lane-review.mjs`)
+// left the suite GREEN at 53 passed; appending the identical line to a swept file reddened it. And the list was
+// false by its own stated criterion: running its own predicate over `git ls-files` finds THREE further emitters
+// shipping a `--ref=` invocation that says nothing about verification —
+// `skills-src/batch-backlog-items/SKILL.md` (the serial `/batch` close-out),
+// `docs/agent/backlog-workflow.md` (the canonical per-item arc) and
+// `agent-memory-src/single-session-should-use-a-lane.md`.
+//
+// SO THE HARVEST IS NOW THE TRACKED FILE SET. `git grep -lF pr-land.mjs` over tracked files, minus exactly one
+// exclusion (`scripts/pr-land.mjs` — a tool's own `--help` usage banner documents its flags; it is not a caller
+// of itself, and the exclusion is pinned below so it cannot silently grow). Every invocation the harvest finds
+// must DECLARE ITS POSTURE, one of two ways — which is the contract review round 2 actually asked for, "either
+// carries a verify flag or is preceded by a verify-lane run":
+//   · it carries `--require-verified` / `--no-require-verified`, or
+//   · a `verify-lane.mjs` / `run.mjs verify` command sits on the same line or within the 3 lines above it, so the
+//     arc records a marker for the commit it is about to land. The window is deliberately TIGHT: it proves the
+//     verify is adjacent in the documented arc, NOT merely somewhere in the same file. What it does NOT prove is
+//     execution order — source adjacency is the checkable proxy, and the reason the doc arcs were edited to put
+//     the verify AFTER the item commit rather than leaving it where it already sat, hundreds of lines up.
+// Each harvested invocation is then driven through pr-land's own flag parser, `resolveVerifyOptions`, and
+// `verifyGateDecision` against the marker state that path really sees.
 describe('#3321 — every committed pr-land invocation declares its verification posture (caller sweep)', () => {
   const REPO = process.cwd();
   const WORKFLOW = 'skills-src/batch-backlog-items/parallel-execute.workflow.js';
   const DRAIN = 'scripts/lane-drain.mjs';
+  // The ONE exclusion. pr-land's `--help` banner spells its own flags out as example command lines; they are
+  // documentation of the tool, not call sites of it. Pinned by name AND by count below.
+  const SELF = 'scripts/pr-land.mjs';
 
   // pr-land's OWN flag parser (`scripts/pr-land.mjs`, the argv loop) — the same regex, not a re-implementation.
   const parseArgv = (cmd) => {
@@ -467,11 +494,102 @@ describe('#3321 — every committed pr-land invocation declares its verification
   // "the `node scripts/pr-land.mjs …` argv" is not mistaken for a call site that forgot its posture.
   const PR_LAND_CMD = /node scripts\/pr-land\.mjs(?:\s+--[^\s`\\]+)+/g;
   const VERIFY_FLAGS = ['require-verified', 'no-require-verified'];
+  // The second arm: a recorded verification for the commit about to land. `verify-lane.mjs` is the ONLY writer of
+  // `.git/.lane-verify`; `run.mjs verify` is the operation that shells it.
+  const VERIFY_RUN = /verify-lane\.mjs|run\.mjs verify/;
+  const VERIFY_WINDOW = 3;
   const srcOf = (f) => readFileSync(resolve(REPO, f), 'utf8');
-  const invocationsIn = (f) => [...srcOf(f).matchAll(PR_LAND_CMD)].map((m) => m[0].trim());
+  const greenFor = (sha) => verifyFinishBody(
+    verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }),
+    { finishedAt: new Date(T0).toISOString(), exitCode: 0 },
+  );
+
+  /** Every tracked file that mentions pr-land.mjs — the harvest set, computed, never listed. */
+  const trackedMentioningPrLand = () =>
+    execFileSync('git', ['grep', '-lF', '--', 'pr-land.mjs'], { cwd: REPO, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean);
+
+  /** Harvest one file's invocations WITH the line context the verify-arm needs. */
+  const invocationsIn = (f) => {
+    const lines = srcOf(f).split('\n');
+    const out = [];
+    lines.forEach((line, i) => {
+      for (const m of line.matchAll(PR_LAND_CMD)) {
+        const before = lines.slice(Math.max(0, i - VERIFY_WINDOW), i + 1).join('\n');
+        out.push({ file: f, line: i + 1, cmd: m[0].trim(), precededByVerify: VERIFY_RUN.test(before) });
+      }
+    });
+    return out;
+  };
+  const cmdsIn = (f) => invocationsIn(f).map((v) => v.cmd);
+
+  const harvest = () =>
+    trackedMentioningPrLand()
+      .filter((f) => f !== SELF)
+      .flatMap(invocationsIn);
+
+  it('the harvest is the TRACKED FILE SET, not a hand-written list of filenames', () => {
+    const files = trackedMentioningPrLand();
+    // The files the round-3 sweep hard-coded are of course still in it — but so is everything else, which is the
+    // whole point. If this ever equals exactly [WORKFLOW, DRAIN, SELF] the sweep has quietly narrowed again.
+    expect(files).toContain(WORKFLOW);
+    expect(files).toContain(DRAIN);
+    expect(files.length).toBeGreaterThan(3);
+    // And the emitters review round 3 missed are inside the harvest now, by construction rather than by name.
+    const harvested = harvest().map((v) => v.file);
+    for (const missed of [
+      'skills-src/batch-backlog-items/SKILL.md',
+      'docs/agent/backlog-workflow.md',
+      'agent-memory-src/single-session-should-use-a-lane.md',
+    ]) expect(harvested).toContain(missed);
+  });
+
+  it('the ONE exclusion is pr-land\'s own --help banner, and it stays one file', () => {
+    const excluded = trackedMentioningPrLand().filter((f) => f === SELF);
+    expect(excluded).toEqual([SELF]);
+    // Every hit the exclusion swallows lives in the usage banner — i.e. above the `import` line that starts the
+    // program. If a REAL self-invocation is ever added below it, this count moves and the exclusion must be
+    // re-argued rather than silently widened.
+    const src = srcOf(SELF);
+    const programStart = src.indexOf('\nimport ');
+    const hits = [...src.matchAll(PR_LAND_CMD)];
+    expect(hits.length).toBe(14);
+    for (const h of hits) expect(h.index, h[0]).toBeLessThan(programStart);
+  });
+
+  it('no emitter ships a pr-land invocation that says nothing about verification', () => {
+    const silent = harvest()
+      .filter((v) => !VERIFY_FLAGS.some((f) => f in parseArgv(v.cmd)))
+      .filter((v) => !v.precededByVerify)
+      .map((v) => `${v.file}:${v.line}: ${v.cmd.slice(0, 90)}`);
+    expect(silent).toEqual([]);
+  });
+
+  it('every harvested invocation reaches ok:true on the marker state its own path really has', () => {
+    for (const v of harvest()) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(v.cmd), env: {} });
+      const where = `${v.file}:${v.line}`;
+      if (opts.requireVerified) {
+        // The lane-local arms: no flag, but a verify adjacent above them, so a FRESH green marker for the commit
+        // being landed is exactly what the arc produces. These are the paths where the gate MEANS something.
+        expect(v.precededByVerify, where).toBe(true);
+        expect(verifyGateDecision({ record: greenFor(SHA), headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: true, reason: 'verified' });
+        // …and the reason the verify has to sit AFTER the item commit: a green marker for an EARLIER head is
+        // stale, and the strict gate refuses it (the #3212 shape).
+        expect(verifyGateDecision({ record: greenFor(OTHER), headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: false, reason: 'unverified' });
+      } else {
+        // The CI-gated arms: the marker is structurally unreachable, so they declare the opt-out instead.
+        expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: true, reason: 'untracked' });
+      }
+    }
+  });
 
   it('the parallel /workflow producer passes the opt-out on EVERY argv it emits', () => {
-    const invocations = invocationsIn(WORKFLOW);
+    const invocations = cmdsIn(WORKFLOW);
     // Step 8 emits two (the WE PR and the impl-repo PR); the #2216 label-reconcile pass emits two more.
     expect(invocations.length).toBe(4);
     for (const cmd of invocations) {
@@ -486,7 +604,7 @@ describe('#3321 — every committed pr-land invocation declares its verification
   });
 
   it('the same argvs WITHOUT the flag are the wedge — so the flag is provably load-bearing', () => {
-    const stripped = invocationsIn(WORKFLOW).map((c) => c.replace(/\s--no-require-verified\b/g, ''));
+    const stripped = cmdsIn(WORKFLOW).map((c) => c.replace(/\s--no-require-verified\b/g, ''));
     expect(stripped.length).toBe(4);
     for (const cmd of stripped) {
       const opts = resolveVerifyOptions({ flags: parseArgv(cmd), env: {} });
@@ -494,16 +612,6 @@ describe('#3321 — every committed pr-land invocation declares its verification
       expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), cmd)
         .toMatchObject({ ok: false, reason: 'unverified' });
     }
-  });
-
-  it('no emitter ships a pr-land invocation that says nothing about verification', () => {
-    const silent = [];
-    for (const file of [WORKFLOW, DRAIN]) {
-      for (const cmd of invocationsIn(file)) {
-        if (!VERIFY_FLAGS.some((f) => f in parseArgv(cmd))) silent.push(`${file}: ${cmd.slice(0, 80)}`);
-      }
-    }
-    expect(silent).toEqual([]);
   });
 
   it('the drain builds its argv as an ARRAY, and that array declares the posture too', () => {
