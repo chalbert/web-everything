@@ -19,7 +19,7 @@
  *      unreachable from the public API by construction, and no test here pretends otherwise.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,7 @@ import {
   assertLaneCwd,
   JUDGE_TIMEOUT_MS,
   JudgeTimeoutError,
+  JudgeBudgetError,
   laneRootOf,
   sameDirectory,
   REAL_PATH,
@@ -975,3 +976,241 @@ describe('an unbounded juror budget', () => {
     }
   });
 });
+
+/**
+ * #3187 — THE INHERITED DEFAULT KILLED EVERY TOOL-BEARING JUROR, AND DID NOT SAY SO.
+ *
+ * TWO HALVES, TESTED AS TWO HALVES because they fail independently. (a) `DEFAULT_BUDGET_USD` was `0.5`, sized
+ * for a TOOL-FREE juror in #3028 and never revisited when tool-bearing jurors arrived in #3072 — so a caller
+ * that declared no budget inherited a ceiling BELOW every spend a tool-bearing juror actually produces. WHICH
+ * callers those are is NOT restated here — `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS" is the one list, and
+ * this line previously carried a narrower copy of it (*"which today means `we:scripts/lib/judge-panel.mjs`,
+ * the converge panel"*) that was WRONG: `we:scripts/operations/explore.mjs`'s tool-free `synthesize` seat
+ * inherits it too, through `createDefaultJudge`, and so does anything reaching `judgePanel` without a per-seat
+ * budget. A second copy of a list is a second thing to be wrong; point at the list instead.
+ *
+ * (b) The kill surfaces as `is_error` with `stop_reason: "tool_use"`, which names nothing about money and
+ * which a CONFORMING run also carries — so it read as a crash. On the converge run that exposed this, 6 of 8 seats died this way and the panel escalated
+ * `needs-human` on `mandatory-lens-absent`: a spending limit diagnosed as a panel failure.
+ *
+ * THE SPENDS ARE MEASURED, NOT INVENTED — four real tool-bearing `review-pr` rounds on 2026-08-18, read off
+ * each run's own telemetry line: $0.6152, $0.6597, $0.6997, $0.9042. Plus one converge seat killed at $0.596
+ * that finished at $0.69 when re-run identically against a 3.0 ceiling.
+ */
+const MEASURED_TOOL_BEARING_SPENDS_USD = Object.freeze([0.6152, 0.6597, 0.6997, 0.9042]);
+/** The converge-path seat: killed having spent this, then finished at $0.69 under a wider ceiling. */
+const MEASURED_CONVERGE_KILL_SPEND_USD = 0.596;
+
+describe('#3187 (a) — the INHERITED default admits a tool-bearing juror at the measured spends', () => {
+  it.each(MEASURED_TOOL_BEARING_SPENDS_USD)(
+    'a juror that spends $%s finishes under the inherited ceiling instead of being killed at it',
+    (spend) => {
+      // STRICTLY greater: a ceiling merely EQUAL to the spend is the boundary the kill happens at, and every
+      // one of these is a spend the juror had already reached when its round completed.
+      expect(DEFAULT_BUDGET_USD).toBeGreaterThan(spend);
+    },
+  );
+
+  it('also clears the converge seat that was actually killed, on ONE of the paths that inherit this', () => {
+    expect(DEFAULT_BUDGET_USD).toBeGreaterThan(MEASURED_CONVERGE_KILL_SPEND_USD);
+    expect(DEFAULT_BUDGET_USD).toBeGreaterThan(0.69); // what that same seat spent when it was allowed to finish
+  });
+
+  it('is a positive finite NUMBER, not `null` — `assertPanelBudget` cannot sum a roster of no-ceilings', () => {
+    // Why the default did not simply follow `review-pr`/`review-prep` to `budget: null`: judge-panel.mjs feeds
+    // this value to `assertPanelBudget`, which REFUSES a non-positive-finite per-juror budget.
+    expect(typeof DEFAULT_BUDGET_USD).toBe('number');
+    expect(Number.isFinite(DEFAULT_BUDGET_USD)).toBe(true);
+    expect(DEFAULT_BUDGET_USD).toBeGreaterThan(0);
+  });
+});
+
+describe('#3187 (a) — end to end, over a fake CLI that ENFORCES the ceiling the way the real one does', () => {
+  // A REAL DIRECTORY, because `assertLaneCwd` stats it: a tool-bearing spawn is refused unless its `cwd` is an
+  // existing lane clone, and the whole point of these cases is that the juror IS tool-bearing.
+  let laneDir = null;
+  let tmpRoot = null;
+  beforeAll(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'judge-budget-lane-'));
+    laneDir = join(tmpRoot, '.lanes', 'web-everything', 'lane-3');
+    mkdirSync(laneDir, { recursive: true });
+  });
+  afterAll(() => { if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true }); });
+
+  /**
+   * A fake `claude` that reads `--max-budget-usd` OFF ITS OWN ARGV and kills the run when the round's spend
+   * exceeds it — emitting the real kill shape (`is_error` + `stop_reason: "tool_use"`) rather than an answer.
+   *
+   * THIS IS THE POINT OF THE FIXTURE: the assertion then depends on the constant instead of restating it. A
+   * plain canned-stdout spawn would pass at ANY default, because nothing in it would enforce anything.
+   */
+  function budgetEnforcingSpawn(spendUsd) {
+    const seen = { ceiling: undefined, killed: null };
+    const fn = (cli, argv) => {
+      const i = argv.indexOf('--max-budget-usd');
+      const ceiling = i === -1 ? null : Number(argv[i + 1]);
+      seen.ceiling = ceiling;
+      seen.killed = ceiling !== null && spendUsd > ceiling;
+      const stdout = JSON.stringify(seen.killed
+        ? { is_error: true, stop_reason: 'tool_use', result: '', total_cost_usd: spendUsd, session_id: 'kkkk' }
+        : {
+          is_error: false,
+          stop_reason: 'tool_use',
+          session_id: 'aaaaaaaa-bbbb-8ccc-9ddd-eeeeeeeeeeee',
+          total_cost_usd: spendUsd,
+          duration_ms: 1900,
+          num_turns: 4,
+          usage: { input_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 900 },
+          structured_output: { verdict: 'accept', findings: [] },
+        });
+      return {
+        stdout: { on: (e, cb) => { if (e === 'data') setTimeout(() => cb(stdout), 0); } },
+        stderr: { on: () => {} },
+        stdin: { on: () => {}, end: () => {} },
+        on: (e, cb) => { if (e === 'close') setTimeout(() => cb(seen.killed ? 1 : 0), 1); },
+        kill: () => {},
+      };
+    };
+    return { fn, seen };
+  }
+
+  it.each(MEASURED_TOOL_BEARING_SPENDS_USD)(
+    'a caller declaring NO budget completes a tool-bearing juror that spends $%s (Done-when 2)',
+    async (spend) => {
+      const { fn, seen } = budgetEnforcingSpawn(spend);
+      const r = await judgeSpawn({
+        mandate: 'You are the rigor juror.',
+        input: 'THE-DIFF',
+        shape: SHAPE,
+        // NO `budget` — this is the whole criterion: what a caller INHERITS must not kill it.
+        runId: 'run-3187',
+        lens: 'rigor',
+        cwd: laneDir,
+        allowedTools: ['Bash', 'Read', 'Grep', 'Glob'], // tool-BEARING, which is the shape that overspends
+        spawnFn: fn,
+      });
+      expect(seen.ceiling).toBe(DEFAULT_BUDGET_USD); // it really did inherit, rather than passing no flag
+      expect(seen.killed).toBe(false);
+      expect(r.value).toEqual({ verdict: 'accept', findings: [] });
+      expect(r.costUsd).toBe(spend);
+    },
+  );
+
+  it('and the fixture is not vacuous — a spend ABOVE the inherited ceiling still gets killed, legibly', async () => {
+    const over = DEFAULT_BUDGET_USD + 0.25;
+    const { fn, seen } = budgetEnforcingSpawn(over);
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, runId: 'run-3187', lens: 'rigor',
+      cwd: laneDir,
+      allowedTools: ['Read'],
+      spawnFn: fn,
+    })).rejects.toThrow(JudgeBudgetError);
+    expect(seen.killed).toBe(true);
+  });
+});
+
+describe('#3187 (b) — a budget-terminated spawn REPORTS THE CEILING, not a bare `tool_use` stop', () => {
+  /** The kill shape, as the CLI emits it: an error whose stop reason says nothing about money. */
+  const killed = (extra = {}) => JSON.stringify({
+    is_error: true,
+    stop_reason: 'tool_use',
+    total_cost_usd: 0.596,
+    session_id: 'kkkkkkkk-bbbb-8ccc-9ddd-eeeeeeeeeeee',
+    result: '',
+    ...extra,
+  });
+
+  it('throws a JudgeBudgetError naming BOTH the spend and the ceiling', () => {
+    expect(() => parseJudgeOutcome(killed(), '', 0.5)).toThrow(JudgeBudgetError);
+    expect(() => parseJudgeOutcome(killed(), '', 0.5)).toThrow(/0\.596/);
+    expect(() => parseJudgeOutcome(killed(), '', 0.5)).toThrow(/max-budget-usd of \$0\.5/);
+  });
+
+  it('says it is a BOUND, not a crash — the misdiagnosis is the expensive half of this bug', () => {
+    expect(() => parseJudgeOutcome(killed(), '', 0.5)).toThrow(/KILLED BY ITS SPEND CEILING/);
+    expect(() => parseJudgeOutcome(killed(), '', 0.5)).toThrow(/not a crash/);
+  });
+
+  it('carries the two numbers on the INSTANCE too, so a run record can file it without regex', () => {
+    try {
+      parseJudgeOutcome(killed(), '', 0.5);
+      throw new Error('expected a throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(JudgeBudgetError);
+      expect(e.name).toBe('JudgeBudgetError');
+      expect(e.budgetExceeded).toBe(true);
+      expect(e.budget).toBe(0.5);
+      expect(e.costUsd).toBe(0.596);
+      expect(e.stopReason).toBe('tool_use');
+    }
+  });
+
+  it('fires whether or not the CLI supplied result text — BOTH old branches were silent about the budget', () => {
+    // The pre-#3187 code split on `parsed.result`: non-empty rethrew the CLI's words verbatim, empty dumped
+    // the parsed object. Neither named a ceiling, so the budget branch has to precede both.
+    expect(() => parseJudgeOutcome(killed({ result: '' }), '', 0.5)).toThrow(JudgeBudgetError);
+    expect(() => parseJudgeOutcome(killed({ result: 'Claude Code stopped' }), '', 0.5)).toThrow(JudgeBudgetError);
+  });
+
+  it('does NOT fire when no ceiling was declared — there is no number to name and none is invented', () => {
+    // `budget: null` is what `review-pr` and `review-prep` declare. Such a run cannot be killed by a ceiling,
+    // so a `tool_use` error there is a different failure and keeps the CLI's own words.
+    expect(() => parseJudgeOutcome(killed({ result: 'something else broke' }), '', null))
+      .toThrow(/the juror failed: something else broke/);
+    expect(() => parseJudgeOutcome(killed({ result: 'something else broke' }), '', null))
+      .not.toThrow(JudgeBudgetError);
+  });
+
+  it('does NOT fire on a CONFORMING run, which also stops for `tool_use` (the forced tool call)', () => {
+    const conforming = JSON.stringify({
+      is_error: false,
+      stop_reason: 'tool_use',
+      total_cost_usd: 0.9042,
+      session_id: 'aaaa',
+      structured_output: { verdict: 'accept', findings: [] },
+    });
+    const r = parseJudgeOutcome(conforming, '', 0.5); // a spend OVER the ceiling, but not an error
+    expect(r.value).toEqual({ verdict: 'accept', findings: [] });
+    expect(r.stopReason).toBe('tool_use');
+  });
+
+  it('does NOT fire on an is_error with a DIFFERENT stop reason — those keep their existing messages', () => {
+    const bare = JSON.stringify({ is_error: true, result: 'Not logged in · Please run /login' });
+    expect(() => parseJudgeOutcome(bare, '', 0.5)).toThrow('Not logged in · Please run /login');
+    expect(() => parseJudgeOutcome(bare, '', 0.5)).not.toThrow(JudgeBudgetError);
+
+    const emptyEndTurn = JSON.stringify({ is_error: true, result: '', stop_reason: 'end_turn', session_id: 'zzzz' });
+    expect(() => parseJudgeOutcome(emptyEndTurn, 'exit code 1', 0.5)).toThrow(/no result text/);
+    expect(() => parseJudgeOutcome(emptyEndTurn, 'exit code 1', 0.5)).not.toThrow(JudgeBudgetError);
+  });
+
+  it('reaches a caller through judgeSpawn, which passes the ceiling it actually spawned with', async () => {
+    const { fn } = fakeSpawnAtTopLevel(killed(), { code: 1 });
+    await expect(judgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, budget: 0.5, runId: 'run-3187', lens: 'rigor', spawnFn: fn,
+    })).rejects.toThrow(/max-budget-usd of \$0\.5/);
+  });
+
+  it('is a DISTINCT type from the wall-clock kill — "out of money" and "out of time" are different facts', () => {
+    expect(JudgeBudgetError).not.toBe(JudgeTimeoutError);
+    const e = new JudgeBudgetError({ budget: 0.5, costUsd: 0.596 });
+    expect(e).not.toBeInstanceOf(JudgeTimeoutError);
+    expect(e).toBeInstanceOf(Error);
+  });
+});
+
+/** The same canned-stdout fake as the `judgeSpawn` block above, hoisted for the #3187 block's one use of it. */
+function fakeSpawnAtTopLevel(stdout, { code = 0, stderr = '' } = {}) {
+  const seen = { argv: null };
+  const fn = (cli, argv) => {
+    seen.argv = argv;
+    return {
+      stdout: { on: (e, cb) => { if (e === 'data') setTimeout(() => cb(stdout), 0); } },
+      stderr: { on: (e, cb) => { if (e === 'data' && stderr) setTimeout(() => cb(stderr), 0); } },
+      stdin: { on: () => {}, end: () => {} },
+      on: (e, cb) => { if (e === 'close') setTimeout(() => cb(code), 1); },
+      kill: () => {},
+    };
+  };
+  return { fn, seen };
+}

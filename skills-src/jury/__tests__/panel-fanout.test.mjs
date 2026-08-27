@@ -54,6 +54,9 @@ import {
   resolveRoster,
   normalizeFinding,
 } from '../../../scripts/lib/jury-core.mjs';
+// #3187 — the inherited per-seat default, imported so the declared-total assertion below DERIVES from the
+// constant instead of restating a number that only happened to be true while the default was 0.5.
+import { DEFAULT_BUDGET_USD } from '../../../scripts/lib/judge-spawn.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HARNESS = join(HERE, '..', 'subject-jury.workflow.js');
@@ -474,7 +477,11 @@ describe('the cost of a panel is measured and returned, not buried', () => {
     expect(out.totalCostUsd).toBeCloseTo(0.15, 10);
     // The DECLARED total is the admission number; the OBSERVED one is what actually happened. Both are reported
     // so a caller can compare them — judge-panel is explicit that it is admission control, not a live meter.
-    expect(out.totalBudgetUsd).toBeCloseTo(2.5, 10);
+    // DERIVED from `DEFAULT_BUDGET_USD`, never written out (#3187). `PAYLOAD` declares no per-seat `budget`, so
+    // these five seats INHERIT the default — which makes this shim a TRANSITIVE consumer of that constant: it
+    // imports nothing from `judge-spawn.mjs` and so does not appear in any importer count. Written as the
+    // literal `2.5` this case baked in `5 × 0.5` and went red the moment #3187 raised the default to 1.5.
+    expect(out.totalBudgetUsd).toBeCloseTo(5 * DEFAULT_BUDGET_USD, 10);
     expect(out.maxTotalBudgetUsd).toBe(10);
   });
 

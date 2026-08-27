@@ -56,11 +56,34 @@
  *     bill compounds, so depth is an explicit parameter that fails closed rather than an assumption. A caller
  *     that nests a panel passes `depth + 1`.
  *
- *  2. AGGREGATE BUDGET. `judgeSpawn` takes `budget` PER SPAWN (`--max-budget-usd`, default `0.5`). Five jurors
- *     at that cap is five times the bill with nothing watching the total. `maxTotalBudgetUsd` is REQUIRED — an
- *     unset aggregate ceiling is the same fail-open the depth cap rejects — and the sum of the seats' per-juror
- *     budgets is checked BEFORE THE FIRST SPAWN, so a panel that cannot afford its roster bills nothing at all
- *     rather than half a roster.
+ *  2. AGGREGATE BUDGET. `judgeSpawn` takes `budget` PER SPAWN (`--max-budget-usd`, defaulting to
+ *     `DEFAULT_BUDGET_USD` — read the number THERE, not here; this line said `0.5` for as long as that was
+ *     true and it stopped being true in #3187). Five jurors at that cap is five times the bill with nothing
+ *     watching the total. `maxTotalBudgetUsd` is REQUIRED — an unset aggregate ceiling is the same fail-open
+ *     the depth cap rejects — and the sum of the seats' per-juror budgets is checked BEFORE THE FIRST SPAWN,
+ *     so a panel that cannot afford its roster bills nothing at all rather than half a roster.
+ *
+ *     THIS PANEL IS THE MODULE THAT NAMES THAT DEFAULT, and #3187 is why the number moved. Nothing here sets
+ *     a `JUDGE_BUDGET_USD` of its own, so every seat that omits `budget` gets whatever `judge-spawn.mjs` calls
+ *     the default. (This line said *"the two declared operations set their own `JUDGE_BUDGET_USD`"* — wrong:
+ *     `git grep -n "judgeStep("` finds FOUR live declarations, and `explore.mjs`'s `synthesize` sets no budget
+ *     at all. The count is not this file's to keep; see the list named below.)
+ *
+ *     IT IS NOT THE ONLY THING THAT INHERITS THAT DEFAULT — anything reaching `judgePanel` without a per-seat
+ *     budget inherits it THROUGH here while importing nothing, and a third path reaches `judgeSpawn` without
+ *     coming through here at all. `DEFAULT_BUDGET_USD`'s own "WHO INHERITS THIS" is the ONE list of all three;
+ *     do not answer "what does this reach" from this file. #3187 got that question wrong twice — once by
+ *     counting importers (red CI), once by grepping for `kind: 'judge'` instead of `judgeStep(`.
+ *
+ *     While that default was `0.5`, sized for a TOOL-FREE juror, a tool-bearing seat here was killed
+ *     mid-run — 6 of 8 seats on one converge run,
+ *     escalating `needs-human` on `mandatory-lens-absent` as though the panel had failed. Raising the default
+ *     is what unblocked this path; `JudgeBudgetError` is what stops the next one costing a misdiagnosis.
+ *
+ *     WHY THE DEFAULT CANNOT SIMPLY BE `null` HERE, unlike in those operations: `assertPanelBudget` refuses a
+ *     non-positive-finite per-juror budget, because an aggregate ceiling is not checkable over a roster of
+ *     `null`s. A seat that genuinely wants no ceiling must say so per seat, and pays for it by leaving the
+ *     aggregate admission check with nothing to sum.
  *
  *     Its honest limit: this is ADMISSION CONTROL over the DECLARED ceilings, not a live meter. What actually
  *     stops a running juror is its own `--max-budget-usd`, enforced by the CLI. The result reports the observed
