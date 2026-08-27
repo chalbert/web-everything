@@ -2991,6 +2991,129 @@ export function dirLevelScopeFinding(item) {
   return scope.filter((p) => typeof p === 'string' && SCOPE_REPO_PREFIX_RE.test(p) && p.endsWith('/'));
 }
 
+// ── scope entry names a path that does not resolve, but its BASENAME does (#3337) ─────────────
+// `scope:` is machine-read: `scripts/readiness/dispatch-plan.mjs` matches it by EXACT path through
+// `coversFile`, so an entry naming a path that does not exist covers nothing — the file the work really
+// touches goes undeclared, and two items that are really the same-file collision look disjoint to the
+// dispatcher. That is the failure this catches: `we:scripts/lib/__tests__/lane-verify.test.mjs` when the
+// tracked file is `we:scripts/__tests__/lane-verify.test.mjs` (#3321), or `we:scripts/lib/foo.mjs` when the
+// module lives at `we:scripts/foo.mjs`. 8 of the `scripts/lib/*.mjs` modules keep their test at the
+// top-level `scripts/__tests__/` rather than a sibling `scripts/lib/__tests__/`, so the wrong directory is
+// the natural guess for any of them.
+//
+// WARNING, NEVER AN ERROR — the greenfield case is legitimate. A scope may name a file the item is about to
+// CREATE (#3307's `we:scripts/lib/claim-sweep.mjs` was correct as written), and static state cannot tell a
+// to-be-created file from a typo. What CAN be told apart is the SHAPE: a basename that matches nothing
+// anywhere is a genuine new file (silent); a basename that already exists at a different path is the shape
+// that is provably a typo far more often than not. Erroring would redden exactly the greenfield case.
+//
+// FALSE POSITIVES ARE THE FAILURE MODE (the gate already emits ~1400 warnings — noise makes the whole pile
+// less read, not more), so the rule is deliberately narrow on four axes:
+//   1. LOCAL REPO ONLY. Only `we:` entries are checked. `fui:`/`plateau:` paths live in sibling repos this
+//      gate cannot see, and "not found" there would mean "not checkable", not "wrong".
+//   2. FILE ENTRIES ONLY. A subtree entry (glob / trailing slash / extensionless — `isSubtreeEntry`) leases a
+//      tree, never an exact path, so "does it resolve" is not even the right question for it. The dir-level
+//      shape is already the separate #2739 finding.
+//   3. BEST-TAIL SUGGESTION, NOT EVERY BASENAME MATCH. Candidates are ranked by how many TRAILING path
+//      segments they share with the entry, and only the top tier is offered. This is what makes a generic
+//      basename safe: `.claude/skills/review/SKILL.md` has 27 `SKILL.md` matches, but exactly one shares the
+//      `review/SKILL.md` tail — so the warning names one probable path instead of a useless list of 27.
+//   4. A WIDE TOP TIER IS SILENCE. When even the best tier is bigger than SCOPE_BASENAME_MAX_SUGGESTIONS the
+//      basename is generic AND undiscriminating; there is no path to suggest, the evidence is weak, and an
+//      unactionable "this looks wrong" is exactly the warning that trains people to skip the output.
+// Resolved items are skipped and a non-empty `scopeRationale:` clears the finding — the same two escapes the
+// dir-level rule above uses, so an author whose odd-looking entry is deliberate has one place to say so.
+
+/** Only the local repo's tree is visible to this gate, so only its entries can be resolution-checked. */
+const SCOPE_LOCAL_REPO_PREFIX = 'we:';
+
+/** Widest top tier still worth suggesting. Past this the basename discriminates nothing (see axis 4). */
+export const SCOPE_BASENAME_MAX_SUGGESTIONS = 3;
+
+/** Count the path segments `a` and `b` share reading from the END (both share ≥1 iff same basename). */
+function sharedTrailingSegments(a, b) {
+  const A = a.split('/'), B = b.split('/');
+  let n = 0;
+  while (n < A.length && n < B.length && A[A.length - 1 - n] === B[B.length - 1 - n]) n++;
+  return n;
+}
+
+/**
+ * Index a tracked-path list once for {@link scopeBasenameMismatches} (which is called per backlog item).
+ * @param {Iterable<string>} trackedPaths repo-relative tracked paths (`git ls-files`), no `<repo>:` prefix.
+ * @returns {{paths: Set<string>, byBasename: Map<string, string[]>}}
+ */
+export function buildTrackedPathIndex(trackedPaths) {
+  const paths = new Set();
+  const byBasename = new Map();
+  for (const raw of trackedPaths || []) {
+    if (typeof raw !== 'string' || !raw) continue;
+    paths.add(raw);
+    const base = raw.slice(raw.lastIndexOf('/') + 1);
+    const bucket = byBasename.get(base);
+    if (bucket) bucket.push(raw); else byBasename.set(base, [raw]);
+  }
+  return { paths, byBasename };
+}
+
+/**
+ * @param {{scope?: unknown, status?: string, scopeRationale?: string}} item RAW (pre-loader) frontmatter.
+ * @param {{paths: Set<string>, byBasename: Map<string, string[]>}} index from {@link buildTrackedPathIndex}.
+ * @returns {{entry: string, path: string, suggestions: string[]}[]} one finding per unresolved `we:` FILE
+ *   entry whose basename matches tracked files at other paths, `suggestions` = the best-tail tier (never
+ *   empty, never longer than SCOPE_BASENAME_MAX_SUGGESTIONS). `[]` for a resolved item, one carrying a
+ *   non-empty scopeRationale, a non-array scope, or a missing/empty index.
+ */
+export function scopeBasenameMismatches(item, index) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope)) return [];
+  if (item?.status === 'resolved') return [];
+  const rationale = typeof item?.scopeRationale === 'string' ? item.scopeRationale.trim() : '';
+  if (rationale) return [];
+  const paths = index?.paths, byBasename = index?.byBasename;
+  // An empty index means "the tracked list could not be read", not "nothing resolves" — stay silent rather
+  // than flag the entire corpus off a failed fs read.
+  if (!(paths instanceof Set) || !(byBasename instanceof Map) || paths.size === 0) return [];
+
+  const findings = [];
+  for (const entry of scope) {
+    if (typeof entry !== 'string' || !entry.startsWith(SCOPE_LOCAL_REPO_PREFIX)) continue; // axis 1
+    if (isSubtreeEntry(entry)) continue;                                                   // axis 2
+    const path = entry.slice(SCOPE_LOCAL_REPO_PREFIX.length);
+    if (!path || paths.has(path)) continue;                                       // resolves — nothing to say
+    const candidates = byBasename.get(path.slice(path.lastIndexOf('/') + 1)) || [];
+    if (!candidates.length) continue;                       // no basename match anywhere ⇒ a genuine new file
+    let best = 0;                                                                            // axis 3
+    for (const c of candidates) { const n = sharedTrailingSegments(path, c); if (n > best) best = n; }
+    const suggestions = candidates.filter((c) => sharedTrailingSegments(path, c) === best).sort();
+    if (suggestions.length > SCOPE_BASENAME_MAX_SUGGESTIONS) continue;                       // axis 4
+    findings.push({ entry, path, suggestions });
+  }
+  return findings;
+}
+
+/**
+ * The §6d-septies warning text for one {@link scopeBasenameMismatches} finding. Lives here (not at the call
+ * site) so the message that names the probable intended path is itself unit-pinnable — a warning that says
+ * only "this looks wrong" is not actionable, and the suggested path IS the actionable half.
+ * @param {string} id backlog item id (the filename stem).
+ * @param {{entry: string, suggestions: string[]}} finding
+ * @returns {string}
+ */
+export function scopeBasenameMismatchMessage(id, finding) {
+  const { entry, suggestions } = finding;
+  const did = suggestions.length > 1
+    ? `Did you mean one of ${suggestions.map((s) => `"${SCOPE_LOCAL_REPO_PREFIX}${s}"`).join(', ')}?`
+    : `Did you mean "${SCOPE_LOCAL_REPO_PREFIX}${suggestions[0]}"?`;
+  return `Backlog item "${id}" scope entry "${entry}" names a path that is not tracked, but a file with the ` +
+    `same NAME is tracked elsewhere — the shape of a typo or a stale path, not a new file (#3337). ${did} ` +
+    `\`scope:\` is matched by EXACT path (readiness/scope-lease.mjs \`coversFile\`), so an entry that resolves ` +
+    `to nothing covers nothing: the file this item really touches goes undeclared and the dispatcher can launch ` +
+    `it alongside an item that writes the very same file. Fix the path — or, if this item genuinely CREATES the ` +
+    `file at the path as written, leave it and add a short \`scopeRationale:\` note saying so, which clears ` +
+    `this flag.`;
+}
+
 // ── `--all` inside a git hook (#3196) ──────────────────────────────────────────────────────────
 // `we:.githooks/post-merge` shipped a commands sync carrying `--all`. On that CLI `--all` does NOT mean
 // "deploy every command" — it means "CREATE the machine-global tree", on a machine that never opted in
