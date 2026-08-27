@@ -307,13 +307,41 @@ export const NUMBER_WORDS = Object.freeze({
  */
 export function parseClaimMarkers(text) {
   const src = String(text ?? '');
+  const masked = maskCodeSpans(src);
+  const lines = src.split('\n');
   const out = [];
-  for (const m of src.matchAll(CLAIM_RE)) {
-    const lineNo = src.slice(0, m.index).split('\n').length;
-    const line = src.split('\n')[lineNo - 1] ?? '';
+  for (const m of masked.matchAll(CLAIM_RE)) {
+    const lineNo = masked.slice(0, m.index).split('\n').length;
+    // `line` is read from the ORIGINAL text: masking decides what is an assertion, never what the prose says.
+    const line = lines[lineNo - 1] ?? '';
     out.push({ lineNo, line, raw: m[0], ...readClaim(m[1], m[2], Number(m[3])) });
   }
   return out;
+}
+
+/**
+ * Blank out fenced code blocks and inline code spans, preserving every character offset and every newline so
+ * line numbers stay exact.
+ *
+ * WHY. A marker shown as an EXAMPLE — in `backticks` or inside a ``` fence — documents the grammar; it
+ * asserts nothing. Reading one as a claim made this module fail its own acceptance criterion, *"it fires on
+ * nothing it was not asked to check"*: the card that specifies the checker spells the grammar out in
+ * backticks, so the tree sweep reported as *"0 markers, exit 0"* in fact found 1 and exited 1. That is the
+ * over-firing the header calls the build that gets this checker uninstalled — arriving via documentation
+ * rather than prose. Nothing else changes: a marker written in running prose is still read exactly as before.
+ */
+export function maskCodeSpans(text) {
+  const src = String(text ?? '');
+  let openFence = null;
+  return src.split('\n').map((line) => {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/);
+    if (openFence !== null) {
+      if (fence && fence[1][0] === openFence[0] && fence[1].length >= openFence.length) openFence = null;
+      return ' '.repeat(line.length);
+    }
+    if (fence) { openFence = fence[1]; return ' '.repeat(line.length); }
+    return line.replace(/(`+)(?:(?!\1)[\s\S])*\1/g, (m) => ' '.repeat(m.length));
+  }).join('\n');
 }
 
 function readClaim(metricName, argText, asserted) {

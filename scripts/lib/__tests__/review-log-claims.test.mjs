@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,6 +14,7 @@ import {
   ghCommentFetcher,
   prsReferenced,
   parseArgv,
+  maskCodeSpans,
   METRICS,
   main,
 } from '../review-log-claims.mjs';
@@ -229,6 +230,45 @@ describe('#3336 — recognising a claim: marked, never sniffed', () => {
     expect(parseClaimMarkers(doc).map((c) => c.lineNo)).toEqual([3, 5]);
     const { results } = check(doc);
     expect(results.map((r) => `${r.file}:${r.lineNo}:${r.status}`)).toEqual(['card.md:3:ok', 'card.md:5:ok']);
+  });
+});
+
+describe('#3336 — a marker shown as an EXAMPLE documents the grammar; it asserts nothing', () => {
+  // The regression this pins: the card specifying this checker spells the grammar out in backticks, so the
+  // tree sweep reported as "0 markers, exit 0" in fact found 1 and exited 1 — the module failing its own
+  // acceptance criterion, "it fires on nothing it was not asked to check".
+  it('#3336 a marker inside an inline code span is not a claim', () => {
+    expect(parseClaimMarkers('mark it as `<!-- claim: rounds(1572)=5 -->` in your card')).toEqual([]);
+    expect(parseClaimMarkers('``<!-- claim: rounds(1572)=5 -->``')).toEqual([]);
+  });
+
+  it('#3336 a marker inside a fenced block is not a claim', () => {
+    for (const f of ['```', '~~~', '```markdown']) {
+      expect(parseClaimMarkers(`before\n${f}\n<!-- claim: rounds(1572)=5 -->\n${f.slice(0, 3)}\nafter`)).toEqual([]);
+    }
+  });
+
+  it('#3336 a marker in running prose is still read exactly as before', () => {
+    const claims = parseClaimMarkers('PR #1572 took **5** rounds. <!-- claim: rounds(1572)=5 -->');
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ metric: 'rounds', asserted: 5, invalid: null, lineNo: 1 });
+  });
+
+  it('#3336 masking preserves offsets, so the line number and the prose stay exact', () => {
+    const doc = 'a `<!-- claim: rounds(1)=1 -->`\n\nPR #1572 took **5** rounds <!-- claim: rounds(1572)=5 -->\n';
+    expect(maskCodeSpans(doc).split('\n').map((l) => l.length)).toEqual(doc.split('\n').map((l) => l.length));
+    const claims = parseClaimMarkers(doc);
+    expect(claims).toHaveLength(1);
+    expect(claims[0].lineNo).toBe(3);
+    expect(claims[0].line).toContain('PR #1572 took **5** rounds'); // read from the ORIGINAL, not the mask
+  });
+
+  it('#3336 the real tree sweeps clean — the acceptance criterion, run for real', () => {
+    const mdIn = (dir) => readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => join(dir, f));
+    const files = [...mdIn('backlog'), ...mdIn('docs/agent'), 'AGENTS.md'];
+    expect(files.length).toBeGreaterThan(3000);
+    const marked = files.flatMap((f) => parseClaimMarkers(readFileSync(f, 'utf8')));
+    expect(marked).toEqual([]); // 0 markers, 0 errors — nothing is sniffed out of prose
   });
 });
 

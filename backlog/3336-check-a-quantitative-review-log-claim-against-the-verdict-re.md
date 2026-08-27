@@ -48,8 +48,22 @@ Adjacent but not this: #3314 asks whether `claim-accuracy` should be mandatory �
    which exits 1 when the record contradicts the figure *or* when the marker has drifted from the number in
    the sentence it annotates.
 4. **It fires on nothing it was not asked to check** — run over every `we:backlog/`, `we:docs/agent/` and
-   `we:AGENTS.md` markdown file in the tree (3344 files) it reports `0` markers, `0` errors. Nothing is
-   sniffed out of prose.
+   `we:AGENTS.md` markdown file in the tree (3346 files) it reports `0` markers, `0` errors. Nothing is
+   sniffed out of prose, and a marker shown as an *example* — in backticks or a fence — is documentation,
+   not an assertion.
+
+**RETRACTED 2026-08-27 (PR #1617 review round 1, found while re-measuring).** Criterion 4 previously read
+*"(**3344** files) it reports `0` markers, `0` errors"*. **Both figures were wrong, and the second was a
+claim this item's own tool contradicted.** Re-measured in this lane on 2026-08-27:
+
+- **The count is 3346**, not 3344 — 3326 `we:backlog/*.md` + 19 `we:docs/agent/*.md` + `we:AGENTS.md`.
+  (`npm run check:standards` independently reports `3326 backlog items`.)
+- **The sweep reported 1 marker and 1 error, exit 1** — not `0`/`0`. Criterion 3 above spells the grammar
+  out as `` `<!-- claim: rounds(1572)=5 -->` ``, and the parser read that *example* as a live assertion. So
+  the deliverable failed this very criterion, on this very card, and the "0 flags" figure was written from
+  memory rather than from the run. **Fixed, not just re-stated:** `maskCodeSpans` now blanks fenced blocks
+  and inline code spans before markers are matched, preserving offsets so line numbers stay exact. The
+  sweep now genuinely reports `0` markers and exits 0, and a test pins it against the real tree.
 
 **Deliberately not checked**, so the boundary is on the record: durations and spend; whether a finding is
 right; comparisons, adjectives and universal quantifiers; distributive claims ("one round *each*" — multiple
