@@ -56,6 +56,27 @@ The three: r1 fixed the epic card and left the PR description; r2 fixed the desc
 >
 > All three are fixed, and each is now pinned by a mutation that was actually re-run in this lane.
 
+> **Retracted, a third time — the retraction above said "There was a **third** way" and closed "All three
+> are fixed".** Written at round 3 and left standing through rounds 4 and 5, each of which found another
+> way. **Five, not three** — three that dropped a site to no tier at all, two that laundered a live site
+> into ALREADY RETRACTED and took the exit code to 0 "clean".
+> - **Fourth** (round 4, laundering): a `~~strike~~` ANYWHERE on the site's own physical line counted as
+>   retracting it, without ever asking whether the strike *covered* the claim. Not a contrived shape — it
+>   is this repo's **dominant** strike convention to strike the old value and assert the corrected one
+>   beside it on the same line, so the permissive rule laundered the common case. Now `struckCovers` asks
+>   whether a struck span contains the text *this* site matched on, falling back to the strict whole-line
+>   rule when there is no match text.
+> - **Fifth** (round 5, silent drop): the numeral scanner read `\d[\d,]*`, swallowing a following comma
+>   into the token, so a claim writing `84,` demanded that exact comma-adjacency and never saw `84`
+>   written bare. Its **mirror** sat in `tokenPattern`, whose numeric tail rejected any following comma,
+>   so a *site* writing `84,` was dropped just as silently. The review prescribed the first half only;
+>   the second was found by testing the fix, and either alone leaves the drop reachable from the other
+>   side. A comma is now internal only where it is a thousands separator — followed by exactly 3 digits.
+>
+> All five are fixed, and each is pinned by a mutation that was actually re-run in this lane. The count
+> is corrected in the module header, on this card and in the PR body **together** — a count corrected in
+> one place and left stale in another is precisely the defect this card exists to catch.
+
 What is reported, accurately: a near-match, an ambiguous paraphrase and a bare numeral in unrelated prose
 are exactly what the person doing the correcting needs to see, so a site that scores into a tier is
 reported and *labelled* — and whether it scores does **not** depend on what else its paragraph happens to
@@ -74,7 +95,7 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 
 1. **Executable** — `npx vitest run claim-sweep -t "#3307" | grep -qE "Tests +[0-9]+ passed"`. Fails
    before this item lands — `we:scripts/lib/claim-sweep.mjs` and its suite do not exist, so vitest finds
-   no test *file*, prints `No test files found` and exits 1 — and passes after (73 passed).
+   no test *file*, prints `No test files found` and exits 1 — and passes after (93 passed).
    > **Retracted — this line read "(42 passed)".** That was the count at the first cut. Review #1620
    > bounced the PR for two silent-drop defects and two untested first-cut fixes; the prevention for all
    > four took the suite from 42 to **68**. Re-measured on this branch, not carried over.
@@ -82,6 +103,10 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    > test that did not exercise its own name; that prevention took the suite from 68 to **73**. Measured
    > in this lane in this session (`npx vitest run claim-sweep` → `Tests  73 passed (73)`), not carried
    > over from the line above.
+   > **Retracted a third time — "(73 passed)".** Two further rounds each added prevention: round 4's
+   > strike-coverage narrowing took the suite 73 → **82**, and round 5's numeral-comma fix took it
+   > 82 → **93**. Re-measured in this lane in this session (`npx vitest run claim-sweep` →
+   > `Tests  93 passed (93)`), not carried over from either line above.
    The `grep` is load-bearing, but not for the reason first written here.
    > **Retracted — this read "a `-t` filter matching nothing is an empty selection, and vitest exits 0 on
    > one, so the bare form would be green before the work."** The first half is true; the conclusion is
@@ -90,18 +115,24 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    > | tree state | `-t` filter | bare exit | with `\| grep -qE` |
    > |---|---|---|---|
    > | `main` (neither file exists) | `#3307` | **1** — `No test files found` | **1** |
-   > | this branch | `#3307` | 0 — `73 passed` | **0** |
-   > | this branch | matches nothing | **0** — `73 skipped` | **1** |
+   > | this branch | `#3307` | 0 — `93 passed` | **0** |
+   > | this branch | matches nothing | **0** — `93 skipped` | **1** |
    >
    > So before the work the bare form already fails, because there is no test *file* — not because of an
    > empty selection. The `grep` earns its place against the OTHER row: once the file exists, a renamed
-   > `it()` or a drifted filter selects nothing, vitest reports `73 skipped` and exits **0**, and the bare
+   > `it()` or a drifted filter selects nothing, vitest reports `93 skipped` and exits **0**, and the bare
    > form would go green while testing nothing. That is the trap `3319`'s criterion records.
    >
    > **Retracted — this table read `68 passed` / `68 skipped`.** The figures were right when measured and
    > the round-3 prevention moved them. All three rows were re-run in this lane in this session at 73,
    > including the `main` row (both new paths moved aside): bare exit 1 on `No test files found`, grep
    > exit 1. The shape of the argument is unchanged; only the count moved.
+   >
+   > **Retracted again — the table then read `73 passed` / `73 skipped`.** Rounds 4 and 5 moved it twice
+   > more. All three rows were re-run in this lane in this session at **93**, the `main` row included
+   > (both new paths moved aside → bare exit **1** on `No test files found`, grep exit **1**). The
+   > argument for the `grep` is untouched: only the third row's count moved, and it is the row the
+   > `grep` exists for.
 2. **Real specimen** — the frozen fixtures replay the `84 recorded verdicts` figure at the moment its
    correction was half applied: parent `3318` already retracted, child `3319` still asserting it,
    `we:scripts/lib/jury-core.mjs` carrying the numeral in a comment. The sweep names `3319` as the one
@@ -127,6 +158,18 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    > round-2 fix was not covered: the near tier's per-block `break` had a test named for it that did not
    > exercise it, so re-introducing the `break` left the suite green. The mutation was not actually run
    > against that test. It is now, and it reddens.
+   >
+   > **Retracted, a third time — "There was a third direction (above)".** There were **five** in the end,
+   > and the two that arrived after this item was written are pinned by the bullets added above:
+   > - a `~~strike~~` sitting anywhere on the site's line no longer retracts a claim it does not cover,
+   >   so the repo's dominant "strike the old value, assert the corrected one beside it" shape stays a
+   >   **survivor** and the CLI still exits 1 (round 4);
+   > - a comma next to a numeral no longer changes whether the token tier can see it, in **either**
+   >   direction — claim-side or site-side — while `84` still does not match inside `84,000` (round 5).
+   >
+   > Each of the five is pinned by a mutation actually re-run in this lane, with the log in the commit
+   > that made it. The pattern to notice is that this item's own count went stale three times in five
+   > rounds; that is the defect this card exists to catch, arriving on the card that describes it.
 5. `npm run check:standards` — 0 new errors and 0 new warnings vs this lane's `main`, measured both ways
    in the same session rather than compared against a number written on a card. Measured at the tip:
    **0 error(s), 1438 warning(s)** on the branch and **0 error(s), 1438 warning(s)** on the same tree with
