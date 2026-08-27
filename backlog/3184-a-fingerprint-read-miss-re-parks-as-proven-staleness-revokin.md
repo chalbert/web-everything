@@ -2,8 +2,9 @@
 bornAs: x6jb3zu
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-18"
+dateResolved: "2026-08-27"
 preparedDate: "2026-08-18"
 scope:
   - we:scripts/merge-ai-prs.mjs
