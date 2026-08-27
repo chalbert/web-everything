@@ -4212,3 +4212,82 @@ describe('#3308 — the announcement surface', () => {
     expect(hasDrainReasonComment(posted, REVIEW_COVERAGE_KIND, other)).toBe(false);
   });
 });
+
+describe('#3184 — the drain records a fingerprint READ MISS instead of collapsing it into a marker-less null', () => {
+  // The pure verdict is pinned in `scripts/lib/__tests__/review-escalation.test.mjs`. What belongs HERE is the
+  // drain's half of Done-when 4: the CALLER must tell `decideReviewGate` which kind of `null` it is holding.
+  // The gate cannot infer it — "this accept recorded no fingerprint" and "a fingerprint was recorded and this
+  // pass could not read the live side" arrive as the same `headDiff: null`, and the whole defect is the drain
+  // handing over one story for both. Source-level for the same reason the #x9xqexm block above is: the read
+  // sits inline in `runCli`'s per-candidate loop behind two `execFileSync` calls, with no other observable seam.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+
+  it('the drain hands the gate an explicit read-failed signal, not a bare null', () => {
+    expect(src).toMatch(/headReadFailed:\s*liveDiffReadFailed/);
+  });
+
+  it('the signal is derived from an OWED read, so a marker-less accept can never raise it', () => {
+    // `liveDiffReadOwed` is the predicate that separates the two nulls. It must require a recorded marker —
+    // without that clause an accept that stamped no fingerprint reports a read miss it never owed, and the
+    // #3184 tier would swallow every pre-#x169fqe stale re-park.
+    expect(src).toMatch(/const liveDiffReadOwed = !!\(\(acceptedDiff \|\| acceptedContribution\)/);
+    // …and the miss is the owed read coming back empty, in EITHER of its three ways (throw, unscored result,
+    // or the repo guard refusing the read). Assigning anything else here — a constant, or the catch alone —
+    // loses one of them.
+    expect(src).toMatch(/liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;/);
+  });
+
+  it('the repo guard still gates the READ itself — a sibling PR never resolves refs against the local clone', () => {
+    // PR #1087 blocker 1, unchanged by #3184: the guard was split out of the condition so the miss could be
+    // RECORDED, never so the read could happen without it. It must still stand between the owed read and the
+    // `computeNetDiffText` call.
+    expect(src).toMatch(/if \(liveDiffReadOwed && \(isLocalRepo\(v\.repo\) \|\| escCwd\)\) \{/);
+  });
+
+  it('a suppressed re-park is STILL not waivable by the relief valve — staleAcceptance carries it', () => {
+    // The one behavioural risk of returning `applyLabel: null`: `applyEscalationRelief`'s later checks key on
+    // the label, and a null would fall past the `review:human` refusal. It never gets there — the
+    // `staleAcceptance` refusal is checked FIRST. This test is why that ordering is not free to change.
+    const suppressed = decideReviewGate({
+      escalate: true,
+      humanRequired: true,
+      labels: [{ name: REVIEW_LABELS.accepted }],
+      acceptedSha: '2d4cc065',
+      headSha: 'ed32bba83fee',
+      acceptedDiff: 'a'.repeat(64),
+      acceptedContribution: 'b'.repeat(64),
+      headDiff: null,
+      headContribution: null,
+      headReadFailed: true,
+      operatorClearance: { actor: 'Nicolas Gilbert' },
+    });
+    expect(suppressed.action).toBe('park');
+    expect(suppressed.applyLabel).toBe(null);       // the #3184 suppression
+    expect(suppressed.staleAcceptance).toBe(true);
+    expect(applyEscalationRelief(suppressed, { relieved: true }).waive).toBe(false);
+    expect(applyEscalationRelief(suppressed, { relieved: true }).reason).toContain('stale acceptance');
+  });
+
+  // ── PRE-EXISTING STRUCTURE THAT SUPPRESSION NOW DEPENDS ON ───────────────────────────────────────────────
+  // BOTH OF THE TWO TESTS BELOW WERE GREEN BEFORE #3184 AND PROVE NOTHING ABOUT IT. They are stated plainly as
+  // what they are, because a green-before assertion sitting unlabelled inside a change's describe block reads
+  // as evidence for that change and is not. What they DO buy: `applyLabel: null` is a new caller of two
+  // guards whose shape was previously incidental, and if either is later re-keyed the failure is silent and
+  // in the operator's least-recoverable direction. They are regression pins on someone else's code.
+  it('[green before #3184 — pinned, not proven] the revocation notice hangs off `gate.applyLabel`', () => {
+    // A null label skips the notice structurally, and `revokesClearance` is false as well, so the structural
+    // and the flag guard agree. Announcing a revocation that did not happen would send the operator to
+    // re-clear a clearance that is still live.
+    expect(src).toMatch(/if \(gate\.applyLabel && !DRY_RUN\) \{/);
+    expect(src.indexOf('if (gate.revokesClearance) {'))
+      .toBeGreaterThan(src.indexOf('if (gate.applyLabel && !DRY_RUN) {'));
+  });
+
+  it('[green before #3184 — pinned, not proven] the #2324 body block keys on humanRequired, not the label', () => {
+    // Suppression removes the label write, and in the drain the park COMMENT hangs off that write. The durable
+    // record survives only because the human-park body block is a separate branch keyed on `gate.humanRequired`
+    // — which suppression deliberately leaves true. Re-key that guard to the label and a suppressed park
+    // becomes a silent one, which is the #xmnl36p defect coming back by another door.
+    expect(src).toMatch(/if \(gate\.humanRequired && !DRY_RUN\) \{/);
+  });
+});
