@@ -395,8 +395,46 @@ const LEAD_RE = new RegExp(
   'i',
 );
 const PHRASE_RE = new RegExp(`\\b(?:${RETRACTION_PHRASES.map(escapeRe).join('|')})\\b`, 'i');
-/** A struck-through span, e.g. `~~All 84 recorded verdicts~~`. */
-const STRUCK_RE = /~~[^~]+~~/;
+/** A struck-through span, e.g. `~~All 84 recorded verdicts~~`. Global — a line can carry several. */
+const STRUCK_RE = /~~([^~]+)~~/g;
+
+/**
+ * Does a strike on this line cover THIS SITE's own matched text — rather than merely sit somewhere on
+ * the same physical line?
+ *
+ * RETRACTED — this test used to be `STRUCK_RE.test(own)`, i.e. "does the site's line contain a
+ * strikethrough span anywhere". Wrong in the one direction this module forbids, and wrong against this
+ * repo's DOMINANT strike shape rather than a contrived one: the convention here is to strike the OLD
+ * value and assert the corrected one BESIDE it on the same line —
+ *
+ *     | ~~14 retain / 2 delete~~ -> **delete all 16 (WE holds zero impl)** |
+ *
+ * — so the strike covers the withdrawn text while the LIVE claim stands verbatim next to it. Sweeping
+ * `delete all 16 (WE holds zero impl)` over that real card reported `tier: 'exact'` with
+ * `retracted: true`, survivors 0, exit 0 "clean", on a claim that is the ACTIVE ruling there. Same
+ * laundering class as the two earlier bugs (bare-substring markers; the block-level `continue`), on a
+ * third code path.
+ *
+ * A strike now counts only when a struck span actually CONTAINS the text this site matched on — the
+ * claim for `exact`/`normalized`, the folded sentence for `near`, the token for `token`. Comparison is
+ * on `normalizeText`, which drops the `~~` itself, so span and match are compared as prose. When no
+ * match text is supplied (`retractionNear` called directly on a line), the fallback is the strict one:
+ * the strike counts only if it takes the WHOLE line, leaving no unstruck prose behind. Both directions
+ * err toward leaving the site a SURVIVOR.
+ *
+ * @param {string} raw the site's own RAW line
+ * @param {string|null} [covers] the text this site matched on, if known
+ * @returns {boolean}
+ */
+export function struckCovers(raw, covers) {
+  const line = String(raw == null ? '' : raw);
+  const spans = [...line.matchAll(STRUCK_RE)].map((m) => m[1]);
+  if (spans.length === 0) return false;
+  const want = normalizeText(covers == null ? '' : covers);
+  if (want) return spans.some((s) => normalizeText(s).includes(want));
+  // Nothing to locate: only a line whose own content is ENTIRELY struck reads as a retraction of itself.
+  return normalizeText(stripLineLeaders(line.replace(STRUCK_RE, ' '))) === '';
+}
 
 /**
  * Is the neighbourhood of `line` a retraction — i.e. does the correction itself quote the claim here?
@@ -406,16 +444,23 @@ const STRUCK_RE = /~~[^~]+~~/;
  *   1. a line in the window that LEADS with a retraction word once its leaders are stripped
  *      (`**Retracted — it read …**`, `> Retracted:`, `- Superseded by #1234`);
  *   2. an unambiguous retraction PHRASE anywhere in the window, word-bounded (`no longer true`);
- *   3. the SITE'S OWN line being struck through (`~~the old claim~~`) — a strike elsewhere in the window
- *      says nothing about this line, and the old rule read one as covering the other.
+ *   3. the SITE'S OWN MATCHED TEXT being struck through (`~~the old claim~~`) — a strike elsewhere in
+ *      the window says nothing about this line, and a strike elsewhere ON this line says nothing about
+ *      this claim. See `struckCovers`: the first rule read a window strike as covering the line, the
+ *      second read a line strike as covering the claim, and both laundered live claims.
  * Anything short of those leaves the site a SURVIVOR. See RETRACTION_MARKERS above for the measurement
  * that forced this, and `3299`/`3301` before adding a fourth shape.
  *
+ * @param {string[]} lines
+ * @param {number} line 1-based
+ * @param {{window?:number, covers?:string|null}} [opts] `covers` is the text this site matched on —
+ *   without it the strike shape falls back to "the whole line is struck", never to "a strike is present".
  * @returns {{retracted:boolean, marker?:string, markerLine?:number}}
  */
-export function retractionNear(lines, line, window = RETRACTION_WINDOW) {
+export function retractionNear(lines, line, opts = {}) {
+  const { window = RETRACTION_WINDOW, covers = null } = opts;
   const own = lines[line - 1];
-  if (own !== undefined && STRUCK_RE.test(own)) {
+  if (own !== undefined && struckCovers(own, covers)) {
     return { retracted: true, marker: '~~', markerLine: line };
   }
   const from = Math.max(0, line - 1 - window);
@@ -457,10 +502,13 @@ export function sweepDocument(doc, claim, opts = {}) {
 
   /** line → best site */
   const best = new Map();
-  const record = (line, tier, excerpt, reason) => {
+  // `matched` is the text this site actually scored on — the claim, the folded sentence, or the token.
+  // It travels with the site so `retractionNear` can ask whether a strike covers THIS claim rather than
+  // whether the line carries a strike at all. It is not reported; it exists for that question alone.
+  const record = (line, tier, excerpt, reason, matched) => {
     const prev = best.get(line);
     if (prev && TIER_RANK[prev.tier] >= TIER_RANK[tier]) return;
-    best.set(line, { line, tier, excerpt, reason });
+    best.set(line, { line, tier, excerpt, reason, matched });
   };
 
   // exact — verbatim substring
@@ -468,7 +516,7 @@ export function sweepDocument(doc, claim, opts = {}) {
     let at = text.indexOf(claimText);
     while (at !== -1) {
       const line = lineAt(starts, at);
-      record(line, 'exact', lines[line - 1].trim(), 'the claim appears verbatim');
+      record(line, 'exact', lines[line - 1].trim(), 'the claim appears verbatim', claimText);
       at = text.indexOf(claimText, at + Math.max(1, claimText.length));
     }
   }
@@ -482,7 +530,8 @@ export function sweepDocument(doc, claim, opts = {}) {
       at = block.norm.indexOf(claimNorm, at + Math.max(1, claimNorm.length))) {
       const line = lineForOffset(block, at);
       record(line, 'normalized', (lines[line - 1] || '').trim(),
-        'matches once blockquote markers, emphasis and line wrapping are folded — the claim may continue onto the following lines');
+        'matches once blockquote markers, emphasis and line wrapping are folded — the claim may continue onto the following lines',
+        claimText);
     }
     // NO `continue` past this loop. It used to skip the WHOLE sentence scan for any block that carried
     // a substring hit anywhere in it, so an independent, token-less paraphrase sharing the paragraph
@@ -512,7 +561,8 @@ export function sweepDocument(doc, claim, opts = {}) {
         // the second — the same silent-drop family as the `score < 1` bug above. `record` already keeps
         // one site per line, so a repeated sentence on one line still collapses to one entry.
         record(sIdx === -1 ? block.startLine : lineForOffset(block, sIdx), 'near', sentence,
-          `paraphrase — ${Math.round(score * 100)}% of the claim's word-pairs appear in this folded sentence`);
+          `paraphrase — ${Math.round(score * 100)}% of the claim's word-pairs appear in this folded sentence`,
+          sentence);
       }
     }
   }
@@ -528,7 +578,8 @@ export function sweepDocument(doc, claim, opts = {}) {
         const cite = looksLikeLineCitation(raw, token);
         record(line, 'token', raw.trim(),
           `carries the claim's distinctive token \`${token}\` in a sentence that does not otherwise match`
-          + (cite ? ' — and reads as a `path:line` citation here, not as the claim\'s quantity' : ''));
+          + (cite ? ' — and reads as a `path:line` citation here, not as the claim\'s quantity' : ''),
+          token);
         return;
       }
     }
@@ -537,7 +588,7 @@ export function sweepDocument(doc, claim, opts = {}) {
   return [...best.values()]
     .sort((a, b) => a.line - b.line)
     .map((site) => {
-      const r = retractionNear(lines, site.line);
+      const r = retractionNear(lines, site.line, { covers: site.matched });
       const score = TIER_RANK[site.tier] >= 3 ? 1 : relevance(claimNorm, normalizeText(site.excerpt));
       return {
         path: doc.path,

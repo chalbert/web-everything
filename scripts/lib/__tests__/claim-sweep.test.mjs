@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
-  normalizeText, distinctiveTokens, tokenPattern, shingleContainment, retractionNear,
+  normalizeText, distinctiveTokens, tokenPattern, shingleContainment, retractionNear, struckCovers,
   relevance, looksLikeLineCitation, stripLineLeaders,
   sweepDocument, sweepDocuments, collectDocuments, sweepRepo, formatReport, parseFlags, main,
   NOT_COVERED, RETRACTION_MARKERS, RETRACTION_PHRASES, RETRACTION_LEAD_WORDS,
@@ -664,6 +664,86 @@ describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not l
 
   it.each(REAL)('#3307 still detects a real retraction: %s', (_label, lines, line) => {
     expect(retractionNear(lines, line).retracted).toBe(true);
+  });
+
+  // ── Review #1620 round 4, the blocking finding ───────────────────────────────────────────────────
+  // RETRACTED — the `['struck site line', [`~~${SURVIVOR}~~`], 1]` row above was the ONLY strike
+  // fixture in this table, and its whole line is struck. It passed both before and after the fix, so
+  // it pinned nothing about WHICH text the strike covers. The rows below are the shape it never
+  // reached: a strike and a live claim sharing one physical line.
+  //
+  // Why this shape and not a contrived one — measured in this lane, not quoted from the review. Over
+  // `git ls-files -- '*.md'` on this branch (4132 files): 66 lines carry a `~~span~~` across 40 files,
+  // and 55 of them (83%) carry at least 40 characters of other text on the same line once the struck
+  // spans are removed. At `origin/main` the same measurement gives 68 / 56 (82%) across 40 files.
+  // Striking the old value and asserting the corrected one BESIDE it is this repo's DOMINANT
+  // retraction shape, not its exception, so the permissive rule laundered the common case.
+  const SAME_LINE = [
+    // label, the ONE physical line, retracted?
+    ['unrelated aside struck beside a live verbatim claim',
+      `${SURVIVOR} Though ~~the old count was wrong~~ some say otherwise.`, false],
+    // The real line this was found on: backlog/1246-...:97, where the claim swept for is the ACTIVE
+    // ruling on the card and the strike covers the wording it replaced.
+    ['the repo table shape — old value struck, corrected value beside it',
+      `| disposition | ~~14 retain / 2 delete~~ \u2192 **${SURVIVOR}** |`, false],
+    ['two strikes, neither covering the claim',
+      `~~one aside~~ ${SURVIVOR} ~~another aside~~`, false],
+    ['the whole line struck', `~~${SURVIVOR}~~`, true],
+    ['the strike wraps the claim, with live prose either side',
+      `The old wording was ~~${SURVIVOR}~~ and it is gone.`, true],
+    ['two strikes, one of them covering the claim',
+      `~~an unrelated aside~~ and ~~${SURVIVOR}~~`, true],
+  ];
+
+  it.each(SAME_LINE)('#3307 a strike retracts only what it COVERS: %s', (_label, line, retracted) => {
+    expect(retractionNear([line], 1, { covers: SURVIVOR }).retracted).toBe(retracted);
+    // ...and end to end, where the site's matched text is threaded through by `sweepDocument` itself.
+    const sites = sweepDocument({ path: 'c.md', text: `${line}\n` }, { text: SURVIVOR });
+    expect(sites).toHaveLength(1);
+    expect(sites[0].tier).toBe('exact');
+    expect(sites[0].retracted).toBe(retracted);
+  });
+
+  it('#3307 MUTATION — a struck aside beside a live claim does NOT exit 0 "clean"', () => {
+    // The consequence that made this blocking rather than cosmetic, and the row that reddens if
+    // `struckCovers` is reverted to `STRUCK_RE.test(own)`: survivors 0 and exit 0 on a claim that
+    // still stands verbatim. Re-run as a mutation in this lane, not asserted.
+    const report = sweepDocuments(
+      [{ path: 'c.md', text: `${SURVIVOR} Though ~~the old count was wrong~~ some say otherwise.\n` }],
+      { text: SURVIVOR },
+    );
+    expect(report.counts.survivors).toBe(1);
+    expect(report.counts.retracted).toBe(0);
+    expect(formatReport(report)).toMatch(/RESULT: 1 surviving site/);
+  });
+
+  it('#3307 the strike narrowing holds for the near and token tiers too, not just exact', () => {
+    // `covers` is the folded SENTENCE for `near` and the TOKEN for `token`, so the same question is
+    // asked of every tier: does the strike cover what THIS site matched on?
+    const near = 'the gate never runs quickly against backlog cards.';
+    const claim = 'the gate never runs against backlog cards';
+    expect(sweepDocument({ path: 'd.md', text: `${near} ~~an unrelated aside~~\n` }, { text: claim })[0])
+      .toMatchObject({ tier: 'near', retracted: false });
+    expect(sweepDocument({ path: 'd.md', text: `~~${near}~~\n` }, { text: claim })[0])
+      .toMatchObject({ tier: 'near', retracted: true });
+    // token tier: the claim's `84` standing in unrelated prose, with an unrelated strike on the line.
+    expect(sweepDocument({ path: 'd.md', text: `Row 84 of the table. ~~an unrelated aside~~\n` },
+      { text: SURVIVOR })[0]).toMatchObject({ tier: 'token', retracted: false });
+    expect(sweepDocument({ path: 'd.md', text: `Row ~~84~~ of the table.\n` },
+      { text: SURVIVOR })[0]).toMatchObject({ tier: 'token', retracted: true });
+  });
+
+  it('#3307 struckCovers with NO match text falls back to whole-line, never to "a strike is present"', () => {
+    // `retractionNear` is exported and callable on a bare line. Its strike shape must not be the
+    // permissive one just because the caller has no match text to hand.
+    expect(struckCovers('~~old claim~~', null)).toBe(true);
+    expect(struckCovers('> - ~~old claim~~', null)).toBe(true);       // leaders do not count as content
+    expect(struckCovers('live claim, though ~~an aside~~ stands', null)).toBe(false);
+    expect(struckCovers('no strike here at all', 'anything')).toBe(false);
+    // Two strikes with live prose between them: the line's own content is NOT entirely struck, so the
+    // fallback declines — the direction that leaves the site a survivor.
+    expect(struckCovers('~~old claim~~ and ~~another~~', null)).toBe(false);
+    expect(struckCovers('~~old claim~~ ~~and another~~', null)).toBe(true);
   });
 
   it('#3307 stripLineLeaders reduces nested blockquote/list/emphasis leaders to the bare word', () => {
