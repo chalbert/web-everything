@@ -1,20 +1,29 @@
 ---
 bornAs: xjzkvg4
-kind: story
+kind: decision
 size: 3
 parent: "3318"
 status: open
 dateOpened: "2026-08-27"
-scope:
-  - we:scripts/check-standards.mjs
+relatedReport: reports/2026-08-27-card-gate-deployment.md
 tags: []
 ---
 
 # The card gates run nowhere — no caller outside the scoring harness
 
-Every gate in the review-corpus gate library is imported only by the replay harness, which scores candidates against recorded reviews. Nothing invokes them at write time, at prepare time, or in the standards check, so a defect a gate detects still ships.
+Every gate in the review-corpus gate library is imported only by the replay harness and its tests, so a defect a gate detects still ships. Prepared as a decision. Most of the "which gates, where, at what severity" question turns out to be already ruled — by #3026's shipped diff-scoped precedent, #2678's warn-never-deny, and #3357 — and two real forks remain: whether #3314's typed-field requirement reaches a deterministic gate, and what evidence licenses a deployment when the replay score is undefined.
 
-## Verified, not assumed
+## The fact, and a correction to how it was verified
+
+**The fact holds: no production caller.** Nothing in `we:scripts/check-standards.mjs` or
+`we:scripts/check-standards-rules.mjs` references the library. The real importer set is **three files, all
+inside the experiment**: `we:scripts/review-corpus/replay-gates.mjs:51`, its test
+`we:scripts/review-corpus/__tests__/gates.test.mjs:16`, and `we:scripts/review-corpus/stability.mjs:286`
+(transitively, via the harness). So the library is candidates, measured against history, invoked by nothing
+that guards a write, a card, or a land.
+
+**Retracted — the proof this card was filed with does not run.** The original body printed this, under the
+heading *"Verified, not assumed"*:
 
 ```
 grep -rln "review-corpus/gates.mjs" scripts/
@@ -22,9 +31,16 @@ grep -rln "review-corpus/gates.mjs" scripts/
   → scripts/review-corpus/replay-gates.mjs
 ```
 
-Two hits: the file itself, and the **scoring harness**. `we:scripts/check-standards.mjs` and
-`we:scripts/check-standards-rules.mjs` contain no reference. So the entire library is **candidates**, measured
-against history and invoked by nothing that guards a write, a card, or a land.
+**That command returns nothing at all — zero hits, exit 1.** Two independent reasons, both knowable at filing.
+(1) The gate module does contain the literal, in its own `@file` docblock, but plain `grep` classifies the
+file as **binary** and skips it silently, because of the single NUL byte at offset 27761 that this card's own
+report documents. (2) The harness **never contains that string** — it imports the module by a *relative
+specifier*, so the second hit never existed. `git grep -ln` does list the gate module, so the report's claim
+that git grep skips it too is also wrong and is corrected there.
+
+The **conclusion** was right and the **evidence was invented**, which is precisely the defect class #3341's
+gate exists to catch. It is recorded here rather than quietly fixed, because this card proposes to deploy that
+gate — see *What the library missed*, below.
 
 ## Why this matters more now than it did yesterday
 
@@ -38,53 +54,402 @@ Five items target that library, and **all five build detectors into a file nothi
 | [#3362](/backlog/3362/) | a check must state its predicate and candidate set |
 | [#3319](/backlog/3319/) | (touches the same library) |
 
-Each is individually good work with a measured false-positive rate. Together they are a library whose net
-effect on anything shipping today is **zero**.
+Each is individually good work. Together they are a library whose net effect on anything shipping today is
+**zero**.
 
 ## A precise note on an earlier retraction, because this is adjacent and must not be confused with it
 
 An earlier card claimed *"the gate scores a corpus of past reviews and never runs against a backlog card"* and
 concluded *"a detector pointed only backwards catches nobody."* **That was retracted, and the retraction was
 correct**: `vacuousExecutableCriterion` opens with `if (!/^backlog\//.test(path || ''))` and is registered
-`targets: 'backlog card'`, so backlog cards are exactly and only what it scans. The stated mechanism was wrong.
+`targets: 'backlog card'`, so backlog cards are exactly and only what it scans.
 
 **This item is a different fact and does not revive that claim.** What a gate *scans* and whether anything
-*calls* it are independent. The gate targets cards correctly; no caller passes it a card outside the harness.
-Recorded explicitly so a future reader does not read this as the retracted claim returning by the back door —
-and because getting that distinction wrong is precisely the error the retraction punished.
+*calls* it are independent. The gate targets cards correctly; no caller passes it a card outside the
+experiment.
 
-## What to decide, and it is a real decision
+## Retyped story → decision (prep, 2026-08-27)
 
-**Which gates deploy, where, and at what severity.** Not "wire them all in" — the library holds heuristics with
-known false-positive rates, and the ones measured so far differ by an order of magnitude:
+Filed as a `story` with `scope: we:scripts/check-standards.mjs`. Retyped to `decision`; `scope:` dropped,
+since a decision is ratified rather than dispatched, and each child carries its own slice.
 
-- #3341: **17 / 3336 cards (0.5%)**, adjudicated 13 true · 1 arguable · 3 false.
-- #3340: **0 findings** across the tree — a pure regression guard.
+**The retype was attacked and held, for a reason the first draft of this prep did not have.** The skeptic's
+objection was fair against that draft: every fork was written as a single-branch "ratify", and a decision with
+no live branches is a design document. What the skeptic then found is what justifies the retype —
+[`#claim-accuracy-advisory-blocks-on-impact`](../../docs/agent/platform-decisions.md#claim-accuracy-advisory-blocks-on-impact)
+(#3314) was ratified **one day before this card, under this card's own parent epic**, and appears to govern
+this exact finding population by a different test. A builder has no authority to decide whether a standing
+statute reaches their change; that is a ratification. Fork 1 is that question.
 
-Candidate call sites, each with a different cost and blast radius:
+## The measured ground — one sweep, one revision
 
-- **Write-time** (`PreToolUse` hook, the precedent `we:scripts/lint-locus-prefix.mjs` sets) — tightest loop,
-  but several gates need repo context and a hook that shells out to git on every write is a real cost.
-- **`check:standards`** — the natural home for card-shaped rules, and the place a false positive is loudest.
-- **Prepare close-out** — where a card is finished, which suits gates that need the card complete.
+Method and caveats: [the session report](/reports/2026-08-27-card-gate-deployment/), linked as
+`relatedReport`. Stated in #3362's form so no completeness is implied.
 
-**Severity is the other half.** A hard failure on a heuristic gets routed around within a day, after which it
-protects nothing — the pattern named on #3340 and measured on [#3308](/backlog/3308/), where a first draft
-fired on 59 of 60 merged PRs before being cut to 8. Warn-first is likely right for the fuzzy gates and wrong
-for the crisp ones.
+**Scan.** Every git-tracked file matching `^(backlog|agent-memory-src|reports)/.*\.md$` at `6b03a7bd` —
+**4046 files** (backlog 3339, agent-memory-src 252, reports 455) — passed to every entry of the frozen
+`GATES` registry (`we:scripts/review-corpus/gates.mjs:715`) through a working-tree context.
+**Predicate.** One finding = one element of a gate's returned array. **Not adjudicated** for eight of the
+nine: a count is a *fire rate on today's tree*, never a false-positive rate. Re-run independently by the
+skeptic pass, exact match on all nine counts.
 
-## Do not deploy on a score alone
+| gate | `targets` | findings today | context it needs | adjudicated FP |
+| --- | --- | ---: | --- | --- |
+| `resolved-with-todo` | backlog card | **5** | — (pure) | not adjudicated |
+| `stale-gate-count` | backlog card | **28** | — (pure) | not adjudicated |
+| `dangling-wikilink` | agent memory | **70** | `list` (11 ms) | not adjudicated |
+| `dangling-hash-id` | backlog card | **1** | `knownHashIds` (116 ms) | not adjudicated |
+| `grep-literal-mismatch` | backlog card | **5** | `read` | not adjudicated |
+| `vacuous-executable-criterion` | backlog card | **1** | `read` | not adjudicated |
+| `scope-omits-donewhen-file` | backlog card | **72** | — (pure) | not adjudicated |
+| `citation-line-content` | any prose | **577** | `read` | not adjudicated |
+| `uncited-mechanism-claim` | backlog card | **17** | `read` | **13 true · 1 arguable · 3 false** |
+| | | **776** | | |
 
-The replay harness measures a gate's **precision against labels that exist**. #3341's replay returned
-*0 labels caught, 6 extras* — and the 0 is **not** a miss rate: none of the 39 confirmed labels is an instance
-of that class, because the class was named later than every mined case. A score of 0/0 is undefined, not
-failed. Any deployment rule keyed on replay score has to handle that case or it will reject exactly the gates
-written for defects the corpus predates.
+Baseline for scale: `npm run check:standards` on this clone is **0 errors, 1451 warnings**. All nine as
+whole-corpus warnings would be **+776 on 1451 (+53%)**; `citation-line-content` alone is **+40%**.
+
+### The standing count is yield evidence too, and it cuts against the cheap gates
+
+A low standing count reads two ways, and prep's first draft only read one. It is a small **drain**, and it is
+also the best available estimate of how often the gate **ever catches anything** — its hits across 3339 cards
+of history. Read that way, `dangling-hash-id` (**1**), `vacuous-executable-criterion` (**1**),
+`resolved-with-todo` (**5**) and `grep-literal-mismatch` (**5**) are **12 findings between them across the
+entire board**. Cheap to deploy is not the same as worth deploying, and any ordering that ranks by drain cost
+silently ranks by the inverse of evidence. The bands below are therefore keyed on **impact**, not on cost.
+
+### The number the framing invites you to misread — and its interval
+
+#3341's **17 / 3336 (0.5%)** is a **fire rate on the board**, not a false-positive rate. Its adjudication was
+13 true · 1 arguable · 3 false, so the point estimate is **3/17 = 17.6%** (23.5% counting the arguable one
+against it). **At n = 17 that is not a band assignment.** The 95% Wilson interval on 3/17 is roughly
+**[6.2%, 41.0%]** — it spans "clears 10%", "probation at 10%" and "auto-disable at 25%" together. #3318's own
+conformance front demands "four numbers, always together, **always with intervals**"; a single point estimate
+placed in a band is the thing that front exists to stop.
+
+**And the contract it would be measured against is not a statute.** #3318 is an **open epic**, not a statute
+anchor; its own goal-set row 8 marks the effective-FP contract **"blocked — no ledger"**, so it has no
+instrument. Its stated numbers come with the epic's own caveat: 10% is a product decision Google's footnote
+calls *"somewhat arbitrary"*, against Coverity's published 20% target and measured developer tolerance near
+15%. Its **effective-FP** is a not-useful rate over *surfaced* findings with an action-rate denominator — a
+different instrument from a raw adjudicated-incorrect count. Prep's first draft called this "a ratified
+contract" and assigned a band from it; that was wrong on three counts and is corrected here.
+
+### A mechanism claim this card owed itself
+
+The filed body said `vacuousExecutableCriterion` "must *run* a command to know it is vacuous, which is not a
+write-time operation." **It runs nothing.** Shape 1 (`we:scripts/review-corpus/gates.mjs:317-332`) calls
+`read(rel)` and tests `body.includes(needle)`; shape 2 (`we:scripts/review-corpus/gates.mjs:335-345`) is a
+regex over the criterion text. No subprocess exists in the module. The gate **is** write-time feasible.
+
+### What the library missed — one true negative, recorded
+
+Both this card and its report were run through all nine gates. **Both come back clean** — including on the
+invented proof retracted above, which is a `grep-literal-mismatch`-class defect in the card deploying
+`grep-literal-mismatch`. The gate cannot reach it: `grepLiteralMismatch` opens with `doneWhenSection(text)`
+(`we:scripts/review-corpus/gates.mjs:228`) and iterates Done-when criteria only, so a falsified command in a
+card *body* is structurally out of scope. **Recall on the one factual error in this card is 0/1.**
+**Three findings did land during prep**, all `citation-line-content`, all on drafts of this card and its
+report. Two were true: one cited a warn-flag's line while naming a *different* flag in the same sentence; the
+other cited an enum's line while naming a property declared 140 lines earlier. The third is **arguable and
+worth recording as a limitation** — it fired on a `path:211-213` *range* citation whose named levels sit at
+either end of the range, because the gate parses only the first number and looks ±4 lines from it. A range
+citation is a form it does not model.
+**Running tally on this two-file sample: 2 true, 1 arguable, 1 miss.** Recorded because a deployment argument
+that reports only the catches is the same defect in a new place — and because this is the only end-to-end
+evidence anyone has of these gates on live prose rather than on a replay. It points where the forks below
+point: useful enough to run, not precise enough to block.
+
+---
+
+## Supported by default — five concerns that are settled, composed, or scheduling
+
+The card asked *which gates deploy, where, and at what severity*. Most of that is already ruled, and **saying
+so is the ruling**. Two entries below were authored as `## Fork N` in this prep and dissolved by the
+fresh-context two-confusion screen; one was written as settled and is **retracted**, having been settled by
+the wrong anchor. All are recorded rather than deleted, so a reader can see what was considered.
+
+**1. The call site is not a fork — the branches compose over one kernel (#756).**
+`we:scripts/lint-locus-prefix.mjs` runs **one pure detector** (`scanRepoLocusPrefixes`) from **five** facades:
+`--pre` (a `PreToolUse(Edit|Write)` deny registered in `we:.claude/settings.json`), a single-file `PostToolUse`
+backstop in the same file, `--staged`, `--all`, and `--range=<gitrange>` — the producer sweep pr-land runs
+before opening a PR (`we:scripts/pr-land.mjs:708`). The library already has the same kernel shape:
+`runGates(text, ctx)` at `we:scripts/review-corpus/gates.mjs:728`. The composability probe *succeeds* — the
+facades coexist, there is no excluded branch, so there is no fork.
+
+**2. Write-time feasibility is a derivable per-gate property — and the kernel fails open today.**
+Measured: `knownHashIds()` costs **116 ms** (one `git grep` over 3339 cards, 939 ids); `git ls-files` costs
+**11 ms**; every other gate is `readFileSync` plus regex, and the slowest — `uncited-mechanism-claim` —
+averages **0.39 ms per card**. So "several gates need repo context and shelling to git on every write is a
+real cost" resolves to **exactly one gate**, `dangling-hash-id`. These timings license the derivation and
+nothing else.
+**Build obligation the entry must name:** `runGates` (`we:scripts/review-corpus/gates.mjs:728-734`) wraps
+every gate in a `try` with an empty `catch`, commented *"a gate that throws scores as finding nothing"*. That
+is correct for a *scoring* harness and **fail-open for a gate** — a gate that throws reports clean. Any
+deployment must not route through that swallow unchanged, whatever severity is ruled.
+
+**3. Corpus scope: diff-scoped, and the repo already ships it over this material (#3026).**
+`we:scripts/check-standards.mjs:1249-1270` runs the provenance gate **diff-scoped against the `origin/main`
+merge-base, reporting only tokens on lines a change ADDED** — its header states the reason in numbers:
+"corpus-wide this fires 1,808 times on overwhelmingly correct prose". It also **narrowed its own scope to
+exclude `backlog/` on measurement** — the filed scope produced "503 findings on 22 merges", the shipped scope
+"0 on 0". That is the fourth corner prep's first draft never offered, already built, already measured, over
+this exact corpus. It settles scope: **diff-scoped**, per gate, with whole-corpus reserved for a gate whose
+standing count is already near zero.
+
+**4. RETRACTED — "the severity ladder is settled by #867". It is not, and a later anchor rules the other way.**
+> Prep's first draft read: *"[`#gate-rollout-ratchet`](../../docs/agent/platform-decisions.md#gate-rollout-ratchet)
+> (#867) already rules how a gate rolls from warn-only to build-blocking … warn-only is a stage you exit, not
+> a resting posture,"* and concluded that a drained gate enters at ERROR, citing #867's by-name rejection of a
+> "violation-level baseline snapshot" to reject new-code-only scoping.
+>
+> **Three errors.** (i) #867's scope is a **drainable derived route set** with a `WARN_ROUTES` opt-out —
+> re-rendered a11y routes, not an append-only card archive. (ii) Its rejected alternative is a *stored
+> snapshot*, and a merge-base diff scope **stores nothing to rot**, so the stated reason does not reach it;
+> entry 3 shows the repo shipping exactly that scope. (iii) A later anchor rules the opposite for a
+> `check:standards` gate: [`#small-file-preference`](../../docs/agent/platform-decisions.md#small-file-preference)
+> (#2678, ratified 19 days after #867) makes **soft-warn permanent** — "never errors, never denies the write"
+> — with an inline escape-hatch comment, and rejects hard-deny outright as "a footgun on high-churn files".
+> The first draft also reclassified the citation-gate warn flag as #867 non-compliance; the sibling comment at
+> `we:scripts/check-standards.mjs:1265` states that posture is *ruled*, for the "don't red the gate on a
+> corpus nobody is touching" reason.
+
+**The corrected default, from the anchors that do reach:** a card gate runs **diff-scoped and WARN**, with an
+inline escape hatch, and does **not** hard-deny. Beyond #2678, [`#blast-radius-advisory-care-not-a-gate`](../../docs/agent/platform-decisions.md#blast-radius-advisory-care-not-a-gate)
+(#2563 clause 1) holds that where a repo tightens a signal to a gate, "**`gate` means route-to-a-human, never
+hard-block-with-no-reviewer**". Whether *any* gate may nonetheless block is Fork 1.
+
+**5. The deployment set is derived from `GATES`, never hand-listed.**
+*Authored as a fork; dissolved `flagged(impl)` by the screen — a card author cannot observe which way it was
+built, and merit survives the free-build test, so it is an authoring requirement on the build child, not a
+ruling.* Settled three ways: `runGates` already iterates the frozen `GATES`; #3357's mutation refutation (a
+check reading two hard-coded paths stayed green when a reviewer added a non-compliant third file — "a hand
+sweep wearing a guard's clothes … it encodes the two callers someone *remembered*"); and the hookable rule
+that a script-decidable set is derived, not typed out.
+**`targets` cannot carry it.** `targets` (`we:scripts/review-corpus/gates.mjs:716-724`) names the **corpus** —
+`'backlog card'` / `'agent memory'` / `'any prose'` — not the facade and not the severity. Six gates share
+`targets: 'backlog card'` and must deploy differently. Two fields are needed that do not exist: `needs` (the
+context keys the gate uses — entry 2's derivation) and `impact` (Fork 1's typed class):
+
+```js
+export const GATES = Object.freeze([
+  { name: 'vacuous-executable-criterion', fn: vacuousExecutableCriterion, targets: 'backlog card',
+    needs: ['read'], impact: 'broken' },     // criterion green before the work — real work silently skipped
+  { name: 'stale-gate-count',             fn: staleGateCount,             targets: 'backlog card',
+    needs: [],       impact: 'cosmetic' },   // a drifting number no criterion depends on
+  // …
+]);
+```
+
+**No measured count goes in the registry.** Prep's first draft proposed a `standing: 72` field;
+[`#statute-anchor-states-rule-not-status`](../../docs/agent/platform-decisions.md#statute-anchor-states-rule-not-status)
+(#2854) is the shape objection — point-in-time status does not live in the timeless artifact, it lives on the
+item and is re-measured by a check. `impact` is timeless; a standing count is not.
+*Sharp edge:* the gate module holds a literal NUL byte at offset 27761, so plain `grep` skips it as binary —
+which is how this card's own headline proof came to be printed without anyone noticing it returns nothing.
+`git grep` is unaffected.
+
+---
+
+## Fork 1 — Does #3314's typed-field requirement reach a deterministic gate, or govern AI lenses only?
+
+**Fork-existence — a genuine either/or, not a forced invariant.** Both readings are coherent and they cannot
+coexist: under (a) a named sub-class of gates *may* block a land; under (b) **no** card gate may ever block,
+because #2678's warn-never-deny is then the only rule in force. One ruling has to be in effect. This is the
+one concern prep could not settle from the tree, and it is a *which-statute-governs* call, not a build choice.
+
+**Crux.** [`#claim-accuracy-advisory-blocks-on-impact`](../../docs/agent/platform-decisions.md#claim-accuracy-advisory-blocks-on-impact)
+(#3314) was ratified **2026-08-26, under parent #3318 — this card's own parent** — and governs findings over
+"card bodies, Done-when criteria, docs, agent-memory notes, code comments, PR descriptions". **All nine gates
+target exactly that population.** #3314 holds that such a population is "dominated by low-impact prose *by
+construction*", that "the argument does **not** depend on the lens's measured hit rate, and would not change
+if the lens got better: the objection is structural", and closes: *"any future rule of this shape must name a
+typed field or take plain advisory instead."* **Its typed field already exists.** The finding property is
+`impactIfUnfixed`, declared at `we:scripts/lib/jury-core.mjs:57`. Its enum lives at
+`we:scripts/lib/jury-core.mjs:197`, held total by a `check:standards` gate. A gloss table in the same module
+defines each level: the lowest is *"nothing breaks; a later reader might be mildly misled"*, and the level
+this fork turns on is *"real work is lost, duplicated, or silently skipped — recoverable, but only by someone
+noticing"*.
+
+- **(a) It reaches. A card gate is a rule of that shape, so it takes plain advisory unless it names the typed
+  field — and a gate whose finding class is `impactIfUnfixed >= broken` by construction may block.**
+  ← **default**
+  #3314's stated ground is the **finding population**, not the channel that surfaces it, and moving the same
+  population from an advisory jury lens into a `check:standards` ERROR is a *strictly harder* block — no
+  reviewer at all — so a reading that exempts it because the detector is a regex rather than a model inverts
+  the anchor. Reading (a) also supplies the discriminator prep otherwise lacks, and it is #3314's own:
+  impact, not volume and not precision.
+- **(b) It governs lenses only; the gates are ordinary `check:standards` rules.** *Rejected, but not
+  baselessly.* #3314 sits in the jury cluster, its remedy is jury machinery, and its subject is a *lens's
+  mandate* — the anchor even carries a retraction narrowing an earlier overstatement about #2563's reach,
+  which is a caution against stretching it. But (b) does not free the gates to block: #2678 then binds
+  instead, and its answer is **never deny**. So (b) is the *stricter* branch in practice, and choosing it
+  means ruling that no card gate ever blocks a land — a coherent end-state, and one the decider may prefer
+  for its simplicity.
+- **Sub-fork, stated rather than left as an aside:** under (a), is `impact` declared **per gate** (a class
+  property) or **per finding** (computed)? **Per gate** is the default — a gate is a fixed predicate, so its
+  finding class has one impact by construction, and a per-finding computation would put reviewer discretion
+  back in exactly the place #3314 says a typed field must sit. `citation-line-content` is the honest
+  exception: a wrong locus a card *directs work to* is `broken` by #3314's gloss, while the same defect in a
+  resolved 2026-05 card is `cosmetic`. Under per-gate declaration it takes the lower class, `degraded`, and
+  never blocks.
+
+**Proposed classification under (a),** using #3314's own gloss. This is the band table the original Done-when
+asked for, keyed on impact rather than on drain cost:
+
+| gate | proposed `impact` | blocks under (a)? | standing findings |
+| --- | --- | --- | ---: |
+| `resolved-with-todo` | `broken` — resolved with no proof written | yes | 5 |
+| `vacuous-executable-criterion` | `broken` — criterion green before the work | yes | 1 |
+| `grep-literal-mismatch` | `broken` — work directed at a literal that is not there | yes | 5 |
+| `scope-omits-donewhen-file` | `broken` — slice unbuildable inside its declared scope | yes | 72 |
+| `uncited-mechanism-claim` | `degraded` — cost a build round; recovered unaided | no | 17 |
+| `citation-line-content` | `degraded` — per-finding impact varies; class takes the floor | no | 577 |
+| `stale-gate-count` | `cosmetic` | no | 28 |
+| `dangling-hash-id` | `cosmetic` | no | 1 |
+| `dangling-wikilink` | `cosmetic` | no | 70 |
+
+**What this covers and what it does not (#3362).** It covers the nine gates in the frozen registry at
+`6b03a7bd`. The `impact` column is **proposed, not measured** — it is a reading of #3314's gloss, and it is
+the part of this fork most worth overriding. It does not adjudicate any of the 759 unadjudicated findings,
+and says nothing about gates not yet written, including #3362's own, which has no implementation and so no
+count.
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT — and the amendment is this fork's existence. The skeptic pass refuted
+prep's original Fork 1 ("drain-then-land at ERROR") outright, on three independent grounds: #867's baseline
+rejection does not reach a merge-base diff scope, because nothing is snapshotted; the repo already ships that
+scope at `we:scripts/check-standards.mjs:1249-1270`, narrowed on measurement to exclude `backlog/`; and #2678
+ruled warn-never-deny for a `check:standards` gate *after* #867. All three were verified and folded in — the
+old fork is now the retracted entry 4 above, and the surviving question is the #3314 collision the skeptic
+found, which the first draft never cited. The skeptic's strongest unrefuted objection was exactly that:
+*"ratifying (b) reverses a ratified statute by re-implementing the lens in regex."* That objection is not
+answered here — it is **promoted to the fork itself**, because whether #3314 reaches is not prep's to decide.
+Statute-overlap: reconciled explicitly against #3314, #2678, #2563 clause 1, #2854 and #3026; #867 is demoted
+from authority to background, and #1937 is **dropped as a citation** — the session report itself concluded it
+governs location, not corpus scope, and the first draft re-deployed it as support anyway.
+Citation-scope: #3314 is cited as the *contested* authority, which is the fork; #2678 and #2563 as authority
+for the warn default; #3318 as **an open program metric with a blocked meter**, never as a statute.
+**Screen:** clear on the substance, re-checked after the rewrite. The fresh-context screen cleared this
+fork's predecessor on both axes, and the axes hold under the new framing: a consumer observes the ruling
+directly the first time a card is or is not blocked, and under free-and-instant build the branches still
+differ on whether a prose finding may ever stop a land — a correctness-and-permission question that cost does
+not touch.
+
+## Fork 2 — What evidence licenses a deployment, when the replay score is 0/0?
+
+**Fork-existence:** the declared bar is *broken* — it rejects a gate for finding six real defects, and the
+harness's own docblock contradicts its second term. One branch survives; **ratify**.
+
+**Crux.** `we:scripts/review-corpus/gates.mjs:12-15` declares, before the experiment ran: *"a gate ships only
+if it catches >=80% of its own labelled class in the corpus AND fires zero times where no reviewer found
+anything."* `we:scripts/review-corpus/replay-gates.mjs:16-19` says the opposite about the second term: an
+EXTRA is "NOT a false-positive count … either a false positive or a real defect nobody looked for … a number
+to ADJUDICATE, never as a number to divide by."
+
+- **(a) Keep the declared bar.** *Rejected.* Applied to #3341 it fails the gate twice: on a catch rate of
+  **0 labels caught out of 0 instances** — none of the 39 confirmed labels is an instance of a class named
+  *after* every mined case was recorded — and on **6 extras adjudicated one by one, all real**. **0/0 is
+  undefined, not failed**, and a rule keyed on it rejects exactly the gates written for defects the corpus
+  predates.
+- **(b) Replay score is admissible only where the class is representable in the corpus. A gate whose class has
+  zero instances among the 39 confirmed labels scores `not-measurable`, and its evidence is instead the
+  whole-corpus sweep plus per-finding adjudication. Extras are adjudicated, never divided by. Every gate
+  deploys at warn on any evidence; a promotion to blocking additionally requires an adjudicated sample with a
+  stated interval whose *lower bound* clears the bar in force.** ← **default**
+- **(c) Drop replay from the deployment rule entirely.** *Rejected.* It is the only contamination-free measure
+  the repo has: `revisionReader` binds every read to the case's own `head` via `git show`
+  (`we:scripts/review-corpus/replay-gates.mjs:69-79`), so a gate cannot see the review that found the defect.
+
+**The interval clause is the amendment, and it is load-bearing.** Prep's first draft wrote (b) as "adjudicated
+FP under #3318's ratified contract — under 10%", and that was wrong three ways: #3318 is an open epic whose
+meter is marked blocked, its **effective-FP** is a different instrument from a raw adjudicated count, and
+3/17 carries a 95% interval of roughly **[6.2%, 41.0%]** that covers every band the contract names. Requiring
+a *lower bound* to clear the bar makes the rule honest at small n and matches #3318's own "always with
+intervals" discipline without borrowing its unbuilt threshold. **Which** bar is in force follows from Fork 1
+— under (a) it is `impactIfUnfixed`, under (b) there is no blocking to license and the clause is inert.
+
+**Consequence, plainly.** `uncited-mechanism-claim` — the library's most-cited success, 13 true findings —
+deploys at **warn** and not above: `not-measurable` by replay, and 17 adjudications too few to place it
+anywhere. It is a **narrow-and-re-adjudicate**, and its 3 false positives are the specification.
+
+**Code example** — so `not-measurable` is a printed verdict rather than a silent zero, which is the current
+failure mode:
+
+```js
+const instances = labels.filter((l) => l.class === gate.name).length;
+const verdict = instances === 0
+  ? { score: 'not-measurable', why: `0 of ${labels.length} confirmed labels are instances of this class` }
+  : { score: hits / instances, extras };            // extras: adjudicate, never divide by
+```
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT. `not-measurable` for 0/0 and "adjudicate extras, never divide by" both
+held under attack. The amendment landed on the threshold clause and is folded in above: strike the #3318 10%
+citation, replace with an interval whose lower bound clears the bar in force. The skeptic also argued this
+fork is "mostly not a decision" — that amending a docblock the experiment's own author wrote is an edit, not
+a ratification. Partly conceded: the `not-measurable` fix *is* a bug fix and is written as one. What remains
+ratifiable is the **evidence standard for promoting any gate to blocking**, which outlives this library.
+Statute-overlap: none — this fork deliberately mints no threshold, which is why the #3318 citation was
+struck. Citation-scope: the harness docblock is cited as the *contradicting sibling*, not as authority.
+**Screen:** clear — the fresh-context screen returned clear on this fork, on the ground that it "earns the
+call": it decides that a gate a card author would otherwise be blocked by does not run, and under
+free-and-instant build (a) still permanently rejects any gate written for a defect class newer than the
+corpus, which is correctness rather than ordering.
+
+---
+
+## Predicted touch-set (#2619) and the child slices
+
+Coarse, repo-qualified, prefix-shaped. This item carries no `scope:`; each child gets **its own slice**, so
+the children do not serialize against each other:
+
+- `we:scripts/review-corpus/gates.mjs` — the `needs` + `impact` registry fields, and the fail-open swallow in
+  `runGates`. One child.
+- `we:scripts/review-corpus/` — the deployment runner: derives its set from `GATES`, diff-scopes against the
+  `origin/main` merge-base the way `we:scripts/check-standards.mjs:1249-1270` already does, and emits the
+  `not-measurable` replay verdict. A second child, `blockedBy` the first.
+- `we:scripts/check-standards.mjs` — the registration block plus the inline escape hatch #2678's precedent
+  carries. A third child.
+- A per-gate re-measurement check, so no standing count is ever asserted from source (#2854). Folds into the
+  first child.
+- **No corpus drain is carved.** Under the corrected default the gates are diff-scoped, so historical findings
+  are not a precondition; a drain becomes worthwhile only if a gate is later promoted to whole-corpus.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `high` (gate-self machinery, and a live statute reconciliation). Provisional: binds against the
+predicted scope above, re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| correctness#2 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| security#2 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| simplicity#2 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| standards-conformance#2 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| claim-accuracy#1 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
+| claim-accuracy#2 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
+
+**Bars registered beyond the generic expectations, so they cannot be invented later:** every count is
+**re-measured at landing**, never copied from this card; the deployment set is proven derived by a mutation
+test that registers a gate the deployment code never names; and any command printed as evidence is **run**,
+because this card shipped one that was not.
 
 ## Done when
 
-1. **Executable** — at least one gate runs from a real call site, and a card carrying the defect it detects is
-   flagged where an author will see it, while a clean card passes. Both directions.
-2. Each gate in the library is classified — deployed (and where, at what severity), warn-only, or not-yet — with
-   the measured finding count that justifies the classification recorded beside it.
-3. `npm run check:standards` — 0 errors.
+A decision is done when it is **ratified**. Its builds are carved as children with the slices above.
+
+1. **Fork 1 ratified or overridden**, and the ruling codified — reconciled with
+   `#claim-accuracy-advisory-blocks-on-impact` in the same change, since the two govern one turf. Not
+   codified under `#gate-rollout-ratchet`.
+2. **Fork 2 ratified or overridden**, with the interval clause intact or replaced knowingly.
+3. **Executable, on the runner child** — one gate runs from a real call site derived from `GATES`,
+   diff-scoped; a card carrying the defect it detects is flagged where an author will see it, and a clean card
+   passes. Both directions, asserted with a non-zero pass count (`| grep -qE "Tests +[0-9]+ passed"`).
+4. **Executable, on the registry child** — a mutation test registers a gate the deployment code never names
+   and asserts it fires (#3357's third-file refutation, applied here); and a gate that throws is proven
+   **not** to report clean, closing the `runGates` swallow.
+5. Every gate carries its `impact` class and the evidence behind it, **re-measured at landing**.
+6. `npm run check:standards` — 0 errors.
