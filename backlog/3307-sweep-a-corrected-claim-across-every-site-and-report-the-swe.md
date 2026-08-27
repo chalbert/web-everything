@@ -61,9 +61,21 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    > **Retracted — this line read "(42 passed)".** That was the count at the first cut. Review #1620
    > bounced the PR for two silent-drop defects and two untested first-cut fixes; the prevention for all
    > four took the suite from 42 to **68**. Re-measured on this branch, not carried over.
-   The `grep` is load-bearing: a `-t` filter matching nothing is an empty selection, and vitest exits
-   **0** on one, so the bare form would be green before the work (`3319`'s criterion records the same
-   trap).
+   The `grep` is load-bearing, but not for the reason first written here.
+   > **Retracted — this read "a `-t` filter matching nothing is an empty selection, and vitest exits 0 on
+   > one, so the bare form would be green before the work."** The first half is true; the conclusion is
+   > false for *this* criterion. Measured in the lane, all four combinations:
+   >
+   > | tree state | `-t` filter | bare exit | with `\| grep -qE` |
+   > |---|---|---|---|
+   > | `main` (neither file exists) | `#3307` | **1** — `No test files found` | **1** |
+   > | this branch | `#3307` | 0 — `68 passed` | **0** |
+   > | this branch | matches nothing | **0** — `68 skipped` | **1** |
+   >
+   > So before the work the bare form already fails, because there is no test *file* — not because of an
+   > empty selection. The `grep` earns its place against the OTHER row: once the file exists, a renamed
+   > `it()` or a drifted filter selects nothing, vitest reports `68 skipped` and exits **0**, and the bare
+   > form would go green while testing nothing. That is the trap `3319`'s criterion records.
 2. **Real specimen** — the frozen fixtures replay the `84 recorded verdicts` figure at the moment its
    correction was half applied: parent `3318` already retracted, child `3319` still asserting it,
    `we:scripts/lib/jury-core.mjs` carrying the numeral in a comment. The sweep names `3319` as the one
