@@ -12,6 +12,9 @@ scope:
   - we:scripts/__tests__/lane-drain.test.mjs
   - we:scripts/pr-land.mjs
   - we:skills-src/batch-backlog-items/parallel-execute.workflow.js
+  - we:skills-src/batch-backlog-items/SKILL.md
+  - we:docs/agent/backlog-workflow.md
+  - we:agent-memory-src/single-session-should-use-a-lane.md
   - we:backlog/2833-subagent-stall-reaping-detect-a-subagent-blocked-on-a-backgr.md
 tags: []
 ---
@@ -83,12 +86,60 @@ mode live: a hand-maintained caller list in a docblock is a claim, and this one 
 drain) and again in round 2 (missed the workflow). Filing a follow-up would have shipped a third revision of the
 same claim with nothing enforcing it.
 
-The guard is the described one, as a test — `we:scripts/__tests__/lane-verify.test.mjs`, "caller sweep". It reads
-the committed source of each emitter, harvests every real `pr-land` command string (a match needs at least one
-`--flag`, so a docblock's prose mention is not counted as a call site), and drives each one through
-`we:scripts/pr-land.mjs`'s own flag parser, `resolveVerifyOptions` and `verifyGateDecision` against the marker
-state that path actually sees. It also pins the drain's array-literal argv, which no command-string scan can see.
-A new `pr-land` invocation that says nothing about verification reddens the suite instead of reaching the gate.
+**RETRACTION — the first cut of that guard was the same hand sweep, moved.** This section previously described
+what shipped as reading "the committed source of each emitter … A new `pr-land` invocation that says nothing about
+verification reddens the suite instead of reaching the gate." **False when written.** The round-3 test iterated two
+hard-coded filenames — `for (const file of [WORKFLOW, DRAIN])` — so a flag-free invocation in a *third* file reached
+the gate in silence. Review round 3 measured exactly that in a lane clone: baseline `npx vitest run lane-verify` =
+**53 passed**; adding a flag-free `pr-land` invocation to `we:scripts/lane-review.mjs` left it **green at 53**, while
+adding the identical line to one of the two swept files reddened it. And the completeness claim was false by the
+sweep's *own* predicate: run over `git ls-files` it found **three** further emitters shipping a `--ref=` invocation
+that said nothing about verification.
+
+**The guard now reads the tracked file set.** `we:scripts/__tests__/lane-verify.test.mjs`, "caller sweep", harvests
+every `node we:scripts/pr-land.mjs …` invocation from a `git grep -lF` for `we:scripts/pr-land.mjs` over tracked files — minus exactly one
+stated exclusion, `we:scripts/pr-land.mjs`'s own `--help` banner, which is pinned by name **and** by count (14 hits,
+every one above the program's first `import`, so a real self-invocation added later moves the count rather than
+hiding inside the exclusion). Every invocation it finds must **declare its posture**, which is the contract review
+round 2 actually asked for — *"either carries a verify flag or is preceded by a `verify-lane` run"*:
+
+- it carries `--require-verified` / `--no-require-verified`, **or**
+- a `we:scripts/verify-lane.mjs` / `we:scripts/operations/run.mjs verify` command sits on the same line or within the 3 lines above it.
+
+Each is then driven through `we:scripts/pr-land.mjs`'s own flag parser, `resolveVerifyOptions` and
+`verifyGateDecision` against the marker state that path actually sees. The drain's array-literal argv, which no
+command-string scan can see, is pinned separately. **Stated limit:** source adjacency is a checkable proxy for "the
+verify precedes the land", not a proof of execution order — which is precisely why the doc arcs below were edited to
+move the verify *after* the item commit rather than left relying on a verify hundreds of lines up the file.
+
+## `/batch` and the solo arc — decided, not assumed
+
+The widened sweep found three emitters the hand list never saw, all of them **documentation an agent follows**
+rather than code that executes: `we:skills-src/batch-backlog-items/SKILL.md` (the serial `/batch` close-out),
+`we:docs/agent/backlog-workflow.md` (the canonical per-item arc) and
+`we:agent-memory-src/single-session-should-use-a-lane.md`.
+
+**They do not get the opt-out, and must not.** They run `pr-land` from the **lane clone**, where the marker *is*
+reachable — so the strict gate is the correct answer there, and it is the only delivery path on which this item's
+gate can actually engage. Handing them a blanket `--no-require-verified` would have closed the hole everywhere
+except where it matters.
+
+**But they were broken, for a second reason.** `we:docs/agent/backlog-workflow.md` routes the resolve-time check
+through `we:scripts/operations/run.mjs verify` (which shells `we:scripts/verify-lane.mjs`, the only writer of the marker) — and that runs *before*
+`resolve` and *before* the item commit. The marker is **sha-keyed**, so HEAD moves underneath it and the marker is
+**stale** by the time `pr-land` reads it. Measured on this branch, that argv (`--ref=lane/<slug>-<NNN> --no-wait`)
+parsed with `pr-land`'s own parser:
+
+| marker at land | verdict | ok |
+| --- | --- | --- |
+| absent | `unverified` | **false** |
+| green, keyed to an EARLIER head (stale) | `unverified` | **false** |
+| green, keyed to HEAD | `verified` | **true** |
+
+So the stale case is refused exactly as hard as the absent one — the #3212 shape this card already reasons about
+for the `/workflow` producer and had never reasoned about for `/batch`, because the sweep never saw it. **Fixed by
+moving the verification, not by weakening the gate:** all three arcs now record the verification *after* the item
+commit, immediately before `pr-land`. That is one suite run per item, relocated — not a second one.
 
 ## Done when
 
@@ -102,15 +153,18 @@ A new `pr-land` invocation that says nothing about verification reddens the suit
 
    | tree | vitest's own summary line | criterion exit |
    | --- | --- | --- |
-   | `origin/main` (`5634f078`) | `Tests  32 skipped (32)` | **1** |
-   | this branch (`027fe1fe`) | `Tests  21 passed \| 32 skipped (53)` | **0** |
+   | `origin/main` (`a284ccd3`) | `Tests  32 skipped (32)` | **1** |
+   | this branch (`b3cce4d9`) | `Tests  24 passed \| 32 skipped (56)` | **0** |
 
    *(Re-measured on every round rather than carried over, because both sides move: `origin/main` advances under a
    live drain, and each round adds cases. Earlier cuts of this table read `14 passed` against `1c293a0f`,
-   `16 passed` against `379cf93c`, and `17 passed \| 32 skipped (49)` earlier in round 3 — that last is superseded
-   by the four caller-sweep cases added after it. The RED side is re-run against the tip each time — never assumed
-   from the previous reading. The verdict has been identical at all four tips, which is the point: the criterion
-   depends on this branch's tests existing, not on which commit main happens to be at.)*
+   `16 passed` against `379cf93c`, `17 passed \| 32 skipped (49)` earlier in round 3, and `21 passed \| 32 skipped
+   (53)` against `5634f078` at the end of round 3 — all superseded, not contradicted: round 4 widened the sweep and
+   added three cases. The RED side is re-run against the tip each time — never assumed from the previous reading;
+   `a284ccd3` was re-measured in this lane by checking `origin/main`'s copies of the two files into the working
+   tree, running, and restoring. The verdict has been identical at all five tips, which is the point: the criterion
+   depends on this branch's tests existing, not on which commit main happens to be at. The `b3cce4d9` reading is
+   the last commit before this card and the PR body, which are the only things the commits after it touch.)*
 
    **THE `grep` IS THE CRITERION, NOT DECORATION.** `npx vitest run lane-verify -t "#3321"` on its own exits
    **0** on `origin/main` — measured, not assumed: a `-t` filter that matches nothing is a selection of zero, and
@@ -118,7 +172,9 @@ A new `pr-land` invocation that says nothing about verification reddens the suit
    `Tests +[0-9]+ passed` asserts that tests actually RAN, which is the property the criterion means to state.
 
 2. **The gate still lets a verified lane through** — a gate that refuses everything is worse than the hole it
-   closes, so the same 17 tests pin the PASS direction, not just the refusal: a `green` marker for THIS head is
+   closes, so the same `-t "#3321"` selection — **24 tests, re-measured this round** (it has read 14, 16, 17 and 21
+   at earlier tips; every one of those numbers is superseded, and the round-3 card's "the same 17 tests" was already
+   stale when it shipped) — pins the PASS direction, not just the refusal: a `green` marker for THIS head is
    `ok`/`verified` with **no options passed at all**, and stays `ok` long past the TTL (sha-identity is the
    freshness test, not the clock). Confirmed at the CLI too: with a real green marker written by
    `we:scripts/verify-lane.mjs` for the lane's exact HEAD, `verify-lane check` with no flags returns
@@ -142,6 +198,20 @@ A new `pr-land` invocation that says nothing about verification reddens the suit
    runs each through the real resolver and gate; being prompt strings is no obstacle, since the sweep reads the
    source text rather than executing the workflow. The same test asserts the count is **four**, so an invocation
    added or removed without thought reddens too.
+
+   **And the lane-local callers still land too** — the other half, added in round 4. The three documented arcs
+   (`/batch`'s close-out, the canonical per-item arc, the single-session lane note) keep the **strict** gate, and
+   the sweep asserts each reaches `ok`/`verified` on a green marker for HEAD *and* `ok:false`/`unverified` on a
+   green marker keyed to an earlier head — the stale case that made them fail before the verify was moved after
+   the item commit.
+
+6. **The caller sweep's harvest is the tracked file set, not a list of filenames** — the round-3 guard iterated two
+   hard-coded paths while its own title, its own case name and three docblocks called it a sweep of every committed
+   invocation. The sweep now derives its file set from a `git grep -lF` for `we:scripts/pr-land.mjs` over tracked files with exactly
+   one stated, count-pinned exclusion (`we:scripts/pr-land.mjs`'s own `--help` banner), and asserts that set is larger than
+   those three files, so a future narrowing reddens. Mutation-checked against the reviewer's own probe: a flag-free
+   invocation added to `we:scripts/lane-review.mjs` — green at 53 passed under the round-3 guard — now reddens two
+   cases.
 
 4. **The escapes are distinguishable** — under the opt-out, a fresh `running` marker still returns
    `verify-unfinished` and a corrupt marker still returns `verify-corrupt`; only `WE_LAND_UNVERIFIED=1` returns
