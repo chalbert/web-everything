@@ -561,6 +561,17 @@ Scope. #3314 was convened as one lens's promotion, and answering it did not requ
 an explicit one-member set is strictly weaker and reversible. Generalizing would have overridden a resolved
 decision (#2310) as a side effect of an unrelated call, which is the move #3320 refused for size.
 
+**STILL OPEN after PR #1642 (merged 2026-08-27).** That PR was a **prepare** run, not a
+delivery: it set `preparedDate`, published
+`we:reports/2026-08-26-advisory-lens-blocking-set-corpus-replay.md` and authored the fork — and says so in its
+own body (*"Prep only — the decision is not ruled. The item stays `status: open`."*). It touched no code and no
+statute. All three criteria below remain unaddressed: the item is not `status: resolved` and carries no
+`codifiedIn`; no anchor states the `MANDATORY_LENSES` any-impact veto; and the child that criterion 3 requires
+be filed **unconditionally** — making advisory-lens findings minable with a declared `impactIfUnfixed`, scope
+`we:scripts/workflows/review-parked-prs.mjs` + `we:scripts/review-corpus/mine-review-corpus.mjs` — does not
+exist (the only #3318 child touching the miner is #3363, which records reviewer identity, a different job).
+**What remains: ratify the fork, land the anchor, and carve that child.**
+
 ## Done when
 
 1. **Executable** — `npm run check:standards` passes with this item `status: resolved` and `codifiedIn`
