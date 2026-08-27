@@ -710,6 +710,338 @@ export function uncitedMechanismClaim(text, { path, read } = {}) {
   return out;
 }
 
+/* ------------------------------------------------------------------ G4 (#3362) */
+
+/**
+ * THE CLASSES OF THING A CHECK SCANS — the set a completeness claim quantifies over. Checkers
+ * themselves (`gate`, `check`, `sweep`, `test`, `guard`) are deliberately ABSENT: *"all gates are pure
+ * functions"* is a claim about the checkers, not about what they cover, and admitting them would make
+ * every sentence about this file's own registry a finding.
+ *
+ * `branch` is absent for a different reason, and it was measured: in this repo the word means a DECISION
+ * fork or a code path, never a scan candidate, and admitting it produced three of the sweep's false
+ * positives at once — two spellings of *"no branch is broken"* (the fork-existence test) and one
+ * *"every branch is string equality"* about the arms of a function.
+ *
+ * `finding` is absent for the same measured reason: in this repo it is an element of a review VERDICT,
+ * and *"every finding is resolved"* — the `prevention-outstanding` precondition, written out in
+ * `we:scripts/lib/jury-core.mjs`, `we:scripts/lib/review-core.mjs` and `we:scripts/pr-status.mjs` — is a
+ * state of the verdict, not a claim about what a scan reached. It accounted for six of the twenty script
+ * hits in one phrase.
+ */
+const CANDIDATE_NOUNS = [
+  'caller', 'callers', 'call site', 'call sites', 'callsite', 'callsites',
+  'invocation', 'invocations', 'emitter', 'emitters', 'site', 'sites',
+  'usage', 'usages', 'occurrence', 'occurrences', 'instance', 'instances',
+  'reference', 'references', 'file', 'files', 'path', 'paths',
+  'script', 'scripts', 'module', 'modules', 'card', 'cards', 'item', 'items',
+  'doc', 'docs', 'commit', 'commits',
+  'entry', 'entries', 'line', 'lines', 'symbol', 'symbols',
+  'export', 'exports', 'import', 'imports', 'function', 'functions',
+  'helper', 'helpers', 'rule', 'rules', 'claim', 'claims',
+  'sentence', 'sentences', 'criterion', 'criteria', 'hook', 'hooks',
+  'skill', 'skills', 'lane', 'lanes',
+].sort((a, b) => b.length - a.length);
+
+/**
+ * The verb slot, in the third-person-singular AND the bare plural form. Both are needed here and the
+ * `-s`-only trick #3341 uses cannot be borrowed: a universal subject is routinely plural (*"all callers
+ * declare"*), so the bare form is the normal spelling rather than the modal's tell. Prescriptions are
+ * excluded instead by the slot being a CLOSED list that contains no modal — *"every caller must
+ * declare"* puts `must` in the slot and fails to match at all.
+ *
+ * `name`/`names` is deliberately NOT in the slot even though it reads as a coverage verb. It is the
+ * second half of too many noun-noun compounds: *"no function name"* parses as `no` + `function` +
+ * `name`, which flagged #3341's own card on a phrase that asserts nothing.
+ */
+const COVERAGE_VERBS = [
+  'declares', 'declare', 'states', 'state', 'carries', 'carry', 'ships', 'ship',
+  'cites', 'cite', 'has', 'have', 'is', 'are', 'gets', 'get',
+  'records', 'record', 'includes', 'include', 'uses', 'use', 'sets', 'set',
+  'emits', 'emit', 'reports', 'report', 'passes', 'pass', 'matches', 'match',
+  'resolves', 'resolve', 'points', 'point', 'says', 'say', 'appears', 'appear',
+  'lives', 'live', 'sits', 'sit', 'runs', 'run', 'goes', 'go', 'exists', 'exist',
+  'checks', 'check', 'covers', 'cover', 'ends', 'end', 'reads', 'read',
+  'writes', 'write', 'calls', 'call', 'takes', 'take', 'comes', 'come',
+].sort((a, b) => b.length - a.length);
+
+/** Adverbs allowed between the quantified noun and its verb. Anything else breaks the subject bond. */
+const COVERAGE_ADVERBS = '(?:already|still|now|only|silently|always|never|then|also|itself|deliberately|currently|explicitly|actually|simply|just|therefore|thus|finally|correctly|properly)';
+
+/** Function words that may not stand in the modifier slot — they end the noun phrase rather than modify it. */
+const MODIFIER_STOP = '(?:this|that|these|those|the|a|an|its|their|our|it|we|you|other|such|of|in|on|at|for|from|with|by|to)';
+
+/**
+ * `every|all|no|none of the` + up to two adjectival modifiers + a candidate noun + a verb.
+ *
+ * `each` is deliberately NOT a quantifier here. It distributes over an enumerated set the reader can
+ * see — *"each round shipped a sentence"* names four rows of a table — which is the honest form this
+ * card is asking for, not the unbounded universal it is asking against.
+ */
+const COMPLETENESS_SUBJECT_RX = new RegExp(
+  `\\b(every|all|no|none of the)\\s+`
+  + `((?:(?!${MODIFIER_STOP}\\b)[a-z][\\w-]*\\s+){0,2})`
+  + `(${CANDIDATE_NOUNS.join('|')})\\b`
+  + `((?:\\s+${COVERAGE_ADVERBS})*)\\s+`
+  + `(${COVERAGE_VERBS.join('|')})\\b`,
+  'gi',
+);
+
+/**
+ * The second shape: a check declaring itself the settled answer. Round 4 of PR #1609 shipped exactly
+ * this — *"the sweep, not this comment, is now authoritative"* — beside a predicate that matched the
+ * lander's path spelled without a repo prefix.
+ */
+const AUTHORITY_RX = /\b(?:is|are|was|were|remains?|becomes?|stays?)\s+(?:(?:now|still|already|therefore|thus|the|only|sole|itself)\s+){0,3}authoritative\b|\bthe\s+(?:\w+\s+){0,2}?authoritative\s+(?:source|list|sweep|check|scan|answer|record|set|account)\b/i;
+
+/**
+ * A checker noun. Required IN THE SUBJECT — the 48 characters before the word — not merely somewhere in
+ * the sentence: it is the CHECK that must not call itself settled. Measured: the loose form flagged
+ * *"the lane's own remote-tracking refs are authoritative"* (a claim about a data source) and a quoted
+ * *"unreviewed content is authoritative on `main`"*, neither of which is a coverage claim.
+ */
+const CHECK_NOUN_RX = /\b(?:sweep|check|gate|guard|scan|harvest|lint|linter|validator|audit|detector|test|suite|grep|search|comment)\b/i;
+
+/**
+ * Vocabulary that makes a sentence a claim about VERIFICATION rather than about anything else. This is
+ * the tightening that keeps the gate off a 3300-card board: *"every card carries a `bornAs`"* is an
+ * ordinary universal and must not fire; *"every caller is covered"* is a coverage claim and must.
+ */
+const VERIFICATION_TERM_RX = /\b(?:check(?:s|ed|ing)?|gate(?:s|d)?|guard(?:s|ed|ing)?|sweep(?:s|ing)?|swept|scan(?:s|ned|ning)?|harvest(?:s|ed|ing)?|lint(?:s|er|ed)?|verif(?:y|ies|ied|ication)|coverage|covered|caught|catch(?:es)?|flagged|flagging|detect(?:s|ed|or|ion)?|audit(?:s|ed)?|validat(?:e|es|ed|ion|or)|enforce[sd]?|assert(?:s|ed|ion)?|prove[sn]?|proof|authoritative|complete(?:ness)?|exhaustive|miss(?:es|ed)?|grep(?:s|ped)?|test(?:s|ed)?|regression)\b/i;
+
+/**
+ * THE ESCAPE, and the half that stops the rule being satisfied by DELETING the sentence. A claim that
+ * names what it scanned is the fixed form and must pass: a count, a harvest command, the tracked set,
+ * the word `candidate`, a stated predicate, or a path/glob that bounds the search.
+ *
+ * Deliberately GENEROUS, on #3341's reasoning: the gate asks *what did you actually scan*, never *is
+ * your scan wide enough*. A sentence naming a path as a citation rather than as a candidate set is let
+ * through, and that is the intended trade — a gate that flags qualified sentences gets routed around,
+ * and the routing-around costs more than the misses.
+ */
+const NAMES_CANDIDATE_SET_RX = /\bcandidates?\b|\bgit\s+(?:grep|ls-files)\b|\bls-files\b|\btracked\s+(?:set|files|tree)\b|\bscans?\b|\bscanned\b|\bscanning\b|\bsweeps?\s+over\b|\bmatching\b|\bpredicate\b|\bof\s+the\s+\d+\b|\b\d\d+\s+[a-z]|`{1,2}[^`\n]*[/*][^`\n]*`{1,2}|\b[\w-]+\/[\w.*/-]+/i;
+
+/**
+ * A hedge or a negator in front of the quantifier, which already concedes the claim is partial. The
+ * lookback runs to the nearest clause boundary rather than the immediately preceding word, because the
+ * honest disclaimer this must not punish puts a verb in between: `we:scripts/operations/__tests__/review-pr.test.mjs`
+ * reads *"they do NOT prove that every caller passes `--careLevel`"*, which is this rule being FOLLOWED.
+ * Flagging it would make deleting the sentence cheaper than keeping it — the exact failure the card names.
+ */
+const HEDGED_RX = /\b(?:not|never|n't|nor|without|hardly|barely|nearly|almost|virtually|perhaps|maybe)\b[^.;:!]{0,40}$/i;
+
+/** A conditional or prescriptive frame EARLIER in the sentence demotes the universal to a wish. */
+const PRESCRIPTIVE_FRAME_RX = /\b(?:if|whether|unless|until|once|when|suppose|assume[sd]?|must|should|shall|will|would|can|could|may|might|ought|aims?|intends?|wants?|so that|goal|target)\b/i;
+
+/**
+ * Straight and curly quotation spans within a sentence. A match inside one is a QUOTATION, not this
+ * author's claim — the same exemption `ownProseLines` gives a markdown blockquote, and for the same
+ * reason: this repo's retraction convention is to reproduce the wrong sentence and then correct it, so
+ * firing inside quotes would punish exactly the practice the rule exists to reinforce.
+ *
+ * Newlines are INSIDE the span, not a terminator. A quoted ruling wraps — `backlog/3013-…md` quotes the
+ * screen's merit split across two lines — and a `\n`-terminated span left the second half unquoted.
+ */
+function quotedSpans(sentence) {
+  const out = [];
+  for (const m of sentence.matchAll(/["“][^"“”]{4,600}["”]/g)) out.push([m.index, m.index + m[0].length]);
+  return out;
+}
+
+/**
+ * Blank an `## Acceptance` / `## Acceptance criteria` / `## Criteria` section, on exactly the reasoning
+ * `ownProseLines` already blanks Done-when for #3341: a criterion describes the tree AFTER the work, so
+ * a present-tense universal there is a target, not a claim about what was scanned. Done LOCALLY rather
+ * than inside `ownProseLines` so #3341's measured sweep is not perturbed by this card.
+ *
+ * The heading must be that phrase and nothing else. `backlog/2949-…md` is titled "Acceptance criteria on
+ * items, written to be proven not judged"; a prefix match would blank the whole card.
+ */
+const CRITERIA_HEADING_RX = /^(#+)\s*(?:acceptance(?:\s+criteria)?|criteria|definition of done)\s*$/i;
+
+function dropCriteriaSections(lines, text) {
+  const raw = text.split('\n');
+  const out = lines.slice();
+  for (let i = 0; i < raw.length; i += 1) {
+    const m = raw[i].match(CRITERIA_HEADING_RX);
+    if (!m) continue;
+    for (let j = i; j < raw.length; j += 1) {
+      const h = raw[j].match(/^(#+)\s+\S/);
+      if (j > i && h && h[1].length <= m[1].length) break;
+      out[j] = '';
+    }
+  }
+  return out;
+}
+
+/**
+ * 0-based line indexes whose sentence ENDS on a line introducing a list. A sentence closing with `:` in
+ * front of a bullet or numbered run names its candidate set in the rows below — *"Every upstream item is
+ * still open, verified live:"* followed by the three items it checked is the qualified form, not the
+ * overclaim. Same exemption, same reason, as `fenceIntroLines` above for #3341.
+ */
+function listIntroLines(text) {
+  const raw = text.split('\n');
+  const out = new Set();
+  for (let i = 0; i < raw.length; i += 1) {
+    if (!/[:：]\s*[*_`]*\s*$/.test(raw[i])) continue;
+    for (let j = i + 1; j < raw.length && j <= i + 3; j += 1) {
+      if (!raw[j].trim()) continue;
+      if (/^\s*(?:[-*+]\s|\d+[.)]\s|\|)/.test(raw[j])) out.add(i);
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Comment text only, from a JS/TS source, with every other line blanked so line numbers stay true.
+ * Handles `/* … *\/` blocks and line-leading `//` runs. A `/*` inside a string or regex literal would
+ * fool it; that is a heuristic limit of scanning comments without parsing, not a claim it cannot happen.
+ */
+export function commentLines(text) {
+  const lines = text.split('\n');
+  const out = new Array(lines.length).fill('');
+  let inBlock = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const l = lines[i];
+    if (inBlock) {
+      const e = l.indexOf('*/');
+      if (e === -1) { out[i] = l.replace(/^\s*\*+\s?/, ''); continue; }
+      inBlock = false;
+      out[i] = l.slice(0, e).replace(/^\s*\*+\s?/, '');
+      continue;
+    }
+    const b = l.indexOf('/*');
+    if (b !== -1) {
+      const e = l.indexOf('*/', b + 2);
+      if (e === -1) { inBlock = true; out[i] = l.slice(b + 2); } else out[i] = l.slice(b + 2, e);
+      continue;
+    }
+    const s = l.match(/^\s*\/\/+\s?(.*)$/);
+    if (s) out[i] = s[1];
+  }
+  return out;
+}
+
+/**
+ * Blank any paragraph (a run of non-blank lines) that carries a retraction marker. A retraction
+ * reproduces the sentence it is withdrawing, and in a comment there is no blockquote to mark it with.
+ */
+function dropRetractedParagraphs(lines) {
+  const out = lines.slice();
+  let i = 0;
+  while (i < out.length) {
+    if (!out[i].trim()) { i += 1; continue; }
+    let j = i;
+    while (j < out.length && out[j].trim()) j += 1;
+    const para = out.slice(i, j).join('\n');
+    if (/\bRETRACT(?:ED|ION|S)?\b/.test(para)) for (let k = i; k < j; k += 1) out[k] = '';
+    i = j;
+  }
+  return out;
+}
+
+/**
+ * AN UNQUALIFIED COMPLETENESS CLAIM: a sentence asserting that a check covers every case, that names no
+ * candidate set the reader could check the claim against.
+ *
+ * WHERE THIS CAME FROM. PR #1609 (#3321) went five rounds. Every round found a real caller the previous
+ * sweep had missed, and every round shipped a sentence larger than its code: round 2 *"every committed
+ * landing invocation declares its verification posture"*, round 3 *"no emitter ships a landing invocation
+ * that says nothing about verification"*, round 4 *"the sweep, not this comment, is now authoritative"*.
+ * The guard improved each round; the claim was false each round. Round 4 is the sharpest: the candidate
+ * set had already been widened to a `git grep` over the tracked set, but the predicate matched the
+ * lander's path spelled without a repo prefix while this repo writes it with one. Widening the candidate
+ * set while the predicate stayed narrow only moved where the blindness sat.
+ *
+ * WHAT THIS GATE SCANS AND WHAT IT MATCHES (stated this way because the card is about not doing
+ * otherwise). It scans the prose of files under `backlog/` — minus frontmatter, fenced code, headings,
+ * table rows, blockquotes and the Done-when section (`ownProseLines`), minus an `Acceptance` section
+ * (`dropCriteriaSections`), and minus a paragraph carrying a retraction marker (`dropRetractedParagraphs`)
+ * — and the comment text of `.mjs`/`.js`/`.ts` files (`commentLines`), under the same last exclusion.
+ * Within that text it matches a sentence that (a) contains `every|all|no|none of the` + up to two
+ * adjectival modifiers + a noun from `CANDIDATE_NOUNS` + a verb from `COVERAGE_VERBS`, or asserts
+ * `AUTHORITY_RX` beside a checker noun; AND (b) carries a word from `VERIFICATION_TERM_RX`; AND (c)
+ * matches nothing in `NAMES_CANDIDATE_SET_RX`. Four further exemptions apply per sentence and are
+ * documented where they are defined, not restated here: a question, a quotation span (`quotedSpans`), a
+ * colon introducing a list (`listIntroLines`), and a hedge or negator in front of the quantifier
+ * (`HEDGED_RX` / `PRESCRIPTIVE_FRAME_RX`).
+ *
+ * Swept over `backlog/` at 3339 cards it produced 12 findings, adjudicated on the card; over the 576
+ * `.mjs`/`.cjs` files under `scripts/`, 10.
+ *
+ * It does NOT find every unqualified completeness claim, and the gaps below are known ones rather than
+ * an exhaustive list of them:
+ *   - A universal whose noun is outside `CANDIDATE_NOUNS` — *"every round shipped a claim"*.
+ *   - A universal whose verb is outside `COVERAGE_VERBS`, or separated from its noun by a relative
+ *     clause — *"no caller that lands ships a bare invocation"*.
+ *   - A coverage claim carrying NO verification vocabulary — *"every caller now declares the flag"*.
+ *     Admitted, and admitted knowingly: without that word the sentence is indistinguishable from the
+ *     thousands of ordinary universals on a 3300-card board, and a loose predicate here is the noise
+ *     #3308 measured (a first draft firing on 59 of 60 PRs).
+ *   - Past-tense and future claims; the verb slot is present-tense only.
+ *
+ * DISTINCT FROM #3341, which shares this file's prose splitter and nothing else. That gate governs
+ * MECHANISM claims — *"X does Y by mechanism Z"* — and is answered by a citation; its subject is a module
+ * path, and `ATTRIBUTIVE_RX` already drops a bare stem sitting behind `every`/`all`, so the two cannot
+ * fire on the same phrase. This gate governs COMPLETENESS claims, where a citation is NOT the remedy: a
+ * sentence can cite a real predicate and still overstate its reach, which is precisely what round 4 did.
+ */
+export function unqualifiedCompletenessClaim(text, { path } = {}) {
+  const p = path || '';
+  let lines;
+  if (/^backlog\/.*\.md$/.test(p)) lines = dropCriteriaSections(dropRetractedParagraphs(ownProseLines(text)), text);
+  else if (/\.(?:mjs|cjs|js|ts)$/.test(p)) lines = dropRetractedParagraphs(commentLines(text));
+  else return [];
+
+  const out = [];
+  const listIntro = listIntroLines(text);
+  for (const s of sentencesWithLines(lines)) {
+    if (s.text.includes('?')) continue;                       // a question is not an assertion
+    if (listIntro.has(s.endLine - 1)) continue;               // the rows below ARE the candidate set
+    if (!VERIFICATION_TERM_RX.test(s.text)) continue;         // not a claim about a check at all
+    if (NAMES_CANDIDATE_SET_RX.test(s.text)) continue;        // the fixed form: it says what it scanned
+    const quoted = quotedSpans(s.text);
+    const inQuote = (i) => quoted.some(([a, b]) => i >= a && i < b);
+
+    let hit = null;
+    COMPLETENESS_SUBJECT_RX.lastIndex = 0;
+    for (const m of s.text.matchAll(COMPLETENESS_SUBJECT_RX)) {
+      if (inQuote(m.index)) continue;
+      if (HEDGED_RX.test(s.text.slice(0, m.index))) continue;
+      if (PRESCRIPTIVE_FRAME_RX.test(s.text.slice(0, m.index))) continue;
+      // "every card has to declare" is a prescription wearing an indicative's clothes.
+      if (/^\s+to\b/.test(s.text.slice(m.index + m[0].length))) continue;
+      // A CAPITALISED word mid-sentence in the verb slot is a proper noun, not a verb: "no contract type
+      // references Report" is a noun phrase whose head is `references`, and reading `Report` as the verb
+      // inverted the whole parse on `backlog/1808-…md`.
+      if (/^[A-Z]/.test(m[5]) && m.index > 0) continue;
+      hit = { subject: `${m[1]} ${m[2]}${m[3]}`.replace(/\s+/g, ' ').trim(), kind: 'universal' };
+      break;
+    }
+    if (!hit) {
+      const am = s.text.match(AUTHORITY_RX);
+      if (am && !inQuote(am.index) && CHECK_NOUN_RX.test(s.text.slice(Math.max(0, am.index - 48), am.index))
+        && !PRESCRIPTIVE_FRAME_RX.test(s.text.slice(0, am.index))) {
+        hit = { subject: 'authoritative', kind: 'authority' };
+      }
+    }
+    if (!hit) continue;
+
+    out.push({
+      gate: 'unqualified-completeness-claim',
+      path: p,
+      line: s.line,
+      subject: hit.subject,
+      message: hit.kind === 'universal'
+        ? `"${hit.subject}…" claims a check covers the whole set and names no candidate set — no count, no harvest command, no path, no predicate. State what was scanned and what the predicate matches instead; a reader can then see their own spelling is not covered.`
+        : `This sentence calls a check authoritative without saying what it scans or what it matches. "Authoritative" is not falsifiable; "scans N candidates from <harvest>, matching <predicate>" is, and stays true as the tree grows.`,
+    });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ registry */
 
 export const GATES = Object.freeze([
@@ -722,6 +1054,7 @@ export const GATES = Object.freeze([
   { name: 'scope-omits-donewhen-file', fn: scopeOmitsDoneWhenFile, targets: 'backlog card' },
   { name: 'citation-line-content', fn: citationLineContent, targets: 'any prose' },
   { name: 'uncited-mechanism-claim', fn: uncitedMechanismClaim, targets: 'backlog card' },
+  { name: 'unqualified-completeness-claim', fn: unqualifiedCompletenessClaim, targets: 'backlog card or script comment' },
 ]);
 
 /** Run every registered gate over one file. */

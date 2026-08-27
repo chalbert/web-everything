@@ -12,6 +12,7 @@ import {
   scopeOmitsDoneWhenFile,
   citationLineContent,
   uncitedMechanismClaim,
+  unqualifiedCompletenessClaim,
 } from '../gates.mjs';
 import { GATES, runGates } from '../gates.mjs';
 import { covers } from '../replay-gates.mjs';
@@ -321,6 +322,122 @@ describe('uncitedMechanismClaim — #3341', () => {
   });
 });
 
+// ── #3362: state a check's predicate and candidate set; never assert completeness ─────────────────────
+// The specimens are the three completeness sentences PR #1609 (#3321) shipped across five rounds, quoted
+// on `backlog/3362-…md`. Each round found a real missed caller AND shipped a claim larger than its code:
+// the guard improved every round, the claim was false every round. Round 4 is the one that fixes the
+// rule's shape — the candidate set had been widened to a `git grep` over the tracked set, but the
+// predicate still matched the lander's path spelled without a repo prefix, so widening the candidate set
+// while the predicate stayed narrow only moved where the blindness sat.
+describe('unqualifiedCompletenessClaim — #3362', () => {
+  const fire = (body, path = 'backlog/x.md') => unqualifiedCompletenessClaim(
+    `---\nkind: story\nstatus: open\n---\n\n# A card\n\n${body}\n`,
+    { path },
+  );
+
+  it('#3362 flags each of the three sentences PR #1609 shipped, through runGates', () => {
+    const r2 = 'The sweep is fixed: every committed landing invocation declares its verification posture.';
+    const r3 = 'After this change no emitter ships a landing invocation that says nothing about verification.';
+    const r4 = 'The sweep, not this comment, is now authoritative for the check.';
+    for (const s of [r2, r3, r4]) {
+      // Through the registry's REAL calling convention — a gate that only works when called directly
+      // is a gate that never runs.
+      const out = runGates(`---\nkind: story\n---\n\n# A card\n\n${s}\n`, { path: 'backlog/3321-x.md', read: () => null })
+        .filter((f) => f.gate === 'unqualified-completeness-claim');
+      expect(out, s).toHaveLength(1);
+      expect(out[0].subject.trim().length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('#3362 PASSES the same claim once it states its scan and its predicate', () => {
+    // THE NEGATIVE HALF, and the reason it exists: without it the cheapest way to satisfy this gate is to
+    // DELETE the sentence rather than qualify it, which loses the information a reader needs.
+    expect(fire('Every committed landing invocation declares its verification posture, across the 213 candidates the sweep scans from a `git grep` over the tracked set.')).toEqual([]);
+    expect(fire('No emitter under `scripts/` ships a landing invocation that says nothing about verification.')).toEqual([]);
+    expect(fire('The sweep is authoritative for the 213 candidates it scans, matching the lander predicate.')).toEqual([]);
+  });
+
+  it('#3362 stays out of the shapes it deliberately excludes', () => {
+    expect(fire('Every card carries a `bornAs` in its frontmatter.')).toEqual([]);       // no verification vocabulary
+    expect(fire('Every caller must declare its verification posture.')).toEqual([]);     // a PRESCRIPTION
+    expect(fire('Every card has to declare a scope before the check passes.')).toEqual([]);
+    expect(fire('If every caller declares its posture, the check passes.')).toEqual([]); // a CONDITIONAL
+    expect(fire('Not every caller declares its verification posture.')).toEqual([]);     // already hedged
+    expect(fire('All gates are pure functions so the harness can score them.')).toEqual([]); // about the CHECKERS
+  });
+
+  it('#3362 does not punish an honest disclaimer that a sweep was NOT done', () => {
+    // `we:scripts/operations/__tests__/review-pr.test.mjs` reads "they do NOT prove that every caller
+    // passes `--careLevel`". That is this rule being followed; flagging it would make deletion cheaper
+    // than qualification, which is the failure the card names.
+    expect(fire('These fixtures do not prove that every caller passes the flag the check reads.')).toEqual([]);
+  });
+
+  it('#3362 does not fire inside a quotation — the retraction convention reproduces the wrong sentence', () => {
+    expect(fire('The first version said: "every committed landing invocation declares its verification posture", which was false.')).toEqual([]);
+    // And across a line break, which is how a wrapped quotation actually reaches disk.
+    expect(fire('The screen affirmed: *"every committed landing invocation declares\nits verification posture"*, which was false.')).toEqual([]);
+    expect(fire('> every committed landing invocation declares its verification posture\n')).toEqual([]);
+  });
+
+  it('#3362 treats a list under a colon as the candidate set it is', () => {
+    // Same exemption, same reason, as the fenced-block intro #3341 honours: the rows below ARE the scan.
+    expect(fire('Every upstream item is still open, verified live:\n\n- `#2249` — open\n- `#2250` — open\n')).toEqual([]);
+  });
+
+  it('#3362 leaves an Acceptance section alone, as #3341 leaves Done-when alone', () => {
+    // A criterion describes the tree AFTER the work, so a present-tense universal there is a target.
+    expect(fire('## Acceptance\n\n- No file is read more than once per `check:standards` pass.\n')).toEqual([]);
+    // …and the same sentence in ordinary prose is still a claim.
+    expect(fire('No file is read more than once per `check:standards` pass.')).toHaveLength(1);
+  });
+
+  it('#3362 reads a SCRIPT DOCBLOCK too — round 4 shipped its sentence in a comment', () => {
+    const src = [
+      '/**', ' * @file scripts/lib/lane-verify.mjs', ' *',
+      ' * The sweep, not this comment, is now authoritative for the check.', ' */',
+      'export const x = 1;', '',
+      '// every committed landing invocation declares its verification posture.',
+    ].join('\n');
+    const out = unqualifiedCompletenessClaim(src, { path: 'scripts/lib/lane-verify.mjs' });
+    expect(out).toHaveLength(2);
+    expect(out[0].line).toBe(4);
+    expect(out[1].line).toBe(8);
+    // Source that is not a comment is not prose: the identical words in a string literal say nothing.
+    expect(unqualifiedCompletenessClaim(
+      'const msg = "every committed landing invocation declares its verification posture";\n',
+      { path: 'scripts/lib/lane-verify.mjs' },
+    )).toEqual([]);
+  });
+
+  it('#3362 exempts a RETRACTED comment paragraph, which reproduces the sentence it withdraws', () => {
+    const src = [
+      '/**', ' * RETRACTED — this block used to read "the sweep is now authoritative for the check".',
+      ' * every committed landing invocation declares its verification posture, it said.', ' */',
+    ].join('\n');
+    expect(unqualifiedCompletenessClaim(src, { path: 'scripts/lib/lane-verify.mjs' })).toEqual([]);
+  });
+
+  it('#3362 and #3341 partition the sentence space rather than overlapping it', () => {
+    const read = () => 'anything\n';
+    const card = (body) => `---\nkind: story\nstatus: open\nscope:\n  - we:scripts/pr-land.mjs\n---\n\n# A card\n\n${body}\n`;
+    // A MECHANISM claim is #3341's and only #3341's — a citation is its remedy.
+    const mech = runGates(card('pr-land derives the review label from the three-dot file list.'), { path: 'backlog/x.md', read });
+    expect(mech.map((f) => f.gate)).toEqual(['uncited-mechanism-claim']);
+    // A COMPLETENESS claim is #3362's and only #3362's — a citation is NOT its remedy, because a sentence
+    // can cite a real predicate and still overstate its reach, which is exactly what round 4 did.
+    const comp = runGates(card('Every committed landing invocation declares its verification posture.'), { path: 'backlog/x.md', read });
+    expect(comp.map((f) => f.gate)).toEqual(['unqualified-completeness-claim']);
+  });
+
+  it('#3362 emits a subject the default matcher can score on', () => {
+    for (const f of fire('Every committed landing invocation declares its verification posture.')) {
+      expect(f.subject.trim().length).toBeGreaterThanOrEqual(3);
+      expect(covers({ ...f }, { path: f.path, line: f.line, summary: f.subject }, 3, 'content')).toBe(true);
+    }
+  });
+});
+
 describe('covers — the scoring matcher', () => {
   const label = { path: 'backlog/x.md', line: 102, summary: 'criterion 1 claims grepping SKILL.md for `dispatch-lane` returns nothing today' };
 
@@ -374,6 +491,7 @@ describe('every gate emits the `subject` the default matcher scores on', () => {
     ['scope-omits-donewhen-file', () => scopeOmitsDoneWhenFile('---\nscope:\n  - we:skills-src/conveyor/SKILL.md\n---\n\n## Done when\n\n1. a test in `we:skills-src/conveyor/__tests__/runner.test.mjs` asserts it.\n', { path: 'backlog/x.md' })],
     ['citation-line-content', () => citationLineContent('the push it does itself (`we:scripts/pr-land.mjs:5`) calls `realPush` first.', { path: 'backlog/x.md', read: () => `${'x\n'.repeat(20)}function gitPushMain() {}\n${'y\n'.repeat(20)}function realPush() {}\n` })],
     ['uncited-mechanism-claim', () => uncitedMechanismClaim('---\nscope:\n  - we:scripts/pr-land.mjs\n---\n\n# A card\n\npr-land derives the review label from the three-dot file list.\n', { path: 'backlog/x.md', read: () => 'anything\n' })],
+    ['unqualified-completeness-claim', () => unqualifiedCompletenessClaim('---\nkind: story\n---\n\n# A card\n\nEvery committed landing invocation declares its verification posture.\n', { path: 'backlog/x.md' })],
   ];
 
   it.each(SAMPLES)('%s emits a subject of at least 3 characters on every finding', (_name, fire) => {
@@ -386,14 +504,14 @@ describe('every gate emits the `subject` the default matcher scores on', () => {
     }
   });
 
-  it('every gate in the registry has a sample above, so a tenth gate cannot skip this check unnoticed', () => {
+  it('every gate in the registry has a sample above, so an eleventh gate cannot skip this check unnoticed', () => {
     // The other four gates are exercised with `subject` assertions in their own describes higher up; this
     // pins the REGISTRY size, so adding a gate without adding coverage for its subject reddens here.
-    expect(GATES).toHaveLength(9);
+    expect(GATES).toHaveLength(10);
     expect(GATES.map((g) => g.name)).toEqual([
       'resolved-with-todo', 'stale-gate-count', 'dangling-wikilink', 'dangling-hash-id',
       'grep-literal-mismatch', 'vacuous-executable-criterion', 'scope-omits-donewhen-file',
-      'citation-line-content', 'uncited-mechanism-claim',
+      'citation-line-content', 'uncited-mechanism-claim', 'unqualified-completeness-claim',
     ]);
   });
 
