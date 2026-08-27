@@ -1,4 +1,5 @@
 ---
+bornAs: xsuqas6
 kind: decision
 parent: "3318"
 status: open
@@ -156,6 +157,6 @@ Care level: `elevated` — the change touches shared review-panel machinery (`we
 
 This is a **decision**, not a build — "done" is the item reaching Definition of Ready, which the gates below confirm, not code shipping. The mechanism itself is not yet carved to a child item (per the *prepared-fork shape*'s "resolved / stated-as-fork / delegated" trinity, this item reaches DoR via the **stated-as-fork** path — every fork above carries options, a bold default, a `Skeptic:` and `Screen:` line): a `blockedBy`-chained build child is spun off **at ratification**, once the human's forks are settled and there is a single ruling to scope a build against, not before.
 
-1. **Observable** — `preparedDate` is stamped, `npm run check:standards` is 0 errors, and `check:item -- xsuqas6` (or its landed `NNN`) passes.
+1. **Observable** — `preparedDate` is stamped, `npm run check:standards` is 0 errors, and `check:item -- 3375` (or its landed `NNN`) passes.
 2. **Observable** — the `/research/` topic renders (`we:src/_data/researchTopics/creator-owed-proof-not-reviewer-rederivation.json` + its `.njk` write-up), and this item's `relatedReport` resolves.
 3. **Not tier-1, and why** — which of Fork 1's three candidate tests to ratify, and whether Fork 2 extends the shared evidence ladder, are design judgment calls with no executable form; the mechanism's own criteria (the disposition truth table, the ladder totality assertion, the ledger wiring) belong on the spun-off build child, carrying its own tier-1 criteria.
