@@ -44,24 +44,51 @@
  *
  *   1. OPT-OUT — `--no-require-verified` (or `--require-verified=0|false|no|off`, or `WE_REQUIRE_VERIFIED=0`).
  *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere. An opt-out with no
- *      callers would be a claim, not an escape hatch. THE COMPLETE LIST, swept from every repo-committed
- *      `pr-land.mjs` invocation carrying a `--ref=`/`--repo=`, and it is two files, not one:
+ *      callers would be a claim, not an escape hatch. The callers that TAKE it are two files:
  *        · `we:scripts/lane-drain.mjs#buildPrLandArgs` — the merge-queue drain. Lands from the PRIMARY checkout,
  *          where a lane clone's marker cannot exist; its required GitHub check is the real gate (#1937).
  *        · `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — all FOUR invocations (the WE and
  *          impl per-lane PR opens, and the two Finalize label-reconcile calls, the latter from PRIMARY_ROOT
  *          against a lane ref — the same unreachable-marker shape as the drain). That workflow already runs the
  *          full gate at its step 4; it verifies without RECORDING, and its file says why it cannot simply record.
- *      An earlier revision of this comment claimed the list had "exactly one" entry, on the strength of a caller
- *      sweep that had missed the workflow — review round 2 caught it. Anything added to this list must be added
- *      HERE too, or the next reader inherits the same false completeness claim.
- *      AND THE LIST IS NO LONGER LOAD-BEARING ON ITS OWN. A hand-maintained caller list is a claim that rots the
- *      moment someone adds a caller, and this one was wrong twice. The sweep now RUNS, in
- *      `we:scripts/__tests__/lane-verify.test.mjs` ("caller sweep"): it harvests every committed `pr-land`
- *      invocation straight from source and drives each through this resolver and `verifyGateDecision` on the
- *      marker state that path really sees. A new flag-free call site reddens the suite instead of reaching the
- *      gate — so this comment can now only go stale, never silently wrong.
- *      It relaxes only the two "we never saw a result" cells —
+ *      Both are the SAME shape: the marker is structurally unreachable, so demanding it could only ever fail.
+ *
+ *      RETRACTION — THIS LIST WAS TWICE DESCRIBED AS SOMETHING IT IS NOT. Round 2 of PR #1609 called it "exactly
+ *      one" entry, on the strength of a caller sweep that had missed the workflow. Round 3 corrected the count and
+ *      then made a second, larger false claim, which read:
+ *
+ *          "THE COMPLETE LIST, swept from every repo-committed `pr-land.mjs` invocation carrying a
+ *           `--ref=`/`--repo=`, and it is two files, not one … The sweep now RUNS … it harvests every committed
+ *           `pr-land` invocation straight from source … A new flag-free call site reddens the suite instead of
+ *           reaching the gate — so this comment can now only go stale, never silently wrong."
+ *
+ *      WRONG, AND WRONG AT THE TIME. The round-3 sweep iterated two hard-coded filenames, so a flag-free call
+ *      site in a THIRD file reached the gate in silence (review round 3 measured exactly that: the suite stayed
+ *      green at 53 passed with one added to `we:scripts/lane-review.mjs`). And "every repo-committed invocation"
+ *      was false by the sweep's own predicate — run over `git ls-files` it found three further emitters saying
+ *      nothing about verification. What is written above is therefore NOT a completeness claim about `pr-land`
+ *      call sites; it is the list of callers that take THIS ESCAPE, and it is the sweep, not this comment, that
+ *      is now authoritative about the rest.
+ *
+ *      THE SWEEP IS WHAT HOLDS, AND IT NOW READS THE TRACKED FILE SET. `we:scripts/__tests__/lane-verify.test.mjs`
+ *      ("caller sweep") harvests every `node scripts/pr-land.mjs …` invocation from `git grep -lF pr-land.mjs`
+ *      over tracked files — minus one stated, count-pinned exclusion (`pr-land.mjs`'s own `--help` banner) — and
+ *      requires each to DECLARE ITS POSTURE: carry a verify flag, or be preceded within 3 lines by a
+ *      `verify-lane.mjs` / `run.mjs verify` run. Each is then driven through this resolver and
+ *      `verifyGateDecision` on the marker state that path really sees. A flag-free call site in a file nobody
+ *      listed reddens the suite — which is what the sentence above claimed before it was true.
+ *
+ *      THE OTHER ARM IS THE POINT OF THE ITEM. The lane-local emitters (the serial `/batch` close-out in
+ *      `we:skills-src/batch-backlog-items/SKILL.md`, the canonical per-item arc in
+ *      `we:docs/agent/backlog-workflow.md`, and `we:agent-memory-src/single-session-should-use-a-lane.md`) do NOT
+ *      take this opt-out and must not: they run `pr-land` from the LANE, where the marker IS reachable, so the
+ *      strict gate is the correct answer and a blanket opt-out would gut the gate on the one path where it can
+ *      engage. They were nevertheless BROKEN before round 4 — their verify ran before `resolve` and before the
+ *      item commit, so the sha-keyed marker was already STALE at land (the #3212 shape; measured `ok:false` /
+ *      `unverified` on a stale green, same as on an absent one). Each now records the verification AFTER the
+ *      item commit, immediately before `pr-land`.
+ *
+ *      The opt-out relaxes only the two "we never saw a result" cells —
  *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
  *      `corrupt` marker still refuse, because those are evidence of a BROKEN verification, not a missing one.
  *   2. BREAK-GLASS — `WE_LAND_UNVERIFIED=1`. The full override, every cell, including stall and corrupt. For a

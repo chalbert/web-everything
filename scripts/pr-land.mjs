@@ -134,8 +134,12 @@ const AS_JSON = !!flags.json;
 // THAT IS NOW WRONG in its load-bearing half: a fresh GREEN marker is demanded BY DEFAULT, of every caller, and
 // `--require-verified` is merely the (still-honoured) explicit spelling of the default. The solo / conveyor flow
 // no longer has to pass anything to be gated. What a caller must now do explicitly is the OPPOSITE — say
-// `--no-require-verified` to land without a marker, which the CI-gated drain does (see `buildPrLandArgs` in
-// we:scripts/lane-drain.mjs) because it lands from the PRIMARY checkout, where a lane clone's marker cannot exist.
+// `--no-require-verified` to land without a marker, which BOTH CI-gated callers do — the drain (`buildPrLandArgs`
+// in we:scripts/lane-drain.mjs) and the parallel `/workflow` producer's four argvs
+// (we:skills-src/batch-backlog-items/parallel-execute.workflow.js) — because they land from the PRIMARY checkout
+// against a lane ref, where a lane clone's marker cannot exist. Which callers say what is not left to a comment:
+// the caller sweep in we:scripts/__tests__/lane-verify.test.mjs harvests every `pr-land` invocation in the tracked
+// file set and requires each to declare a posture (a verify flag, or an adjacent `verify-lane` run).
 // An UNFINISHED (`running`) marker for that HEAD is refused UNCONDITIONALLY (it is the exact observed stall — a
 // backgrounded run that yielded mid-flight), and the opt-out does NOT relax that. The documented break-glass
 // WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).

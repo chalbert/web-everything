@@ -210,8 +210,18 @@ export function planDrain(manifest, queuedState) {
  * ONE OF THE TWO call sites that item's opt-out exists for. THIS CLAUSE USED TO READ "the one call site", which was
  * wrong: review round 2 of PR #1609 found the parallel `/workflow` producer
  * (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`) still emitting four flag-free `pr-land` argvs.
- * The complete, swept list lives in the OPT-OUT entry of `we:scripts/lib/lane-verify.mjs`'s header — add to it
- * there, and the caller-sweep test in `we:scripts/__tests__/lane-verify.test.mjs` will hold you to it.
+ * RETRACTION — this clause used to read: "The complete, swept list lives in the OPT-OUT entry of
+ * `we:scripts/lib/lane-verify.mjs`'s header — add to it there, and the caller-sweep test in
+ * `we:scripts/__tests__/lane-verify.test.mjs` will hold you to it." THAT INSTRUCTION WOULD HAVE COST THE NEXT
+ * AUTHOR: at the time it was written the caller-sweep test iterated TWO HARD-CODED FILENAMES, so it would NOT
+ * have held anyone to anything for a caller added in a new file — review round 3 of PR #1609 measured a flag-free
+ * invocation added to a third file passing the suite green.
+ * As of round 4 the sweep reads the TRACKED FILE SET (`git grep -lF pr-land.mjs`, minus `pr-land.mjs`'s own
+ * `--help` banner) and requires every invocation it finds to declare its posture — carry a verify flag, or be
+ * preceded within 3 lines by a `verify-lane.mjs` / `run.mjs verify` run. So the enforcement the sentence promised
+ * now exists, and a new call site anywhere in the repo reddens the suite rather than reaching the gate. The list
+ * in the OPT-OUT header is the roster of callers that TAKE this escape, not a completeness claim about `pr-land`
+ * call sites; keep it current, but the test — not that list — is what holds.
  * #3321 flipped `resolveVerifyOptions`'s default to "verification
  * required", which is right for a lane session landing its OWN clone — the clone is where `verify-lane.mjs` writes
  * `.git/.lane-verify`, so the marker is reachable and demanding it is meaningful. The drain is the opposite shape on
