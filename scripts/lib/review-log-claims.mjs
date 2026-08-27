@@ -63,6 +63,13 @@
  *   convergence"*. A universal quantifier over a population this module cannot enumerate is not derivable
  *   here; the counts underneath one usually are, and those are what a marker should carry.
  * - **Distributive claims.** Multiple PR arguments SUM. "Each" is not expressible; mark each row separately.
+ * - **WHO wrote a verdict comment.** `parseVerdictComment` keys off the heading prefix alone, so ANY
+ *   commenter can post a body starting *"✅ review — accepted"* and it is counted as a recorded round; the
+ *   renderer's own marker block is not verified and no author check is applied. This is a real trust
+ *   boundary, stated rather than hidden (PR #1617 review round 1, operator note 3). It is theoretical in a
+ *   solo constellation, and it is the reason this is an AUTHOR-RUN aid rather than an authority: it tells
+ *   you what the comment stream says, which is not the same as what a trusted renderer wrote. Verifying the
+ *   marker block would narrow it and is a separate change.
  *
  * ── FAIL vs WARN vs ANNOTATE ────────────────────────────────────────────────────────────────────────────────
  *
