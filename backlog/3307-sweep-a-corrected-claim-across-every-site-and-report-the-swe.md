@@ -56,15 +56,15 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 ## Done when
 
 1. **Executable** — `npx vitest run claim-sweep -t "#3307" | grep -qE "Tests +[0-9]+ passed"`. Fails
-   before this item lands — `we:scripts/lib/claim-sweep.mjs` and its suite do not exist, so the filter
-   selects nothing and there is no `Tests N passed` line to match — and passes after (68 passed).
+   before this item lands — `we:scripts/lib/claim-sweep.mjs` and its suite do not exist, so vitest finds
+   no test *file*, prints `No test files found` and exits 1 — and passes after (68 passed).
    > **Retracted — this line read "(42 passed)".** That was the count at the first cut. Review #1620
    > bounced the PR for two silent-drop defects and two untested first-cut fixes; the prevention for all
    > four took the suite from 42 to **68**. Re-measured on this branch, not carried over.
    The `grep` is load-bearing, but not for the reason first written here.
    > **Retracted — this read "a `-t` filter matching nothing is an empty selection, and vitest exits 0 on
    > one, so the bare form would be green before the work."** The first half is true; the conclusion is
-   > false for *this* criterion. Measured in the lane, all four combinations:
+   > false for *this* criterion. Measured in the lane, all three rows:
    >
    > | tree state | `-t` filter | bare exit | with `\| grep -qE` |
    > |---|---|---|---|
@@ -93,4 +93,12 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    made it. A green suite over an unreverted fix proves nothing, which is how the first cut shipped two
    "fixed here" defects with no test on either.
 5. `npm run check:standards` — 0 new errors and 0 new warnings vs this lane's `main`, measured both ways
-   in the same session rather than compared against a number written on a card.
+   in the same session rather than compared against a number written on a card. Measured at the tip:
+   **4 error(s), 1438 warning(s)** on the branch and **4 error(s), 1438 warning(s)** on the same tree with
+   the two new paths moved aside and this card restored to `origin/main` — the two sorted issue lists are
+   byte-identical. All four errors are `number-stranded` strays on cards this PR does not contain
+   (`xd6hbxe`, `xmit46t`, `xmiuo0r`, `xu9c4q4`); they read from `origin/main`, so they fire for every
+   branch until a heal lands there, and they are deliberately **not** bundled — `number-stranded` rewrites
+   citations in `we:docs/agent/platform-decisions.md`, which would turn a one-card change into a statute
+   edit. An earlier run in the same session showed 0 errors; the four appeared on `main` mid-session,
+   which is why the baseline is re-measured rather than remembered.
