@@ -1,4 +1,5 @@
 ---
+bornAs: xwb8luf
 kind: story
 size: 2
 parent: "3029"
@@ -47,7 +48,7 @@ detail"* — over the mint at **we:scripts/operations/dispatch-lane-io.mjs:631**
 and in both files the mint is what makes the id trustworthy. Neither says anything about what to do when the
 listing cannot be matched, and that is the gap.
 
-## Identical to two of the three sites #x3gvcun covers — and NOT to the third
+## Identical to two of the three sites #3353 covers — and NOT to the third
 
 `grep -rn "=== handle" scripts/ --include=*.mjs` returns exactly three lines in the repo at `7584ecc1`:
 
@@ -70,7 +71,7 @@ wrong shape — copy the `createDispatchObservers` fix.
 
 ## Where the consequence differs, and why that changes the fix
 
-`we:backlog/x3gvcun-*.md` calls this site's cost *"closes out an investigation rather than starting a second
+`we:backlog/3353-*.md` calls this site's cost *"closes out an investigation rather than starting a second
 agent in an occupied lane."* True, and it is worth being more exact, because the tail here has three exits,
 not two:
 
@@ -118,20 +119,20 @@ C (listing echoes id in other case)        -> unresolved
 - **B** — the same listing with no report. `unresolved`, i.e. "the session is gone", asserted from a read that
   said nothing.
 - **C** — `listAgents: () => [{ sessionId: 'SESS-1' }]`, the id echoed back in another case. The exact compare
-  misses and the panelist reads as gone. This is hardening 3 of `#x3gvcun` reaching the same line.
+  misses and the panelist reads as gone. This is hardening 3 of `#3353` reaching the same line.
 
-## Ordering: this lands AFTER #x3gvcun, but is not a `blockedBy` edge yet
+## Ordering: this lands AFTER #3353, but is not a `blockedBy` edge yet
 
-`#x3gvcun` is not on `main` — it exists only on the unmerged branch `origin/lane/split-3096`. Putting it in
+`#3353` is not on `main` — it exists only on the unmerged branch `origin/lane/split-3096`. Putting it in
 `blockedBy` today would trip `we:scripts/check-standards.mjs:814` (*"blockedBy … does not resolve to an
-existing item"*) and add an error to a currently-clean gate. **Add `blockedBy: ["x3gvcun"]` — or its landed
-number — once that card is on `main`.** The ordering is real and is `#x3gvcun`'s own instruction: *"File it as
+existing item"*) and add an error to a currently-clean gate. **Add `blockedBy: ["3353"]` — or its landed
+number — once that card is on `main`.** The ordering is real and is `#3353`'s own instruction: *"File it as
 its own card once hardening 2's shape is settled, so it copies a landed pattern instead of a second guess."*
 
 ## Not in scope
 
 - **The three dispatch sites** — `we:scripts/operations/dispatch-lane-io.mjs:340/342` and `:811`, `we:scripts/operations/wake.mjs:340`. Those are
-  `#x3gvcun`, and its `Done when` counts the repo-wide `=== handle` sites down to **1** on the expectation
+  `#3353`, and its `Done when` counts the repo-wide `=== handle` sites down to **1** on the expectation
   that this line is still standing when it lands. Touching them here would break that count.
 - **Giving explore-io its own named grace constant, or sharing the dispatch one.** Named above; a different
   change with a different argument.
@@ -144,7 +145,7 @@ its own card once hardening 2's shape is settled, so it copies a landed pattern 
 A `claude agents --json` listing that parses as a non-empty array but yields no matchable session id is read
 as *unreadable* by the `explore` observer, not as *the panelist is gone*: it returns neither `resolved` nor
 `unresolved`, and in particular never emits a `TRUNCATED` report result on the strength of an unreadable
-listing. The comparison is whitespace- and case-tolerant on both sides, matching whatever `#x3gvcun` landed
+listing. The comparison is whitespace- and case-tolerant on both sides, matching whatever `#3353` landed
 for the dispatch sites. Both are covered by tests that redden when the branch is reverted.
 
 ## Done when
@@ -185,7 +186,7 @@ Every count and every run below was taken in a lane clone at `origin/main` `7584
    C (listing echoes id in other case) -> unresolved
    ```
 
-   It must return `running`, normalized on both sides the way `#x3gvcun` normalized
+   It must return `running`, normalized on both sides the way `#3353` normalized
    `we:scripts/operations/dispatch-lane-io.mjs:811`. Covered by its own test in the same block.
 
 4. **Executable — the new exit sits ABOVE the report tail, not merely above the `unresolved` return.** The
@@ -197,7 +198,7 @@ Every count and every run below was taken in a lane clone at `origin/main` `7584
    1
    ```
 
-   Must rise to **2**. The count is deliberately mechanism-neutral — whether `#x3gvcun` settles on a throw
+   Must rise to **2**. The count is deliberately mechanism-neutral — whether `#3353` settles on a throw
    (as its hardening 2 proposes for `createDispatchObservers`) or on an early `running` return, either lands
    in this span. Placed below line 835 instead, the fix would still emit a truncated report on an unreadable
    listing, which is the failure this card exists for. A whole-file `grep -c unreadable` would NOT do here: it
@@ -206,7 +207,7 @@ Every count and every run below was taken in a lane clone at `origin/main` `7584
 
 **Gate, not a criterion:** `npm run check:standards` must show no new errors and no new warnings against the
 baseline measured at build time. Do not hard-code a number — it was **0 errors / 1438 warnings** at
-`7584ecc1` on 2026-08-26, measured twice, and it moves most days. Note this differs from `#x3gvcun`'s recorded
-baseline of 1 error: that error was the stranded-hash card `backlog/x10eju0-*.md`, JIT-numbered to `#3350` in
+`7584ecc1` on 2026-08-26, measured twice, and it moves most days. Note this differs from `#3353`'s recorded
+baseline of 1 error: that error was the stranded-hash card `backlog/3350-*.md`, JIT-numbered to `#3350` in
 commit `fad31663`, so it is no longer stranded. Run the gate **twice** and compare — the loader is
 non-deterministic in the presence of any malformed card.
