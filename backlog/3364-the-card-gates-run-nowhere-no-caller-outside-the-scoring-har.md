@@ -23,8 +23,8 @@ inside the experiment**: `we:scripts/review-corpus/replay-gates.mjs:51`, its tes
 (transitively, via the harness). So the library is candidates, measured against history, invoked by nothing
 that guards a write, a card, or a land.
 
-**Retracted — the proof this card was filed with does not run.** The original body printed this, under the
-heading *"Verified, not assumed"*:
+**Retracted — the proof this card was filed with does not run as printed, and neither does its first
+correction.** The original body printed this, under the heading *"Verified, not assumed"*:
 
 ```
 grep -rln "review-corpus/gates.mjs" scripts/
@@ -32,16 +32,24 @@ grep -rln "review-corpus/gates.mjs" scripts/
   → scripts/review-corpus/replay-gates.mjs
 ```
 
-**That command returns nothing at all — zero hits, exit 1.** Two independent reasons, both knowable at filing.
-(1) The gate module does contain the literal, in its own `@file` docblock, but plain `grep` classifies the
-file as **binary** and skips it silently, because of the single NUL byte at offset 27761 that this card's own
-report documents. (2) The harness **never contains that string** — it imports the module by a *relative
-specifier*, so the second hit never existed. `git grep -ln` does list the gate module, so the report's claim
-that git grep skips it too is also wrong and is corrected there.
+That is wrong on the second line: `we:scripts/review-corpus/replay-gates.mjs` imports the module by a
+*relative specifier* (`import { GATES, runGates } from 'we:./gates.mjs'` at line 51) and never contains the
+literal string `"we:review-corpus/gates.mjs"`, so that hit never existed.
 
-The **conclusion** was right and the **evidence was invented**, which is precisely the defect class #3341's
-gate exists to catch. It is recorded here rather than quietly fixed, because this card proposes to deploy that
-gate — see *What the library missed*, below.
+**A prior draft of this correction was itself wrong, and is retracted in turn.** It claimed the command
+"returns nothing at all — zero hits, exit 1" because plain `grep` classifies the gate module as binary (true:
+it has a NUL byte at offset 27761) and "skips it silently." Run for real — `command grep -rln
+"we:review-corpus/gates.mjs" scripts/`, bypassing this session's harness-level grep wrapper, which was the
+actual source of the earlier zero-hit reading — it prints `we:scripts/review-corpus/gates.mjs` and **exits
+0**. `grep -l` reports a filename match inside a binary file by default; only the explicit `-I`
+(`--binary-files=without-match`) flag, not present in the printed command, would suppress that. So the
+correct result is: **one hit, `we:scripts/review-corpus/gates.mjs`, exit 0** — not zero hits, and not the two
+hits originally printed.
+
+The **conclusion** was right throughout — no production caller outside the experiment — and the **evidence
+was invented twice**, which is precisely the defect class #3341's gate exists to catch. It is recorded here
+rather than quietly fixed, because this card proposes to deploy that gate — see *What the library missed*,
+below.
 
 ## Why this matters more now than it did yesterday
 
@@ -267,9 +275,12 @@ export const GATES = Object.freeze([
 [`#statute-anchor-states-rule-not-status`](../../docs/agent/platform-decisions.md#statute-anchor-states-rule-not-status)
 (#2854) is the shape objection — point-in-time status does not live in the timeless artifact, it lives on the
 item and is re-measured by a check. `impact` is timeless; a standing count is not.
-*Sharp edge:* the gate module holds a literal NUL byte at offset 27761, so plain `grep` skips it as binary —
-which is how this card's own headline proof came to be printed without anyone noticing it returns nothing.
-`git grep` is unaffected.
+*Sharp edge, corrected:* the gate module does hold a literal NUL byte at offset 27761, but plain `grep -l`
+does **not** skip it as binary — it reports the filename match by default (only `-I` suppresses that). The
+headline proof's error was not a silent grep skip; it was printing a second, non-existent hit
+(`we:scripts/review-corpus/replay-gates.mjs`, which imports the module by relative specifier and never
+contains the literal) and, in an earlier correction, misreading a harness-level grep wrapper's `-I`-forced
+zero-hit result as `grep`'s own default behavior. `git grep` is unaffected either way.
 
 **6. ANSWERED, not asked — #3314 does not reach a deterministic gate. Its typed-field discipline is adopted
 anyway.**

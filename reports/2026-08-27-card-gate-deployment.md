@@ -12,13 +12,17 @@ one needs, and the ratified anchors that turn out to decide most of the question
 verified before folding in. They are recorded rather than silently fixed because the subject of the report is
 whether detectors of exactly this defect class should be deployed.
 
-1. **The card's headline proof does not run.** The `grep -rln` invocation it printed returns **nothing** —
-   zero hits, exit 1 — not the two hits the card showed. The gate module contains the literal in its own
-   `@file` docblock but is skipped as binary (§9); the harness does not contain that string at all, because
-   it imports by a relative specifier. The real importer set is **three files, all inside the experiment**:
-   `we:scripts/review-corpus/replay-gates.mjs:51`, `we:scripts/review-corpus/__tests__/gates.test.mjs:16`,
-   and `we:scripts/review-corpus/stability.mjs:286` transitively. **The conclusion — no production caller —
-   is unaffected and holds.**
+1. **The card's headline proof does not run as printed — but not for the reason first stated here either.**
+   The `grep -rln` invocation it printed does find the gate module: run for real (bypassing this session's
+   harness-level grep wrapper, which forces `-I` and was the actual source of the earlier zero-hit reading),
+   it prints `we:scripts/review-corpus/gates.mjs` and **exits 0** — one hit, not zero, and not the two hits
+   the card showed. §9's "plain grep skips it as binary" claim was also wrong and is corrected there: `grep
+   -l` reports a filename match inside a binary file by default; only the explicit `-I` flag suppresses
+   that. What was actually wrong with the printed proof is its **second** line — the harness does not
+   contain the literal string at all, because it imports by a relative specifier. The real importer set is
+   **three files, all inside the experiment**: `we:scripts/review-corpus/replay-gates.mjs:51`,
+   `we:scripts/review-corpus/__tests__/gates.test.mjs:16`, and `we:scripts/review-corpus/stability.mjs:286`
+   transitively. **The conclusion — no production caller — is unaffected and holds.**
 2. **This report's first version claimed `#gate-rollout-ratchet` (#867) settles the severity question. It
    does not** — see §6, rewritten. A later anchor rules the other way for a `check:standards` gate, and the
    repo already ships the diff-scoped posture #867's baseline clause was read as forbidding.
@@ -270,12 +274,18 @@ Kept apart deliberately, because collapsing them is what produced §6a's error.
 ## 9. An incidental defect, recorded not fixed
 
 `we:scripts/review-corpus/gates.mjs` contains **one literal NUL byte at offset 27761**, inside the masking
-expression in `sentencesWithLines`. **Plain `grep` classifies the file as binary and skips it silently** —
-which is how #3364's headline proof came to print a hit that the command does not produce, and why nobody
-noticed. **`git grep` is unaffected and lists the file correctly**; this report's first version claimed
-otherwise and was wrong. That still matters for #3357's concern: an audit of this registry by plain `grep`
-returns a clean-looking nothing. Not fixed here — the file is held by a sibling lane. Replacing the literal
-with a printable sentinel would restore it.
+expression in `sentencesWithLines`. **Corrected again: plain `grep -l` does not skip the file as binary.**
+This report's prior draft claimed it does; that was verified against a harness-level grep wrapper (this
+session's tool sandbox forces `-I`, ignore-binary) rather than against real `grep`, whose default
+`--binary-files=binary` reports a filename match without displaying the matched line — only the explicit
+`-I` flag skips it, and the command as printed in #3364 does not pass one. Run directly, `grep -rln
+"we:review-corpus/gates.mjs" scripts/` prints `we:scripts/review-corpus/gates.mjs` and exits 0. **`git grep`
+is unaffected and lists the file correctly too**, so both tools agree the module is found; #3364's headline
+proof was wrong only in printing a second, non-existent hit for the harness file. #3357's concern about a
+plain-`grep` audit of this registry therefore does not apply to this file specifically — a real `grep -l`
+does surface it. Not fixed here — the file is held by a sibling lane. Replacing the NUL byte with a printable
+sentinel would still be worth doing, since a NUL byte is unusual in a source file regardless of how `grep`
+handles it.
 
 ---
 
