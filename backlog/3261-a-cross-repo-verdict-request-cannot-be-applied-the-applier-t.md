@@ -91,7 +91,7 @@ N repos means N workflow files. A reusable/called workflow keeps that to one def
 ## Closeout note — 2026-08-27: LEFT OPEN
 
 PR #1534 is titled "#3261 fallout" but is a **backlog-card-only** PR: it filed the two transport gaps found
-while onboarding plateau-app (`xdiub6l` → #3263, `xnnehes` → #3264) and changed no transport code.
+while onboarding plateau-app (`3263` → #3263, `3264` → #3264) and changed no transport code.
 Separately, **Done-when 1 HAS landed** on `main` via `93c41eaf` — *"record-verdict: stage a verdict on its
 OWN repo's board, and refuse the wrong one (#3261)"*. Three of the four criteria remain, each checked on
 `main` at `6b03a7bd`:
