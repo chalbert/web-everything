@@ -1462,10 +1462,13 @@ Stated so the carve is mechanical, and deliberately **not** pre-filed: a spin-of
 board off an un-ratified call. Predicted touch-set (#2619), sliced so the children do not overlap and can
 run in parallel:
 
-| child | scope slice |
-|---|---|
-| Derive the impact level, and delete the dangling `severity` references | `we:scripts/lib/jury-core.mjs`, `we:scripts/lib/review-render.mjs` |
-| The anchor set and the agreement runner | `we:scripts/lib/finding-anchors.mjs`, `we:scripts/review-corpus/anchor-agreement.mjs` |
+| child | what it builds | scope slice |
+|---|---|---|
+| **The derivation, in shadow** (Forks 1, 2, 3, 5) | `deriveFindingImpact` + the `normalizeFinding` wiring that records the derived level **without letting it govern**; the `reach`/`likelihood` display-only fields and their two enums; the mandate paragraphs; the deletion of the dangling `severity` references | `we:scripts/lib/jury-core.mjs`, `we:scripts/lib/review-render.mjs` |
+| **The anchor set and the agreement runner** (Fork 4) | `FINDING_ANCHORS` seeded from `#3314`'s ratified examples, the teaching/held-out split with its disjointness gate, and the three-section runner reporting Krippendorff's α with the ordinal metric | `we:scripts/lib/finding-anchors.mjs`, `we:scripts/review-corpus/anchor-agreement.mjs` |
+
+**A third child exists only after the flip, and is not carved now:** turning shadow off, so the derived level
+governs. It is its own decision (Fork 2), taken on the report Fork 2 specifies, and nothing may pre-file it.
 
 ## Done when
 
