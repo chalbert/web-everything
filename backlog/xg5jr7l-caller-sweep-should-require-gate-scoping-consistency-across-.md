@@ -10,12 +10,11 @@ tags: []
 # Caller sweep should require gate-scoping consistency across the documented lane-local verify arcs
 
 #3321 made `pr-land`'s finish-guard mandatory and re-pointed four documented lane-local arcs to run
-`we:scripts/operations/run.mjs verify` after the item commit. Only one of the four scopes the gate it
-runs; the other three fall back to `verify-lane`'s default `npm run test:unit && npm run
-check:standards`, which scans the WHOLE repo. A pre-existing, unrelated repo-wide error inherited from
-`main` can therefore record a RED marker for an otherwise-correct commit, and the now-mandatory guard
-refuses the land. It fails closed and visibly, so it costs a debug cycle, not a bad landing. Give the
-other three arcs the same scoping, and add the check that would have caught the drift.
+`we:scripts/operations/run.mjs verify` after the item commit. Only one of the four scopes its gate;
+the other three inherit `verify-lane`'s default, which scans the WHOLE repo. So a pre-existing,
+unrelated error inherited from `main` can record a RED marker for an otherwise-correct commit, and the
+mandatory guard then refuses the land. It fails closed and visibly — a debug cycle, not a bad landing.
+Scope the other three arcs, and add the check that would have caught the drift.
 
 ## Provenance
 
