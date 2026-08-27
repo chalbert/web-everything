@@ -14,6 +14,29 @@ tags: []
 
 guard-lane protects a lane only when its occupant was DECLARED via adopt. A consumer that pins lanes by hand without leasing is invisible to the pool, so acquire hands its lane to another session and the contested-lease guard cannot fire.
 
+## Fourth occurrence — from the opposite direction, and disclosed by the session that caused it
+
+A reviewing agent ran a stray `git checkout <ref> -- .` **inside lane-27, a lane it did not hold**, briefly
+overwriting that tree. It then reset the lane clean and released a second lane it had borrowed. Nothing was
+lost, and the session that did it reported it unprompted.
+
+**This one matters because it is not a reset.** The first three occurrences were `git reset --hard` onto another
+ref. This is a working-tree overwrite from a checkout — a different command, a different intent, the same
+outcome. So the exposure is not "one bad verb"; it is that **a lane's tree is writable by any process that
+knows its path**, and every clobbering verb reaches it.
+
+It also settles an attribution question. Three of the four incidents came from one session's non-participating
+consumer; this fourth came from the other side. **The pattern is not one session's bug** — it is what an
+advisory lease permits, and it will recur with whatever tool is written next.
+
+Two consequences for the fix directions below:
+
+- A guard keyed on `git reset` would have caught three of four. Any check must key on **the lane being
+  occupied**, not on the verb attempting to write.
+- The **hold-don't-release** response is confirmed correct from both ends: on detecting a foreign write, the
+  holder should keep its lease and report, because releasing hands the clone to a third party while the
+  intruding session is still inside it — turning one collision into two.
+
 ## Second occurrence, hours later — and it carries a symptom the first did not
 
 An agent holding **lane-35** had its working tree discarded mid-task: a sibling process ran
