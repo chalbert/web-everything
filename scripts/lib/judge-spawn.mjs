@@ -364,6 +364,29 @@ export const DEFAULT_EFFORT = 'medium';
  * default stays a NUMBER, and its job is to be large enough that inheriting it is never the thing that kills
  * a juror.
  *
+ * WHO INHERITS THIS — and why an IMPORTER COUNT is the wrong way to ask. Changing a DEFAULT reaches everything
+ * that OMITS the argument, and omitting an argument imports nothing, so a consumer of this value can be
+ * invisible to `git grep DEFAULT_BUDGET_USD` by construction. #3187's first round learned this the expensive
+ * way: it justified a bounded test run by counting this constant's importers, and CI went red on
+ * `we:skills-src/jury/__tests__/panel-fanout.test.mjs`, in a consumer that imports nothing from this file.
+ * The three live paths, as of #3187:
+ *
+ *   1. `we:scripts/lib/judge-panel.mjs` — the one module that NAMES this constant as a caller default
+ *      (`budget = DEFAULT_BUDGET_USD`), so its whole roster seats here when a caller declares nothing.
+ *   2. TRANSITIVELY, anything reaching `judgePanel` without a per-seat budget. `we:skills-src/jury/
+ *      panel-fanout.mjs` forwards `budget` only when `typeof payload.budget === 'number'`; a payload without
+ *      one falls through to (1). Every hand-run `panel-fanout.mjs` invocation in `we:docs/agent/
+ *      delivery-loop.md` and the `converge`/`drain`/`harvest-learnings`/`brand-mark-loop` skills is such a
+ *      caller, which is why raising this value NARROWS what their `--max-total-budget-usd` admits.
+ *   3. `createDefaultJudge` (`we:scripts/operations/cli-adapter.mjs`) forwards `budget` unconditionally, so a
+ *      `judge` step declaration that OMITS it arrives here as `undefined` and takes this default parameter.
+ *      No declaration does today — both `review-pr` and `review-prep` declare `JUDGE_BUDGET_USD = null`
+ *      explicitly — but the path is open and no grep for this identifier would show it.
+ *
+ * So: when you change this number, run the FULL suite, and expect the breakage somewhere that never mentions
+ * it. Tests that pin an inherited total must DERIVE it from this constant rather than write the product out;
+ * `judge-panel.test.mjs` and `panel-fanout.test.mjs` both do, and both had to be fixed to.
+ *
  * RE-DERIVE THIS when the juror's work changes — a new lens, a wider tool set, a bigger diff corpus.
  */
 export const DEFAULT_BUDGET_USD = 1.5;
