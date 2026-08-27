@@ -102,3 +102,19 @@ consumer in `check:standards`, so this adds 0 to its warning count.
    corpus, and the score is recorded on this card: a detector that fires on most existing cards is a warning,
    not a hard failure, and that decision is part of the work rather than an afterthought.
 3. `npm run check:standards` — 0 errors.
+
+## Closeout note (2026-08-27) — left open
+
+PR [#1637](https://github.com/chalbert/web-everything/pull/1637) landed the **gateable** half: the
+`uncitedMechanismClaim` gate at `we:scripts/review-corpus/gates.mjs:647`, registered in `GATES` at
+`we:scripts/review-corpus/gates.mjs:724`, with 11 `#3341` cases in
+`we:scripts/review-corpus/__tests__/gates.test.mjs` (re-run at closeout: 11 passed). Done-when 1 and 2 are
+satisfied — the replay score above is the record Done-when 2 asks for — and `npm run check:standards` is
+0 errors.
+
+**What remains** is this card's own non-gateable half: *"Write the convention down where reviewers will meet
+it rather than leaving it as folklore."* PR #1637 records it as undone under *Found but not fixed* — the
+convention sits in the gate's docblock, which a reader of the gate meets and a reviewer does not. This
+card's `scope:` is `we:scripts/review-corpus/gates.mjs` alone, so delivering it needs the scope widened to
+the review skill (or a sibling card), which is why this stays open rather than resolving on the Done-when
+list alone.

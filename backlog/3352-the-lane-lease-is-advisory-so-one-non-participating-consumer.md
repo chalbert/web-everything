@@ -135,3 +135,15 @@ motion, which is a reason to build (1) rather than a reason to skip it.
    than one that over-shares, since it stalls every dispatch.
 2. The `#3283` workaround is withdrawn wherever it still stands, or its remaining sites are named here.
 3. `npm run check:standards` — 0 errors.
+
+## Closeout note (2026-08-27) — left open
+
+PR [#1623](https://github.com/chalbert/web-everything/pull/1623) was **card-only** — its own scope line says
+*"Card only, `backlog/*.md`"* — and it added the second-occurrence account and the wrong-tree
+`check:standards` symptom recorded above. **No code landed.** `git log origin/main --
+we:scripts/lane-pool.mjs` carries nothing for this item (its newest commit is `0709df10`, for #3283), and
+nothing under `we:scripts/` mentions this item's number.
+
+So all three Done-when criteria are outstanding: no test asserting that an occupied-but-unleased lane is
+withheld by `acquire` while a genuinely free one is still handed out (1), no withdrawal of the #3283
+workaround and no naming of its remaining sites (2), and (3) is unreached because (1) and (2) are.

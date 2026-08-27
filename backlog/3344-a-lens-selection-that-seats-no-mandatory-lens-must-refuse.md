@@ -3,8 +3,10 @@ bornAs: xxf6jvr
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
+graduatedTo: none
 scope:
   - we:scripts/operations/review-pr.mjs
 tags: []
