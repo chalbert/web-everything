@@ -9,13 +9,17 @@
  *   themselves are proved in `scripts/lib/__tests__/review-core.test.mjs`; we only pin that the CLI wires them.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient } from '../review-core-cli.mjs';
+import {
+  parseFlags, reduceReview, buildMandateText, buildComment, deriveDispositionLenient, buildShapePlan,
+} from '../review-core-cli.mjs';
 import {
   VERDICTS,
   NEGOTIATION_OUTCOMES,
   PLAN_OUTCOMES,
   MANDATORY_LENSES,
   PANEL_LENSES,
+  careLevelFromReasons,
+  panelRigorFromReasons,
 } from '../lib/review-core.mjs';
 
 describe('parseFlags', () => {
@@ -307,5 +311,88 @@ describe('buildComment — the comment subcommand glue (renders via renderPanelC
     expect(() => buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] })).not.toThrow();
     const md = buildComment({ findings: [{ summary: 'x' }], reasons: ['sampling floor (1-in-10)'] });
     expect(md).not.toContain('**Disposition:**');
+  });
+});
+
+// ── #3335 THE SHAPE A TOUCH-SET EARNS ────────────────────────────────────────────────────────────────────
+// The caller-side half of #3318: a review caller must derive its lenses from the PR's touch-set, before the
+// run starts. `buildShapePlan` is the pure function behind the `shape` subcommand — the thing a caller runs
+// over `gh pr view <pr> --json files --jq '[.files[].path]'` before it composes the run command.
+//
+// WHAT THESE TESTS SCAN, STATED SO THE COVERAGE IS NOT OVERSOLD: they drive `buildShapePlan` over three
+// hand-written file lists (a statute path, a script path, a backlog card) and one empty list. They do NOT
+// sweep the repo, do NOT assert anything about live PRs, and do NOT prove every touch-set routes correctly —
+// the file-kind rosters they lean on are `scoreEscalation`'s and `classifyReviewSubject`'s, each proved in
+// its own suite.
+describe('#3335 buildShapePlan — the shape a touch-set earns', () => {
+  // The exact touch-set of PR #1580, the motivating case: a statute edit reviewed under `correctness` alone.
+  const STATUTE_FILES = ['docs/agent/platform-decisions.md'];
+
+  it('#3335 — #1580\'s statute touch-set earns care `high`, humanRequired, and all five lenses', () => {
+    const plan = buildShapePlan({ changedFiles: STATUTE_FILES });
+    expect(plan.careLevel).toBe('high');
+    expect(plan.humanRequired).toBe(true);
+    expect(plan.earnedLenses).toHaveLength(5);
+    expect(plan.earnedLenses).toEqual([...PANEL_LENSES]);
+    // The floor the one caller-chosen seat must be spent on — read off the routed mandatory set, never a
+    // hard-coded name, so #3314 re-tuning that set moves this with it.
+    expect(plan.mandatoryFloor).toEqual([...MANDATORY_LENSES]);
+    expect(plan.seatLens).toBe(MANDATORY_LENSES[0]);
+    expect(plan.escalated).toBe(true);
+    expect(plan.reasons.join(' ')).toContain('statute');
+  });
+
+  it('#3335 — its careLevel equals `rigor --reasons=<its own reasons>`, so the two entry points agree', () => {
+    // The `rigor` subcommand's derivation, run over the reasons THIS plan produced. `buildShapePlan` reaches
+    // the band through `scoreEscalation`'s signals; `careLevelFromReasons` reaches it through the decorated
+    // reason strings. Both end at `deriveCareLevel`, and this is the assertion that keeps them one answer.
+    for (const files of [STATUTE_FILES, ['scripts/lib/jury-core.mjs'], ['scripts/lib/review-policy.contract.json']]) {
+      const plan = buildShapePlan({ changedFiles: files });
+      expect(careLevelFromReasons(plan.reasons)).toBe(plan.careLevel);
+      // …and the rigor numbers the same reasons dial are the ones the plan reports.
+      const rigor = panelRigorFromReasons(plan.reasons);
+      expect(plan.rounds).toBe(rigor.rounds);
+      expect(plan.jurorsPerLens).toBe(rigor.jurorsPerLens);
+      expect(plan.earnedLenses).toEqual([...rigor.lenses]);
+    }
+  });
+
+  it('#3335 — a statute-touching PR earns a DIFFERENT shape than a script-only one', () => {
+    const statute = buildShapePlan({ changedFiles: STATUTE_FILES });
+    const script = buildShapePlan({ changedFiles: ['scripts/review-core-cli.mjs'] });
+    // The whole point of the item: the shape is a function of what the PR TOUCHES, not of what the caller typed.
+    expect(statute.careLevel).not.toBe(script.careLevel);
+    expect(statute.humanRequired).toBe(true);
+    expect(script.humanRequired).toBe(false);
+    expect(statute.jurorsPerLens).toBeGreaterThan(script.jurorsPerLens);
+    expect(statute.rounds).toBeGreaterThan(script.rounds);
+    // …and a code PR still earns the FULL mandatory panel — the derivation never narrows the floor.
+    expect(script.mandatoryFloor).toEqual([...MANDATORY_LENSES]);
+    expect(script.earnedLenses).toEqual([...PANEL_LENSES]);
+    expect(script.escalated).toBe(true);
+  });
+
+  it('#3335 — REUSES #3309\'s subject router rather than re-taxonomizing: a card-only PR routes to prose', () => {
+    const card = buildShapePlan({ changedFiles: ['backlog/3335-a-review-caller-must-derive-its-lenses.md'] });
+    expect(card.subject).toBe('prose');
+    // `none` asks for NO panel at all, so there are no earned lenses to fall short of — the proportionate band.
+    expect(card.careLevel).toBe('none');
+    expect(card.escalated).toBe(false);
+    expect(card.earnedLenses).toEqual([]);
+    // #3309's decision-prose floor, which `review-pr --lens=` cannot seat today. Reported as unreachable
+    // rather than handed to a caller as a flag the enum refuses.
+    expect(card.mandatoryFloor).not.toEqual([...MANDATORY_LENSES]);
+    expect(card.seatLensReachable).toBe(false);
+    // A code PR's seat lens IS reachable — the negative half, so the flag is not just always-false.
+    expect(buildShapePlan({ changedFiles: ['scripts/x.mjs'] }).seatLensReachable).toBe(true);
+  });
+
+  it('#3335 — an unreadable touch-set is never scored as `none` by this function\'s caller', () => {
+    // The function itself is total and scores `[]` as `none` — that is `scoreEscalation`'s own answer. What
+    // must not happen is a CALLER reading that as "no review needed", so the `shape` subcommand refuses an
+    // empty list outright (exit 2). This pins the pure half; the refusal lives in `runShape`.
+    const empty = buildShapePlan({ changedFiles: [] });
+    expect(empty.careLevel).toBe('none');
+    expect(empty.changedFiles).toEqual([]);
   });
 });

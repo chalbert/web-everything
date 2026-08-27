@@ -17,12 +17,34 @@ label swap by hand: each is a step, and a hand-rolled one drifts from the consol
 
 ## Run it
 
+**Read the touch-set FIRST, and derive the shape from it (#3335).** Not the park comment's echo of the file
+list — that can lag the head. The shape command is the derivation, not a taxonomy you apply by hand:
+
+```
+gh pr view <PR> --repo=<owner/name> --json files --jq '[.files[].path]' \
+  | node scripts/review-core-cli.mjs shape --json
+```
+
+It prints `{careLevel, reasons, humanRequired, earnedLenses, mandatoryFloor, subject, rounds, jurorsPerLens,
+seatLens}` — composed from `scoreEscalation` + `panelRigorForCareLevel` (via #3309's subject router), so it
+agrees with `review-core-cli.mjs rigor --reasons=<those reasons>` by construction. Then run the review with the
+`careLevel` it gave you, and the `--lens` it names:
+
 ```
 JUROR_LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-juror)
-node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> --cwd="$JUROR_LANE" --json
+node scripts/operations/run.mjs review-pr --pr=<PR> --repo=<owner/name> \
+  --careLevel=<the shape's careLevel> --lens=<the shape's seatLens> --cwd="$JUROR_LANE" --json
 # …and when the review is done, hand the lane back (the slug is on acquire's stderr):
 node scripts/lane-pool.mjs release --lane="${JUROR_LANE##*lane-}" --session=<the holder slug acquire printed>
 ```
+
+**`--careLevel` is a DECLARATION that gets checked, not a dial.** It cannot add a seat — the step list is fixed
+at registration (#3319), so declaring `high` does not seat five lenses. What it buys is two refusals and one
+honest sentence: an escalated declaration **refuses** an advisory `--lens`; `read` re-derives the shape over the
+**net** file list and refuses an **under**-declaration (declaring more care than the net diff earns proceeds —
+`gh`'s three-dot list is routinely inflated by sibling-lane content); and the durable comment states what the
+touch-set **earned** beside what actually **sat**, with the shortfall named lens by lens. Omitting it is still
+legal and changes nothing — which is precisely why deriving it is step one of this flow rather than a habit.
 
 **`--cwd` is REQUIRED, and it is a lane of the JUROR's own** (#3151). `review-pr`'s juror is tool-bearing — it
 runs gates, reproduces defects and mutates source to test a claim — so `assertLaneCwd` refuses to spawn it
@@ -85,6 +107,19 @@ the one that burns people: pointing `--lens` at an *advisory* lens does not narr
 sessions were caught by that in a single day, from opposite directions. If you want a specific advisory lens
 looked at, ask for it in addition — not by pointing `--lens` at it.
 
+**So for one caller-chosen seat there are TWO bands, not four — and the shape command tells you which (#3335).**
+The care dial does not produce "the mandatory pair for code": at `low`, `elevated` and `high` alike it asks for
+the **whole five-lens set**, and only `rounds` and `jurorsPerLens` change. `none` asks for **no panel at all**.
+Hence:
+
+| the shape's `careLevel` | what to spend the seat on |
+| --- | --- |
+| `none` | the floor lens is proportionate — the dial asked for no panel, so `--lens` may go where you like. |
+| `low` / `elevated` / `high` | a **`MANDATORY_LENSES`** value — the shape's `seatLens`. One seat cannot deliver the fan-out the dial asks for, so the seat must be able to block and the shortfall is recorded. An advisory `--lens` here is **refused** by name. |
+
+Choosing an advisory lens on an escalated PR must be a stated choice, never a default nobody notices — that was
+PR #1569 round 2, which sat `claim-accuracy` alone on a declarative-leash change.
+
 **Two `judge` steps are still not a `judgePanel` fan-out**, and the distinction is load-bearing. `judgePanel`
 (#3050) omits `allowedTools` from its per-seat call object, so every panel seat would run `--tools ''` — that is
 **#3158, still open** — and today's juror is tool-bearing because, as `we:scripts/lib/judge-spawn.mjs` puts it,
@@ -92,7 +127,10 @@ looked at, ask for it in addition — not by pointing `--lens` at it.
 that bill.
 
 Report the verdict as **the seats that actually judged** — the write-up's table lists what ran, not what
-exists. Do not call it a panel verdict, and do not describe a run as single-lens.
+exists. Do not call it a panel verdict, and do not describe a run as single-lens. **And report what the PR
+earned beside it (#3335):** the write-up's *Earned vs seated* line names the derived care level and the lenses
+that were earned but did not sit, so "3 panel lenses did not run" can be read as proportionate or as a
+shortfall. Carry both halves; neither sentence means anything without the other.
 
 On the operator's explicit decision:
 
