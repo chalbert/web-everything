@@ -161,6 +161,30 @@ const labelNames = (labels) => (Array.isArray(labels) ? labels : [])
 const commentBody = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#startedAtMs — `startedAt` as epoch ms, whichever shape it arrives in.
+ *
+ * MEASURED, NOT ASSUMED: `claude agents --json` returns `startedAt` as an epoch NUMBER
+ * (`1787004649412` — `2026-08-17T22:10:49.412Z`), not the ISO string it reads like in a written-out listing.
+ * `Date.parse(1787004649412)` is `NaN`, so a parser that accepted only the string shape would compute no age at
+ * all — and would do it SILENTLY, dropping the "held for N hours" figure out of the one note whose entire job is
+ * to make a 217-hour block impossible to overlook. The failure would have looked like a formatting nicety and
+ * been exactly the defect this pass exists to remove, one level up. Both shapes are accepted, and both are
+ * pinned in `reconcile-core.test.mjs`.
+ * @param {string|number|null|undefined} startedAt
+ * @returns {number} epoch ms, or `NaN` when it cannot be read
+ */
+export function startedAtMs(startedAt) {
+  if (typeof startedAt === 'number') return Number.isFinite(startedAt) ? startedAt : NaN;
+  if (typeof startedAt === 'string') {
+    const trimmed = startedAt.trim();
+    // A numeric STRING is an epoch too — `Date.parse('1787004649412')` is NaN, so it must not reach it.
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+    return Date.parse(trimmed);
+  }
+  return NaN;
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#countFindings — how many comments on this PR are a REVIEWER speaking,
  * rather than the conveyor talking to itself. A comment whose LEADING line is one of
  * {@link BOOKKEEPING_MARKERS} is this loop's own record and is not a finding. Pure.
@@ -349,7 +373,7 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
       // The permission block is the case that must never be merely refused. Three sessions have held one for
       // 211.4 hours; a refusal buried in a list is how that stayed invisible. It gets its own surfaced note.
       if (live.kind === 'awaiting-permission') {
-        const startedMs = live.startedAt ? Date.parse(live.startedAt) : NaN;
+        const startedMs = startedAtMs(live.startedAt);
         const heldHours = Number.isFinite(startedMs) && now ? Math.round(((now - startedMs) / 3_600_000) * 10) / 10 : null;
         notes.push({
           kind: 'awaiting-permission', prNumber, pid: live.pid, cwd: live.cwd, sessionId: live.sessionId,

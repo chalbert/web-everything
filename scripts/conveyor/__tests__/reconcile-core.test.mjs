@@ -30,7 +30,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission,
+  planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS,
 } from '../reconcile-core.mjs';
 import { STAND_DOWN_MARKER } from '../stand-down.mjs';
@@ -44,6 +44,9 @@ const NOW = Date.parse('2026-08-26T17:34:00Z');
 const HOUR = 3_600_000;
 /** The three permission-blocked sessions started 2026-08-17T22:10–22:12Z — 211.4 h before the 17:34Z reading. */
 const BLOCKED_SINCE = '2026-08-17T22:10:00Z';
+/** THE SHAPE THE TOOL ACTUALLY RETURNS. Read off a live `claude agents --json` on 2026-08-26: `startedAt` is an
+ *  epoch NUMBER, not the ISO string it reads like. This is `conveyor-3151`'s (pid 18278) real value. */
+const BLOCKED_SINCE_EPOCH = 1787004649412; // === 2026-08-17T22:10:49.412Z
 const STALE_MTIME = NOW - 211.4 * HOUR;   // a transcript nobody has written to in 211 hours.
 const FRESH_MTIME = NOW - 30_000;         // written 30 s ago.
 
@@ -281,6 +284,42 @@ describe('case 5 — refusal 4: liveness from a live PROCESS, and the listing is
     expect(plan.refusals[0].kind).not.toBe('live-process'); // outranks a live pid ON PURPOSE.
     expect(plan.notes).toHaveLength(1);
     expect(plan.notes[0]).toMatchObject({ kind: 'awaiting-permission', prNumber: 1563, heldHours: 211.4 });
+    expect(plan.notes[0].text).toContain('nobody is there to answer it');
+  });
+
+  it('5(b\u2032) the SAME block, with `startedAt` in the shape the tool really returns — an epoch NUMBER', () => {
+    // Measured off a live listing: `startedAt` comes back as `1787004649412`, and `Date.parse` of that is NaN.
+    // A parser that accepted only the ISO string would compute NO age — silently dropping the one figure that
+    // makes a 217-hour block impossible to overlook, while every other assertion stayed green.
+    const agents = [{
+      sessionId: 's-b2', cwd: '/lanes/lane-31', pid: 18278, pidAlive: true, laneHeadOid: SHA,
+      status: 'waiting', waitingFor: 'permission prompt', startedAt: BLOCKED_SINCE_EPOCH,
+    }];
+    const plan = planReconcile({ prs: [pr1563({ transcriptMtimeMs: STALE_MTIME })], agents, durableCounts: {}, now: NOW });
+    expect(plan.refusals[0].kind).toBe('awaiting-permission');
+    expect(plan.notes[0].heldHours).toBe(211.4);          // NOT null — the whole point of this case.
+    expect(plan.notes[0].text).toContain('211.4h');
+  });
+
+  it('`startedAt` is read in every shape the listing produces, and unreadable ones do not throw', () => {
+    expect(startedAtMs(BLOCKED_SINCE_EPOCH)).toBe(BLOCKED_SINCE_EPOCH);
+    expect(startedAtMs('2026-08-17T22:10:49.412Z')).toBe(BLOCKED_SINCE_EPOCH);
+    expect(startedAtMs(String(BLOCKED_SINCE_EPOCH))).toBe(BLOCKED_SINCE_EPOCH); // a numeric STRING is an epoch too
+    expect(startedAtMs(null)).toBeNaN();
+    expect(startedAtMs(undefined)).toBeNaN();
+    expect(startedAtMs('not a date')).toBeNaN();
+  });
+
+  it('an unreadable `startedAt` still SURFACES the block — it just cannot age it', () => {
+    // The note is the point; the hour count is the detail. Losing the detail must never lose the note.
+    const agents = [{
+      sessionId: 's-b3', cwd: '/lanes/lane-31', pid: 18278, pidAlive: true, laneHeadOid: SHA,
+      status: 'waiting', waitingFor: 'permission prompt',
+    }];
+    const plan = planReconcile({ prs: [pr1563()], agents, durableCounts: {}, now: NOW });
+    expect(plan.refusals[0].kind).toBe('awaiting-permission');
+    expect(plan.notes).toHaveLength(1);
+    expect(plan.notes[0].heldHours).toBeNull();
     expect(plan.notes[0].text).toContain('nobody is there to answer it');
   });
 
