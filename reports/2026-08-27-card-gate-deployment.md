@@ -186,8 +186,24 @@ Its typed field exists. The finding property is `impactIfUnfixed`, declared at
 later reader might be mildly misled", and the level the fork turns on is "real work is lost, duplicated, or
 silently skipped".
 
-Whether #3314 reaches a deterministic gate in `check:standards`, or governs AI lenses only, is not
-derivable from the tree — and it decides whether any card gate may block a land. That is #3364's Fork 1.
+**And on the reach question the anchor answers itself — it does not reach.** Three findings, each verified:
+
+- **Its subject is a lens's mandate inside the AI jury**, and its own scope note says so: *"The blocking set
+  is an explicit one-member set, not `ADVISORY_LENSES`"*, with generalization deferred to `#3338`.
+- **It presupposes deterministic gates as a separate thing.** Arguing its bar may not be built on
+  `blocksAcceptance`, it names *"the already-existing `check:standards` locus gate"* as a **prevention** that
+  a lens finding is measured against.
+- **Card gates already block.** `we:scripts/check-standards.mjs:586` routes `validateBacklogItem`'s findings
+  to `err`, so a deterministic error on a backlog card is the status quo #3314 was ratified alongside.
+
+So the collision dissolves. What #3314 leaves behind is a **discipline worth adopting anyway** — its
+forward-facing clause, *"any future rule of this shape must name a typed field or take plain advisory
+instead"* — which the card adopts by declaring `impact` on each registry entry.
+
+**What is genuinely left, and is #3364's one fork:** a card gate that ERRORs blocks a land with **no
+reviewer**, and the repo has no rule for when a heuristic earns that. Impact says which gates are candidates;
+precision says when a candidate crosses. Whether both must hold, or impact alone suffices, is the ruling —
+and today it is the difference between four gates blocking immediately and none blocking until measured.
 
 **`#gate-on-merged-tree-lane-fast-fail` (#1937) is cited for nothing.** It governs *location* — lane clone
 versus central merged tree — not corpus scope, so it neither authorizes nor forbids anything here. This
