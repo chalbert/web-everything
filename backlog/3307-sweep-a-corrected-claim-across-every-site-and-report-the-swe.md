@@ -36,13 +36,30 @@ The three: r1 fixed the epic card and left the PR description; r2 fixed the desc
 > under ALREADY RETRACTED and the CLI exited 0 "clean". Measured over the tracked markdown at
 > `origin/main` (4133 files, 300929 lines), that rule put **11620 lines — 3.86%** inside a "retraction"
 > window across **536 files**, with `superseded` (424), `it read` (133) and `was wrong` (124) each
-> outnumbering `retracted` (91) itself. Both defects are fixed and pinned by tests that redden on
-> reversion. The corpus figures are quoted at `origin/main` rather than at this branch's tree on purpose:
-> the branch's own retraction prose moves them, and a reviewer can reproduce the `origin/main` numbers.
+> outnumbering `retracted` (91) itself. The corpus figures are quoted at `origin/main` rather than at
+> this branch's tree on purpose: the branch's own retraction prose moves them, and a reviewer can
+> reproduce the `origin/main` numbers.
+
+> **Retracted, in turn — the retraction above said "the two ways review #1620 found", and closed "Both
+> defects are fixed and pinned by tests that redden on reversion".** Both halves were wrong, and the
+> second was wrong in exactly the way this card exists to stop.
+> - There was a **third** way, found on the next round: the paragraph scan recorded a folded hit and
+>   then `continue`d past the whole sentence loop, so an independent, token-less paraphrase sharing that
+>   paragraph reached no tier at all — absent from survivors, from undecided, from `retractedSites` and
+>   from `coverage.skipped` alike. The same two sentences split across two paragraphs both reported, so
+>   the answer depended on the blank line rather than on the text.
+> - "Pinned by tests that redden on reversion" did not hold for the first fix's sibling change.
+>   Removing the near tier's per-block `break` was pinned by a test *named* for it whose two fixture
+>   lines were literal substrings of the claim, so the document-wide `exact` scan answered them and the
+>   near tier never ran on them; re-introducing the `break` left the suite green. A test can be named
+>   for an invariant it does not exercise — round-1 finding 3 recurring inside the round-2 prevention.
+>
+> All three are fixed, and each is now pinned by a mutation that was actually re-run in this lane.
 
 What is reported, accurately: a near-match, an ambiguous paraphrase and a bare numeral in unrelated prose
-are exactly what the person doing the correcting needs to see, so every site that reaches a tier is
-reported and *labelled* — `exact`/`normalized` are `confirmed`, `near`/`token` are `undecided`, and a site
+are exactly what the person doing the correcting needs to see, so a site that scores into a tier is
+reported and *labelled* — and whether it scores does **not** depend on what else its paragraph happens to
+contain. `exact`/`normalized` are `confirmed`, `near`/`token` are `undecided`, and a site
 under a retraction *label* is listed with `retracted: true` rather than dropped. Only an unretracted
 `confirmed` site is a survivor, and only survivors set the exit status. Retraction detection is anchored
 to the shapes a retraction is actually written in and errs toward leaving a site a SURVIVOR, because an
@@ -57,10 +74,14 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 
 1. **Executable** — `npx vitest run claim-sweep -t "#3307" | grep -qE "Tests +[0-9]+ passed"`. Fails
    before this item lands — `we:scripts/lib/claim-sweep.mjs` and its suite do not exist, so vitest finds
-   no test *file*, prints `No test files found` and exits 1 — and passes after (68 passed).
+   no test *file*, prints `No test files found` and exits 1 — and passes after (73 passed).
    > **Retracted — this line read "(42 passed)".** That was the count at the first cut. Review #1620
    > bounced the PR for two silent-drop defects and two untested first-cut fixes; the prevention for all
    > four took the suite from 42 to **68**. Re-measured on this branch, not carried over.
+   > **Retracted again — "(68 passed)".** Review #1620 bounced round 2 for a third silent drop and for a
+   > test that did not exercise its own name; that prevention took the suite from 68 to **73**. Measured
+   > in this lane in this session (`npx vitest run claim-sweep` → `Tests  73 passed (73)`), not carried
+   > over from the line above.
    The `grep` is load-bearing, but not for the reason first written here.
    > **Retracted — this read "a `-t` filter matching nothing is an empty selection, and vitest exits 0 on
    > one, so the bare form would be green before the work."** The first half is true; the conclusion is
@@ -69,13 +90,18 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
    > | tree state | `-t` filter | bare exit | with `\| grep -qE` |
    > |---|---|---|---|
    > | `main` (neither file exists) | `#3307` | **1** — `No test files found` | **1** |
-   > | this branch | `#3307` | 0 — `68 passed` | **0** |
-   > | this branch | matches nothing | **0** — `68 skipped` | **1** |
+   > | this branch | `#3307` | 0 — `73 passed` | **0** |
+   > | this branch | matches nothing | **0** — `73 skipped` | **1** |
    >
    > So before the work the bare form already fails, because there is no test *file* — not because of an
    > empty selection. The `grep` earns its place against the OTHER row: once the file exists, a renamed
-   > `it()` or a drifted filter selects nothing, vitest reports `68 skipped` and exits **0**, and the bare
+   > `it()` or a drifted filter selects nothing, vitest reports `73 skipped` and exits **0**, and the bare
    > form would go green while testing nothing. That is the trap `3319`'s criterion records.
+   >
+   > **Retracted — this table read `68 passed` / `68 skipped`.** The figures were right when measured and
+   > the round-3 prevention moved them. All three rows were re-run in this lane in this session at 73,
+   > including the `main` row (both new paths moved aside): bare exit 1 on `No test files found`, grep
+   > exit 1. The shape of the argument is unchanged; only the count moved.
 2. **Real specimen** — the frozen fixtures replay the `84 recorded verdicts` figure at the moment its
    correction was half applied: parent `3318` already retracted, child `3319` still asserting it,
    `we:scripts/lib/jury-core.mjs` carrying the numeral in a comment. The sweep names `3319` as the one
@@ -83,22 +109,40 @@ GitHub, merged PRs, the sibling constellation repos, and untracked/ignored/binar
 3. **Mutation** — correcting only the quoted site drops the survivor count to 0 while the code comment
    is still named; re-introducing the claim in a fourth file raises it there; deleting the retraction
    marker turns the parent card's quotation back into a survivor.
-4. **No silent drop, either way** — the two directions a sweep can lie, each pinned by a test that
-   reddens when its fix is reverted:
+4. **No silent drop, either way** — the directions a sweep can lie, each pinned by a test that reddens
+   when its fix is reverted:
    - a site that reaches the top of the `near` tier (shingle-containment exactly 1 on a NON-substring)
      is reported, not dropped for scoring too well;
    - a claim beside ordinary prose using a marker phrase in a non-retraction sense (`it read`,
-     `was wrong`, `superseded`, …) stays a **survivor** and the CLI still exits 1.
+     `was wrong`, `superseded`, …) stays a **survivor** and the CLI still exits 1;
+   - a `near` paraphrase is reported **whatever else its paragraph contains** — sharing a block with a
+     verbatim copy of the claim must not suppress it, and N restatements in one paragraph are N sites.
+     A paragraph carrying the claim wrapped twice reports both copies, and a single wrapped copy whose
+     sentence opens on an earlier line is still ONE site, not two.
    Every fix in this card is re-reverted and the suite re-run; the mutation log is in the commit that
    made it. A green suite over an unreverted fix proves nothing, which is how the first cut shipped two
    "fixed here" defects with no test on either.
+   > **Retracted — this item said "the two directions a sweep can lie", and the sentence under it
+   > claimed every fix in this card was re-reverted.** There was a third direction (above), and one
+   > round-2 fix was not covered: the near tier's per-block `break` had a test named for it that did not
+   > exercise it, so re-introducing the `break` left the suite green. The mutation was not actually run
+   > against that test. It is now, and it reddens.
 5. `npm run check:standards` — 0 new errors and 0 new warnings vs this lane's `main`, measured both ways
    in the same session rather than compared against a number written on a card. Measured at the tip:
-   **4 error(s), 1438 warning(s)** on the branch and **4 error(s), 1438 warning(s)** on the same tree with
+   **0 error(s), 1438 warning(s)** on the branch and **0 error(s), 1438 warning(s)** on the same tree with
    the two new paths moved aside and this card restored to `origin/main` — the two sorted issue lists are
-   byte-identical. All four errors are `number-stranded` strays on cards this PR does not contain
-   (`xd6hbxe`, `xmit46t`, `xmiuo0r`, `xu9c4q4`); they read from `origin/main`, so they fire for every
-   branch until a heal lands there, and they are deliberately **not** bundled — `number-stranded` rewrites
-   citations in `we:docs/agent/platform-decisions.md`, which would turn a one-card change into a statute
-   edit. An earlier run in the same session showed 0 errors; the four appeared on `main` mid-session,
-   which is why the baseline is re-measured rather than remembered.
+   1438 lines each and byte-identical (`diff` empty), and no warning names either new file
+   (`grep -c claim-sweep` → 0).
+   > **Retracted — this item read "4 error(s), 1438 warning(s)" on both sides, and named four
+   > `number-stranded` strays (`xd6hbxe`, `xmit46t`, `xmiuo0r`, `xu9c4q4`) as deliberately not bundled.**
+   > True when written and false now: those four were JIT-numbered and healed on `main` at `6fbecfe1`
+   > (→ `#3358`, `#3359`, `#3360`, `#3361`), so the rule no longer fires. Re-measured in this lane in
+   > this session, both sides are **0 errors**. The strays needed no action from this PR and got none;
+   > the reasoning for not bundling them stands unchanged for the next branch that meets one —
+   > `number-stranded` rewrites citations in `we:docs/agent/platform-decisions.md`, which turns a
+   > one-card change into a statute edit and parks it waiting for a human over a mechanical rename.
+   >
+   > This figure has now moved **twice** inside this item's life: 0 → 4 when four strays landed on
+   > `main` mid-session, and 4 → 0 when the heal landed. That is the whole argument for the "measured
+   > both ways in the same session" clause, and it is why the *procedure* is the criterion here and the
+   > number is only its output.
