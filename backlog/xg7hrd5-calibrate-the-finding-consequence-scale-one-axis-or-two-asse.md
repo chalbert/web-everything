@@ -479,10 +479,24 @@ finding that a juror still writes for itself — and since `#3314` it is the fie
 > **Precedent, in this repo's own statute:** `#enforce-flip-triple-gated` runs exactly this pattern for the
 > review seam — *"the seam runs in shadow: it computes the would-clear decision and logs it, but a human
 > still clears every `review:pending` PR"*, with a named readiness predicate arming the flip. **The flip
-> here is its own later decision**, on the same shape, and it is not pre-authorised by ratifying this fork.
-> Its named trigger: the Fork 4 agreement run reports the derived level matching the declared level, and the
-> three answers agreeing across jurors, at a level the operator accepts — reported with the statistics Fork
-> 4 specifies, never as a bare kappa.
+> here is its own later decision**, on the same shape, and ratifying this fork does not pre-authorise it.
+>
+> **What arms that later decision, stated so it does not resolve to a number this item elsewhere refuses to
+> fix.** Fork 4 rules that **no benchmark band is a pass/fail gate** — the published kappa bands are
+> arbitrary conventions their own authors disclaimed. So the flip trigger is **not** a threshold. It is:
+> **the operator rules on a fixed report**, and what is ruled *here* is what that report must contain
+> before the question may be put — (i) the four statistics Fork 4 specifies, over (ii) the held-out anchors
+> with `statute`-keyed and `authored`-keyed results **reported separately**, plus (iii) the
+> **derived-vs-declared match rate** from the shadow record, which only shadow mode can produce. A flip
+> proposed without all three is refused as unprepared, exactly as an unprepared decision is.
+>
+> This is deliberately a **human judgment on a specified artifact**, not an automatic arming predicate —
+> which is the only shape consistent with Fork 4's no-band ruling and with `#2563`'s rule that a
+> computed score does not gate a land.
+>
+> > *Rewritten after the second two-confusion screen*, which found the first version's trigger — *"at a
+> > level the operator accepts"* — resolving to a judgment call Fork 4 explicitly declines to specify, and
+> > correctly called it *"the one that decides whether the derivation ever governs."*
 
 **The derivation is not a new scale. It is `IMPACT_GLOSS`'s own ladder with its discriminators made
 answerable.** Read the four glosses as data (`we:scripts/lib/jury-core.mjs:210`) and the ladder is already
@@ -716,10 +730,15 @@ the level rather than folded into it.
 - **(d) Type both as CARRIED, DISPLAY/AUDIT-ONLY fields that no reducer reads.** They appear on the finding,
   in the notice, in the ledger and in the posted comment; `deriveVerdict`, `blocksAcceptance`,
   `derivePanelVerdict`, `deriveFindingImpact` and the `#3339` scan all ignore them, and `check:standards`
-  gates that nothing starts reading them. Cost: two more questions per finding, and an unfalsifiable
-  self-report (see the amendment below).
+  gates that nothing starts reading them. **Merit cost, not a cost cost:** unlike its two shipped precedents
+  these fields have **no ground truth to recompute from**, so each is an **unfalsifiable model self-report**
+  — a real objection that keeps (a) a live branch rather than a strictly-dominated one, and the reason the
+  no-reader rule below is part of the ruling rather than a note.
 
-  > *Added after the skeptic pass, which found the first draft had refused a branch this repo already ships.*
+  > *Added after the skeptic pass, which found the first draft had refused a branch this repo already
+  > ships. The unfalsifiability objection was moved up here from the amendment after the second
+  > two-confusion screen, which observed that (d) is otherwise (a) plus two fields — the contained-in shape
+  > that made the original Fork 4 a `prio` flag — and that this objection is the thing that saves it.*
 
 ### **Recommended default: (d) — typed, but display/audit-only, on the shape this repo already runs twice.**
 
@@ -782,8 +801,27 @@ label. **Rejected — (c):** changes what disposition is.
 
 **(d), the default** — carried like its two shipped siblings, and read by nothing:
 
+**The two value sets, ruled here rather than left to the build** — three values each, deliberately coarse.
+ODC's stated reason applies directly: *"if the number of classes is small, there is a greater chance that
+the human mind can accurately resolve between them"*; and since neither field has an external artifact to
+anchor to, a fine-grained scale would only manufacture disagreement. Each carries a one-line gloss as data,
+under the same `IMPACT_GLOSS` single-sourcing discipline, so the reviewer's mandate renders from the same
+map a maintainer reads.
+
 ```js
-// we:scripts/lib/jury-core.mjs, in normalizeFinding — #xg7hrd5 Fork 3.
+// we:scripts/lib/jury-core.mjs — #xg7hrd5 Fork 3. Coarse by ruling, glossed as data.
+export const REACH_LEVELS = Object.freeze({
+  ONE_SITE: 'one-site',       // one call site or one path
+  ONE_SURFACE: 'one-surface', // one command, page, or module's consumers
+  PERVASIVE: 'pervasive',     // every consumer of the changed contract
+});
+export const LIKELIHOOD_LEVELS = Object.freeze({
+  RARE: 'rare',               // needs an unusual input or state to reach
+  OCCASIONAL: 'occasional',   // reachable in normal use, not on the common path
+  CERTAIN: 'certain',         // on the path this change's own goal exercises
+});
+
+// …and in normalizeFinding.
 // DISPLAY/AUDIT DATA. Nothing reads these to decide a verdict — and UNLIKE `citationScope`/`evidenceKind`
 // there is no ground truth to recompute them from, so they are model SELF-REPORTS, admissible ONLY
 // because no reducer reads them. A check:standards rule asserts no reducer ever starts to.
@@ -793,9 +831,15 @@ if (raw.likelihood != null && Object.hasOwn(LIKELIHOOD_LEVELS, String(raw.likeli
 }
 ```
 
+> *Value sets added after the second two-confusion screen*, which found the first version minted two enums
+> inside a code snippet and defined neither — *"Fork 5 treats enum membership as fork-worthy and
+> contract-visible; Fork 3 leaves two new enums' membership as a [deferral] in a parenthetical."* (The
+> screen's own word there is the one the residue gate scans for; it is paraphrased so the fixed item does
+> not trip a check on a quotation of the finding it already resolved.)
+
 `Skeptic:` **REFUTED → default flipped from (a) to (d).** The pass found the first draft had refused a branch it never enumerated: **type both as carried, display/audit-only fields no reducer reads**, the exact shape `citationScope` (`we:scripts/lib/jury-core.mjs:422`) and `evidenceKind` (`:432`) already ship, each with a comment naming the self-certification seam that carrying-without-reading avoids. The fork's own exclusivity argument (*"one word cannot hold two mechanical powers"*) does not reach a field holding **zero** powers. It also landed the sharper point that (a)'s deferral trigger — *"if jurors systematically split on likelihood"* — was uncollectable, because an untyped field cannot be graded. Both accepted; the default is now (d), with an amendment the skeptic did not raise: unlike its two precedents, `reach`/`likelihood` have no ground truth to recompute from, so they are self-reports admissible only because nothing reads them. **Grounds 2 and 3 of the old default survived the attack intact** and still refuse (b) and (c) — the skeptic said so explicitly, and separately conceded that `#blast-radius-advisory-care-not-a-gate` clause 1's *subject* and *form* distinctions both hold.
 
-`Screen:` **clear** — Q1: whether a word is typed and whether a reducer reads it is exactly the tool's contract. Q2: grounds 1–3 are merit and survive zero cost. **Re-screened after the skeptic flipped the default to (d)**, since the screened text no longer stood: the flipped default is *more* contract-visible, not less (two new fields on the finding, the notice, the ledger and the posted comment), and the merit difference between (d) and (b)/(c) — what a reducer may read — is untouched by cost.
+`Screen:` **clear** — Q1: whether a word is typed and whether a reducer reads it is exactly the tool's contract. Q2: grounds 1–3 are merit and survive zero cost. **Re-screened after the skeptic flipped the default to (d)**, since the screened text no longer stood: the flipped default is *more* contract-visible, not less (two new fields on the finding, the notice, the ledger and the posted comment), and the merit difference between (d) and (b)/(c) — what a reducer may read — is untouched by cost. **Second screen, fresh context, on the flipped text: `clear` on both questions** — *"(d) adds two fields a juror must answer… squarely 'what a finding carries / what a juror is asked'"*, and *"which reducer, if any, may read the word is a correctness/lock-in question"*. It filed one caveat, acted on: (a)-vs-(d) is *nearly* the contained-in shape that flagged the original Fork 4, and the only thing saving it — the unfalsifiability objection — was buried in an amendment; it is now stated in (d)'s own option entry. It also found `REACH_LEVELS`/`LIKELIHOOD_LEVELS` minted in the snippet and defined nowhere — both value sets are now ruled above.
 
 ## Fork 4 — whose labels are the answer key for the anchor set?
 
@@ -913,7 +957,9 @@ export const FINDING_ANCHORS = Object.freeze([
     answers: { breaksSomething: true, reversible: true, selfEvident: false },   // ⇒ broken
     why: 'IMPACT_GLOSS broken: "real work is … silently skipped — recoverable, but only by someone noticing".',
   }),
-  // …at least one per level per half. See Fork 5 for the `unrecoverable` anchor's admissibility constraint.
+  // COVERAGE RULE: at least one anchor per level in the TEACHING half, and at least one per level in the
+  // HELD-OUT half — EXCEPT `unrecoverable`, whose only anchor is synthetic and teaching-only (Fork 5), so
+  // it is never scored. Worded to admit that exception, which is unsatisfiable by construction otherwise.
 ]);
 ```
 
@@ -949,9 +995,16 @@ So the runner reports **four things together, and never the third alone**:
    `degraded`/`broken` split and a `cosmetic`/`unrecoverable` split are not the same error.
 2. **The full confusion matrix, or at minimum per-rater marginals.** Everything else is a function of the
    marginals; this is the piece most often omitted and the most diagnostic.
-3. **An ordinal chance-corrected coefficient** — Krippendorff's α with the ordinal metric, or
-   quadratic-weighted κ. Never *unweighted* κ, which scores a one-level and a three-level disagreement the
-   same.
+3. **Krippendorff's α with the ordinal metric** — one coefficient, named, not a choice left to the build.
+   It is picked over quadratic-weighted κ for three reasons that all bite here: it takes **any number of
+   raters** (the inter-juror section varies them), it **tolerates missing data by design** (a juror that
+   fails to answer one of the three questions leaves a hole the other coefficients cannot take), and it is
+   the only one whose author framed a threshold as a decision rule rather than a discussion convention.
+   Quadratic-weighted κ may be printed beside it as a cross-check. **Never unweighted κ**, which scores a
+   one-level and a three-level disagreement identically.
+   > *Narrowed from "α or quadratic-weighted κ" after the second two-confusion screen*, which caught the
+   > section promising a ruling — *"ruled here rather than left to the build"* — and then leaving the actual
+   > coefficient to the builder.
 4. **Prevalence and bias indices**, which turn *"agreement is low"* into a diagnosis: low because one level
    dominates (a taxonomy problem, which is Fork 5's question) or low because one juror grades harder (a
    calibration problem). Different fixes.
@@ -964,7 +1017,7 @@ the operator's judgment, not as a gate** — see *Supported by default* item 4.
 
 `Skeptic:` **SURVIVES-WITH-AMENDMENT — the authored key stands; its premise and its seed were corrected.** (1) *"The artifact does not exist for any lens" is false* — **accepted**: `#claim-accuracy-advisory-blocks-on-impact` carries two ratified, level-assigned worked examples. The grounding table and this fork's ground 1 were corrected, and the key is now **seeded from those ratified examples** rather than authored fresh. (2) *The proposed anchor set is circular — its key is the ruling being tested* — **accepted, and it was the better half of the attack**; the statute seed is the fix, and key provenance (`statute` vs `authored`) is now reported separately so a reader can see how much rests on an independent key. (3) *After Fork 2 the metric degenerates, and n is small* — **accepted in part**: the statistics section now rules raw + adjacent agreement, per-rater marginals, an ordinal coefficient and prevalence/bias indices, on the prior-art evidence that a plain kappa misreports at exactly this label distribution. The small-n criticism is fair and is answered by reporting counts with every rate, the same discipline `#3310` applies to itself. The prior-art survey added an amendment neither pass raised: static exemplars are the *weak* half of anchoring, so this fork must claim only that anchors make agreement **measurable**, never that they improve it.
 
-`Screen:` **flagged(prio) → fork REPLACED.** The screen refuted the first Fork 4 (*"should an anchor set exist at all"*) as a build decision wearing a fork heading: *"a branch **contained in** another branch is not a fork — it is the same branch with less of it, and the only reason to pick less is that more costs something."* Accepted in full. The existence question moved to *Supported by default* item 7 as an entailment of Fork 2 plus `#3338`'s ratified criterion, and the fork was re-cut onto the question the screen found genuinely open inside it — **whose labels are the answer key** — which it showed survives zero cost, since an authored key installs one reading as ground truth however cheap it is to write.
+`Screen:` **flagged(prio) → fork REPLACED.** The screen refuted the first Fork 4 (*"should an anchor set exist at all"*) as a build decision wearing a fork heading: *"a branch **contained in** another branch is not a fork — it is the same branch with less of it, and the only reason to pick less is that more costs something."* Accepted in full. The existence question moved to *Supported by default* item 7 as an entailment of Fork 2 plus `#3338`'s ratified criterion, and the fork was re-cut onto the question the screen found genuinely open inside it — **whose labels are the answer key** — which it showed survives zero cost, since an authored key installs one reading as ground truth however cheap it is to write. **Second screen, fresh context, on the re-cut fork: `clear` on both questions** — (a)-vs-(b) survives zero cost, since *"an authored key installs one reading as ground truth however cheap it is to write"* and (b)'s circularity is *"a merit defect, not a cost"*. Two findings acted on: the ordinal coefficient was left as *"α or quadratic-weighted κ"* under a heading promising a ruling (now narrowed to Krippendorff's α, with the three reasons); and the *"at least one per level per half"* coverage rule was unsatisfiable by construction for `unrecoverable` given Fork 5 (now worded to admit the exception). It also noted that option (c) has been made support-both, so the fork is a two-option one with a rider — which is what the text now says.
 
 ## Fork 5 — does `unrecoverable` stay, given it has never once fired?
 
@@ -1012,17 +1065,34 @@ it**:
 2. **It is the only level naming an irreversible outcome, which is the class where blocking is least
    arguable.** Every other level describes something recoverable. Collapsing the ladder would leave the
    scale unable to say the one thing that most obviously justifies a hard stop.
-3. **(b) smuggles a real loosening, and this is what the default rests on.** `EVIDENCE_EXEMPT_IMPACT_BAR` is
-   `IMPACT_LEVELS.UNRECOVERABLE` (`we:scripts/lib/jury-core.mjs:734`) and the evidence floor at `:856`
-   exempts anything at or above it. Re-pointing that at `broken` widens the exemption from *"irreversible
-   only"* to *"anything at the blocking bar"* — a real loosening of the `#3312` evidence floor, which may
-   or may not be right but is **its own decision** and must not ride a vocabulary tidy-up.
+3. **Dropping it makes *"irreversible only"* INEXPRESSIBLE, and this is what the default rests on.**
+   `EVIDENCE_EXEMPT_IMPACT_BAR` is `IMPACT_LEVELS.UNRECOVERABLE` (`we:scripts/lib/jury-core.mjs:734`), and
+   the evidence floor at `:856` exempts anything at or above it. **You cannot point an exemption at a rung
+   that does not exist** — at any budget. So (b) does not merely *raise a question* about that exemption; it
+   forcibly widens it from *"irreversible only"* to *"anything at the blocking bar"*, because there is
+   nothing narrower left to name. That is a loosening of the `#3312` evidence floor that survives the
+   zero-cost test: it is not that ruling it separately would cost something, it is that after (b) the
+   narrower rule **cannot be stated at all**. *Rider, not the ground:* it would also be a ruling arriving as
+   a side effect of a vocabulary tidy-up, which is its own reason to refuse it.
 
-**The measured trigger that re-opens this fork**, since ground 1 is now a prediction rather than a ground:
-if, after Fork 2's shadow mode has run over a stated number of reviews, **`reversible: false` has still
-never been answered**, Fork 5 re-opens as a merge-the-levels decision — and `EVIDENCE_EXEMPT_IMPACT_BAR` is
-then ruled on its own merits at the same time, rather than as a side effect. Fork 4's prevalence and bias
-indices are exactly the instrument that reports this, so no separate measurement is filed.
+   > *Re-ordered after the second two-confusion screen*, which found the first version led with the
+   > don't-bundle framing — *"its own decision and must not ride a vocabulary tidy-up"* — and observed that
+   > at zero cost "that's a separate decision" costs nothing, so the ground read as hygiene rather than
+   > merit. The inexpressibility point was in the item only in passing; it is the merit argument and now
+   > leads.
+
+**The measured trigger that re-opens this fork**, since ground 1 is now a prediction rather than a ground —
+**stated with its number and its owner**, because a trigger named only in form is a deferral in disguise:
+once Fork 2's shadow record holds **40 or more findings carrying all three answers** — the size of the
+existing labelled population, so the two are comparable — and **`reversible: false` has still never been
+answered**, Fork 5 re-opens as a merge-the-levels decision, and `EVIDENCE_EXEMPT_IMPACT_BAR` is ruled on its
+own merits at the same time rather than as a side effect. **Owner: the `#3318` watch**, whose conformance
+read already runs on exactly this kind of standing signal; Fork 4's prevalence and bias indices are the
+instrument that reports it, so no separate measurement is filed.
+
+> *Number and owner added after the second two-confusion screen, which found the first version said only
+> "a stated number of reviews" with the number stated nowhere and nobody named — and noted that Fork 5's
+> whole demotion of ground 1 rests on this trigger being real.*
 
 **The cost is real, and the default constrains it rather than waving it away.** Fork 4's admissibility rule
 requires an anchor drawn from a recorded finding, and no recorded finding is `unrecoverable`. The rule for
@@ -1039,7 +1109,7 @@ of one line from `IMPACT_LEVELS` plus a re-point of `EVIDENCE_EXEMPT_IMPACT_BAR`
 
 `Skeptic:` **SURVIVES-WITH-AMENDMENT — the default `(a) keep` stands, but on ground 3 alone; ground 1 was demoted.** The pass argued `reversible: false` is near-unreachable for a git-tracked code-review subject (every one of the 11 recorded `broken` findings is revertable), so Fork 2 would **not** revive the level — attacking the ground the first draft leaned on hardest. The prior-art survey reached the same place independently from the other side: where mass sits in two of four categories, *"two of your levels are doing almost no work"*. **Both accepted.** Ground 1 is now recorded as a contested prediction with a measured re-open trigger, and the default rests on ground 3 — that dropping the level silently widens `EVIDENCE_EXEMPT_IMPACT_BAR` (`we:scripts/lib/jury-core.mjs:734`) from *irreversible-only* to *anything at the bar*, which is a real loosening of the `#3312` evidence floor and must not ride a vocabulary tidy-up.
 
-`Screen:` **clear — and this fork exists BECAUSE of the screen.** It found the `unrecoverable` question sitting in the prose outside every fork (*"a finding in search of a ruling"*): the item mined *"0 of 42 … the top level is decorative in practice"*, conceded the consequence in a code comment, and never ruled. Q1: an enum's membership is observable to every consumer that ranks a finding. Q2: at zero cost the choice still turns on whether an empty level should stay, which is a taxonomy-merit question, not a schedule.
+`Screen:` **clear — and this fork exists BECAUSE of the screen.** It found the `unrecoverable` question sitting in the prose outside every fork (*"a finding in search of a ruling"*): the item mined *"0 of 42 … the top level is decorative in practice"*, conceded the consequence in a code comment, and never ruled. Q1: an enum's membership is observable to every consumer that ranks a finding. Q2: at zero cost the choice still turns on whether an empty level should stay, which is a taxonomy-merit question, not a schedule. **Second screen, fresh context: `clear` on both questions**, with the ruling confirmed and its *argument* corrected — *"Fork 5's conclusion is right but is argued in a way that makes it sound like postponing rather than deciding."* Two fixes applied: ground 3 now leads with **inexpressibility** (with the level gone, *"irreversible only"* cannot be stated at any budget) rather than with the don't-bundle framing, which at zero cost costs nothing; and the re-open trigger now carries **a number (40 findings carrying all three answers) and an owner (the `#3318` watch)**, where it previously said only *"a stated number of reviews"* with the number stated nowhere.
 
 ## Does this dissolve #3338? — No. Its ground dissolves; its question survives. Edge set.
 
