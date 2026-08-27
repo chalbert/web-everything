@@ -357,6 +357,17 @@ describe('unqualifiedCompletenessClaim — #3362', () => {
     expect(fire('The sweep is authoritative for the 213 candidates it scans, matching the lander predicate.')).toEqual([]);
   });
 
+  it('#3362 does not let an ordinary English slash idiom stand in for a real candidate set (#1649)', () => {
+    // The old bare-slash alternative in NAMES_CANDIDATE_SET_RX was "one word, a slash, more word
+    // characters" — indistinguishable from "and/or", "pass/fail", "his/her", "before/after". Any of
+    // those silently exempted a genuine unqualified completeness claim from being flagged at all. Each
+    // sentence below is the SAME claim ('#3362 flags each of the three sentences...' establishes it
+    // fires with no suffix); the only change is a trailing idiom, and it must still fire.
+    for (const tail of ['and/or fails silently.', 'pass/fail either way.', "his/her intent does not matter.", 'before/after the change.']) {
+      expect(fire(`Every caller declares its verification posture, ${tail}`), tail).toHaveLength(1);
+    }
+  });
+
   it('#3362 stays out of the shapes it deliberately excludes', () => {
     expect(fire('Every card carries a `bornAs` in its frontmatter.')).toEqual([]);       // no verification vocabulary
     expect(fire('Every caller must declare its verification posture.')).toEqual([]);     // a PRESCRIPTION

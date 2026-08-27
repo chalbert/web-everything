@@ -818,8 +818,21 @@ const VERIFICATION_TERM_RX = /\b(?:check(?:s|ed|ing)?|gate(?:s|d)?|guard(?:s|ed|
  * your scan wide enough*. A sentence naming a path as a citation rather than as a candidate set is let
  * through, and that is the intended trade — a gate that flags qualified sentences gets routed around,
  * and the routing-around costs more than the misses.
+ *
+ * THE BARE PATH ALTERNATIVE IS STRUCTURAL, not "any word slash word". PR #1649's review caught the
+ * naive bare-slash pattern this used to be — one word, a slash, more word characters, nothing else —
+ * matching ordinary English slash idioms: *"and/or"*, *"pass/fail"*, *"his/her"*, *"before/after"*. Any
+ * of those silently exempted a genuine unqualified completeness claim carrying one of them from ever
+ * being flagged (verified directly: those four variants, plus the unmodified control sentence, tested
+ * against the old pattern). The trailing lookahead requires the run of path-like characters after the
+ * first slash to contain a dot, digit, hyphen, or a second slash before it runs out — every real
+ * path/glob in this repo has an extension, a hyphenated segment, more than one segment, or a digit, and
+ * no plain two-word English slash idiom does. A bare two-segment path with no extension (`scripts/lib`)
+ * no longer self-exempts on its own; that trades a false positive (an extra, correctable flag) for
+ * closing a false negative (a missed completeness claim), which is the direction this gate exists to
+ * protect.
  */
-const NAMES_CANDIDATE_SET_RX = /\bcandidates?\b|\bgit\s+(?:grep|ls-files)\b|\bls-files\b|\btracked\s+(?:set|files|tree)\b|\bscans?\b|\bscanned\b|\bscanning\b|\bsweeps?\s+over\b|\bmatching\b|\bpredicate\b|\bof\s+the\s+\d+\b|\b\d\d+\s+[a-z]|`{1,2}[^`\n]*[/*][^`\n]*`{1,2}|\b[\w-]+\/[\w.*/-]+/i;
+const NAMES_CANDIDATE_SET_RX = /\bcandidates?\b|\bgit\s+(?:grep|ls-files)\b|\bls-files\b|\btracked\s+(?:set|files|tree)\b|\bscans?\b|\bscanned\b|\bscanning\b|\bsweeps?\s+over\b|\bmatching\b|\bpredicate\b|\bof\s+the\s+\d+\b|\b\d\d+\s+[a-z]|`{1,2}[^`\n]*[/*][^`\n]*`{1,2}|\b[\w-]+\/(?=[\w.*/-]*[.\d/-])[\w.*/-]+/i;
 
 /**
  * A hedge or a negator in front of the quantifier, which already concedes the claim is partial. The
