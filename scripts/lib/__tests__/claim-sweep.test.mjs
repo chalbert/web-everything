@@ -24,7 +24,9 @@ import {
 
 // ── The real specimen, frozen at the half-applied moment ──────────────────────────────────────────────
 
-/** The claim as it was written, at the site that was corrected first. */
+/** The claim as it was written, at the site that was corrected first.
+ *  Retracted — the figure is false: the measured counts are 92 cases, 87 carrying a lens row, 86 of
+ *  those `correctness`. It is quoted here as a fixture, never asserted. */
 const CLAIM_84 = 'All 84 recorded verdicts ran correctness alone.';
 
 /** Parent card `3318` — already corrected: the figure survives only inside its own retraction. */
@@ -38,8 +40,8 @@ const CARD_3318 = `# Review-efficacy watch
 `;
 
 /** Child card `3319` — NOT yet corrected. The surviving site the sweep has to name.
- *  RETRACTED as fact: the figure below is false (92 cases, 87 with a lens row, 86 of those `correctness`).
- *  It is a frozen replay of what the card said on 2026-08-26, not an assertion — and the marker is here
+ *  Retracted — the figure below is false: 92 cases, 87 with a lens row, 86 of those `correctness`.
+ *  It is a frozen replay of what the card said on 2026-08-26, not an assertion — and the label is here
  *  so that running this tool over its own tree reports the fixture as withdrawn rather than surviving. */
 const CARD_3319_BEFORE = `# Run the security lens once per code PR
 
@@ -60,7 +62,7 @@ const JURY_CORE_BEFORE = `export const MANDATE_LENSES = Object.freeze({
 `;
 
 /** The PR body — not in the tree, so it is only in range when supplied as a document.
- *  RETRACTED as fact, for the same reason as the fixture above: a frozen replay, never a claim. */
+ *  Retracted — false for the same reason as the fixture above: a frozen replay, never a claim. */
 const PR_BODY_BEFORE = `## What this does
 
 Sizes the security lens against the evidence. All 84 recorded verdicts ran correctness alone.
@@ -173,8 +175,9 @@ describe('#3307 claim-sweep — matching tiers', () => {
 
   it('#3307 reports a paraphrase as `near`/undecided rather than dropping it', () => {
     // The specimen is the second real case from `3307`'s evidence: a claim written into a card, quoted
-    // into a second card and repeated in a PR body before being refuted. RETRACTED as fact — the gate
-    // does run against backlog cards; these two strings are a frozen replay, never an assertion.
+    // into a second card and repeated in a PR body before being refuted.
+    // Retracted — the gate DOES run against backlog cards; the strings below are a frozen replay of a
+    // refuted claim, used as fixture text, never an assertion.
     const claim = 'the gate never runs against backlog cards at all';
     const doc = { path: 'docs/a.md', text: 'We noted that the gate never runs against backlog cards in practice.\n' };
     const sites = sweepDocument(doc, { text: claim });
@@ -501,6 +504,8 @@ describe('#3307 claim-sweep — the near tier reports the TOP of its own range',
   // DISTINCT claim shingles, so a sentence repeating a clause contains all of them without being a
   // substring, and the block-level `indexOf` has already `continue`d past every block that IS one.
   // Such a site matched NO tier and vanished from the report. Prevention the review marked OWED.
+  // Retracted — the claim text below is FALSE (the gate does run against backlog cards). It is reused
+  // here because `3307`'s evidence names it as the no-distinctive-token specimen, not as an assertion.
   const CLAIM = 'the gate never runs against backlog cards';
   // A duplicated clause: every shingle of the claim is present, but the claim is no substring of it.
   const DUPED = 'the gate never runs never runs against backlog cards';
@@ -518,6 +523,7 @@ describe('#3307 claim-sweep — the near tier reports the TOP of its own range',
   it('#3307 MUTATION — restoring the `score < 1` exclusion loses the site entirely', () => {
     // The invariant in one line: across the near tier's whole range, containment at or above the
     // threshold ALWAYS yields a site. Re-adding `&& score < 1` reddens this at the top of the range.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
     for (const candidate of [DUPED, 'the gate never runs against backlog cards in practice', CLAIM]) {
       const score = shingleContainment(normalizeText(CLAIM), normalizeText(candidate));
       const sites = sweepDocument({ path: 'a.md', text: `${candidate}\n` }, { text: CLAIM });
@@ -528,6 +534,7 @@ describe('#3307 claim-sweep — the near tier reports the TOP of its own range',
   it('#3307 a paragraph restating the claim TWICE reports both lines, not just the first', () => {
     // The near tier used to `break` after the first matching sentence in a block — the same
     // silent-drop family. Two restatements on two lines of one paragraph are two sites.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
     const doc = {
       path: 'a.md',
       text: 'the gate never runs against backlog cards here.\nAnd the gate never runs against backlog cards there.\n',
@@ -539,6 +546,8 @@ describe('#3307 claim-sweep — the near tier reports the TOP of its own range',
 describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not launder a survivor', () => {
   // Juror finding, claim-sweep.mjs retractionNear. Prevention the review marked OWED: ordinary prose
   // using a marker phrase in a NON-retraction sense, placed beside a genuine unretracted claim.
+  // Retracted — the figure below is false (92 cases, 87 with a lens row, 86 `correctness`); it is named
+  // SURVIVOR because these cases are about whether the SWEEP reports it, not about the count.
   const SURVIVOR = 'All 84 recorded verdicts ran correctness alone.';
 
   /** Ordinary English that the old bare-substring rule read as a retraction. Each is a real prose shape. */
@@ -592,6 +601,10 @@ describe('#3307 claim-sweep — retraction detection is ANCHORED, and must not l
     expect(stripLineLeaders('1. ~~Superseded~~')).toMatch(/^Superseded/);
     // A card id is not a heading leader — `#` only leads when whitespace follows.
     expect(stripLineLeaders('#3319 is a card id, not a heading')).toBe('#3319 is a card id, not a heading');
+    // Bullet glyphs count as leaders too: this module's own header writes its list with `•` inside a
+    // block comment, and without this the file's own retraction label went unrecognised.
+    expect(stripLineLeaders(' *   \u2022 Retracted — the claim is false')).toBe('Retracted — the claim is false');
+    expect(stripLineLeaders('   \u00b7 Retraction: x')).toBe('Retraction: x');
   });
 
   it('#3307 a lead word counts as a LABEL, not as the subject of a sentence', () => {
@@ -656,6 +669,7 @@ describe('#3307 claim-sweep — the two first-cut fixes, now actually protected'
         '> verdicts ran correctness alone.',
       ].join('\n') + '\n',
     };
+    // Retracted — the quoted figure is false (92 cases, 87 with a lens row, 86 `correctness`).
     const sites = sweepDocument(doc, { text: 'All 84 recorded verdicts ran correctness alone.' });
     const normalized = sites.find((x) => x.tier === 'normalized');
     expect(normalized).toBeDefined();

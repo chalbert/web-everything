@@ -12,8 +12,9 @@
  *     comment in `we:scripts/lib/jury-core.mjs`. Correcting one did not correct the others.
  *   • A card id believed nonexistent was "corrected" to a new id across a commit message, a PR title and a
  *     PR body — and the original turned out to be real and in flight. Three sites rewritten, all wrong.
- *   • "the gate never runs against backlog cards" — written into a card, quoted into a second card, and
- *     repeated in a PR body before being refuted. Two of the three had to be chased down separately.
+ *   • Retracted — "the gate never runs against backlog cards" is FALSE; it does. It was written into a
+ *     card, quoted into a second card, and repeated in a PR body before being refuted, and two of the
+ *     three had to be chased down separately. Quoted here as a specimen, never asserted.
  *   • A retraction that named its own mistake correctly and then MISNAMED the sibling retraction it cited.
  *
  * The shape is always the same: **a claim has more sites than the person correcting it remembers.**
@@ -164,6 +165,12 @@ export const NOT_COVERED = Object.freeze([
   'the sibling constellation repos (Frontier UI, plateau-app) — a separate checkout, so a separate sweep',
   'untracked, git-ignored, binary and over-size files (counted in coverage.skipped, never hidden)',
   'a paraphrase sharing no distinctive token with the claim — there is nothing to key on',
+  'a retraction written WITHOUT a label — no leading `Retracted`/`Superseded`/`Correction`, no struck '
+    + 'claim, no unambiguous phrase — is not recognised, so the site it covers is reported as a SURVIVOR. '
+    + 'Deliberate: the detector errs toward over-reporting, because an over-reported survivor costs one '
+    + 'glance and a laundered one costs a bounce round. Real example on this tree: '
+    + 'we:backlog/3350-an-automated-rebase-defeats-the-drain-s-re-sync.md:76, where the retraction strikes '
+    + 'the OLD wording two lines above and quotes the claim below it',
 ]);
 
 // ── Pure text helpers ─────────────────────────────────────────────────────────────────────────────────
@@ -357,7 +364,7 @@ export function stripLineLeaders(line) {
       .replace(/^>+/, '')
       .replace(/^<!--/, '')
       .replace(/^(?:\/\/+|\/\*+|#{1,6}(?=\s))/, '')
-      .replace(/^(?:[-+]|\*(?!\*))\s+/, '')
+      .replace(/^(?:[-+\u2022\u00b7\u25e6]|\*(?!\*))\s+/, '')
       .replace(/^\d+[.)]\s+/, '')
       .replace(/^[*_~]{1,2}/, '');
   } while (s !== prev);
