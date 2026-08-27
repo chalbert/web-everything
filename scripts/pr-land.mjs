@@ -128,13 +128,30 @@ const WAIT = !flags['no-wait'];
 const DRY_RUN = !!flags['dry-run'];
 const FALLBACK_GIT = !!flags['fallback-git'];
 const AS_JSON = !!flags.json;
-// #2833 — the lane-verification finish-guard. `--require-verified` (or env WE_REQUIRE_VERIFIED=1) DEMANDS a
-// fresh GREEN marker for the HEAD being landed — the solo / conveyor build flow passes it so a lane that
-// skipped its synchronous suite run cannot deliver. An UNFINISHED (`running`) marker for that HEAD is refused
-// UNCONDITIONALLY (it is the exact observed stall — a backgrounded run that yielded mid-flight). The documented
-// break-glass WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).
+// #2833 — the lane-verification finish-guard. #3321 INVERTED WHO HAS TO SPEAK UP. This comment used to read
+// "`--require-verified` (or env WE_REQUIRE_VERIFIED=1) DEMANDS a fresh GREEN marker for the HEAD being landed —
+// the solo / conveyor build flow passes it so a lane that skipped its synchronous suite run cannot deliver."
+// THAT IS NOW WRONG in its load-bearing half: a fresh GREEN marker is demanded BY DEFAULT, of every caller, and
+// `--require-verified` is merely the (still-honoured) explicit spelling of the default. The solo / conveyor flow
+// no longer has to pass anything to be gated. What a caller must now do explicitly is the OPPOSITE — say
+// `--no-require-verified` to land without a marker, which BOTH CI-gated callers do — the drain (`buildPrLandArgs`
+// in we:scripts/lane-drain.mjs) and the parallel `/workflow` producer's four argvs
+// (we:skills-src/batch-backlog-items/parallel-execute.workflow.js) — because they land from the PRIMARY checkout
+// against a lane ref, where a lane clone's marker cannot exist. Which callers say what is not left to a comment:
+// the caller sweep in we:scripts/__tests__/lane-verify.test.mjs harvests `pr-land` COMMAND STRINGS from the
+// tracked file set and requires each to declare a posture (a verify flag, or an adjacent `verify-lane` run).
+// #3321 round 5 — THIS SENTENCE READ "harvests EVERY `pr-land` invocation in the tracked file set". That was a
+// completeness claim larger than the check, which is the exact defect this PR was bounced for five rounds
+// running: round 4's harvest regex knew only the bare `node scripts/pr-land.mjs` spelling, so a live emitter
+// written with this repo's own `we:` locus prefix was invisible to it. The sweep's real scope and its stated
+// limits (which path spellings it knows, that array-built argvs need their own case, that source adjacency is a
+// proxy and not proof of order) live beside the sweep itself — read them there, do not infer them from here.
+// An UNFINISHED (`running`) marker for that HEAD is refused UNCONDITIONALLY (it is the exact observed stall — a
+// backgrounded run that yielded mid-flight), and the opt-out does NOT relax that. The documented break-glass
+// WE_LAND_UNVERIFIED=1 overrides the whole gate (the PR still rides the required CI check).
 // #2833 finding 5 — resolve through the SHARED resolver so this gate and `verify-lane check` agree on the same
-// flag/env pair (both call `resolveVerifyOptions`): `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, plus the
+// flag/env pair (both call `resolveVerifyOptions`): the #3321 default, `--require-verified` /
+// `WE_REQUIRE_VERIFIED=1`, the `--no-require-verified` / `WE_REQUIRE_VERIFIED=0` opt-out, plus the
 // `WE_LAND_UNVERIFIED=1` break-glass.
 const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
 const TITLE = typeof flags.title === 'string' ? flags.title : null;
@@ -720,13 +737,21 @@ function runCli() {
   //     verification NOT look complete: it reads the lane's `.git/.lane-verify` marker (written synchronously by
   //     `scripts/verify-lane.mjs`) and refuses to publish/land the source commit when that commit's verification
   //     is UNFINISHED (`running` — the exact stall), CORRUPT (marker present but unparseable), or — under
-  //     --require-verified / WE_REQUIRE_VERIFIED — absent or red. A `running` marker for THIS HEAD is ALWAYS
-  //     refused (a half-run must never look complete); a `red` marker blocks only under --require-verified (the
-  //     "absent/red under --require-verified" contract) since the required CI check gates the merge otherwise; a
-  //     missing marker only blocks when verification is required (the CI-gated drain / parallel-workflow paths
-  //     verify via the required GitHub check, not this marker, so they are not blocked). WE_LAND_UNVERIFIED=1 is
-  //     the documented break-glass. Runs AFTER the dry-run block (a dry run reports the plan without being gated)
-  //     and BEFORE any push.
+  //     BY DEFAULT since #3321 — absent or red. A `running` marker for THIS HEAD is ALWAYS refused (a half-run
+  //     must never look complete); a `red` marker and a missing marker block unless the caller took the
+  //     `--no-require-verified` opt-out, since the required CI check gates the merge for such a caller.
+  //     #3321 — THE PARENTHETICAL HERE USED TO READ "a missing marker only blocks when verification is required
+  //     (the CI-gated drain / parallel-workflow paths verify via the required GitHub check, not this marker, so
+  //     they are not blocked)". That stated the mechanism BACKWARDS once the default flipped: those paths are not
+  //     blocked because they now PASS `--no-require-verified` — the drain in `buildPrLandArgs`
+  //     (we:scripts/lane-drain.mjs) and the parallel workflow at all four of its invocations
+  //     (we:skills-src/batch-backlog-items/parallel-execute.workflow.js) — NOT because saying nothing is read as
+  //     "not tracked here, go ahead". (This retraction itself named only the drain at first, while asserting both
+  //     were handled; review round 2 caught that and the workflow was wired to match.) Saying
+  //     nothing now means "verified, please". Left as written, the sentence would tell the next reader that a
+  //     CI-gated caller needs no flag, which is exactly the wedge #3321's review caught.
+  //     WE_LAND_UNVERIFIED=1 is the documented break-glass. Runs AFTER the dry-run block (a dry run reports the
+  //     plan without being gated) and BEFORE any push.
   {
     // Resolve the marker in the REAL git dir (`.git` is a directory in a clone, a FILE in a worktree; #2833
     // finding 4) and read it through the SHARED reader `readVerifyMarker` (#2833 finding 2) — NEVER a hand-inlined

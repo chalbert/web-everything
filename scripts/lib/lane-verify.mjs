@@ -13,8 +13,9 @@
  *     `running` marker at start and rewrites it to `green`/`red` at finish. If the process is killed mid-run
  *     (the stall), the marker is stranded at `running` — a DETECTABLY-unfinished verification.
  *   - the delivery gate (`pr-land.mjs`) reads the marker for the HEAD it is about to land and REFUSES when the
- *     verification is unfinished (`running` — the exact stall signature) or, under `--require-verified`, absent.
- *     A stranded/abandoned run can no longer masquerade as a delivered lane.
+ *     verification is unfinished (`running` — the exact stall signature) or — since #3321, BY DEFAULT — absent
+ *     or red. A stranded/abandoned run can no longer masquerade as a delivered lane, and neither can a lane that
+ *     never started one.
  *
  * This module is the DECISION half — the gate functions (`verifyGateDecision`, `isVerifyAbandoned`, the marker
  * body builders) take no filesystem, no git, no clock (the caller passes `nowMs`), so they stay unit-testable.
@@ -29,6 +30,98 @@
  * `{ corrupt: true }`, which the gate refuses). Likewise `resolveVerifyOptions` single-sources the
  * `--require-verified`/`WE_REQUIRE_VERIFIED`/`WE_LAND_UNVERIFIED` flag+env resolution both entry points apply
  * (#2833 finding 5 — `check` mode used to ignore `WE_REQUIRE_VERIFIED`, disagreeing with pr-land).
+ *
+ * ── #3321: VERIFICATION IS MANDATORY BEFORE A LANE LANDS ────────────────────────────────────────────────
+ * #2833 shipped the gate but left `requireVerified` DEFAULT FALSE, so the mandatory half never engaged: a lane
+ * whose suites had never run at all landed on the `untracked` verdict — "no marker → not tracked here → allow".
+ * That is a gate that PASSES WHEN IT CANNOT TELL, and it is measurably expensive: 18 of the 39 confirmed review
+ * findings in `scripts/review-corpus/` had their input available at COMMIT time, where the very suite this marker
+ * records would have caught them. The suite itself had been red on every macOS host and nobody noticed, because
+ * nothing on the delivery path was obliged to look.
+ *
+ * So the default INVERTS. Verification is required unless a caller explicitly says otherwise, and there are now
+ * exactly two documented ways past the gate — deliberately different in strength:
+ *
+ *   1. OPT-OUT — `--no-require-verified` (or `--require-verified=0|false|no|off`, or `WE_REQUIRE_VERIFIED=0`).
+ *      Restores the pre-#3321 ADVISORY posture for callers that genuinely verify elsewhere. An opt-out with no
+ *      callers would be a claim, not an escape hatch. The callers that TAKE it are two files:
+ *        · `we:scripts/lane-drain.mjs#buildPrLandArgs` — the merge-queue drain. Lands from the PRIMARY checkout,
+ *          where a lane clone's marker cannot exist; its required GitHub check is the real gate (#1937).
+ *        · `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — all FOUR invocations (the WE and
+ *          impl per-lane PR opens, and the two Finalize label-reconcile calls, the latter from PRIMARY_ROOT
+ *          against a lane ref — the same unreachable-marker shape as the drain). That workflow already runs the
+ *          full gate at its step 4; it verifies without RECORDING, and its file says why it cannot simply record.
+ *      Both are the SAME shape: the marker is structurally unreachable, so demanding it could only ever fail.
+ *
+ *      RETRACTION — THIS LIST WAS TWICE DESCRIBED AS SOMETHING IT IS NOT. Round 2 of PR #1609 called it "exactly
+ *      one" entry, on the strength of a caller sweep that had missed the workflow. Round 3 corrected the count and
+ *      then made a second, larger false claim, which read:
+ *
+ *          "THE COMPLETE LIST, swept from every repo-committed `pr-land.mjs` invocation carrying a
+ *           `--ref=`/`--repo=`, and it is two files, not one … The sweep now RUNS … it harvests every committed
+ *           `pr-land` invocation straight from source … A new flag-free call site reddens the suite instead of
+ *           reaching the gate — so this comment can now only go stale, never silently wrong."
+ *
+ *      WRONG, AND WRONG AT THE TIME. The round-3 sweep iterated two hard-coded filenames, so a flag-free call
+ *      site in a THIRD file reached the gate in silence (review round 3 measured exactly that: the suite stayed
+ *      green at 53 passed with one added to `we:scripts/lane-review.mjs`). And "every repo-committed invocation"
+ *      was false by the sweep's own predicate — run over `git ls-files` it found three further emitters saying
+ *      nothing about verification. What is written above is therefore NOT a completeness claim about `pr-land`
+ *      call sites; it is the list of callers that take THIS ESCAPE.
+ *
+ *      RETRACTION, ROUND 5 — the sentence that used to finish that paragraph read: "and it is the sweep, not
+ *      this comment, that is now authoritative about the rest." FALSE WHEN WRITTEN, and false by the sweep's own
+ *      predicate for the fourth consecutive round. Round 4's sweep matched only the bare spelling
+ *      `node scripts/pr-land.mjs …`, while this repo's documentation convention writes `node we:scripts/…`, so
+ *      one live emitter was invisible to it: `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md` —
+ *      a `type: feedback` agent memory, i.e. a loaded instruction, carrying the canonical cross-repo delivery arc
+ *      for Frontier UI and plateau-app, flag-free and with no adjacent verify. An agent following it would have
+ *      met this gate at `pr-land` step 1b with exit 3 / `unverified`. Measured, not assumed: running the sweep's
+ *      own predicate over `git grep -lF pr-land.mjs` (213 candidate files) with and without an optional `we:`
+ *      prefix harvested 8 invocations vs 7, and that file's line was the whole difference.
+ *
+ *      THE SWEEP IS WHAT HOLDS — WITHIN ITS STATED SCOPE, WHICH IS NOT "EVERYTHING".
+ *      `we:scripts/__tests__/lane-verify.test.mjs` ("caller sweep") harvests every `pr-land` COMMAND STRING it
+ *      can see from `git grep -lF pr-land.mjs` over tracked files — minus one stated, count-pinned exclusion
+ *      (`pr-land.mjs`'s own `--help` banner) — and requires each to DECLARE ITS POSTURE: carry a verify flag, or
+ *      be preceded within 3 lines by a `verify-lane.mjs` / `run.mjs verify` run. Each is then driven through this
+ *      resolver and `verifyGateDecision` on the marker state that path really sees. Its LIMITS are stated there
+ *      rather than left for the next round to discover: it reads command strings carrying at least one `--flag`
+ *      (a bare flagless `node …pr-land.mjs` in prose is not harvested), it knows three spellings of the path
+ *      (bare, `we:`, `./`), array-built argvs are pinned by a separate case, and source adjacency is a proxy for
+ *      "the verify precedes the land", never a proof of execution order. Two named MUTATION PROBES — the plain
+ *      shape and the `we:`-prefixed shape, each injected into a real tracked file — pin that a flag-free call
+ *      site in a file nobody listed reddens the suite.
+ *
+ *      THE OTHER ARM IS THE POINT OF THE ITEM. The lane-local emitters (the serial `/batch` close-out in
+ *      `we:skills-src/batch-backlog-items/SKILL.md`, the canonical per-item arc in
+ *      `we:docs/agent/backlog-workflow.md`, `we:agent-memory-src/single-session-should-use-a-lane.md`, and — added
+ *      in round 5 — the cross-repo arc in `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md`) do NOT
+ *      take this opt-out and must not: they run `pr-land` from the LANE, where the marker IS reachable, so the
+ *      strict gate is the correct answer and a blanket opt-out would gut the gate on the one path where it can
+ *      engage. They were nevertheless BROKEN, in two different ways. `we:docs/agent/backlog-workflow.md` ran the
+ *      `verify` operation BEFORE `resolve` and before the item commit, so the sha-keyed marker it wrote was
+ *      already STALE at land (the #3212 shape; measured `ok:false` / `unverified` on a stale green, same as on an
+ *      absent one). The other three named no marker-writing verification at all — `/batch`'s SKILL.md ran the
+ *      item's in-locus gate directly (`npm run check:standards --scope=…`, which writes no marker), and neither
+ *      agent memory mentioned verification. Each now records the verification AFTER the item commit, immediately
+ *      before `pr-land`.
+ *
+ *      WHAT THAT COSTS, STATED HONESTLY. An earlier cut of this paragraph, and of the card, called it "one suite
+ *      run per item, relocated — not a second one". WRONG. Measured against `origin/main`'s copies: the earlier
+ *      check in `backlog-workflow.md` and `/batch`'s in-locus gate are both still instructed, so for those two
+ *      arcs this is an ADDITIONAL run of `verify-lane`'s gate, not a moved one; and for the two agent memories
+ *      there was no verification before at all, so it is a FIRST.
+ *
+ *      The opt-out relaxes only the two "we never saw a result" cells —
+ *      absent/stale and `red` — and it is NOT a bypass: a FRESH `running` marker (the #2833 stall) and a
+ *      `corrupt` marker still refuse, because those are evidence of a BROKEN verification, not a missing one.
+ *   2. BREAK-GLASS — `WE_LAND_UNVERIFIED=1`. The full override, every cell, including stall and corrupt. For a
+ *      guard bug or a wedged lane; the PR still rides the required CI check. House style: `WE_MERGE_BREAK_GLASS`.
+ *
+ * Fail-closed by construction: `verifyGateDecision`'s own `requireVerified` parameter defaults TRUE as well, so a
+ * caller that FORGETS to pass the resolved option gets the strict gate, never the permissive one. The whole
+ * defect class this item closes is a default that reads as "allow" when the answer is unknown.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,14 +157,56 @@ export function readVerifyMarker(gitDir) {
   }
 }
 
+/** The tokens that mean "no" in a flag value or an env var. `''` is deliberately NOT one of them: an env var set
+ *  to empty is an accident, not a decision, and a fail-closed gate must not read an accident as consent (#3321). */
+const NEGATIVE_TOKENS = new Set(['0', 'false', 'no', 'off']);
+
+/** Is this flag/env value an EXPLICIT negative? Pure. `undefined` (absent) is not — absence never opts out. */
+function isNegative(value) {
+  if (value === false) return true;
+  return typeof value === 'string' && NEGATIVE_TOKENS.has(value.trim().toLowerCase());
+}
+
 /** Resolve the verification GATE options from an entry point's parsed flags + process env. Pure. The SINGLE
  *  source both `verify-lane.mjs check` and `pr-land.mjs` call, so the two can never disagree (#2833 finding 5 —
  *  `check` mode read only `flags['require-verified']` while pr-land also honoured `WE_REQUIRE_VERIFIED`, so the
- *  same environment gave two verdicts). `requireVerified` = the `--require-verified` flag OR `WE_REQUIRE_VERIFIED=1`;
- *  `breakGlass` = the documented `WE_LAND_UNVERIFIED=1` override. */
+ *  same environment gave two verdicts).
+ *
+ *  #3321 — `requireVerified` now defaults TRUE. Verification is MANDATORY before a lane lands; a caller must say
+ *  so explicitly to land unverified, and saying nothing means "verified, please", never "don't bother":
+ *    - `--require-verified` (bare, or `=1|true|…`)  → required  (the pre-#3321 spelling, still honoured)
+ *    - `WE_REQUIRE_VERIFIED=1`                      → required  (ditto)
+ *    - nothing at all                               → required  ← THE FLIP
+ *    - `--no-require-verified`                      → OPT-OUT   (advisory posture; NOT a bypass — see below)
+ *    - `--require-verified=0|false|no|off`          → OPT-OUT
+ *    - `WE_REQUIRE_VERIFIED=0|false|no|off`         → OPT-OUT
+ *  The opt-out only relaxes the "we never saw a result" cells (absent/stale, `red`). A fresh `running` marker
+ *  (the #2833 stall) and a `corrupt` marker still refuse under it — the FULL override is `WE_LAND_UNVERIFIED=1`,
+ *  reported separately as `breakGlass`. Two different strengths, kept distinguishable on purpose.
+ *
+ *  When those inputs CONFLICT, an explicit positive FLAG beats a negative ENV (`--require-verified` with an
+ *  ambient `WE_REQUIRE_VERIFIED=0` ⇒ required), and `--require-verified` beats `--no-require-verified`. Both
+ *  tie-breaks resolve toward verifying — a fail-closed gate must not read a contradiction as consent, for the
+ *  same reason an empty env var is not consent. See the precedence note in the body. */
 export function resolveVerifyOptions({ flags = {}, env = {} } = {}) {
+  // PRECEDENCE: an EXPLICIT POSITIVE FLAG OUTRANKS EVERYTHING BELOW IT — including a negative env var. The first
+  // cut of #3321 collapsed flag and env into one flat OR, which silently regressed the pre-#3321 precedence: an
+  // ambient `WE_REQUIRE_VERIFIED=0` in the environment defeated an explicit `--require-verified` on the command
+  // line (the old resolver had the flag win, since it was `!!flag || env === '1'`). That is fail-OPEN on a
+  // contradictory invocation, and this gate exists to fail CLOSED. A flag is a decision made HERE, for THIS run;
+  // an env var is ambient and may be inherited from a parent process that knew nothing about this call. When they
+  // disagree, the deliberate one wins — and when the deliberate one is "verify", it wins doubly, because reading a
+  // stale export as permission to skip verification is the whole defect class this item closes.
+  const flagRequires = flags['require-verified'] !== undefined && !isNegative(flags['require-verified']);
+  const optedOut = !flagRequires && (
+    // `--no-require-verified` — present and not itself negated (`--no-require-verified=0` is a double negative
+    // nobody means; treat only a straightforward presence as the opt-out). Passing BOTH `--require-verified` and
+    // `--no-require-verified` is contradictory, and `flagRequires` above resolves it fail-closed: verify.
+    (flags['no-require-verified'] !== undefined && !isNegative(flags['no-require-verified']))
+    || isNegative(flags['require-verified'])
+    || isNegative(env.WE_REQUIRE_VERIFIED));
   return {
-    requireVerified: !!flags['require-verified'] || env.WE_REQUIRE_VERIFIED === '1',
+    requireVerified: !optedOut,
     breakGlass: env.WE_LAND_UNVERIFIED === '1',
   };
 }
@@ -133,32 +268,58 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  * THE FINISH-GUARD DECISION (#2833). Given the lane's verification `record` and the `headSha` a delivery step
  * (pr-land) is about to land, decide whether that HEAD is verified enough to deliver. Pure — no fs/git/clock.
  *
+ * #3321 — `requireVerified` DEFAULTS TRUE here, not just in `resolveVerifyOptions`. A caller that omits the
+ * option gets the strict gate: the failure mode this closes is precisely a gate that allows when it cannot tell.
+ * Read every "`requireVerified` false" cell below as "under the explicit `--no-require-verified` opt-out".
+ *
  *   - `breakGlass` (env `WE_LAND_UNVERIFIED=1`) → ALWAYS ok, flagged. The deliberate documented override so a
  *     guard bug / a legitimately-CI-only land is never permanently wedged (house style: `WE_MERGE_BREAK_GLASS`).
+ *     This is the FULL bypass — the opt-out is not: it leaves stall and corrupt refusing.
  *   - a `green` record whose `sha` === `headSha` → ok (`verified`). The one clean pass.
  *   - a `running` record whose `sha` === `headSha` → the EXACT observed stall: a verification was started for
  *     this commit and never finished. A FRESH (in-flight) `running` marker is NOT ok (`verify-unfinished`) — a
  *     half-run verification must never look complete. But a PAST-TTL `running` marker (the writer is presumed
- *     gone) must not wedge the CI-gated drain forever: past-TTL AND `requireVerified` false ⇒ DEGRADE to the
- *     non-blocking `untracked` verdict (the required CI check still gates the merge) — #2833 finding 1. Under
- *     `requireVerified` it stays refused even when abandoned (the solo/conveyor build gate demands a real green).
+ *     gone) must not wedge an opted-out CI-gated caller forever: past-TTL AND `requireVerified` false ⇒ DEGRADE
+ *     to the non-blocking `untracked` verdict (the required CI check still gates the merge) — #2833 finding 1.
+ *     Under `requireVerified` — now the DEFAULT (#3321) — it stays refused even when abandoned: that path demands
+ *     a real green. That is not a wedge, because re-running `verify-lane` legitimately overwrites a `running`
+ *     marker for the same sha (its start-write refuses only to clobber a TERMINAL record for a FOREIGN sha).
  *   - a `red` record whose `sha` === `headSha`: refused (`verify-red`) ONLY under `requireVerified`; without it
  *     the marker is advisory and the record is allowed (`red-ci-gated`). This is the asymmetry between the two
  *     hazard classes — "never finished" (`running`) is always refused; "finished badly" (`red`) blocks only when
  *     the caller demanded a local green. It matches the "absent/red under `--require-verified`" contract in the
- *     PR body + #2833 resolution, and keeps the CI-gated drain / parallel-workflow paths (which gate the merge
- *     via the required GitHub `test` check — a red tree also fails it) untouched, as documented.
+ *     PR body + #2833 resolution. THIS CLAUSE USED TO END "...and keeps the CI-gated drain / parallel-workflow
+ *     paths (which gate the merge via the required GitHub `test` check — a red tree also fails it) UNTOUCHED, as
+ *     documented." THAT WAS WRONG, and it is the exact error #3321's review caught: those paths passed NOTHING,
+ *     and after the flip "nothing" resolves to `requireVerified: true`, so they were not kept untouched — they
+ *     were silently switched to the strict gate and would have refused every couple. They are untouched only
+ *     NOW, because BOTH were changed to pass `--no-require-verified` explicitly: `we:scripts/lane-drain.mjs`
+ *     (in `buildPrLandArgs`) and `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (all four
+ *     pr-land invocations — the two per-lane PR opens and the two Finalize label-reconcile calls). The first
+ *     retraction of this clause named only the drain and left the parallel-workflow half asserted-but-unfixed,
+ *     which review round 2 caught: a retraction that fixes one of the two callers it names is still a false
+ *     claim. Inverting a default is a change to every caller that says nothing; it cannot leave them "unchanged"
+ *     by construction.
  *   - a `corrupt` record (the marker exists but did not parse) → NOT ok (`verify-corrupt`), regardless of
  *     `requireVerified`. A torn/garbled marker must never fold into `absent` and fail OPEN — exactly backwards
  *     for a stall guard (#2833 finding 5). Re-run `verify-lane` (or delete the marker) to recover.
  *   - no record, or a record for a DIFFERENT `sha` (stale — the tree moved on): if `requireVerified` → NOT ok
- *     (`unverified`); else ok (`untracked`). The default-allow keeps CI-gated callers (the drain, the parallel
- *     workflow — which verify via the required GitHub check, not this marker) working unchanged; the solo /
- *     conveyor build flow passes `--require-verified` to demand a local green before it lands.
+ *     (`unverified`); else ok (`untracked`). #3321 flipped which of those is the default. THIS is the cell the
+ *     item exists for: "no marker" used to mean "not tracked here, go ahead", so a lane whose suites had never
+ *     run landed on the strength of the gate not knowing. It now means "unverified — run `verify-lane`". The
+ *     permissive `untracked` verdict survives only for a caller that explicitly opts out (`--no-require-verified`)
+ *     because it verifies elsewhere. That is not hypothetical and must not be left as an "e.g.": the callers are
+ *     `buildPrLandArgs` in `we:scripts/lane-drain.mjs` and the four pr-land invocations in
+ *     `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` — both land from a checkout where a lane
+ *     clone's marker can never appear, and both are gated by the required GitHub check (#1937). If either call
+ *     site drops the flag, this cell wedges that whole path — see the test that pins the built argv through this
+ *     function in `we:scripts/__tests__/lane-drain.test.mjs`.
+ *     Note a MISSING `headSha` also lands here (nothing can match it), and so is refused by default rather than
+ *     waved through: not being able to identify the tree is not evidence that the tree is fine.
  *
  * @returns {{ ok:boolean, status:string, reason:string, detail:string }}
  */
-export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs = DEFAULT_VERIFY_TTL_MINUTES * 60_000, breakGlass = false, requireVerified = false } = {}) {
+export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs = DEFAULT_VERIFY_TTL_MINUTES * 60_000, breakGlass = false, requireVerified = true } = {}) {
   if (breakGlass) {
     return { ok: true, status: 'break-glass', reason: 'break-glass', detail: 'WE_LAND_UNVERIFIED=1 — verification gate overridden (deliberate break-glass; the PR still rides the required CI check).' };
   }
@@ -200,13 +361,13 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     }
     // Advisory mode: the required CI check (which a red tree also fails) gates the actual merge, so a local red
     // marker does not block here — matching "absent/red under --require-verified" (docs + #2833 resolution).
-    return { ok: true, status: 'red', reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but --require-verified was not set — not blocking here; the PR's required CI check gates the merge.` };
+    return { ok: true, status: 'red', reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
 
   // No marker, or a marker for a different commit (the tree moved since it was written).
   const why = rec ? `the recorded verification is for ${String(rec.sha).slice(0, 8)}, not the HEAD being landed (${String(headSha).slice(0, 8)})` : 'no verification marker for this lane';
   if (requireVerified) {
-    return { ok: false, status: 'absent', reason: 'unverified', detail: `${why} — run \`node scripts/verify-lane.mjs\` (a foreground, blocking suite run) to record a green result before landing (or set WE_LAND_UNVERIFIED=1 to override).` };
+    return { ok: false, status: 'absent', reason: 'unverified', detail: `${why} — verification is MANDATORY before a lane lands (#3321): run \`node scripts/verify-lane.mjs\` (a foreground, blocking suite run) to record a green result for this HEAD. Deliberate escapes: --no-require-verified when the lane is verified elsewhere, or WE_LAND_UNVERIFIED=1 to override the gate entirely.` };
   }
-  return { ok: true, status: 'untracked', reason: 'untracked', detail: `${why} — verification not tracked via the lane marker here (the PR's required CI check still gates the merge).` };
+  return { ok: true, status: 'untracked', reason: 'untracked', detail: `${why} — this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0), so the marker is advisory here (the PR's required CI check still gates the merge).` };
 }

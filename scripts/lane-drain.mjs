@@ -205,9 +205,43 @@ export function planDrain(manifest, queuedState) {
  * Build the `node scripts/pr-land.mjs …` argv for one repo's ref. Pure. `--no-ff` merge history is pr-land's
  * default; `--repo` is passed only for a non-primary (non-WE) repo (WE lands in the drain's cwd). A body
  * file (the #2170 dismissals PR body) is forwarded when supplied. `--json` so the drain reads the result.
+ *
+ * #3321 — `--no-require-verified` IS MANDATORY ON THIS ARGV, and it is not a weakening of that item's gate; it is
+ * ONE OF THE TWO call sites that item's opt-out exists for. THIS CLAUSE USED TO READ "the one call site", which was
+ * wrong: review round 2 of PR #1609 found the parallel `/workflow` producer
+ * (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js`) still emitting four flag-free `pr-land` argvs.
+ * RETRACTION — this clause used to read: "The complete, swept list lives in the OPT-OUT entry of
+ * `we:scripts/lib/lane-verify.mjs`'s header — add to it there, and the caller-sweep test in
+ * `we:scripts/__tests__/lane-verify.test.mjs` will hold you to it." THAT INSTRUCTION WOULD HAVE COST THE NEXT
+ * AUTHOR: at the time it was written the caller-sweep test iterated TWO HARD-CODED FILENAMES, so it would NOT
+ * have held anyone to anything for a caller added in a new file — review round 3 of PR #1609 measured a flag-free
+ * invocation added to a third file passing the suite green.
+ * As of round 4 the sweep reads the TRACKED FILE SET (`git grep -lF pr-land.mjs`, minus `pr-land.mjs`'s own
+ * `--help` banner) and requires every invocation it finds to declare its posture — carry a verify flag, or be
+ * preceded within 3 lines by a `verify-lane.mjs` / `run.mjs verify` run. So the enforcement the sentence promised
+ * now exists, and a new call site anywhere in the repo reddens the suite rather than reaching the gate. The list
+ * in the OPT-OUT header is the roster of callers that TAKE this escape, not a completeness claim about `pr-land`
+ * call sites; keep it current, but the test — not that list — is what holds.
+ * #3321 flipped `resolveVerifyOptions`'s default to "verification
+ * required", which is right for a lane session landing its OWN clone — the clone is where `verify-lane.mjs` writes
+ * `.git/.lane-verify`, so the marker is reachable and demanding it is meaningful. The drain is the opposite shape on
+ * BOTH counts, so a flag-free argv here is a gate that can only ever fail:
+ *   - it lands WE from the PRIMARY checkout (`DRAIN_REPOS.we.path = null` ⇒ cwd, above), and the lane it is landing
+ *     is a SEPARATE CLONE. A lane's `.git/.lane-verify` can therefore NEVER appear in the git dir pr-land reads, so
+ *     the marker is not merely missing-this-time but structurally unreachable — the gate would return `unverified`
+ *     for every queued couple, forever, and `reopenStrandedItem` would send each item back to `open`.
+ *   - the drain does not need it: the PR's required GitHub check is the per-repo landing authority (#1937, stated
+ *     on `DRAIN_REPOS` above), and a couple only reaches here already labelled `ready-to-merge` — i.e. green.
+ * This is exactly the "verifies elsewhere" caller #3321's opt-out was written for. #2833's resolution said the same
+ * of this path ("the CI-gated drain / parallel-workflow paths verify via the required GitHub check") — but read that
+ * as WHY the opt-out is right here, NOT as evidence those paths are already wired for it. Under #3321's default they
+ * are unblocked only where the flag is actually passed; reading that sentence the other way is what produced the
+ * wedge #1609's review caught, twice. It is the NARROW
+ * opt-out, never the `WE_LAND_UNVERIFIED=1` break-glass: a fresh `running` marker (the #2833 stall) and a corrupt
+ * marker still refuse under it, so a genuinely half-run verification is still caught here.
  */
 export function buildPrLandArgs({ ref, repoPath = null, bodyFile = null, dryRun = false } = {}) {
-  const args = ['scripts/pr-land.mjs', `--ref=${ref}`, '--json'];
+  const args = ['scripts/pr-land.mjs', `--ref=${ref}`, '--json', '--no-require-verified'];
   if (repoPath) args.push(`--repo=${repoPath}`);
   if (bodyFile) args.push(`--body-file=${bodyFile}`);
   if (dryRun) args.push('--dry-run');

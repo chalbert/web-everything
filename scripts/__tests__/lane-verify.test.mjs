@@ -8,6 +8,9 @@
  *   (`scripts/verify-lane.mjs`) and pr-land's finish-guard calls `verifyGateDecision` here.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import {
   VERIFY_FILENAME,
   DEFAULT_VERIFY_TTL_MINUTES,
@@ -112,7 +115,7 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
     expect(v.reason).toBe('unverified');
   });
 
-  it('NO marker without --require-verified → ok (CI-gated drain / workflow paths untouched)', () => {
+  it('NO marker under the EXPLICIT opt-out (requireVerified:false) → ok (a caller that verifies elsewhere)', () => {
     const v = verifyGateDecision({ record: null, headSha: SHA, requireVerified: false });
     expect(v.ok).toBe(true);
     expect(v.reason).toBe('untracked');
@@ -211,10 +214,12 @@ describe('normalizeVerifyRecord — the SHARED normalizer both readers use (#283
 
 describe('resolveVerifyOptions — one flag/env resolver for BOTH entry points (#2833 finding 5)', () => {
   it('--require-verified OR WE_REQUIRE_VERIFIED=1 → requireVerified true; WE_LAND_UNVERIFIED=1 → breakGlass', () => {
-    expect(resolveVerifyOptions({ flags: {}, env: {} })).toEqual({ requireVerified: false, breakGlass: false });
+    // #3321 flipped the bare default from false to true; the two POSITIVE spellings below still resolve the same.
+    expect(resolveVerifyOptions({ flags: {}, env: {} })).toEqual({ requireVerified: true, breakGlass: false });
     expect(resolveVerifyOptions({ flags: { 'require-verified': true }, env: {} })).toEqual({ requireVerified: true, breakGlass: false });
     expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: false });
-    expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: false, breakGlass: true });
+    // break-glass is reported SEPARATELY and does not relax `requireVerified` — the gate reads both.
+    expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: true });
   });
   it('the SAME flag/env pair yields IDENTICAL options at both call sites (they call one function)', () => {
     // verify-lane `check` and pr-land both call resolveVerifyOptions with {flags, env}; identical input ⇒ identical
@@ -226,6 +231,506 @@ describe('resolveVerifyOptions — one flag/env resolver for BOTH entry points (
     const atPrLand = resolveVerifyOptions({ flags, env });
     expect(atVerifyLane).toEqual(atPrLand);
     expect(atVerifyLane).toEqual({ requireVerified: true, breakGlass: true });
+  });
+});
+
+/**
+ * #3321 — VERIFICATION IS MANDATORY BEFORE A LANE LANDS.
+ *
+ * #2833 built the gate but defaulted `requireVerified` FALSE, so its mandatory half never engaged: a lane whose
+ * suites had never run at all landed on the `untracked` verdict — "no marker → not tracked here → allow". A gate
+ * that PASSES WHEN IT CANNOT TELL. The cost is measured: 18 of the 39 confirmed findings in the review corpus had
+ * their input available at COMMIT time, where the suite this marker records would have caught them; and the suite
+ * itself sat red on every macOS host precisely because nothing on the delivery path was obliged to look.
+ *
+ * These tests pin BOTH directions, because a gate that refuses everything is worse than the hole it closes:
+ *   · the REFUSAL — unverified/red/unidentifiable now blocks by default, at both the resolver and the decision; and
+ *   · the PASS — a legitimately verified lane (green marker for THIS head) sails through with no options at all.
+ * Plus the two escapes, kept at deliberately different strengths: the opt-out relaxes only "we never saw a
+ * result"; only break-glass overrides a broken one.
+ */
+describe('#3321 — the gate no longer passes when it cannot tell (requireVerified defaults true)', () => {
+  const greenFor = (sha) => verifyFinishBody(verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }), { finishedAt: new Date(T0).toISOString(), exitCode: 0 });
+  const runningFor = (sha) => verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() });
+
+  describe('the resolver: silence means "verified, please", never "don\'t bother"', () => {
+    it('#3321 no flags, no env → requireVerified TRUE (the flip; was false before this item)', () => {
+      expect(resolveVerifyOptions({ flags: {}, env: {} }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions()).toEqual({ requireVerified: true, breakGlass: false });
+    });
+
+    it('#3321 every documented OPT-OUT spelling resolves to requireVerified false', () => {
+      const optOuts = [
+        { flags: { 'no-require-verified': true }, env: {} },
+        { flags: { 'require-verified': '0' }, env: {} },
+        { flags: { 'require-verified': 'false' }, env: {} },
+        { flags: { 'require-verified': 'no' }, env: {} },
+        { flags: { 'require-verified': 'OFF' }, env: {} },
+        { flags: {}, env: { WE_REQUIRE_VERIFIED: '0' } },
+        { flags: {}, env: { WE_REQUIRE_VERIFIED: 'false' } },
+      ];
+      for (const input of optOuts) {
+        expect(resolveVerifyOptions(input).requireVerified, JSON.stringify(input)).toBe(false);
+      }
+    });
+
+    it('#3321 only an EXPLICIT negative opts out — absence and an empty/unknown value stay required', () => {
+      // An env var set to empty is an accident, not a decision. A fail-closed gate must not read an accident as
+      // consent, so `WE_REQUIRE_VERIFIED=` (and any value that is not one of the negative tokens) stays required.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '' } }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: 'maybe' } }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: { 'require-verified': undefined }, env: {} }).requireVerified).toBe(true);
+    });
+
+    it('#3321 an explicit --require-verified BEATS an ambient WE_REQUIRE_VERIFIED=0 (precedence, fail-closed)', () => {
+      // Review finding (b) on PR #1609: the first cut of #3321 collapsed flag and env into one flat OR, so an
+      // ambient negative env DEFEATED an explicit positive flag — a silent regression of the pre-#3321 precedence
+      // (`!!flags['require-verified'] || env === '1'`, where the flag won) and fail-OPEN on a contradictory
+      // invocation. A flag is a decision made for THIS run; an env var may be inherited from a parent that knew
+      // nothing about this call. The deliberate one wins, and it wins toward verifying.
+      for (const env of [{ WE_REQUIRE_VERIFIED: '0' }, { WE_REQUIRE_VERIFIED: 'false' }, { WE_REQUIRE_VERIFIED: 'off' }]) {
+        expect(resolveVerifyOptions({ flags: { 'require-verified': true }, env }).requireVerified, JSON.stringify(env)).toBe(true);
+        expect(resolveVerifyOptions({ flags: { 'require-verified': '1' }, env }).requireVerified, JSON.stringify(env)).toBe(true);
+      }
+      // The env still decides when the flag is absent — the opt-out is not being broken, only out-ranked.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_REQUIRE_VERIFIED: '0' } }).requireVerified).toBe(false);
+      // ...and an explicitly NEGATIVE flag still opts out; it is not "any mention of the flag wins".
+      expect(resolveVerifyOptions({ flags: { 'require-verified': '0' }, env: { WE_REQUIRE_VERIFIED: '1' } }).requireVerified).toBe(false);
+    });
+
+    it('#3321 contradictory flags resolve fail-closed: --require-verified beats --no-require-verified', () => {
+      // Nobody means both. A gate whose purpose is to refuse when it cannot tell must not read "I cannot tell"
+      // as consent, so the contradiction resolves toward verifying.
+      expect(resolveVerifyOptions({ flags: { 'require-verified': true, 'no-require-verified': true }, env: {} }).requireVerified).toBe(true);
+    });
+
+    it('#3321 break-glass is reported SEPARATELY and never relaxes requireVerified', () => {
+      // The two escapes are different strengths and must stay distinguishable: collapsing WE_LAND_UNVERIFIED into
+      // requireVerified would silently turn the narrow opt-out into the full bypass.
+      expect(resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } })).toEqual({ requireVerified: true, breakGlass: true });
+    });
+
+    /**
+     * #3321 — THE DOUBLE-NEGATIVE CORNER (PR #1609 r2, the correctness juror's CONFIRMED finding). The resolver's
+     * comments state that `--no-require-verified=0` is "a double negative nobody means" and resolves toward
+     * REQUIRED. That was documented, hand-traced and correct — and untested, which is how a stated contract turns
+     * into an accidental one. It is a real corner even if `pr-land`'s regex parser is unlikely to emit it: the
+     * parser accepts `--flag=<anything>`, so a caller CAN produce every row below, and the whole subject of this
+     * card is a gate that must never resolve an input it cannot read as "go ahead".
+     *
+     * Exhaustive over the resolver's inputs: {absent, affirmative, negative} for each of the two flag spellings ×
+     * {absent, '1', negative} for the env var = 27 rows, each asserted against the documented rule
+     * (affirmative flag → required; else any explicit negative → opt-out; else required).
+     */
+    it('#3321 every flag×flag×env combination resolves exactly as the comments claim (27 rows, negated negatives included)', () => {
+      const FLAG = { absent: undefined, affirmative: true, negative: '0' };
+      const ENV = { absent: undefined, on: '1', negative: '0' };
+      for (const [rvName, rv] of Object.entries(FLAG)) {
+        for (const [nrvName, nrv] of Object.entries(FLAG)) {
+          for (const [envName, ev] of Object.entries(ENV)) {
+            const flags = {};
+            if (rv !== undefined) flags['require-verified'] = rv;
+            if (nrv !== undefined) flags['no-require-verified'] = nrv;
+            const env = ev === undefined ? {} : { WE_REQUIRE_VERIFIED: ev };
+
+            // The documented rule, restated independently of the implementation.
+            const expected = rvName === 'affirmative' ? true
+              : !(nrvName === 'affirmative' || rvName === 'negative' || envName === 'negative');
+
+            const label = `require-verified:${rvName} no-require-verified:${nrvName} env:${envName}`;
+            expect(resolveVerifyOptions({ flags, env }).requireVerified, label).toBe(expected);
+          }
+        }
+      }
+      // The two rows the finding named, called out by name so a regression reads as itself in the failure output:
+      // a NEGATED negative is not an opt-out (it cancels, leaving the mandatory default)...
+      expect(resolveVerifyOptions({ flags: { 'no-require-verified': '0' }, env: {} }).requireVerified).toBe(true);
+      expect(resolveVerifyOptions({ flags: { 'no-require-verified': 'false' }, env: {} }).requireVerified).toBe(true);
+      // ...and a negated `--require-verified` still opts out even against WE_REQUIRE_VERIFIED=1, because the
+      // command line is the deliberate signal and it said "no".
+      expect(resolveVerifyOptions({ flags: { 'require-verified': 'off' }, env: { WE_REQUIRE_VERIFIED: '1' } }).requireVerified).toBe(false);
+    });
+  });
+
+  describe('the decision: a caller that omits the option gets the STRICT gate', () => {
+    it('#3321 THE HOLE, CLOSED: no marker + no requireVerified argument → REFUSED as unverified', () => {
+      // Before this item this exact call returned { ok: true, reason: 'untracked' } — a lane whose suites had
+      // never run was allowed to land because the gate could not tell that they had not.
+      const v = verifyGateDecision({ record: null, headSha: SHA });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('unverified');
+      expect(v.detail).toMatch(/verify-lane/);
+    });
+
+    it('#3321 a RED marker for this head + no requireVerified argument → REFUSED (was advisory)', () => {
+      const redRec = verifyFinishBody(runningFor(SHA), { finishedAt: new Date(T0).toISOString(), exitCode: 2 });
+      const v = verifyGateDecision({ record: redRec, headSha: SHA, nowMs: T0 });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('verify-red');
+    });
+
+    it('#3321 a marker for a DIFFERENT sha + no requireVerified argument → REFUSED (stale ≠ verified)', () => {
+      const v = verifyGateDecision({ record: greenFor(OTHER), headSha: SHA });
+      expect(v.ok).toBe(false);
+      expect(v.reason).toBe('unverified');
+    });
+
+    it('#3321 an UNIDENTIFIABLE head (no headSha) does not wave a green marker through', () => {
+      // Nothing can match a missing head, so this falls to the absent cell. Not being able to identify the tree
+      // is not evidence that the tree is fine — the whole defect class this item closes.
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: null }).ok).toBe(false);
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: undefined }).reason).toBe('unverified');
+    });
+
+    it('#3321 an ABANDONED (past-TTL) running marker no longer degrades to allow by default', () => {
+      // #2833 finding 1's degrade survives, but only for a caller that explicitly opted out.
+      const abandoned = { record: runningFor(SHA), headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES + 5) };
+      expect(verifyGateDecision(abandoned).ok).toBe(false);
+      expect(verifyGateDecision(abandoned).reason).toBe('verify-unfinished');
+      expect(verifyGateDecision({ ...abandoned, requireVerified: false }).ok).toBe(true);
+    });
+  });
+
+  describe('the counter-test: a legitimately verified lane still LANDS', () => {
+    // A gate that blocks everything is worse than the hole. These are the passes that must survive the flip.
+    it('#3321 a green marker for THIS head passes with NO options at all', () => {
+      const v = verifyGateDecision({ record: greenFor(SHA), headSha: SHA, nowMs: T0 + min(10) });
+      expect(v.ok).toBe(true);
+      expect(v.reason).toBe('verified');
+    });
+
+    it('#3321 a green marker still passes long after the TTL — sha-identity is the freshness test, not the clock', () => {
+      const v = verifyGateDecision({ record: greenFor(SHA), headSha: SHA, nowMs: T0 + min(DEFAULT_VERIFY_TTL_MINUTES * 100) });
+      expect(v.ok).toBe(true);
+      expect(v.reason).toBe('verified');
+    });
+
+    it('#3321 END TO END: the resolver\'s own output, fed to the gate, lands a verified lane and refuses a bare one', () => {
+      // The exact wiring both entry points do — `resolveVerifyOptions(…)` straight into `verifyGateDecision(…)`.
+      const opts = resolveVerifyOptions({ flags: {}, env: {} });
+      expect(verifyGateDecision({ record: greenFor(SHA), headSha: SHA, ...opts }).ok).toBe(true);
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }).ok).toBe(false);
+    });
+  });
+
+  describe('the two escapes are different strengths', () => {
+    it('#3321 the OPT-OUT is not a bypass: a fresh running marker and a corrupt marker still refuse under it', () => {
+      const optOut = resolveVerifyOptions({ flags: { 'no-require-verified': true }, env: {} });
+      expect(optOut).toEqual({ requireVerified: false, breakGlass: false });
+      // the #2833 stall — a half-run verification must never look complete, opt-out or not
+      expect(verifyGateDecision({ record: runningFor(SHA), headSha: SHA, nowMs: T0 + min(1), ...optOut }).reason).toBe('verify-unfinished');
+      // a marker that exists but did not parse is evidence of a BROKEN verification, not a missing one
+      expect(verifyGateDecision({ record: { corrupt: true }, headSha: SHA, ...optOut }).reason).toBe('verify-corrupt');
+      // ...while the cells it IS meant to relax do relax
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...optOut }).reason).toBe('untracked');
+    });
+
+    it('#3321 BREAK-GLASS is the full bypass, and reaches cells the opt-out does not', () => {
+      const bg = resolveVerifyOptions({ flags: {}, env: { WE_LAND_UNVERIFIED: '1' } });
+      expect(bg.requireVerified).toBe(true); // still "required" — break-glass overrides, it does not un-require
+      for (const record of [null, { corrupt: true }, runningFor(SHA)]) {
+        const v = verifyGateDecision({ record, headSha: SHA, nowMs: T0 + min(1), ...bg });
+        expect(v.ok).toBe(true);
+        expect(v.reason).toBe('break-glass');
+      }
+    });
+  });
+});
+
+// ── #3321 — THE CALLER SWEEP, as a test instead of an assertion in a comment ──────────────────────────────────
+//
+// The residual this item's round-3 fix named and deferred, built here instead. FOUR times now, a docblock or a
+// test name has asserted a completed sweep of the callers the flipped default re-points, and four times the
+// sweep had missed one: round 1 missed `we:scripts/lane-drain.mjs`, round 2 missed
+// `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` (four flag-free argvs, so every `/workflow`
+// lane died at pr-land's step-1b gate with exit 3 / `unverified`), round 3 missed the three DOC emitters
+// below, and round 4 missed `we:agent-memory-src/lane-pr-is-universal-delivery-all-repos.md` — see THE PREFIX
+// ARM on `PR_LAND_CMD`.
+//
+// RETRACTION — this comment used to end: "So the sweep runs here, over the real committed source: every
+// `node scripts/pr-land.mjs …` command string this repo ships must state its verification posture explicitly …
+// Add a fifth flag-free invocation and this reddens instead of shipping." THAT WAS FALSE WHEN WRITTEN. The
+// round-3 sweep iterated TWO HARD-CODED FILENAMES (`for (const file of [WORKFLOW, DRAIN])`) — the same
+// hand-maintained caller list it claimed to be replacing, relocated from a comment into a test. Measured by
+// review round 3, in this lane at `ff8088e4`: appending a flag-free `node scripts/pr-land.mjs` invocation
+// (argv `--ref=lane/x --label-on-green --json`) to a THIRD emitter (`scripts/lane-review.mjs`)
+// left the suite GREEN at 53 passed; appending the identical line to a swept file reddened it. And the list was
+// false by its own stated criterion: running its own predicate over `git ls-files` finds THREE further emitters
+// shipping a `--ref=` invocation that says nothing about verification —
+// `skills-src/batch-backlog-items/SKILL.md` (the serial `/batch` close-out),
+// `docs/agent/backlog-workflow.md` (the canonical per-item arc) and
+// `agent-memory-src/single-session-should-use-a-lane.md`.
+//
+// SO THE HARVEST IS NOW THE TRACKED FILE SET. `git grep -lF pr-land.mjs` over tracked files, minus exactly one
+// exclusion (`scripts/pr-land.mjs` — a tool's own `--help` usage banner documents its flags; it is not a caller
+// of itself, and the exclusion is pinned below so it cannot silently grow). Every invocation the harvest finds
+// must DECLARE ITS POSTURE, one of two ways — which is the contract review round 2 actually asked for, "either
+// carries a verify flag or is preceded by a verify-lane run":
+//   · it carries `--require-verified` / `--no-require-verified`, or
+//   · a `verify-lane.mjs` / `run.mjs verify` command sits on the same line or within the 3 lines above it, so the
+//     arc records a marker for the commit it is about to land. The window is deliberately TIGHT: it proves the
+//     verify is adjacent in the documented arc, NOT merely somewhere in the same file. What it does NOT prove is
+//     execution order — source adjacency is the checkable proxy, and the reason the doc arcs were edited to put
+//     the verify AFTER the item commit rather than leaving it where it already sat, hundreds of lines up.
+// Each harvested invocation is then driven through pr-land's own flag parser, `resolveVerifyOptions`, and
+// `verifyGateDecision` against the marker state that path really sees.
+//
+// RETRACTION — THE TITLE BELOW READ "#3321 — every committed pr-land invocation declares its verification
+// posture (caller sweep)". FALSE WHEN WRITTEN, for the fifth time in this PR's history and by the same
+// mechanism: the sweep's stated scope was larger than its actual scope. Round 4's `PR_LAND_CMD` matched only
+// `node scripts/pr-land.mjs …`, so an invocation written with this repo's own `we:` locus prefix was not
+// "a committed pr-land invocation" as far as the sweep was concerned — and exactly one such invocation was
+// shipping, flag-free, in a loaded agent memory. The title now says what the sweep IS, and the limits below
+// say what it is not, rather than a name doing the claiming.
+//
+// WHAT THE SWEEP IS NOT — the stated limits, so the next round need not discover them:
+//   · It harvests COMMAND STRINGS carrying at least one `--flag`. A bare `node we:scripts/pr-land.mjs` with no
+//     flags at all (e.g. `we:backlog/2219…:222`) is prose about the tool, not an argv, and is NOT harvested.
+//   · It knows three spellings of the path — bare, `we:`-prefixed, `./`-prefixed. A fourth spelling would be
+//     invisible again; the mutation probes below are the defence against that, not the regex.
+//   · Argvs built as ARRAYS (`we:scripts/lane-drain.mjs#buildPrLandArgs`) are invisible to any command-string
+//     scan and are pinned by a separate case.
+//   · Source adjacency is a checkable proxy for "the verify precedes the land", never a proof of execution order.
+describe('#3321 — every pr-land COMMAND STRING the tracked file set ships declares its posture (caller sweep)', () => {
+  const REPO = process.cwd();
+  const WORKFLOW = 'skills-src/batch-backlog-items/parallel-execute.workflow.js';
+  const DRAIN = 'scripts/lane-drain.mjs';
+  // The ONE exclusion. pr-land's `--help` banner spells its own flags out as example command lines; they are
+  // documentation of the tool, not call sites of it. Pinned by name AND by count below.
+  const SELF = 'scripts/pr-land.mjs';
+
+  // pr-land's OWN flag parser (`scripts/pr-land.mjs`, the argv loop) — the same regex, not a re-implementation.
+  const parseArgv = (cmd) => {
+    const flags = {};
+    for (const a of cmd.split(/\s+/).slice(2)) {
+      const m = a.match(/^--([^=]+)(?:=(.*))?$/);
+      if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+    }
+    return flags;
+  };
+  // A REAL invocation, not the prose form: at least one `--flag` must follow, so a docblock's
+  // "the `node scripts/pr-land.mjs …` argv" is not mistaken for a call site that forgot its posture.
+  //
+  // THE PREFIX ARM (review round 5, the CONFIRMED coverage-gap finding). This regex used to read
+  // `/node scripts\/pr-land\.mjs…/` — a bare path and nothing else — while this repo's own documentation
+  // convention writes cross-repo paths with the constellation locus prefix, `node we:scripts/pr-land.mjs …`.
+  // So the sweep's harvest was blind to exactly the spelling the docs are written in. Measured in this lane,
+  // not assumed: running this describe's own predicate over `git grep -lF pr-land.mjs` (213 candidate files)
+  // with and without the prefix arm harvested 8 invocations vs 7, and the one invocation only the widened
+  // regex sees is `agent-memory-src/lane-pr-is-universal-delivery-all-repos.md:20` — a `type: feedback` agent
+  // (CITATION CORRECTED, round 6: this read `:16` for three rounds. The line number drifted when this round's own
+  // verify step was inserted into that file; `:16` was right when written and stale by the time it was read. The
+  // invocation itself never moved file. Re-measured here, not adjusted by arithmetic: `grep -n pr-land` on that
+  // file puts the harvested argv at line 20.)
+  // memory, i.e. a LOADED INSTRUCTION, and the canonical cross-repo delivery arc for Frontier UI and
+  // plateau-app. It carried no verify flag and no adjacent verify run, so after this item's flip an agent
+  // following it would have hit `pr-land`'s step-1b gate with exit 3 / `unverified`. That arc is fixed in this
+  // round, and the `we:`-prefixed shape is now a named mutation probe below so the prefix cannot go blind again.
+  //
+  // The `./` arm harvests NOTHING today — measured: 0 additional invocations over the same 213 files. It is
+  // here because "the sweep did not know that spelling" is the failure mode of record, five rounds running.
+  const PR_LAND_CMD = /node (?:we:|\.\/)?scripts\/pr-land\.mjs(?:\s+--[^\s`\\]+)+/g;
+  const VERIFY_FLAGS = ['require-verified', 'no-require-verified'];
+  // The second arm: a recorded verification for the commit about to land. `verify-lane.mjs` is the ONLY writer of
+  // `.git/.lane-verify`; `run.mjs verify` is the operation that shells it.
+  const VERIFY_RUN = /verify-lane\.mjs|run\.mjs verify/;
+  const VERIFY_WINDOW = 3;
+  const srcOf = (f) => readFileSync(resolve(REPO, f), 'utf8');
+  const greenFor = (sha) => verifyFinishBody(
+    verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }),
+    { finishedAt: new Date(T0).toISOString(), exitCode: 0 },
+  );
+
+  /** Every tracked file that mentions pr-land.mjs — the harvest set, computed, never listed. */
+  const trackedMentioningPrLand = () =>
+    execFileSync('git', ['grep', '-lF', '--', 'pr-land.mjs'], { cwd: REPO, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean);
+
+  /**
+   * Harvest one source TEXT's invocations WITH the line context the verify-arm needs. PURE over `(name, src)`,
+   * which is what lets the mutation probes below run the REAL predicate over a real file's source plus one
+   * injected line — no temp clone, no file written, no `git checkout` to undo.
+   */
+  const scanSource = (name, src) => {
+    const lines = src.split('\n');
+    const out = [];
+    lines.forEach((line, i) => {
+      for (const m of line.matchAll(PR_LAND_CMD)) {
+        const before = lines.slice(Math.max(0, i - VERIFY_WINDOW), i + 1).join('\n');
+        out.push({ file: name, line: i + 1, cmd: m[0].trim(), precededByVerify: VERIFY_RUN.test(before) });
+      }
+    });
+    return out;
+  };
+  /** The predicate the `no HARVESTED emitter …` case applies, factored out so a probe asserts the REAL rule. */
+  const silentIn = (invocations) => invocations
+    .filter((v) => !VERIFY_FLAGS.some((f) => f in parseArgv(v.cmd)))
+    .filter((v) => !v.precededByVerify)
+    .map((v) => `${v.file}:${v.line}: ${v.cmd.slice(0, 90)}`);
+  const invocationsIn = (f) => scanSource(f, srcOf(f));
+  const cmdsIn = (f) => invocationsIn(f).map((v) => v.cmd);
+
+  const harvest = () =>
+    trackedMentioningPrLand()
+      .filter((f) => f !== SELF)
+      .flatMap(invocationsIn);
+
+  it('the harvest is the TRACKED FILE SET, not a hand-written list of filenames', () => {
+    const files = trackedMentioningPrLand();
+    // The files the round-3 sweep hard-coded are of course still in it — but so is everything else, which is the
+    // whole point. If this ever equals exactly [WORKFLOW, DRAIN, SELF] the sweep has quietly narrowed again.
+    expect(files).toContain(WORKFLOW);
+    expect(files).toContain(DRAIN);
+    expect(files.length).toBeGreaterThan(3);
+    // And the emitters the review rounds missed are inside the harvest now, by construction rather than by name.
+    const harvested = harvest().map((v) => v.file);
+    for (const missed of [
+      // round 3 missed these three
+      'skills-src/batch-backlog-items/SKILL.md',
+      'docs/agent/backlog-workflow.md',
+      'agent-memory-src/single-session-should-use-a-lane.md',
+      // round 4 missed this one, because it is written with the `we:` locus prefix (see PR_LAND_CMD above)
+      'agent-memory-src/lane-pr-is-universal-delivery-all-repos.md',
+    ]) expect(harvested).toContain(missed);
+  });
+
+  it('the ONE exclusion is pr-land\'s own --help banner, and it stays one file', () => {
+    const excluded = trackedMentioningPrLand().filter((f) => f === SELF);
+    expect(excluded).toEqual([SELF]);
+    // Every hit the exclusion swallows lives in the usage banner — i.e. above the `import` line that starts the
+    // program. If a REAL self-invocation is ever added below it, this count moves and the exclusion must be
+    // re-argued rather than silently widened.
+    const src = srcOf(SELF);
+    const programStart = src.indexOf('\nimport ');
+    const hits = [...src.matchAll(PR_LAND_CMD)];
+    expect(hits.length).toBe(14);
+    for (const h of hits) expect(h.index, h[0]).toBeLessThan(programStart);
+  });
+
+  it('no HARVESTED emitter ships a pr-land invocation that says nothing about verification', () => {
+    // RETRACTION — this case was named "no emitter ships a pr-land invocation that says nothing about
+    // verification". FALSE WHEN WRITTEN, and false for the specific reason the describe block above records:
+    // `PR_LAND_CMD` matched only the bare `node scripts/pr-land.mjs` spelling, so an emitter writing the same
+    // command with this repo's own `we:` locus prefix was not an emitter as far as this case was concerned. It
+    // says "HARVESTED" now, and what the harvest is — and is not — is stated in the describe title and pinned by
+    // the mutation probes below, rather than asserted by a name.
+    expect(silentIn(harvest())).toEqual([]);
+  });
+
+  /**
+   * THE MUTATION PROBES. Every round of this PR that widened the sweep also claimed the widening was complete,
+   * and three times a reviewer disproved the claim the same way: append one flag-free `pr-land` invocation to a
+   * real tracked file and watch the suite stay green. So the probe is a TEST now, not a reviewer's manual step.
+   *
+   * Each probe runs the REAL predicate (`scanSource` + `silentIn` — the same functions the harvest case above
+   * uses) over a real tracked file's real source with ONE line appended. Nothing is written to disk.
+   */
+  describe('mutation probes — a flag-free invocation in a file nobody listed must be SEEN', () => {
+    // THE PROBE COMMANDS ARE COMPOSED, NEVER WRITTEN AS ONE LITERAL. This test file is itself in the harvest's
+    // candidate set (it mentions `pr-land.mjs` throughout), so a probe spelled as a single string literal would
+    // be harvested from THIS file and reported as a silent emitter — the sweep would redden on its own probes.
+    // Splitting `node` off the front means no committed pr-land COMMAND STRING exists here for `PR_LAND_CMD` to
+    // match, while the string the probe actually injects is byte-identical to the real shape. The alternative —
+    // excluding this file from the harvest — would have made the sweep blind inside the one file most likely to
+    // grow a `pr-land` invocation, and would have grown the stated exclusion list from one to two.
+    const NODE = 'node';
+    const PROBE_ARGV = '--ref=lane/mutation-probe-999 --label-on-green';
+    const PROBES = [
+      {
+        // Review round 3's probe, against a file that was outside the round-3 two-filename sweep entirely.
+        name: 'the PLAIN shape, in scripts/lane-review.mjs (review round 3\'s probe)',
+        file: 'scripts/lane-review.mjs',
+        cmd: `${NODE} scripts/pr-land.mjs ${PROBE_ARGV} --json`,
+      },
+      {
+        // Review round 5's probe. The round-4 regex saw NOTHING here: it is the identical shape, spelled with
+        // the `we:` locus prefix this repo's documentation uses everywhere.
+        name: 'the we:-PREFIXED shape, in skills-src/pr/SKILL.md (review round 5\'s probe)',
+        file: 'skills-src/pr/SKILL.md',
+        cmd: `${NODE} we:scripts/pr-land.mjs ${PROBE_ARGV}`,
+      },
+    ];
+
+    for (const probe of PROBES) {
+      it(`#3321 ${probe.name} is harvested, and reddens the silent-emitter rule`, () => {
+        // The file is a real tracked file, and a real candidate: it mentions pr-land.mjs, so the harvest's own
+        // `git grep -lF` already returns it. A probe against a file the grep never reaches would prove nothing.
+        expect(trackedMentioningPrLand(), probe.file).toContain(probe.file);
+
+        const clean = srcOf(probe.file);
+        expect(silentIn(scanSource(probe.file, clean)), 'the unmutated file must be clean').toEqual([]);
+
+        const found = scanSource(probe.file, `${clean}\n\`${probe.cmd}\`\n`);
+        expect(found.map((v) => v.cmd), 'the injected invocation must be HARVESTED').toContainEqual(probe.cmd);
+        expect(silentIn(found), 'and must be reported as declaring nothing').toHaveLength(1);
+      });
+
+      it(`#3321 ${probe.name}, WITH an adjacent verify, passes — the rule is posture, not "no pr-land here"`, () => {
+        // The counter-direction. Without this a probe only proves the sweep dislikes the word `pr-land`; with it,
+        // the probe proves the sweep is reading the DECLARED POSTURE — which is the contract the item states.
+        const clean = srcOf(probe.file);
+        const verify = `${NODE} scripts/operations/run.mjs verify --checkout=<lane> --json`;
+        expect(silentIn(scanSource(probe.file, `${clean}\n\`${verify}\`\n\`${probe.cmd}\`\n`))).toEqual([]);
+        // …and the flag arm passes too, on the same injected line.
+        expect(silentIn(scanSource(probe.file, `${clean}\n\`${probe.cmd} --no-require-verified\`\n`))).toEqual([]);
+      });
+    }
+  });
+
+  it('every harvested invocation reaches ok:true on the marker state its own path really has', () => {
+    for (const v of harvest()) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(v.cmd), env: {} });
+      const where = `${v.file}:${v.line}`;
+      if (opts.requireVerified) {
+        // The lane-local arms: no flag, but a verify adjacent above them, so a FRESH green marker for the commit
+        // being landed is exactly what the arc produces. These are the paths where the gate MEANS something.
+        expect(v.precededByVerify, where).toBe(true);
+        expect(verifyGateDecision({ record: greenFor(SHA), headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: true, reason: 'verified' });
+        // …and the reason the verify has to sit AFTER the item commit: a green marker for an EARLIER head is
+        // stale, and the strict gate refuses it (the #3212 shape).
+        expect(verifyGateDecision({ record: greenFor(OTHER), headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: false, reason: 'unverified' });
+      } else {
+        // The CI-gated arms: the marker is structurally unreachable, so they declare the opt-out instead.
+        expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), where)
+          .toMatchObject({ ok: true, reason: 'untracked' });
+      }
+    }
+  });
+
+  it('the parallel /workflow producer passes the opt-out on EVERY argv it emits', () => {
+    const invocations = cmdsIn(WORKFLOW);
+    // Step 8 emits two (the WE PR and the impl-repo PR); the #2216 label-reconcile pass emits two more.
+    expect(invocations.length).toBe(4);
+    for (const cmd of invocations) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(cmd), env: {} });
+      expect(opts, cmd).toEqual({ requireVerified: false, breakGlass: false });
+      // The marker state this path REALLY has: absent. Its step-4 gate shells the suites directly and never
+      // writes `.git/.lane-verify`, and the reconcile pass runs from the PRIMARY checkout against a lane ref,
+      // where a lane clone's marker is structurally unreachable.
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), cmd)
+        .toMatchObject({ ok: true, reason: 'untracked' });
+    }
+  });
+
+  it('the same argvs WITHOUT the flag are the wedge — so the flag is provably load-bearing', () => {
+    const stripped = cmdsIn(WORKFLOW).map((c) => c.replace(/\s--no-require-verified\b/g, ''));
+    expect(stripped.length).toBe(4);
+    for (const cmd of stripped) {
+      const opts = resolveVerifyOptions({ flags: parseArgv(cmd), env: {} });
+      expect(opts.requireVerified, cmd).toBe(true);
+      expect(verifyGateDecision({ record: null, headSha: SHA, ...opts }), cmd)
+        .toMatchObject({ ok: false, reason: 'unverified' });
+    }
+  });
+
+  it('the drain builds its argv as an ARRAY, and that array declares the posture too', () => {
+    // `buildPrLandArgs` is an array literal, not a command string, so the regex above cannot see it. Pinned here
+    // as well, so the sweep has no hole the drain could slip back through. (`lane-drain.test.mjs` pins the
+    // resolved behaviour; this pins that the sweep itself covers the shape.)
+    expect(srcOf(DRAIN)).toMatch(/const args = \['scripts\/pr-land\.mjs',[^\]]*'--no-require-verified'/);
   });
 });
 

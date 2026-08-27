@@ -13,7 +13,16 @@ lane clone): it is universal, not WE-specific.
 on ANY repo via `--repo=<path>` (`pr-land` resolves its `REPO` from `--repo`; the lane manifest carries
 cross-repo `repos`). A repo having no `pr-land`/`lane` script in its OWN `plateau-app:scripts/` does **not**
 mean it lacks the flow — the flow *is* the shared WE tooling. To use a repo's flow:
-`node we:scripts/lane-pool.mjs acquire --repo=<repo> …` then `node we:scripts/pr-land.mjs --repo=<repo> …`.
+`node we:scripts/lane-pool.mjs acquire --repo=<repo> …`, work and **commit in that lane**, then record the
+verification for the commit you just made —
+`node we:scripts/operations/run.mjs verify --checkout=<repo> --json` (it shells `we:scripts/verify-lane.mjs`,
+the only writer of the `.git/.lane-verify` marker) — and only then
+`node we:scripts/pr-land.mjs --repo=<repo> …`.
+
+**The verify step is not optional and it must come AFTER the commit** (#3321). `pr-land`'s finish-guard now
+demands a fresh green marker by default, the marker is keyed to HEAD, and this arc lands from the lane clone —
+where the marker *is* reachable, so the strict gate applies and a missing or stale marker is refused with
+`unverified` (exit 3). A verify run before the commit is already stale by the time you land (#3212).
 
 **The failure (2026-07-19):** I glanced at `plateau-app:scripts/`, saw no lane/pr-land script, and told the
 user "plateau has none of the lane/PR tooling" — reasoning from *local absence* instead of the established

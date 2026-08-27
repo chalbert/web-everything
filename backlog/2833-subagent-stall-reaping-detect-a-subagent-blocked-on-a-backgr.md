@@ -55,6 +55,14 @@ gate:
   under `--require-verified`, absent/red. `WE_LAND_UNVERIFIED=1` is the documented break-glass. The conveyor/solo
   delivery brief passes `--require-verified`; the CI-gated drain / parallel-workflow paths (which verify via the
   required GitHub `test` check, not this marker) are not blocked.
+  > **SUPERSEDED BY #3321.** The last sentence stands as the record of what #2833 shipped, but it is **no longer
+  > true of the code**. #3321 flipped `requireVerified` to default **true**, so "absent/red under
+  > `--require-verified`" is now "absent/red **by default**", and the CI-gated paths are unblocked only because
+  > they were changed to **pass `--no-require-verified` explicitly**: the drain in `buildPrLandArgs`
+  > (`we:scripts/lane-drain.mjs`), and all four `pr-land` argvs emitted by
+  > `we:skills-src/batch-backlog-items/parallel-execute.workflow.js`. Silence is no longer read as "not tracked
+  > here, go ahead". Do not cite this sentence as evidence that a CI-gated caller needs no flag — that reading is
+  > exactly what #3321's review caught, twice.
 
 Rejected alternatives: (a) a *pure* synchronous wrapper — removes the footgun but is unenforced, so nothing
 catches a lane that skipped it; (b) a *pure* finish-guard — has no signal to check without the marker, so the
