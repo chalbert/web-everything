@@ -65,6 +65,33 @@ recalled: `grep -coE 'we:[A-Za-z0-9_./-]+\.mjs:[0-9]+'` returned `0` for that ca
 the other four. A round-3 pass raised it to `7`. Nobody was being careless: the claim was true of the cards
 that had been *revised* and silently generalised to the ones that had not. A gate would not have generalised.
 
+## The scores, recorded (Done-when 2)
+
+**Against the mined corpus.** `node we:scripts/review-corpus/replay-gates.mjs --gate=uncited-mechanism-claim`
+over 92 cases / 39 confirmed labels: **0 labels caught, 6 fires with no matching label.**
+
+The 0 is not a miss rate. **None of the 39 confirmed labels is an instance of this class** — the class was
+first named on PR #1596, which is later than every case in `we:scripts/review-corpus/cases`. So the file
+header's *">=80% of its own labelled class"* term is 0/0, undefined rather than failed. Recorded here
+rather than rounded away, because a 0 that means "no specimen" and a 0 that means "missed them all" are
+the same number and opposite facts.
+
+The 6 extras were adjudicated one by one and **all 6 are real uncited mechanism claims** — two of them the
+same card (`3182`/`xvpy20j`) at two revisions. The header's other term, *"fires zero times where no
+reviewer found anything"*, would forbid any gate that finds what reviewers missed, which is the thing
+`we:scripts/review-corpus/replay-gates.mjs` itself says an extra may be: *"either a false positive or a
+real defect nobody looked for … a number to ADJUDICATE, never a number to divide by."* Adjudicated, not
+divided by.
+
+**Against the live board.** Swept over all 3336 files in `we:backlog/`: **17 findings on 17 cards (0.5%).**
+Own judgement on all 17: **13 true, 3 false, 1 arguable.** The three false ones are subject-attachment
+misreads (*"the path in `X` resolves"*, where the path resolves and `X` does not) and a design proposal
+written in the present tense (*"a pure `X` parses …"* for a script the card is asking for). None is
+fixable without a predicate that would cost more than it saves.
+
+The gate is a CANDIDATE, scored by the replay harness — `we:scripts/review-corpus/gates.mjs` has no
+consumer in `check:standards`, so this adds 0 to its warning count.
+
 ## Done when
 
 1. **Executable** — a new gate in `we:scripts/review-corpus/gates.mjs`, registered in `GATES`, reports the
