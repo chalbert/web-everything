@@ -1,0 +1,544 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    Decision <a href="/backlog/">#xg7hrd5</a> asks how a review finding's <strong>consequence level</strong>
+    should be set and calibrated. The operator's requirement, in their words: <em>&ldquo;so that a medium
+    severity across many reviews is about the same severity, and so is a low or high&rdquo;</em> &mdash;
+    <strong>inter-review calibration</strong>, not a category exemption. A level must mean the same thing in
+    review 1 and review 500. And second: <em>&ldquo;each finding must be classified by its blocking nature,
+    probably derived from other criteria&hellip; I feel we are missing some criteria to derive this, we can
+    probably use classic testing or review models.&rdquo;</em>
+</p>
+<p>
+    This page surveys the five classic models the operator pointed at, plus two supporting literatures, and
+    records what each <em>actually</em> does rather than what it is reputed to do. Where a widely-repeated
+    claim turned out to be unverifiable or false, that is recorded too.
+</p>
+
+<h2>What the repo already has (measured 2026-08-27, in a lane at <code>6b03a7bd</code>)</h2>
+<ul>
+    <li><strong>Four impact levels ship</strong> &mdash; <code>IMPACT_LEVELS</code> = cosmetic &middot;
+        degraded &middot; broken &middot; unrecoverable, with <code>IMPACT_GLOSS</code> holding a one-line
+        definition each, as data, rendered into the reviewer's mandate.</li>
+    <li><strong>Disposition is already derived in code</strong> from three provenance booleans
+        (<code>introduced</code>, <code>worseThanBase</code>, <code>parallelizable</code>); exactly one of
+        eight combinations blocks, and it is fail-closed on an incomplete answer set.</li>
+    <li><strong>No <code>severity</code> field on a jury finding</strong> &mdash; but the word is named four
+        times on the review path, once in a docblock that describes a render that does not happen.
+        <em>Scope matters here:</em> a <strong>required</strong> <code>severity</code> field does exist four
+        files away, in the unrelated Web Reporting report model, so the unscoped claim
+        &ldquo;<code>severity</code> exists nowhere&rdquo; is false.</li>
+    <li><strong>The level is the only decision-bearing finding field a juror still writes for itself.</strong>
+        Its siblings <code>disposition</code>, <code>citationScope</code> and <code>evidenceKind</code> are
+        all recomputed, each with a comment naming the self-certification hole that would otherwise open.
+        <code>impactIfUnfixed</code> is validated by enum membership only &mdash; membership is checked,
+        meaning is not.</li>
+    <li><strong>A label population exists, and it is skewed.</strong> 42 labelled findings across the 92-case
+        replay corpus: <strong>broken 11 &middot; degraded 19 &middot; cosmetic 12 &middot; unrecoverable
+        0</strong>. One defect class spans three levels, and four findings that a <em>ratified</em> anchor
+        calls <code>broken</code> were labelled <code>cosmetic</code>.</li>
+    <li><strong>Run-to-run stability is unmeasured-to-poor.</strong> Across 5 recorded same-head-sha repeat
+        pairs, <strong>0 of 7 findings recurred</strong> and one pair's verdict flipped
+        <code>accept</code>&rarr;<code>changes</code> on a byte-identical diff. Caveats travel with it: n=5,
+        a convenience sample, and no reviewer identity recorded per round, so juror nondeterminism cannot yet
+        be separated from version drift.</li>
+</ul>
+<p>
+    <strong>The structural point that routes around a blocker a sibling decision called fatal.</strong> The
+    <em>retrospective</em> above-bar rate per lens is genuinely unrecoverable &mdash; where the advisory
+    lenses ran the field did not exist, and where the field exists the lenses never ran. But
+    <strong>inter-rater agreement needs no history</strong>: hand several jurors the same fixed finding and
+    see whether they agree. That is obtainable now, from fixtures, at a fraction of a review's cost. The
+    &ldquo;unanswerable&rdquo; verdict applies to the retrospective rate alone.
+</p>
+
+<h2>1 &mdash; IEEE 1044 (Standard Classification for Software Anomalies)</h2>
+<p>
+    <a href="https://standards.ieee.org/ieee/1044/4607/">IEEE Std 1044-2009</a> is the closest match to what
+    was asked for: it keeps <strong>Severity</strong>, <strong>Priority</strong> and
+    <strong>Disposition</strong> as separate normative fields, so one argument cannot settle two questions.
+</p>
+<ul>
+    <li><strong>Severity</strong> &mdash; <em>&ldquo;The highest failure impact that the defect could (or
+        did) cause, as determined by (from the perspective of) the organization responsible for software
+        engineering.&rdquo;</em></li>
+    <li><strong>Priority</strong> &mdash; <em>&ldquo;Ranking for processing assigned by the organization
+        responsible for the evaluation, resolution, and closure of the defect <strong>relative to other
+        reported defects</strong>.&rdquo;</em></li>
+    <li><strong>Disposition</strong> &mdash; <em>&ldquo;Final disposition of defect report upon
+        closure.&rdquo;</em> Sample values: Corrected &middot; Not found &middot; Referred &middot;
+        Duplicate.</li>
+</ul>
+<p>
+    <strong>Disposition in 1044 is a closure outcome, not a blocking decision</strong> &mdash; and the
+    standard's own scope table puts the <em>&ldquo;disposition process of whether or not to remove the
+    defect&rdquo;</em> explicitly <strong>out of scope</strong>. There is no derivation rule anywhere:
+    disposition is recorded, never computed. A separate <strong>Mode</strong> attribute factors out
+    <em>wrong / extra / missing</em>, the same move ODC calls Qualifier and Fagan calls Category.
+</p>
+<p>
+    <strong>The finding that matters most for this decision is what 1044 gave up.</strong> The 2009 revision
+    lists among its changes: <em>&ldquo;<strong>Not specifying a mandatory set of values for anomaly
+    attributes</strong>&rdquo;</em> and <em>&ldquo;<strong>Not specifying a classification
+    process</strong>&rdquo;</em>, and states the governing rule &mdash; <em>&ldquo;the classification
+    attributes defined in the standard are normative (mandatory), whereas the sample classification attribute
+    values are only informative (optional).&rdquo;</em> Its five sample severity levels (Blocking, Critical,
+    Major, Minor, Inconsequential) get <strong>one line each</strong>, demoted to informative examples, plus
+    five toy worked problems in an informative annex.
+</p>
+<p>
+    <strong>That is precisely the state <code>IMPACT_GLOSS</code> is in today.</strong> 1044 pushes the
+    calibration burden onto the adopter and says so, requiring each organization to define <em>&ldquo;how
+    disagreement or conflict regarding classification decisions are to be resolved&rdquo;</em> and
+    <em>&ldquo;the project-, product-, or organization-specific values&hellip;&rdquo;</em>. The standard knows
+    raters will disagree and makes tie-breaking the adopter's problem.
+</p>
+<p>
+    The <strong>1993 edition</strong> was structurally the opposite &mdash; a mandatory four-step process
+    (Recognition &rarr; Investigation &rarr; Action &rarr; Disposition) with a mandatory coded vocabulary
+    (<code>RR</code>/<code>IV</code>/<code>AC</code>/<code>IM</code>/<code>DP</code> prefixes) &mdash; which
+    is exactly what 2009 threw away. <em>Could not verify:</em> the exact 1993 severity and disposition value
+    lists; IEEE Xplore returned HTTP 418 and no open copy was found.
+</p>
+
+<h2>2 &mdash; Orthogonal Defect Classification (IBM)</h2>
+<p>
+    ODC splits its attributes by <strong>time of knowledge</strong>, and that split is the enforcement
+    mechanism for independence. Three attributes are collected when a defect is <em>opened</em>
+    (<strong>Activity, Trigger, Impact</strong>) and five when it is <em>closed</em> (<strong>Target, Defect
+    Type, Qualifier, Age, Source</strong>). Because the two halves are recorded by different people at
+    different moments, cause (Type) and catalyst (Trigger) are structurally prevented from collapsing into
+    one field.
+</p>
+<p>
+    <strong>Defect Type</strong> in ODC 5.2 has <strong>7</strong> values for design/code (Assignment/
+    Initialization, Checking, Algorithm/Method, Function/Class/Object, Timing/Serialization, Interface/O-O
+    Messages, Relationship) &mdash; not the 8 of the 1992 paper, which had Build/Package/Merge and
+    Documentation promoted out into their own Targets. <strong>Qualifier</strong> is Missing / Incorrect /
+    Extraneous. <strong>Triggers</strong> number 21, grouped by Activity, and are explicitly
+    <em>&ldquo;not &lsquo;cause&rsquo;, they are facilitators&rdquo;</em>. <strong>Impact</strong> has 13
+    values (Installability, Integrity/Security, Performance, Maintenance, Serviceability, Migration,
+    Documentation, Usability, Standards, Reliability, Requirements, Accessibility, Capability).
+</p>
+<p>
+    <em>Two corrections to widely-repeated claims:</em> the 1992 acronym is <strong>CUPRIMD</strong> (7
+    letters), and <strong>CUPRIMDSO is not ODC's Impact list</strong> &mdash; it is a separate IBM Rochester
+    customer-satisfaction framework. No &ldquo;RAS variant&rdquo; of ODC Impact was found; that appears to be
+    a conflation with IBM's unrelated hardware Reliability/Availability/Serviceability term.
+</p>
+<h3>Does ODC have a severity field? No &mdash; and IBM says so by name</h3>
+<p>
+    ODC 5.2 &sect;5.1, verbatim: <em>&ldquo;<strong>Additional non-ODC attributes (e.g. phase-found,
+    severity, open date, component, etc...)</strong> that are captured in any defect tracking system can be
+    used in conjunction with ODC-based analysis.&rdquo;</em> Severity sits in a list headed
+    <em>non-ODC attributes</em>, beside <code>open date</code>. Chillarege's own attribute diagram files
+    Severity and Priority under <strong>Tracking (not ODC)</strong>.
+</p>
+<p>
+    The 1992 paper explains the placement without arguing it: ODC sorts attributes into <strong>cause</strong>
+    and <strong>effect</strong>, and ODC's contribution is the cause attributes. <em>&ldquo;An explicit
+    measure commonly used in IBM is severity; the severity of a defect is usually measured on a scale of
+    1-4.&rdquo;</em> Where CUPRIMD got promoted into <code>Impact</code>, severity never did.
+    <strong>Could not verify:</strong> any source in which IBM or Chillarege states a <em>reason</em> for the
+    exclusion. It is asserted, never argued &mdash; so this is a precedent, not an argument.
+</p>
+<p>
+    ODC's stated reason for keeping value sets small is directly on point for a four-level scale:
+    <em>&ldquo;<strong>If the number of classes is small, there is a greater chance that the human mind can
+    accurately resolve between them.</strong>&rdquo;</em> Orthogonality itself has no formal enforcement; it
+    is bought by construction &mdash; small closed sets, frozen vocabularies (adopters define Activities but
+    may not define Triggers), the opener/closer time split, and a falsification criterion: an attribute whose
+    distribution does not shift as a function of process stage fails ODC's own test.
+</p>
+<h3>The counter-datum</h3>
+<p>
+    The one ODC attribute defined by judgment is the one that failed in the wild. A 2018 study had
+    <strong>five annotators</strong> label two datasets (962 and 675 defects) on <strong>ODC
+    Impact</strong>: <em>&ldquo;only 9 out of the original 13 categories were used&hellip; we found
+    <strong>high variability among annotators</strong>&hellip; both systems contain examples where annotators
+    have reported two, three and even four different categories for the same defect report.&rdquo;</em> On
+    the same 962 defects, the five raters assigned the <code>Maintenance</code> category
+    <strong>2, 140, 184, 36 and 62</strong> times. Reported agreement runs <strong>kappa
+    0.26&ndash;0.33</strong> &mdash; fair to poor. <code>Impact</code> is ODC's closest analogue to
+    <code>impactIfUnfixed</code>.
+</p>
+
+<h2>3 &mdash; CVSS, and the SSVC response</h2>
+<p>
+    CVSS is worth studying for how it <em>fails</em> as much as how it works.
+</p>
+<h3>How it anchors</h3>
+<p>
+    Base metrics anchor to observable system predicates rather than judgments. <strong>Attack Vector</strong>:
+    Network is <em>&ldquo;bound to the network stack&hellip; exploitable at the protocol level one or more
+    network hops away&rdquo;</em>; Physical <em>&ldquo;requires the attacker to physically touch or manipulate
+    the vulnerable system.&rdquo;</em> The v3.1 &rarr; v4.0 change to <strong>User Interaction</strong> is a
+    textbook anchoring upgrade: a bare binary became three values, each with an observable predicate
+    <em>and enumerated worked examples per value</em> (Passive: <em>&ldquo;involuntary&hellip; utilizing a
+    website that has been modified to display malicious content&rdquo;</em>; Active: <em>&ldquo;dismiss or
+    accept prompts or security warnings prior to taking an action&rdquo;</em>).
+</p>
+<p>
+    v4.0's structure is <strong>Base / Threat / Environmental / Supplemental</strong>. The Supplemental group
+    is notable: it adopted three SSVC decision points wholesale (Automatable, Value Density, Safety) and
+    placed all three in the one group defined as having <em>&ldquo;<strong>no impact on the final CVSS
+    score</strong>&hellip; more, less, or absolutely no effect&rdquo;</em>. The concepts SSVC identified as
+    decisive are exactly the ones CVSS carries as inert annotation.
+</p>
+<h3>How it fails</h3>
+<p>
+    <strong>A correction first:</strong> the famous <em>&ldquo;CVSS measures severity, not risk&rdquo;</em>
+    line is <strong>not in either Specification Document</strong> &mdash; the word &ldquo;risk&rdquo; appears
+    zero times in the v3.1 spec. It lives in the
+    <a href="https://www.first.org/cvss/v3.1/user-guide">v3.1 User Guide &sect;2.1</a> and the FAQ. Cite
+    accordingly.
+</p>
+<ul>
+    <li><strong>The measurement-theory objection.</strong> CMU SEI's <em>Towards Improving CVSS</em>:
+        <em>&ldquo;CVSS is <strong>widely misused</strong> for vulnerability prioritization and risk
+        assessment, despite being designed to measure technical severity. Furthermore, <strong>the CVSS
+        scoring algorithm is not justified, either formally or empirically</strong>&hellip; Therefore, CVSS
+        is inadequate.&rdquo;</em> It takes ordinal data and constructs ratio values, which
+        <em>&ldquo;strictly speaking, commits a data type error.&rdquo;</em> Its prescription, written a year
+        before SSVC: <em>&ldquo;<strong>skip converting qualitative measurements to numbers</strong>&hellip;
+        This mapping could be represented as a decision tree or a table.&rdquo;</em></li>
+    <li><strong>Clustering.</strong> Over 192,035 CVEs, remediating everything rated High or Critical gives
+        82.1% coverage but requires acting on <strong>58.1% of all published CVEs</strong>, while only 6.4%
+        were ever observed exploited. FIRST has conceded inflation in print, describing v4.0's Threat group
+        as <em>&ldquo;addressing concerns that many CVSS (Base) scores are too high.&rdquo;</em></li>
+    <li><strong>Inter-rater reliability &mdash; the strongest evidence in this survey.</strong> A 2024 IEEE
+        S&amp;P distinguished paper put 196 practitioners (mean 6.5 years' scoring experience) on real
+        vulnerabilities. Finn's coefficient: Attack Vector <strong>0.33</strong> and <strong>0.21</strong>;
+        User Interaction on reflected XSS <strong>0.247</strong> and on stored XSS <strong>0.0206</strong>
+        (&ldquo;almost no agreement&rdquo;); Scope <strong>0.035&ndash;0.080</strong>. Retested nine months
+        later, <em>&ldquo;<strong>68% of these users gave different severity ratings</strong>&rdquo;</em> to
+        the same vulnerabilities. 85% of evaluators find CVSS inconsistent; 80% still find it useful; 30%
+        have never read the documentation. One participant on Scope: <em>&ldquo;If you ask 10 people for
+        their opinion you get 10 coin tosses.&rdquo;</em></li>
+</ul>
+<p>
+    <strong>Read that last result carefully, because it is the one that bites.</strong> Two of the three
+    metrics tested were the <em>anchored</em> ones. <strong>Anchoring to an observable fact produces
+    reproducibility only when <em>which</em> fact is uncontested</strong> &mdash; when the fact is itself a
+    modelling choice (&ldquo;is a PDF opened from an email bound to the network stack?&rdquo;), the anchor
+    does not bind.
+</p>
+<h3>SSVC &mdash; the derived-disposition blueprint</h3>
+<p>
+    SSVC's thesis: <em>&ldquo;<strong>We propose that decisions about vulnerabilities&mdash;rather than their
+    severity&mdash;are a more useful approach.</strong>&rdquo;</em> Its design goals include
+    <em>&ldquo;Outputs are decisions&rdquo;</em>, <em>&ldquo;Inputs are qualitative&rdquo;</em>, and
+    <em>&ldquo;there are <strong>no (unjustified) shifts to quantitative calculations</strong>&rdquo;</em>.
+</p>
+<p>
+    Its argument against numbers is worth quoting in full, because it applies to any threshold-on-a-scale
+    design: <em>&ldquo;<strong>Decisions are not numbers.</strong> They are qualitative actions&hellip; CVSS
+    scores were designed to be accurate within +/- 0.5 points&hellip; Therefore, under a Gaussian error
+    distribution, <strong>8.9 is really 60% high and 40% critical</strong> since the recommended dividing
+    line is 9.0. SSVC decisions should be distinct and crisp, without such statistical overlaps.&rdquo;</em>
+    And on when quantification is earned at all: <em>&ldquo;Quantified metrics are more useful when (1) data
+    for decision making is available, and (2) the stakeholders agree on how to measure. <strong>Vulnerability
+    management does not yet meet either criterion.</strong>&rdquo;</em>
+</p>
+<p>
+    The <strong>deployer tree</strong> has 4 decision points and 72 rows; the <strong>supplier tree</strong>
+    4 points and 36 rows. Outcomes both sides: <strong>Defer &middot; Scheduled &middot; Out-of-Cycle
+    &middot; Immediate</strong>. An ordering invariant does real work: <em>&ldquo;an <em>active</em> state of
+    Exploitation will never result in a <em>defer</em> priority.&rdquo;</em>
+</p>
+<p>
+    <strong>How SSVC anchors its decision points</strong> is the operationally useful part.
+    <strong>Technical Impact</strong> ships a <strong>three-yes/no-question rubric</strong> (<em>&ldquo;can
+    the attacker install and run arbitrary software?&hellip; trigger all the actions that the vulnerable
+    component can perform?&hellip; get an account with full privileges?&rdquo;</em>).
+    <strong>Exploitation</strong> anchors to public artifacts (Metasploit, ExploitDB).
+    <strong>System Exposure</strong> anchors to a scan (<em>&ldquo;visible on Shodan&rdquo;</em>).
+    <strong>Safety Impact</strong> anchors to aircraft-software hazard categories. Its own criterion for
+    checkability: <em>&ldquo;A proof of automation in a relevant environment is an <strong>objective
+    evaluation</strong>&hellip; in a way that cannot be provided for some CVSS elements, such as Attack
+    Complexity.&rdquo;</em>
+</p>
+<h3>The SSVC reliability pilot &mdash; the single most decision-relevant table found</h3>
+<p>Nine CVEs, six analysts, Fleiss' kappa per decision point:</p>
+<table>
+    <thead><tr><th>Decision point</th><th>Fleiss' kappa</th><th>Anchored to</th></tr></thead>
+    <tbody>
+        <tr><td>Exploitation</td><td><strong>0.807</strong></td><td>public PoC databases</td></tr>
+        <tr><td>Technical Impact</td><td><strong>0.679</strong></td><td>a three-question rubric</td></tr>
+        <tr><td>Exposure</td><td>0.480</td><td>a Shodan scan</td></tr>
+        <tr><td>Portfolio Value</td><td>0.257</td><td>organizational judgment</td></tr>
+        <tr><td>Mission Impact</td><td>0.146</td><td>organizational judgment</td></tr>
+        <tr><td>Safety Impact</td><td>0.122</td><td>organizational judgment</td></tr>
+        <tr><td><em>Supplier outcome (derived)</em></td><td><em>0.226</em></td><td>&mdash;</td></tr>
+        <tr><td><em>Deployer outcome (derived)</em></td><td><em>0.295</em></td><td>&mdash;</td></tr>
+    </tbody>
+</table>
+<p>
+    <strong>Two things follow, pointing in opposite directions.</strong> The <em>anchoring gradient</em> is
+    real and measurable: inputs tied to an external artifact agree, inputs resting on organizational judgment
+    do not. <strong>But the derived outcomes score worse than their best inputs</strong> &mdash; composing
+    several imperfectly-agreed inputs through a tree <strong>compounds</strong> disagreement rather than
+    cancelling it. Any design that derives a level from sub-answers must treat its own faithfulness as an
+    empirical question, not a design one. The authors are candid that the pilot is <em>&ldquo;encouraging,
+    though not conclusive&rdquo;</em> and that shared authorship may have inflated agreement.
+</p>
+<p>
+    One more SSVC judgment worth carrying: it <strong>declines to reuse CVSS's User Interaction</strong>,
+    because <em>&ldquo;most people click on links in emails as part of their normal processes&hellip; user
+    interaction does not present a firm barrier to automatability; it presents a <strong>stochastic
+    barrier</strong>.&rdquo;</em> And CISA's shipped variant adds a rule that answers CVSS's
+    &ldquo;assume the worst&rdquo; default: there is <strong>no &ldquo;unknown&rdquo; option</strong>
+    &mdash; <em>&ldquo;CISA identifies the value that is the most reasonable assumption based on prior
+    events.&rdquo;</em>
+</p>
+
+<h2>4 &mdash; Fagan inspection</h2>
+<p>
+    The 1986 paper carries the definition (1976 has it only as a footnote on a form):
+    <em>&ldquo;A <strong>MAJOR</strong> defect is one that <strong>would cause a malfunction or unexpected
+    result if left uncorrected</strong>. Inspections also find <strong>MINOR</strong> defects. They will not
+    cause malfunction, but are more of the nature of poor workmanship, like misspellings that do not lead to
+    erroneous product performance.&rdquo;</em>
+</p>
+<p>
+    <strong>That is a binary, functional test</strong> &mdash; and Fagan's reason for it is commensurability
+    with testing: <em>&ldquo;Major defects are of the same type as defects found by testing.&rdquo;</em> His
+    headline efficiency figures count majors only. The full classification is a three-part composite
+    <code>TYPE / CATEGORY / SEVERITY</code> &mdash; e.g. <code>LO/W/MAJ</code> &mdash; where Category is
+    Missing / Wrong / Extra, the same factoring 1044 calls Mode.
+</p>
+<p>
+    <strong>Inspection-rate discipline.</strong> 1976 gives loc/hr rates (design preparation 100, inspection
+    130; code preparation 125, inspection 150 &mdash; note the meeting rate is <em>higher</em> than
+    preparation, which is often misreported), with only a session-length rationale:
+    <em>&ldquo;error detection efficiency&hellip; tends to dwindle after two hours.&rdquo;</em> 1986 supplies
+    the causal chain and the familiar cap: <em>&ldquo;<strong>Excessive RATE OF INSPECTION causes fewer
+    defects to be found</strong>&hellip; there is evidence that defect detection efficiency diminishes at
+    rates above 125 NCSS/h.&rdquo;</em> Later work confirms it hard &mdash; one large study reports 3.7%
+    detection at 150 lines/hour falling to 0.8% at 750. <em>Could not verify:</em> the IBM technical report
+    behind the 125 cap is cited everywhere and obtainable nowhere.
+</p>
+<h3>Classification consistency between inspectors</h3>
+<p>
+    <strong>Fagan makes no claim, anywhere</strong> &mdash; both papers were searched in full. And the method
+    makes the question unaskable: severity is assigned <strong>unilaterally by one person, the moderator, in
+    real time</strong> (<em>&ldquo;The defects found by inspection are immediately recorded and classified
+    <strong>by the moderator</strong>&rdquo;</em>). Single-rater by construction, so no agreement statistic
+    is collectible. <strong>Could not verify:</strong> any study measuring inter-rater agreement specifically
+    on Fagan's major-vs-minor call. That is a genuine gap in the literature.
+</p>
+<p>
+    Where others did measure, the picture is poor. Eight classifiers over 30 real faults with an ODC-style
+    scheme averaged <strong>kappa 0.16</strong> &mdash; while reporting <strong>median confidence 4 of
+    5</strong>. And a live commercial study of what actually gets logged found
+    <em>&ldquo;<strong>24% of the issues are False Positives, 55% involve Soft Maintenance, and 21% are True
+    Defects</strong>&rdquo;</em>, with most soft-maintenance issues caused by <em>&ldquo;conflicts between the
+    coding style or conventions used by different reviewers.&rdquo;</em>
+</p>
+<p>
+    <strong>Two levels is Fagan's, not the field's.</strong> Everyone who deployed it added a third tier to
+    drain triviality out of &ldquo;minor&rdquo; (JPL: major/minor/trivial; NASA-STD-8739.9:
+    Major/Minor/Clerical). Gilb supplies the economic rationale Fagan never does &mdash; a major has
+    <em>&ldquo;approximately an order of magnitude more downstream cost potential than it's cost to remove
+    immediately&hellip; Without this classification, up to 90% of QC effort might be wasted dealing with
+    minor defects.&rdquo;</em> Note these are <em>different</em> definitions (functional vs economic vs
+    mission-scoped) and are not interchangeable. The consistent asymmetry across all of them is the blocking
+    rule: <strong>only majors are obligatory</strong> &mdash; <em>&ldquo;Minor defects should be resolved if
+    cost and schedule permit.&rdquo;</em>
+</p>
+
+<h2>5 &mdash; Google Tricorder</h2>
+<h3>Effective false positive, exactly defined</h3>
+<p>
+    <em>&ldquo;We consider an issue to be an <strong>effective false positive</strong> if developers did not
+    take positive action after seeing the issue. If an analysis incorrectly reports an issue, but developers
+    make the fix anyway&hellip; that is not an effective false positive. <strong>If an analysis reports an
+    actual fault, but the developer did not understand the fault and therefore took no action, that is an
+    effective false positive.</strong>&hellip; Developers, not tool authors, will determine and act on a
+    tool's perceived false-positive rate.&rdquo;</em>
+</p>
+<p>
+    <strong>Two thresholds, not one.</strong> Pre-launch, a code-review check must <em>&ldquo;produce less
+    than 10% effective false positives&rdquo;</em> &mdash; measured by running the analyzer on existing code
+    and manually checking a statistically sound sample. Post-launch, live telemetry computes
+    <code>NOT USEFUL / (NOT USEFUL + PLEASE FIX + APPLY FIX)</code>: <em>&ldquo;A rate &ge; 10% puts the
+    analyzer on <strong>probation</strong>&hellip; If the rate goes above <strong>25%</strong>, we may decide
+    to turn the analyzer off immediately.&rdquo;</em> The 10% figure is disclosed as
+    <em>&ldquo;initially chosen&hellip; <strong>somewhat arbitrarily</strong>&rdquo;</em>.
+</p>
+<h3>Severity levels: removed, and the reason is not the obvious one</h3>
+<p>
+    <em>&ldquo;<strong>To achieve this, we got rid of all priority or severity ratings for analysis
+    results.</strong>&hellip; Instead of having developers filter out analyzer results, we started getting
+    <strong>bug reports about broken analyzers</strong>. For example, we discovered that the C++ linter was
+    also linting Objective-C files and fixed this issue; previously Objective-C developers had just hidden
+    all linter results.&rdquo;</em>
+</p>
+<p>
+    <strong>The argument is not that severity is inaccurate.</strong> It is that a severity/filter axis lets
+    consumers <strong>silence a broken producer instead of reporting it</strong>, destroying the telemetry
+    the 10% rule depends on. Corroborated by the removal of Critique's own confidence filter:
+    <em>&ldquo;We removed all of this user customizability&hellip; and immediately started getting complaints
+    from users about annoying analysis results&rdquo;</em> &mdash; i.e. removing the filter
+    <strong>converted silent dissatisfaction into actionable complaints</strong>.
+    <em>Sourcing caveat:</em> this statement exists in <strong>exactly one paper</strong> (ICSE-SEIP 2015
+    &sect;III-E) &mdash; not in the CACM 2018 article, not in the SWE book. And
+    <strong>could not verify</strong> any Google statement that severity is <em>unreliable</em>; do not
+    paraphrase it that way.
+</p>
+<h3>Blocking vs advisory &mdash; three tiers by false-positive budget</h3>
+<table>
+    <thead><tr><th>Tier</th><th>FP budget</th><th>Scope</th><th>Blocks?</th></tr></thead>
+    <tbody>
+        <tr><td>Compiler error</td><td><strong>zero</strong> effective FP</td><td>correctness only</td><td><strong>Yes</strong> &mdash; breaks the build</td></tr>
+        <tr><td>Presubmit gate</td><td>zero; opt-in per team</td><td>highly specific custom checks</td><td><strong>Yes</strong> &mdash; blocks the commit</td></tr>
+        <tr><td>Code-review robocomment</td><td><strong>&le; 10%</strong></td><td>style, readability, best practices</td><td><strong>No</strong> &mdash; advisory</td></tr>
+    </tbody>
+</table>
+<p>
+    <strong>The FP budget is what buys the advisory tier its breadth</strong>, and enforcement at review time
+    is social: <em>&ldquo;enabling <strong>peer accountability</strong>, where the reviewer will see if the
+    author chose to ignore analysis results&rdquo;</em>. Their own list of how click-metrics mislead is worth
+    copying for anyone building a comparable measure &mdash; fixes made before the reviewer sees them, fixes
+    made in the editor, and <em>&ldquo;developers may ignore findings they do not plan to fix, rather than
+    clicking NOT USEFUL.&rdquo;</em>
+</p>
+
+<h2>6 &mdash; Does rubric anchoring actually work?</h2>
+<p>
+    Less than the folklore claims. <strong>Behaviorally anchored rating scales</strong> (BARS) build anchors
+    by <em>retranslation</em>: a second independent panel reassigns each example to a dimension, and examples
+    without high agreement are <strong>discarded</strong>. Retranslation is a <em>discrimination</em> test
+    &mdash; it certifies an anchor is unambiguous, and guarantees nothing about whether the resulting scale
+    produces better ratings.
+</p>
+<p>
+    A comprehensive review of published BARS-vs-other-format comparisons concluded that <em>&ldquo;<strong>BARS
+    and other formats appear to differ relatively little (if at all)</strong> with regard to psychometric
+    characteristics&rdquo;</em>, and the field subsequently called a moratorium on rating-format research and
+    redirected to rater cognition.
+</p>
+<p>
+    The cleanest recent test separates two things usually conflated. Crossing rubric type with descriptor
+    specificity over 274 double-marked essays: <strong>rubric structure did nothing</strong>
+    (interaction p = 0.454), while <strong>descriptor specificity</strong> moved ICC from ~0.49 to ~0.64 for
+    experienced raters (p = 0.035) &mdash; and ~0.43 to ~0.44 for inexperienced ones. Rater experience
+    dominated every instrument manipulation.
+</p>
+<p>
+    <strong>What replicates is calibration, not the artifact.</strong> Frame-of-reference training &mdash;
+    raters shown reference performances, <em>told the correct rating with the reasoning</em>, and given
+    feedback on practice ratings &mdash; has meta-analytic support. The strongest before/after found
+    multi-rater agreement rising 0.071&ndash;0.535 to 0.294&ndash;0.780 after customized training. But
+    counter-evidence of equal quality exists: a randomized trial of the full training package moved ICC
+    0.40&rarr;0.43 against a control's 0.43&rarr;0.53 (<strong>p = 0.19</strong>), concluding
+    <em>&ldquo;<strong>Rater training did not improve interrater reliability or accuracy</strong>&rdquo;</em>
+    &mdash; while rater <strong>confidence</strong> rose significantly (3.8&rarr;4.4, p = 0.018).
+</p>
+<p>
+    <strong>Keep that last detail.</strong> It is the same signature as the Fagan-adjacent study (kappa 0.16
+    at median confidence 4/5): <strong>anchoring reliably raises rater confidence whether or not it raises
+    agreement.</strong> The defensible claim is that worked examples beat definitions <em>when used to
+    calibrate raters against a known correct answer with feedback</em>; shipping exemplars as static
+    reference text and expecting agreement to follow is the version the evidence does not support.
+</p>
+
+<h2>7 &mdash; Measuring agreement: which statistic, and the kappa trap</h2>
+<table>
+    <thead><tr><th></th><th>Raters</th><th>Measurement level</th><th>Missing data</th></tr></thead>
+    <tbody>
+        <tr><td>Cohen's kappa</td><td>exactly 2, fixed pair</td><td>nominal (weighted &rarr; ordinal)</td><td>no</td></tr>
+        <tr><td>Fleiss' kappa</td><td>any n, same count per unit</td><td>nominal</td><td>no</td></tr>
+        <tr><td>Krippendorff's alpha</td><td>any n, may vary per unit</td><td>nominal/ordinal/interval/ratio</td><td><strong>yes, by design</strong></td></tr>
+    </tbody>
+</table>
+<p>
+    <strong>The benchmark bands are arbitrary conventions and they disagree.</strong> The familiar
+    &ldquo;0.61&ndash;0.80 substantial&rdquo; scale carries its own authors' disclaimer that the divisions are
+    <em>&ldquo;clearly arbitrary&rdquo;</em> and were proposed for discussing <em>their own worked
+    example</em>; a competing published scale calls the same 0.45 &ldquo;fair to good&rdquo; where the first
+    calls it &ldquo;moderate&rdquo;. The only threshold an author framed as a decision rule is
+    Krippendorff's: <em>&ldquo;it is customary to require alpha &ge; .800. Where tentative conclusions are
+    still acceptable, alpha &ge; .667 is the lowest conceivable limit.&rdquo;</em>
+</p>
+<p>
+    <strong>The kappa paradox is the operational trap for a four-level scale with skewed mass.</strong> When
+    one category is rare or dominant, chance agreement inflates toward observed agreement and kappa
+    collapses; worse, kappa is <em>higher</em> when raters disagree more about the base rate. Formally:
+    <em>&ldquo;<strong>for fixed observed agreement between the judges, Cohen's kappa penalizes judges with
+    similar marginals compared to judges who produce different marginals.</strong>&rdquo;</em> Across 4&times;4
+    tables at identical observed agreement of 0.65, kappa ranges 0.47 (symmetric) to 0.56 (asymmetric); at
+    0.55 it ranges 0.34 to 0.45 &mdash; a full benchmark band, purely from how the four categories were used.
+    Real data: three raters, 57 trials, <strong>observed agreement 0.842 with Cohen's kappa 0.042</strong>,
+    because ~92% of items fell in one category.
+</p>
+<p><strong>So report four things together, and never the third alone:</strong></p>
+<ol>
+    <li><strong>Raw observed agreement, plus adjacent agreement</strong> (within one level), since the levels
+        are ordinal.</li>
+    <li><strong>The full confusion matrix, or at minimum per-rater marginals</strong> &mdash; everything else
+        is a function of the marginals; most often omitted, most diagnostic.</li>
+    <li><strong>An ordinal chance-corrected coefficient</strong> &mdash; Krippendorff's alpha with the ordinal
+        metric, or quadratic-weighted kappa. Never unweighted kappa, which scores a one-level and a
+        three-level disagreement identically.</li>
+    <li><strong>Prevalence and bias indices</strong>, which turn &ldquo;agreement is low&rdquo; into a
+        diagnosis: low because one level dominates (a taxonomy problem) or low because one rater grades
+        harder (a calibration problem). Different fixes.</li>
+</ol>
+<p>
+    <strong>And one design implication.</strong> If most items land in one or two of four levels, the deeper
+    message is that <strong>two of the levels are doing almost no work</strong>. Merging levels or re-cutting
+    boundaries improves measurement more than changing coefficient. With a measured distribution of
+    <strong>broken 11 &middot; degraded 19 &middot; cosmetic 12 &middot; unrecoverable 0</strong>, that
+    warning lands directly.
+</p>
+
+<h2>What each source contributes to this decision</h2>
+<ul>
+    <li><strong>IEEE 1044</strong> &mdash; ratifies keeping impact and disposition as separate fields, and
+        shows that the one thing it could <em>not</em> make work was mandatory shared level values: the 2009
+        revision dropped them and demoted its one-line glosses to informative, which is precisely the state
+        four one-line glosses are sitting in today.</li>
+    <li><strong>ODC</strong> &mdash; the strongest available precedent for having <em>no</em> severity field
+        (IBM's own spec calls severity a &ldquo;non-ODC attribute&rdquo; beside <code>open date</code>), and
+        simultaneously the sharpest warning about the impact field, since the one ODC attribute defined by
+        judgment measured kappa 0.26&ndash;0.33 in the wild.</li>
+    <li><strong>CVSS + SSVC</strong> &mdash; SSVC is the working blueprint: anchored checkable inputs feeding
+        a transparent lookup table whose output is an action, not a number. Its pilot says which inputs will
+        hold up (those anchored to external artifacts or a three-question rubric) and which will not
+        (organizational judgment) &mdash; and its derived-outcome kappa warns that a derived disposition
+        <em>compounds</em> input disagreement rather than cancelling it.</li>
+    <li><strong>Fagan</strong> &mdash; the case for making the blocking split binary and functional
+        (&ldquo;would cause a malfunction if left uncorrected&rdquo;) rather than a threshold on a graded
+        scale, with the caution that he never asked whether two inspectors would agree, and that when others
+        looked, 79% of what got logged was not a major.</li>
+    <li><strong>Tricorder</strong> &mdash; a replacement for a severity field that this architecture can
+        actually implement (a per-producer effective-false-positive rate with a probation gate), plus the
+        explicit finding that a severity axis is <em>harmful</em> because it lets consumers filter out a
+        broken producer instead of reporting it.</li>
+</ul>
+
+<h2>Could not verify</h2>
+<ul>
+    <li>IEEE 1044-1993's exact severity and disposition value lists (IEEE Xplore returned HTTP 418; no open
+        copy). The four-step process and code prefixes are secondary-source only.</li>
+    <li>Any stated <em>reason</em> ODC excludes severity. The exclusion is verified; the rationale is never
+        given anywhere. Inferred reasons must not be cited as sourced.</li>
+    <li>&ldquo;CUPRIMDSO&rdquo; as ODC's Impact list &mdash; it is not; the 1992 paper says CUPRIMD (7
+        letters). No &ldquo;RAS variant&rdquo; of ODC Impact appears to exist.</li>
+    <li>A &ldquo;base score is not risk&rdquo; sentence inside either CVSS Specification Document &mdash;
+        verified <strong>absent</strong>. It is in the User Guides and FAQ.</li>
+    <li>SSVC row-by-row decision tables (tree shapes and ordering invariants verified; individual row&rarr;
+        outcome mappings not).</li>
+    <li>The IBM technical report behind Fagan's 125 NCSS/hr cap &mdash; cited by Fagan 1986 and by later NASA
+        work, not obtainable. The cap's empirical basis is second-hand everywhere.</li>
+    <li>Any study measuring inter-rater agreement specifically on Fagan's major-vs-minor call. A genuine gap
+        in the literature.</li>
+    <li>Any Google statement that severity is <em>unreliable</em> &mdash; the argument is about filtering
+        destroying feedback, not about severity being inaccurate.</li>
+    <li>Several widely-circulated effect sizes in the rater-training literature; the verified substitutes are
+        used above.</li>
+    <li>The main published <em>pro</em>-CVSS-reliability result (a 2018 IEEE TDSC paper) &mdash; search
+        summary only. It deserves a real read before either side is cited as settled.</li>
+</ul>
+{% endraw %}

@@ -5,6 +5,7 @@ parent: "3318"
 status: open
 dateOpened: "2026-08-26"
 preparedDate: "2026-08-27"
+blockedBy: ["xg7hrd5"]
 relatedReport: reports/2026-08-26-advisory-lens-blocking-set-corpus-replay.md
 tags: []
 ---
@@ -15,6 +16,43 @@ tags: []
 alone rather than take the general form. The general form is the obvious next question: if
 `impactIfUnfixed >= broken` is the right reason to block a land, why does a `broken` finding from
 `simplicity` or `standards-conformance` ride the accept?
+
+> ## Do not rule this yet — `blockedBy` #xg7hrd5 (added 2026-08-27)
+>
+> **This item is prepared but its load-bearing ground is about to change.** Fork 1's recommended default
+> (a) rests, by its own text, on one discriminating ground — a lens joins the blocking set only if its
+> *"impact levels are checkable against an artifact rather than asserted"* — and calls `simplicity`'s
+> exclusion *"permanent unless the criterion itself is overturned"*.
+>
+> [`#xg7hrd5`](/backlog/xg7hrd5-calibrate-the-finding-consequence-scale-one-axis-or-two-asse/) prepares
+> exactly that criterion. Its Fork 2 moves the level from a juror's assertion to a derivation over three
+> factual answers, and its Fork 4 builds the anchor set those answers are checked against. Both are
+> **lens-independent**: a `simplicity` juror answers them exactly as a `correctness` juror does. So the
+> criterion stops discriminating between lenses, and this item's *"permanent"* half loses its ground.
+>
+> Two things sharpen this rather than soften it. **(1)** Measured in that item's lane, `claim-accuracy`
+> already has an anchor — `#claim-accuracy-advisory-blocks-on-impact` carries two ratified, level-assigned
+> worked examples — while the corpus holds 42 impact labels and zero anchors for any other lens. Read
+> strictly, the criterion **does** still discriminate today: `claim-accuracy` is admitted on evidence
+> `simplicity` has nothing comparable to.
+>
+> *Corrected this round.* An earlier draft of this point read *"the artifact does not exist for any lens —
+> the corpus holds 42 impact labels and zero anchors — so read strictly the criterion currently admits
+> `claim-accuracy` on no more evidence than it excludes `simplicity` on."* That was wrong, and it
+> repeats a prop [`#xg7hrd5`](/backlog/xg7hrd5-calibrate-the-finding-consequence-scale-one-axis-or-two-asse/)
+> itself withdrew after its skeptic pass for the identical reason: `claim-accuracy`'s anchor already exists.
+>
+> **(2)** That item's Fork 2 predicts a `simplicity` finding will usually derive to `cosmetic`, which would
+> make generalising safe **for a reason this card never argued** — the rubric, not the roster, holding low
+> consequence below the bar. A decider ratifying this card today would not see that case.
+>
+> **What survives untouched, and is why this is `blockedBy` rather than dissolved:** generalising still
+> takes the merge path from 2-of-4 to 4-of-4 blocking lenses, and the advisory lenses never dissented in
+> 6 of 6 observed subjects. Grounds 1 and 2 stand. **The question is live; only its third ground is not.**
+>
+> Per #1886 a ratified call is immutable, so ratifying this first would leave no honest repair but a new
+> reconciliation item. Re-derive Fork 1's default with the criterion **retired as a discriminator** once
+> #xg7hrd5 is ruled, and take the anchor-agreement number as an input Done-when 3 did not previously have.
 
 ## Digest
 

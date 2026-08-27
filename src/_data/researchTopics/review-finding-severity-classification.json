@@ -1,0 +1,29 @@
+{
+  "id": "review-finding-severity-classification",
+  "title": "Calibrated severity and derived disposition for review findings — IEEE 1044, ODC, CVSS/SSVC, Fagan and Tricorder against a jury spine that has impact levels but no anchors",
+  "status": "open",
+  "summary": "Prep research for decision #xg7hrd5: how a review finding's consequence level should be set and calibrated, so that a level means the same thing in review 1 and review 500. Grounding measured in-lane: `IMPACT_LEVELS` (cosmetic/degraded/broken/unrecoverable) and a disposition derived in code from three provenance booleans both ship (we:scripts/lib/jury-core.mjs), but `severity` is named four times on the review path and is not a field on a jury finding (it IS a required field in the unrelated Web Reporting model, we:scripts/lib/buildReport.mjs:42 — the unscoped claim is false); the level is written by the model and validated by enum membership alone, the only decision-bearing finding field not recomputed; the 92-case corpus holds 42 labelled findings (broken 11, degraded 19, cosmetic 12, unrecoverable 0), one defect class spans three levels, and four findings the ratified #3314 anchor calls `broken` were labelled `cosmetic`; and run-to-run stability is 0 of 7 findings recurring across 5 same-head-sha pairs with one verdict flip. Prior art reshaped the forks four times. IEEE 1044-2009 keeps Severity and Priority as separate normative fields but explicitly REMOVED mandatory level values and demoted its one-line severity glosses to informative — the exact state IMPACT_GLOSS is in. ODC has no severity field by name (IBM's spec lists it among 'non-ODC attributes' beside `open date`), and its one judgment-defined attribute, Impact, measured kappa 0.26-0.33 with five raters assigning the same category 2/140/184/36/62 times to the same 962 defects. CVSS is both the anchoring exemplar (v4.0's User Interaction gained observable predicates plus worked examples per value) and the cautionary tale (Finn's 0.021-0.33 on anchored metrics across 196 experienced practitioners; 68% gave different ratings to the same vulnerabilities nine months later). SSVC is the working blueprint — anchored checkable inputs feeding a transparent lookup table whose output is an action, not a number — and its six-analyst pilot gives the decisive datum: anchored inputs agreed well (Exploitation Fleiss 0.807, Technical Impact 0.679 via a three-yes/no-question rubric) but the DERIVED outcomes scored worse than their inputs (0.226/0.295), so composing imperfectly-agreed inputs through a tree compounds disagreement rather than cancelling it. Fagan's major/minor is binary and functional ('would cause a malfunction or unexpected result if left uncorrected') and severity is assigned unilaterally by one moderator, so no agreement statistic was ever collectible; where others measured, 8 classifiers over 30 faults averaged kappa 0.16 at median confidence 4/5. Google Tricorder removed all severity/priority ratings — not because severity is inaccurate but because a filter axis lets consumers silence a broken analyzer instead of reporting it — replacing it with an effective-false-positive rate (no positive action taken, including where the developer did not understand a real fault), probation at 10%, disable at 25%. Two supporting literatures: anchoring research says rubric structure does little while descriptor specificity moves ICC ~.49 to ~.64, that frame-of-reference calibration with feedback is what replicates rather than static exemplars, and that anchoring reliably raises rater CONFIDENCE whether or not it raises agreement; and the kappa paradox means a four-level scale with mass in two levels can report kappa 0.04 at 84% observed agreement, so raw + adjacent agreement, per-rater marginals, an ordinal coefficient and prevalence/bias indices must be reported together. Recommended: one axis (delete the dangling references, scoped by filename); derive the level from breaksSomething/reversible/selfEvident read off IMPACT_GLOSS's own ladder but SHADOW-FIRST until measured; type reach and likelihood as display/audit-only fields no reducer reads; seed the anchor answer key from #3314's two ratified worked examples rather than authoring it fresh; keep `unrecoverable`. Full grounding in we:reports/2026-08-27-calibrated-finding-severity-and-disposition.md.",
+  "dateOpened": "2026-08-27",
+  "lastReviewed": "2026-08-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "review",
+    "jury",
+    "severity",
+    "calibration",
+    "inter-rater-reliability",
+    "ieee-1044",
+    "orthogonal-defect-classification",
+    "cvss",
+    "ssvc",
+    "fagan-inspection",
+    "tricorder",
+    "static-analysis",
+    "false-positive-rate",
+    "kappa",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}
