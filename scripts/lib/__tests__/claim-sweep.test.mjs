@@ -531,15 +531,84 @@ describe('#3307 claim-sweep — the near tier reports the TOP of its own range',
     }
   });
 
-  it('#3307 a paragraph restating the claim TWICE reports both lines, not just the first', () => {
-    // The near tier used to `break` after the first matching sentence in a block — the same
-    // silent-drop family. Two restatements on two lines of one paragraph are two sites.
+  // Two token-less NEAR paraphrases — neither is a substring of the claim, so neither can be picked up
+  // by the document-wide `exact` scan or by the block's folded `indexOf`. Only the near tier can see
+  // them, which is what makes them able to pin a near-tier regression.
+  //
+  // > **Retracted — an earlier cut of this test used the fixtures
+  // > `'the gate never runs against backlog cards here.'` and
+  // > `'And the gate never runs against backlog cards there.'`, and its name claimed to pin the near
+  // > tier's removed `break`.** It pinned nothing: both lines CONTAIN the claim verbatim, so the
+  // > document-wide `exact` scan reported them and the near tier never ran. Re-introducing the `break`
+  // > left the suite green. Verified by mutation in this lane, not assumed.
+  const NEAR_A = 'the gate never runs quickly against backlog cards.';
+  const NEAR_B = 'the gate never runs at all against backlog cards.';
+
+  it('#3307 both NEAR restatements in one paragraph report — the near tier really is the one that sees them', () => {
     // Retracted — fixture text repeating the false claim above, never an assertion.
-    const doc = {
-      path: 'a.md',
-      text: 'the gate never runs against backlog cards here.\nAnd the gate never runs against backlog cards there.\n',
-    };
-    expect(sweepDocument(doc, { text: CLAIM }).map((x) => x.line)).toEqual([1, 2]);
+    for (const line of [NEAR_A, NEAR_B]) {
+      expect(normalizeText(line).includes(normalizeText(CLAIM))).toBe(false); // not a substring
+      expect(shingleContainment(normalizeText(CLAIM), normalizeText(line))).toBeGreaterThanOrEqual(0.6);
+    }
+    const sites = sweepDocument({ path: 'a.md', text: `${NEAR_A}\n${NEAR_B}\n` }, { text: CLAIM });
+    expect(sites.map((x) => [x.line, x.tier])).toEqual([[1, 'near'], [2, 'near']]);
+  });
+
+  it('#3307 MUTATION — a `break` in the near-tier sentence loop loses the second restatement', () => {
+    // The invariant the name above depends on: N near restatements in one paragraph are N sites.
+    // Restoring the `break` reddens this. It did NOT redden the fixtures this test used to carry.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
+    const sites = sweepDocument({ path: 'a.md', text: `${NEAR_A}\n${NEAR_B}\n` }, { text: CLAIM });
+    expect(sites).toHaveLength(2);
+  });
+
+  it('#3307 a near paraphrase sharing a paragraph with a VERBATIM copy is reported, not swallowed', () => {
+    // Round-3 juror finding. The block-level scan recorded the folded hit and then `continue`d past the
+    // WHOLE sentence loop, so an independent token-less restatement sitting in the same paragraph
+    // reached no tier — absent from survivors, undecided, retractedSites AND `coverage.skipped` alike.
+    // Splitting the very same two sentences into two paragraphs reported both, which is what showed it
+    // was the shared block and not the sentence doing it.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
+    const VERBATIM = 'the gate never runs against backlog cards, as noted earlier.';
+    const together = sweepDocument({ path: 'a.md', text: `${VERBATIM}\n${NEAR_A}\n` }, { text: CLAIM });
+    expect(together.map((x) => [x.line, x.tier])).toEqual([[1, 'exact'], [2, 'near']]);
+    // Same two sentences, one blank line between them — the answer must not depend on the paragraphing.
+    const apart = sweepDocument({ path: 'a.md', text: `${VERBATIM}\n\n${NEAR_A}\n` }, { text: CLAIM });
+    expect(apart.map((x) => x.tier)).toEqual(together.map((x) => x.tier));
+  });
+
+  it('#3307 MUTATION — `continue`ing past the sentence loop after a folded hit drops the paraphrase', () => {
+    // Stated as the invariant rather than as the mutation: whether a near paraphrase is reported is
+    // independent of whether some OTHER line of its paragraph carries the claim verbatim.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
+    const VERBATIM = 'the gate never runs against backlog cards, as noted earlier.';
+    for (const lead of [VERBATIM, 'An unrelated sentence about something else entirely.']) {
+      const sites = sweepDocument({ path: 'a.md', text: `${lead}\n${NEAR_A}\n` }, { text: CLAIM });
+      expect({ lead, near: sites.filter((x) => x.tier === 'near').map((x) => x.line) })
+        .toEqual({ lead, near: [2] });
+    }
+  });
+
+  it('#3307 a paragraph carrying the claim WRAPPED twice reports both copies, not just the first', () => {
+    // The same single-`indexOf`-then-`continue` line dropped a second folded copy in one paragraph.
+    // Neither copy is a literal substring of the raw text (each is wrapped across two lines), so only
+    // the block-level folded scan can see them.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
+    const text = 'the gate never runs\nagainst backlog cards, and later\nthe gate never runs\nagainst backlog cards again.\n';
+    expect(text.includes(CLAIM)).toBe(false); // wrapped — no verbatim substring anywhere
+    const sites = sweepDocument({ path: 'a.md', text }, { text: CLAIM });
+    expect(sites.filter((x) => x.tier === 'normalized').map((x) => x.line)).toEqual([1, 3]);
+  });
+
+  it('#3307 one wrapped copy whose sentence OPENS on an earlier line is one site, not two', () => {
+    // The guard on the other side of the same fix: now that the sentence loop runs even when the block
+    // carries a folded hit, the claim's own sentence would be re-recorded at `near` under the line the
+    // SENTENCE starts on — double-reporting a single occurrence. A sentence carrying the claim verbatim
+    // is skipped for that reason.
+    // Retracted — fixture text repeating the false claim above, never an assertion.
+    const sites = sweepDocument(
+      { path: 'a.md', text: `As noted earlier,\n${CLAIM} in every run.\n` }, { text: CLAIM });
+    expect(sites.map((x) => [x.line, x.tier])).toEqual([[2, 'exact']]);
   });
 });
 

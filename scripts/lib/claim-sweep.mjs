@@ -462,26 +462,35 @@ export function sweepDocument(doc, claim, opts = {}) {
   // normalized + near — paragraph-level, so a re-flowed or re-indented copy is still found
   for (const block of paragraphsOf(lines)) {
     if (!block.norm || !claimNorm) continue;
-    const exactInBlock = block.norm.indexOf(claimNorm);
-    if (exactInBlock !== -1) {
-      const line = lineForOffset(block, exactInBlock);
+    // EVERY folded occurrence in the block, not just the first. This used to be a single `indexOf`
+    // followed by `continue`, which dropped a second wrapped copy in the same paragraph outright.
+    for (let at = block.norm.indexOf(claimNorm); at !== -1;
+      at = block.norm.indexOf(claimNorm, at + Math.max(1, claimNorm.length))) {
+      const line = lineForOffset(block, at);
       record(line, 'normalized', (lines[line - 1] || '').trim(),
         'matches once blockquote markers, emphasis and line wrapping are folded — the claim may continue onto the following lines');
-      continue;
     }
+    // NO `continue` past this loop. It used to skip the WHOLE sentence scan for any block that carried
+    // a substring hit anywhere in it, so an independent, token-less paraphrase sharing the paragraph
+    // with a verbatim copy reached no tier at all — not survivors, not undecided, not even
+    // `coverage.skipped`. An uncounted omission, in the one report that must not have any.
     let cursor = 0;
     for (const sentence of sentencesOf(block.norm)) {
       const sIdx = block.norm.indexOf(sentence, cursor);
       if (sIdx !== -1) cursor = sIdx + sentence.length;
+      // A sentence CARRYING the claim verbatim is already recorded just above at a confirmed tier.
+      // Skipping it here is not a drop, and re-recording it would double-report one occurrence under
+      // two line numbers whenever its sentence opens on an earlier line than the claim itself.
+      if (sentence.includes(claimNorm)) continue;
       const score = shingleContainment(claimNorm, sentence);
       // The TOP of the range is IN it. This used to read `score >= near && score < 1`, on the unstated
       // assumption that a containment of exactly 1 can only mean the claim is a literal substring and was
       // therefore already caught above as `normalized`. That is false: containment counts DISTINCT claim
       // shingles, so a sentence that repeats a clause ("the gate never runs never runs against backlog
-      // cards") contains every one of them while being no substring at all — and the block-level
-      // `indexOf` above has already `continue`d past any block that IS a substring match. Such a site
-      // scored 1, matched no other tier, and vanished from a report whose whole promise is that nothing
-      // is silently filtered. It is the STRONGEST paraphrase the near tier can see; it is now recorded.
+      // cards") contains every one of them while being no substring at all — and the substring case is
+      // handled by the explicit skip above, not by scoring. Such a site scored 1, matched no other tier,
+      // and vanished from a report whose whole promise is that nothing is silently filtered. It is the
+      // STRONGEST paraphrase the near tier can see; it is now recorded.
       if (score >= near) {
         // The excerpt is the FOLDED sentence that matched, not the raw first line of the paragraph: a
         // paraphrase is usually mid-blockquote, and quoting the wrong line reads as a false positive.
