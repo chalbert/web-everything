@@ -31,7 +31,8 @@
  * ── WHAT IS AND IS NOT FILTERED (this section used to overclaim; see the retraction below) ────────────
  * A near-match, an ambiguous paraphrase, and a bare number in an unrelated context are precisely what the
  * human doing the correcting needs to see; a sweep that silently drops them is worse than one that admits
- * uncertainty, because it reads as completeness. Every site that reaches a tier is REPORTED and labelled:
+ * uncertainty, because it reads as completeness. A site that scores into a tier is REPORTED and labelled,
+ * and whether it scores does NOT depend on what else its paragraph happens to contain:
  *
  *   exact       verbatim substring                              → confidence `confirmed`
  *   normalized  matches once blockquote markers, emphasis,      → confidence `confirmed`
@@ -44,15 +45,28 @@
  *               in a sentence that is otherwise unrelated
  *
  * RETRACTED — this section used to head itself "WHY NOTHING IS SILENTLY FILTERED" and to promise, flatly,
- * "Every site this finds is REPORTED". Both were false when written, in the two ways review #1620 found:
+ * "Every site this finds is REPORTED". False when written, in THREE ways, all found by review #1620:
  *   • the `near` tier excluded a containment of exactly 1, so the STRONGEST non-substring paraphrase it
  *     could see reached no tier at all and left no trace in the report;
  *   • `retractionNear` matched a dozen short English phrases as bare substrings anywhere in a ±6-line
  *     window, so an unretracted claim beside "…on the old display it read as a jumble of digits" was
- *     filed under ALREADY RETRACTED and the CLI exited 0 "clean".
+ *     filed under ALREADY RETRACTED and the CLI exited 0 "clean";
+ *   • the paragraph scan recorded a folded hit and then `continue`d past the whole sentence loop, so an
+ *     independent, token-less paraphrase sharing that paragraph reached no tier — absent from survivors,
+ *     from undecided, from retractedSites AND from `coverage.skipped` alike. The same two sentences split
+ *     across two paragraphs both reported, so the answer depended on the blank line, not on the text.
+ *
+ * RETRACTED, SECOND ORDER — this paragraph previously read "Both are fixed and both are pinned by tests
+ * that redden on reversion". The first half was true and the second was not, for the FIRST fix's own
+ * sibling change: removing the near tier's per-block `break` was pinned by a test named for it whose two
+ * fixture lines were literal substrings of the claim, so the `exact` scan answered it and the near tier
+ * never ran. Re-introducing the `break` left the suite green. That is round-1 finding 3 — "fixed here,
+ * with nothing protecting it" — recurring inside the round-2 prevention. All three are now fixed and each
+ * is pinned by a mutation that was actually re-run in the lane, not asserted.
+ *
  * A promise of completeness is exactly the thing this module must not make loosely, because the whole
- * point of it is that "no output" reads as "nothing to find". Both are fixed and both are pinned by
- * tests that redden on reversion; the wording is now scoped to what the code actually does.
+ * point of it is that "no output" reads as "nothing to find". The wording is now scoped to what the code
+ * actually does.
  *
  * Retraction is an annotation rather than a filter, but it is NOT free of judgment: marking a site
  * retracted removes it from `survivors` and can take the exit code to 0, so the detector is deliberately

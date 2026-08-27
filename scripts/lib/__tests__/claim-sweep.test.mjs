@@ -496,13 +496,15 @@ describe('#3307 claim-sweep — CLI', () => {
   });
 });
 
-// ── #3307 review round 2 — the four defects the review found, each with a test that reddens without its fix ──
+// ── #3307 review rounds 2 and 3 — each defect the review found, with a test that reddens without its fix ──
 
 describe('#3307 claim-sweep — the near tier reports the TOP of its own range', () => {
   // Juror finding, claim-sweep.mjs near tier. `score >= near && score < 1` excluded a containment of
   // exactly 1 on the assumption that only a literal substring can score 1 — but containment counts
   // DISTINCT claim shingles, so a sentence repeating a clause contains all of them without being a
-  // substring, and the block-level `indexOf` has already `continue`d past every block that IS one.
+  // substring. (This comment used to add "and the block-level `indexOf` has already `continue`d past
+  // every block that IS one" — that `continue` was itself the round-3 finding and is gone; a sentence
+  // carrying the claim verbatim is now skipped explicitly, at the sentence, not at the whole block.)
   // Such a site matched NO tier and vanished from the report. Prevention the review marked OWED.
   // Retracted — the claim text below is FALSE (the gate does run against backlog cards). It is reused
   // here because `3307`'s evidence names it as the no-distinctive-token specimen, not as an assertion.
