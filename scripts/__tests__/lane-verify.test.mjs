@@ -559,7 +559,7 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
     });
     return out;
   };
-  /** The same predicate `no emitter ships …` applies, factored out so a probe asserts the REAL rule. */
+  /** The predicate the `no HARVESTED emitter …` case applies, factored out so a probe asserts the REAL rule. */
   const silentIn = (invocations) => invocations
     .filter((v) => !VERIFY_FLAGS.some((f) => f in parseArgv(v.cmd)))
     .filter((v) => !v.precededByVerify)
