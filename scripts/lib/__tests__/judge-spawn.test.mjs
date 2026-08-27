@@ -1011,7 +1011,7 @@ describe('#3187 (a) — the INHERITED default admits a tool-bearing juror at the
     },
   );
 
-  it('also clears the converge seat that was actually killed, which is the path that inherits this', () => {
+  it('also clears the converge seat that was actually killed, on ONE of the paths that inherit this', () => {
     expect(DEFAULT_BUDGET_USD).toBeGreaterThan(MEASURED_CONVERGE_KILL_SPEND_USD);
     expect(DEFAULT_BUDGET_USD).toBeGreaterThan(0.69); // what that same seat spent when it was allowed to finish
   });
