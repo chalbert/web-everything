@@ -1,7 +1,8 @@
 ---
+bornAs: xyp1wnt
 kind: story
 size: 3
-parent: "xgy2ypv"
+parent: "3369"
 status: open
 scope: ["we:scripts/lib/judge-spawn.mjs", "we:scripts/operations/cli-adapter.mjs"]
 dateOpened: "2026-08-27"
@@ -35,7 +36,7 @@ building or choosing a second provider yet. Behaviour is unchanged; Claude remai
 
 ## Deliberately NOT in scope
 
-- **A second provider implementation.** That is `#x356hzs`, which is blocked on this item landing first —
+- **A second provider implementation.** That is `#3371`, which is blocked on this item landing first —
   there is no port to implement against otherwise.
 - **The dispatcher/panelist spawn sites** (`we:scripts/operations/dispatch-lane-io.mjs`,
   `we:scripts/operations/explore-io.mjs`). Judges are the lowest-risk boundary because they are tool-free by
@@ -44,4 +45,4 @@ building or choosing a second provider yet. Behaviour is unchanged; Claude remai
 
 ## Lineage
 
-First decomposition step of `#xgy2ypv` (multi-provider agent dispatch), filed 2026-08-27.
+First decomposition step of `#3369` (multi-provider agent dispatch), filed 2026-08-27.
