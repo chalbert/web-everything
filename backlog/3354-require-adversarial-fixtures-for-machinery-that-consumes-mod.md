@@ -1,10 +1,12 @@
 ---
 bornAs: xuhxkqz
 kind: decision
-status: open
+status: resolved
 scaffoldedBy: "prepare-fixture-statute-lane-24-b65dbaef"
 dateScaffolded: "2026-08-26"
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-27"
+codifiedIn: "docs/agent/platform-decisions.md#agent-convergence-independent-validation"
 preparedDate: "2026-08-26"
 relatedReport: reports/2026-08-26-adversarial-fixtures-model-output-consumers.md
 relatedTo: ["3351", "3352", "2877", "2697"]
@@ -18,6 +20,24 @@ tags:
 ---
 
 # Require adversarial fixtures for machinery that consumes model output
+
+**Ratified 2026-08-27 by the operator (Nicolas Gilbert) — both invariants, as prepared, neither overridden.**
+Codified as a one-sentence amendment to clause 2 of
+[#agent-convergence-independent-validation](/docs/agent/platform-decisions.md#agent-convergence-independent-validation),
+with the author-facing form as a second qualifier beside the #3264 tier-1 note in
+`we:docs/agent/backlog-workflow.md`. No new anchor was minted. The enforcement mechanism is
+[#3355](/backlog/3355-gate-the-declared-model-consumer-set-on-standing-adversarial/), whose `blockedBy` on this
+item is cleared by this PR.
+
+> **One piece of the evidence was contested at ratification and is recorded as such.** The item cites
+> `we:scripts/lib/jury-core.mjs:480` (`admitsCitation` failing **open** on an unknown scope) as a live defect.
+> Read at ratification time, that fail-open is a **documented deliberate choice**: its own docblock argues an
+> unrecognised word must never silently withhold a finding, *"which is the DROP direction and the one that
+> costs an escaped defect"* — the same reasoning [#3351](/backlog/3351/) used when it chose downgrade-and-disclose
+> over dropping a hallucinated citation. It is cited here as evidence for Ratify 2 and it may not be a defect at
+> all. **The ruling does not rest on it**: the six defects in the table below, and the second live case (the
+> array refusal absent from three sibling call sites), carry the argument without it. Flagged rather than
+> quietly dropped, because the same overclaiming this cluster keeps finding would otherwise be repeated here.
 
 ## Digest
 

@@ -2851,7 +2851,8 @@ Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ### Agent fix/convergence: peer-agreement is not validation — independence rests on a distinct fresh validator, and the deterministic land-gate must be gaming-proofed {#agent-convergence-independent-validation}
 
-**Ratified 2026-07-10 (#2398, graduated to epic #2410, successor to #2285).** When the drain converges an agent-authored fix
+**Ratified 2026-07-10 (#2398, graduated to epic #2410, successor to #2285). Clause 2 amended 2026-08-27 by the
+operator (Nicolas Gilbert) — #3354, the model-consumer sentence.** When the drain converges an agent-authored fix
 in-process (the editor↔reviewer negotiation loop shipped by #2311/#2310, wired live by #2326), the loop is one
 **convergence bar**, not two paths: it lands only when *all* hold — **approach agreed · an independent validator
 accepts · `check:standards` green · required `test` (CI) green · no test-tampering.** "CI green" is the
@@ -2871,6 +2872,10 @@ core invariant — **a landed PR is accepted by an agent that did not author the
    **anti-test-gaming guards** — test files read-only to the author peers (or diff-gate any test change), fail the
    land if coverage drops or tests are removed/skipped, require a test that fails on pre-change behavior for logic
    fixes, and have the validator inspect for test tampering.
+   Where the code under review **acts on a value that came from a model**, the same requirement binds on the
+   consumer's **existence**, not only on a fix: such a module carries a standing adversarial fixture set, and a
+   fixture counts only if a named line of guard code, removed, makes it fail. Structural validity is not the
+   untrusted part — meaning is; schema validation and constrained decoding do not discharge this.
 
 Applies to any AI-review/convergence surface in the constellation, not just the drain. Non-convergence (round cap)
 or `needs-human` escalates to `review:human`, unchanged. Ship unattended auto-fix behind an off-by-default flag,
