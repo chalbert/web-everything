@@ -2,10 +2,11 @@
 bornAs: x3884p1
 kind: story
 size: 3
-status: open
+status: resolved
 relatedTo: ["2748", "3151"]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/__tests__/lane-pool-reap-on-acquire.test.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs"]
 dateOpened: "2026-08-26"
+dateResolved: "2026-08-26"
 preparedDate: "2026-08-26"
 tags: [lane-pool, lease, concurrency, reaper]
 ---
