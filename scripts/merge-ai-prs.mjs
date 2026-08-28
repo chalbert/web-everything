@@ -2621,6 +2621,33 @@ export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, 
 }
 
 /**
+ * #3379 — push a land-time numbering/resolve-on-land commit to main, tolerating a failed push exactly the
+ * way `regenDerivedOnLand` above already does for the derived-artifact commit: same `{pushed, warning}`
+ * shape, same injectable `exec` (default the real `execFileSync`) so this is unit-testable without shelling.
+ *
+ * WHY THIS EXISTS (#1664/#1665 stranded a hash each, #3379). Before this extraction, the push lived INLINE
+ * in `runCli`, calling the real `execFileSync` directly with no injection seam — so a push failure here had
+ * never once been unit-tested, unlike its `regenDerivedOnLand` sibling four hundred lines up, which already
+ * had exactly this shape AND a dedicated test for a failed push. Nobody reused it when this numbering push
+ * was written (#2288, 2026-07-07); a second, ad-hoc, untestable copy of "commit already made, push it,
+ * tolerate failure" was written instead. Worse: the old inline `catch` only ever printed a stderr line, and
+ * only `if (!AS_JSON)` — a `--json` caller (the resident drain daemon's own normal invocation) got ZERO
+ * signal a fix never reached main. This function's `warning` field is designed to be threaded into the
+ * final JSON result (see `numberingWarning` in `runCli`'s returned `result`), so that gap is closed too.
+ * @param {{exec:Function, cwd?:string, remote?:string, base?:string, shouldPush:boolean}} o
+ * @returns {{pushed:boolean, warning?:string}}
+ */
+export function pushNumberingOnLand({ exec, cwd = process.cwd(), remote = 'origin', base = 'main', shouldPush = false } = {}) {
+  if (!shouldPush || typeof exec !== 'function') return { pushed: false };
+  try {
+    exec('git', ['push', remote, `HEAD:${base}`], { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } });
+    return { pushed: true };
+  } catch (e) {
+    return { pushed: false, warning: `numbering/resolve committed locally but push FAILED (${String((e && e.message) || e).split('\n')[0]}) — push main by hand` };
+  }
+}
+
+/**
  * #2348 — resync a DETACHED cwd onto the real just-merged `origin/${base}` before JIT numbering / derived
  * regen read it. `git pull --ff-only` (the block above, in `runCli`) needs an ATTACHED branch with an
  * upstream — the PRIMARY's local `main`. It always errors on a DETACHED HEAD, which is exactly the state
@@ -4354,16 +4381,16 @@ async function runCli() {
         process.stderr.write(`  ⚠ resolve-on-land FAILED ${failedResolve.map((f) => `#${f.id} (${f.reason})`).join(', ')} — the card is NOT resolved on main; resolve it by hand (#2899)\n`);
       }
       resolveOnLandReport = { resolved: resolvedOnLand, alreadyResolved, deferred: plan.deferred, failed: failedResolve };
-      if (n.committed || resolvedOnLand.length) {
-        try {
-          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-          if (!AS_JSON && n.committed) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
-          if (!AS_JSON && resolvedOnLand.length) process.stderr.write(`  ✓ resolved on land ${resolvedOnLand.map((i) => `#${i}`).join(', ')} + pushed to main (#2899/#2748)\n`);
-        } catch (e) {
-          if (!AS_JSON) process.stderr.write(`  ⚠ numbering/resolve committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
-        }
+      // #3379 — extracted + injectable (`pushNumberingOnLand`, mirrors `regenDerivedOnLand`): a failed push
+      // now returns a `warning`, always (not just `if (!AS_JSON)`), so a --json caller sees it too.
+      const pushResult = pushNumberingOnLand({ exec: execFileSync, shouldPush: n.committed || resolvedOnLand.length > 0 });
+      if (pushResult.pushed) {
+        if (!AS_JSON && n.committed) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+        if (!AS_JSON && resolvedOnLand.length) process.stderr.write(`  ✓ resolved on land ${resolvedOnLand.map((i) => `#${i}`).join(', ')} + pushed to main (#2899/#2748)\n`);
+      } else if (pushResult.warning && !AS_JSON) {
+        process.stderr.write(`  ⚠ ${pushResult.warning}\n`);
       }
-      return { ...n, resolvedOnLand };
+      return { ...n, resolvedOnLand, ...(pushResult.warning ? { warning: pushResult.warning } : {}) };
     });
     numbered = numLock.result;
     if (numLock.contended && !AS_JSON) process.stderr.write(`  ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
@@ -4412,7 +4439,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
