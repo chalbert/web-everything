@@ -24,16 +24,19 @@
  *   node scripts/verify-lane.mjs --json              # machine-readable {sha, status, exitCode} on stdout
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
  *   node scripts/verify-lane.mjs check --require-verified   # exit non-zero unless HEAD has a fresh GREEN marker (the gate pr-land applies)
+ *   node scripts/verify-lane.mjs reset                # clear a stale marker so `verify` can start (x4jcqm4) — refuses if the lane's lease is live
  *
- * Exit codes: 0 = green (marker recorded green) / `check` verdict ok; 2 = red (suites failed — marker recorded
- * red) / `check` verdict not-ok; 3 = usage / git error (no marker written).
+ * Exit codes: 0 = green (marker recorded green) / `check` verdict ok / `reset` cleared or was a no-op; 2 = red
+ * (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no marker written) /
+ * `reset` refused because the lane's lease is live.
  */
 import { execSync } from 'node:child_process';
-import { writeFileSync, renameSync } from 'node:fs';
+import { writeFileSync, renameSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
+import { LEASE_FILENAME, isLeaseStale } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -55,7 +58,7 @@ const AS_JSON = !!flags.json;
 // `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, and the `WE_LAND_UNVERIFIED=1` break-glass. Previously `check`
 // read only `flags['require-verified']`, so the same env produced two different verdicts at the two call sites.
 const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
-const MODE = positionals[0] === 'check' ? 'check' : 'verify';
+const MODE = positionals[0] === 'check' ? 'check' : positionals[0] === 'reset' ? 'reset' : 'verify';
 
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const tryGit = (args) => { try { return git(args); } catch { return null; } };
@@ -94,6 +97,37 @@ if (!headSha) emit({ sha: null, status: 'error', reason: 'no-head', detail: `cou
 if (MODE === 'check') {
   const v = verifyGateDecision({ record: readMarker(), headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
   emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
+}
+
+// ── `reset` (x4jcqm4) — clear a marker that is stale, not overlapping ─────────────────────────────────
+// The START-write guard above (finding 4) is correct when a marker's terminal record belongs to a run that is
+// STILL RELEVANT — but it cannot tell that apart from a marker that is simply old: a finished run, in a lane
+// nothing currently holds. Two nights running that indistinguishability forced a manual `rm` of this file to
+// unblock an unrelated change. `reset` is the sanctioned recovery: it clears the marker ONLY when this lane's
+// own `.lane-lease` marker is absent or has outlived its TTL (`isLeaseStale`, `scripts/lib/lane-lease.mjs`) —
+// the same staleness test `lane-pool.mjs acquire` already uses to decide a lane is reclaimable. A LIVE lease
+// means someone may still be relying on the current marker, so `reset` refuses exactly then, matching the
+// START-write guard's own protective posture rather than working around it.
+if (MODE === 'reset') {
+  if (!existsSync(MARKER)) emit({ sha: headSha, status: 'noop', reason: 'no-marker', detail: `no marker at ${MARKER} — nothing to reset.` }, 0);
+  const record = readMarker();
+  const leaseFile = join(GIT_DIR, LEASE_FILENAME);
+  let lease = null;
+  if (existsSync(leaseFile)) {
+    try { lease = JSON.parse(readFileSync(leaseFile, 'utf8')); } catch { lease = null; }
+  }
+  if (lease && !isLeaseStale(lease, Date.now())) {
+    emit(
+      {
+        sha: headSha, status: 'refused', reason: 'active-lease', exitCode: null,
+        detail: `refusing to reset: ${leaseFile} holds a live lease (${lease.session || 'unknown'}, acquired ${lease.acquiredAt}) — this lane may be in active use; release it or let the lease expire first.`,
+      },
+      3,
+    );
+  }
+  unlinkSync(MARKER);
+  const desc = record && !record.corrupt ? `${record.status || 'stranded'} marker for ${String(record.sha || '?').slice(0, 8)}` : 'a corrupt marker';
+  emit({ sha: headSha, status: 'reset', reason: 'cleared', detail: `cleared ${desc} — ${MARKER} removed.` }, 0);
 }
 
 // ── `verify` — run the suites SYNCHRONOUSLY and record the outcome ───────────────────────────────────
