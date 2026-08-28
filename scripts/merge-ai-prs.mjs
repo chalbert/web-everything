@@ -514,6 +514,23 @@ export function planCiLifecycleLabelUpdate({ currentLabels = [], desired, owned 
 }
 
 /**
+ * A parked hold that has since been resolved leaves a stale `review:pending` sitting beside a real
+ * `review:accepted` — a retry review accepts, but `review-set-label.mjs` correctly refuses to label
+ * OVER a live hold, so the accept and the still-standing park both land. The drain's own merge decision
+ * requires `review:accepted` present AND no hold label present (`hasLabel`'s callers, `HOLD-INTEGRITY
+ * #2820` above), so this contradiction reads as "still held" and the PR sits merge-eligible-looking but
+ * permanently skipped, needing a human or a session to notice the contradiction and run
+ * `review-set-label.mjs --to=accepted` by hand. Pure detector; the caller applies the sanctioned CLI
+ * resolution — this never edits labels itself, only says whether the contradiction is present.
+ * @param {{currentLabels?:Array}} o
+ * @returns {boolean} true iff both `review:accepted` and `review:pending` are present at once
+ */
+export function hasStaleReviewPendingBesideAccept({ currentLabels = [] } = {}) {
+  const has = (name) => hasLabel({ labels: currentLabels }, name);
+  return has('review:accepted') && has('review:pending');
+}
+
+/**
  * Classify one PR into a merge/skip verdict. Pure — no gh calls. Returns
  *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, certifyLabel, testGreen, state, mergeable }.
  * `decision === 'merge'` requires ALL of: producer-certified, required check green, mergeable, a landable
@@ -3196,6 +3213,22 @@ async function runCli() {
             for (const add of plan.toAdd) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', add], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* a label race/permission miss is non-fatal — the next pass retries */ } }
             if (ok) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} ci-lifecycle → "${desired}" (reconcile)\n`); }
           }
+        }
+      }
+      // ── Stale review:pending beside a real review:accepted — the drain's own sanctioned resolution
+      //    (review-set-label.mjs --to=accepted) applied automatically instead of needing a human/session to
+      //    notice the contradiction. Every PR (not just AI-generated ones — the contradiction can happen on
+      //    any parked-then-accepted PR), best-effort, never fatal to the sweep.
+      if (hasStaleReviewPendingBesideAccept({ currentLabels: p.labels })) {
+        if (DRY_RUN) {
+          touched = true;
+          if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would clear stale review:pending beside review:accepted\n`);
+        } else {
+          try {
+            execFileSync('node', ['scripts/review-set-label.mjs', String(p.number), ...repoFlag(repo), '--to=accepted'], { stdio: ['ignore', 'ignore', 'pipe'] });
+            touched = true;
+            if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} cleared stale review:pending beside review:accepted\n`);
+          } catch { /* self-clear refusal or a label race — non-fatal, the next pass (or a different actor) retries */ }
         }
       }
       if (touched) reconciled.push(p.number);
