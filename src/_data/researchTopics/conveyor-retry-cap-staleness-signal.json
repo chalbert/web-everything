@@ -1,0 +1,22 @@
+{
+  "id": "conveyor-retry-cap-staleness-signal",
+  "title": "Conveyor retry-cap staleness vs. real-failure signal — prior art from the repo's own review-escalation machinery",
+  "summary": "Prior-art survey for decision #x5y1l6r (prepared 2026-08-28): the conveyor's auto-fix/auto-heal retry caps in we:scripts/conveyor/tick-core.mjs count every dispatch attempt identically, unable to tell a PR that is merely BEHIND a fast-moving main (no real regression) from one that is genuinely, repeatedly broken. THE TRACE CORRECTION — the observed incident (a fix that kept getting restarted by rebase-triggered CI reruns until the PR was closed) implicates planCiHealSpawns (guard 3b, #2666, tick-core.mjs:482-516), not planFixSpawns (guard 3, tick-core.mjs:383-417) as originally filed: a review:changes fix-agent dispatch is always a genuine repair attempt by construction (hasReviewChanges is set only by a human/AI naming a real finding), so guard 3's counter already counts only real attempts. After a fix agent re-arms a PR to review:pending (rearm-review.mjs) it becomes review-parked, and isCiHealTarget's own docstring explicitly hands a review:changes PR to the fix loop and everything else to CI-heal (tick-core.mjs:210) -- so a re-armed PR that falls BEHIND again is guard 3b's problem, with its own separate ciHealAttempts counter and cap. THE CLOSE-MECHANISM TRACE -- a repo-wide grep for any PR-close call across scripts/**/*.mjs and .github/workflows/*.yml found none; pr-watch.mjs only DETECTS an already-closed PR (tick-core CLOSED branch is read-only), and skills-src/conveyor/SKILL.md:496-497 states plainly that a closed PR is 'a human abandoned it', an anomaly to investigate, never a mechanized outcome. So the observed 'automated cleanup' was a human acting on a false-broken read of a staleness-only exhaustion signal, not code auto-closing anything. THE PRIOR-ART FINDING -- this repo already built and hardened, for a different purpose, the exact base-independent content-fingerprint machinery this decision needs: normalizeContributionFingerprint (review-escalation.mjs:1192), built to let a human review-clearance survive the drain's own content-preserving rebase, hardened against three real production false-staleness incidents (#x9xqexm/PR#1100, #xalaqel/PR#1106, #x0pfbqp) and one still-open residual (#x413mbt, a relocation collision deliberately left in for a human-backstopped use case). A prep-stage skeptic sub-agent attacked reusing it as-is for the CI-heal retry cap and found a concrete false-negative specific to that path: the CI-heal agent's own brief instructs regenerating derived registries/lockfiles during BEHIND-conflict resolution, and the fingerprint only special-cases the lane manifest file, so a purely mechanical heal can get a DIFFERENT fingerprint despite no real change, defeating the exemption for the dominant trigger. The recommended default therefore is NOT the fingerprint reuse but a direct self-report: the CI-heal agent's brief already determines, mid-run, whether it committed anything beyond the mechanical rebase (fix-agent-ci-brief.md's own conditional commit step) -- record that boolean on the durable CI-heal comment marker (ci-heal-mark.mjs, mirroring the #2643/#2666 durable-comment-count pattern) instead of inferring it after the fact. Full grounding in we:reports/2026-08-28-conveyor-retry-cap-staleness-vs-failure.md.",
+  "status": "open",
+  "dateOpened": "2026-08-28",
+  "lastReviewed": "2026-08-28",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "conveyor",
+    "retry-cap",
+    "staleness",
+    "ci-heal",
+    "fingerprint",
+    "review-escalation",
+    "decision-prep",
+    "delivery"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-08-28-conveyor-retry-cap-staleness-vs-failure.md"
+}

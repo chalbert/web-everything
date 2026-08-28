@@ -1,0 +1,93 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/x5y1l6r/">#x5y1l6r</a> asks: the conveyor's auto-fix and auto-CI-heal retry
+  caps (<code>we:scripts/conveyor/tick-core.mjs</code>) count every dispatch attempt against a fixed
+  budget (default 3) before handing a stuck PR to a human. That counter cannot tell a PR that is merely
+  BEHIND a fast-moving <code>main</code> — no real regression, just racing the base — from one that is
+  genuinely, repeatedly broken. What signal should classify the difference, and where in the tick-core
+  machinery does it actually need to apply?
+</p>
+
+<h2>Finding 1 — the trace correction: it is guard 3b, not guard 3</h2>
+<p>
+  The card as filed named <code>planFixSpawns</code> (the <code>review:changes</code> fix loop, "guard 3")
+  as the blind counter. Re-tracing the causal chain shows that attribution is wrong for the
+  staleness-restart part of the incident. A <code>review:changes</code> dispatch is <em>always</em> a
+  genuine repair attempt — the label is set only by a human or AI naming a real finding, and
+  <code>we:skills-src/conveyor/fix-agent-brief.md</code> has no "nothing to fix" branch. So guard 3's
+  counter already counts only real attempts. On success, the fix agent re-arms the PR to
+  <code>review:pending</code> (<code>we:scripts/conveyor/rearm-review.mjs</code>) — a review-parked state.
+  If <code>main</code> moves again before re-review, the PR goes BEHIND, and <code>isCiHealTarget</code>
+  explicitly routes anything not carrying <code>review:changes</code> to the CI-heal loop
+  ("owned by the fix loop, which already rebases" is the exclusion reason for the one case that
+  <em>doesn't</em> apply here — <code>we:scripts/conveyor/tick-core.mjs:210</code>). <code>planCiHealSpawns</code>
+  ("guard 3b", #2666) then dispatches against its own, separate <code>ciHealAttempts</code> counter and cap —
+  the counter the observed incident's repeated rebase-triggered restarts almost certainly burned through.
+</p>
+
+<h2>Finding 2 — the close mechanism traced to a negative result</h2>
+<p>
+  A repo-wide search for any PR-close call — <code>gh pr close</code>, a <code>state: closed</code>
+  mutation, a stale-PR GitHub Action — across every script and workflow in this repo found none.
+  <code>we:scripts/conveyor/pr-watch.mjs</code> only <em>detects</em> an already-closed PR (a read of
+  <code>gh pr view</code>'s state); it never issues one. The conveyor SKILL is explicit that a closed PR is
+  a human decision to investigate, never a mechanized outcome: <em>"closed (watcher 4) — the PR was closed
+  without merging (a human abandoned it). The runner surfaces it as an anomaly to investigate."</em> Both
+  retry-cap exhaustion notes are worded as a hand-off ("run <code>/review N</code>"), never a close verb.
+  So the observed "automated cleanup" was a human closing the PR after repeated exhaustion notices — the
+  false signal, not a rogue auto-close, is what this decision needs to fix.
+</p>
+
+<h2>Finding 3 — the repo already built the right primitive, for a different purpose</h2>
+<p>
+  <code>normalizeContributionFingerprint</code> (<code>we:scripts/lib/review-escalation.mjs:1192</code>)
+  is a base-independent digest of a PR's own content — it hashes every <code>+</code>/<code>-</code> line,
+  hunk lengths, and a context-run-length "shape" marker, while dropping absolute hunk offsets, the
+  inter-hunk gap, and git's section heading — everything a rebase alone changes. It exists because
+  <code>normalizeDiffFingerprint</code> (its sibling, which keeps context lines and hunk offsets) turned
+  out <strong>not enough</strong>: on WE PR #1100, a human review-clearance was revoked 3 minutes after
+  being granted because the drain's own content-preserving rebase shifted one hunk offset, with every
+  <code>+</code>/<code>-</code> line byte-identical. Two more production incidents (#xalaqel — an
+  inter-hunk gap moved under a uniform base displacement; #x0pfbqp — git's section heading is derived from
+  base text) forced the same conclusion: any signal that keeps <em>anything</em> position-derived will
+  false-flag a base-move as a real change. <code>normalizeContributionFingerprint</code> is the fix,
+  measured at 0 false divergences across 201 machine-replayed content-preserving rebases and 16 real
+  stamped clearances. It carries one deliberately accepted residual, left open as <code>#x413mbt</code>: a
+  contribution <em>relocated</em> without changing its own length or shape can collide with a prior
+  fingerprint. The docstring justifies accepting that residual because the original use (human
+  review-clearance) already had a human look at the content once before the fingerprint's exemption fires.
+</p>
+
+<h2>Finding 4 — reusing it as-is for the retry cap does not survive a skeptic attack</h2>
+<p>
+  A prep-stage skeptic sub-agent, prompted only to refute, attacked the naive proposal (reuse
+  <code>normalizeContributionFingerprint</code> for the CI-heal retry cap, unchanged) on merit and
+  citation-scope and found a concrete, path-specific false-negative: the CI-heal agent's own brief
+  (<code>we:skills-src/conveyor/fix-agent-ci-brief.md</code>) instructs it, when resolving a rebase
+  conflict, to "regenerate derived/generated artifacts" and "take-main for coordination JSON" — and
+  <code>normalizeContributionFingerprint</code> special-cases exactly one file (the lane manifest),
+  hashing every other regenerated registry or lockfile verbatim. A purely mechanical BEHIND-heal that
+  regenerates a registry during conflict resolution gets a <em>different</em> fingerprint despite no real
+  change — defeating the exemption for the archetypal, most common CI-heal trigger. The skeptic also found
+  the fingerprint's cited production track record (0/201, two incidents fixed) was measured against
+  drain-rebase-survival specifically, not against fix-agent/CI-heal attempt cycles — an over-cited scope.
+  And the accepted <code>#x413mbt</code> residual has no human backstop in a fully automated retry-cap use
+  the way it does in the original human-clearance use.
+</p>
+
+<h2>The recommended default</h2>
+<p>
+  Not a diff-inference at all: a <strong>direct self-report</strong>. The CI-heal agent's brief already
+  determines, mid-run, whether it committed anything beyond the mechanical rebase ("if a clean rebase
+  already fixes it … no code change is needed" vs. "if a real break remains … repair") — record that fact
+  directly on the durable CI-heal comment marker
+  (<code>we:scripts/conveyor/ci-heal-mark.mjs</code>, mirroring the restart-surviving durable-comment-count
+  pattern <a href="/backlog/2643/">#2643</a> and <a href="/backlog/2666/">#2666</a> already established),
+  and bind <code>planCiHealSpawns</code>'s cap on the count of comments where that flag is true. This
+  sidesteps the fingerprint approach's registry-regeneration false-negative entirely, because it is an
+  exact fact the agent already computes rather than an inference with a documented failure mode on this
+  exact path. Full reasoning, the per-fork classification, and the resolved skeptic findings are in
+  <a href="/backlog/x5y1l6r/">#x5y1l6r</a>.
+</p>
+{% endraw %}
