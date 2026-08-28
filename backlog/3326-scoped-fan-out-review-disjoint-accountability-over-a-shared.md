@@ -315,8 +315,8 @@ amortised spend is $0.43/PR for one juror, one lens, one round — the thing bei
   before any PR is read, and `advance`'s `judge` case refuses a request that is not one
   `{ mandate, input, shape }`. So a **variable** number of scoped seats cannot be declared as steps, and
   #3319's own residual already records why. That is a real fork — fan out inside the *caller* of one declared
-  judge step, or widen the judge request contract to carry seats — and it is filed as **#x79c033**, not decided
-  here. #3326 delivers the derivation, the manifest and the reduction; #x79c033 decides how they get seated.
+  judge step, or widen the judge request contract to carry seats — and it is filed as **#3377**, not decided
+  here. #3326 delivers the derivation, the manifest and the reduction; #3377 decides how they get seated.
 - **#3158 (tool-free panel jurors) — a hard dependency, and it is larger than it looks.** The design's central
   invariant is full repository access, and `judgePanel` forwards no `allowedTools`, so every panel seat is
   `--tools ''` today; #3318 records the consequence in one line — *"Wiring it as-is replaces one tool-bearing
@@ -624,7 +624,7 @@ design and defers on the taxonomy.)*
 
 ## Deliberately out of scope
 
-**Seating the panel inside a declared operation** — #x79c033.
+**Seating the panel inside a declared operation** — #3377.
 
 **Raising `maxShards` above 1 in the live panel** — gated on criterion 1's number, not on this card landing.
 
