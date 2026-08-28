@@ -36,10 +36,10 @@ numbering at all, since the rule runs unconditionally as part of the standard ga
 
 **3. The miss is not a one-off — it recurred on the very next merge.** This card's own PR (#1665,
 which fixed finding 1 and added this card) landed cleanly, and THIS card's own hash-slug filename
-(`xm1izdn`) was left stranded on `origin/main` afterward too — same shape, same silence, verified
+(`3379`) was left stranded on `origin/main` afterward too — same shape, same silence, verified
 immediately with a fresh `git fetch origin main` + `git ls-tree`. Two ad-hoc, non-"couple" PRs in a
 row, two stranded hashes. Fixed the same way (`we:scripts/backlog.mjs number-stranded` →
-`xm1izdn`→`#3379`), landed in a follow-up PR — but the recurrence is the real signal: whatever
+`3379`→`#3379`), landed in a follow-up PR — but the recurrence is the real signal: whatever
 `numberPendingHashes` needs to run reliably at land time, it is not running for this PR shape.
 
 **4. `check:standards`' own enforcement of this rule is not reliable in CI, only locally.** GitHub
