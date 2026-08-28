@@ -34,6 +34,23 @@ re-running `check:standards`, which still errored on the unrenamed name read fro
 fails for every PR, not just the one that would fix it — including PRs with no relation to backlog
 numbering at all, since the rule runs unconditionally as part of the standard gate.
 
+**3. The miss is not a one-off — it recurred on the very next merge.** This card's own PR (#1665,
+which fixed finding 1 and added this card) landed cleanly, and THIS card's own hash-slug filename
+(`xm1izdn`) was left stranded on `origin/main` afterward too — same shape, same silence, verified
+immediately with a fresh `git fetch origin main` + `git ls-tree`. Two ad-hoc, non-"couple" PRs in a
+row, two stranded hashes. Fixed the same way (`we:scripts/backlog.mjs number-stranded` →
+`xm1izdn`→`#3379`), landed in a follow-up PR — but the recurrence is the real signal: whatever
+`numberPendingHashes` needs to run reliably at land time, it is not running for this PR shape.
+
+**4. `check:standards`' own enforcement of this rule is not reliable in CI, only locally.** GitHub
+Actions' checkout is shallow, so `git ls-tree -r origin/main` cannot resolve there, and the rule is
+written fail-soft on exactly that (`we:scripts/check-standards.mjs:553`, "origin/main not
+resolvable here — the drain's post-land assert still guards the land path"). Confirmed live: PR
+#1665's CI (`we:scripts/check-standards.mjs`'s job) passed clean while the exact same command
+failed locally in a full clone. The rule is real and correctly designed for a full-clone context
+(a lane, the primary checkout, the daemon) but currently gives false confidence that CI is
+enforcing it — CI is not.
+
 ## Done when
 
 1. **Executable** — a test reproduces the chicken-and-egg: a fixture where `origin/main` (not the
