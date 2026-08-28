@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, restampAcceptance, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, buildDrainVerdicts, REVIEW_COVERAGE_KIND, REVIEW_RECORD_HEADLINES, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, restampAcceptance, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, buildDrainVerdicts, REVIEW_COVERAGE_KIND, REVIEW_RECORD_HEADLINES, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -2278,6 +2278,39 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
     expect(add.args).toEqual(['add', 'AGENTS.md']);        // ONLY the derived output — never the foreign file
     expect(add.args).not.toContain(FOREIGN);
     expect(r).toMatchObject({ ran: true, committed: true, pushed: true });
+  });
+});
+
+describe('pushNumberingOnLand — the #3379 extraction (#1664/#1665 stranded a hash each, silently)', () => {
+  it('shouldPush=false is a no-op: no exec call, not pushed', () => {
+    const calls = [];
+    const exec = (...a) => { calls.push(a); };
+    const r = pushNumberingOnLand({ exec, shouldPush: false });
+    expect(r).toEqual({ pushed: false });
+    expect(calls.length).toBe(0);
+  });
+
+  it('a successful push reports pushed:true, with no warning', () => {
+    const calls = [];
+    const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); };
+    const r = pushNumberingOnLand({ exec, shouldPush: true, remote: 'origin', base: 'main' });
+    expect(r).toEqual({ pushed: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ cmd: 'git', args: ['push', 'origin', 'HEAD:main'] });
+    expect(calls[0].opts.env.MAIN_PUSH_OK).toBe('1'); // gated main write, as the drain
+  });
+
+  it('a failed push reports pushed:false with a `warning` — the exact #1664/#1665 shape, never thrown', () => {
+    const exec = () => { throw new Error('! [rejected] HEAD -> main (non-fast-forward)'); };
+    expect(() => pushNumberingOnLand({ exec, shouldPush: true })).not.toThrow();
+    const r = pushNumberingOnLand({ exec, shouldPush: true });
+    expect(r.pushed).toBe(false);
+    expect(r.warning).toMatch(/numbering\/resolve committed locally but push FAILED/);
+    expect(r.warning).toMatch(/non-fast-forward/);
+  });
+
+  it('no exec function supplied is a no-op, not a crash', () => {
+    expect(pushNumberingOnLand({ shouldPush: true })).toEqual({ pushed: false });
   });
 });
 
