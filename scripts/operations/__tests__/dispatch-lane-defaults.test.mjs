@@ -317,3 +317,73 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
     expect(calls.some((c) => c.file === 'claude')).toBe(true);
   });
 });
+
+describe('#3332 — readTick reaches the REAL `laneRefForPr` default for a fix/ci-heal launch, and pays no `gh pr view` call for anything else', () => {
+  const baseIo = {
+    root: '/repo',
+    readText: () => 'brief {{ITEM_NUM}} {{PR_NUM}} {{LANE_REF}} {{LANE}} {{SESSION_SLUG}} {{SCOPE}}',
+    loadItems: () => [{ num: '3037', slug: 'x', specPath: 'backlog/3037-x.md', scope: ['we:scripts/'] }],
+    listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
+    listAgents: () => [],
+    // Isolated from the #3457/#3460 already-done ground-truth check below — it shells its OWN `gh` call through
+    // the same injected `exec`, and left at its default it would collide with this describe's `gh pr view` spy.
+    checkAlreadyDone: () => ({ done: false, pr: null, checked: true }),
+  };
+
+  it('a `fix` launch with no `laneRefForPr` override reaches the REAL `defaultLaneRefForPr` — one `gh pr view` call, argv pinned', () => {
+    const { exec, calls } = spyExec(JSON.stringify({ headRefName: 'lane/3037-x' }));
+    const v = readTick({
+      num: '3037',
+      ...baseIo,
+      exec,
+      runNode: () => JSON.stringify({ decisions: { spawnFixes: [{ num: '3037', lane: 8, pr: 701 }] }, nextState: { fixGuards: [{ num: '3037', pr: 701, lane: 8, spawnedTick: 0 }] } }),
+    });
+    expect(v.launchKind).toBe('fix');
+    expect(v.laneRef).toBe('lane/3037-x');
+    const gh = calls.find((c) => c.file === 'gh');
+    expect(gh, 'the default laneRefForPr must reach the real `gh pr view` call').toBeTruthy();
+    expect(gh.argv).toEqual(['pr', 'view', '701', '--json', 'headRefName']);
+  });
+
+  it('a `build` launch never calls `gh pr view` at all — a build dispatch has no PR yet to look up', () => {
+    const { exec, calls } = spyExec('[]');
+    const v = readTick({
+      num: '3037',
+      ...baseIo,
+      exec,
+      runNode: () => JSON.stringify({ decisions: { spawnBuilds: [{ num: '3037', lane: 8 }] }, nextState: { buildGuards: [{ num: '3037', lane: 8, spawnedTick: 0 }] } }),
+    });
+    expect(v.launchKind).toBe('build');
+    expect(v.laneRef).toBeNull();
+    expect(calls.some((c) => c.file === 'gh')).toBe(false);
+  });
+
+  it('a `ci-heal` launch resolves against nextState.ciHealGuards, not buildGuards/prepareGuards/fixGuards, and its LANE_REF also reaches the real default', () => {
+    const { exec } = spyExec(JSON.stringify({ headRefName: 'lane/3037-x' }));
+    const v = readTick({
+      num: '3037',
+      ...baseIo,
+      exec,
+      runNode: () => JSON.stringify({
+        decisions: { spawnCiHeals: [{ num: '3037', lane: 8, pr: 701, reason: 'red-ci' }] },
+        nextState: {
+          buildGuards: [{ num: '3037', lane: 9, spawnedTick: 0 }], // a decoy under the SAME num, wrong list
+          ciHealGuards: [{ num: '3037', pr: 701, lane: 8, spawnedTick: 0 }],
+        },
+      }),
+    });
+    expect(v.launchKind).toBe('ci-heal');
+    expect(v.dispatchedGuard).toEqual({ num: '3037', pr: 701, lane: 8, spawnedTick: 0 });
+    expect(v.laneRef).toBe('lane/3037-x');
+  });
+
+  it('a `gh pr view` failure THROWS through readTick rather than being swallowed — a dispatch with no LANE_REF must not proceed silently', () => {
+    const exec = () => { throw new Error('gh: not authenticated'); };
+    expect(() => readTick({
+      num: '3037',
+      ...baseIo,
+      exec,
+      runNode: () => JSON.stringify({ decisions: { spawnFixes: [{ num: '3037', lane: 8, pr: 701 }] }, nextState: { fixGuards: [] } }),
+    })).toThrow(/not authenticated/);
+  });
+});
