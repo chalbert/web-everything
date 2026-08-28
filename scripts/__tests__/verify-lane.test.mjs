@@ -88,3 +88,57 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
     expect(onDisk.status).toBe('green');
   });
 });
+
+describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a lease to protect', () => {
+  const leaseFile = () => join(dir, '.git', '.lane-lease');
+  function runReset() {
+    try {
+      const out = execFileSync('node', [VERIFY_LANE, 'reset', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
+    } catch (e) {
+      return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+    }
+  }
+
+  it('clears a terminal marker for a foreign sha when the lane holds no lease', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'red', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 1 }) + '\n');
+
+    const { code, json } = runReset();
+
+    expect(code).toBe(0);
+    expect(json.status).toBe('reset');
+    expect(existsSync(marker())).toBe(false);
+    // and a fresh verify now starts cleanly instead of refusing as superseded
+    const after = runVerify('true');
+    expect(after.code).toBe(0);
+    expect(after.json.status).toBe('green');
+  });
+
+  it('is a no-op, not an error, when there is no marker to clear', () => {
+    const { code, json } = runReset();
+    expect(code).toBe(0);
+    expect(json.status).toBe('noop');
+  });
+
+  it('refuses when the lane holds a LIVE lease, leaving the marker intact', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'red', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 1 }) + '\n');
+    writeFileSync(leaseFile(), JSON.stringify({ session: 'someone', acquiredAt: new Date().toISOString(), ttlMinutes: 240 }) + '\n');
+
+    const { code, json } = runReset();
+
+    expect(code).toBe(3);
+    expect(json?.status).toBe('refused');
+    expect(existsSync(marker())).toBe(true);
+  });
+
+  it('clears the marker when the lane holds only a STALE (expired) lease', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'red', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 1 }) + '\n');
+    writeFileSync(leaseFile(), JSON.stringify({ session: 'someone', acquiredAt: '2000-01-01T00:00:00.000Z', ttlMinutes: 240 }) + '\n');
+
+    const { code, json } = runReset();
+
+    expect(code).toBe(0);
+    expect(json.status).toBe('reset');
+    expect(existsSync(marker())).toBe(false);
+  });
+});
