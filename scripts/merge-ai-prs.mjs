@@ -514,6 +514,23 @@ export function planCiLifecycleLabelUpdate({ currentLabels = [], desired, owned 
 }
 
 /**
+ * A parked hold that has since been resolved leaves a stale `review:pending` sitting beside a real
+ * `review:accepted` — a retry review accepts, but `review-set-label.mjs` correctly refuses to label
+ * OVER a live hold, so the accept and the still-standing park both land. The drain's own merge decision
+ * requires `review:accepted` present AND no hold label present (`hasLabel`'s callers, `HOLD-INTEGRITY
+ * #2820` above), so this contradiction reads as "still held" and the PR sits merge-eligible-looking but
+ * permanently skipped, needing a human or a session to notice the contradiction and run
+ * `review-set-label.mjs --to=accepted` by hand. Pure detector; the caller applies the sanctioned CLI
+ * resolution — this never edits labels itself, only says whether the contradiction is present.
+ * @param {{currentLabels?:Array}} o
+ * @returns {boolean} true iff both `review:accepted` and `review:pending` are present at once
+ */
+export function hasStaleReviewPendingBesideAccept({ currentLabels = [] } = {}) {
+  const has = (name) => hasLabel({ labels: currentLabels }, name);
+  return has('review:accepted') && has('review:pending');
+}
+
+/**
  * Classify one PR into a merge/skip verdict. Pure — no gh calls. Returns
  *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, certifyLabel, testGreen, state, mergeable }.
  * `decision === 'merge'` requires ALL of: producer-certified, required check green, mergeable, a landable
@@ -652,6 +669,33 @@ export function isRebaseDropCandidate(v) {
  * path below resolves from `import.meta.url`, never from cwd. `spawn` is injected so the pinning is
  * assertable without a subprocess.
  */
+/**
+ * #1671 review finding — every internal caller of `review-set-label.mjs` needs the SINGLE-token `--repo=`
+ * form (its own parser: `argv.find(a => a.startsWith('--repo='))`, `repoOptional` false for every caller in
+ * this file) and, for a sibling-constellation repo, a pinned `cwd` (#3202 — an unpinned git read inside the
+ * CLI runs against the WRONG tree, which can silently mis-stamp a fingerprint rather than merely failing).
+ * `repoFlag()` (this file's OWN `gh`-CLI helper, TWO tokens: `['--repo', slug]` or `[]`) is NOT that format —
+ * passing it here fails 100% of calls, silently, because the caller-side `try{}catch{}` this CLI is always
+ * wrapped in swallows the child's non-zero exit. One shared spawn point instead of each call site re-deriving
+ * the args by hand, so the format is correct by construction. `spawn` is injected so this is unit-testable
+ * without a subprocess.
+ * @param {{pr:number|string, repo:string, to:string, cwd?:string, actor?:string, channel?:string, reason?:string, spawn?:Function}} o
+ * @returns {{ok:boolean, reason?:string}}
+ */
+export function spawnReviewSetLabel({ pr, repo, to, cwd, actor, channel, reason, spawn = spawnSync } = {}) {
+  const args = [String(pr), `--repo=${repo}`, `--to=${to}`];
+  if (actor) args.push(`--actor=${actor}`);
+  if (channel) args.push(`--channel=${channel}`);
+  if (reason) args.push(`--reason=${reason}`);
+  try {
+    const r = spawn(process.execPath, [new URL('./review-set-label.mjs', import.meta.url).pathname, ...args], { encoding: 'utf8', cwd });
+    if (r.status === 0) return { ok: true };
+    return { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim().split('\n').pop() };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
 export function restampAcceptance({ pr, repo, newHead, cwd, spawn = spawnSync }) {
   try {
     const r = spawn(process.execPath, [
@@ -3195,6 +3239,27 @@ async function runCli() {
             for (const rm of plan.toRemove) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--remove-label', rm], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* best-effort — the next pass retries */ } }
             for (const add of plan.toAdd) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', add], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* a label race/permission miss is non-fatal — the next pass retries */ } }
             if (ok) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} ci-lifecycle → "${desired}" (reconcile)\n`); }
+          }
+        }
+      }
+      // ── Stale review:pending beside a real review:accepted — the drain's own sanctioned resolution
+      //    (review-set-label.mjs --to=accepted) applied automatically instead of needing a human/session to
+      //    notice the contradiction. Every PR (not just AI-generated ones — the contradiction can happen on
+      //    any parked-then-accepted PR), best-effort, never fatal to the sweep.
+      if (hasStaleReviewPendingBesideAccept({ currentLabels: p.labels })) {
+        if (DRY_RUN) {
+          touched = true;
+          if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would clear stale review:pending beside review:accepted\n`);
+        } else {
+          // #1671 review finding — review-set-label.mjs needs the single-token `--repo=` form and (for a
+          // sibling repo) a pinned cwd; `repoFlag()` is the wrong shape for it (that's the gh-CLI helper).
+          // `spawnReviewSetLabel` is the shared, correctly-shaped spawn point (mirrors `restampAcceptance`).
+          const out = spawnReviewSetLabel({ pr: p.number, repo: repo || localSlug, to: 'accepted', cwd: siblingCloneDir(repo) });
+          if (out.ok) {
+            touched = true;
+            if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} cleared stale review:pending beside review:accepted\n`);
+          } else if (!AS_JSON) {
+            process.stderr.write(`  · ${repoTag(repo)}${p.number} stale review:pending NOT cleared (${out.reason}) — self-clear refusal or a label race, non-fatal, the next pass retries\n`);
           }
         }
       }
