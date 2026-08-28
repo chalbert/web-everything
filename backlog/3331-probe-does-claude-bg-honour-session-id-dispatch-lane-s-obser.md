@@ -74,6 +74,53 @@ pre-PR life, two minutes after it starts.
   the REAL CLI's response to this argv remains unasserted."* It names `#3096` — which is `#3096` — as
   where a first live run happens.
 
+## Probe result (2026-08-27) — `--session-id` is IGNORED
+
+Run from `/Users/nicolasgilbert/workspace/webeverything`, CLI **2.1.246 (Claude Code)**. Command shape (the
+exact argv `buildAgentArgv` emits, minus the conveyor):
+
+```
+claude --bg --session-id <minted-uuid> -n probe-3331-<i> "Reply with the single word: probe. Do nothing else."
+```
+
+Three runs. Every run printed, on stderr, before backgrounding:
+
+```
+warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)
+```
+
+| run | minted (passed in) | listed (actual, from `claude agents --json`) | match |
+|---|---|---|---|
+| 1 | `c5bfcd5b-716c-4973-8c16-90424fba2064` | `45707cbb-f6dc-4600-9159-2d9ff1829674` | no |
+| 2 | `a0527ec1-8cd4-4786-abb7-1c5bbe4a1ae2` | `7f4b9f11-fc7b-4b4f-9613-31e1dea36c1a` | no |
+| 3 | `3ade0c8e-c34e-4733-a00d-1fd0aa841853` | `8882f9aa-5757-412d-af4c-c61db925d9e6` | no |
+
+**3 of 3 mismatched.** The 2026-08-25 manual observation holds. `Done when` #3 is the live branch, not #2.
+
+Two further facts read off the same listing, neither assumed beyond what was observed:
+
+1. **`name` carries the `-n` slug verbatim** (`probe-3331-1` etc). The dispatcher already passes a slug it
+   chooses (`payload.sessionSlug || 'conveyor-<num>'`, `buildAgentArgv`), so there is a dispatcher-chosen
+   handle in the listing — it is the `-n` name, not the session id. Whether the slug is unique enough to key
+   on is a design question for the remedy: two dispatches for the same item would collide today, since
+   nothing reserves the namespace.
+2. **`state` read `done` for all three finished probes.** The sink's comment at
+   `we:scripts/operations/dispatch-lane-io.mjs:819-825` says `claude agents --json` carries "no terminal
+   record for a completed session at all", measured on CLI 2.1.220; this run was 2.1.246, and that comment is
+   now stale as written. **Do not over-read this:** `done` was only observed for sessions that finished
+   normally. Whether it also covers a crashed session — the distinction the `unresolved` vocabulary exists
+   for — was not probed and must not be assumed without a separate crash probe.
+
+**Remedy status (`Done when` #3): started, not landed.** A build attempt produced a checkpoint commit
+(`6ec8b639`) on `lane/3331-session-id-probe-salvage`, touching `we:scripts/operations/dispatch-lane-io.mjs`,
+`we:scripts/operations/wake.mjs`, the sink's header comment, and a new
+`we:scripts/operations/__tests__/dispatch-liveness-hardening.test.mjs`. Two agents timed out working it —
+first the original build, then a continuation from the checkpoint — and neither pushed a finished,
+gate-passing state. As of 2026-08-27 that branch is **53 commits behind `main`** — a plain diff against
+current `main` reads as ~70 unrelated files deleted, which is drift, not intent. Whoever picks this up next
+should treat the checkpoint as reference material to read, not a branch to rebase forward; re-verify from
+current `main` rather than trying to carry the stale diff through 53 commits of conflict.
+
 ## Done when
 
 1. **The probe has run and its result is written into this card**, with the exact command, the CLI version,
