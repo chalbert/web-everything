@@ -1,0 +1,449 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/3320/">#3320</a> ruled that diff size <strong>adds reviewers and never refuses a
+  PR</strong>, and named <em>scoped fan-out</em> as the replacement for a refuse threshold: every reviewer gets
+  the whole diff and full repository access, each is accountable for a disjoint named subset, plus a seam
+  reviewer scoped to the boundaries and an omission reviewer scoped to the whole diff.
+  <a href="/backlog/3326/">#3326</a> is the build. This topic is its prior-art survey: <strong>how do real
+  systems parallelise accountability for a large change, and does splitting accountability while keeping the
+  input whole actually find more?</strong>
+</p>
+<p>
+  Reported as mechanism, not reputation. Where a system's behaviour is not established from a primary source,
+  this page says so rather than guessing.
+</p>
+
+<h2>The finding that frames everything else — two different interventions, two opposite results</h2>
+<p>
+  There are two things one might call "decomposing a review", and only one of them has a controlled positive
+  result. Conflating them is the single most common error in this space.
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Intervention</th><th>What is split</th><th>Controlled result</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Scenario / Perspective-Based Reading</strong><br>Porter, Votta &amp; Basili, IEEE TSE 21(6), 1995</td>
+      <td>The <strong>accountability</strong>. Every reviewer reads the whole artifact; each owns a disjoint
+      fault class.</td>
+      <td><strong>+~35% team detection rate, p &lt; .01</strong></td>
+    </tr>
+    <tr>
+      <td><strong>Change decomposition</strong><br>di Biase, Bruntink, van Deursen &amp; Bacchelli, PeerJ CS, 2019</td>
+      <td>The <strong>input</strong>. The changeset is cut into coherent pieces, reviewed separately.</td>
+      <td><strong>Fewer wrongly-reported issues; no effect on defects found</strong></td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  Porter et al. ran a 3×2⁴ partial-factorial randomised experiment: 48 subjects, <strong>16 three-person
+  teams</strong>, two specifications, three methods (Ad Hoc / Checklist / Scenario). The three scenarios were
+  Data Type Inconsistencies, Incorrect Functionalities, and — note this one —
+  <strong>Missing or Ambiguous Functionalities</strong>. An omission-scoped reviewer is one of the three
+  original roles.
+</p>
+<p>
+  Three results carry the argument:
+</p>
+<ul>
+  <li><strong>The placebo is ruled out.</strong> Each scenario group was best at <em>its own</em> faults and
+  "generally <strong>no more effective than other Scenario reviewers</strong> at finding faults their Scenarios
+  were not designed to detect" — so "the <strong>content</strong> of the Scenario was primarily responsible",
+  not the act of having more readers. <em>This is the result that distinguishes scoping from resampling.</em></li>
+  <li><strong>Scoping cost nothing off-scope.</strong> "all reviewers, regardless of which detection method each
+  used, were <strong>equally effective at finding those faults not targeted by any of the Scenarios</strong>."</li>
+  <li><strong>The partition was deliberately incomplete and still won.</strong> The scenarios addressed "about
+  <strong>half</strong>" of the faults the checklist covered.</li>
+</ul>
+<p>
+  And two that cut the other way: the aggregation meeting was <strong>net negative</strong> (gain 4.7% / 3.1%,
+  loss 6.8% / 7.7% — "Collection meetings produced <strong>no net improvement</strong>"), and the checklist
+  method — the industry standard — "was no more effective than the Ad Hoc detection method."
+</p>
+<p>
+  <strong>The strongest replication is null.</strong> Lanubile &amp; Visaggio, with over 100 subjects: "the
+  experimental results do not support previous findings that PBR improves defect detection effectiveness with
+  respect to nonsystematic reading techniques." Other replications report no significant difference among
+  perspectives in detection rate <em>or</em> coverage. Industry counter-signal from Robert Bosch GmbH runs the
+  other way — "the overlap of detected defects among inspectors using different perspectives is <strong>low</strong>"
+  — i.e. the mechanism replicates on <em>complementarity</em> but not reliably on <em>total yield</em>.
+</p>
+
+<h2>Track 1 — Ownership routing: nobody records who approved which file</h2>
+<p>
+  Five production systems were checked. <strong>Not one lets an approval cover a subset of the diff.</strong>
+  Every one partitions the <em>requirement</em> by path and keeps the <em>approval artifact</em> whole-change.
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>System</th><th>Routing mechanism</th><th>Per-file approval?</th><th>Partitioned reviewer sees whole diff?</th></tr></thead>
+  <tbody>
+    <tr><td>GitHub CODEOWNERS</td><td>gitignore-style patterns, <strong>last match wins</strong>; one review request per matched owner set</td><td><strong>No</strong> — the REST review object has no path field at all</td><td>Yes, always</td></tr>
+    <tr><td>Google OWNERS + Critique</td><td>Per-directory ownership, inherited down; recommender finds the smallest reviewer set covering all files</td><td><strong>No</strong> — only a private, non-gating per-file "reviewed" checkbox</td><td>Yes — "look at <em>every</em> line of code that you have been assigned to review"</td></tr>
+    <tr><td>Gerrit <code>code-owners</code></td><td>Submit rule: every touched file approved by one of its owners; per-file status <code>INSUFFICIENT_REVIEWERS</code> / <code>PENDING</code> / <code>APPROVED</code></td><td><strong>Explicitly impossible</strong> — see the quote below</td><td>Yes, and reviewing only your own files is <em>discouraged</em></td></tr>
+    <tr><td>Phabricator / Phorge Owners</td><td>Packages with include + exclude paths; Strong vs Weak <em>dominion</em> for overlaps; Herald adds blocking reviewers</td><td>At <strong>package</strong> granularity (the reviewer row is path-scoped); per-file accept not established</td><td>Yes</td></tr>
+    <tr><td>Chromium</td><td>Gerrit <code>code-owners</code> + <code>set noparent</code>, <code>per-file</code>, <code>file://</code> includes</td><td>No; <code>Owners-Override</code> puts the whole burden on one person</td><td>Yes</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  Gerrit states the reason, and it is a reason any per-file scheme inherits:
+</p>
+<blockquote>
+  <p>
+    <strong>NOTE:</strong> Code owner approvals are always applied on the whole change / patch set and count for
+    all files… <strong>It is not possible to approve individual files only.</strong> This means code owners
+    should always review all files in the change / patch set before applying their approval. E.g. it is
+    discouraged to only review the owned files, since <strong>the set of owned files can change</strong> if
+    <code>OWNERS</code> files in the destination branch are changed after the approval has been applied.
+  </p>
+</blockquote>
+<p>
+  Google and Chromium landed independently on the same workaround: <strong>state the partition in a comment</strong>.
+  Google's guidance is to "note in a comment which parts you reviewed" and prefer "LGTM with comments";
+  Chromium's is the single most transferable line in the track — "If you have multiple reviewers,
+  <strong>provide a message indicating what you expect from each reviewer.</strong> Otherwise people might
+  assume their input is not required or waste time with redundant reviews."
+</p>
+<p>
+  Two more transferable details: Gerrit's UI has a section titled "Which reviewers own which file", and
+  "<strong>If no reviewer is an owner of the given file, a red question mark is shown</strong>" — an
+  unowned-territory signal. And Chromium's Rubber Stamper "never provides OWNERS approval, by design… If it
+  provided both code review and OWNERS approval, that would be an abuse vector" — one actor never supplies both
+  checks.
+</p>
+<p>
+  <strong>What does not transfer:</strong> round-robin load balancing (it optimises human fatigue, vacations and
+  queue depth — none of which an agent panel has); emergency override culture (it exists because humans are
+  <em>unavailable</em>); "one reviewer is usually enough" (Google's median reviewer count is <strong>1</strong>,
+  and that economics inverts when reviewers are cheap); and private "viewed" checkboxes, which are meaningless
+  for an agent whose ingestion of the diff is provable.
+</p>
+
+<h2>Track 2 — Decomposition research measured accuracy, almost never effectiveness</h2>
+<p>
+  The untangling line is mature and every published number scores a partition against a ground-truth partition.
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Work</th><th>Decomposition signal</th><th>What was measured</th></tr></thead>
+  <tbody>
+    <tr><td><strong>ClusterChanges</strong> (Barnett, Bird, Brunet &amp; Lahiri, ICSE 2015)</td><td><strong>def-use only</strong>, deliberately: <code>defUsesInDiffs</code> (a definition in one diff-region used in another) and <code>useUsesInDiffs</code> (two regions using an <em>unchanged</em> definition — "changed all the callers, not the callee")</td><td>1000 Microsoft Office changesets: <strong>~42%</strong> had more than one non-trivial partition; 66% of diff-regions land in non-trivial partitions. User study of 20 developers asked whether the split was intuitive and whether it <em>would help</em> — <strong>belief, never outcome</strong>.</td></tr>
+    <tr><td><strong>SmartCommit</strong> (ESEC/FSE 2021)</td><td>Graph over diff hunks, hard + soft links</td><td>Median accuracy <strong>71–84%</strong> vs ground truth</td></tr>
+    <tr><td><strong>Flexeme</strong> (ESEC/FSE 2020)</td><td>δ-PDG multi-version program dependence graph + name flows</td><td><strong>0.81</strong> accuracy vs ground truth, 32× faster than prior SOTA</td></tr>
+    <tr><td><strong>UTango</strong> (FSE 2022)</td><td>Context-aware graph clustering</td><td><strong>+9.9%</strong> over Flexeme, vs ground truth</td></tr>
+    <tr><td><strong>Herzig &amp; Zeller</strong> (MSR 2013)</td><td>Tangled-change detection</td><td><strong>7–20%</strong> of bug fixes are tangled; ≥16.6% of files misattributed. Effect measured on <strong>defect-prediction models</strong> — a data-quality result, not a review result.</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  <strong>Read none of these as evidence that a reviewer then finds more bugs.</strong> They say a machine can
+  recover the author's intended partition, which is a different claim.
+</p>
+<p>
+  Two empirical results <em>do</em> speak to the special seats:
+</p>
+<ul>
+  <li><strong>Interface faults dominate — the case for a seam reviewer.</strong> Perry &amp; Evangelist
+  (HICSS-20, 1987) counted a real error population: ~36% of change requests touched two or more C files or a
+  global header, and <strong>51%</strong> of the single-file remainder were still interface faults —
+  <strong>68.6% of the total error population</strong>. The largest single category is <em>Error Handling</em>
+  at 14.1% of all errors, itself an omission class.</li>
+  <li><strong>Omission dominates the misses — the case for an omission reviewer.</strong> Khoshnoud et al.
+  studied <strong>187 missed bugs in 173 merged PRs across 77 GitHub projects</strong>: semantic bugs are
+  51.34% of misses, and exception handling is <strong>36.46%</strong> of those; missing-null-check is
+  <strong>47.06%</strong> of the analysis-check class. The sub-taxonomy is literally <em>missing code, missing
+  method, missing operator, missing cases, missing null, missing directory</em>.</li>
+</ul>
+<p>
+  Also worth pinning: <strong>a whole-program reader catches a class a per-site reader cannot.</strong> Wagner
+  et al. compared bug-finding tools, testing and review on the same code — tools and tests found
+  <strong>no identical defect at all</strong>, and "all defects found by bug finding tools were also found by the
+  review", which additionally produced 17 defect types the tools never did. Every extra catch was
+  <em>cross-location</em>: an unclosed database connection missed "because this was done in different functions",
+  and 8 redundant <code>if</code>-clauses to the tools' 1 because "the redundancy of the others could only be
+  found out by investigating the logics of the program." <em>Caveats: the denominator is the union of all three
+  techniques, so this is coverage-share not recall; the review used three developers including the code's own
+  author, unprepared, on one project.</em>
+</p>
+
+<h2>Track 3 — Provenance of the two numbers everyone cites</h2>
+
+<h3>The ~200–400 LOC ceiling</h3>
+<p>
+  Primary source: <em>Code Review at Cisco Systems</em>, a chapter in Jason Cohen's <em>Best Kept Secrets of
+  Peer Code Review</em> (Smart Bear, 2006). A 10-month study in the Cisco MeetingPlace group, 2500 reviews over
+  3.2 million lines by 50 developers. What is actually established, and what is folklore:
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Claim</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>The chart plots <strong>defect density</strong> (defects/kLOC) against LOC under review</td><td><strong>Established</strong> — and density, not raw count, is what declines</td></tr>
+    <tr><td>The defect counts come from 2500 reviews</td><td><strong>False.</strong> "we took a <strong>random sample of 300 reviews</strong> and studied the conversations in each one"</td></tr>
+    <tr><td>"Defect" means a bug</td><td><strong>False.</strong> "<strong>If the code is right but there's a better way to do it, it's a defect.</strong>" (Hence 32 defects/kLOC here vs 0.353/kLOC for Coverity — not commensurable.)</td></tr>
+    <tr><td>The inflection is at 200 lines</td><td><strong>As worded:</strong> "Anything below 200 lines produces a relatively high rate of defects… <strong>no review larger than 250 lines produced more than 37 defects per 1000 lines</strong>" — not zero</td></tr>
+    <tr><td>400 is a measured threshold</td><td><strong>Derived, not measured</strong> — from a separate 60-minute attention finding: "a reviewer will probably not be able to review more than 300-400 lines of code before his performance drops"</td></tr>
+    <tr><td>Declining density means declining effectiveness</td><td><strong>An assumption the authors disclose themselves</strong> (footnote 5): "we're tacitly assuming that <strong>true defect density is constant</strong>." Nothing measured missed defects.</td></tr>
+    <tr><td>"70–90% yield" / "density almost zero after 400"</td><td><strong>Vendor drift.</strong> There was no ground truth of total defects, and the book's own data shows up to 37/kLOC above 250 lines. The chapter's actual advice is <strong>100–300 lines in 30–60 minutes</strong>.</td></tr>
+    <tr><td>A peer-reviewed replication exists</td><td><strong>None found.</strong> Microsoft's measured onset is <strong>20+ changed files</strong> (a different unit and a much later onset); Kononenko et al. find a continuous size effect on Mozilla with <strong>no inflection point</strong> (coefficients 0.098–0.115, all p&lt;0.001, adjusted R² only 0.128–0.173)</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  For context, independent peer-reviewed medians: Google <strong>24</strong> lines, Mozilla 34, Apache 25, Linux
+  32, Android/AMD 44, Chrome 78. <strong>Real review sizes cluster an order of magnitude below the "limit".</strong>
+</p>
+
+<h3>Coverity's "churn cap" — real, but not what it is usually cited as</h3>
+<p>
+  From Bessey et al., <em>A Few Billion Lines of Code Later</em> (CACM 53(2), 2010), verbatim:
+</p>
+<blockquote>
+  <p>
+    The new-speak term we use internally is 'churn.' … <strong>We try to cap churn at less than 5% per
+    release.</strong> This goal means large classes of analysis tricks are disallowed since they cannot
+    obviously guarantee minimal effect on the bugs found. <strong>Randomization is verboten</strong>…
+    <strong>Timeouts are also bad.</strong>
+  </p>
+</blockquote>
+<p>
+  So the churn cap is a <strong>≤5%-per-release stability budget on how much the reported defect set may shift
+  between tool versions</strong> — not a cap on code or paths analysed. The causal direction is the interesting
+  part: an output-stability requirement is what <em>forbids</em> randomisation. The often-cited "stops reporting
+  after N similar defects" is <strong>not established</strong>; the nearest documented behaviour is deliberate
+  unsoundness — "in the extreme skipping problematic code entirely."
+</p>
+<p>
+  The same paper supplies the false-positive economics: "more than <strong>30%</strong> easily cause problems.
+  People ignore the tool… A vicious cycle starts where low trust causes complex bugs to be labeled false
+  positives"; target "below <strong>20%</strong> for stable checkers"; and "<strong>if the first N reports are
+  false positives (N = 3?)</strong>, people tend to utter variants on 'This tool sucks.'" — i.e. order findings
+  by confidence, not by file order.
+</p>
+
+<h2>Track 4 — What shipped AI reviewers actually do with a large diff</h2>
+<p>
+  <strong>Chunking as a context-window workaround is the norm. Exactly one shipped system publishes a partition
+  where each pass owns a named subset and returns a coverage receipt.</strong>
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>System</th><th>Mechanism</th><th>Context workaround, or disjoint accountability?</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Qodo / PR-Agent <code>/review</code></strong></td><td>Fully published compression: under budget the <strong>whole diff goes uncompressed</strong>; over budget it drops context lines, strips delete-only hunks and <strong>skips a file whole rather than truncating it</strong>, degrading skipped files to bare filename lists. <code>/review</code> is a <strong>single call</strong>.</td><td>Workaround</td></tr>
+    <tr><td>PR-Agent <code>/improve</code></td><td>Disjoint file groups fired concurrently, then <strong>flat-concatenated</strong></td><td>Workaround; no ownership</td></tr>
+    <tr><td>CodeRabbit</td><td>Each file summarised and reviewed concurrently, with priority tiers</td><td>Workaround — the documented motive is <strong>rate-limit throughput and queue fairness</strong>. No receipt, no per-call lens.</td></tr>
+    <tr><td>Greptile v5</td><td>"a <strong>swarm of narrowly scoped agents in parallel</strong>… each agent explores one hypothesis"</td><td>Partitioned by <em>question</em>, not diff region. Slice and merge unpublished — <strong>mechanism not established</strong>.</td></tr>
+    <tr><td>Cursor BugBot V1</td><td>The <em>opposite</em>: eight parallel passes with <strong>randomised diff order</strong>, then majority voting to drop single-pass findings. <strong>Deleted in 2025</strong> for an agentic loop.</td><td>Neither — pure replication</td></tr>
+    <tr><td>Google AutoCommenter</td><td>One <strong>file</strong> at a time, truncated on overflow (~200 lines); multi-file changes processed sequentially with <strong>no cross-file reasoning</strong>. All the engineering is post-inference: suppressing comments on unchanged lines took posting rate <strong>6% → 1.3%</strong>; pruning 22 non-actionable rules took satisfaction <strong>54% → 66%</strong>.</td><td>Workaround</td></tr>
+    <tr><td>Meta RADAR</td><td>Partitions by <strong>risk tier across diffs</strong>, not within one diff: risk score → percentile threshold → LLM accepting only at confidence ≥8/10 → deterministic validation. 535K+ diffs; revert rate ⅓ and incident rate 1/50 of non-RADAR diffs.</td><td>Disjoint accountability per <em>stage</em></td></tr>
+    <tr><td><strong>Qwen Code <code>/review</code></strong></td><td>See below</td><td><strong>Disjoint accountability, with receipts</strong></td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  Qwen Code's <code>/review</code> is the closest published analogue to this design. Under a size gate (≤500
+  <em>source</em> lines — gated on source because "the median diff is 41% tests") it fans out to up to 16
+  parallel agents, <strong>each reading the whole diff</strong>, each owning one named lens; its three
+  correctness agents are <em>procedural</em>, defined by how they walk the diff (every line / every deleted line
+  / every cross-file edge) "so their coverage is complementary instead of overlapping." Above the gate it adds a
+  territory axis — ~400-line chunks split on hunk boundaries, never inside a function — while 5–7 agents keep
+  whole-diff scope. Its stated rationale is accountability, not tokens: "one agent per chunk means
+  <strong>every line of the diff has exactly one accountable reviewer</strong>… not a promise of fewer calls."
+</p>
+<p>
+  Two mechanisms to take from it, and one warning:
+</p>
+<ul>
+  <li><strong>The coverage receipt.</strong> "a chunk with no receipt is re-reviewed before the run proceeds — so
+  <strong>'no blockers' can never be reported over code that nobody read</strong>." No production ownership
+  system in Track 1 has this.</li>
+  <li><strong>Downgrade, never delete</strong>, at the verification stage — a finding may only be rejected by
+  quoting contradicting code; anything weaker is downgraded.</li>
+  <li><strong>The warning: territory alone silently fails.</strong> On one PR, "chunk agents held every one of
+  these defects inside their assigned territory and reported none. <strong>What they lacked was not the lines
+  but the question.</strong>" Territory and dimension are orthogonal axes and territory without a named lens
+  buys nothing. <em>These are internal single-PR anecdotes, not a controlled study.</em></li>
+</ul>
+<p>
+  <strong>The measured LLM-specific result the field was missing.</strong> Sovrano, Bauer &amp; Bacchelli
+  (2025) found models are "<strong>lost in the end</strong>" — significantly worse at spotting vulnerabilities
+  positioned toward the conclusion of larger files, across XSS, SQLi and path traversal, on GPT-3.5, GPT-4,
+  Mixtral and Llama alike. Naive chunking produced "an average recall increase of over <strong>37%</strong>
+  across all models" and CWE types — <strong>at a precision cost</strong>, because more chunks means more false
+  positives. This is the strongest evidence for the territory half of the design, and it prices it honestly.
+  Independently, review-comment F1 collapses roughly <strong>15×</strong> past a ~50-line diff (0.657–0.800
+  under 10 lines; 0.043–0.070 at 150–600 lines).
+</p>
+
+<h2>Track 5 — Combining disagreeing reviewers: aggregate in silence, never vote, never debate</h2>
+<p>
+  <strong>Multi-agent debate does not survive matched-compute replication.</strong> The 2023 positive results
+  compared against a 3-sample majority baseline with unmatched compute. Since then: averaged over seven
+  benchmarks, plain <strong>majority voting (0.7691) beats every multi-agent-debate configuration</strong>
+  (best MAD 0.7377), and more rounds monotonically hurt. A five-framework, four-model, nine-benchmark study
+  found "<strong>none of these MAD methods achieve a win rate higher than 20% when compared to CoT across 36
+  scenarios</strong>". At matched budget, isolated self-correction beats debate on GSM-Hard (61.0 vs 58.8) and
+  MMLU-Hard (66.7 vs 60.7, p&lt;0.001) while debate burns 2.1–3.4× the tokens.
+</p>
+<p>
+  <strong>The mechanism that destroys it is conformity, and it is large.</strong> Measured conformity rates
+  under doubt average <strong>47.2%</strong> and reach 69.9% for one model; conformity grows with rounds
+  (33.9% at one round → 44.4% at five) and with majority size (32.6% with three agents → 69.9% with six).
+  Worse, <strong>57–77% of conformity flips are correct→wrong</strong>, and "<strong>stronger agents are more
+  likely to flip from correct to incorrect</strong>". A reflection/double-check step cut conformity 69.9% → 35.2%
+  — so if any interaction round is added, make it <em>reflection</em>, not debate.
+</p>
+<p>
+  <strong>Voting is biased against the correct answer here.</strong> Shared pretraining correlates reviewer
+  errors, which breaks the independence assumption a vote rests on: measured, <strong>roughly 1 in 4
+  disagreement cases have the minority holding the correct answer</strong>, a ~10-percentage-point theoretical
+  recovery margin over majority voting. A meta-classifier over the disagreement pattern reached 81.2% flip
+  precision — i.e. the right move is a classifier over <em>how</em> reviewers disagreed, not a rhetorical
+  meta-judge that inherits the same correlated errors.
+</p>
+<p>
+  <strong>Disagreement is a calibrated error detector.</strong> Davani, Díaz &amp; Prabhakaran (TACL 2022) built
+  a shared body with one head per annotator: F1 <strong>59.49</strong> versus 57.32 for training on the majority
+  and 53.54 for a fully independent per-annotator ensemble — and head disagreement predicted error, with mean
+  uncertainty <strong>0.049 on correct predictions versus 0.170 on incorrect and 0.199 on false positives</strong>.
+  Cost: 22.3 minutes against a 20.5-minute baseline, while the fully independent ensemble cost 158.4. <em>This is
+  the architecture: disjoint accountability over shared input is the cheap one; disjoint input is the expensive
+  one that performs worst.</em>
+</p>
+<p>
+  <strong>The union trap.</strong> Ribeiro et al. ran three analyzers over NIST Juliet — Frama-C precision
+  <strong>0.57</strong>, Clang Analyzer 0.16, Cppcheck 0.08, and the <strong>plain union 0.39</strong>. Unioning
+  weak reporters onto a strong one pulls precision toward the pool <em>mean</em>. Their learned filter over the
+  pooled warnings lifted precision <strong>0.39 → 0.68</strong> while retaining <strong>95.8%</strong> of real
+  flaws (false alarms 3942 → 1158). <strong>The rule is union-then-rank-then-filter, never union-and-report.</strong>
+</p>
+<p>
+  <em>A correction recorded because it is the failure mode this programme keeps finding:</em> an earlier draft of
+  this survey cited a "&lt;10% pairwise overlap between analyzers" figure attributed to that paper.
+  <strong>That figure does not exist in it</strong> — it came from a search-engine synthesis and was passed
+  through unchecked. Struck. The aggregate row above is the exact arithmetic sum of the three tools, i.e. plain
+  concatenation with no dedup, which is precisely why that paper cannot speak to overlap at all.
+</p>
+<p>
+  <strong>Triage disagreement is systematic, and high agreement is usually a narrowed question.</strong> Google's
+  FindBugs fixit reached 0.87 consensus over 10,479 reviews — but only after collapsing "Must Fix / Should Fix /
+  I Will Fix" into one class, leaving ~27% with genuine residual disagreement. A Microsoft study of 1.5 million
+  comments reached Fleiss κ = 0.947 only after collapsing three categories to two <em>and</em> negotiating the
+  contested nit-pick boundary. The pattern across both: "<strong>did X happen</strong>" agrees (κ 0.76–0.96);
+  "<strong>how much does X matter</strong>" does not (κ≈0.46) — 68% of CVSS re-scorers gave a different rating to
+  a vulnerability they had already scored themselves. <strong>Chasing a high agreement number is evidence you
+  narrowed the question.</strong>
+</p>
+<p>
+  Google's Tricorder supplies the operational definition to use instead: an "<strong>effective false
+  positive</strong>" is "any report from the tool where a user chooses not to take action", enforced numerically
+  — <strong>not-useful rate ≥10% puts an analyzer on probation; above 25% it may be turned off immediately.</strong>
+</p>
+
+<h2>The distinction the whole survey turns on — <em>read</em> scope versus <em>owned</em> scope</h2>
+<p>
+  Almost every result above measures the change a reviewer <strong>reads</strong>. A scoped fan-out that keeps
+  the full diff in front of every juror shrinks only what a juror is <strong>answerable for</strong>. Sorting
+  the evidence by which scope it acts on is what decides whether it transfers.
+</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Result</th><th>Acts on</th><th>Transfers to a shared-context fan-out?</th></tr></thead>
+  <tbody>
+    <tr><td>Meta <code>BystanderRecRnd</code> — assigning one <strong>named individual</strong> rather than a team: <strong>−11.6% time-in-review, no quality-guardrail regression</strong></td><td><strong>owned</strong></td><td><strong>Yes</strong></td></tr>
+    <tr><td>Porter et al. — each scenario group best at <em>its own</em> fault class, no better elsewhere; whole artifact read by all</td><td><strong>owned</strong></td><td><strong>Yes</strong></td></tr>
+    <tr><td>di Biase et al. — false positives <strong>0.42 → 0.07</strong> (p = 0.03, Cliff's δ = 0.36); defects found 1.42 vs 1.21 (<strong>p = 0.6, n.s.</strong>)</td><td>reporting</td><td><strong>Yes</strong>, as a false-positive claim only</td></tr>
+    <tr><td>Baum, Schneider &amp; Bacchelli (EMSE 2019, n = 50) — effectiveness <strong>59% small vs 35% large</strong>; <strong>76% vs 36%</strong> on a delocalized defect; McNemar p = 0.002–0.0117 surviving Bonferroni-Holm, fatigue and position ruled out</td><td><strong>read</strong></td><td><strong>No</strong></td></tr>
+    <tr><td>Sovrano et al. — naive chunking, <strong>&gt;+37% recall</strong></td><td><strong>read</strong></td><td><strong>No</strong> — and it runs the other way: the gain came from reading <em>less</em></td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  <strong>No study measures the separation.</strong> If the size penalty comes from how much a reviewer must
+  hold while reading, a shared-context fan-out does not capture it; if it comes from how much a reviewer feels
+  answerable for, it might. That gap is why <a href="/backlog/3326/">#3326</a> carries a three-arm measurement
+  of its own — unscoped, scoped, and truncated at the same shard count — rather than inheriting a result.
+</p>
+<p>
+  <strong>One further correction, on presentation order.</strong> Primacy is evidenced (Fregnan et al.,
+  n = 106: <strong>64% lower odds</strong> of spotting a defect when its file is shown last; hot-spot-first,
+  <strong>+23%</strong> comments). <strong>Dependency-optimal re-sequencing is a null result</strong> — Baum et
+  al. report p = 0.2587 / 0.1084 / 0.0537, "no statistical confirmation". The usable knob is <em>which subset
+  leads</em>, not how the whole diff is sorted.
+</p>
+<p>
+  <strong>And the honest baseline: there isn't one.</strong> No reviewer recommender in the literature —
+  RevFinder, cHRev, TIE, WhoDo, WhoReview, Meta's RevRecV2 — assigns disjoint subsets; every one ranks
+  candidates for the change as a whole. The idea's only prior appearance is an unimplemented suggestion from
+  <strong>8 of 20</strong> ClusterChanges study participants, asking to "allow different reviewers with
+  different purposes to focus on what they want." Nothing validates the design, and nothing warns against it.
+</p>
+<p>
+  A consequence worth stating separately: the decomposition literature's accuracy race (0.13 → 0.83 across
+  ClusterChanges, Herzig, Flexeme, SmartCommit, UTango, on ground truth that is <strong>synthetic almost
+  everywhere</strong> — recombined commits, merged consecutive commits, cherry-pick chains, successors reusing a
+  predecessor's corpus) optimises "did we cut where the author cut". <strong>Because every juror reads the
+  whole diff, a mis-cut mis-routes accountability rather than context</strong>, so none of those metrics bound
+  the risk that actually matters here — a finding nobody owns. Do not import their accuracy targets; measure
+  coverage and precision instead.
+</p>
+
+<h2>What this repo's own data adds</h2>
+<p>
+  Measured 2026-08-27 (full working in
+  <code>we:reports/2026-08-27-scoped-fan-out-code-review.md</code>):
+</p>
+<ul>
+  <li><strong>The dial is inert on most PRs.</strong> Over 120 merged PRs the median change is <strong>4 files /
+  317 lines</strong>; only 21% change ≥10 files and 4% change ≥25. The cost lives entirely in the tail.</li>
+  <li><strong>Directory-prefix cutting degenerates here.</strong> Ten of the fifteen largest PRs put ≥47% of
+  their files under one two-segment prefix; one is <strong>100%</strong> a single flat directory, where a
+  directory cut yields exactly one shard. Balancing on churn instead takes the largest shard's share from
+  <strong>79% to 17%</strong> on the biggest PR.</li>
+  <li><strong>Raw churn is still the wrong weight.</strong> On that PR, 74% of files and 44% of changed lines are
+  generated fixtures — so a raw-churn cut spends ~2.6 of 6 seats holding machine-generated JSON to account.</li>
+  <li><strong>Identifier-only reference tracing misses most of a frozen string enum's consumers</strong> — one
+  constant reaches 4 files by name and 18 by its literal value.</li>
+  <li><strong>And the measurement that argues against the design:</strong> two runs of the same reviewer against
+  the same commit share <strong>zero</strong> findings at defect level (5 pairs, 7 pooled findings, micro-churn
+  1.0). If that holds, resampling explains any gain from N seats and the scoping explains no residual. It is
+  weak evidence — small n, biased sample — and it is the only local measurement there is.</li>
+</ul>
+<p>
+  Which is why <a href="/backlog/3326/">#3326</a> ships the fan-out <strong>off</strong> (<code>maxShards: 1</code>)
+  and carries an A/B of scoped versus unscoped seats, reporting recall <em>and</em> precision per arm, as the one
+  acceptance criterion that can fail if the premise is wrong.
+</p>
+
+<h2>What argues against the design, kept together so it is not lost</h2>
+<ol>
+  <li>The only controlled experiment on change decomposition and review outcome found <strong>no effect on
+  defects found</strong>.</li>
+  <li>The strongest replication of Perspective-Based Reading is <strong>null</strong>.</li>
+  <li><strong>More reviewers may buy nothing.</strong> "Two reviewers find an optimal number of defects" is a
+  convergent practice across Android, Chrome, AMD, Bing, Office and SQL; at Microsoft "there was only a minimal
+  increase in the number of comments about the change when more reviewers were active."</li>
+  <li><strong>The aggregation step is where findings get lost</strong> — measured net-negative in the one
+  experiment that quantified it. A reduce stage needs an explicit reason to exist.</li>
+  <li><strong>Gerrit deliberately refuses per-file approval</strong>, and its staleness reasoning applies to any
+  per-file verdict, along with rename/copy edge cases no production system has solved.</li>
+  <li><strong>Disjoint reporting destroys capture-recapture</strong>, the only statistical instrument for
+  estimating what was missed — it needs overlap between reviewers to work. Whole-diff <em>reading</em> preserves
+  it; strictly disjoint <em>reporting</em> kills it, so the seam and omission seats must keep overlapping the
+  scoped ones.</li>
+  <li><strong>Adding agents can collapse accuracy through conformity</strong> — one model went from 100%
+  unaided to 23% with two peers. <em>That study injects static consensus and does not test whether explicit
+  individual accountability mitigates it, so it is a warning, not a validation.</em></li>
+  <li><strong>More context can hurt.</strong> A deployed system serving ~400M daily users found a narrower code
+  slice beat a wider one "due to LLMs' reduced capability with longer contexts."</li>
+  <li><strong>Consensus among many agents is worth little.</strong> One recorded case had 80+ agents endorse a
+  false vulnerability, "killed only by a single empirical test." An executable check outranks any panel.</li>
+  <li><strong>No published experiment tests whether splitting a code diff across LLM calls changes defect
+  recall.</strong> The closest is in-file vulnerability localisation. The design is ahead of the evidence, and
+  the honest response is to measure rather than to assume.</li>
+</ol>
+{% endraw %}
