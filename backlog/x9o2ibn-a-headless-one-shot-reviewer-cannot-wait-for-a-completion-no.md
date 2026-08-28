@@ -23,13 +23,22 @@ This is exactly the shape of automation `#3379`'s cards describe: a step reasone
 its OWN mechanism (right instinct — don't busy-poll) but the mechanism it reasoned about doesn't
 exist in the context it was running in, and nothing caught the mismatch.
 
+**The fix belongs in the mechanism, not the agent's judgment.** The dispatching harness
+(`we:scripts/verify-lane.mjs`'s sibling pattern; concretely, a `subprocess.Popen(...).wait(timeout=…)`
+around the whole headless process, as this session's own `converge.py` already does) is ALREADY a
+synchronous, mechanical wait — the orchestrator blocks until the process exits, no polling, no
+notification, nothing for an agent to reason about. The bug is that `review-pr` hands control BACK
+to the agent mid-operation with an unfinished background step and asks IT to decide how to wait —
+the one thing a one-shot process structurally cannot do well. The right fix removes that decision
+from the agent entirely: `review-pr` blocks internally until its own gate finishes, so a headless
+caller never sees a "still running, come back later" state at all. Prompting the agent to poll
+instead (a earlier draft of this card's `Done when` #2) is a workaround for the mechanism being
+wrong, not a fix — dropped in favor of making the operation itself synchronous.
+
 ## Done when
 
 1. **Executable** — a test drives `we:scripts/operations/run.mjs review-pr` in a fixture where the
-   gate step backgrounds itself, and asserts that in NON-interactive/one-shot mode (however that is
-   detected — a flag, an env var, absence of a resumable session) the operation or its documented
-   caller contract BLOCKS until the gates finish (or times out loudly) rather than returning control
-   with an unresolved background step and no path back to it.
-2. The `REVIEW` brief given to a headless reviewer (`we:skills-src/review/SKILL.md` or the
-   dispatching prompt) states explicitly that no async notification exists in this mode and the
-   agent must poll or block, not defer — closing the gap even before the operation itself changes.
+   gate step backgrounds itself, and asserts the operation call ITSELF blocks (or the CLI's
+   `review-pr` command blocks) until the gate resolves — no `--resume=<run-id>` hand-back required
+   for the common case. A caller that legitimately wants async behavior can still ask for it
+   explicitly; the default must not require a second turn that a one-shot process cannot have.
