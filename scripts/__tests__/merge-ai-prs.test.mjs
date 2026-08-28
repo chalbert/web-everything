@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, restampAcceptance, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, buildDrainVerdicts, REVIEW_COVERAGE_KIND, REVIEW_RECORD_HEADLINES, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
+import { isAiAuthor, labelOnGreenVerdict, planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, computeNetDiffPaths, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, needsAcceptanceRestamp, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, parseNumstat, computeNetDiffChangedFiles, computeNetDiffText, resolveNetDiffBasis, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, matchesOnlyTarget, mapWithConcurrency, fetchPrReadsCached, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, buildDrainVerdicts, REVIEW_COVERAGE_KIND, REVIEW_RECORD_HEADLINES, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -1027,6 +1027,58 @@ describe('hasStaleReviewPendingBesideAccept — the label-collision detector (ch
   });
   it('tolerates string-shaped labels too (hasLabel\'s own tolerance)', () => {
     expect(hasStaleReviewPendingBesideAccept({ currentLabels: ['review:accepted', 'review:pending'] })).toBe(true);
+  });
+});
+
+describe('spawnReviewSetLabel (#1671 review finding — repoFlag() is the WRONG shape for review-set-label.mjs)', () => {
+  const spy = (status = 0) => {
+    const calls = [];
+    const spawn = (cmd, argv, opts) => { calls.push({ cmd, argv, opts }); return { status, stdout: '', stderr: '' }; };
+    return { calls, spawn };
+  };
+
+  it('emits the SINGLE-token --repo= form review-set-label.mjs actually parses, never repoFlag()\'s two-token gh form', () => {
+    const { calls, spawn } = spy();
+    const out = spawnReviewSetLabel({ pr: 1671, repo: 'chalbert/web-everything', to: 'accepted', spawn });
+    expect(out).toEqual({ ok: true });
+    expect(calls[0].argv).toContain('--repo=chalbert/web-everything');
+    expect(calls[0].argv).not.toContain('--repo'); // the gh-CLI two-token form — never emitted here
+  });
+
+  it('pins the child to a sibling repo\'s clone, exactly like restampAcceptance does for the same CLI (#3202)', () => {
+    const { calls, spawn } = spy();
+    spawnReviewSetLabel({ pr: 9, repo: 'frontierui', to: 'accepted', cwd: '/ws/frontierui', spawn });
+    expect(calls[0].opts.cwd).toBe('/ws/frontierui');
+  });
+
+  it('inherits the caller\'s cwd (undefined) for a local-repo PR', () => {
+    const { calls, spawn } = spy();
+    spawnReviewSetLabel({ pr: 9, repo: 'chalbert/web-everything', to: 'accepted', spawn });
+    expect(calls[0].opts.cwd).toBeUndefined();
+  });
+
+  it('a non-zero exit reports ok:false with a reason, never throws — the #1671 bug\'s failure was silent, this one is not', () => {
+    const { spawn } = spy(2);
+    expect(() => spawnReviewSetLabel({ pr: 1671, repo: 'chalbert/web-everything', to: 'accepted', spawn })).not.toThrow();
+    const out = spawnReviewSetLabel({ pr: 1671, repo: 'chalbert/web-everything', to: 'accepted', spawn: () => ({ status: 2, stdout: '{"error":"invalid --repo"}', stderr: '' }) });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toMatch(/invalid --repo/);
+  });
+
+  it('a thrown spawn (e.g. ENOENT) is caught, never propagates', () => {
+    const spawn = () => { throw new Error('spawn ENOENT'); };
+    expect(() => spawnReviewSetLabel({ pr: 1, repo: 'chalbert/web-everything', to: 'accepted', spawn })).not.toThrow();
+    expect(spawnReviewSetLabel({ pr: 1, repo: 'chalbert/web-everything', to: 'accepted', spawn }).ok).toBe(false);
+  });
+
+  it('passes through optional --actor/--channel/--reason only when supplied', () => {
+    const { calls, spawn } = spy();
+    spawnReviewSetLabel({ pr: 1, repo: 'chalbert/web-everything', to: 'accepted', spawn });
+    expect(calls[0].argv.some((a) => a.startsWith('--actor='))).toBe(false);
+    calls.length = 0;
+    spawnReviewSetLabel({ pr: 1, repo: 'chalbert/web-everything', to: 'clear-human', actor: 'nic', reason: 'operator said so', spawn });
+    expect(calls[0].argv).toContain('--actor=nic');
+    expect(calls[0].argv).toContain('--reason=operator said so');
   });
 });
 

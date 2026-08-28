@@ -669,6 +669,33 @@ export function isRebaseDropCandidate(v) {
  * path below resolves from `import.meta.url`, never from cwd. `spawn` is injected so the pinning is
  * assertable without a subprocess.
  */
+/**
+ * #1671 review finding — every internal caller of `review-set-label.mjs` needs the SINGLE-token `--repo=`
+ * form (its own parser: `argv.find(a => a.startsWith('--repo='))`, `repoOptional` false for every caller in
+ * this file) and, for a sibling-constellation repo, a pinned `cwd` (#3202 — an unpinned git read inside the
+ * CLI runs against the WRONG tree, which can silently mis-stamp a fingerprint rather than merely failing).
+ * `repoFlag()` (this file's OWN `gh`-CLI helper, TWO tokens: `['--repo', slug]` or `[]`) is NOT that format —
+ * passing it here fails 100% of calls, silently, because the caller-side `try{}catch{}` this CLI is always
+ * wrapped in swallows the child's non-zero exit. One shared spawn point instead of each call site re-deriving
+ * the args by hand, so the format is correct by construction. `spawn` is injected so this is unit-testable
+ * without a subprocess.
+ * @param {{pr:number|string, repo:string, to:string, cwd?:string, actor?:string, channel?:string, reason?:string, spawn?:Function}} o
+ * @returns {{ok:boolean, reason?:string}}
+ */
+export function spawnReviewSetLabel({ pr, repo, to, cwd, actor, channel, reason, spawn = spawnSync } = {}) {
+  const args = [String(pr), `--repo=${repo}`, `--to=${to}`];
+  if (actor) args.push(`--actor=${actor}`);
+  if (channel) args.push(`--channel=${channel}`);
+  if (reason) args.push(`--reason=${reason}`);
+  try {
+    const r = spawn(process.execPath, [new URL('./review-set-label.mjs', import.meta.url).pathname, ...args], { encoding: 'utf8', cwd });
+    if (r.status === 0) return { ok: true };
+    return { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim().split('\n').pop() };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
 export function restampAcceptance({ pr, repo, newHead, cwd, spawn = spawnSync }) {
   try {
     const r = spawn(process.execPath, [
@@ -3224,11 +3251,16 @@ async function runCli() {
           touched = true;
           if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would clear stale review:pending beside review:accepted\n`);
         } else {
-          try {
-            execFileSync('node', ['scripts/review-set-label.mjs', String(p.number), ...repoFlag(repo), '--to=accepted'], { stdio: ['ignore', 'ignore', 'pipe'] });
+          // #1671 review finding — review-set-label.mjs needs the single-token `--repo=` form and (for a
+          // sibling repo) a pinned cwd; `repoFlag()` is the wrong shape for it (that's the gh-CLI helper).
+          // `spawnReviewSetLabel` is the shared, correctly-shaped spawn point (mirrors `restampAcceptance`).
+          const out = spawnReviewSetLabel({ pr: p.number, repo: repo || localSlug, to: 'accepted', cwd: siblingCloneDir(repo) });
+          if (out.ok) {
             touched = true;
             if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} cleared stale review:pending beside review:accepted\n`);
-          } catch { /* self-clear refusal or a label race — non-fatal, the next pass (or a different actor) retries */ }
+          } else if (!AS_JSON) {
+            process.stderr.write(`  · ${repoTag(repo)}${p.number} stale review:pending NOT cleared (${out.reason}) — self-clear refusal or a label race, non-fatal, the next pass retries\n`);
+          }
         }
       }
       if (touched) reconciled.push(p.number);
