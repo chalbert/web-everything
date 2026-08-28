@@ -127,11 +127,19 @@ async function parkOneDispatch({ ageMs = 10 * 60 * 1000 } = {}) {
  * call already returned. Passed as `execFileSync`'s own `timeout` option, Node itself enforces this one: if the
  * child has not exited by the deadline, Node sends it `killSignal` (`SIGKILL`) and `execFileSync` throws.
  *
- * Sixty seconds is comfortably above every real case in this file (the stub `claude`/`gh` do nothing but write
- * a file and print) and comfortably below `CHILD_PROCESS_TIMEOUT_MS`, so the two bounds do not race each other
- * — this one fires first and produces a clean, reported kill; `CHILD_PROCESS_TIMEOUT_MS` never needs to.
+ * RAISED from 60s (2026-08-28), because "comfortably above every real case" stopped being true under a FULL
+ * unsharded `npm run test:unit` run on a loaded machine: this genuinely healthy path (the stub `claude`/`gh` do
+ * nothing but write a file and print — low-hundreds-of-ms on a quiet machine, per the wedged-kill test's own
+ * comment below) was SIGKILLed by this exact 60_000ms bound three times in a row, with `stdout`/`stderr` empty —
+ * proof the child was still starting up, not still working. `CHILD_PROCESS_TIMEOUT_MS` already carries the same
+ * lesson once (its own history: this file's wall time went ~78s → ~512s, ~6.5x, under a sharded CI fork storm)
+ * but that raise only widened the OUTER vitest bound — this INNER, Node-enforced kill never moved with it, so
+ * under load it now fires FIRST and kills a slow-but-healthy child before the outer bound would even notice.
+ * 100s keeps a real 20s margin below `CHILD_PROCESS_TIMEOUT_MS` (so the two still do not race — this one fires
+ * first) without matching the full ~6.5x, which the wedged-child test below still bounds independently via its
+ * own `WEDGED_KILL_DEADLINE_MS` override — this default governs only the healthy-path cases.
  */
-const EXEC_TIMEOUT_MS = 60_000;
+const EXEC_TIMEOUT_MS = 100_000;
 
 function runWakeCli(args = [], { agents = '[]', prs = '[]', execTimeoutMs = EXEC_TIMEOUT_MS, detached = false } = {}) {
   return execFileSync(process.execPath, [WAKE_CLI, ...args], {
