@@ -35,6 +35,13 @@ caller never sees a "still running, come back later" state at all. Prompting the
 instead (a earlier draft of this card's `Done when` #2) is a workaround for the mechanism being
 wrong, not a fix — dropped in favor of making the operation itself synchronous.
 
+This is a direct instance of the existing rule, not a new one: "script-decidable → hook
+(deterministic); judgment stays in context" (Hookable vs Judgment). Whether to block, poll, or
+resume on a backgrounded gate is entirely script-decidable — there is no case where an agent's
+judgment should be in that loop at all. The agent's role is to ask the mechanic (the operation) to
+run an allowed action and receive a finished result; it should never be handed a half-finished
+mechanical state and asked to orchestrate the rest itself.
+
 ## Done when
 
 1. **Executable** — a test drives `we:scripts/operations/run.mjs review-pr` in a fixture where the
