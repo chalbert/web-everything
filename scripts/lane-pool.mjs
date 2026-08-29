@@ -90,6 +90,7 @@ import {
   laneHolderSlug,
   laneWorkerSession,
   isContestedLease,
+  isTransientRefLockError,
 } from './lib/lane-lease.mjs';
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
@@ -136,6 +137,32 @@ const tryGit = (args, cwd, opts = {}) => {
     return null;
   }
 };
+
+// Live-fire dispatch test, 2026-08-29: `git fetch origin --prune` crashed `provision`/`acquire` outright —
+// "error: cannot lock ref '<ref>': is at X but expected Y" — a transient race over the SHARED object store
+// every lane clones `--reference` (two lanes' fetches touching the same `refs/remotes/origin/*` at once).
+// On a host running several concurrent sessions this is ORDINARY contention, not a real failure, yet it was
+// an uncaught throw that aborted the whole batch — and `acquire`'s OWN fetch (this same call) is the very
+// FIRST git command a dispatched delivery agent's brief runs, so an unlucky race there crashed the agent
+// before it ever reached `lane-pool acquire`'s own retry-free call. Retry a FEW times with a short backoff,
+// matching only this specific ref-lock signature — any other fetch failure (network down, bad remote) still
+// throws immediately, unretried, exactly as before.
+const FETCH_LOCK_RETRY_ATTEMPTS = 4;
+const FETCH_LOCK_RETRY_BASE_MS = 250;
+function blockingSleep(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms)); } catch { /* env without SAB — skip the wait */ }
+}
+function fetchOriginPruneWithRetry(dir) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return git(['fetch', 'origin', '--prune', '--quiet'], dir);
+    } catch (e) {
+      const msg = String(e?.stderr || e?.message || e);
+      if (!isTransientRefLockError(msg) || attempt >= FETCH_LOCK_RETRY_ATTEMPTS) throw e;
+      blockingSleep(FETCH_LOCK_RETRY_BASE_MS * attempt);
+    }
+  }
+}
 
 const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p);
 
@@ -647,7 +674,7 @@ function localRemoteShas(dir) {
 // (safe to unmap its stale item mapping, #2139) from a skipped one (still serving its in-flight item).
 function refreshLane(repo, n, { force = false } = {}) {
   const dir = laneDir(repo, n);
-  git(['fetch', 'origin', '--prune', '--quiet'], dir);
+  fetchOriginPruneWithRetry(dir);
   // #2337(b) — a LIVE lease is an ownership hold (a process is presumed alive within TTL), distinct from the
   // dirty/ahead STALENESS guard below. `--force` exists to recycle stale residue, not to stomp an active
   // consumer, so the lease check runs REGARDLESS of `--force`: a leased lane is always skipped (loud), never
@@ -1119,7 +1146,7 @@ function cmdAcquire(repo) {
   // A FIRST reserve of a not-yet-reserved lane still resets (clean-populate to origin/main), like any acquire.
   const dir = laneDir(repo, chosen);
   if (!flags['no-reset'] && !targetWasReserved) {
-    git(['fetch', 'origin', '--prune', '--quiet'], dir);
+    fetchOriginPruneWithRetry(dir);
     // #2924 — re-verify containment on FRESH post-fetch remote-tracking refs, immediately before the
     // destructive reset below. Whatever proved this lane safe to reset — auto-pick's `infoFor()` snapshot, or
     // nothing at all before #3390's own explicit-lane guard — is up to ~30s stale by the time this line runs
