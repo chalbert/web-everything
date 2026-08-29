@@ -3,9 +3,12 @@ bornAs: xxogfx8
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/run-record.mjs", "we:scripts/operations/run-store.mjs"]
 dateOpened: "2026-08-27"
+dateStarted: "2026-08-28"
+dateResolved: "2026-08-28"
+graduatedTo: none
 tags: [operations, telemetry, conveyor, delivery]
 ---
 

@@ -51,7 +51,7 @@ describe('the pure core', () => {
   it('newRunRecord produces exactly the documented shape', () => {
     expect(sample()).toEqual({
       v: RUN_RECORD_VERSION, id: 'run-sample', op: 'fixture-review',
-      input: { pr: 1 }, cursor: 0, findings: {}, verdict: null, effects: [], telemetry: [], pending: null,
+      input: { pr: 1 }, cursor: 0, findings: {}, verdict: null, effects: [], telemetry: [], stepTimings: [], pending: null,
     });
   });
 

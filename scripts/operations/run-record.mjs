@@ -97,6 +97,7 @@ export function newRunRecord({ id, op, input = {} } = {}) {
     verdict: null,
     effects: [],
     telemetry: [],
+    stepTimings: [],
     pending: null,
   };
 }
@@ -168,6 +169,81 @@ export function totalJudgeSpend(run) {
 }
 
 /**
+ * ONE stepTimings ROW, whitelisted the way {@link normalizeJudgeTelemetry} whitelists `telemetry` (#3368).
+ * `stepTimings` answers "how long did this STEP take", a different question from "what did a judge SPAWN
+ * cost" — see `withTelemetry`'s refusal in `engine.mjs`, which is exactly why this is its own field with its
+ * own whitelist rather than a wider `telemetry`.
+ *
+ * @param {{step: string, stepIndex: number, startedAt: string, finishedAt?: string, durationMs?: number}} o
+ * @returns {object} a frozen row.
+ */
+function normalizeStepTimingRow({ step, stepIndex, startedAt, finishedAt, durationMs } = {}) {
+  if (typeof step !== 'string' || !step.trim()) {
+    throw new TypeError('operations: a stepTimings row needs a `step` name');
+  }
+  if (!Number.isInteger(stepIndex) || stepIndex < 0) {
+    throw new TypeError('operations: a stepTimings row needs a non-negative integer `stepIndex`');
+  }
+  if (typeof startedAt !== 'string' || Number.isNaN(Date.parse(startedAt))) {
+    throw new TypeError(`operations: a stepTimings row needs a parseable \`startedAt\` — got ${JSON.stringify(startedAt)}`);
+  }
+  const row = { step, stepIndex, startedAt };
+  if (finishedAt !== undefined && finishedAt !== null) {
+    if (typeof finishedAt !== 'string' || Number.isNaN(Date.parse(finishedAt))) {
+      throw new TypeError(`operations: a stepTimings row \`finishedAt\` must be a parseable string — got ${JSON.stringify(finishedAt)}`);
+    }
+    if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+      throw new TypeError(`operations: a finished stepTimings row needs a non-negative \`durationMs\` — got ${JSON.stringify(durationMs)}`);
+    }
+    row.finishedAt = finishedAt;
+    row.durationMs = durationMs;
+  }
+  return Object.freeze(row);
+}
+
+/**
+ * STAMP A STEP'S START. PURE — `at` is a clock reading the CALLER took; this function never reads a clock
+ * (#3368: the engine's purity contract at `engine.mjs:45` forbids that for the engine, and this helper holds
+ * the same line so the io shell stays the only place `Date.now()`/`new Date()` appears).
+ *
+ * IDEMPOTENT per `stepIndex` — called again for a step that already has an OPEN (unfinished) row returns
+ * `run` unchanged, so a caller re-entering the same suspended step (an `awaiting-judge`/`awaiting-confirm`
+ * poll, a resumed process) cannot double-stamp it.
+ *
+ * @param {object} run
+ * @param {{step: string, stepIndex: number, at: string}} o
+ * @returns {object}
+ */
+export function withStepStart(run, { step, stepIndex, at } = {}) {
+  const timings = Array.isArray(run.stepTimings) ? run.stepTimings : [];
+  if (timings.some((t) => t.stepIndex === stepIndex && t.finishedAt === undefined)) return run;
+  const row = normalizeStepTimingRow({ step, stepIndex, startedAt: at });
+  return { ...run, stepTimings: [...timings, row] };
+}
+
+/**
+ * STAMP A STEP'S FINISH, on the open row {@link withStepStart} left for it. PURE, same clock-injection
+ * discipline as `withStepStart`.
+ *
+ * A `stepIndex` with NO open row — never started, or already finished — returns `run` UNCHANGED rather than
+ * fabricating one: a run halted mid-step must show a started step with NO finish, never an invented one
+ * (#3368, Done-when #1).
+ *
+ * @param {object} run
+ * @param {{stepIndex: number, at: string}} o
+ * @returns {object}
+ */
+export function withStepFinish(run, { stepIndex, at } = {}) {
+  const timings = Array.isArray(run.stepTimings) ? run.stepTimings : [];
+  const i = timings.findIndex((t) => t.stepIndex === stepIndex && t.finishedAt === undefined);
+  if (i === -1) return run;
+  const row = timings[i];
+  const durationMs = Math.max(0, Date.parse(at) - Date.parse(row.startedAt));
+  const next = normalizeStepTimingRow({ step: row.step, stepIndex: row.stepIndex, startedAt: row.startedAt, finishedAt: at, durationMs });
+  return { ...run, stepTimings: [...timings.slice(0, i), next, ...timings.slice(i + 1)] };
+}
+
+/**
  * Structural validation of a run record. Used by every reader and by `advance`, so a malformed record can
  * never be stepped.
  *
@@ -236,6 +312,30 @@ export function validateRunRecord(record) {
   if (record.telemetry !== undefined) {
     if (!Array.isArray(record.telemetry)) errors.push('`telemetry` must be an array when present');
     else record.telemetry.forEach((t, i) => { if (!isPlainObject(t)) errors.push(`telemetry[${i}] must be an object`); });
+  }
+  // SAME TOLERANCE, SAME REASON, DISTINCT FIELD (#3368) — `stepTimings` postdates v1 exactly like `telemetry`
+  // did, and the two must not be conflated: one is juror spend, the other is step wall-clock.
+  if (record.stepTimings !== undefined) {
+    if (!Array.isArray(record.stepTimings)) {
+      errors.push('`stepTimings` must be an array when present');
+    } else {
+      record.stepTimings.forEach((t, i) => {
+        if (!isPlainObject(t)) { errors.push(`stepTimings[${i}] must be an object`); return; }
+        if (typeof t.step !== 'string' || !t.step) errors.push(`stepTimings[${i}] has no step name`);
+        if (!Number.isInteger(t.stepIndex) || t.stepIndex < 0) errors.push(`stepTimings[${i}] has an invalid stepIndex`);
+        if (typeof t.startedAt !== 'string' || Number.isNaN(Date.parse(t.startedAt))) {
+          errors.push(`stepTimings[${i}] has an unparseable startedAt ${JSON.stringify(t.startedAt)}`);
+        }
+        if (t.finishedAt !== undefined) {
+          if (typeof t.finishedAt !== 'string' || Number.isNaN(Date.parse(t.finishedAt))) {
+            errors.push(`stepTimings[${i}] has an unparseable finishedAt ${JSON.stringify(t.finishedAt)}`);
+          }
+          if (typeof t.durationMs !== 'number' || !Number.isFinite(t.durationMs) || t.durationMs < 0) {
+            errors.push(`stepTimings[${i}] has an invalid durationMs ${JSON.stringify(t.durationMs)}`);
+          }
+        }
+      });
+    }
   }
   if (record.pending !== null && !isPlainObject(record.pending)) {
     errors.push('`pending` must be null or an object');
