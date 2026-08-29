@@ -64,14 +64,19 @@ export function isParkedOnDispatch(run) {
  * @param {object} [opts.registry]
  * @param {object|Map} [opts.sinks] - needed only if advancing reaches a further effect step.
  * @param {string|Date} [opts.now]
+ * @param {() => number} [opts.clock] - mints the instant a step (re)entered by THIS pass starts/finishes, as
+ *   epoch ms (#3368, PR #1693 review finding 1). Sampled FRESH at each stamp site — never frozen to one
+ *   upfront reading — because a step this pass both starts AND finishes (e.g. a `comment.post` sink call
+ *   inside `applyPendingEffects`) has REAL elapsed time between those two stamps; a single `now` for both
+ *   would silently record it as instantaneous. This is deliberately separate from `now`: `now`/`hoursStuck`
+ *   answer "when did we learn a PRE-EXISTING dispatch resolved" (`effect-observer.mjs`'s `observedAt`
+ *   approximation, correctly a single per-pass reading), while `clock` answers "how long did work THIS pass
+ *   itself performed take" — the same distinction `cli-adapter.mjs`'s `driveRun` already draws by calling
+ *   its injected `clock()` fresh at each of its four stamp sites.
  * @returns {Promise<object>} `{runId, resolved, stillRunning, skipped, errors, advanced, status}`
  */
-export async function wakeRun(run, { observers, store, registry, sinks = {}, now = new Date() } = {}) {
-  // THE INJECTED CLOCK, READ ONCE PER PASS (#3368). `now` is already this function's clock (`hoursStuck`,
-  // `observeRun`) — a dispatch's ACTUAL finish happened at some earlier, unknown instant, and `now` is when
-  // this pass LEARNED of it, exactly the same approximation `effect-observer.mjs`'s `observedAt` already
-  // makes. `stampFinish`/`withStepStart` below never read a clock themselves.
-  const atIso = (now instanceof Date ? now : new Date(now)).toISOString();
+export async function wakeRun(run, { observers, store, registry, sinks = {}, now = new Date(), clock = () => Date.now() } = {}) {
+  const nowIso = () => new Date(clock()).toISOString();
   const observed = await observeRun(run, { observers, now });
   const report = {
     runId: run.id,
@@ -132,7 +137,7 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
         current = advance(current, { registry });
         // THE FINISH STAMP a dispatch was missing (#3368): a build that ran 40 minutes now reads as 40
         // minutes, not as absent — `withStepFinish` is a no-op unless `advance` just resolved THIS step.
-        current = current.cursor > stepIndex ? withStepFinish(current, { stepIndex, at: atIso }) : current;
+        current = current.cursor > stepIndex ? withStepFinish(current, { stepIndex, at: nowIso() }) : current;
         store.write(current);
         report.advanced = true;
         continue;
@@ -143,17 +148,23 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
       // already stamped started when it first suspended, so this is a no-op for those.
       if (status === 'running') {
         const declaration = registry.get(current.op);
-        current = withStepStart(current, { step: declaration.steps[stepIndex]?.name, stepIndex, at: atIso });
+        current = withStepStart(current, { step: declaration.steps[stepIndex]?.name, stepIndex, at: nowIso() });
       }
       // Every other suspend is somebody else's stop: a confirm is owed to a person or a policy, a judge needs
       // a spawn. The waker calls `advance` and nothing else (#3070), so it hands those back untouched.
       const next = advance(current, { registry });
       if (next === current) break;
-      current = next.cursor > stepIndex ? withStepFinish(next, { stepIndex, at: atIso }) : next;
+      current = next.cursor > stepIndex ? withStepFinish(next, { stepIndex, at: nowIso() }) : next;
       store.write(current);
       report.advanced = true;
     }
   } catch (e) {
+    // PERSIST THE START STAMP EVEN ON A THROW (PR #1693 review, finding 2). A `running` step's declaration
+    // fn can throw deterministically (see `cli-adapter.mjs`'s identical `step-refused` handling) — `current`
+    // above already carries that step's `withStepStart` row by the time `advance` throws, but nothing had
+    // written it to disk yet. Without this, the persisted record shows no trace the step ever started,
+    // contradicting this item's own "started, never a fabricated finish" guarantee for exactly this path.
+    store.write(current);
     report.errors.push({ error: String(e?.message ?? e) });
   }
 

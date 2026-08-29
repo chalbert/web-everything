@@ -667,6 +667,9 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
         priorConfirm: findPriorConfirm(declaration, current, stepIndex),
       };
     }
+    // Persisted deliberately (PR #1693 review, finding 3): the start stamp above is real — the declaration
+    // fn genuinely began — `advance` just made no progress past it, so recording it is consistent with
+    // every other halt this file persists, not a side effect specific to `stuck`.
     if (next === current) { store.write(current); return { run: current, stopped: 'stuck', error: null, applied }; }
     current = stampFinish(next, stepIndex, clock);
     store.write(current);

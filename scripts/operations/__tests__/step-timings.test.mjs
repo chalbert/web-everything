@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { newRunRecord, validateRunRecord, withStepFinish, withStepStart } from '../run-record.mjs';
 import { startRun } from '../engine.mjs';
 import { createRegistry, op } from '../registry.mjs';
-import { effect } from '../step-kinds.mjs';
+import { compute, effect } from '../step-kinds.mjs';
 import { inFlight } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { driveRun } from '../cli-adapter.mjs';
@@ -194,6 +194,7 @@ describe('wake.mjs resolves a dispatch\'s FINISH stamp — driveRun can only sta
     const report = await wakeRun(parked.run, {
       observers: { 'start.build': async () => ({ status: 'succeeded', result: { exit: 0 } }) },
       store, registry, sinks, now: new Date('2026-08-27T01:00:00.000Z'),
+      clock: () => Date.parse('2026-08-27T01:00:00.000Z'),
     });
     expect(report.status).toBe('complete');
 
@@ -218,5 +219,78 @@ describe('wake.mjs resolves a dispatch\'s FINISH stamp — driveRun can only sta
     });
     expect(report.status).toBe('awaiting-effect');
     expect(store.read('run-dt2').stepTimings).toEqual([{ step: 'go', stepIndex: 0, startedAt: '1970-01-01T00:00:01.000Z' }]);
+  });
+
+  // PR #1693 REVIEW, FINDING 1. `wakeRun` used to sample its clock ONCE at function entry and reuse that
+  // single reading for every stamp made during the pass — so a step this pass both starts AND finishes
+  // (walking straight through a `compute` step right after resolving the dispatch ahead of it) always
+  // recorded `durationMs: 0`, however long it actually took. A per-call clock proves the fix: two DIFFERENT
+  // readings, taken at the two stamps for the SAME step, both within this one `wakeRun` call.
+  it("a step that both starts and finishes within ONE wakeRun call gets a real, non-zero duration", async () => {
+    const chainRegistry = createRegistry();
+    chainRegistry.register(op('fx-dispatch-then-compute', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      tally: compute({ reads: [], fn: () => 'done' }),
+    }));
+    const chainSinks = { 'start.build': async () => inFlight({ handle: 'sess-xyz' }) };
+
+    const store = createMemoryRunStore();
+    const run = startRun({ op: 'fx-dispatch-then-compute', id: 'run-dc', input: { pr: 3 }, registry: chainRegistry });
+    store.write(run);
+    const parked = await driveRun({
+      run, registry: chainRegistry, store, sinks: chainSinks,
+      judge: async () => { throw new Error('no juror'); }, clock: stubClock(),
+    });
+    expect(parked.stopped).toBe('effect-in-flight');
+
+    let t = 5000;
+    const wakeClock = () => { t += 250; return t; }; // a FRESH reading every call — never frozen.
+    const report = await wakeRun(parked.run, {
+      observers: { 'start.build': async () => ({ status: 'succeeded' }) },
+      store, registry: chainRegistry, sinks: chainSinks, clock: wakeClock,
+    });
+    expect(report.status).toBe('complete');
+
+    const tallyRow = store.read('run-dc').stepTimings.find((r) => r.step === 'tally');
+    // The buggy code recorded exactly 0 here, every time, regardless of `wakeClock`'s step size.
+    expect(tallyRow.durationMs).toBe(250);
+  });
+
+  // PR #1693 REVIEW, FINDING 2. A `running` step's declaration fn can throw deterministically (the same
+  // case `cli-adapter.mjs`'s `step-refused` handling covers) — `withStepStart` had already tagged it
+  // started in memory by then, but nothing persisted that before the catch returned, so the run record on
+  // disk showed no trace the step ever started. That contradicts this item's own "started, never a
+  // fabricated finish" guarantee for exactly this path.
+  it('a running step that throws inside wakeRun still persists its start stamp', async () => {
+    const throwRegistry = createRegistry();
+    throwRegistry.register(op('fx-dispatch-then-throw', {
+      input: { pr: { type: 'number', required: true } },
+      go: effect({ reads: ['input.pr'], effects: () => [{ type: 'start.build', payload: {}, dispatch: true }] }),
+      boom: compute({ reads: [], fn: () => { throw new Error('deterministic refusal'); } }),
+    }));
+    const throwSinks = { 'start.build': async () => inFlight({ handle: 'sess-boom' }) };
+
+    const store = createMemoryRunStore();
+    const run = startRun({ op: 'fx-dispatch-then-throw', id: 'run-boom', input: { pr: 1 }, registry: throwRegistry });
+    store.write(run);
+    const parked = await driveRun({
+      run, registry: throwRegistry, store, sinks: throwSinks,
+      judge: async () => { throw new Error('no juror'); }, clock: stubClock(),
+    });
+    expect(parked.stopped).toBe('effect-in-flight');
+
+    const report = await wakeRun(parked.run, {
+      observers: { 'start.build': async () => ({ status: 'succeeded' }) },
+      store, registry: throwRegistry, sinks: throwSinks, clock: stubClock(500),
+    });
+    expect(report.errors.length).toBeGreaterThan(0);
+
+    // The buggy code left NO row at all here — the start stamp lived only in an in-memory object that was
+    // discarded when the catch block returned without a `store.write`.
+    const boomRow = store.read('run-boom').stepTimings.find((r) => r.step === 'boom');
+    expect(boomRow).toBeDefined();
+    expect(boomRow.startedAt).toEqual(expect.any(String));
+    expect(boomRow.finishedAt).toBeUndefined();
   });
 });
