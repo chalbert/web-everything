@@ -22,6 +22,9 @@ import {
   missingToolAllows,
   toolAllowStatus,
   PR_WATCH_TOOLS,
+  withOutputStyle,
+  outputStyleStatus,
+  OUTPUT_STYLE,
   skillsDeployScript,
   mayWriteUserTree,
   knownGitDirs,
@@ -412,6 +415,87 @@ describe('toolAllowStatus — the step has to speak `drift` or the check gate ca
       toolAllowStatus({ settings: empty, write: false }).status,
       toolAllowStatus({ settings: full, write: false }).status,
       toolAllowStatus({ settings: empty, write: true, dryRun: true }).status,
+    ];
+    for (const st of statuses) expect(['ok', 'drift', 'planned']).toContain(st);
+  });
+});
+
+describe('withOutputStyle — the response-style preference that has to survive a fresh VM', () => {
+  it('sets the style on a settings file that names none', () => {
+    expect(withOutputStyle({}).outputStyle).toBe(OUTPUT_STYLE);
+  });
+
+  it('is idempotent', () => {
+    const once = withOutputStyle({});
+    expect(withOutputStyle(once)).toEqual(once);
+  });
+
+  it('NEVER overwrites a style the operator already chose, including a different one', () => {
+    // The whole restraint of this step. `outputStyle` is single-valued, so unlike `permissions.allow` there is
+    // no additive form — applying it over an existing value can only mean overwriting a stated preference.
+    expect(withOutputStyle({ outputStyle: 'Explanatory' }).outputStyle).toBe('Explanatory');
+  });
+
+  it('leaves every other key untouched', () => {
+    const before = { permissions: { allow: ['Artifact'] }, hooks: { SessionStart: [] } };
+    expect(withOutputStyle(before)).toMatchObject(before);
+  });
+
+  it('treats a blank or non-string style as absent', () => {
+    for (const v of ['', '   ', null, 42]) {
+      expect(withOutputStyle({ outputStyle: v }).outputStyle).toBe(OUTPUT_STYLE);
+    }
+  });
+});
+
+describe('outputStyleStatus — the step has to speak `drift` or the check gate cannot see it', () => {
+  const none = {};
+  const set = { outputStyle: OUTPUT_STYLE };
+
+  it('reports DRIFT on a read-only run with no style set', () => {
+    const r = outputStyleStatus({ settings: none, write: false });
+    expect(r).toMatchObject({ id: 'style', status: 'drift' });
+    expect(r.detail).toContain('bootstrap:install');
+  });
+
+  it('reports OK when a style is already set, whatever the write mode', () => {
+    for (const write of [true, false]) {
+      expect(outputStyleStatus({ settings: set, write })).toMatchObject({ status: 'ok' });
+    }
+  });
+
+  it('reports OK — never drift — on a style the operator chose that is not ours', () => {
+    // `--check` must not exit non-zero on a machine configured exactly as its owner intended.
+    const r = outputStyleStatus({ settings: { outputStyle: 'Learning' }, write: false });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('Learning');
+  });
+
+  it('reports PLANNED and writes NOTHING on --dry-run', () => {
+    let wrote = false;
+    const r = outputStyleStatus({ settings: none, write: true, dryRun: true, apply: () => { wrote = true; } });
+    expect(r.status).toBe('planned');
+    expect(wrote).toBe(false);
+  });
+
+  it('APPLIES and reports ok on a writing run, passing the styled settings to the writer', () => {
+    let written = null;
+    const r = outputStyleStatus({ settings: none, write: true, apply: (s) => { written = s; } });
+    expect(r.status).toBe('ok');
+    expect(written.outputStyle).toBe(OUTPUT_STYLE);
+  });
+
+  it('writes NOTHING on a read-only run, even though it reports drift', () => {
+    let wrote = false;
+    outputStyleStatus({ settings: none, write: false, apply: () => { wrote = true; } });
+    expect(wrote).toBe(false);
+  });
+
+  it('uses the same status vocabulary as the other steps, so one gate covers all', () => {
+    const statuses = [
+      outputStyleStatus({ settings: none, write: false }).status,
+      outputStyleStatus({ settings: set, write: false }).status,
+      outputStyleStatus({ settings: none, write: true, dryRun: true }).status,
     ];
     for (const st of statuses) expect(['ok', 'drift', 'planned']).toContain(st);
   });
@@ -828,7 +912,14 @@ describe('main() — the installer orchestration', () => {
   const spyIo = (over = {}) => {
     const io = {
       lines: [], writes: [], trustWrites: [], skills: [], hooks: [], links: [],
-      readSettings: () => ({}),
+      // STATEFUL, and that is the point (PR #1685 review, correctness/coverage). It used to be the constant
+      // `() => ({})`, which cannot tell a FRESH read after a write apart from a STALE pre-write object being
+      // reused — so the juror collapsed `main()`'s second `io.readSettings()` into `= allowSettings`,
+      // reintroducing the exact defect the re-read exists to prevent, and all 142 tests still passed. The
+      // double now answers with the LAST object `writeSettings` received, so a step that re-reads sees the
+      // previous step's write and a collapsed read reddens. Overrides in `over` still win (see the
+      // `readSettings: () => null` unreadable-config cases below).
+      readSettings: () => (io.writes.length ? io.writes[io.writes.length - 1] : {}),
       writeSettings: (next) => io.writes.push(next),
       readTrust: () => ({}),
       writeTrust: (next) => io.trustWrites.push(next),
@@ -922,6 +1013,19 @@ describe('main() — the installer orchestration', () => {
       const { io } = run(['install', '--json'], LAPTOP, { readSettings: () => null });
       expect(io.writes).toEqual([]);
       for (const id of ['gitdir', 'pr-watch']) expect(report(io).steps.find((st) => st.id === id), id).toMatchObject({ status: 'drift' });
+    });
+
+    it('a write run leaves BOTH the allow rules and the style in the SAME settings object', () => {
+      // THE MUTATION THIS EXISTS TO KILL (PR #1685 review, correctness/coverage). `writeSettings` REPLACES the
+      // file wholesale, so each step that may write must re-read first; collapse `main()`'s second
+      // `io.readSettings()` into `= allowSettings` and the style step writes back a settings object from
+      // BEFORE the pr-watch step's write, silently stripping allow rules the operator was just granted. Every
+      // per-step assertion still passes under that mutation — each step's own write is fine in isolation — so
+      // the only thing that catches it is asserting the FINAL object carries both steps' work at once.
+      const { io } = run(['install', '--json'], LAPTOP);
+      const final = io.writes.at(-1);
+      expect(final.permissions.allow).toEqual(expect.arrayContaining([...PR_WATCH_TOOLS]));
+      expect(final.outputStyle).toBe(OUTPUT_STYLE);
     });
   });
 

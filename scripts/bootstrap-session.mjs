@@ -448,6 +448,67 @@ export function toolAllowStatus({ settings, write, dryRun = false, apply } = {})
   return { id, status: 'ok', detail: `allowed ${missing.join(', ')}` };
 }
 
+// ── Output style ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The operator's chosen response style — the built-in `Concise` ("responds tersely, leading with results and
+ * skipping preamble and narration").
+ *
+ * WHY IT TRAVELS WITH THE OTHER MACHINE STATE. Same argument as {@link PR_WATCH_TOOLS} verbatim: it is a
+ * `~/.claude/settings.json` key, so on the host whose `$HOME` does not survive it is re-chosen by hand every
+ * session or simply lost. A VM session that configures itself is the whole point of this script; a preference
+ * the operator has already stated is exactly the kind of state it exists to carry.
+ */
+export const OUTPUT_STYLE = 'Concise';
+
+/**
+ * Set `outputStyle` in a settings OBJECT. PURE.
+ *
+ * WRITES ONLY INTO THE ABSENCE, and that restraint is the whole design rather than caution. `outputStyle` is a
+ * SINGLE-VALUED key, unlike `permissions.allow` — there is no additive form of setting it, so the only way to
+ * apply it over an existing value is to overwrite a choice the operator made. {@link withToolAllowlist} can
+ * promise it never removes an operator's entry because appending is available to it; this cannot, so it
+ * declines instead. A settings file that already names a style is left exactly as it stands, whatever it says.
+ *
+ * Idempotent: re-running over a settings object that already carries any style changes nothing.
+ */
+export function withOutputStyle(settings, style = OUTPUT_STYLE) {
+  const next = JSON.parse(JSON.stringify(settings ?? {}));
+  if (typeof next.outputStyle === 'string' && next.outputStyle.trim()) return next;
+  next.outputStyle = style;
+  return next;
+}
+
+/** The style a settings object already names, or '' when it names none. PURE. */
+export function currentOutputStyle(settings) {
+  const v = settings?.outputStyle;
+  return typeof v === 'string' && v.trim() ? v.trim() : '';
+}
+
+/**
+ * Decide (and, when permitted, apply) the output-style step, in the SAME `ok` / `drift` / `planned` vocabulary
+ * {@link toolAllowStatus} and `gitDirStatus` use — see that function for why speaking the vocabulary, rather
+ * than merely reporting, is what puts a step inside `--check`'s drift gate.
+ *
+ * A settings file that already names a style — ANY style, not only this one — is `ok`, not `drift`. Reporting
+ * drift there would be this script telling the operator their own stated preference is wrong, and `--check`
+ * would then exit non-zero on a machine that is configured exactly as its owner intended.
+ *
+ * @param {{settings: object|null, write: boolean, dryRun?: boolean, apply?: (s: object) => void}} o
+ * @returns {{id: string, status: 'ok'|'drift'|'planned', detail: string}}
+ */
+export function outputStyleStatus({ settings, write, dryRun = false, apply } = {}) {
+  const id = 'style';
+  const current = currentOutputStyle(settings);
+  if (current) return { id, status: 'ok', detail: `already set: ${current}` };
+  if (dryRun) return { id, status: 'planned', detail: `would set outputStyle: ${OUTPUT_STYLE}` };
+  if (!write) {
+    return { id, status: 'drift', detail: `NOT set: outputStyle — run \`npm run bootstrap:install\`` };
+  }
+  if (typeof apply === 'function') apply(withOutputStyle(settings));
+  return { id, status: 'ok', detail: `set outputStyle: ${OUTPUT_STYLE}` };
+}
+
 // ── SessionStart hook registration (user level, absolute path — the #3074 shape) ───────────────────────
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
@@ -908,6 +969,15 @@ export function main(argv, io = defaultIo()) {
   report.steps.push(allowSettings === null
     ? { id: 'pr-watch', status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }
     : toolAllowStatus({ settings: allowSettings, write, dryRun: has('--dry-run'), apply: io.writeSettings }));
+
+  // A SECOND `readSettings`, deliberately — NOT a reuse of `allowSettings`. The step above may have just
+  // written the file, and `writeSettings` REPLACES it wholesale; applying this step over the pre-write object
+  // would write back a settings file with the allow rules that step just added stripped out again. Each step
+  // that may write reads first, so the last writer never carries a stale copy of an earlier one's work.
+  const styleSettings = io.readSettings();
+  report.steps.push(styleSettings === null
+    ? { id: 'style', status: 'drift', detail: unreadableConfig(SETTINGS_PATH) }
+    : outputStyleStatus({ settings: styleSettings, write, dryRun: has('--dry-run'), apply: io.writeSettings }));
 
   // The user-level SessionStart registration is the most invasive thing here — it makes this script run in
   // repos that never asked for it — so it is the one effect that NEVER happens implicitly on a durable host.
