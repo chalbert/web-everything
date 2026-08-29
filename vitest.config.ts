@@ -145,11 +145,18 @@ export default defineConfig({
     // verify-lane gate far beyond anything else in the suite. This is routing-only: it moves the files onto
     // the same isolated single `forks` process as their siblings above, with no change to the tests
     // themselves (replacing the real git subprocesses with mocks is a separate, bigger design call).
+    // `dispatch-spawn-live.test.mjs` joins for the identical reason: it spawns several real `node` child
+    // processes per test (through `defaultSpawnAgent`'s real `execFileSync`), including one case that
+    // compares the wall-clock of a blocking spawn against a non-blocking one. On the shared `threads` pool,
+    // contention from OTHER concurrent worker threads/processes inflated real subprocess spawn overhead
+    // enough to blow that comparison — and, under enough load, to trip `execFileSync`'s own `ETIMEDOUT`.
+    // Isolating it here removes the contention rather than only widening margins to tolerate it.
     poolMatchGlobs: [
       ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
       ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
       ['scripts/__tests__/lane-pool-acquire-base.test.mjs', 'forks'],
       ['scripts/__tests__/publish-secret-gate.test.mjs', 'forks'],
+      ['scripts/operations/__tests__/dispatch-spawn-live.test.mjs', 'forks'],
     ],
     poolOptions: {
       forks: {

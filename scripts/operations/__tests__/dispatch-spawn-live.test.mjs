@@ -120,12 +120,28 @@ describe('dispatching an agent, against a real process', () => {
     expect(() => spawnVia(fake, argv, { FAKE_CLAUDE_FAIL: '1' })).toThrow();
   });
 
+  /**
+   * RAISED from a 1_500ms session and a RATIO assertion (2026-08-29), after the ratio blew up under load
+   * with no defect in the code it was testing. The property under test is "the foreground spawn pays
+   * WORK_MS of real blocking; the background one does not" — not any particular absolute wall time, since
+   * this file (like `wake-cli.test.mjs` before it) spawns real `node` child processes and machine
+   * contention can inflate raw spawn/startup overhead in both calls. The PRIOR fix for that ("comparative,
+   * not absolute" — `background < foreground / 2`) does not actually cancel that overhead out: it stays
+   * inside both terms of the ratio. Once startup overhead (forking node, loading the shim, writing its log)
+   * grew large enough under contention to rival WORK_MS itself, `foreground / 2` shrank towards `background`
+   * and the assertion went red on a perfectly healthy run — the same shape of flake `execFileSync`'s own
+   * `ETIMEDOUT` produced when a spawn simply took too long to start.
+   *
+   * SUBTRACTING the two elapsed times instead cancels the shared overhead exactly (both spawns pay ~the same
+   * fork/startup cost), leaving only the one thing that differs between them: WORK_MS of real blocking on
+   * the foreground side. The margin below only has to absorb scheduling jitter BETWEEN the two otherwise-
+   * identical spawns, so it does not need to grow just because the machine is slower overall — and this file
+   * is now routed to its own single `forks` process (vitest.config.ts) specifically to shrink that jitter.
+   */
   it('`--bg` RETURNS while the same shim, run in the foreground, blocks — the property the dispatch model rests on', () => {
     fake = withFakeClaude();
-    // The shim sits in a real 1.5s "session" when it is NOT backgrounded. Without a slow path the assertion
-    // below is unfalsifiable — an earlier cut asserted `elapsed < 10_000` against a shim that could not block
-    // under any input, so no change to production code could ever have reddened it.
-    const work = { FAKE_CLAUDE_WORK_MS: '1500' };
+    const WORK_MS = 3_000;
+    const work = { FAKE_CLAUDE_WORK_MS: String(WORK_MS) };
 
     const fgStart = Date.now();
     spawnVia(fake, ['--session-id', 'fg', '-n', 'fg', '# brief'], work);
@@ -135,13 +151,13 @@ describe('dispatching an agent, against a real process', () => {
     spawnVia(fake, buildAgentArgv({ sessionId: 'r', payload: { num: '5', prompt: '# brief' } }), work);
     const background = Date.now() - bgStart;
 
-    // COMPARATIVE, not an absolute bound. The property is "one waits for the session and the other does not",
-    // and this file already runs beside 37 other suites — an absolute `background < 1_000` is a flake waiting
-    // for a loaded machine, and one measured ~0.8s against it. Comparing the two runs of the SAME shim in the
-    // SAME process cancels the load out.
-    expect(foreground).toBeGreaterThanOrEqual(1_400);
-    expect(background).toBeLessThan(foreground / 2);
-  });
+    // Foreground genuinely blocked for ~WORK_MS — this direction only grows under load, never shrinks, so a
+    // small fixed tolerance is safe regardless of machine contention.
+    expect(foreground).toBeGreaterThanOrEqual(WORK_MS - 200);
+    // The DIFFERENCE isolates the blocking WORK_MS from the shared spawn overhead — see the block comment
+    // above for why this replaced a ratio. Half of WORK_MS is margin for jitter between the two spawns.
+    expect(foreground - background).toBeGreaterThanOrEqual(WORK_MS / 2);
+  }, 30_000);
 
   /**
    * `assertWins` is the guard on every other case in this file, and a guard nothing exercises is a comment.
