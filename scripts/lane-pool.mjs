@@ -1558,6 +1558,22 @@ function cmdUnmap(repo) {
   log(dropped.length ? `unmapped ${dropped.join(', ')}` : '(nothing to unmap)');
 }
 
+// ── flag validation ──────────────────────────────────────────────────────────────────────────────────
+// Every flag this script reads ANYWHERE, across every command (verified by grepping every `flags.x` /
+// `flags['x']` read in this file). The arg parser above (`for (const a of rest) ...`) puts ANY `--foo` into
+// `flags` with zero validation, so a typo or unsupported flag silently no-ops instead of erroring — on a
+// destructive command like `acquire` that is a real footgun, not a cosmetic one: `acquire --help` (meant to
+// print usage) was accepted as a plain `acquire` with an ignored `help` flag, auto-picked a free lane, and
+// reset it — no error, no warning, the exact silent-failure shape lane-pool already goes to lengths to avoid
+// elsewhere (dirty/ahead guards, live-lease guards). This is a flat, not per-command, allowlist: a command
+// reading a flag meant for a different command is a much smaller, less surprising mistake than an
+// unrecognized flag vanishing outright, and a flat set can't drift out of sync with which command reads what.
+const KNOWN_FLAGS = new Set([
+  'acquirable', 'adopt', 'all', 'all-pools', 'base', 'branch', 'count', 'force', 'item', 'json', 'lane',
+  'name', 'no-install', 'no-reap', 'no-reset', 'origin', 'pool', 'purpose', 'reference', 'release-reserved',
+  'repo', 'reserve', 'scope', 'session', 'ttl-minutes',
+]);
+
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
 const COMMANDS = {
   provision: cmdProvision,
@@ -1576,11 +1592,22 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
+}
+
+if (positionals.length) {
+  fail(`unexpected extra argument(s) after "${cmd}": ${positionals.join(' ')} — every lane-pool.mjs argument past the command is a --flag`);
+}
+const unknownFlags = Object.keys(flags).filter((f) => !KNOWN_FLAGS.has(f));
+if (unknownFlags.length) {
+  fail(
+    `unrecognized flag(s): ${unknownFlags.map((f) => `--${f}`).join(', ')} — run \`node scripts/lane-pool.mjs help\` for the ` +
+      `full flag list. A silently-ignored flag on a destructive command like \`acquire\` is exactly the footgun this check exists to close.`,
+  );
 }
 
 COMMANDS[cmd](resolveRepo());
