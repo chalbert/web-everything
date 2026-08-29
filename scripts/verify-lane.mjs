@@ -17,9 +17,17 @@
  *
  * The pure decision half (marker shape + the gate decision `pr-land` calls) lives in `scripts/lib/lane-verify.mjs`.
  *
+ * THE DEFAULT GATE IS DIFF-DRIVEN (#3372). Rather than an unconditional `npm run test:unit`, the default gate
+ * decides off the lane's actual `git diff` against `origin/main` via `scripts/readiness/test-selection.mjs`
+ * (#2681): a diff that is entirely shrinkable (docs/research/test files, no sensitive surface, no glob-edge) runs
+ * only `npx vitest related <changed files>`; anything else — a sensitive surface, an unlisted surface, a
+ * glob-discovered fixture root, or an unresolvable diff — falls back to the FULL `npm run test:unit`, unchanged.
+ * See `scripts/lib/verify-lane-gate.mjs` for the decision core and why defaulting the shrink at THIS call site
+ * does not conflict with #2681's own "not defaulted [on the CI merge gate]" DoD.
+ *
  * Usage:
- *   node scripts/verify-lane.mjs                      # run the default gate (test:unit + check:standards) foreground, record green/red for HEAD
- *   node scripts/verify-lane.mjs --gate="npm run test:unit"   # override the suite command
+ *   node scripts/verify-lane.mjs                      # run the default gate (diff-driven selection + check:standards; #3372) foreground, record green/red for HEAD
+ *   node scripts/verify-lane.mjs --gate="npm run test:unit"   # override the suite command (skips diff-driven selection entirely)
  *   node scripts/verify-lane.mjs --repo=~/workspace/.lanes/web-everything/lane-3   # verify a specific lane clone
  *   node scripts/verify-lane.mjs --json              # machine-readable {sha, status, exitCode} on stdout
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
@@ -38,6 +46,7 @@ import { join, resolve } from 'node:path';
 import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
 import { LEASE_FILENAME, isLeaseStale } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { resolveDefaultGate } from './lib/verify-lane-gate.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -52,7 +61,6 @@ for (const a of process.argv.slice(2)) {
 
 const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p);
 const REPO = resolve(expandHome(flags.repo) || process.cwd());
-const GATE = typeof flags.gate === 'string' ? flags.gate : 'npm run test:unit && npm run check:standards';
 const AS_JSON = !!flags.json;
 // #2833 finding 5 — resolve the gate options through the SHARED resolver so `check` mode agrees with pr-land:
 // `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, and the `WE_LAND_UNVERIFIED=1` break-glass. Previously `check`
@@ -131,6 +139,11 @@ if (MODE === 'reset') {
 }
 
 // ── `verify` — run the suites SYNCHRONOUSLY and record the outcome ───────────────────────────────────
+// #3372 — the DEFAULT gate is diff-driven (scripts/lib/verify-lane-gate.mjs): an explicit `--gate=` always wins
+// (unchanged); otherwise resolve off the lane's actual diff against origin/main. Computed here (not above, with
+// the other flags) so `check`/`reset` — which never reach this section — never pay for the git diff it needs.
+const GATE = typeof flags.gate === 'string' ? flags.gate : resolveDefaultGate({ runGit: git, env: process.env }).command;
+
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
 //    unfinished) marker rather than nothing.
 //    #2833 finding 4: the same sha compare-and-set the FINISH write applies (below) must also guard the START
