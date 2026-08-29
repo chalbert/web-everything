@@ -46,7 +46,7 @@
 
 import { advance, runStatus, startRun } from './engine.mjs';
 import { applyPendingEffects, inFlightEntries } from './effect-executor.mjs';
-import { totalJudgeSpend } from './run-record.mjs';
+import { totalJudgeSpend, withStepFinish, withStepStart } from './run-record.mjs';
 import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 
@@ -531,6 +531,22 @@ function findPriorConfirm(declaration, run, stepIndex) {
 }
 
 /**
+ * STAMP A STEP'S FINISH, only if the `advance` call just moved the cursor past it. PURE-over-its-inputs
+ * except for the `clock()` read, which is the one io this whole file threads through instead of hiding
+ * (#3368). A step that is still suspended (an effect still `in-flight`, a confirm/judge with no answer yet)
+ * leaves `run.cursor` unchanged, so this is a no-op — exactly the "started, not finished" state Done-when #1
+ * asks for.
+ *
+ * @param {object} run - the run AFTER the `advance` call that may have resolved `stepIndex`.
+ * @param {number} stepIndex - the step's index BEFORE that `advance` call.
+ * @param {() => number} clock
+ * @returns {object}
+ */
+function stampFinish(run, stepIndex, clock) {
+  return run.cursor > stepIndex ? withStepFinish(run, { stepIndex, at: new Date(clock()).toISOString() }) : run;
+}
+
+/**
  * DRIVE A RUN to its next stop. The whole adapter, in one loop.
  *
  * @param {object} o
@@ -541,6 +557,9 @@ function findPriorConfirm(declaration, run, stepIndex) {
  * @param {(request: object) => Promise<object>} o.judge
  * @param {{value: *}|null} [o.resume] - the confirm answer, when one arrived.
  * @param {number} [o.maxTurns]
+ * @param {() => number} [o.clock] - mints the instant a step starts/finishes, as epoch ms (#3368). INJECTED so
+ *   the engine (and this file) stay testable with deterministic timings — never `Date.now()` read ad hoc. See
+ *   `stampStart`/`stampFinish` below and `we:scripts/operations/run-record.mjs#withStepStart`.
  * @returns {Promise<{run: object, stopped: string, error: (Error|null), applied: string[], step?: string,
  *   priorConfirm?: ({step: string, value: *}|null), inFlight?: string[]}>}
  *   `stopped` is one of `'complete'`, `'confirm'`, `'stuck'`, `'effect-halted'`, `'effect-in-flight'` or
@@ -549,7 +568,7 @@ function findPriorConfirm(declaration, run, stepIndex) {
  *   `priorConfirm` ride only on `step-refused`, because that is the one stop `renderOutcome` cannot describe
  *   from `{run, stopped, error, applied}` alone — see the file header and #3063 for why.
  */
-export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null, attemptedBy = 'unknown' } = {}) {
+export async function driveRun({ run, registry, store, sinks, judge, resume = null, maxTurns = 64, autoConfirm = null, attemptedBy = 'unknown', clock = () => Date.now() } = {}) {
   let current = run;
   let pendingResume = resume;
   const applied = [];
@@ -573,7 +592,9 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
       }
       // THE STOP. With no answer in hand the adapter returns; the caller prints the question and exits.
       if (pendingResume == null) return { run: current, stopped: 'confirm', error: null, applied };
+      const stepIndex = current.cursor;
       current = advance(current, { registry, resume: pendingResume });
+      current = stampFinish(current, stepIndex, clock);
       pendingResume = null;
       store.write(current);
       continue;
@@ -582,11 +603,13 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     if (status === 'awaiting-judge') {
       // THE SPAWN, in the caller, between two `advance` calls — the declaration declared it and did not act.
       // Its cost rides back on the resume; `advance` stamps the row with the request's own lens/model/effort.
+      const stepIndex = current.cursor;
       const { value, telemetry } = unwrapJudgeOutcome(await judge(current.pending.request));
       current = advance(current, {
         registry,
         resume: { step: current.pending.step, value, ...(telemetry ? { telemetry } : {}) },
       });
+      current = stampFinish(current, stepIndex, clock);
       store.write(current);
       continue;
     }
@@ -594,6 +617,7 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     if (status === 'awaiting-effect') {
       // THREADED FROM THE ENTRY POINT, which is the only thing that knows. `driveRun` itself cannot tell a
       // person from a network client — it has both callers — so it must be told rather than assume.
+      const stepIndex = current.cursor;
       const outcome = await applyPendingEffects(current, { sinks, store, attemptedBy });
       current = outcome.run;
       applied.push(...outcome.applied);
@@ -602,11 +626,14 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
       // work that outlives this process, so `error` is null and the halt reports itself through `inFlight`.
       // Without this branch the loop falls through to `advance`, which returns the run UNCHANGED (in-flight
       // counts as unapplied, by design), so the driver spins to `maxTurns` and throws a runaway-loop error —
-      // the CLI exits 1 and the HTTP adapter 500s on the one operation the epic exists to reach.
+      // the CLI exits 1 and the HTTP adapter 500s on the one operation the epic exists to reach. It is also
+      // (#3368) why THIS step's timing gets no finish here: the dispatch outlives this process, and only
+      // `wake.mjs`'s resolve path — the thing that later learns the dispatch is done — may stamp one.
       if (outcome.inFlight && outcome.inFlight.length) {
         return { run: current, stopped: 'effect-in-flight', error: null, applied, inFlight: outcome.inFlight };
       }
       current = advance(current, { registry });
+      current = stampFinish(current, stepIndex, clock);
       store.write(current);
       continue;
     }
@@ -621,10 +648,16 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
     // run, re-spawning the juror this story exists to stop paying for twice. Do not widen this catch.
     const declaration = registry.get(current.op);
     const stepIndex = current.cursor;
+    // STAMP THE START before the declaration fn runs (#3368) — a step that throws below still shows as
+    // started, and a step that suspends (judge/confirm/effect) carries this stamp into its `pending` record,
+    // which is exactly the "halted mid-step" case Done-when #1 asks for: started, and no finish until one of
+    // the branches above (or `wake.mjs`, for a dispatch) actually stamps it.
+    current = withStepStart(current, { step: declaration.steps[stepIndex]?.name, stepIndex, at: new Date(clock()).toISOString() });
     let next;
     try {
       next = advance(current, { registry });
     } catch (e) {
+      store.write(current); // persist the start stamp even though the step refused — started, never finished.
       return {
         run: current,
         stopped: 'step-refused',
@@ -634,8 +667,8 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
         priorConfirm: findPriorConfirm(declaration, current, stepIndex),
       };
     }
-    if (next === current) return { run: current, stopped: 'stuck', error: null, applied };
-    current = next;
+    if (next === current) { store.write(current); return { run: current, stopped: 'stuck', error: null, applied }; }
+    current = stampFinish(next, stepIndex, clock);
     store.write(current);
   }
 

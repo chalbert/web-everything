@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { advance, runStatus } from './engine.mjs';
 import { applyPendingEffects, resolveInFlight } from './effect-executor.mjs';
 import { observeRun } from './effect-observer.mjs';
+import { withStepFinish, withStepStart } from './run-record.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
 import { createDispatchObservers, defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
@@ -66,6 +67,11 @@ export function isParkedOnDispatch(run) {
  * @returns {Promise<object>} `{runId, resolved, stillRunning, skipped, errors, advanced, status}`
  */
 export async function wakeRun(run, { observers, store, registry, sinks = {}, now = new Date() } = {}) {
+  // THE INJECTED CLOCK, READ ONCE PER PASS (#3368). `now` is already this function's clock (`hoursStuck`,
+  // `observeRun`) — a dispatch's ACTUAL finish happened at some earlier, unknown instant, and `now` is when
+  // this pass LEARNED of it, exactly the same approximation `effect-observer.mjs`'s `observedAt` already
+  // makes. `stampFinish`/`withStepStart` below never read a clock themselves.
+  const atIso = (now instanceof Date ? now : new Date(now)).toISOString();
   const observed = await observeRun(run, { observers, now });
   const report = {
     runId: run.id,
@@ -113,6 +119,7 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
   try {
     for (let turn = 0; turn < 64; turn += 1) {
       const status = runStatus(current, { registry });
+      const stepIndex = current.cursor;
       if (status === 'awaiting-effect') {
         // `auto`, because this is the timer. The distinction is the whole point of recording it.
         const outcome = await applyPendingEffects(current, { sinks, store, attemptedBy: 'auto' });
@@ -123,15 +130,26 @@ export async function wakeRun(run, { observers, store, registry, sinks = {}, now
         // ADVANCE, do not loop back. `applyPendingEffects` does not clear `pending` — only `advance` does — so
         // re-entering the effect branch would apply nothing and spin to the turn cap.
         current = advance(current, { registry });
+        // THE FINISH STAMP a dispatch was missing (#3368): a build that ran 40 minutes now reads as 40
+        // minutes, not as absent — `withStepFinish` is a no-op unless `advance` just resolved THIS step.
+        current = current.cursor > stepIndex ? withStepFinish(current, { stepIndex, at: atIso }) : current;
         store.write(current);
         report.advanced = true;
         continue;
+      }
+      // A step the waker itself steps THROUGH (e.g. a `compute` right after a resolved effect) still needs a
+      // start stamp — the ONLY place besides `cli-adapter.mjs`'s `driveRun` that can newly enter a `running`
+      // step. Every other suspend below (a confirm/judge with no answer) is somebody else's stop and was
+      // already stamped started when it first suspended, so this is a no-op for those.
+      if (status === 'running') {
+        const declaration = registry.get(current.op);
+        current = withStepStart(current, { step: declaration.steps[stepIndex]?.name, stepIndex, at: atIso });
       }
       // Every other suspend is somebody else's stop: a confirm is owed to a person or a policy, a judge needs
       // a spawn. The waker calls `advance` and nothing else (#3070), so it hands those back untouched.
       const next = advance(current, { registry });
       if (next === current) break;
-      current = next;
+      current = next.cursor > stepIndex ? withStepFinish(next, { stepIndex, at: atIso }) : next;
       store.write(current);
       report.advanced = true;
     }
