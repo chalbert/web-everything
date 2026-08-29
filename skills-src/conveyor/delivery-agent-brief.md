@@ -17,6 +17,7 @@
 | `{{LANE}}` | the free lane id the dispatch plan assigned this launch (`launch[].lane`) — e.g. `4` |
 | `{{SESSION_SLUG}}` | a stable per-item session slug, e.g. `conveyor-{{ITEM_NUM}}` (ties `acquire`↔`release`, `claim`↔`resolve`) |
 | `{{SCOPE}}` | the item's predicted `scope:` frontmatter, repo-qualified & comma-joined — e.g. `we:scripts/conveyor,we:.claude/skills/conveyor` |
+| `{{ATTEMPT_TAG}}` | **#3110** — empty on a first attempt, a letter (`b`, `c`, …) on a retry of this same item. Fold it in EXACTLY where step 8 shows, right after `{{ITEM_NUM}}` in the branch name — this is what lets the observer tell your attempt's PR apart from a sibling retry's. Never invent your own retry marker in its place. |
 
 > **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — the skill substitutes them from the
 > launch entry before spawning you (the table above). `<like-this>` are **agent-runtime values** you produce as
@@ -251,9 +252,14 @@ git commit -F <msgfile> <explicit-paths>
 # independent backstop — it re-reads the marker and refuses regardless of what you concluded here.
 node scripts/operations/run.mjs verify --checkout="$PWD" --gate="npm run check:standards" --json   # (or the item's locus gate)
 
-node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-<slug> --sha=HEAD --base=main \
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base=main \
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json
 ```
+
+**`{{ATTEMPT_TAG}}` goes RIGHT THERE, between `{{ITEM_NUM}}` and your `-<slug>` — never anywhere else in the
+ref.** It is empty on a first attempt, so the ref is byte-identical to before this note existed; on a retry it
+is how the observer (`#3110`) tells your build's own PR apart from an earlier, still-unresolved attempt's —
+without it, a later retry's merge can get credited to a dead earlier one, or vice versa.
 
 `--requireVerified=true` (#2833) makes the home refuse to publish the lane ref unless the HEAD it is landing has a
 fresh GREEN verification marker from the `verify-lane` run just above — so a lane that skipped or backgrounded

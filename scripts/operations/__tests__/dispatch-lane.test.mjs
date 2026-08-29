@@ -39,6 +39,8 @@ import {
   DISPATCH_LANE_OP,
   DISPATCH_LISTING_GRACE_MINUTES,
   LAUNCH_KINDS,
+  OPTIONAL_BRIEF_PLACEHOLDERS,
+  attemptTagFor,
   canonicalPlaceholder,
   dispatchLaneOperation,
   DISPATCH_GUARD_LISTING_GRACE_MINUTES,
@@ -1076,6 +1078,55 @@ describe('classifyDispatchPr — the PR axis\'s pure core', () => {
       expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: [ref(bad, { state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })] }).verdict).toBe('pending');
     }
   });
+
+  // #3110 — the exact scenario the item was filed against: item 100 dispatched twice. Entry A (first attempt,
+  // tag `''`) starts at T1 and never produces its own PR. Entry B, a later retry (tag `'b'`), starts at
+  // T2 > T1 and its PR merges at T3 > T2 > T1. Before this fix, A's own classify call saw B's merged PR (same
+  // item number, merged after A's own startedAt) and wrongly resolved `merged` off it.
+  describe('the attempt-tag axis (#3110) — a later retry\'s PR must never resolve an earlier, unrelated entry', () => {
+    const T1 = '2026-08-13T10:00:00.000Z';
+    const T3 = '2026-08-13T11:00:00.000Z'; // > T2 > T1, whatever T2 (entry B's own start) actually was
+
+    it('entry A (attempt \'\') does NOT resolve merged off entry B\'s (attempt \'b\') later PR', () => {
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      // Old, tag-blind behaviour: this WOULD have been `merged` (T3 >= T1). #3110's fix excludes it outright —
+      // the PR structurally belongs to a different attempt, not merely "a PR that happens to be too recent".
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'pending', pr: null });
+    });
+
+    it('entry B (attempt \'b\') DOES resolve merged off its own PR', () => {
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('symmetric: an EARLIER attempt\'s PR must never resolve a LATER entry either (both directions closed)', () => {
+      // Entry A's own PR merges (correctly, for A) — entry B (the later retry) must not see it as its own.
+      const prs = [ref('lane/3095-a-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'pending', pr: null });
+    });
+
+    it('a candidate with NO resolvable tag (a legacy ref) is left to the timing filter alone', () => {
+      // Neither side ever carried a letter before #3110 shipped — must keep resolving exactly as before.
+      const prs = [ref('lane/3095-legacy-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('omitting `attempt` entirely degrades to today\'s tag-blind behaviour — the misattribution still happens', () => {
+      // Documents the residual: a caller that never threads `attempt` through gets no protection. This is the
+      // exact pre-#3110 shape, pinned so the default stays deliberate, not accidental.
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('two attempts\' OWN PRs both open at once — each entry resolves only its own', () => {
+      const prs = [
+        ref('lane/3095-a-slug', { number: 1 }),
+        ref('lane/3095b-b-slug', { number: 2 }),
+      ];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'pending', pr: { number: 1 } });
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'pending', pr: { number: 2 } });
+    });
+  });
 });
 
 // ── 7. the reader shells the tick core, and nothing else ────────────────────────────────────────────────────
@@ -1987,6 +2038,119 @@ describe('readTick — the ground-truth check is LAZY: one gh call per dispatch 
     expect(out.launch).toBeNull();
     expect(calls).toBe(0);
     expect(out.alreadyDone).toEqual({ done: false, pr: null, checked: false });
+  });
+});
+
+describe('#3110 — attemptTagFor: the pure retry-letter mapping', () => {
+  it('zero prior attempts → no tag, the byte-identical-to-before case', () => {
+    expect(attemptTagFor(0)).toBe('');
+  });
+  it('one prior attempt (this dispatch is the SECOND) → \'b\', matching the documented `conveyor-2500b` precedent', () => {
+    expect(attemptTagFor(1)).toBe('b');
+  });
+  it('counts on up: 2 → \'c\', 3 → \'d\'', () => {
+    expect(attemptTagFor(2)).toBe('c');
+    expect(attemptTagFor(3)).toBe('d');
+  });
+  it('caps at \'z\' rather than overflowing past a single letter (a 26th+ retry is its own anomaly)', () => {
+    expect(attemptTagFor(25)).toBe('z');
+    expect(attemptTagFor(26)).toBe('z');
+    expect(attemptTagFor(1000)).toBe('z');
+  });
+  it('degenerate input (negative, NaN, non-numeric) fails to the safe no-tag default, never throws', () => {
+    expect(attemptTagFor(-1)).toBe('');
+    expect(attemptTagFor(NaN)).toBe('');
+    expect(attemptTagFor('not a number')).toBe('');
+    expect(attemptTagFor(undefined)).toBe('');
+  });
+});
+
+describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TAG), everything else unchanged', () => {
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x' };
+
+  it('ATTEMPT_TAG never supplied at all does not throw, even though it is now in the build required set', () => {
+    // BRIEF (the synthetic fixture above) never references {{ATTEMPT_TAG}} at all, so this only proves the
+    // per-name required-value check treats it as optional-and-absent rather than missing-and-fatal; the real
+    // substitution mechanics (does {{ATTEMPT_TAG}} actually resolve to '' / a letter) are proven separately
+    // below against the REAL brief file, which does reference it.
+    const { prompt, unknownTokens } = fillBrief(BRIEF, { ...VALUES }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(unknownTokens).toEqual([]);
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('a NON-optional name is still refused blank — the exemption is per-name, not global', () => {
+    expect(() => fillBrief(BRIEF, { ...VALUES, SESSION_SLUG: '' }, BRIEF_REQUIRED_BY_KIND.build))
+      .toThrow(/no value for the brief placeholder \{\{SESSION_SLUG\}\}/);
+  });
+
+  it('an explicit empty `optionalNames` list restores the old all-required behaviour for ATTEMPT_TAG too', () => {
+    expect(() => fillBrief(BRIEF, { ...VALUES }, BRIEF_REQUIRED_BY_KIND.build, []))
+      .toThrow(/no value for the brief placeholder \{\{ATTEMPT_TAG\}\}/);
+  });
+
+  it('OPTIONAL_BRIEF_PLACEHOLDERS names exactly ATTEMPT_TAG, and only the build kind carries it', () => {
+    expect(OPTIONAL_BRIEF_PLACEHOLDERS).toEqual(['ATTEMPT_TAG']);
+    expect(BRIEF_PLACEHOLDERS).toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.build).toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.prepare).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND['prepare-decision']).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.fix).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND['ci-heal']).not.toContain('ATTEMPT_TAG');
+  });
+});
+
+describe('#3110 — a fresh build dispatch\'s attempt tag rides its session slug and branch instruction', () => {
+  it('a genuine first attempt (no prior in-flight record) is byte-identical to before — no letter at all', () => {
+    const v = shapeDispatchRead(tickRead(), { num: '3037' });
+    expect(v.sessionSlug).toBe('conveyor-3037');
+    expect(v.prompt).toContain('session: conveyor-3037');
+    expect(v.prompt).not.toContain('conveyor-3037b');
+  });
+
+  it('one prior AGED-OUT in-flight record for this item → the retry gets the \'b\' tag on its session slug', () => {
+    // The exact shape #3390-adjacent tests already use for "aged out, no longer holds, but still on disk":
+    // `dispatchStillHolds` sees it as gone (not `holdingRuns`), so the dispatch proceeds — but it is still one
+    // real prior attempt, which is exactly what `attemptTagFor` needs to count.
+    const gone = goneRun({ startedAt: isoPlus(NOW, -60) });
+    const v = shapeDispatchRead(tickRead({ inFlightDispatches: inFlightBlock([gone]) }), { num: '3037' });
+    expect(v.dispatching).toBe(true);
+    expect(v.sessionSlug).toBe('conveyor-3037b');
+    expect(v.prompt).toContain('session: conveyor-3037b');
+  });
+
+  // The synthetic `BRIEF` fixture above carries no branch-naming line at all (it is a 5-line stand-in, not the
+  // real markdown) — this proves the REAL template's `{{ATTEMPT_TAG}}` usage against the real file on disk,
+  // the same way "FILLS THE REAL BRIEF ON DISK" below proves the other five.
+  it('the REAL delivery-agent brief folds ATTEMPT_TAG into the branch name exactly where step 8 shows', () => {
+    const VALUES = {
+      ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: '8', SESSION_SLUG: 'conveyor-3037b', SCOPE: 'we:scripts/',
+    };
+    const firstAttempt = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: '' }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(firstAttempt.prompt).toContain('lane/3037-<slug>');
+    expect(firstAttempt.prompt).not.toContain('lane/3037b-<slug>');
+
+    const retry = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: 'b' }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(retry.prompt).toContain('lane/3037b-<slug>');
+    expect(retry.prompt).not.toContain('lane/3037-<slug>'); // the unsuffixed form must not also appear
+  });
+
+  it('two prior aged-out records → \'c\'; a HOLDING (still-alive) record instead refuses the dispatch entirely', () => {
+    const twoGone = [goneRun({ runId: 'a', startedAt: isoPlus(NOW, -60) }), goneRun({ runId: 'b', startedAt: isoPlus(NOW, -50) })];
+    expect(shapeDispatchRead(tickRead({ inFlightDispatches: inFlightBlock(twoGone) }), { num: '3037' }).sessionSlug).toBe('conveyor-3037c');
+
+    const held = tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()]) });
+    const refused = shapeDispatchRead(held, { num: '3037' });
+    expect(refused.dispatching).toBe(false); // never reaches attempt-tag computation at all
+  });
+
+  it('prepare/prepare-decision kinds never gain a letter — only a fresh build branch needs one', () => {
+    const prepareRead = tickRead({
+      launchKind: 'prepare',
+      launch: { num: '3037', lane: 8 },
+      dispatchedGuard: { num: '3037', lane: 8, spawnedTick: 0 },
+      inFlightDispatches: inFlightBlock([goneRun({ startedAt: isoPlus(NOW, -60) })]),
+    });
+    expect(shapeDispatchRead(prepareRead, { num: '3037' }).sessionSlug).toBe('prepare-3037');
   });
 });
 

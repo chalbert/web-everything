@@ -10,7 +10,9 @@ import {
   classifyReap,
   reapPlan,
   itemNumFromSession,
+  sessionSlugAttemptTag,
   laneRefItemNum,
+  laneRefAttemptTag,
   prStatesFromList,
   pidAliveForLease,
 } from '../lease-reaper.mjs';
@@ -65,6 +67,35 @@ describe('itemNumFromSession — the couple key encoded in a lease session', () 
   });
 });
 
+// #3110 — the retry-suffix letter, previously parsed only to be discarded, now read as the entry's own
+// attempt identity so `classifyDispatchPr` can tell "my own retry's PR" from "a sibling attempt's PR".
+describe('sessionSlugAttemptTag — the attempt identity a conveyor-<id>[a-z] session slug carries', () => {
+  it('an unsuffixed slug is a genuine first attempt — empty string, not null', () => {
+    expect(sessionSlugAttemptTag('conveyor-2667')).toBe('');
+    expect(sessionSlugAttemptTag('fix-2630')).toBe('');
+    expect(sessionSlugAttemptTag('prepare-2604')).toBe('');
+    expect(sessionSlugAttemptTag('prepare-decision-2647')).toBe('');
+  });
+  it('a retry-suffixed slug carries its letter', () => {
+    expect(sessionSlugAttemptTag('conveyor-2500b')).toBe('b');
+    expect(sessionSlugAttemptTag('conveyor-2500c')).toBe('c');
+  });
+  it('lower-cases a shouty suffix, matching itemNumFromSession\'s own convention', () => {
+    expect(sessionSlugAttemptTag('conveyor-2500B')).toBe('b');
+  });
+  it('not a conveyor session slug at all → null, distinct from the empty-string first-attempt tag', () => {
+    expect(sessionSlugAttemptTag('Mac:24827')).toBe(null);
+    expect(sessionSlugAttemptTag('shell-fix')).toBe(null);
+    expect(sessionSlugAttemptTag('')).toBe(null);
+    expect(sessionSlugAttemptTag(null)).toBe(null);
+  });
+  it('never disagrees with itemNumFromSession about which slugs match at all', () => {
+    for (const s of ['conveyor-2667', 'conveyor-2500b', 'Mac:24827', 'probe1', '', null]) {
+      expect(sessionSlugAttemptTag(s) === null).toBe(itemNumFromSession(s) === null);
+    }
+  });
+});
+
 describe('laneRefItemNum — the couple key encoded in a lane/<num>-<slug> head ref', () => {
   it('a lane/<num>-<slug> head ref → the item number', () => {
     expect(laneRefItemNum('lane/2667-conveyor-auto-release')).toBe('2667');
@@ -92,6 +123,22 @@ describe('laneRefItemNum — the couple key encoded in a lane/<num>-<slug> head 
     expect(laneRefItemNum('lane/build-3095')).toBe(null); // no leading `x`, not digits
     expect(laneRefItemNum('lane/x9yl-too-short')).toBe(null); // `x` + 3 < the 5-char floor
     expect(laneRefItemNum('lane/2667')).toBe(null); // no `-<slug>` at all
+  });
+
+  // #3110
+  it('laneRefAttemptTag mirrors sessionSlugAttemptTag\'s null/empty-string distinction', () => {
+    expect(laneRefAttemptTag('lane/2667-conveyor-auto-release')).toBe(''); // first attempt
+    expect(laneRefAttemptTag('lane/2500b-retry-slug')).toBe('b');
+    expect(laneRefAttemptTag('lane/2500B-shouty')).toBe('b');
+    expect(laneRefAttemptTag('lane/x9ylkp7-hash-item')).toBe(''); // a hash-id ref is a first attempt too
+    expect(laneRefAttemptTag('main')).toBe(null);
+    expect(laneRefAttemptTag('lane/build-3095')).toBe(null); // matches no item at all
+    expect(laneRefAttemptTag(null)).toBe(null);
+  });
+  it('never disagrees with laneRefItemNum about which refs match at all', () => {
+    for (const r of ['lane/2667-x', 'lane/2500b-x', 'main', 'lane/build-3095', 'lane/2667', null]) {
+      expect(laneRefAttemptTag(r) === null).toBe(laneRefItemNum(r) === null);
+    }
   });
 
   it('the REAPER is unaffected by the widening: a hash key is unreachable from a lease session', () => {

@@ -78,9 +78,28 @@ import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTE
  * @param {string|null|undefined} session
  * @returns {string|null}
  */
+/** Shared match, so {@link itemNumFromSession} and {@link sessionSlugAttemptTag} can never disagree about
+ *  where the retry-suffix letter sits — same reason {@link laneRefItemNum} names for its own couple. */
+function matchSessionSlug(session) {
+  const m = String(session ?? '').match(/^(?:conveyor|fix|prepare-decision|prepare)-(\d+)([a-z]?)$/i);
+  return m ? { num: m[1], tag: m[2].toLowerCase() } : null;
+}
+
 export function itemNumFromSession(session) {
-  const m = String(session ?? '').match(/^(?:conveyor|fix|prepare-decision|prepare)-(\d+)[a-z]?$/i);
-  return m ? m[1] : null;
+  return matchSessionSlug(session)?.num ?? null;
+}
+
+/**
+ * #3110 — the retry-suffix letter a `conveyor-<id>[a-z]` session slug carries (`''` for an unsuffixed first
+ * attempt, `'b'`/`'c'`/… for a second/third/… retry — the exact shape this file's own docblock above already
+ * named, `conveyor-2500b`), or `null` when `session` doesn't match the slug grammar at all. `null` and `''`
+ * are deliberately distinct: `null` means "not a conveyor session slug, say nothing", `''` means "a genuine
+ * first attempt", and the two must never be conflated by a caller comparing tags for equality.
+ * @param {string|null|undefined} session
+ * @returns {string|null}
+ */
+export function sessionSlugAttemptTag(session) {
+  return matchSessionSlug(session)?.tag ?? null;
 }
 
 /**
@@ -107,9 +126,28 @@ export function itemNumFromSession(session) {
  * @param {string|null|undefined} headRef
  * @returns {string|null}
  */
+/** Shared match, so {@link laneRefItemNum} and {@link laneRefAttemptTag} can never disagree about where the
+ *  retry-suffix letter sits (same "one matcher, two readers never disagree" reasoning the docblock above gives
+ *  for widening this grammar in one place rather than two). */
+function matchLaneRef(headRef) {
+  const m = String(headRef ?? '').match(/^lane\/(x[a-z0-9]{5,7}|\d+)([a-z]?)-/i);
+  return m ? { num: m[1].toLowerCase(), tag: m[2].toLowerCase() } : null;
+}
+
 export function laneRefItemNum(headRef) {
-  const m = String(headRef ?? '').match(/^lane\/(x[a-z0-9]{5,7}|\d+)[a-z]?-/i);
-  return m ? m[1].toLowerCase() : null;
+  return matchLaneRef(headRef)?.num ?? null;
+}
+
+/**
+ * #3110 — the retry-suffix letter a `lane/<num>[a-z]-<slug>` head ref carries (`''` for an unsuffixed first
+ * attempt, `'b'`/`'c'`/… for a second/third/… retry), or `null` when `headRef` doesn't match the ref grammar
+ * at all. Mirrors {@link sessionSlugAttemptTag}'s null/`''` distinction for the same reason: `null` means "not
+ * a conveyor lane ref, say nothing", `''` means "a genuine first attempt".
+ * @param {string|null|undefined} headRef
+ * @returns {string|null}
+ */
+export function laneRefAttemptTag(headRef) {
+  return matchLaneRef(headRef)?.tag ?? null;
 }
 
 /**

@@ -55,7 +55,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 import { normNum } from '../conveyor/queue-store.mjs';
-import { laneRefItemNum } from '../conveyor/lease-reaper.mjs';
+import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
@@ -1072,7 +1072,11 @@ export function createDispatchObservers({
         if (prList === undefined) {
           try { prList = listPrs(); } catch { prList = null; }
         }
-        const { verdict, pr } = classifyDispatchPr({ num, startedAt: entry?.startedAt, prs: prList });
+        // #3110 — this entry's own attempt identity, off the SAME sessionSlug already persisted on its
+        // payload (no new field, no new IO): `''` for a first attempt, a letter for a retry, `null` for a
+        // legacy payload with no sessionSlug at all (degrades to the tag-blind behaviour).
+        const attempt = sessionSlugAttemptTag(entry?.payload?.sessionSlug ?? null);
+        const { verdict, pr } = classifyDispatchPr({ num, startedAt: entry?.startedAt, prs: prList, attempt });
         if (verdict === 'merged') {
           // THE ONE PLACE `succeeded` BECOMES REACHABLE. `resolveInFlight` records `applied` and the run
           // advances — which is correct precisely because a merged PR is a CLEAN outcome, the one thing no
@@ -1161,13 +1165,24 @@ function unresolvedPrReason(verdict, pr, entry) {
  * this: {@link laneRefItemNum} — pure, unit-tested, shared with the lease reaper — is the matcher, so the two
  * can never disagree about which ref belongs to which item.
  *
- * THE STALE GUARD IS THE HONEST COST OF ID-MATCHING. Ids match a predecessor's PR as well as this build's, so a
- * merge only counts when it happened at or after `startedAt` (which every in-flight entry carries — the
- * executor stamps it, and re-stamps it on every retry). A MISSING or unparseable `startedAt` fails CLOSED: with
- * no instant to compare against, no merge can be attributed, and the verdict is `stale`. The residual this
- * does not close, stated rather than hidden: a predecessor's PR that merges AFTER a retry started is inside the
- * window and would resolve the retry. Only a PR number stored on the entry could tell those apart, and that is
- * approach 2 — a persisted field, a `pr-land`→run-store coupling and a migration, which is not this item.
+ * THE STALE GUARD CATCHES A MERGE BEFORE MY START; THE ATTEMPT-TAG GUARD (#3110) CATCHES ONE AFTER IT. Ids
+ * match a predecessor's PR as well as this build's, so on their own they answer only WHEN a merge happened,
+ * never WHOSE attempt it belongs to. `startedMs` answers the first question (a merge before `startedAt`
+ * belongs to a previous attempt); `attempt` answers the second, independently — the two are ANDed, not merged
+ * into one check, so neither can quietly redefine what "belongs to this entry" means for the other (the
+ * residual this function's own review once flagged: two guards on one function must agree on that, not each
+ * invent an answer). A MISSING or unparseable `startedAt` fails CLOSED on the first axis (verdict `stale`); a
+ * PR whose OWN attempt tag is resolvable but does not match `attempt` fails closed on the second (excluded
+ * from `mine` entirely, before the stale filter even runs — it is not this entry's PR at all, not merely late).
+ *
+ * `attempt`/a candidate's tag is `''` for an unsuffixed first attempt, `'b'`/`'c'`/… for a retry, or `null` when
+ * unresolvable (a legacy dispatch, from before this session slug / branch name ever carried one). `null` on
+ * EITHER side degrades to today's tag-blind behaviour (only `startedAt` decides) — so nothing already in
+ * flight when this shipped, and no future entry whose slug happens not to parse, loses its existing coverage.
+ * The one case this still does not close, per #3110's own filing: an entry resolved and closed OUT before a
+ * later retry began (its in-flight record is gone, so it no longer holds a comparable tag) whose PR somehow
+ * merges long after — see `we:scripts/operations/dispatch-lane.mjs`'s attempt-count comment for why that
+ * residual is bounded to an already-resolved, already-closed-out entry, not a still-open one.
  *
  * VERDICT PRIORITY among the PRs that survive the stale filter: `merged` > `pending` > `parked` > `closed`.
  * `pending` outranks the two ambiguous terminals on purpose — an item with an abandoned PR AND a live open one
@@ -1178,15 +1193,26 @@ function unresolvedPrReason(verdict, pr, entry) {
  * @param {string|number|null} o.num - the item id off the entry's payload.
  * @param {string|null} [o.startedAt] - when THIS dispatch attempt started.
  * @param {object[]|null} [o.prs] - a parsed `gh pr list --state all --json …` page; `null` = the read failed.
+ * @param {string|null} [o.attempt] - THIS entry's own attempt tag (see {@link sessionSlugAttemptTag}), or
+ *   `null`/omitted to skip the attempt-tag axis entirely (today's tag-blind behaviour).
  * @returns {{verdict: 'merged'|'pending'|'parked'|'closed'|'stale', pr: object|null}}
  */
-export function classifyDispatchPr({ num, startedAt = null, prs = null } = {}) {
+export function classifyDispatchPr({ num, startedAt = null, prs = null, attempt = null } = {}) {
   const key = normNum(num);
   // NO ITEM ID, or NO LISTING (the read failed / returned junk) → no verdict. `pending` is the word for "this
   // axis has nothing to say", and it is indistinguishable from "no PR yet" ON PURPOSE: both mean fall through.
   if (!key || !Array.isArray(prs)) return { verdict: 'pending', pr: null };
 
-  const mine = prs.filter((p) => laneRefItemNum(p?.headRefName) === key);
+  // #3110 — a candidate whose OWN tag is resolvable and DIFFERS from `attempt` belongs to a sibling attempt
+  // structurally, not merely by timing coincidence: exclude it before the stale filter ever sees it. A
+  // candidate with no resolvable tag (a legacy ref), or when this entry itself carries no tag (`attempt ===
+  // null`), is left for the timing filter alone to judge — unresolvable on this axis means silent, not refused.
+  const mine = prs.filter((p) => {
+    if (laneRefItemNum(p?.headRefName) !== key) return false;
+    if (attempt === null) return true;
+    const theirs = laneRefAttemptTag(p?.headRefName);
+    return theirs === null || theirs === attempt;
+  });
   if (!mine.length) return { verdict: 'pending', pr: null }; // no PR yet — exactly today's behaviour
 
   const startedMs = startedAt ? Date.parse(startedAt) : NaN;
