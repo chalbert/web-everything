@@ -137,9 +137,19 @@ export default defineConfig({
     // on an assertion whose subject had never been reached. The bound is now removable per-process
     // (`WE_DISPATCH_LIST_TIMEOUT_MS=0`, which the test sets) and this keeps its subprocess spawns off the
     // shared pool as well: the race is removed, and then the contention that produced it is too.
+    // #xp2pmg4: `lane-pool-acquire-base.test.mjs` and `publish-secret-gate.test.mjs` join the same override
+    // for the same underlying reason — both spin up real `git init`/`git clone` fixture repos, and those
+    // subprocess spawns are exactly the CPU contention the comment above already names as a cost on the
+    // shared `threads` pool. Measured wall-clock on main before this change: lane-pool-acquire-base.test.mjs
+    // ~202.4s (13 tests), publish-secret-gate.test.mjs ~40.6s (12 tests) — both dominate the unit-test/
+    // verify-lane gate far beyond anything else in the suite. This is routing-only: it moves the files onto
+    // the same isolated single `forks` process as their siblings above, with no change to the tests
+    // themselves (replacing the real git subprocesses with mocks is a separate, bigger design call).
     poolMatchGlobs: [
       ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
       ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
+      ['scripts/__tests__/lane-pool-acquire-base.test.mjs', 'forks'],
+      ['scripts/__tests__/publish-secret-gate.test.mjs', 'forks'],
     ],
     poolOptions: {
       forks: {
