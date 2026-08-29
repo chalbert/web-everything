@@ -5,6 +5,9 @@ status: resolved
 dateOpened: "2026-08-29"
 dateStarted: "2026-08-29"
 dateResolved: "2026-08-29"
+costTokens: "in:0 cw:458800 cr:25896192 out:85606"
+costUsd: 19.68
+costSessions: 1
 tags: []
 ---
 
