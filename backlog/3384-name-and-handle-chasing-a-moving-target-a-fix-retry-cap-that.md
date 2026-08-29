@@ -1,4 +1,5 @@
 ---
+bornAs: x5y1l6r
 kind: decision
 status: open
 dateOpened: "2026-08-28"
@@ -140,7 +141,7 @@ veto (a)'s correct, exact answer.
   fingerprint even though nothing "real" changed — defeating the exemption for the archetypal case it
   exists to catch. The skeptic also found the fingerprint's own documented residual
   (`we:scripts/lib/review-escalation.mjs:1114-1170`) was deliberately widened toward false-*honour* for its
-  original use (a relocation with unchanged content/length/run-shape collides — bug `#x413mbt` stays open)
+  original use (a relocation with unchanged content/length/run-shape collides — bug `#3021` stays open)
   on the strength of a human already having looked at that content once; this automated retry-cap use has
   no such backstop, so importing the same residual here could let a genuinely-relocated-but-still-broken
   attempt wrongly read as "no change" and loop past the point a human should see it. And its production
@@ -191,7 +192,7 @@ still fails the *same* check is a case neither this fork's default nor the rejec
 solves (out of scope here — it is a different problem, "detect thrashing between distinct failed
 attempts," not "detect a no-op restart"; noted, not solved). Axis 1 (merit) **refuted** the fingerprint
 default for the CI-heal path outright on the registry-regeneration false-negative above, and flagged the
-unbounded #x413mbt residual risk of an automated (no human backstop) use. Axis 3 (citation-scope)
+unbounded #3021 residual risk of an automated (no human backstop) use. Axis 3 (citation-scope)
 **refuted** the track-record citation as measuring a different domain (drain-rebase-survival, not
 retry-cap attempt cycles). Axis 2 (statute-overlap) survived clean — no `we:docs/agent/platform-decisions.md`
 anchor governs retry-cap classification, and `#deterministic-core-thin-judgment` (cited throughout
