@@ -1030,6 +1030,26 @@ function cmdAcquire(repo) {
       }
       fail(`lane-${n} is ${describeLease(lease) || 'held'} — pick another lane`);
     }
+    // #3390 — the explicit-lane path is the ONLY claim route that reaches the destructive reset below with no
+    // #2267 dirty/ahead check at all: auto-pick's `chooseFreeLane` never selects a dirty/ahead candidate to
+    // begin with, and `refreshLane` calls `laneDirtyOrAhead` explicitly, but a TTL-stale reclaim just above
+    // (`tryClaimLane`'s `isLeaseStale` branch) unlinks the old marker and lets this path fall straight through
+    // to `checkout -B --force` + `clean -fd`. A lease going stale (a long session, a slow multi-hour task) is
+    // NOT evidence the tree holds abandoned garbage. Real incident: lane-11's lease went TTL-stale mid-epic
+    // with 4 built-and-tested files sitting as uncommitted/untracked edits; this exact path silently destroyed
+    // them (recovered only from Claude Code's own session transcripts, not from anything git-recoverable).
+    // Skipped when the reset itself would be skipped (`--no-reset`, or the reserved-lane re-reserve path,
+    // which never resets either) so this never blocks an acquire that was never going to touch the tree.
+    if (!flags.force && !targetWasReserved && !flags['no-reset']) {
+      const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      if (dirty || ahead > 0) {
+        fail(
+          `lane-${n} has ${uncommitted} uncommitted change(s) and is ${ahead} commit(s) ahead of origin/${repo.branch} ` +
+            `— acquire --lane=${n} would destroy that work via its reset-to-origin step. Use --force to reclaim it ` +
+            `anyway (mirrors every other destructive override in this file), or investigate/salvage the tree first.`,
+        );
+      }
+    }
     chosen = n;
   } else {
     // Auto-pick: lowest acquirable, then atomically claim; on a lost race retry the next candidate.

@@ -39,7 +39,13 @@ beforeEach(() => {
   git(['init', '--quiet', '--bare', '--initial-branch=main', originDir]);
   git(['clone', '--quiet', originDir, referenceDir]);
   writeFileSync(join(referenceDir, 'file.txt'), 'main-tip\n');
-  git(['add', 'file.txt'], referenceDir);
+  // #3390 — the real repo gitignores `.env.local` (the per-lane dev-port file `writeLaneEnv` generates for a
+  // BANDED pool like `web-everything`), so it never counts as "dirty" for `laneDirtyOrAhead`'s
+  // `git status --porcelain` read. This synthetic origin needs the same ignore or the "banded (WE) pool" test
+  // below would see its own generated `.env.local` as an untracked change and trip the new dirty-tree guard —
+  // a test-fixture gap, not a real one.
+  writeFileSync(join(referenceDir, '.gitignore'), '.env.local\n');
+  git(['add', 'file.txt', '.gitignore'], referenceDir);
   git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'main v1'], referenceDir);
   git(['push', '--quiet', 'origin', 'main'], referenceDir);
 });
