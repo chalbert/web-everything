@@ -1,8 +1,10 @@
 ---
 bornAs: xpace6e
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-29"
+dateStarted: "2026-08-29"
+dateResolved: "2026-08-29"
 tags: []
 ---
 
@@ -66,3 +68,22 @@ we:scripts/lib/verify-lane-gate.mjs's hardcoded FULL_GATE runs npm run check:sta
 
 Filed 2026-08-29, surfaced by a design-agent investigation launched mid-session while landing #3368,
 after that landing hit the exact false-red pattern #1937 already exists to prevent.
+
+## Progress
+
+- Status: implemented, verifying.
+- Branch: lane-40 (`we-lane-40`), working tree at `~/workspace/.lanes/web-everything/lane-40`.
+- Done:
+  - `we:scripts/lib/verify-lane-gate.mjs`: added `canScopeCheckStandards(changedFiles)` — true iff the changed
+    set is known + non-empty and touches neither `backlog/` nor a gate-self/policy-core path
+    (`isPolicyCorePath` from `we:scripts/lib/gate-config.mjs`). `resolveDefaultGate` now composes the
+    check:standards half as `npm run check:standards -- --local --files=<changed>` whenever that holds,
+    independently of the vitest half's shrink/full mode (deliberately narrower deny-set than the vitest
+    shrink's full sensitive-surface gauntlet — see the file header for why).
+  - `we:scripts/lib/__tests__/verify-lane-gate.test.mjs`: re-targeted the fail-safe assertions that used to pin
+    a bare `npm run check:standards` (they now assert scoped check:standards alongside a full vitest half where
+    applicable), added `canScopeCheckStandards` unit cases (null/empty/backlog/gate-self/blast-radius-but-not-
+    policy-core), and empty-changed-set + backlog + policy-core end-to-end fail-safe cases. 16/16 passing.
+  - `npm run check:standards` (unscoped — this PR's own diff touches `backlog/`): 0 errors, no new warnings.
+- Next: full `npm run test:unit` running in background; once green, run `verify` + `resolve`.
+- Notes: no changes outside `we:scripts/lib/verify-lane-gate.mjs` and its test, per Done-when #3.
