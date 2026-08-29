@@ -104,20 +104,42 @@ which once cost a real PR a human closing it by mistake) went through the full
 `/prepare` → independent review → ratify → resolve cycle for real and is merged (`main`, PRs
 #1674, #1675). Its own recommended fix is filed but not yet built.
 
+**Correction (2026-08-29): #3118 IS ratified.** The "What's still not done" list below originally
+opened with "Decision #3118 was never ratified... the single biggest open gap." That was wrong and
+is now stale twice over — #3118 resolved on `dateResolved: 2026-08-26`, ruling (c), call the
+existing `dispatch-lane` operation, never a second spawn implementation, codified at
+[we:docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation).
+All five pieces built in the prior session update already presuppose exactly that answer, correctly.
+
+**What happened since the update above:** lane-11, which held the prototype, had 4 of its 5 built
+pieces — the session-identity fix, `route-pr-outcome`, the runner→`dispatch-lane` wiring, and
+`we:skills-src/conveyor/supervisor.mjs` — wiped by an `acquire --lane=11` re-claim after the
+original lease went TTL-stale. The explicit-lane acquire path has no dirty-tree guard (a bug filed
+separately). All four were recovered byte-for-byte from Claude Code's own session transcripts — the
+original session's main + subagent JSONL logs, cross-checked against its file-history backup store
+(10 of 12 cross-checked files matched the backup exactly) — and re-verified: 364/364 tests green,
+`check:standards` 0 errors. Everything is now pushed to a durable remote branch,
+`origin/lane/mechanical-dispatcher-recovered`, not just local-only in a lane clone, so it survives
+any future lane reset. lane-11 itself still holds the working copy and has an occupant declared.
+
 **What's still not done, in priority order:**
 
-1. **Decision #3118 ("where does agent-spawning live") was never ratified.** All five pieces above
-   presuppose its answer — (c), call `dispatch-lane`, never a second spawn implementation — but the
-   operator has not actually ratified it. This is the single biggest open gap.
-2. **Nothing has been fired end-to-end, live.** Every test this session deliberately avoided
-   triggering a real dispatch through the full chain (a real queued item → the runner above →
-   `dispatch-lane` → a real spawned agent → a real PR → `route-pr-outcome` → resolution) — this
-   card's own "Done when" #1 is therefore still open. `we:scripts/operations/dispatch-lane-io.mjs`'s
-   sink refuses to dispatch from a lane checkout (`assertNotALaneCheckout`), so a live test needs
-   the primary checkout (meaning lane-11's pieces land first) or an equivalent non-`lane-N` setup —
-   worth a decision of its own before attempting it.
+1. **The live end-to-end test.** Nothing blocks it now — #3118 is ratified and all five pieces are
+   recovered and tested. Still needs: a setup decision (a scratch clone of the recovered branch,
+   named anything other than `lane-N` so `dispatch-lane`'s `assertNotALaneCheckout` guard doesn't
+   refuse it, rather than lane-11 itself or requiring `main` first) and picking one specific
+   low-stakes backlog item to actually dispatch. The existing `-live`-named tests
+   (`we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` etc.) only prove subprocess
+   plumbing against a fake `claude` stand-in on `PATH`, NOT the real CLI's behavior — the real-CLI
+   uncertainty #3118 flagged (whether `--bg` really discards `--session-id`, the exact
+   `backgrounded · <id> · <name>` stdout shape, whether resume-by-short-handle works) is still
+   genuinely unverified, and is exactly what this live test is for.
+2. **Landing lane-11's five pieces to `main`** via the normal small-PR path.
 3. **The stray-run-record reaper for `dispatch-lane`** (disk hygiene for the runner's own bookkeeping
    over a long-running deployment) was designed but not built — low urgency.
 4. **"Done when" #2 (a notification path for a blocked/escalated case) is still open** — nothing
    built this session addresses it directly; the supervisor's JSONL log is observability, not a
    notification.
+5. **Decision #3384's own recommended fix** — the `<!-- ci-heal-committed: -->` self-report marker
+   on `we:scripts/conveyor/ci-heal-mark.mjs` — is still unbuilt. The decision itself is ratified AND
+   resolved; only the code is outstanding. A separate, smaller thread from this epic.
