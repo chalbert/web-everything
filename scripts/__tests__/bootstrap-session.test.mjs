@@ -22,6 +22,9 @@ import {
   missingToolAllows,
   toolAllowStatus,
   PR_WATCH_TOOLS,
+  withOutputStyle,
+  outputStyleStatus,
+  OUTPUT_STYLE,
   skillsDeployScript,
   mayWriteUserTree,
   knownGitDirs,
@@ -412,6 +415,87 @@ describe('toolAllowStatus — the step has to speak `drift` or the check gate ca
       toolAllowStatus({ settings: empty, write: false }).status,
       toolAllowStatus({ settings: full, write: false }).status,
       toolAllowStatus({ settings: empty, write: true, dryRun: true }).status,
+    ];
+    for (const st of statuses) expect(['ok', 'drift', 'planned']).toContain(st);
+  });
+});
+
+describe('withOutputStyle — the response-style preference that has to survive a fresh VM', () => {
+  it('sets the style on a settings file that names none', () => {
+    expect(withOutputStyle({}).outputStyle).toBe(OUTPUT_STYLE);
+  });
+
+  it('is idempotent', () => {
+    const once = withOutputStyle({});
+    expect(withOutputStyle(once)).toEqual(once);
+  });
+
+  it('NEVER overwrites a style the operator already chose, including a different one', () => {
+    // The whole restraint of this step. `outputStyle` is single-valued, so unlike `permissions.allow` there is
+    // no additive form — applying it over an existing value can only mean overwriting a stated preference.
+    expect(withOutputStyle({ outputStyle: 'Explanatory' }).outputStyle).toBe('Explanatory');
+  });
+
+  it('leaves every other key untouched', () => {
+    const before = { permissions: { allow: ['Artifact'] }, hooks: { SessionStart: [] } };
+    expect(withOutputStyle(before)).toMatchObject(before);
+  });
+
+  it('treats a blank or non-string style as absent', () => {
+    for (const v of ['', '   ', null, 42]) {
+      expect(withOutputStyle({ outputStyle: v }).outputStyle).toBe(OUTPUT_STYLE);
+    }
+  });
+});
+
+describe('outputStyleStatus — the step has to speak `drift` or the check gate cannot see it', () => {
+  const none = {};
+  const set = { outputStyle: OUTPUT_STYLE };
+
+  it('reports DRIFT on a read-only run with no style set', () => {
+    const r = outputStyleStatus({ settings: none, write: false });
+    expect(r).toMatchObject({ id: 'style', status: 'drift' });
+    expect(r.detail).toContain('bootstrap:install');
+  });
+
+  it('reports OK when a style is already set, whatever the write mode', () => {
+    for (const write of [true, false]) {
+      expect(outputStyleStatus({ settings: set, write })).toMatchObject({ status: 'ok' });
+    }
+  });
+
+  it('reports OK — never drift — on a style the operator chose that is not ours', () => {
+    // `--check` must not exit non-zero on a machine configured exactly as its owner intended.
+    const r = outputStyleStatus({ settings: { outputStyle: 'Learning' }, write: false });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('Learning');
+  });
+
+  it('reports PLANNED and writes NOTHING on --dry-run', () => {
+    let wrote = false;
+    const r = outputStyleStatus({ settings: none, write: true, dryRun: true, apply: () => { wrote = true; } });
+    expect(r.status).toBe('planned');
+    expect(wrote).toBe(false);
+  });
+
+  it('APPLIES and reports ok on a writing run, passing the styled settings to the writer', () => {
+    let written = null;
+    const r = outputStyleStatus({ settings: none, write: true, apply: (s) => { written = s; } });
+    expect(r.status).toBe('ok');
+    expect(written.outputStyle).toBe(OUTPUT_STYLE);
+  });
+
+  it('writes NOTHING on a read-only run, even though it reports drift', () => {
+    let wrote = false;
+    outputStyleStatus({ settings: none, write: false, apply: () => { wrote = true; } });
+    expect(wrote).toBe(false);
+  });
+
+  it('uses the same status vocabulary as the other steps, so one gate covers all', () => {
+    const statuses = [
+      outputStyleStatus({ settings: none, write: false }).status,
+      outputStyleStatus({ settings: set, write: false }).status,
+      outputStyleStatus({ settings: none, write: true, dryRun: true }).status,
     ];
     for (const st of statuses) expect(['ok', 'drift', 'planned']).toContain(st);
   });
