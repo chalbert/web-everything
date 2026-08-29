@@ -933,6 +933,23 @@ describe('main() — the installer orchestration', () => {
 
   const run = (argv, env, over = {}) => { const io = spyIo({ env, ...over }); const code = main(argv, io); return { io, code }; };
 
+  // A STATEFUL DOUBLE, unlike `spyIo` above. `spyIo`'s `readSettings: () => ({})` is a constant — it cannot
+  // tell a fresh post-write read apart from a stale pre-write object, so no test built on it can catch
+  // `main()` collapsing its two `io.readSettings()` calls (`allowSettings`, then `styleSettings`) back into
+  // one. This double closes that gap: `readSettings` returns whatever `writeSettings` last received, so a
+  // step that reuses a pre-write object instead of re-reading loses whatever the PRIOR step just wrote.
+  // Review finding, 2026-08-29 (round 2): reverting `styleSettings = io.readSettings()` to
+  // `styleSettings = allowSettings` left the whole suite green because `spyIo` could not see the difference.
+  const statefulSpyIo = (initialSettings, over = {}) => {
+    let settings = initialSettings;
+    const io = spyIo({
+      readSettings: () => settings,
+      writeSettings: (next) => { io.writes.push(next); settings = next; },
+      ...over,
+    });
+    return io;
+  };
+
   // The `aliases` step's WRITE branch. The first cut of this PR tested only the pure `aliasesFor`, and the
   // review proved the gap by mutation: inverting `io.symlink(target, path)` to create every link backwards,
   // and forcing the consent gate to never write, BOTH still passed the whole suite. `exists: () => true` in
@@ -1142,5 +1159,19 @@ describe('main() — the installer orchestration', () => {
     expect(report(vmForcedLaptop)).toMatchObject({ host: 'laptop', writes: false });
     const laptopForcedVm = spyIo({ env: LAPTOP }); main(['--ephemeral', '--json'], laptopForcedVm);
     expect(report(laptopForcedVm)).toMatchObject({ host: 'ephemeral', writes: true });
+  });
+
+  // THE STYLE STEP'S WRITE MUST NOT STRIP THE PR-WATCH STEP'S WRITE. `writeSettings` REPLACES the file
+  // wholesale, and the pr-watch step runs (and writes) before the style step does — so the style step has to
+  // read the file AFTER that write, not reuse the object the pr-watch step read BEFORE it. `statefulSpyIo`
+  // is what makes that distinguishable: with `spyIo`'s constant `readSettings`, a `main()` that reused the
+  // pre-write object for the style step too would still pass every test above.
+  it('a full write run leaves the settings.json write carrying BOTH the pr-watch allow rules and the output style', () => {
+    const io = statefulSpyIo({}, { env: VM });
+    main(['--json'], io);
+    expect(io.writes.length).toBeGreaterThanOrEqual(2);
+    const final = io.writes.at(-1);
+    for (const tool of PR_WATCH_TOOLS) expect(final.permissions?.allow ?? []).toContain(tool);
+    expect(final.outputStyle).toBe(OUTPUT_STYLE);
   });
 });
