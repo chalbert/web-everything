@@ -3,8 +3,10 @@ bornAs: xgsu14f
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-27"
+dateStarted: "2026-08-28"
+dateResolved: "2026-08-28"
 scope:
   - we:scripts/verify-lane.mjs
 tags: []
