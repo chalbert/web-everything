@@ -284,6 +284,70 @@ action to confirm with a person rather than do unprompted — safe to delete onc
   The correct close-out for an abandoned in-flight dispatch is `we:scripts/operations/wake.mjs --resolve
   ... --force` at the bookkeeping level, documented in `#3353`'s live-run protocol.
 
+## Session update (2026-08-29, third session) — rebased onto `main`, two more machinery bugs found+fixed
+
+Per the prior session's own handoff: rebased `lane/mechanical-dispatcher` onto current `origin/main`
+(resolved two doc-only conflicts in this very file by hand, merging both sides rather than dropping either),
+confirmed tests + `check:standards` stayed green, pushed. Then swept the backlog for open items tagged
+against this machinery and fixed the two it explicitly named as already-known candidates, same bar as the
+prior session's two live-fire fixes:
+
+1. **`#3390` fixed** (`we:scripts/lane-pool.mjs`, commit `7bbb83b2`) — `acquire --lane=N` was the only claim
+   path with no #2267 dirty/ahead check before its own destructive reset (auto-pick's `chooseFreeLane` never
+   selects a dirty/ahead candidate to begin with; `refreshLane` calls `laneDirtyOrAhead` explicitly). A
+   TTL-stale reclaim, or a lane simply released dirty, now REFUSES unless `--force` — this is the exact
+   incident that wiped lane-11's 4 built-and-tested files earlier in this epic. Surfaced a real test-fixture
+   gap in the process: an existing test in `we:scripts/__tests__/lane-pool-acquire-base.test.mjs` had pinned
+   the OLD "unconditionally discards, never refuses" behavior as the expected contract (it predates this fix,
+   from `#2419`) — split it into a without-`--force`/with-`--force` pair rather than silently breaking it.
+   Also found the banded-pool (`web-everything`) test in `we:scripts/__tests__/lane-pool-item-map.test.mjs`
+   was missing the `.gitignore` entry the real repo has for `.env.local` (the per-lane dev-port file
+   `writeLaneEnv` generates) — without it, the synthetic test repo saw its own generated file as an
+   untracked "dirty" change and false-tripped the new guard; the real repo is unaffected (`.env.local` is
+   genuinely gitignored there). 4 new tests.
+2. **`#2924` fixed** (`we:scripts/lane-pool.mjs`, commit `6f7a8aa9`) — `cmdAcquire` proved an ahead lane's
+   containment ONCE from a pick-time `ls-remote` snapshot, then ran the merge-base fan-out, the O_EXCL claim,
+   and `git fetch --prune` before the destructive reset, with no re-verification — a `lane/*` ref deleted or
+   force-pushed on origin inside that ~30s window meant acquire could wipe commits that, by reset time, exist
+   on no remote at all. Fixed by re-checking dirty/ahead + provably-pushed on the JUST-FETCHED local
+   remote-tracking refs (`localRemoteShas`, network-free — the fetch moments earlier already refreshed them)
+   immediately before the reset. Reproduced the exact race deterministically in a test via a `git` PATH shim
+   that lies on the pick-time `ls-remote` (simulating a snapshot taken a moment before a real ref deletion)
+   while the real `fetch --prune` moments later correctly sees the ref is gone. 2 new tests.
+
+Both verified: the full `we:scripts/__tests__/lane-pool*` family (131/131), the broader
+`we:scripts/readiness`/`we:scripts/operations`/`we:skills-src/conveyor` suites (2061/2064 — the 3 failures
+are the same pre-existing host-load-flaky live-subprocess tests as before, confirmed passing in isolation),
+`check:standards` 0 errors. Pushed to `origin/lane/mechanical-dispatcher`.
+
+**Also checked, found already done:** `#3107` ("wire `--adopt` into the dispatch surfaces") — the conveyor
+delivery brief (`we:skills-src/conveyor/delivery-agent-brief.md:42-51`) already passes `--adopt` on its
+self-acquire and even cites `#3107` in its own explanatory comment; `we:docs/agent/delivery-loop.md` already
+documents the two-actor dispatcher→worker `adopt` hand-off correctly, including the exact "driver must NOT
+self-adopt" warning the item worried about. `we:scripts/operations/dispatch-lane*.mjs` never call `acquire`
+themselves (the dispatched agent does, per its own brief), so there is no second wiring point the item
+imagined. Nothing left to build here except the item's own "Done when" #2 — a live-fire proof — which is the
+same open live-end-to-end gap already tracked elsewhere on this card. The backlog item's `status: open` is
+stale bookkeeping, not a real gap; worth a `/resolve` pass by whoever picks this up next.
+
+**Identified but NOT fixed — needs a decided design before building, not a unilateral pick:**
+`#3110` (`classifyDispatchPr` can attribute a later retry's merged PR to an earlier, unrelated dispatch
+entry, `we:scripts/operations/dispatch-lane-io.mjs`). The item's own "Done when" explicitly requires "the fix
+is stated as a decided design, not left to the builder to invent" — there are two named options (a unique
+attempt id woven into the branch name, structurally more invasive; or checking an attributable PR's branch
+against the run store's other STILL-OPEN entries for the same item, cheaper) and no real dispatch has yet
+produced a double-retry to learn from (per `#3096`, real dispatch hasn't gone live in production). Left for
+the operator to weigh in on before a next session builds it.
+
+**Process note for whoever picks this up next:** this session lost time to a false assumption that a lane
+clone's directory, once `cd`'d into, stays the shell's working directory across separate tool calls — it
+does not reliably survive a background-task notification turn boundary, which silently reset it back to the
+primary checkout mid-session. Anything relying on relative paths after such a reset ran against the WRONG
+checkout without erroring. Caught it because a test failure didn't match its own code-reading explanation;
+re-verified everything with `cd <lane-dir> && <command>` embedded in every single invocation from then on.
+**Always embed the `cd` in the same command as the thing being verified — never assume a prior `cd` carried
+over — especially right after a background-task notification.**
+
 ## Goal-vs-filed gap sweep (2026-08-30) — what the stated goal needs that nobody filed a card for
 
 Prior sessions' own sweeps (see the unlanded `origin/lane/mechanical-dispatcher` branch's session updates)
