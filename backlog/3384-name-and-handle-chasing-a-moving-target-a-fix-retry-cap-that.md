@@ -1,8 +1,10 @@
 ---
 bornAs: x5y1l6r
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-28"
+dateResolved: "2026-08-28"
+codifiedIn: one-off
 preparedDate: "2026-08-28"
 tags: [plateau-loop, delivery, conveyor, retry-cap, observability, care-elevated]
 relatedTo: ["3383", "2643", "2666"]
