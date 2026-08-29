@@ -3,6 +3,9 @@ bornAs: xs6omfp
 kind: task
 status: open
 dateOpened: "2026-08-29"
+costTokens: "in:128 cw:132266 cr:6845933 out:18259"
+costUsd: 3.12
+costSessions: 1
 tags: [lane-pool, data-loss]
 scope: ["we:scripts/lane-pool.mjs"]
 ---
