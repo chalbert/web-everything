@@ -35,6 +35,17 @@ past tense. It concentrates in `leash: spec` files (#2564) and backlog bodies, w
 deliverable and no compiler reads it. Four rounds of per-case corrections have not converged; the seventh was
 found in the file filed to fix the second.
 
+### It recurred on PR #1680 (2026-08-29), three years of rounds later in review-time
+
+A backlog card's `Done when` cited `decideDrainAction` as the drain's decision function. No such symbol
+exists anywhere in the tree — the real one is `decideReviewGate`
+(`we:scripts/lib/review-escalation.mjs`). Same generator as the seven above, verbatim: a plausible name in
+the house `decideX` shape, written from memory, shipped in the past tense without a grep. Every OTHER symbol
+the same card cited resolved correctly, which is exactly the pattern that makes the miss invisible to a
+reader — and the card's own acceptance criterion was therefore unwritable as specified, so the defect
+survived to a human verdict. Two independent PRs, one generator: this is the recurrence signal, and it is
+diff-scoped (a changed backlog file), which the "yes, diff-scoped" answer below already covers.
+
 ## Why no existing gate reaches it
 
 `we:scripts/lib/citation-check.mjs` ships the "proven subset" of the #2821 citation-verification family, and
