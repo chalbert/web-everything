@@ -912,7 +912,14 @@ describe('main() — the installer orchestration', () => {
   const spyIo = (over = {}) => {
     const io = {
       lines: [], writes: [], trustWrites: [], skills: [], hooks: [], links: [],
-      readSettings: () => ({}),
+      // STATEFUL, and that is the point (PR #1685 review, correctness/coverage). It used to be the constant
+      // `() => ({})`, which cannot tell a FRESH read after a write apart from a STALE pre-write object being
+      // reused — so the juror collapsed `main()`'s second `io.readSettings()` into `= allowSettings`,
+      // reintroducing the exact defect the re-read exists to prevent, and all 142 tests still passed. The
+      // double now answers with the LAST object `writeSettings` received, so a step that re-reads sees the
+      // previous step's write and a collapsed read reddens. Overrides in `over` still win (see the
+      // `readSettings: () => null` unreadable-config cases below).
+      readSettings: () => (io.writes.length ? io.writes[io.writes.length - 1] : {}),
       writeSettings: (next) => io.writes.push(next),
       readTrust: () => ({}),
       writeTrust: (next) => io.trustWrites.push(next),
@@ -1006,6 +1013,19 @@ describe('main() — the installer orchestration', () => {
       const { io } = run(['install', '--json'], LAPTOP, { readSettings: () => null });
       expect(io.writes).toEqual([]);
       for (const id of ['gitdir', 'pr-watch']) expect(report(io).steps.find((st) => st.id === id), id).toMatchObject({ status: 'drift' });
+    });
+
+    it('a write run leaves BOTH the allow rules and the style in the SAME settings object', () => {
+      // THE MUTATION THIS EXISTS TO KILL (PR #1685 review, correctness/coverage). `writeSettings` REPLACES the
+      // file wholesale, so each step that may write must re-read first; collapse `main()`'s second
+      // `io.readSettings()` into `= allowSettings` and the style step writes back a settings object from
+      // BEFORE the pr-watch step's write, silently stripping allow rules the operator was just granted. Every
+      // per-step assertion still passes under that mutation — each step's own write is fine in isolation — so
+      // the only thing that catches it is asserting the FINAL object carries both steps' work at once.
+      const { io } = run(['install', '--json'], LAPTOP);
+      const final = io.writes.at(-1);
+      expect(final.permissions.allow).toEqual(expect.arrayContaining([...PR_WATCH_TOOLS]));
+      expect(final.outputStyle).toBe(OUTPUT_STYLE);
     });
   });
 
