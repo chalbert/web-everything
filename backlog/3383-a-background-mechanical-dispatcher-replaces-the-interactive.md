@@ -330,14 +330,55 @@ imagined. Nothing left to build here except the item's own "Done when" #2 — a 
 same open live-end-to-end gap already tracked elsewhere on this card. The backlog item's `status: open` is
 stale bookkeeping, not a real gap; worth a `/resolve` pass by whoever picks this up next.
 
-**Identified but NOT fixed — needs a decided design before building, not a unilateral pick:**
-`#3110` (`classifyDispatchPr` can attribute a later retry's merged PR to an earlier, unrelated dispatch
-entry, `we:scripts/operations/dispatch-lane-io.mjs`). The item's own "Done when" explicitly requires "the fix
-is stated as a decided design, not left to the builder to invent" — there are two named options (a unique
-attempt id woven into the branch name, structurally more invasive; or checking an attributable PR's branch
-against the run store's other STILL-OPEN entries for the same item, cheaper) and no real dispatch has yet
-produced a double-retry to learn from (per `#3096`, real dispatch hasn't gone live in production). Left for
-the operator to weigh in on before a next session builds it.
+## Session update (2026-08-29, fourth session, lane-3) — `#3110` designed, validated, and built
+
+Continued straight on from the third session's own handoff. `#3110` (`classifyDispatchPr` can attribute a
+later retry's merged PR to an earlier, unrelated dispatch entry) needed a decided design per its own
+acceptance criteria — this was NOT picked unilaterally; the design was walked through with the operator first
+(the two options above, plus a THIRD found by re-reading the code: reuse the retry-suffix letter
+(`conveyor-2500b`) this file's own docs already named but never actually emitted, rather than either the
+run-store-coupling "approach 2" the code's own docblock deferred or a same-process "claim on first
+observation" alternative that only looks race-free because today's runner happens to tick one item at a
+time — an assumption this epic's own culture (see the `#2924` fix above) treats as fragile, not free).
+
+**Validated BEFORE writing code** (per the operator's own ask to reduce risk with preparation, not just pick
+and build): confirmed `we:scripts/operations/dispatch-lane.mjs`'s own in-flight-dispatch guard already
+refuses to dispatch a retry while an earlier one still holds, so the attempt count this fix needs is
+race-free by construction, not by luck; confirmed BOTH consumers that would need to tolerate a new letter
+(`laneRefItemNum`, `itemNumFromSession`) already silently discard one, today, for an unrelated historical
+reason — nothing to invent, a dormant convention to finally use.
+
+**Built** (`we:scripts/conveyor/lease-reaper.mjs`, `we:scripts/operations/dispatch-lane.mjs`,
+`we:scripts/operations/dispatch-lane-io.mjs`, `we:skills-src/conveyor/delivery-agent-brief.md`, commit
+`0fe266d7`): a fresh `build` dispatch now tags its session slug / branch name with `''` on a first attempt
+or a letter (`b`, `c`, …) on a retry; `classifyDispatchPr` requires an exact tag match (ANDed with, not
+replacing, the existing timing check) before attributing a PR to an entry, closing the bug in BOTH
+directions (an earlier entry can no longer claim a later retry's PR, or vice versa). Backward compatible by
+construction: nothing before this shipped ever emitted a letter, so every legacy entry/PR still carries the
+same empty tag and matches exactly as before.
+
+**A real design wrinkle surfaced and was fixed during implementation, not glossed over:** the first cut
+threaded the new `ATTEMPT_TAG` token through a separate raw-regex substitution pass ahead of `fillBrief`,
+which worked for the real dispatch path but was invisible to anything calling `fillBrief` directly (a test
+helper did, and broke) — a fragile, hidden second substitution mechanism. Fixed properly by widening
+`fillBrief` itself to accept one legitimately-blank OPTIONAL placeholder, so there is exactly ONE substitution
+path again, not two silently disagreeing ones.
+
+Verified: `we:scripts/operations/__tests__/dispatch-lane.test.mjs` (142/142, 20 new),
+`we:scripts/conveyor/__tests__/lease-reaper.test.mjs` (40/40, 7 new), the broader
+`we:scripts/conveyor`/`we:scripts/operations`/`we:skills-src/conveyor` suites (1777/1780 — the same 3
+pre-existing host-load-flaky live-subprocess tests as every prior session, confirmed unrelated),
+`check:standards` 0 errors, same warning count as before. Pushed to `origin/lane/mechanical-dispatcher`.
+
+**Process note, a second one:** the SAME cwd-drift this epic's third session already flagged (a lane
+directory does not reliably survive a background-task notification turn boundary) recurred repeatedly in
+this session too, despite knowing about it — including one case where an entire background test run silently
+executed against the PRIMARY checkout instead of the lane, wasting real wall-clock before being caught (via
+`head -1` on the very first line of output, not by any error). The mitigation from the third session
+(`cd <lane-dir> && <command>` embedded in the SAME invocation, never trusted to persist from a prior one) is
+necessary but was not sufficient on its own to prevent this from recurring — worth having the NEXT session
+verify the very first line of every background command's output confirms the intended directory, as a matter
+of habit, not just after something looks wrong.
 
 **Process note for whoever picks this up next:** this session lost time to a false assumption that a lane
 clone's directory, once `cd`'d into, stays the shell's working directory across separate tool calls — it
