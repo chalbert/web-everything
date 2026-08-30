@@ -617,6 +617,17 @@ function liveRemoteShas(dir) {
   return new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean));
 }
 
+/** #2924 — the LOCAL equivalent of `liveRemoteShas`, network-free. Sound ONLY immediately after a fetch: a
+ *  local `refs/remotes/origin/*` tip is exactly as fresh as the remote it was just fetched from, unlike the
+ *  stale-cache case `aheadIsProvablyPushed`'s own docblock warns against (a ref deleted on origin AFTER
+ *  landing, whose local remote-tracking ref lingers). Used to re-verify containment right before the
+ *  destructive reset, on data no older than the fetch that immediately precedes it — no second network call. */
+function localRemoteShas(dir) {
+  const out = tryGit(['for-each-ref', '--format=%(objectname)', 'refs/remotes/origin'], dir);
+  if (out === null) return new Set();
+  return new Set(out.split('\n').filter(Boolean));
+}
+
 // Returns { skipped: boolean, dirty, uncommitted, ahead } so callers can tell an actually-reset lane
 // (safe to unmap its stale item mapping, #2139) from a skipped one (still serving its in-flight item).
 function refreshLane(repo, n, { force = false } = {}) {
@@ -1030,6 +1041,26 @@ function cmdAcquire(repo) {
       }
       fail(`lane-${n} is ${describeLease(lease) || 'held'} — pick another lane`);
     }
+    // #3390 — the explicit-lane path is the ONLY claim route that reaches the destructive reset below with no
+    // #2267 dirty/ahead check at all: auto-pick's `chooseFreeLane` never selects a dirty/ahead candidate to
+    // begin with, and `refreshLane` calls `laneDirtyOrAhead` explicitly, but a TTL-stale reclaim just above
+    // (`tryClaimLane`'s `isLeaseStale` branch) unlinks the old marker and lets this path fall straight through
+    // to `checkout -B --force` + `clean -fd`. A lease going stale (a long session, a slow multi-hour task) is
+    // NOT evidence the tree holds abandoned garbage. Real incident: lane-11's lease went TTL-stale mid-epic
+    // with 4 built-and-tested files sitting as uncommitted/untracked edits; this exact path silently destroyed
+    // them (recovered only from Claude Code's own session transcripts, not from anything git-recoverable).
+    // Skipped when the reset itself would be skipped (`--no-reset`, or the reserved-lane re-reserve path,
+    // which never resets either) so this never blocks an acquire that was never going to touch the tree.
+    if (!flags.force && !targetWasReserved && !flags['no-reset']) {
+      const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      if (dirty || ahead > 0) {
+        fail(
+          `lane-${n} has ${uncommitted} uncommitted change(s) and is ${ahead} commit(s) ahead of origin/${repo.branch} ` +
+            `— acquire --lane=${n} would destroy that work via its reset-to-origin step. Use --force to reclaim it ` +
+            `anyway (mirrors every other destructive override in this file), or investigate/salvage the tree first.`,
+        );
+      }
+    }
     chosen = n;
   } else {
     // Auto-pick: lowest acquirable, then atomically claim; on a lost race retry the next candidate.
@@ -1074,6 +1105,24 @@ function cmdAcquire(repo) {
   const dir = laneDir(repo, chosen);
   if (!flags['no-reset'] && !targetWasReserved) {
     git(['fetch', 'origin', '--prune', '--quiet'], dir);
+    // #2924 — re-verify containment on FRESH post-fetch remote-tracking refs, immediately before the
+    // destructive reset below. Whatever proved this lane safe to reset — auto-pick's `infoFor()` snapshot, or
+    // nothing at all before #3390's own explicit-lane guard — is up to ~30s stale by the time this line runs
+    // (the merge-base fan-out, the O_EXCL claim, the fetch just above). A `lane/*` ref deleted or force-pushed
+    // on origin inside that window means the earlier proof no longer holds. Network-free: the fetch above
+    // already refreshed every remote-tracking ref, so `localRemoteShas` answers from local state alone.
+    if (!flags.force) {
+      const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir));
+      if (dirty || !provablyPushed) {
+        fail(
+          `lane-${chosen} is no longer provably safe to reset as of this fetch (${uncommitted} uncommitted, ` +
+            `${ahead} ahead, provably-pushed=${provablyPushed}) — a ref its earlier containment proof relied on ` +
+            `may have been deleted or force-pushed in the window since (#2924). Use --force to proceed anyway, ` +
+            `or investigate/salvage the tree first.`,
+        );
+      }
+    }
     const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
     // #2419 — `checkout -B <branch> <baseRef>`, NOT `reset --hard <baseRef>`. A bare reset moves whatever
     // branch HEAD happens to be attached to (it does not touch which branch that is), so a lane left

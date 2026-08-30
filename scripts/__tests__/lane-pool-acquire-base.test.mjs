@@ -228,13 +228,16 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
 
   // #2419 pre-PR review catch — `checkout -B` (unlike `reset --hard`) runs the ordinary safe-checkout
   // tree-merge and REFUSES on a dirty TRACKED-file conflict ("local changes would be overwritten by
-  // checkout") unless `--force` is also passed. `acquire --lane=N` (the EXPLICIT-lane path — e.g. a batch
-  // orchestrator re-acquiring its own known lane number, which skips the auto-pick `chooseFreeLane` dirty
-  // filter entirely, unlike the bare auto-pick path) has never gated its reset on tree cleanliness (a
-  // stray/crashed lane can carry uncommitted edits) — it must unconditionally reclaim the lane exactly like
-  // `reset --hard` always did. Without `--force` this acquire would THROW here (after the lease was already
-  // claimed), stranding the lane half-claimed and dirty.
-  it('acquire --lane=N unconditionally discards a dirty tracked-file conflict, never refuses (mirrors reset --hard)', () => {
+  // checkout") unless `--force` is also passed to the git invocation. `acquire --lane=N` (the EXPLICIT-lane
+  // path — e.g. a batch orchestrator re-acquiring its own known lane number, which skips the auto-pick
+  // `chooseFreeLane` dirty filter entirely, unlike the bare auto-pick path) used to reset unconditionally on
+  // tree cleanliness regardless — #3390 changed that: without the application-level `--force`, this path now
+  // REFUSES before ever reaching the git-level `checkout -B --force` below (a lease going stale, or a lane
+  // simply released dirty, is not evidence the tree holds abandoned garbage — see the real incident named in
+  // #3390). `--force` restores the old unconditional-discard behavior, at which point the underlying
+  // `checkout -B --force` git mechanics still need their own `--force` to not throw on the tree-merge
+  // conflict — this pins both layers.
+  function dirtyLaneAgainstAdvancedOrigin() {
     provision(1);
     const lane = join(poolRoot, 'basetest', 'lane-1');
     // First acquire lands the lane on `main` at the current origin/main tip.
@@ -245,7 +248,7 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
     expect(first.code).toBe(0);
     runPool(['release', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main'], { LANE_POOL_ROOT: poolRoot });
 
-    // Advance origin/main past the lane's last-seen tip, so the acquire below has real incoming content to
+    // Advance origin/main past the lane's last-seen tip, so a --force acquire has real incoming content to
     // conflict against the lane's dirty uncommitted edit.
     writeFileSync(join(referenceDir, 'file.txt'), 'main-advanced-2\n');
     git(['add', 'file.txt'], referenceDir);
@@ -255,12 +258,29 @@ describe('lane-pool acquire --base=<ref> (#2386)', () => {
     // Dirty the lane's tracked file with an UNCOMMITTED edit that conflicts with the incoming content.
     writeFileSync(join(lane, 'file.txt'), 'uncommitted dirty edit\n');
     expect(git(['status', '--porcelain'], lane)).toContain('file.txt');
+    return lane;
+  }
+
+  it('WITHOUT --force, now REFUSES a dirty tracked-file conflict rather than discarding it (#3390)', () => {
+    const lane = dirtyLaneAgainstAdvancedOrigin();
 
     const r = runPool(
       ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--json'],
       { LANE_POOL_ROOT: poolRoot },
     );
-    expect(r.code).toBe(0); // never refuses — succeeds exactly like reset --hard did
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/would destroy that work/);
+    expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('uncommitted dirty edit\n'); // survives
+  });
+
+  it('WITH --force, still discards a dirty tracked-file conflict unconditionally (mirrors reset --hard, #2419)', () => {
+    const lane = dirtyLaneAgainstAdvancedOrigin();
+
+    const r = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=basetest', '--branch=main', '--no-install', '--lane=1', '--force', '--json'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0); // never throws on the git-level tree-merge conflict — succeeds exactly like reset --hard did
     expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('main-advanced-2\n'); // dirty edit discarded
     expect(git(['status', '--porcelain'], lane)).toBe('');
   });
