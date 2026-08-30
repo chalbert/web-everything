@@ -153,6 +153,22 @@ export function isForeignLease({ lease, mySessionId } = {}) {
   return false; // degraded: no identity signal on both sides ⇒ fail-open (allow) — see doc above
 }
 
+/**
+ * Is `lease` CONFIRMED to be held by MY OWN session — the complement `isForeignLease` deliberately does not
+ * provide. `isForeignLease` fails OPEN on an ambiguous read (no `ownerSession`, no `mySessionId`) because its
+ * callers gate a DENY on a positive "foreign" finding, and a guard bug must never wedge the agent. A caller
+ * gating an ALLOW on "this is mine" needs the opposite failure direction: ambiguous must read as NOT mine, or
+ * the same missing-identity gap that makes `isForeignLease` degrade to allow would make this degrade to allow
+ * too — for a predicate whose whole job is refusing everything except a confirmed match (#3378).
+ *
+ *   TRUE only when both sides carry an identity AND they match. Anything else — no lease, no `ownerSession`,
+ *   no `mySessionId`, or a mismatch — is NOT confirmed mine, fail-closed.
+ */
+export function isConfirmedOwnLease({ lease, mySessionId } = {}) {
+  if (!lease || !lease.ownerSession || !mySessionId) return false;
+  return lease.ownerSession === mySessionId;
+}
+
 // #2997 r2 — the DECLARED-OCCUPANT channel, and why `ownerSession` could not be it ────────────────────────
 //
 // `lane-pool.mjs acquire` stamps `ownerSession` from the env of the process that RUNS the acquire. That is the

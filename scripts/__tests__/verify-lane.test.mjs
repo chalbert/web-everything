@@ -91,9 +91,9 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
 
 describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a lease to protect', () => {
   const leaseFile = () => join(dir, '.git', '.lane-lease');
-  function runReset() {
+  function runReset(env = {}) {
     try {
-      const out = execFileSync('node', [VERIFY_LANE, 'reset', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = execFileSync('node', [VERIFY_LANE, 'reset', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
       return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
     } catch (e) {
       return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
@@ -129,6 +129,30 @@ describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a leas
     expect(code).toBe(3);
     expect(json?.status).toBe('refused');
     expect(existsSync(marker())).toBe(true);
+  });
+
+  it('refuses when the lane holds a LIVE FOREIGN lease (ownerSession set, does not match caller)', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'red', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 1 }) + '\n');
+    writeFileSync(leaseFile(), JSON.stringify({ session: 'someone', ownerSession: 'sess-OTHER', acquiredAt: new Date().toISOString(), ttlMinutes: 240 }) + '\n');
+
+    const { code, json } = runReset({ CLAUDE_CODE_SESSION_ID: 'sess-ME' });
+
+    expect(code).toBe(3);
+    expect(json?.status).toBe('refused');
+    expect(existsSync(marker())).toBe(true);
+  });
+
+  it('clears the marker when the lane holds a LIVE lease CONFIRMED as the caller\'s own (#3378)', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'red', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 1 }) + '\n');
+    writeFileSync(leaseFile(), JSON.stringify({ session: 'me', ownerSession: 'sess-ME', acquiredAt: new Date().toISOString(), ttlMinutes: 240 }) + '\n');
+
+    const { code, json } = runReset({ CLAUDE_CODE_SESSION_ID: 'sess-ME' });
+
+    expect(code).toBe(0);
+    expect(json.status).toBe('reset');
+    expect(existsSync(marker())).toBe(false);
+    // the lease itself is untouched — reset only clears the verify marker, never the lease
+    expect(existsSync(leaseFile())).toBe(true);
   });
 
   it('clears the marker when the lane holds only a STALE (expired) lease', () => {

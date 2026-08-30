@@ -15,6 +15,7 @@ import {
   leaseOwnedBy,
   leaseOwnedByCaller,
   isForeignLease,
+  isConfirmedOwnLease,
   laneMarkedSlug,
   assertedLaneSlug,
   laneHolderSlug,
@@ -165,6 +166,32 @@ describe('isForeignLease (#2367 r2 — durable ownerSession is the SOLE ownershi
     expect(isForeignLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
     expect(isForeignLease({})).toBe(false);
     expect(isForeignLease()).toBe(false);
+  });
+});
+
+describe('isConfirmedOwnLease (#3378 — the complement isForeignLease deliberately does not provide)', () => {
+  const at = '2026-07-05T12:00:00.000Z';
+  it('a live lease whose ownerSession matches mine is CONFIRMED mine', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isConfirmedOwnLease({ lease, mySessionId: 'sess-A' })).toBe(true);
+  });
+  it('a live lease whose ownerSession differs from mine is NOT confirmed mine', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isConfirmedOwnLease({ lease, mySessionId: 'sess-B' })).toBe(false);
+  });
+  it('AMBIGUOUS — a lease with no ownerSession is NOT confirmed mine (fail-closed, opposite of isForeignLease)', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at }); // ownerSession null
+    expect(isConfirmedOwnLease({ lease, mySessionId: 'sess-A' })).toBe(false);
+  });
+  it('AMBIGUOUS — the caller has no mySessionId is NOT confirmed mine, even though the lease carries one', () => {
+    const lease = leaseBody({ session: 's', acquiredAt: at, ownerSession: 'sess-A' });
+    expect(isConfirmedOwnLease({ lease, mySessionId: null })).toBe(false);
+    expect(isConfirmedOwnLease({ lease, mySessionId: '' })).toBe(false);
+  });
+  it('no lease ⇒ never confirmed mine; empty args never throw', () => {
+    expect(isConfirmedOwnLease({ lease: null, mySessionId: 'sess-A' })).toBe(false);
+    expect(isConfirmedOwnLease({})).toBe(false);
+    expect(isConfirmedOwnLease()).toBe(false);
   });
 });
 
