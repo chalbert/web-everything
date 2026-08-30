@@ -5,6 +5,9 @@ status: resolved
 dateOpened: "2026-08-05"
 dateStarted: "2026-08-29"
 dateResolved: "2026-08-29"
+costTokens: "in:271 cw:1018929 cr:25551445 out:73992"
+costUsd: 24.82
+costSessions: 1
 graduatedTo: none
 tags: []
 scope: ["we:scripts/lib/invariant-catalogue.json"]
