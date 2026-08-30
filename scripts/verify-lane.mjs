@@ -32,19 +32,20 @@
  *   node scripts/verify-lane.mjs --json              # machine-readable {sha, status, exitCode} on stdout
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
  *   node scripts/verify-lane.mjs check --require-verified   # exit non-zero unless HEAD has a fresh GREEN marker (the gate pr-land applies)
- *   node scripts/verify-lane.mjs reset                # clear a stale marker so `verify` can start (x4jcqm4) — refuses if the lane's lease is live
+ *   node scripts/verify-lane.mjs reset                # clear a stale marker so `verify` can start (x4jcqm4) — refuses if a FOREIGN lease is live (own live lease is OK, #3378)
  *
  * Exit codes: 0 = green (marker recorded green) / `check` verdict ok / `reset` cleared or was a no-op; 2 = red
  * (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no marker written) /
- * `reset` refused because the lane's lease is live.
+ * `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
 import { execSync } from 'node:child_process';
-import { writeFileSync, renameSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
-import { LEASE_FILENAME, isLeaseStale } from './lib/lane-lease.mjs';
+import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
+import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { resolveDefaultGate } from './lib/verify-lane-gate.mjs';
 
@@ -107,15 +108,50 @@ if (MODE === 'check') {
   emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
 }
 
+// #3378 review (rounds 2-4) — `isConfirmedOwnLease` itself now refuses an `ownerSession` match that is either
+// shadowed by a DECLARED occupant (`workerSession`, the dispatcher/worker split) or CONTESTED (a sibling lane
+// sharing the same `ownerSession`, the workflowLane/conveyor-dispatch topology) — see its doc in
+// `lib/lane-lease.mjs`. Telling "contested" apart from "uncontested" needs every OTHER lane's live lease, so
+// `reset` scans the pool the same way `lane-pool.mjs#liveLeasesInPoolExcept` does for the structurally
+// identical `release` decision: every pool under the workspace root, not just this lane's own pool (a
+// session's siblings routinely hold lanes elsewhere). Best-effort — any unreadable dir just yields a shorter
+// list, which can only make a lease read as UNCONTESTED (never a spurious refusal).
+function tryReaddir(dir) {
+  try { return readdirSync(dir); } catch { return []; }
+}
+function readLeaseFile(file) {
+  if (!existsSync(file)) return null;
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+}
+function siblingLeasesExcept(thisLeaseFile) {
+  const poolRoot = defaultPoolRoot(REPO);
+  const out = [];
+  for (const poolName of tryReaddir(poolRoot)) {
+    const poolDir = join(poolRoot, poolName);
+    for (const laneName of tryReaddir(poolDir)) {
+      if (!/^lane-\d+$/.test(laneName)) continue;
+      const file = join(poolDir, laneName, '.git', LEASE_FILENAME);
+      if (file === thisLeaseFile) continue;
+      const sib = readLeaseFile(file);
+      if (sib && !isLeaseStale(sib, Date.now())) out.push(sib);
+    }
+  }
+  return out;
+}
+
 // ── `reset` (x4jcqm4) — clear a marker that is stale, not overlapping ─────────────────────────────────
 // The START-write guard above (finding 4) is correct when a marker's terminal record belongs to a run that is
 // STILL RELEVANT — but it cannot tell that apart from a marker that is simply old: a finished run, in a lane
 // nothing currently holds. Two nights running that indistinguishability forced a manual `rm` of this file to
-// unblock an unrelated change. `reset` is the sanctioned recovery: it clears the marker ONLY when this lane's
-// own `.lane-lease` marker is absent or has outlived its TTL (`isLeaseStale`, `scripts/lib/lane-lease.mjs`) —
-// the same staleness test `lane-pool.mjs acquire` already uses to decide a lane is reclaimable. A LIVE lease
-// means someone may still be relying on the current marker, so `reset` refuses exactly then, matching the
-// START-write guard's own protective posture rather than working around it.
+// unblock an unrelated change. `reset` is the sanctioned recovery: it clears the marker when this lane's own
+// `.lane-lease` marker is absent, has outlived its TTL (`isLeaseStale`, `scripts/lib/lane-lease.mjs` — the
+// same staleness test `lane-pool.mjs acquire` already uses to decide a lane is reclaimable), OR is CONFIRMED
+// to be the caller's own live lease (`isConfirmedOwnLease`, #3378) — the same session that is about to run
+// `verify` again has no one else's work to protect itself from, once a declared occupant (if any) is checked
+// and the ownerSession match (if that's all there is) is confirmed uncontested. A live lease with no confirmed
+// owner match (foreign, shadowed by a different declared occupant, contested by a sibling, or ambiguous
+// because either side lacks an identity signal) still refuses: someone else may be relying on the current
+// marker, matching the START-write guard's own protective posture rather than working around it.
 if (MODE === 'reset') {
   if (!existsSync(MARKER)) emit({ sha: headSha, status: 'noop', reason: 'no-marker', detail: `no marker at ${MARKER} — nothing to reset.` }, 0);
   const record = readMarker();
@@ -124,7 +160,9 @@ if (MODE === 'reset') {
   if (existsSync(leaseFile)) {
     try { lease = JSON.parse(readFileSync(leaseFile, 'utf8')); } catch { lease = null; }
   }
-  if (lease && !isLeaseStale(lease, Date.now())) {
+  const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
+  const siblingLeases = lease ? siblingLeasesExcept(leaseFile) : [];
+  if (lease && !isLeaseStale(lease, Date.now()) && !isConfirmedOwnLease({ lease, mySessionId, siblingLeases })) {
     emit(
       {
         sha: headSha, status: 'refused', reason: 'active-lease', exitCode: null,

@@ -153,6 +153,44 @@ export function isForeignLease({ lease, mySessionId } = {}) {
   return false; // degraded: no identity signal on both sides ⇒ fail-open (allow) — see doc above
 }
 
+/**
+ * Is `lease` CONFIRMED to be held by MY OWN session — the complement `isForeignLease` deliberately does not
+ * provide. `isForeignLease` fails OPEN on an ambiguous read (no `ownerSession`, no `mySessionId`) because its
+ * callers gate a DENY on a positive "foreign" finding, and a guard bug must never wedge the agent. A caller
+ * gating an ALLOW on "this is mine" needs the opposite failure direction: ambiguous must read as NOT mine, or
+ * the same missing-identity gap that makes `isForeignLease` degrade to allow would make this degrade to allow
+ * too — for a predicate whose whole job is refusing everything except a confirmed match (#3378).
+ *
+ * A bare `ownerSession` compare is NOT that confirmed match, though — three review rounds on #3378 caught the
+ * same shipped bug from different angles, because this same file already documents two topologies where
+ * `ownerSession` equality does not mean "mine":
+ *
+ *   1. DISPATCHER/WORKER split (`workerSession`, #2997 r2 above). `ownerSession` records whoever RAN `acquire`,
+ *      which is the DISPATCHER when a lane is leased on an agent's behalf and later handed off (`adopt`) — see
+ *      the `dispatched`/`adopted` fixtures in `lane-lease.test.mjs`. Once occupancy is DECLARED, the declaring
+ *      session is the only one confirmed, dispatcher included: `isForeignOccupancy` already treats "leasing a
+ *      lane is not working in it" as the rule for DENY, so this must apply the same rule for ALLOW.
+ *   2. SIBLING / `workflowLane` leases (`isContestedLease` above). Every sibling lane in a parallel `/workflow`
+ *      or conveyor dispatch shares one `ownerSession` by construction (#2413/#2997), so a bare compare confirms
+ *      EVERY sibling's lane as "mine", not just the caller's own — exactly the ambiguity `leaseOwnedByCaller`
+ *      already refuses to resolve from `ownerSession` alone for a targeted `release` (step 2 above). When
+ *      another live lease anywhere in the pool shares this lease's `ownerSession`, the ambient id is provably
+ *      ambiguous and the `ownerSession` fallback is refused here too.
+ *
+ *   TRUE only when: a DECLARED occupant (`workerSession`) matches me — checked first and, once present, decides
+ *   alone; OR there is no declared occupant AND `ownerSession` matches me AND no sibling lease in `siblingLeases`
+ *   shares that `ownerSession` (uncontested). Anything else — no lease, no `mySessionId`, a mismatched worker, a
+ *   mismatched owner, or a CONTESTED owner match — is NOT confirmed mine, fail-closed.
+ */
+export function isConfirmedOwnLease({ lease, mySessionId, siblingLeases = [] } = {}) {
+  if (!lease || !mySessionId) return false;
+  const worker = laneWorkerSession(lease);
+  if (worker) return worker === mySessionId;
+  if (!lease.ownerSession) return false;
+  if (isContestedLease({ lease, siblingLeases })) return false;
+  return lease.ownerSession === mySessionId;
+}
+
 // #2997 r2 — the DECLARED-OCCUPANT channel, and why `ownerSession` could not be it ────────────────────────
 //
 // `lane-pool.mjs acquire` stamps `ownerSession` from the env of the process that RUNS the acquire. That is the
