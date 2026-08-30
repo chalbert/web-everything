@@ -17,9 +17,17 @@ import { weAlias } from './vitest.shared';
  * Three of these were originally pinned to a single serial `forks` process for a CORRECTNESS reason, not
  * just speed — each measured NOT just slow but actively flaky under CPU contention (a wall-clock comparison
  * blown, a timeout tripped): `gate-entrypoint-integration.test.mjs`, `wake-cli.test.mjs`,
- * `dispatch-spawn-live.test.mjs`. They stay pinned here. Everything else runs on this config's default
- * `threads` pool — with the ~2000-file unit suite no longer sharing it, ordinary multi-worker parallelism
- * is enough; they don't need to queue behind one another the way `singleFork` would force.
+ * `dispatch-spawn-live.test.mjs`. `stdout-flush.test.mjs` joins them for a DIFFERENT reason, found the hard
+ * way (measured on this branch): left on the default `threads` pool alongside the other ~18 git-fixture
+ * files, its two tests that spawn a real full `check-standards.mjs` scan went from 48.4s/39.7s (alone, in
+ * the old unit suite) to 83s/72s (contending with everyone else's git subprocess spawns here) — the exact
+ * contention problem this whole split exists to solve, recreated one tier down. Since vitest runs separate
+ * pools CONCURRENTLY (only files WITHIN one pool serialize against each other), moving it into the isolated
+ * `forks` pool below removes it from that contention AND stops it dragging the other ~18 files down, at the
+ * cost of queuing behind its 3 forks-pool siblings (all small next to it) rather than the ~18-file `threads`
+ * pool. Everything else stays on this config's default `threads` pool — with the ~2000-file unit suite no
+ * longer sharing it, ordinary multi-worker parallelism is enough; they don't need to queue behind one
+ * another the way `singleFork` would force.
  */
 export default defineConfig({
   test: {
@@ -50,6 +58,7 @@ export default defineConfig({
       'scripts/operations/__tests__/stage-pr-view-integration.test.mjs',
     ],
     poolMatchGlobs: [
+      ['scripts/__tests__/stdout-flush.test.mjs', 'forks'],
       ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
       ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
       ['scripts/operations/__tests__/dispatch-spawn-live.test.mjs', 'forks'],
