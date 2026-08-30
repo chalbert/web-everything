@@ -3,6 +3,9 @@ bornAs: xenqv9f
 kind: task
 status: open
 dateOpened: "2026-08-30"
+costTokens: "in:130 cw:143479 cr:7827868 out:25088"
+costUsd: 5.98
+costSessions: 1
 tags: []
 ---
 
