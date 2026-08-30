@@ -193,6 +193,35 @@ describe('isConfirmedOwnLease (#3378 — the complement isForeignLease deliberat
     expect(isConfirmedOwnLease({})).toBe(false);
     expect(isConfirmedOwnLease()).toBe(false);
   });
+
+  // #3378 review rounds 2-4 — a bare ownerSession match is NOT sufficient: the dispatcher/worker split
+  // (`workerSession`) and sibling/workflowLane leases (`isContestedLease`) both make it wrong. Reuses the same
+  // `dispatched`/`adopted` fixture shape as the `isForeignOccupancy` suite below (#2997 r2), the module's own
+  // canonical counter-example to a bare `ownerSession` compare.
+  const dispatched = leaseBody({ session: 'Mac:1', acquiredAt: at, ownerSession: 'sess-DISPATCHER', holder: 'h-1' });
+  const adopted = leaseBody({ ...dispatched, acquiredAt: at, workerSession: 'sess-WORKER' });
+
+  it('a DISPATCHER whose ownerSession matches is NOT confirmed mine once a DIFFERENT session has adopted (declared occupant wins)', () => {
+    expect(isConfirmedOwnLease({ lease: adopted, mySessionId: 'sess-DISPATCHER' })).toBe(false);
+  });
+  it('the ADOPTING WORKER is confirmed mine even though ownerSession belongs to the dispatcher', () => {
+    expect(isConfirmedOwnLease({ lease: adopted, mySessionId: 'sess-WORKER' })).toBe(true);
+  });
+  it('an UNADOPTED dispatched lease (no declared occupant yet) still confirms the ownerSession match', () => {
+    expect(isConfirmedOwnLease({ lease: dispatched, mySessionId: 'sess-DISPATCHER' })).toBe(true);
+  });
+
+  it('CONTESTED — an ownerSession match is NOT confirmed mine when a sibling lane shares that ownerSession (workflowLane/conveyor topology)', () => {
+    const mine = leaseBody({ session: 'Mac:2', acquiredAt: at, ownerSession: 'sess-SHARED', workflowLane: true, holder: 'h-mine' });
+    const sibling = leaseBody({ session: 'Mac:3', acquiredAt: at, ownerSession: 'sess-SHARED', workflowLane: true, holder: 'h-sib' });
+    expect(isConfirmedOwnLease({ lease: mine, mySessionId: 'sess-SHARED', siblingLeases: [sibling] })).toBe(false);
+  });
+  it('UNCONTESTED — an ownerSession match is still confirmed mine when no sibling lease shares it (the ordinary solo topology, unchanged)', () => {
+    const mine = leaseBody({ session: 'Mac:2', acquiredAt: at, ownerSession: 'sess-SOLO' });
+    const other = leaseBody({ session: 'Mac:3', acquiredAt: at, ownerSession: 'sess-OTHER' });
+    expect(isConfirmedOwnLease({ lease: mine, mySessionId: 'sess-SOLO', siblingLeases: [other] })).toBe(true);
+    expect(isConfirmedOwnLease({ lease: mine, mySessionId: 'sess-SOLO' })).toBe(true); // no siblingLeases arg at all
+  });
 });
 
 describe('leaseOwnedByCaller (#2452 Gap 2 — release ownership survives a defaultSession() host:pid change)', () => {
