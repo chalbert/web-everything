@@ -453,6 +453,53 @@ Read digests for every open item under the `#2753`/`#3029`/`#2612` clusters plus
 4. `#2997` — finish the Edit/Write lease-check half; this session's own near-miss is a live argument for it.
 5. Everything else in bucket 3, ordered by how directly it touches the dispatch/verify path this session just built versus how far downstream (review/drain/product-shell) it sits.
 
+### The cross-session learnings pool held ~24 UNADJUDICATED machinery-relevant entries — never `/harvest`-ed
+
+Checked `~/.claude/conveyor/learnings/*.jsonl` (51 files total, spanning 2026-08-08 through today) for anything
+machinery-relevant, since a formal `/harvest` has evidently never run against this backlog. Not adjudicated
+here (that is `/harvest`'s job, not this write-up's) — the highest-confidence, most actionable ones, so the
+next session does not have to re-discover them from a cold pool:
+
+- **Independent, repeated confirmation that #3390 needs to land to `main` now.** Three separate close-sweeps
+  (2026-08-29, files `close-20260829-104521`, `close-20260829-134831`, `close-20260829-201817`) hit the exact
+  bug #3390 already fixes on this branch — `acquire` silently discards a lane's committed-but-unpushed work,
+  with no warning. One entry names it outright: *"Land the existing open guard (#3390, currently only on the
+  unmerged `lane/mechanical-dispatcher` branch) onto `main`."* This is independent field evidence the fix is
+  overdue, not just theoretically nice — raises #3390's priority above where the bookkeeping-debt bucket above
+  placed it.
+- **#3378 ("verify-lane has no sanctioned way to clear a genuinely stale marker") shows `status: resolved`,
+  but at least 8 pool entries — several dated TODAY (`close-20260829-120405`, `-121022`, `-134831`,
+  `-143949`, `-144914`, `-192917`, `-201817`, `note-20260829-131901`) — describe hitting exactly that
+  problem: `verify-lane reset` still refuses to clear a stale marker whenever ANY lease is live, even the
+  caller's OWN live lease.** Either the shipped fix does not cover this case, or it has not reached whatever
+  these sessions ran against. Re-verify #3378's actual fix against this specific case (own-live-lease, not
+  foreign-lease) before trusting the resolved status.
+- **`we:scripts/verify-lane.mjs` silently ignores an unrecognized `--checkout=` flag and falls back to
+  `process.cwd()`** (the real flag is `--repo=`) — pool file `close-20260829-134831`. This is the SAME
+  missing-flag-validation footgun this session already fixed in `we:scripts/lane-pool.mjs` (`KNOWN_FLAGS`),
+  in a sibling script this session also edited today for #3105. Cheap, high-confidence, same fix shape —
+  a strong candidate for the very next small build.
+- **A dispatch with `WE_DISPATCH_AGENT_ARGS` unset hangs an agent silently before it reaches its brief's
+  first step** — no PR, no signal, could sit for days (pool file `close-20260829-140007`). Directly on-theme
+  for this epic's whole "no silent failure" mandate.
+- **Orphaned `conveyor-*` background OS sessions found still alive 12 days after their last activity, with no
+  reaper for the process itself** — only the lane LEASE gets reaped (`we:scripts/conveyor/lease-reaper.mjs`),
+  never the OS-level session it was attached to (pool files `close-20260829-144249`, `close-20260829-145645`).
+- **Delivery agents dispatched against backlog items already marked resolved, silently redoing shipped work**
+  (pool file `close-20260829-155919`) — no validation at the `claude --bg` spawn point that the target item is
+  still open/ready.
+- **A `verify-lane` run under load can take 15–25 minutes and outlast a lane's lease TTL mid-run, so another
+  session reclaims the lane and orphans the in-progress commit** (pool file `close-20260829-162705`) — directly
+  relevant to THIS session's own new `we:scripts/conveyor/verify-dispatch.mjs` pass, which can now also run the
+  gate for a long time from the runner's side; worth checking whether the runner's own lease (if any) or the
+  dispatched agent's lane lease could suffer the identical race.
+
+None of the above have been filed as their own backlog items yet (verified: no open item title-matches any of
+these specifically, beyond #3390/#3378 already covering the first two). A formal `/harvest` pass — dedup
+across the full 51-file pool, red-team, route survivors to backlog/agent-memory — was deliberately NOT run
+this session (it lands via its own PR, out of scope for a session told not to build further); it is the
+natural first move for whoever picks this up next, before adding more to the board from scratch.
+
 ## Goal-vs-filed gap sweep (2026-08-30) — what the stated goal needs that nobody filed a card for
 
 Prior sessions' own sweeps (see the unlanded `origin/lane/mechanical-dispatcher` branch's session updates)
