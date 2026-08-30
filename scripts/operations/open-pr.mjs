@@ -275,8 +275,11 @@ export function openPrOperation({ parkLabels } = {}) {
  * edit a request that was never the problem. Found by running the operation, not by reading it.
  */
 export const HOME_REASONS = Object.freeze({
-  // opened
-  opened: 'opened', parked: 'opened', 'merged-git-fallback': 'opened',
+  // opened — `enqueued`/`labelled-on-green` are `--label-on-green`'s two terminal reasons (pr-land.mjs's
+  // `PLAN.triggerDrain ? 'enqueued' : 'labelled-on-green'`): the PR is real and labelled ready-to-merge,
+  // same as `parked`, just not merged by this call. Missing here, they fell to `unrun` and the sink threw
+  // "the PR was NOT opened" for a PR that had, in fact, opened — hit live 7 times across 2026-08-29/30.
+  opened: 'opened', parked: 'opened', 'merged-git-fallback': 'opened', enqueued: 'opened', 'labelled-on-green': 'opened',
   // a guard answered — fix the request or the lane
   'bad-park': 'refused', 'bad-ref': 'refused', 'empty-body': 'refused', 'locus-prefix': 'refused',
   'no-ref': 'refused', 'no-such-src': 'refused', behind: 'refused', conflict: 'refused',

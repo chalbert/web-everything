@@ -348,7 +348,7 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
     for (const reason of ['gh-error', 'push-failed', 'check-timeout', 'blocked-on-infra', 'fallback-failed']) {
       expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'unrun' });
     }
-    for (const reason of ['opened', 'parked', 'merged-git-fallback']) {
+    for (const reason of ['opened', 'parked', 'merged-git-fallback', 'enqueued', 'labelled-on-green']) {
       expect({ reason, outcome: outcomeFor(reason) }).toEqual({ reason, outcome: 'opened' });
     }
     // Every key of the table is one of the three, so a typo'd value cannot slip in.
@@ -396,7 +396,14 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
    */
   it('has an opinion about every reason pr-land can actually emit', () => {
     const src = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'pr-land.mjs'), 'utf8');
-    const emitted = [...src.matchAll(/reason:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+    const direct = [...src.matchAll(/reason:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+    // A reason picked by a ternary (`reason: cond ? 'a' : 'b'`, e.g. label-on-green's enqueued/labelled-on-green
+    // split) has no literal directly after `reason:`, so the direct scan above misses BOTH branches — this is
+    // exactly how `enqueued`/`labelled-on-green` went unclassified and got reported as `unrun` failures for two
+    // days before anyone traced it back to this table.
+    const ternary = [...src.matchAll(/reason:\s*[\w.]+\s*\?\s*'([a-z-]+)'\s*:\s*'([a-z-]+)'/g)]
+      .flatMap((m) => [m[1], m[2]]);
+    const emitted = [...direct, ...ternary];
     expect(emitted.length).toBeGreaterThan(10);
     const unknown = [...new Set(emitted)].filter((r) => !(r in HOME_REASONS) && r !== 'dry-run');
     expect(unknown, `pr-land emits reason(s) HOME_REASONS does not classify: ${unknown.join(', ')}`).toEqual([]);
@@ -474,6 +481,16 @@ describe('the io shell — one spawn of the home, and no second route', () => {
   it('throws on unrun, and hands the caller the argv to submit elsewhere', async () => {
     const sinks = createOpenPrSinks({ run: () => ({ outcome: 'unrun', reason: 'gh not authenticated' }) });
     await expect(sinks[SUBMIT_PR_EFFECT]({ argv: ['--ref=lane/x'] })).rejects.toThrow(/--ref=lane\/x/);
+  });
+
+  /**
+   * A `--dry-run` also classifies as `unrun` (nothing was opened) — but it is the REQUESTED outcome, not an
+   * environment failure, so it must return the plan rather than throw. Found live: the skill's own "dry-run
+   * first" step (`--dryRun=true`) hit this throw for a plan that rendered correctly.
+   */
+  it('does NOT throw on a requested dry run, even though it is also unrun', async () => {
+    const sinks = createOpenPrSinks({ run: () => ({ outcome: 'unrun', reason: 'dry-run', plan: ['gh pr create …'] }) });
+    await expect(sinks[SUBMIT_PR_EFFECT]({ argv: ['--ref=lane/x', '--dry-run'] })).resolves.toMatchObject({ outcome: 'unrun', reason: 'dry-run' });
   });
 
   /**

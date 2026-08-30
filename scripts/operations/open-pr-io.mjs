@@ -52,7 +52,11 @@ export function createOpenPrSinks({ run = createPrLandRunner() } = {}) {
   return {
     ['open-pr.submit']: async (payload) => {
       const out = run({ argv: payload.argv });
-      if (out.outcome === 'unrun') {
+      // A REQUESTED `--dry-run` classifies as `unrun` too (it opens nothing, by design), but it is not the
+      // "environment could not complete" case this throw exists for — the caller asked for a rehearsal and
+      // got one. Throwing here misreports a working preview as a failure (found dogfooding this operation's
+      // own step-2 dry-run instructions).
+      if (out.outcome === 'unrun' && !payload.argv.includes('--dry-run')) {
         throw new Error(
           `open-pr: pr-land did not report a result — ${out.reason}. The PR was NOT opened, and this is not a `
           + 'refusal you can fix by editing the request. On a host with no `gh` credential this is expected: '
