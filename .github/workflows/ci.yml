@@ -199,6 +199,14 @@ jobs:
         working-directory: web-everything
         run: npm run check:standards
 
+      # The real-git/real-subprocess tier `vitest.config.ts` excludes (see its `test.exclude` comment) —
+      # split out so `npm run test:unit` (and everything that shells it locally: `verify-lane.mjs`'s gate,
+      # `npm test`) no longer pays real git/subprocess cost per lane. Runs here so the required `test` gate
+      # still verifies these on every push before merge — only the LOCAL per-lane cost dropped.
+      - name: Real-git integration suite (lane-pool, operations transport)
+        working-directory: web-everything
+        run: npm run test:integration:vitest
+
   # Deploy-smoke + deterministic interaction lane. Split OUT of `test` so the fast correctness
   # lane (coverage + gate) no longer waits on the ~25s docs build and the ~54s Playwright install +
   # interaction run — the two now run on parallel runners, cutting CI wall-clock from ~3m to ~1m50s.

@@ -1,15 +1,5 @@
-import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-// #449 (per #606): WE consumes the plug platform layer as the `@frontierui/plugs` package — dev-time
-// resolved to the sibling Frontier UI source (mirrors vite.config.mts). The rewritten block tests
-// import `@frontierui/plugs/*`, so the vitest runner needs the same alias.
-const fuiPlugsRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../frontierui/plugs');
-// #1910: the webtheme runtime relocated to fui:webtheme (#1907, per #1282). WE's remaining runtime
-// consumer — the reproduction-parity harness — imports it via `@frontierui/webtheme`, dev-time resolved
-// to the sibling FUI source (mirrors the `@frontierui/plugs` alias). WE keeps only the contract + vectors.
-const fuiWebthemeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../frontierui/webtheme');
+import { configDefaults, defineConfig } from 'vitest/config';
+import { weAlias } from './vitest.shared';
 
 export default defineConfig({
   // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
@@ -123,56 +113,44 @@ export default defineConfig({
       'tests/a11y/**/__tests__/**/*.test.ts', // pure a11y-gate helpers (e.g. sitemap scope-C derivation, #847) — Playwright owns the *.spec.ts lane
       'functions/**/__tests__/**/*.test.{ts,tsx}', // Cloudflare Pages Functions — phase-1 deploy gate (#1137)
     ],
-    // #2407: the hermetic gate-entrypoint integration test spawns two REAL `node` child processes (driving
-    // the actual merge-ai-prs.mjs CLI end-to-end, see that file's header). Alone it's ~3s; under full-suite
-    // CPU contention from OTHER concurrent worker threads/processes (e.g. the lane-pool subprocess tests)
-    // it measured ~51s. Routing just this one file to its own single `forks` process keeps its subprocess
-    // spawns off the shared `threads` worker pool the rest of the suite runs on, instead of contending with
-    // every other file for the same pool of worker threads. Scoped to this file only — no other test's pool
-    // assignment changes.
-    // #3037 (PR #1211 round 2, G3): `wake-cli.test.mjs` joins it for the same reason and with the same
-    // measurement behind it. It drives the REAL waker CLI in a `node` child whose `claude` is an `sh` stub,
-    // and on the shared `threads` pool that child competed with every other worker for CPU — the stub's own
-    // spawn missed the observer's 15-second bound roughly one `--shard=1/2` run in five, and the test failed
-    // on an assertion whose subject had never been reached. The bound is now removable per-process
-    // (`WE_DISPATCH_LIST_TIMEOUT_MS=0`, which the test sets) and this keeps its subprocess spawns off the
-    // shared pool as well: the race is removed, and then the contention that produced it is too.
-    // #xp2pmg4: `lane-pool-acquire-base.test.mjs` and `publish-secret-gate.test.mjs` join the same override
-    // for the same underlying reason — both spin up real `git init`/`git clone` fixture repos, and those
-    // subprocess spawns are exactly the CPU contention the comment above already names as a cost on the
-    // shared `threads` pool. Measured wall-clock on main before this change: lane-pool-acquire-base.test.mjs
-    // ~202.4s (13 tests), publish-secret-gate.test.mjs ~40.6s (12 tests) — both dominate the unit-test/
-    // verify-lane gate far beyond anything else in the suite. This is routing-only: it moves the files onto
-    // the same isolated single `forks` process as their siblings above, with no change to the tests
-    // themselves (replacing the real git subprocesses with mocks is a separate, bigger design call).
-    // `dispatch-spawn-live.test.mjs` joins for the identical reason: it spawns several real `node` child
-    // processes per test (through `defaultSpawnAgent`'s real `execFileSync`), including one case that
-    // compares the wall-clock of a blocking spawn against a non-blocking one. On the shared `threads` pool,
-    // contention from OTHER concurrent worker threads/processes inflated real subprocess spawn overhead
-    // enough to blow that comparison — and, under enough load, to trip `execFileSync`'s own `ETIMEDOUT`.
-    // Isolating it here removes the contention rather than only widening margins to tolerate it.
-    poolMatchGlobs: [
-      ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
-      ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
-      ['scripts/__tests__/lane-pool-acquire-base.test.mjs', 'forks'],
-      ['scripts/__tests__/publish-secret-gate.test.mjs', 'forks'],
-      ['scripts/operations/__tests__/dispatch-spawn-live.test.mjs', 'forks'],
+    // These files all shell real `git init`/`clone`/`push` or spawn real `node` child processes per test
+    // (proof-of-CLI-behavior fixtures, not pure-logic unit tests) and moved out to their own
+    // `vitest.integration.config.ts` (`npm run test:integration:vitest`), reusing the split the repo already
+    // draws for Playwright (`test:unit` vs `test:integration`). Two motivations, not one: (1) contention —
+    // sharing the `threads` pool with these subprocess-heavy files inflated OTHER files' cost (e.g. the
+    // gate-entrypoint-integration test went ~3s alone → ~51s under full-suite contention); (2) local
+    // resource pressure under N concurrently-running lanes — `verify-lane.mjs`'s default gate (#3372) is
+    // diff-driven and already skips unrelated tests, but ANY lane touching `scripts/` (a deny-by-default
+    // sensitive surface) falls back to the full `npm run test:unit`, which no longer needs to re-prove real
+    // git semantics locally — `verify-lane.mjs` is a pre-CI sanity check, not the authority; CI's required
+    // `test` job (which now runs the integration config too) still verifies these on every push before merge.
+    // See `vitest.integration.config.ts`'s header for the full file list and the pool assignment within it.
+    exclude: [
+      ...configDefaults.exclude,
+      'scripts/__tests__/gate-entrypoint-integration.test.mjs',
+      'scripts/operations/__tests__/wake-cli.test.mjs',
+      'scripts/__tests__/lane-pool-acquire-base.test.mjs',
+      'scripts/__tests__/publish-secret-gate.test.mjs',
+      'scripts/operations/__tests__/dispatch-spawn-live.test.mjs',
+      'scripts/__tests__/lane-pool-reserve.test.mjs',
+      'scripts/__tests__/lane-pool-cross-pool.test.mjs',
+      'scripts/__tests__/lane-pool-reap-on-acquire.test.mjs',
+      'scripts/__tests__/lane-pool-siblings.test.mjs',
+      'scripts/__tests__/lane-pool-acquirable.test.mjs',
+      'scripts/__tests__/lane-pool-refresh-guard.test.mjs',
+      'scripts/__tests__/lane-pool-release-ownership.test.mjs',
+      'scripts/__tests__/lane-pool-item-map.test.mjs',
+      'scripts/__tests__/lane-pool-ahead-provably-pushed-single-spawn.test.mjs',
+      'scripts/__tests__/lane-pool-acquire-stale-origin.test.mjs',
+      'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
+      'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
+      'scripts/operations/__tests__/gate-health-integration.test.mjs',
+      'scripts/operations/__tests__/mutation-check-integration.test.mjs',
+      'scripts/operations/__tests__/record-verdict-integration.test.mjs',
+      'scripts/operations/__tests__/stage-pr-view-integration.test.mjs',
     ],
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
   },
   resolve: {
-    alias: {
-      // #449/#1047: the block runtime + its tests import the plug layer via `@frontierui/plugs/*` (FUI
-      // owns the impl, WE consumes it as a no-leakage client) — resolve to the sibling FUI source. The
-      // local-plugs sub-aliases (`@core`/`@webregistries`/… + `virtual:trait-manifest`) were dropped with
-      // `we:plugs/` under #1047: every consumer lived inside that tree, which now resides in FUI.
-      '@frontierui/plugs': fuiPlugsRoot,
-      // #1910: the reproduction-parity harness resolves the relocated webtheme runtime here (impl→fui).
-      '@frontierui/webtheme': fuiWebthemeRoot,
-    },
+    alias: weAlias,
   },
 });
