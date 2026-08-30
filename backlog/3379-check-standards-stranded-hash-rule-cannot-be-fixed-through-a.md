@@ -13,7 +13,7 @@ tags: []
 Two live findings from tonight (2026-08-27), reproduced, not inferred.
 
 **1. `numberPendingHashes` did not fire when PR #1664 merged.** That PR's own content was the
-backlog card `we:backlog/x4jcqm4-verify-lane-has-no-sanctioned-way-...md`, scaffolded as a
+backlog card `we:backlog/3378-verify-lane-has-no-sanctioned-way-...md`, scaffolded as a
 hash-slug id per the normal JIT-numbering flow. It should have been renumbered to a real `NNN` at
 land time (per `we:scripts/lane-drain.mjs`'s `numberPendingHashes`, wrapped in
 `withNumberingLock`). After the merge, `git ls-tree -r origin/main -- backlog/` (verified with a
