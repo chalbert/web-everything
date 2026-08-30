@@ -8,6 +8,9 @@ scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/run-reco
 dateOpened: "2026-08-27"
 dateStarted: "2026-08-28"
 dateResolved: "2026-08-28"
+costTokens: "in:896 cw:2520535 cr:170802227 out:244830"
+costUsd: 116.73
+costSessions: 1
 graduatedTo: none
 tags: [operations, telemetry, conveyor, delivery]
 ---
