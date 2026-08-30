@@ -14,14 +14,21 @@ An **idle, clean, unmapped** lane clone under `~/workspace/.lanes/web-everything
 2. **A plain `node scripts/lane-pool.mjs acquire --lane=N --adopt` re-grab of a lane you just
    `release`d** — confirmed 2026-08-29. `release` drops the lease; the next `acquire --lane=N` on that
    now-unleased lane resets it to `origin/main` immediately, with no separate "refresh" step. This hits
-   a lane that is git-`clean` but **committed and ahead of `origin/main`** — the guard added in #3390
-   ("acquire --lane=N now refuses to reclaim a dirty/ahead lane without --force") did not catch this
-   case in practice; a clean-but-ahead lane still got silently reset. Concretely: filed a backlog item,
-   committed it, released the lane to clear a stale `verify-lane` marker (`reset` refuses while a lease
-   is live), then `acquire --lane=N --adopt`'d it back — the commit was gone, replaced by latest main.
+   a lane that is git-`clean` but **committed and ahead of `origin/main`**. (Corrected — an earlier
+   draft of this note said the guard from #3390 already existed on `main` and only missed this ahead
+   case; that was wrong. #3390 ("acquire --lane=N now refuses to reclaim a dirty/ahead lane without
+   --force") is still `status: open` — its fix commit lives only on the unmerged
+   `lane/mechanical-dispatcher` branch, confirmed via `git merge-base --is-ancestor <sha> main` →
+   false. On `main` today, the explicit `acquire --lane=N` path (`cmdAcquire`'s explicit-lane branch,
+   `scripts/lane-pool.mjs`) runs no `laneDirtyOrAhead` check at all before its `checkout -B --force` +
+   `clean -fd` reset — a dirty tree is exactly as unguarded as an ahead one.) Concretely: filed a
+   backlog item, committed it, released the lane to clear a stale `verify-lane` marker (`reset` refuses
+   while a lease is live), then `acquire --lane=N --adopt`'d it back — the commit was gone, replaced by
+   latest main.
 
 **Why:** the lane pool treats "no live lease" as "free to reset to main," regardless of whether the
-lane carries committed work — it only special-cases *dirty* (uncommitted), not *ahead* (committed).
+lane carries committed work. On the explicit `acquire --lane=N` path, neither case is special-cased
+today — dirty and ahead are equally unguarded until #3390 lands.
 
 **How to apply:**
 - Before editing in a lane, **own it** — `node scripts/lane-pool.mjs map --lane=N --item=NNN` (skips
