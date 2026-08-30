@@ -56,7 +56,13 @@ export function createOpenPrSinks({ run = createPrLandRunner() } = {}) {
       // "environment could not complete" case this throw exists for — the caller asked for a rehearsal and
       // got one. Throwing here misreports a working preview as a failure (found dogfooding this operation's
       // own step-2 dry-run instructions).
-      if (out.outcome === 'unrun' && !payload.argv.includes('--dry-run')) {
+      //
+      // Keyed on `out.reason === 'dry-run'` — the HOME'S OWN reported reason — never on whether `--dry-run`
+      // was in the request argv. A request can carry `--dry-run` and still genuinely fail to run (spawn
+      // error, kill signal, unparseable stdout) before pr-land ever reaches its own dry-run branch; keying
+      // on the request would silently swallow that as an unremarkable rehearsal instead of throwing it,
+      // masking a real infrastructure failure. Found by independent review of this very fix (PR #1715).
+      if (out.outcome === 'unrun' && out.reason !== 'dry-run') {
         throw new Error(
           `open-pr: pr-land did not report a result — ${out.reason}. The PR was NOT opened, and this is not a `
           + 'refusal you can fix by editing the request. On a host with no `gh` credential this is expected: '

@@ -494,6 +494,17 @@ describe('the io shell — one spawn of the home, and no second route', () => {
   });
 
   /**
+   * THE GAP INDEPENDENT REVIEW FOUND (PR #1715): a `--dry-run` REQUEST is not a guarantee pr-land ever reached
+   * its own dry-run branch. A spawn error, a kill signal, or unparseable stdout is `unrun` for a genuinely
+   * different reason, and must still throw — keying the exemption off the request's argv rather than the
+   * home's own reported `reason` would silently swallow exactly this as an unremarkable rehearsal.
+   */
+  it('STILL throws on a dry-run REQUEST whose actual reason is not dry-run — a real failure, not a rehearsal', async () => {
+    const sinks = createOpenPrSinks({ run: () => ({ outcome: 'unrun', reason: 'could not run pr-land: spawn ENOENT' }) });
+    await expect(sinks[SUBMIT_PR_EFFECT]({ argv: ['--ref=lane/x', '--dry-run'] })).rejects.toThrow(/spawn ENOENT/);
+  });
+
+  /**
    * THE ANTI-BYPASS ASSERTION. The whole point of routing through the home is undone the moment this shell
    * learns to talk to GitHub itself. It may reach `child_process` (to spawn the home) and nothing else that
    * can make a request.
