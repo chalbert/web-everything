@@ -2,10 +2,15 @@
 bornAs: x96ezuu
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateStarted: "2026-08-29"
+dateResolved: "2026-08-29"
+codifiedIn: one-off
+ratifiedBy: "Nicolas Gilbert (operator)"
+graduatedTo: ["xl43ch2", "xl0uw4f"]
 preparedDate: "2026-08-15"
-relatedTo: ["3010", "3012", "2606", "089", "428", "3001"]
+relatedTo: ["3010", "3012", "2606", "089", "428", "3001", "xl43ch2", "xl0uw4f"]
 tags: [product-strategy, conveyor, conformance, monetization, throughput, governance, statute-candidate]
 crossRef: { url: /backlog/3010-adopt-a-repo-wide-process-work-freeze-and-a-product-quota/, label: "The quota decision this changes (#3010)" }
 ---
@@ -192,6 +197,51 @@ not cover this and is not touched by anything below.
 
 Whoever rules #3010 must not be able to miss this card — hence the `crossRef` above and the reciprocal note
 on #3010 itself.
+
+## Ruling (2026-08-30, operator, in-session)
+
+Worked through live, one call at a time, rather than accepting the prepared defaults as-is. Two of the three
+calls below depart from the prepared text; the validation gate and the two forks below are kept in the record
+unedited as the analysis that was actually discussed, not as the standing answer.
+
+**Call 1 — the validation gate splits in two, rather than reading as one NOT-YET.**
+
+- **Go-to-market timing stays NOT-YET**, on the gate's own trigger (a real prospective customer/partner ask)
+  — unchanged from the prepared text below.
+- **Technical shape is ASSUME-YES, effective now.** The prepared text's own instruction — *"absent the ask, do
+  not build toward this"* — is overruled for the *build conditions* specifically (a real artifact-conformance
+  prover; the operation engine's HTTP interface published as a documented external surface, not only mounted
+  in plateau-app's dev panel). Those stop being dormant prerequisites gated on a customer ask and become live
+  target architecture: from now on, a relevant build decision in this area defaults to "would this hold up if
+  an external party depended on it," not "is this good enough for WE's own delivery loop today." Whether/when
+  it is ever sold stays gated on the same trigger as before; the technical shape does not wait for that.
+
+**Call 2 (Fork 1) — REJECTED as written. No third fixed enum value.** The prepared default — add
+`product-in-disguise` as one more closed value in `we:scripts/lib/output-mix-paths.json` — is a special case
+of a more general capability a real product needs, and building the special case first would need undoing
+later. Superseded by [#xl43ch2](xl43ch2-generalize-delivery-mix-classification-into-an-open-admin-co.md): an
+open, per-project tag set (not a closed enum) with admin-configurable per-tag targets, filed as its own epic.
+Neither Fork 1's (a) nor (b) is adopted.
+
+**Call 3 (Fork 2) — REJECTED as written. Not WE-scoped, and not deferred.** The prepared default — keep the
+instrument WE-only, revisit cross-repo reach only if the quota is ever gamed — is also superseded by
+#xl43ch2: since Call 1 commits this to being a real product capability, the tag/target system must be
+designed to work against **any repo a customer configures into the product**, from the start, not deferred as
+a later problem the way Fork 2 proposed. (This does not mean plateau-app/frontierui data gets wired in now —
+see #xl43ch2's own scope. It means the schema isn't allowed to assume "one repo.") Per-tenant access/zone
+boundaries are named as a forward design constraint on that same item, not built now.
+
+**Consequence for #3010.** #3010's own validation gate reads *"this flips to go once #3049's third-class
+question resolves."* That question is now resolved — not by adding a third class, but by superseding the
+whole closed-enum premise. #3010 itself is **not** ruled by this card; whoever rules it next should read
+#3010's numeric floor ("half") as one candidate configuration of #xl43ch2's target system once that exists,
+not as a value to hardcode into `we:docs/agent/platform-decisions.md` directly.
+
+**Also surfaced, filed separately, not part of this ruling:** while discussing where this machinery should
+live long-term, the operator noted the conveyor/dispatcher machinery (#3383/#3029/#2753) is intended to
+migrate to plateau-app eventually, which nothing currently records. Captured at
+[#xl0uw4f](xl0uw4f-the-delivery-machinery-is-meant-to-migrate-from-we-to-platea.md) rather than folded in
+here, since it is a separate architectural question from this card's product-vs-machinery classification one.
 
 ## Validation gate — package the conveyor/delivery-loop machinery as an external product, or keep it internal?
 

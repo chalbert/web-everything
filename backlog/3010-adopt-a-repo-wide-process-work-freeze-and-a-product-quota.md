@@ -5,10 +5,20 @@ size: 3
 status: open
 dateOpened: "2026-08-08"
 preparedDate: "2026-08-15"
-relatedTo: ["2907", "2606", "3012", "3013", "3049"]
+relatedTo: ["2907", "2606", "3012", "3013", "3049", "xl43ch2"]
 relatedReport: reports/2026-08-15-3010-freeze-quota-prep.md
 tags: [governance, throughput, backlog, statute-candidate]
 ---
+
+> **Note added 2026-08-30, on #3049's ratification.** The validation gate below reads *"this flips to go once
+> #3049's third-class question resolves."* It has resolved — not by adding a third class to the existing
+> two-class instrument, but by superseding the closed-enum premise entirely; see
+> [#3049's own Ruling](3049-the-conveyor-as-a-shippable-product-not-machinery-and-what-t.md#ruling-2026-08-30-operator-in-session)
+> and [#xl43ch2](xl43ch2-generalize-delivery-mix-classification-into-an-open-admin-co.md). Whoever rules this
+> card next should read the gate's "half" floor as one candidate configuration of #xl43ch2's admin-configurable
+> target system once that exists, not as a number to hardcode into a statute directly. This card itself is
+> **not** ruled by that ratification — Fork 1 (freeze scope) and the rest of this validation gate are still
+> open and unaffected.
 
 # Adopt a repo-wide process-work freeze and a product quota
 
