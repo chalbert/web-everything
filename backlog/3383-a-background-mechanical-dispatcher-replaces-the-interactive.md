@@ -143,3 +143,44 @@ any future lane reset. lane-11 itself still holds the working copy and has an oc
 5. **Decision #3384's own recommended fix** — the `<!-- ci-heal-committed: -->` self-report marker
    on `we:scripts/conveyor/ci-heal-mark.mjs` — is still unbuilt. The decision itself is ratified AND
    resolved; only the code is outstanding. A separate, smaller thread from this epic.
+
+## Goal-vs-filed gap sweep (2026-08-30) — what the stated goal needs that nobody filed a card for
+
+Prior sessions' own sweeps (see the unlanded `origin/lane/mechanical-dispatcher` branch's session updates)
+audited EXISTING backlog cards against current code and found stale/resolved items — a code-vs-card pass.
+This run asked the harder question instead: what does this epic's stated goal (zero interactive-session
+turns inside the delivery loop) require that has no card at all, across lifecycle, deployment shape,
+multi-tenancy, observability, durability, cost/billing, dispatch-surface security, testing/staging, and
+operator documentation. Read this card's full text (including the unlanded branch's four further
+2026-08-29/30 session updates), plus siblings #3029 and #2753, end to end.
+
+**Two categories checked and found already covered — not filed:**
+- **Deployment/hosting shape** (distributed lock vs. local file lock, shared DB vs. gitignored local state) —
+  fully covered by the ratified #2626 decision + tracked #2742 migration, which explicitly names
+  `we:skills-src/conveyor/runner-lock.mjs`'s split (local process guard stays local; arbitration becomes a
+  DO lease iff runners go multi-host) and `we:.operations/`'s file-store-behind-a-seam design, gated on the
+  #2703 trigger.
+- **Multi-tenancy/access control** — deliberately NOT filed. #3049 (ratified framing, not-yet verdict)
+  already holds productizing the conveyor externally at "NOT-YET, pending a real customer ask"; filing
+  speculative multi-tenant access-control work now would contradict that ruling, not fill a gap in it.
+
+**Five genuine gaps filed, each checked against the backlog first (searches cited in each card's digest):**
+
+- **#x2respm** — the supervisor has no reload lifecycle, only crash-restart (lifecycle/operability).
+- **#xetlhb5** — the supervisor/runner has no out-of-band alerting, only a JSONL log (observability/alerting).
+- **#xfmw9pt** — the ratified hosted-key-billed mode has no metering/billing/auth design (cost/billing +
+  dispatch-surface security).
+- **#xq3j6xn** — the dispatch-loop's own code is unregistered in TRUST_CHAIN, so a dispatched agent can
+  weaken it via ordinary agent-clearable review (dispatch-surface security; adjacent to #2937).
+- **#xfhficz** — no operator runbook exists for running/monitoring/recovering the dispatcher (operator
+  documentation).
+
+Each names the sibling precedent it extends (#2468/#2501 for reload, #2489/#2493 for alerting, #2909/#2937
+for the trust-chain gap) — this repo already solved each problem once, for a sibling resident process, and
+none of those fixes were carried over to this epic's own new machinery.
+
+**Not filed, and why:** several concrete operational findings from the 2026-08-29 session updates (the
+orphaned `conveyor-*` OS session with no process reaper, the `verify-lane` TTL-vs-long-gate-run race, the
+unset-`WE_DISPATCH_AGENT_ARGS` silent hang) are real but already surfaced in this card's own learnings-pool
+section, explicitly awaiting a `/harvest` pass — filing them here would duplicate that already-planned step
+rather than fill an unconsidered gap.
