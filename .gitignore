@@ -96,3 +96,9 @@ skills-src/drain/review-baseline-state.json
 # NOT the verdict ledger (#3007) — that is the durable merge authority and a different object entirely; see
 # scripts/operations/run-record.mjs. Never committed.
 .operations/
+# `check:health`'s report — recomputed fresh from current backlog state on every run (its own source
+# comment already disclaims it: "regenerable tool output, not a /research/ deliverable"). Was tracked, so
+# any lane that ran the close-out gate's diagnostic mode was left permanently dirty (`git status --porcelain`
+# gates lane-pool recycling), starving the lane pool (#1153 hit this before). Nobody reads the committed
+# copy as source of truth — every workflow reference re-runs the command. Generate on demand instead.
+audits/backlog-health-audit.md
