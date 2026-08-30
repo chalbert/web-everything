@@ -10,6 +10,12 @@ tags: [governance, conveyor, dispatch, agent-surface]
 
 # Ratify the "agents never run commands, only the mechanical layer does" dispatch doctrine
 
+`#3383`'s own spec states this doctrine; `#3105` already enforces one narrow instance of it (guard-bash
+denies a dispatched agent from running the gate directly), but the general rule has never gone through
+this repo's own decision process. This card names it explicitly, distinguishes it from the adjacent
+`#3188` (interactive-session bash restriction) and `#3401` (TRUST_CHAIN scrutiny), and forks on scope +
+the missing-operation fallback.
+
 ## The doctrine, stated where it actually lives today
 
 `#3383`'s own spec states the target shape plainly: *"Subagents only edit code. Every command they'd
