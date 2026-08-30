@@ -127,6 +127,12 @@ export default defineConfig({
     // See `vitest.integration.config.ts`'s header for the full file list and the pool assignment within it.
     exclude: [
       ...configDefaults.exclude,
+      // #3061 real-CLI regression proof (`check-standards.mjs`/`lane-review.mjs`, captured through a real
+      // pipe — an in-process call can't reproduce the truncation bug this exists to catch). Measured at
+      // 88.9s total, 2 of its tests alone at 48.4s/39.7s — the single most expensive file in the unit suite,
+      // more than every git-fixture file above combined. Found via the CI slow-test report
+      // (`scripts/dev/report-slow-tests.mjs`), not the original file-by-file audit that found the rest.
+      'scripts/__tests__/stdout-flush.test.mjs',
       'scripts/__tests__/gate-entrypoint-integration.test.mjs',
       'scripts/operations/__tests__/wake-cli.test.mjs',
       'scripts/__tests__/lane-pool-acquire-base.test.mjs',
