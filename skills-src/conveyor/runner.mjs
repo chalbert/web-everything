@@ -213,17 +213,23 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  resource from a lane lease), the reconcile-fix dispatch pass (#3438 — dispatches the fix agent
  *  `we:scripts/conveyor/reconcile-pass.mjs` decides is owed for a bounced PR with nothing live working it, a
  *  genuinely different population from `decisions.spawnFixes`'s own tick-core-launched-PRs-only scope; see that
- *  file's own header for the full reasoning), and (#3421) the blocking-hiccup sink. All five are best-effort: a
- *  failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the
- *  sole writer to `main`.
+ *  file's own header for the full reasoning), the blocking-hiccup sink (#3421), and the verify-dispatch pass
+ *  (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's own process, unbound by an
+ *  agent's 120s foreground window). All six are best-effort: a failure is swallowed (logged to stderr) and
+ *  never gates the tick. Never a local merge — the drain stays the sole writer to `main`.
  *
- *  THE HICCUP SINK is the ONLY one of the five that reads `out` (this tick's already-computed
+ *  THE HICCUP SINK is the ONLY one of the six that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
  *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
- *  hiccup-sink.mjs `fileHiccup`. */
+ *  hiccup-sink.mjs `fileHiccup`.
+ *
+ *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
+ *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
+ *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
+ *  interactive agent's Bash call is. */
 function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out } = {}) => {
     const { execFileSync } = await import('node:child_process');
@@ -240,6 +246,7 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
     runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
+    runQuiet('conveyor/verify-dispatch.mjs'); // #3105
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is

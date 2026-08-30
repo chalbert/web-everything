@@ -866,7 +866,12 @@ export function createDispatchSinks({
       const argv = buildAgentArgv({ sessionId, payload, extraArgs, systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE });
       let stdout;
       try {
-        stdout = spawnAgent(argv, { cwd: root });
+        // #3105 — mark this session as a MECHANICALLY DISPATCHED delivery/fix/ci-heal agent, via env (inherited
+        // by the whole `claude --bg` process tree). `scripts/guard-bash.mjs` reads it to deny a dispatched
+        // session from ever running the verification set (verify-lane/check:standards/test:unit) directly — it
+        // must `request` + poll `check` instead, so the gate's own long runtime is never the agent's own Bash
+        // call's problem. An interactive operator session (this var unset) is completely unaffected.
+        stdout = spawnAgent(argv, { cwd: root, env: { ...process.env, WE_DISPATCH_KIND: String(payload.launchKind || 'build') } });
       } catch (e) {
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { sessionId });

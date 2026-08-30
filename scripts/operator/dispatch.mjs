@@ -1,6 +1,16 @@
 /**
  * dispatch.mjs — the load-bearing primitives from `we:scripts/operator/converge.py`, ported to Node (#3383).
  *
+ * ⚠️ SUPERSEDED (#3383). CI-heal now lives in the actual mechanized loop, not here: `we:scripts/conveyor/
+ * tick-core.mjs`'s `planCiHealSpawns` surfaces the dispatch decision (with the retry cap + durable attempt
+ * counter + an explicit `ci-heal-exhausted` note pointing a human at `/review <pr>`), and `we:skills-src/
+ * conveyor/runner.mjs`'s `dispatchPass` calls `we:scripts/operations/dispatch-lane.mjs`'s `ci-heal` launch
+ * kind to spawn the fix agent. Nothing in the live runner imports this file — verified by grepping for
+ * importers of `operator/dispatch.mjs` and `operator/converge.py` repo-wide; both return none outside their
+ * own tests. Kept only as the historical prototype record and to unblock a future PORT of `converge()` /
+ * `make_landable()` if that ever becomes the plan; do not wire a new caller to `runAgent`/`healCi` here — use
+ * `dispatch-lane`'s `ci-heal` kind instead.
+ *
  * WHY A PORT, NOT A REWRITE. `converge.py` is a PROVEN PROTOTYPE (see its own header): one supervisor thread
  * per PR, spawning a headless `claude -p` FIX agent then an independent `claude -p` REVIEWER, reading the
  * label to decide the next round. It worked live across a full session. This file ports exactly the three

@@ -136,17 +136,24 @@ A WE item's gate is `npm run check:standards`. For a cross-locus item, run **tha
 (look up `LOCI[item.locus]` in `check-standards-rules.mjs`). **The gate must be green before you push** — a red
 gate is a hard stop (see *Escalations*). Then resolve:
 
-**Run the gate in the FOREGROUND and never background it.** Backgrounding your suite run and then yielding is
-the exact stall #2833 exists to kill: a run you walk away from leaves the lane half-verified but LOOKING done,
-and nothing reclaims it. This is no longer just guidance: a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`,
-#2833 finding 3) **DENIES** a backgrounded verification-set run (`verify-lane` / `check:standards` / `test:unit`)
-— whether via the Bash `run_in_background` param or a shell `&`/`nohup` — so the footgun is structurally blocked,
-not merely discouraged. The authoritative, marker-recording synchronous verification happens at step 8 against
-your FINAL commit (via `scripts/verify-lane.mjs`); the gate here is the same suites, run green so you may resolve.
+**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
+well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+auto-backgrounded by the tool itself, and you stall with no error — the exact #2833 shape, just reached without
+ever typing `&`. This is not just guidance: a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105)
+**DENIES** a dispatched agent from running the verification set (`verify-lane` / `run.mjs verify` /
+`check:standards` / `test:unit`) directly, in any form. The runner's own long-lived process (unbound by your
+turn's window) runs the gate for you:
 
 ```bash
-# The DECLARED form — one answer, three values, and the same marker `pr-land` gates on:
-node scripts/operations/run.mjs verify --checkout="$PWD" --json     # FOREGROUND, blocking; never `&`
+node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
+node scripts/verify-lane.mjs check --json          # fast marker read; repeat across turns until it settles — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
+```
+
+`check`'s `status` is `running` while your request is still pending or in flight (poll again next turn),
+`green`/`red` once the runner has actually run it. Only once you see `green` do you resolve:
+
+```bash
 node scripts/operations/run.mjs resolve --ref={{ITEM_NUM}} --json   # --ref= is a FLAG, not a positional
 ```
 
@@ -158,13 +165,10 @@ rather than dropping it. Both run the same four refusals — `open-children` (#6
 `verdict`, so a delivery agent branches on a value instead of parsing stderr, and a `--force=true` that
 steps over one is recorded rather than warned about.
 
-**Read `verdict.ok`, and read `verdict.unrun` before you believe a green.** The operation shells
-`we:scripts/verify-lane.mjs` and maps its exit codes and marker vocabulary onto three outcomes: `pass`, `fail`,
-and `unrun`. `unrun` covers a crashed runner, a killed suite, a `corrupt` marker and a marker for a DIFFERENT
-commit — none of which is a failure the suites observed, and none of which may satisfy this gate. It is the
-value a hand-rolled `check:standards | grep` cannot produce, and therefore the one that used to be lost. The
-raw command still works and is what the operation runs; use the operation so the answer is data rather than
-your reading of a terminal.
+**Read `check`'s `status`/`ok`, never just its exit code.** `{sha, status, reason, ok, detail}` — `status` is
+`green` (ok) / `red` (ok:false, a real gate failure) / `running` (not yet settled — poll again, this is NOT a
+failure) / `corrupt` (ok:false — the marker itself is torn; `request` again) / `absent` (ok:false — nothing was
+ever requested for this HEAD; `request` it). Only `green` may satisfy this gate.
 
 ### 6. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
 
@@ -240,17 +244,13 @@ printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 
-# #2833 — synchronously verify the FINAL HEAD you are about to land, in the FOREGROUND (blocks until the
-# suites exit), recording a green marker keyed to this exact commit. Do NOT background this and yield: a
-# half-run verification strands a `running` marker and pr-land's finish-guard (--require-verified) will
-# refuse to publish.
-#
-# READ `verdict.ok` — DO NOT READ THE EXIT CODE. The operation exits 0 whenever the RUN completed, which it
-# does even when the suites went red or never ran: `{ok: false, blocking: [...]}` arrives on exit 0. The raw
-# home's `exit 2 = red` contract is the HOME's, and it does not survive the operation (#x0uj8hj). Proceed only
-# on `ok: true` with an empty `blocking`; `unrun` is not a pass. `open-pr --requireVerified=true` below is the
-# independent backstop — it re-reads the marker and refuses regardless of what you concluded here.
-node scripts/operations/run.mjs verify --checkout="$PWD" --gate="npm run check:standards" --json   # (or the item's locus gate)
+# #2833/#3105 — verify the FINAL HEAD you are about to land, keyed to this exact commit. Same request-then-poll
+# shape as step 5 — you cannot run this yourself (guard-bash denies it); request it and poll `check` across
+# your own turns until it settles GREEN. Do NOT interpret a lingering `running` status as a failure: it means
+# the runner has not picked it up yet (or is still running it), not that anything went wrong — keep polling.
+node scripts/verify-lane.mjs request              # targets HEAD as of the commit you just made — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
+# … poll on later turns …
+node scripts/verify-lane.mjs check --json          # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 
 node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base=main \
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json

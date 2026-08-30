@@ -389,6 +389,70 @@ re-verified everything with `cd <lane-dir> && <command>` embedded in every singl
 **Always embed the `cd` in the same command as the thing being verified — never assume a prior `cd` carried
 over — especially right after a background-task notification.**
 
+## Session update (2026-08-29/30) — #3105 built end-to-end; a machinery-wide sweep for the next session
+
+This session picked #3105 (the gate-timeout stall) as instructed, walked its fork in prose before building
+(operator call: neither shrink-the-gate nor CI-only — a dispatched agent must never run the gate ITSELF at
+all; it requests, the mechanical runner executes with no per-turn ceiling, the agent polls), then widened into
+a full sweep of every open machinery item, not just a bug hunt, per the operator's explicit ask.
+
+### Built and tested this session, on `origin/lane/mechanical-dispatcher` (commit `b09ff7a8` + this update)
+
+1. **`we:scripts/lane-pool.mjs` fails loud on an unrecognized flag or stray positional.** Found live: `acquire --help` (meant to print usage) was silently accepted as a plain no-`--lane` acquire and reset a live lane with no error. `KNOWN_FLAGS` allowlist + positional check, both fail loud. Tests: `we:scripts/__tests__/lane-pool-flag-validation.test.mjs` (new). Landed, pushed, verified against the full `lane-pool*` suite (135 tests) — the same incident class #2997/#3390/#2924 already guard against elsewhere; this is the arg-parsing arm.
+2. **`we:scripts/operator/dispatch.mjs` and `we:scripts/operator/converge.py` marked SUPERSEDED**, not deleted. Their `heal_ci`/`run_agent` prototype logic has a real, tested, WIRED successor: `we:scripts/conveyor/tick-core.mjs`'s `planCiHealSpawns` (retry cap + durable attempt counter + an explicit `ci-heal-exhausted` note pointing a human at `/review <pr>`) surfaces the decision, and `we:scripts/operations/dispatch-lane.mjs`'s `ci-heal` launch kind, driven by `we:skills-src/conveyor/runner.mjs`'s `dispatchPass`, actually spawns the fix agent. Verified nothing live imports either prototype file (repo-wide grep). This closes epic Done-when #3 ("subsumed or explicitly superseded, not left running in parallel") — it was neither running in parallel NOR marked; now it's marked.
+3. **#3105, the full mechanism:**
+   - `we:scripts/verify-lane.mjs` gained a `request` mode: stamps the exact same `running` marker `verify` already writes (same start-write guard, same vocabulary — `verifyGateDecision` needed ZERO changes) and returns immediately. No new marker status.
+   - `we:scripts/conveyor/verify-dispatch.mjs` (new): a mechanical runner pass — pure decision (`laneNeedsVerifyDispatch`) plus an IO shell that scans every lane pool for a `request`-stamped marker matching that lane's OWN current HEAD, and runs `we:scripts/verify-lane.mjs` itself, as the runner's own long-lived process. No 120s ceiling applies here — that ceiling is a property of the interactive tool's own foreground window, not of a subprocess the runner spawns from its own process.
+   - Wired into `we:skills-src/conveyor/runner.mjs`'s `makeCliMechanicalPasses` as a third pass, alongside infra-blocked recovery and the lease-reaper.
+   - `we:scripts/guard-bash.mjs`: a NEW rule, `dispatchedAgentVerificationReason`, denies a mechanically-dispatched agent from running the verification set directly (`verify-lane` default mode, the declared `we:scripts/operations/run.mjs verify` operation — widened `VERIFICATION_RUN` to catch it too since it shells the identical suite run, `check:standards`, `test:unit`) in ANY form, foreground or background — not just backgrounded, which is all the PRE-EXISTING #2833 rule caught. `request`/`check`/`reset` stay exempt (the sanctioned path). Gated on a NEW `WE_DISPATCH_KIND` env var `we:scripts/operations/dispatch-lane-io.mjs` now stamps onto every dispatched agent's `claude --bg` process env (`payload.launchKind`) — unset for an interactive operator session, which is completely unaffected. This is the operator's own explicit ask from earlier in this session: no raw command execution inside a dispatched session, only a request the machinery fulfills.
+   - `we:skills-src/conveyor/delivery-agent-brief.md` steps 5 and 8 rewritten to the request-then-poll pattern.
+   - Filed `#xab3jh7` ("Fold the gate's request/check modes into the declared verify operation") for the `@operation-home-ok` gap `check:standards`'s #3224 rule correctly caught: `request`/`check` bypass the declared `verify` operation today, marked not built — a deliberately small, prepared follow-up, not built now (the operator's own "prepare correctly, don't build ahead of need" instinct from this session).
+   - Tests: `we:scripts/__tests__/verify-lane.test.mjs` (new `request` describe block), `we:scripts/conveyor/__tests__/verify-dispatch.test.mjs` (new file, 9 tests), `we:scripts/__tests__/guard-bash.test.mjs` (new describe block, 7 tests), `we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs` (2 new tests pinning `WE_DISPATCH_KIND`). `check:standards` 0 errors. Full suite run pending at session end — confirm green before landing.
+
+**Not yet done for #3105:** an actual live dispatch through this path has not been run (same "genuinely unverified" caveat #3118 already named for `--bg`/session-handle behavior) — folding `request`/`check` into the declared operation (`#xab3jh7`) is deliberately deferred, not forgotten.
+
+### The broader sweep — every open item touching this machinery, not just a bug hunt
+
+Read digests for every open item under the `#2753`/`#3029`/`#2612` clusters plus every open `lane-pool`/`conveyor`/`dispatch`/`readiness`/`footgun`-tagged item repo-wide (~180 open items scanned by title/digest, not all read in full — flag anything below that needs a second look). Three buckets fell out:
+
+**1. Strong candidates to CLOSE, not build — current code already appears to satisfy them. Verify, then `we:scripts/backlog.mjs resolve`, don't rebuild:**
+- **#3332** ("`spawnFixes`/`spawnCiHeals` have no card — 3 of 5 dispatch kinds routed") — `we:skills-src/conveyor/runner.mjs`'s `makeCliDispatchPass` already builds `items` from ALL FIVE lists (`d.builds, d.prepareScope, d.prepareDecision, d.fixes, d.ciHeals`) and dispatches every one through `dispatch-lane`. Read against current code, not against whatever state existed when this was filed (2026-08-14, before this week's work).
+- **#3096** ("conveyor still dispatches via the harness `Agent` tool, not the declared operation") — `dispatchPass` shells `node we:scripts/operations/run.mjs dispatch-lane` via `execFileSync`, never the `Agent` tool. Also reads stale against the current `we:skills-src/conveyor/runner.mjs`.
+- **#3070** ("choose the waker") — leaning note only, never formally ruled, but **#3084 ("build the waker") already resolved** — the decision was evidently made in practice; close the loop on the card or record why the built shape differs from the leaning note.
+- **#3083** ("choose the retry policy") — its OWN body reads "RULED 2026-08-13 (operator, in session). The mechanism is settled" — a ruled decision sitting at `status: open`. Administrative resolve, not a re-decision.
+- **#3331** ("PROBE: does `claude --bg` honour `--session-id`?") — this epic's OWN earlier session-update text above calls it "(#3331, resolved)" after the session-identity fix; the card itself still reads `status: open`. Same bookkeeping gap.
+
+**2. Bookkeeping debt — code-landed on this branch, backlog status never flipped.** #3390 (`acquire` dirty-tree guard), #2924 (containment re-verify at destructive reset), #3110 (attempt-tag misattribution) are all committed on `lane/mechanical-dispatcher` per this week's own commits, all still `status: open`. Resolve these with `--graduated-to=<this branch's eventual PR>` once landed to `main` — not before, per this epic's own "code unreviewed, not code unrun" caveat: the fix is real and running, the CARD closes at land, same as any other item.
+
+**3. Confirmed still real — checked against current code, not stale.** In rough priority order:
+- **#3353** — "harden the 3 liveness readings, fire the FIRST live dispatch end to end." This is this epic's OWN "what's still not done #1" restated as its own card. #3105 landing removes one real blocker (the gate can no longer stall the agent); this is now the single highest-leverage next step — everything else is polish until something has actually been dispatched and landed for real.
+- **#2997** (status: ACTIVE, started 2026-08-14, not finished) — `Edit`/`Write` has NO lease check at all, only the Bash-side destructive-git-op guard does. This is the SAME risk family as this session's OWN live incident (an unscoped `acquire` wiped lane-11's uncommitted work) — the incident was survivable because the data happened to still be recoverable; a genuine Edit/Write collision would not offer that.
+- **#2955** — the doc-consistency item this session was told to do second, never reached (displaced by the #3105 decision + machinery sweep, per this session's own standing instruction to discard item work for a faster machinery finding). Still open, still small, still real.
+- **#3373** — branch protection doesn't structurally enforce the sole-writer/numbering invariant; script discipline only.
+- **#3107** — confirmed by grep: `--adopt` is NOT passed anywhere in `we:scripts/operations/dispatch-lane-io.mjs` or `we:scripts/operations/dispatch-lane.mjs`. A dispatched agent's lane is never marked occupied, so Gap 1's occupancy protection (#2997's own fix) is dormant for every conveyor dispatch.
+- **#3161** — `dispatch-lane` already computes a real "why nothing happened" reason internally; it just isn't surfaced in the bare non-dispatch JSON.
+- **#3149** — a dispatched agent that hits an uncovered permission prompt has no way to surface it; nobody is watching an unattended session for that shape of stall.
+- **#2824** — the freshness/staleness guard only covers conveyor-LAUNCHED PRs; a human-opened or otherwise-launched PR is uncovered.
+- **#2831** — checked `isCiHealTarget` (`we:scripts/conveyor/tick-core.mjs`): it DOES already heal a red-after-green-open PR regardless of park state, and a BEHIND+parked PR — so this may be PARTIALLY covered already. The gap that clearly remains is identical to #2824's: only `launchedNums` (conveyor-launched) PRs are ever considered. Re-scope or merge with #2824 rather than building it as originally filed.
+- **#3387** — `open-pr`'s `classifySubmit` doesn't recognize `pr-land`'s dry-run/enqueued outcomes, so a successful land can misreport as an error.
+- **#3388** — `verify-lane`'s `shellQuote` (used by this session's own `we:scripts/lib/verify-lane-gate.mjs` reads) has no adversarial shell-injection test. Touches a file this session's #3105 work sits directly beside.
+- **#xab3jh7** (filed this session) — fold `request`/`check` into the declared `verify` operation.
+
+**4. Not urgent, informational only.** #3392 (a lane-pool test flaking on wall-clock timing, not a logic regression — re-run passed 10/10), #3385 (nice-to-have: derive the delivery-loop flowchart from operations config instead of hand-maintaining one).
+
+### Two open DECISIONS worth ratifying before more building — higher leverage than any single card above
+
+- **#3049** ("the conveyor as a shippable product, not machinery") — **prepared** (`preparedDate: 2026-08-15`), captures exactly the framing this session's own mid-session conversation reached independently: a genuine settings surface, options a team could want, "capture only — nothing built, nothing ruled" per its own text. Ratifying this one way or the other changes how everything above should be prioritized and shaped (a seam now vs. building the surface for real) — this is the single highest-leverage open decision in the whole cluster.
+- **#2753** ("session-free conveyor — reduce the operator session to queue + expose-state") — **prepared** (`preparedDate: 2026-08-26`), the parent-shape umbrella `relatedTo` almost every card in this sweep (2677, 2445, 2527, 2626, 2636, 2464, 2703, 3029, 3070, 3096, 3102, 3118, 3165, 3296, 3323, 3331, 3332, 3353) — i.e. this sweep basically reconstructed #2753's own dependency graph from the open-item side. Worth reading in full before the next build session: it may already state the target shape and priority order more authoritatively than this sweep did from the outside.
+
+### Recommended order for the next session
+
+1. Read `#2753` and `#3049` in full; rule or explicitly defer #3049 (it reframes scope more than any code fix would).
+2. Quick verify-then-resolve pass on bucket 1 (#3332, #3096, #3070, #3083, #3331) — cheap, clears real noise from the board before adding more to it.
+3. `#3353` — the first real live dispatch end to end. This is the one thing that turns everything built across these two sessions from "tested in isolation" into "proven".
+4. `#2997` — finish the Edit/Write lease-check half; this session's own near-miss is a live argument for it.
+5. Everything else in bucket 3, ordered by how directly it touches the dispatch/verify path this session just built versus how far downstream (review/drain/product-shell) it sits.
+
 ## Goal-vs-filed gap sweep (2026-08-30) — what the stated goal needs that nobody filed a card for
 
 Prior sessions' own sweeps (see the unlanded `origin/lane/mechanical-dispatcher` branch's session updates)
