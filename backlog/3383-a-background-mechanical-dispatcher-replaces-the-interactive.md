@@ -166,13 +166,13 @@ operator documentation. Read this card's full text (including the unlanded branc
 
 **Five genuine gaps filed, each checked against the backlog first (searches cited in each card's digest):**
 
-- **#x2respm** — the supervisor has no reload lifecycle, only crash-restart (lifecycle/operability).
-- **#xetlhb5** — the supervisor/runner has no out-of-band alerting, only a JSONL log (observability/alerting).
-- **#xfmw9pt** — the ratified hosted-key-billed mode has no metering/billing/auth design (cost/billing +
+- **#3397** — the supervisor has no reload lifecycle, only crash-restart (lifecycle/operability).
+- **#3398** — the supervisor/runner has no out-of-band alerting, only a JSONL log (observability/alerting).
+- **#3400** — the ratified hosted-key-billed mode has no metering/billing/auth design (cost/billing +
   dispatch-surface security).
-- **#xq3j6xn** — the dispatch-loop's own code is unregistered in TRUST_CHAIN, so a dispatched agent can
+- **#3401** — the dispatch-loop's own code is unregistered in TRUST_CHAIN, so a dispatched agent can
   weaken it via ordinary agent-clearable review (dispatch-surface security; adjacent to #2937).
-- **#xfhficz** — no operator runbook exists for running/monitoring/recovering the dispatcher (operator
+- **#3399** — no operator runbook exists for running/monitoring/recovering the dispatcher (operator
   documentation).
 
 Each names the sibling precedent it extends (#2468/#2501 for reload, #2489/#2493 for alerting, #2909/#2937
