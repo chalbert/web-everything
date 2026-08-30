@@ -1,7 +1,7 @@
 /**
  * @file skills-src/conveyor/__tests__/supervisor.test.mjs
  * @description Unit proof of the conveyor RESIDENT SUPERVISOR ({@link ../supervisor.mjs}) — the last piece
- *   that makes the headless runner ({@link ../runner.mjs}) self-sustaining. Three subjects:
+ *   that makes the headless runner ({@link ../runner.mjs}) self-sustaining. Five subjects:
  *
  *   • the PURE classify/backoff decisions ({@link classifyExit}, {@link decideRestart}) — plain objects in,
  *     plain objects out, no clock/IO of their own;
@@ -9,6 +9,9 @@
  *     effects, proving: a clean exit restarts with no backoff, a crash triggers backoff, the backoff grows on
  *     repeated crashes and resets after a healthy run, and a shutdown signal stops the loop before the next
  *     spawn (never orphaning a child the pure loop doesn't itself own);
+ *   • the PURE out-of-band-alerting decisions (#3398 — {@link detectSupervisorAnomalies},
+ *     {@link healthFromAnomalies}, {@link decideAlert}) — fixture spawn/exit/backoff/tick histories in, the
+ *     same anomaly-row shape as the drain-daemon precedent out, no real crash-looping or stuck process needed;
  *   • the REAL SUBPROCESS WIRING ({@link makeRealSpawnChild}, {@link makeJsonlLog}) — short-lived, explicitly
  *     terminated real `node` child processes (never `runner.mjs` itself — a controllable `node -e` script
  *     stands in for it), the same reasoning `dispatch-spawn-live.test.mjs` gives for proving a real subprocess
@@ -25,7 +28,9 @@ import { join } from 'node:path';
 import {
   classifyExit, decideRestart, runSupervisorLoop,
   makeRealSpawnChild, makeJsonlLog,
+  detectSupervisorAnomalies, healthFromAnomalies, decideAlert,
   DEFAULT_CRASH_THRESHOLD_MS, DEFAULT_BASE_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_LOG_PATH,
+  CRASH_CEILING_WARN_COUNT, CRASH_CEILING_CRIT_COUNT, IDLE_QUEUE_WARN_TICKS, IDLE_QUEUE_CRIT_TICKS, ALERT_RENAG_MS,
 } from '../supervisor.mjs';
 
 // ── (1) classifyExit — clean vs crash, from raw exit facts alone ────────────────────────────────────────────
@@ -215,7 +220,134 @@ describe('runSupervisorLoop — spawn, classify, backoff-or-not, repeat', () => 
   });
 });
 
-// ── (4) real subprocess wiring — makeRealSpawnChild / makeJsonlLog against REAL child processes / files ────
+// ── (4) detectSupervisorAnomalies / healthFromAnomalies / decideAlert (#3398) — pure, fixture-driven ─────────
+
+describe('detectSupervisorAnomalies — crash-loop-at-ceiling, from fixture spawn/exit/backoff history', () => {
+  const backoffAtCeiling = (n) => Array.from({ length: n }, (_, i) => ({ event: 'backoff', at: `t${i}`, delayMs: DEFAULT_MAX_BACKOFF_MS, consecutiveCrashes: 7 + i }));
+
+  it('no anomaly below the warn count', () => {
+    expect(detectSupervisorAnomalies({ history: [] })).toEqual([]);
+    expect(detectSupervisorAnomalies({ history: [{ event: 'backoff', at: 't0', delayMs: DEFAULT_BASE_BACKOFF_MS }] })).toEqual([]);
+  });
+
+  it('WARN once the backoff has plateaued at the ceiling CRASH_CEILING_WARN_COUNT time(s)', () => {
+    const history = backoffAtCeiling(CRASH_CEILING_WARN_COUNT);
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0]).toMatchObject({ type: 'crash-loop-at-ceiling', severity: 'warn' });
+  });
+
+  it('CRITICAL once it has stayed at the ceiling for CRASH_CEILING_CRIT_COUNT crashes running', () => {
+    const history = backoffAtCeiling(CRASH_CEILING_CRIT_COUNT);
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies[0]).toMatchObject({ type: 'crash-loop-at-ceiling', severity: 'critical' });
+  });
+
+  it('a spawn/exit interleaved between ceiling backoffs does not break the run', () => {
+    const history = [
+      { event: 'backoff', at: 't0', delayMs: DEFAULT_MAX_BACKOFF_MS },
+      { event: 'spawn', at: 't1' },
+      { event: 'exit', at: 't2', code: 1 },
+      { event: 'backoff', at: 't3', delayMs: DEFAULT_MAX_BACKOFF_MS },
+      { event: 'spawn', at: 't4' },
+      { event: 'exit', at: 't5', code: 1 },
+      { event: 'backoff', at: 't6', delayMs: DEFAULT_MAX_BACKOFF_MS },
+    ];
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies[0].evidence.ceilingHits).toBe(3);
+  });
+
+  it('a healthy (non-ceiling) backoff BREAKS the trailing run — a since-recovered crash-loop is not still alarmed', () => {
+    const history = [
+      ...backoffAtCeiling(5),
+      { event: 'backoff', at: 'tN', delayMs: DEFAULT_BASE_BACKOFF_MS }, // streak reset by a clean run in between
+    ];
+    expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+});
+
+describe('detectSupervisorAnomalies — idle-with-queue, from fixture tick history', () => {
+  const idleTick = (i) => ({ event: 'tick', at: `t${i}`, tick: i, counts: { queued: 2 }, dispatchedTotal: 0 });
+  const busyTick = (i) => ({ event: 'tick', at: `t${i}`, tick: i, counts: { queued: 1 }, dispatchedTotal: 1 });
+  const emptyQueueTick = (i) => ({ event: 'tick', at: `t${i}`, tick: i, counts: { queued: 0 }, dispatchedTotal: 0 });
+
+  it('no anomaly below the warn tick count', () => {
+    const history = Array.from({ length: IDLE_QUEUE_WARN_TICKS - 1 }, (_, i) => idleTick(i));
+    expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+
+  it('WARN at IDLE_QUEUE_WARN_TICKS consecutive idle-with-queue ticks', () => {
+    const history = Array.from({ length: IDLE_QUEUE_WARN_TICKS }, (_, i) => idleTick(i));
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0]).toMatchObject({ type: 'idle-with-queue', severity: 'warn' });
+  });
+
+  it('CRITICAL at IDLE_QUEUE_CRIT_TICKS', () => {
+    const history = Array.from({ length: IDLE_QUEUE_CRIT_TICKS }, (_, i) => idleTick(i));
+    expect(detectSupervisorAnomalies({ history })[0]).toMatchObject({ type: 'idle-with-queue', severity: 'critical' });
+  });
+
+  it('a genuinely EMPTY queue is not an anomaly — idle is the expected, healthy state', () => {
+    const history = Array.from({ length: IDLE_QUEUE_CRIT_TICKS + 5 }, (_, i) => emptyQueueTick(i));
+    expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+
+  it('a tick where something WAS dispatched breaks the run — real progress is not stuck', () => {
+    const history = [...Array.from({ length: IDLE_QUEUE_CRIT_TICKS }, (_, i) => idleTick(i)), busyTick(IDLE_QUEUE_CRIT_TICKS)];
+    expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+
+  it('a restart (exit/spawn) after the idle run means the CURRENT child is not idle — no anomaly', () => {
+    const history = [...Array.from({ length: IDLE_QUEUE_CRIT_TICKS }, (_, i) => idleTick(i)), { event: 'exit', at: 'tX', code: 0 }];
+    expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+
+  it('both detectors can fire at once, worst-severity first', () => {
+    const history = [...backoffAtCeilingFixture(), ...Array.from({ length: IDLE_QUEUE_WARN_TICKS }, (_, i) => idleTick(i))];
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies.map((a) => a.type)).toEqual(['crash-loop-at-ceiling', 'idle-with-queue']);
+    expect(anomalies[0].severity).toBe('critical');
+  });
+  function backoffAtCeilingFixture() {
+    return Array.from({ length: CRASH_CEILING_CRIT_COUNT }, (_, i) => ({ event: 'backoff', at: `b${i}`, delayMs: DEFAULT_MAX_BACKOFF_MS }));
+  }
+});
+
+describe('healthFromAnomalies — worst severity wins', () => {
+  it('no anomalies → healthy', () => expect(healthFromAnomalies([])).toBe('healthy'));
+  it('a warn → degraded', () => expect(healthFromAnomalies([{ severity: 'warn' }])).toBe('degraded'));
+  it('a critical → stuck', () => expect(healthFromAnomalies([{ severity: 'warn' }, { severity: 'critical' }])).toBe('stuck'));
+});
+
+describe('decideAlert — fires on health CHANGE or after the re-nag window; never on healthy', () => {
+  it('never fires when healthy', () => {
+    expect(decideAlert({ health: 'healthy', lastAlert: null }).fire).toBe(false);
+  });
+  it('fires on the FIRST degraded/stuck verdict (no prior alert)', () => {
+    const { fire, record } = decideAlert({ health: 'degraded', anomalies: [{ type: 'idle-with-queue' }], lastAlert: null, nowMs: 1000 });
+    expect(fire).toBe(true);
+    expect(record).toMatchObject({ health: 'degraded', signature: 'degraded', types: ['idle-with-queue'] });
+  });
+  it('does NOT re-fire for the SAME health within the re-nag window', () => {
+    const lastAlert = { signature: 'degraded', at: new Date(1000).toISOString() };
+    const { fire } = decideAlert({ health: 'degraded', lastAlert, nowMs: 1000 + ALERT_RENAG_MS - 1 });
+    expect(fire).toBe(false);
+  });
+  it('DOES re-fire once the re-nag window has elapsed for a still-standing health', () => {
+    const lastAlert = { signature: 'degraded', at: new Date(1000).toISOString() };
+    const { fire } = decideAlert({ health: 'degraded', lastAlert, nowMs: 1000 + ALERT_RENAG_MS });
+    expect(fire).toBe(true);
+  });
+  it('fires immediately on a health CHANGE, even inside the re-nag window', () => {
+    const lastAlert = { signature: 'degraded', at: new Date(1000).toISOString() };
+    const { fire, record } = decideAlert({ health: 'stuck', lastAlert, nowMs: 1500 });
+    expect(fire).toBe(true);
+    expect(record.signature).toBe('stuck');
+  });
+});
+
+// ── (5) real subprocess wiring — makeRealSpawnChild / makeJsonlLog against REAL child processes / files ────
 
 describe('makeRealSpawnChild — real node child processes, never runner.mjs itself', () => {
   it('reports a real clean exit code and a plausible ranMs — proving spawn() wiring, not a stub', async () => {
@@ -254,6 +386,30 @@ describe('makeRealSpawnChild — real node child processes, never runner.mjs its
     // The OS process is actually gone (ESRCH), not just detached — the orphan this whole mechanism prevents.
     expect(() => process.kill(pid, 0)).toThrow();
   });
+
+  it('#3398 — parses a JSON tick line off real stdout into onTickLine, AND still mirrors it to this process\'s own stdout', async () => {
+    const lines = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk, ...rest) => { lines.push(String(chunk)); return origWrite(chunk, ...rest); };
+    const ticks = [];
+    try {
+      const script = 'console.log(JSON.stringify({tick:3,counts:{queued:2},dispatch:{builds:[]}}));process.exit(0)';
+      const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: [script], onChild: () => {}, onTickLine: (t) => ticks.push(t) });
+      await spawnChild();
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    expect(ticks).toEqual([{ tick: 3, counts: { queued: 2 }, dispatch: { builds: [] } }]);
+    expect(lines.join('')).toContain('"tick":3');
+  }, 15_000);
+
+  it('#3398 — a non-JSON stdout line (a human-mode status line) is mirrored but never handed to onTickLine', async () => {
+    const ticks = [];
+    const script = 'console.log("[tick 0] conveyor \\u00b7 0 building"); process.exit(0)';
+    const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: [script], onChild: () => {}, onTickLine: (t) => ticks.push(t) });
+    await spawnChild();
+    expect(ticks).toEqual([]);
+  }, 15_000);
 
   it('a child that fails to even start running (a nonexistent script path) still resolves — not a hang', async () => {
     // The command is always `node` (process.execPath, hardcoded in makeRealSpawnChild) — a nonexistent
