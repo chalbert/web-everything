@@ -66,14 +66,14 @@ entry would fall into that SAME existing branch, needing no new path-resolution 
 
 **3. Current blast radius, measured (not assumed).** `grep -rnoE '\bx[0-9a-z]{6}\b' we:agent-memory-src/`
 (excluding `bornAs:` lines) finds **10 hash-shaped occurrences across 7 distinct hashes in 7 files**:
-`xvwmwkx`, `3026` (×2), `2609`, `2666`, `2501` (×2), `3099`, `3027` — in
+`2685`, `3026` (×2), `2609`, `2666`, `2501` (×2), `3099`, `3027` — in
 `we:agent-memory-src/51-feedback_hookable_vs_judgment_rule.md`, `we:agent-memory-src/index-verif.md`,
 `we:agent-memory-src/resolve-on-land-or-conveyor-redispatches.md` (×2), `we:agent-memory-src/index-batch.md`,
 `we:agent-memory-src/plateau-loop-runs-on-dev-laptop-simple.md` (×2),
 `we:agent-memory-src/story-preparation-checklist.md`, `we:agent-memory-src/grep-every-name-you-cite-in-prose.md`
 (×2). Checked against `we:backlog/`: **none of the 7 hashes exist as a backlog filename any more** — every
 one already numbered and landed. Cross-checked via `bornAs` (`grep -rl "bornAs: <hash>" we:backlog/`), all 7
-resolve cleanly to a real landed item: `xvwmwkx`→#2685, `3026`→#3026, `2609`→#2609, `2666`→#2666,
+resolve cleanly to a real landed item: `2685`→#2685, `3026`→#3026, `2609`→#2609, `2666`→#2666,
 `2501`→#2501, `3099`→#3099, `3027`→#3027. So this is not a one-off: **all 7 hash references agent
 memory currently carries are already dead**, not just the one caught today.
 
@@ -159,7 +159,7 @@ Confidence: **Medium**
 **Risks assessed** (per we:backlog/3103-*.md's taxonomy):
 
 - **premise** (addressed; strategy: verify by mutation or reversion BEFORE building) — Finding 3's blast-radius grep and bornAs cross-check are genuine and reproduce almost exactly against we:agent-memory-src/ (verified independently) — off by exactly the one file (we:agent-memory-src/story-preparation-checklist.md) fixed by commit 91072ddb after the card's numbers were taken, which the Done-when item 6 re-grep self-corrects for.
-- **blast-radius** (addressed; strategy: measure against the real corpus before wiring) — Re-ran the equivalent of `grep -rnoE '\bx[0-9a-z]{6}\b' we:agent-memory-src/ | grep -v bornAs` and cross-checked every hash via `bornAs` in we:backlog/ — all 6 remaining hashes (xvwmwkx→#2685, 3026→#3026, 2609→#2609, 2666→#2666, 2501→#2501, 3027→#3027) resolve exactly as the card's table claims, confirming the measurement was real, not assumed.
+- **blast-radius** (addressed; strategy: measure against the real corpus before wiring) — Re-ran the equivalent of `grep -rnoE '\bx[0-9a-z]{6}\b' we:agent-memory-src/ | grep -v bornAs` and cross-checked every hash via `bornAs` in we:backlog/ — all 6 remaining hashes (2685→#2685, 3026→#3026, 2609→#2609, 2666→#2666, 2501→#2501, 3027→#3027) resolve exactly as the card's table claims, confirming the measurement was real, not assumed.
 - **consumer** (addressed; strategy: find consumers TWO ways: ES imports AND subprocess/hook callers) — Card's finding 1 greps for all consumers of we:scripts/lib/citation-check.mjs's HASH_REWRITE_DIRS and correctly reports it has zero importers (decorative) — confirmed independently with the same grep.
 - **interface** (NOT addressed; strategy: round-trip test at the seam, written by whoever owns neither half) — The seam between the two proposed fixes was not round-tripped: mutating we:scripts/lib/citation-check.mjs's findOutOfScopeHashSlugs with 'agent-memory-src/' in outOfScopeDirs (as Size-basis (b) and Done-when item 4 instruct) fires a WARN on ANY in-flight hash-slug there, including one that fix #1 (widening HASH_REWRITE_DIRS) makes self-healing at land — the two lists are documented as mutually exclusive (rewrite-scope self-heals, out-of-scope-dirs get WARNed) and this card's literal instruction breaks that invariant. Verified by direct invocation of findOutOfScopeHashSlugs with both dirs applied.
 - **decorative-guard** (addressed; strategy: mutate the guarded line; require a NAMED test to redden) — Done-when item 3 explicitly commits to asserting the bornAs guard in a NEW test rather than assuming finding 2 holds, which is the right discipline; finding 2's own read of we:scripts/backlog/id.mjs:144-189 (applyLedger) is accurate — the guard is a per-line BORN_AS_RE check independent of which files feed it.

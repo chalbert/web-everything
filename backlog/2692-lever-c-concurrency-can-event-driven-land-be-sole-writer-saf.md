@@ -242,4 +242,4 @@ not watching. The plan is made real by a tracked monitor that watches the signal
 Outer escalation: `we:reports/2026-07-26-conveyor-per-item-latency.md` §5. Deep design + 10-round evidence:
 `we:reports/2026-07-27-lever-c-landing-merge-queue-design.md`. Slice #2683 is the build; this decision gates it.
 The tracked tripwire that un-defers it is **#2740** (reads #2680's saturation metric, fires #2683 on sustained
-k>1-behind-writer). Program #2606 / epic #2612. The convergence loop's own mechanization is #xvwmwkx.
+k>1-behind-writer). Program #2606 / epic #2612. The convergence loop's own mechanization is #2685.
