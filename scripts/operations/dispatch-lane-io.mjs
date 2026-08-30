@@ -846,7 +846,7 @@ export function isPreSpawnRefusal(error) {
  * this item (#3579) names, mirroring #3370's judge-seam extraction. Its shape is deliberately independent of
  * any one CLI:
  *
- *   request:  {sessionId, cwd, prompt, sessionSlug, num, extraArgs, systemPromptFile}
+ *   request:  {sessionId, cwd, prompt, sessionSlug, num, launchKind, extraArgs, systemPromptFile}
  *             — a session/item identity, the FILLED brief text, and an expected-duration hint (read by the
  *             caller from `payload.expectedWithinMinutes`, not part of the request itself).
  *   returns:  a durable handle string (or a Promise of one) usable for LATER liveness polling — never a raw
@@ -896,6 +896,10 @@ export function createDispatchSinks({
           prompt: payload?.prompt,
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
+          // #3105 — which KIND of mechanical dispatch this is (build / fix / ci-heal). Part of the port's
+          // request rather than a Claude detail: every provider needs to tell the agent it starts what it was
+          // started FOR. `defaultClaudeProvider` carries it across as the `WE_DISPATCH_KIND` env var.
+          launchKind: payload?.launchKind,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
         });
@@ -943,7 +947,7 @@ export function createDispatchSinks({
  * `inFlightEntries` reports it under `unknown`, and the replay guard refuses to double-dispatch it. Returning
  * a handle known to be wrong would instead key every later liveness read on a session that does not exist.
  *
- * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
+ * @param {{sessionId:string, cwd:string, prompt:string, sessionSlug?:string, num?:string, launchKind?:string, extraArgs?:string[], systemPromptFile?:string|null}} request
  * @param {{spawnAgent?: Function}} [io]
  * @returns {string}
  */
@@ -954,7 +958,15 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
   });
-  const stdout = spawnAgent(argv, { cwd: request.cwd });
+  // #3105 — mark this session as a MECHANICALLY DISPATCHED delivery/fix/ci-heal agent, via env (inherited
+  // by the whole `claude --bg` process tree). `scripts/guard-bash.mjs` reads it to deny a dispatched
+  // session from ever running the verification set (verify-lane/check:standards/test:unit) directly — it
+  // must `request` + poll `check` instead, so the gate's own long runtime is never the agent's own Bash
+  // call's problem. An interactive operator session (this var unset) is completely unaffected.
+  const stdout = spawnAgent(argv, {
+    cwd: request.cwd,
+    env: { ...process.env, WE_DISPATCH_KIND: String(request.launchKind || 'build') },
+  });
   const handle = parseBackgroundedHandle(stdout);
   if (!handle) {
     throw new Error(

@@ -290,6 +290,20 @@ describe('the PRODUCTION callers reach those defaults — a tested default nothi
     expect(result.handle).toBe('a9a9a9a9');
   });
 
+  it('#3105 — stamps WE_DISPATCH_KIND=<launchKind> onto the spawned agent\'s env, so guard-bash can deny it running the gate directly', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · fix-3037\n');
+    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'fix-3037', prompt: '# go', launchKind: 'fix' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'fix' });
+  });
+
+  it('#3105 — defaults WE_DISPATCH_KIND to "build" when the payload names no launchKind', async () => {
+    const { exec, calls } = spyExec('backgrounded · a9a9a9a9 · conveyor-3037\n');
+    const sinks = createDispatchSinks({ root: '/primary/webeverything', exec, mintSessionId: () => 'sess-z9' });
+    await sinks[DISPATCH_EFFECT]({ num: '3037', sessionSlug: 'conveyor-3037', prompt: '# go' });
+    expect(calls[0].opts.env).toMatchObject({ WE_DISPATCH_KIND: 'build' });
+  });
+
   it('the observer goes through `defaultListAgents` — same argv, still no `--all`', async () => {
     const { exec, calls } = spyExec('[]');
     const observers = createDispatchObservers({ exec, now: () => new Date('2026-08-13T12:00:00.000Z') });

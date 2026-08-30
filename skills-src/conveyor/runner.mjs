@@ -233,7 +233,9 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  conveyor/ci-queue-watch.mjs sweep`: samples `gh run list`'s started-minus-created wait time and appends it
  *  to a durable sidecar history, the SAME "piggyback on a pass this headless runner already ticks" shape
  *  branch-drift above uses, so a genuine Actions run-queue regression becomes a visible trend instead of
- *  invisible; purely informative — no dispatch gate reads its verdict). All ten are best-effort: a failure is
+ *  invisible; purely informative — no dispatch gate reads its verdict), and the verify-dispatch pass
+ *  (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's own process, unbound by an
+ *  agent's 120s foreground window). All eleven are best-effort: a failure is
  *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer
  *  to `main`.
  *
@@ -245,13 +247,19 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
  *  flight for a PR simply does not appear in next tick's plan.
  *
- *  THE HICCUP SINK is the ONLY one of the eight that reads `out` (this tick's already-computed
+ *  THE HICCUP SINK is the ONLY one of the eleven that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
  *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
- *  hiccup-sink.mjs `fileHiccup`. */
+ *  hiccup-sink.mjs `fileHiccup`.
+ *
+ *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
+ *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
+ *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
+ *  interactive agent's Bash call is.
+ */
 
 /** Cap on {@link summarizeMechanicalPassError}'s output — generous for a real diagnostic, still bounded so one
  *  runaway stack trace can't flood `runner.log`. */
@@ -425,6 +433,7 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
     // `review:changes` is skipped (that re-check is the separate follow-on we:3596, out of scope here). See
     // that file's own header for the full design, ratified in we:3549.
     runQuiet('conveyor/parked-pr-progress-watch.mjs', ['sweep']);
+    runQuiet('conveyor/verify-dispatch.mjs'); // #3105
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
