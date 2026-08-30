@@ -184,3 +184,48 @@ orphaned `conveyor-*` OS session with no process reaper, the `verify-lane` TTL-v
 unset-`WE_DISPATCH_AGENT_ARGS` silent hang) are real but already surfaced in this card's own learnings-pool
 section, explicitly awaiting a `/harvest` pass — filing them here would duplicate that already-planned step
 rather than fill an unconsidered gap.
+
+## Follow-up: independent verification + a blind design review (2026-08-30)
+
+Two more passes ran after the gap sweep above, per the operator's own request. **For the next session,
+three concrete threads, so nothing here has to be re-derived:**
+
+1. **A small fix is ready to land, verified, not yet a PR.** An independent check of the five filed items
+   above found all five genuine and non-duplicate, but flagged that #3397/#3398/#3399 describe
+   we:skills-src/conveyor/supervisor.mjs, which exists only on `origin/lane/mechanical-dispatcher`, not
+   `main`. A landing-order note was added to each and pushed, already `verify-lane` green, as
+   `origin/lane/3383-landing-order-notes` (HEAD carries the three edits only — no other changes). Landing
+   it is one command: `node we:scripts/operations/run.mjs open-pr --ref=lane/3383-landing-order-notes
+   --sha=<that branch's HEAD> --base=main --mode=land --bodyFile=<...> --json` — no re-verification needed,
+   no risk to whatever this epic's own working branch is doing (backlog-prose-only).
+
+2. **A blind Fable review of this epic's design and goals surfaced ranked concerns, most not yet actioned.**
+   Read cold (no access to the gap-sweep findings above), ranked by how much it mattered to the reviewer:
+   (a) escalation/notification (this card's own "Done when" #2, and the filed #3398) is under-built relative
+   to how often it's already needed — a real dispatch sat `blocked` for days with nobody told; (b) in-flight
+   liveness is tracked via four overlapping heuristics (tick-core's session-ephemeral state, dispatch-lane's
+   run records, `claude agents --json`, lane-pool acquirability) rather than one source of truth — worth
+   checking whether #2626's durable-store trigger has effectively fired; (c) **#3390 and #2924 — both
+   already fixed and tested on `origin/lane/mechanical-dispatcher` — are known-good fixes for bugs that are
+   STILL LIVE on `main`** (three independent close-sweeps reportedly hit #3390's bug on `main` the same day
+   its fix sat unlanded); (d) the "subagents never run commands, only the mechanical layer does" doctrine is
+   being enforced piecemeal (`WE_DISPATCH_KIND` in guard-bash, from #3105) without ever going through this
+   repo's own decision process — captured to the learnings pool (`missing-convention`,
+   `~/.claude/conveyor/learnings/note-20260830-091547.jsonl`) rather than filed directly, pending (5) below;
+   (e) the supervisor's clean-exit path gives zero restart delay (an idle-stop conveyor could busy-poll), and
+   the runner's own singleton lease may not survive a long `verify-dispatch` pass, mirroring an
+   already-documented lane-lease TTL race.
+
+3. **(c) above is the one with a clock on it, and it is explicitly BLOCKED, not merely unstarted.** Landing
+   #3390/#2924 needs cherry-picking two commits off `origin/lane/mechanical-dispatcher` (`#3390`'s fix and
+   `#2924`'s fix, both isolated to we:scripts/lane-pool.mjs + we:scripts/lib/lane-lease.mjs per this card's
+   own third-session update above) onto a fresh lane against current `main`. **Do not do this unilaterally
+   while another session is actively driving this epic's own working branch** — check that session's intent
+   first (it may already plan to carve these out per its own "Recommended order for the next session" list
+   above), and re-confirm the branch state hasn't moved past what's described here. Note also: **#3390 and
+   #2924 carry no `parent` field** — they are standalone, pre-existing items, not formally part of this
+   epic's tree. Landing them is not "closing a child of #3383"; it is unblocking work this epic's own branch
+   already depends on.
+
+None of (d) or the #3390/#2924 land are done yet. This section exists so a fresh session doesn't have to
+re-run the verification or the design review to find them again.
