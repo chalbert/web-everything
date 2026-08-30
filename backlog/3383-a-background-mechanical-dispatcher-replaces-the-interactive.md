@@ -184,3 +184,31 @@ orphaned `conveyor-*` OS session with no process reaper, the `verify-lane` TTL-v
 unset-`WE_DISPATCH_AGENT_ARGS` silent hang) are real but already surfaced in this card's own learnings-pool
 section, explicitly awaiting a `/harvest` pass — filing them here would duplicate that already-planned step
 rather than fill an unconsidered gap.
+
+## Goal-vs-filed gap sweep, round 2 (2026-08-30) — the two categories the round-1 sweep named but never resolved
+
+The round-1 sweep directly above lists "durability" and "testing/staging" among the categories it swept, but
+neither category is actually resolved in its own write-up — no gap filed, no existing coverage cited, unlike
+every other category there. This run closed exactly those two, grounded in the shipped code:
+
+- **Data durability and crash recovery — a real, verified gap, not speculative.** `we:skills-src/conveyor/runner.mjs`'s
+  in-flight/prepare/fix guard bookkeeping lives only in the runner process's own memory (`we:scripts/conveyor/tick-core.mjs`'s
+  header says so explicitly: "no parallel on-disk state store is ever created"). `we:skills-src/conveyor/supervisor.mjs`
+  crash-restarts a dead runner as its only recovery path, which wipes that bookkeeping. Unlike the fix/ci-heal
+  retry-cap counters (proven to bind from a durable floor across a restart, `#2643`/`#2666`), the build
+  in-flight guard has no durable floor — only a 3-tick in-memory TTL. A crash in the spawn-to-claim window
+  reopens the exact double-dispatch already reproduced live and still open at `#3177` (two agents on #3151/
+  #3150/#3154/#2972), via the new automatic-restart path rather than #3177's manual-redispatch path. Also
+  flags `#2702`'s Done-when line 19, which claims "durable guard state surviving a runner restart — delivered
+  in #2699"; that claim is stale relative to the shipped runner (#2699 only made tick-core pure/stateless, it
+  never added persistence, and no caller built since has added it either). Filed as a new story.
+- **Testing/staging story — a real, verified gap, not speculative.** This epic's own text already names the
+  risk ("even before any of its code has landed... it is taking real actions against real PRs and real shared
+  state"), and its own "still not done" #1 above confirms the plan: the live end-to-end test is a real,
+  merely low-stakes backlog item, not a fixture. No dry-run/shadow/canary mode exists in
+  `we:skills-src/conveyor/runner.mjs`, `we:skills-src/conveyor/supervisor.mjs`, or
+  `we:scripts/operations/dispatch-lane.mjs` (grepped for `dry-run`/`dryRun`/`canary`/`shadow mode` — none).
+  Filed as a new decision (capture-only, mirroring `#3049`'s shape — no build required to close it).
+
+Both new cards cite the existing adjacent precedent/decision they extend or correct, and were checked against
+the backlog first (search terms and negative results recorded in each card's own digest).
