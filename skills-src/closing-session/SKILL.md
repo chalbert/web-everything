@@ -417,6 +417,45 @@ and pass the list to `renderCloseSessionFlowLine({ candidates })` (`we:scripts/l
 **Flow improvements** line below — it also supplies the `"nothing to flag"` fallback when the array is
 empty, so that exact wording is never re-typed per close.
 
+### 3e. Lane cleanup (release what this session finished)
+A held lane is a **shared, finite resource** (`we:scripts/lane-pool.mjs`) — a lane this session leased and
+then forgot to release stays unavailable to every other session/subagent until its TTL expires (up to
+240 minutes), for no reason once the work is out. This mirrors the clean-auto-commit rule exactly: release
+automatically when it's safe, report and leave it held when it isn't — never ask "should I release?" on a
+lane that's plainly done, and never release one that isn't.
+
+Find every lane this session holds and its landed-ness in one pass:
+```bash
+node scripts/lane-pool.mjs status --json | node -e "
+let d=''; process.stdin.on('data', c => d += c);
+process.stdin.on('end', () => {
+  const mine = JSON.parse(d).lanes.filter(l => l.lease?.ownerSession === process.env.CLAUDE_CODE_SESSION_ID);
+  console.log(JSON.stringify(mine.map(l => ({ lane: l.lane, head: l.head, clean: l.clean, behind: l.behind })), null, 2));
+});
+"
+```
+`ownerSession` is the durable `CLAUDE_CODE_SESSION_ID` signal (the same one `lane-pool.mjs release`'s own
+ownership check falls back to, #2367/#2452/#2997) — stable across this session's separate Bash-tool calls,
+unlike the ambient `hostname():ppid` `defaultSession()` uses when no `--session` is given.
+
+For each lane this session holds, decide from that same `clean` flag the Hard Rules already define:
+- **Clean** (`clean: true`, and the lane's `head` is an ancestor of `origin/main` — i.e. everything the
+  lane produced already landed via its PR, same test as the auto-commit's "finished work" bar) →
+  release it, no asking: `node scripts/lane-pool.mjs release --lane=<N> --json`. This is the common case
+  for any session whose edit-shaped work went through the normal lane→PR flow (§ Hard rules) — by close
+  time the PR is usually already merged, so releasing is a pure resource-hygiene cleanup, not a content
+  decision.
+- **Not clean** (uncommitted work, or local commits not yet landed on `origin/main`) → **do not release.**
+  Report it in the verdict's **Lane** field instead (see below) so the operator can decide — releasing
+  here would let the next `refresh`/reuse of that lane silently discard local-only state (observed
+  directly: a background lane-hygiene daemon fast-forwarding an idle-looking held lane mid-session is
+  exactly this failure mode, and it is why the friction is now in the learnings pool, not why this rule
+  exists to paper over it).
+
+A session holding **no** leased lane (worked directly on the primary checkout, or already released
+everything) reports `none held` — this is the common, unremarkable case for most sessions and is not a
+gap to explain.
+
 ### 4. Verdict
 Emit the close audit in **exactly this template** — fixed field order, fixed labels, verdict last.
 Every close should look the same so the user can scan it without re-reading:
@@ -430,6 +469,7 @@ Every close should look the same so the user can scan it without re-reading:
 **Repo gate:** <✅ N errors=0, M warnings (pre-existing/unrelated) | ❌ red — what failed>
 **Session cost:** <~$X.XX usage-equivalent (model, N turns) — from session-cost.mjs; + "→ #NNN" if accrued to a card (step 3c), or "not attributed (slice/resolve/no dominant item)">
 **Branch:** <branch name only — never list or count uncommitted files>
+**Lane:** <"none held" | "released lane-N (landed via PR #NNN)" per lane | "lane-N held — NOT released: <why not clean>">
 **Efficiency:** <one line — N delegate/script candidates flagged this session (table above), or "nothing to flag", or omit entirely on a trivial session>
 **Flow improvements:** <one line — concrete review/PR-flow improvement candidate(s) this session emitted, or "nothing to flag"; OMIT the line entirely if the session didn't touch the flow (step 3d)>
 **Follow-ups (open by design):** <items deliberately left open, e.g. a blockedBy chain — or "none">
@@ -452,6 +492,9 @@ Rules for filling it:
 - **Session cost** — the one-line total from `session-cost.mjs` (usage-equivalent $; subscription isn't
   billed this). Advisory context-awareness only; never a caveat in the verdict.
 - **Branch** — name only. Uncommitted work is **never** a caveat and is **not** reported here.
+- **Lane** — from step 3e: "none held" when this session never leased one; otherwise one line per lane
+  held, naming whether it was released (and the PR that landed its work, if known) or kept because it
+  wasn't clean. A kept, not-clean lane **is** a real caveat — surface it in the verdict line.
 - **Efficiency** — advisory only (step 3a); the one-line summary of the delegate/script table (or
   "nothing to flag" on a non-trivial session with no findings). Never a caveat in the verdict. Omit the
   line entirely on a trivial session (step 3a's skip).
@@ -459,8 +502,9 @@ Rules for filling it:
   (edited a gate file, or exercised/bumped against it); otherwise **omit the line entirely**. When present,
   name the concrete candidate(s) you emitted, or "nothing to flag". Never a caveat in the verdict.
 - **Follow-ups** — only work *intentionally* left open (e.g. a filed `blockedBy` chain); "none" if clean.
-- **Verdict** — one line. ⚠️ only for real caveats: uncaptured context (offer to capture) or a red gate
-  (offer to fix). Nothing after the verdict line.
+- **Verdict** — one line. ⚠️ only for real caveats: uncaptured context (offer to capture), a red gate
+  (offer to fix), or a held-but-not-clean lane (offer to help finish/land it so it can be released).
+  Nothing after the verdict line.
 
 Keep every field to one line where possible. The template is the whole output — no preamble, no recap
 above it, no discussion below the verdict.
