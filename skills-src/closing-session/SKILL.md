@@ -424,13 +424,19 @@ then forgot to release stays unavailable to every other session/subagent until i
 automatically when it's safe, report and leave it held when it isn't — never ask "should I release?" on a
 lane that's plainly done, and never release one that isn't.
 
-Find every lane this session holds and its landed-ness in one pass:
+Find every lane this session holds, and how many local commits (if any) sit unpushed/unmerged ahead of
+`origin/<branch>`, in one pass:
 ```bash
 node scripts/lane-pool.mjs status --json | node -e "
 let d=''; process.stdin.on('data', c => d += c);
 process.stdin.on('end', () => {
+  const { execFileSync } = require('node:child_process');
   const mine = JSON.parse(d).lanes.filter(l => l.lease?.ownerSession === process.env.CLAUDE_CODE_SESSION_ID);
-  console.log(JSON.stringify(mine.map(l => ({ lane: l.lane, head: l.head, clean: l.clean, behind: l.behind })), null, 2));
+  const withAhead = mine.map((l) => {
+    const ahead = Number(execFileSync('git', ['-C', l.path, 'rev-list', '--count', \`origin/\${l.branch}..HEAD\`], { encoding: 'utf8' }).trim());
+    return { lane: l.lane, head: l.head, clean: l.clean, behind: l.behind, ahead };
+  });
+  console.log(JSON.stringify(withAhead, null, 2));
 });
 "
 ```
@@ -438,19 +444,27 @@ process.stdin.on('end', () => {
 ownership check falls back to, #2367/#2452/#2997) — stable across this session's separate Bash-tool calls,
 unlike the ambient `hostname():ppid` `defaultSession()` uses when no `--session` is given.
 
-For each lane this session holds, decide from that same `clean` flag the Hard Rules already define:
-- **Clean** (`clean: true`, and the lane's `head` is an ancestor of `origin/main` — i.e. everything the
-  lane produced already landed via its PR, same test as the auto-commit's "finished work" bar) →
-  release it, no asking: `node scripts/lane-pool.mjs release --lane=<N> --json`. This is the common case
-  for any session whose edit-shaped work went through the normal lane→PR flow (§ Hard rules) — by close
-  time the PR is usually already merged, so releasing is a pure resource-hygiene cleanup, not a content
-  decision.
-- **Not clean** (uncommitted work, or local commits not yet landed on `origin/main`) → **do not release.**
-  Report it in the verdict's **Lane** field instead (see below) so the operator can decide — releasing
-  here would let the next `refresh`/reuse of that lane silently discard local-only state (observed
-  directly: a background lane-hygiene daemon fast-forwarding an idle-looking held lane mid-session is
-  exactly this failure mode, and it is why the friction is now in the learnings pool, not why this rule
-  exists to paper over it).
+**`ahead` is the field that actually decides this, not `clean`.** `status --json`'s `clean` only means "no
+*uncommitted* diff" and `behind` only means "how far behind `origin/<branch>`" — neither says whether HEAD
+carries local commits `origin/<branch>` doesn't have. A lane sitting on one committed-but-unmerged commit
+on top of an up-to-date main reports `clean: true, behind: 0` — indistinguishable, on those two fields
+alone, from a lane that fully landed. `ahead` (computed above the same way `lane-pool.mjs`'s own
+`laneDirtyOrAhead` computes it internally, `rev-list --count origin/<branch>..HEAD`) is the actual
+landed-ness signal, because it counts exactly those commits. (Caught in review before this shipped —
+PR #1720 finding: the first cut of this step told the agent to decide from `clean` alone, which cannot
+distinguish the two cases above.)
+
+For each lane this session holds:
+- **`ahead === 0`** (nothing local sits unmerged — everything the lane produced already landed via its
+  PR, same bar as the auto-commit's "finished work" test) → release it, no asking:
+  `node scripts/lane-pool.mjs release --lane=<N> --json`. This is the common case for any session whose
+  edit-shaped work went through the normal lane→PR flow (§ Hard rules) — by close time the PR is usually
+  already merged, so releasing is a pure resource-hygiene cleanup, not a content decision.
+- **`ahead > 0`** (or `clean: false`, uncommitted work) → **do not release.** Report it in the verdict's
+  **Lane** field instead (see below) so the operator can decide — releasing here would let the next
+  `refresh`/reuse of that lane silently discard local-only state (observed directly: a background
+  lane-hygiene daemon fast-forwarding an idle-looking held lane mid-session is exactly this failure mode,
+  and it is why the friction is now in the learnings pool, not why this rule exists to paper over it).
 
 A session holding **no** leased lane (worked directly on the primary checkout, or already released
 everything) reports `none held` — this is the common, unremarkable case for most sessions and is not a
