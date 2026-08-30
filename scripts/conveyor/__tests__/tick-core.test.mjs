@@ -30,6 +30,7 @@ import {
   assessIdleStop,
   routeWatcherExit,
   buildStatusLine,
+  computeTickCounts,
   planTick,
   HELD_NOTE_EXCLUDED_REASONS,
   DEFAULT_BUILD_TTL_TICKS,
@@ -618,6 +619,19 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.nextState.launchedNums).toContain('10');
   });
 
+  it('#3398 — decisions.counts carries the same structured tallies as decisions.statusLine, not re-derived by a caller', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+    });
+    // 10 spawns this tick (now building, excluded from `queued`); 11 has no launch plan entry — still queued.
+    expect(out.decisions.counts).toMatchObject({ queued: 1, building: 1 });
+    expect(out.decisions.statusLine).toContain('1 queued');
+    expect(out.decisions.statusLine).toContain('1 building');
+  });
+
   it('shares the free-lane pool across builds and prepares — a prepare never takes a build lane this tick', () => {
     const out = planTick({
       state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
@@ -986,5 +1000,27 @@ describe('buildStatusLine — the terse per-tick line (SKILL §5)', () => {
     expect(line).toContain('1 infra-blocked');
     expect(line).toContain('health warn');
     expect(line).toContain('lane-7');
+  });
+});
+
+describe('computeTickCounts — the structured tallies behind buildStatusLine (#3398)', () => {
+  it('matches the same inputs buildStatusLine renders, as numbers rather than text', () => {
+    const inputs = {
+      queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }],
+      lanes: [{ lane: 4, num: 12 }],
+      prs: [{ num: 13, prNumber: 99, state: 'OPEN', labels: ['review:human'] }],
+      health: { verdict: 'ok' },
+      liveBuildGuards: [{ num: 10, lane: 5 }],
+      livePrepareGuards: [{ num: 20, lane: 6 }],
+      liveFixGuards: [{ pr: 99, num: 13 }],
+      liveCiHealGuards: [{ pr: 98, num: 14 }],
+      launchedNums: [10, 12, 13, 14, 20],
+    };
+    expect(computeTickCounts(inputs)).toEqual({ building: 2, preparing: 1, fixing: 1, healing: 1, queued: 1, parked: 1, verdict: 'ok' });
+    expect(buildStatusLine(inputs)).toContain('1 queued'); // the two never disagree — same computation, one call site each
+  });
+
+  it('is total on no inputs at all', () => {
+    expect(computeTickCounts()).toEqual({ building: 0, preparing: 0, fixing: 0, healing: 0, queued: 0, parked: 0, verdict: 'ok' });
   });
 });

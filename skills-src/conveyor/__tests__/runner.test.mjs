@@ -114,6 +114,7 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   it('projects status, notes, every dispatch kind, and watchers', () => {
     const out = { decisions: {
       statusLine: 'conveyor · 2 building',
+      counts: { building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' },
       notes: [{ kind: 'build-ttl', text: '⚠ re-dispatching' }],
       spawnBuilds: [{ num: 1, lane: 1 }], spawnPrepareScope: [{ num: 2, lane: 2 }],
       spawnPrepareDecision: [{ num: 3, lane: 3 }], spawnFixes: [{ pr: 9 }], spawnCiHeals: [{ pr: 10 }],
@@ -121,6 +122,8 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
     } };
     const s = tickSurface(out);
     expect(s.statusLine).toBe('conveyor · 2 building');
+    // #3398 — the structured tallies pass through verbatim, for the supervisor's alerting to read.
+    expect(s.counts).toEqual({ building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' });
     expect(s.notes).toHaveLength(1);
     expect(s.dispatch).toEqual({
       builds: [{ num: 1, lane: 1 }], prepareScope: [{ num: 2, lane: 2 }],
@@ -130,7 +133,7 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   });
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
-    expect(s).toEqual({ statusLine: '', notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+    expect(s).toEqual({ statusLine: '', counts: null, notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
   });
 });
 

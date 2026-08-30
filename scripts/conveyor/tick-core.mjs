@@ -746,7 +746,14 @@ export function routeWatcherExit(code, labels = []) {
  *   • infra — `state.infraBlocked` count (only when non-empty).
  * @returns {string}
  */
-export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
+/**
+ * The status line's own per-tick tallies, factored out of {@link buildStatusLine} so a caller that needs the
+ * NUMBERS (not the rendered string) — {@link planTick} attaches this to `decisions.counts` for #3398's
+ * supervisor-alerting "idle with a non-empty queue" detector — never has to parse the line's text back apart.
+ * Same inputs, same tallies `buildStatusLine` renders; this is the one place that counts them. Pure.
+ * @returns {{ building: number, preparing: number, fixing: number, healing: number, queued: number, parked: number, verdict: 'ok'|'warn' }}
+ */
+export function computeTickCounts({ queue = [], lanes = [], prs = [], health = {}, liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
   const prepareNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const buildGuardNums = new Set((Array.isArray(liveBuildGuards) ? liveBuildGuards : []).map((g) => normNum(g.num)));
   // Active build lanes = leased lanes whose item is NOT a live prepare (a prepare also leases a lane).
@@ -767,7 +774,14 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
   const fixing = (Array.isArray(liveFixGuards) ? liveFixGuards : []).length;
   const healing = (Array.isArray(liveCiHealGuards) ? liveCiHealGuards : []).length;
   const verdict = health?.verdict === 'warn' ? 'warn' : 'ok';
-  let line = `conveyor · ${building.size} building · ${prepareNums.size} preparing · ${fixing} fixing · ${healing} healing · ${queued} queued · ${parked.size} parked · health ${verdict}`;
+  return { building: building.size, preparing: prepareNums.size, fixing, healing, queued, parked: parked.size, verdict };
+}
+
+export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
+  const { building, preparing, fixing, healing, queued, parked, verdict } = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  });
+  let line = `conveyor · ${building} building · ${preparing} preparing · ${fixing} fixing · ${healing} healing · ${queued} queued · ${parked} parked · health ${verdict}`;
   const infra = (Array.isArray(infraBlocked) ? infraBlocked : []).length;
   if (infra) line += ` · ${infra} infra-blocked`;
   if (verdict === 'warn') {
@@ -964,9 +978,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const statusLine = buildStatusLine({
     queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
+  // #3398 — the numeric tallies behind the line above, structured (not re-parsed from `statusLine`'s text) so
+  // the supervisor's out-of-band alerting can tell "queued > 0 yet nothing dispatched, tick after tick" apart
+  // from a genuinely empty queue, over its own JSONL history.
+  const counts = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  });
 
   return {
     decisions: {
+      counts,
       spawnBuilds: launched.spawn,
       suppressedBuilds: launched.suppressed,
       spawnPrepareScope: prep.scopeSpawns,

@@ -98,6 +98,10 @@ export function tickSurface(out) {
   const d = (out && out.decisions) || {};
   return {
     statusLine: d.statusLine || '',
+    // #3398 — the structured tallies behind `statusLine` (tick-core's `computeTickCounts`), so a consumer
+    // (the supervisor's alerting, once it captures this surface) can read `counts.queued` without re-parsing
+    // the rendered line's text.
+    counts: d.counts && typeof d.counts === 'object' ? d.counts : null,
     notes: Array.isArray(d.notes) ? d.notes : [],
     dispatch: {
       builds: Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [],
