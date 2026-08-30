@@ -1,9 +1,11 @@
 ---
 bornAs: xl1ru2l
 kind: task
-status: active
+status: resolved
 dateOpened: "2026-08-05"
 dateStarted: "2026-08-29"
+dateResolved: "2026-08-29"
+graduatedTo: none
 tags: []
 scope: ["we:scripts/lib/invariant-catalogue.json"]
 ---
