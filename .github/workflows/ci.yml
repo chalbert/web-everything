@@ -364,6 +364,26 @@ jobs:
           path: web-everything/false-green-log.json
           if-no-files-found: warn
 
+      # Free byproduct of the shadow run above: per-test durations are already in vitest-full.json, this
+      # job just never looked at them. Printed straight into the CI log (no artifact download needed) as an
+      # early-warning signal for individual slow tests and files creeping up before they dominate a shard —
+      # this job runs the SAME real-git/subprocess integration config as `npm run test:integration:vitest`
+      # too, so both tiers are covered. Report-only: never fails the job.
+      - name: Report slowest tests (unit)
+        if: always()
+        working-directory: web-everything
+        run: node scripts/dev/report-slow-tests.mjs vitest-full.json --top=40 || true
+
+      - name: Shadow integration-suite run (json report)
+        if: always()
+        working-directory: web-everything
+        run: npx vitest run --config vitest.integration.config.ts --reporter=json --outputFile=vitest-integration.json || true
+
+      - name: Report slowest tests (integration)
+        if: always()
+        working-directory: web-everything
+        run: node scripts/dev/report-slow-tests.mjs vitest-integration.json --top=40 || true
+
   # Visual-regression guard (#2177 / #1966). Builds the docs site (same sibling layout as deploy.yml)
   # and runs `check:visual` against committed -chromium-linux baselines. Separate job so its ~2–3 min
   # build cost doesn't slow the fast `test` job. Runs on the same events (push/PR/dispatch).
