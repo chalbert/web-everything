@@ -749,7 +749,7 @@ export function createDispatchSinks({
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
       const sessionId = String(mintSessionId());
-      const argv = buildAgentArgv({ sessionId, payload, extraArgs });
+      const argv = buildAgentArgv({ sessionId, payload, extraArgs, systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE });
       try {
         spawnAgent(argv, { cwd: root });
       } catch (e) {
@@ -790,6 +790,10 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
   });
 }
 
+/** The dispatched agent's own standing identity, appended as a system prompt (#xqyyoje) — see the file's own
+ *  header for why it is kept separate from the per-item prompt, not folded into `delivery-agent-brief.md`. */
+export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'conveyor', 'dispatched-agent-system-prompt.md');
+
 /**
  * The `claude` argv for one dispatch. PURE and exported, because the argv IS the contract with the CLI and a
  * test that asserts it is the only thing standing between a flag rename and a silent non-dispatch.
@@ -797,13 +801,20 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
  * `--bg` starts the session and returns immediately; `--session-id` pins the handle; `-n` names the session so
  * `claude agents` is legible to an operator watching the pool.
  *
+ * `--append-system-prompt-file` (#xqyyoje), when `systemPromptFile` is given, adds the dispatched agent's
+ * standing identity ahead of `extraArgs` and the prompt — a real CLI flag (`claude --help`), unused before this,
+ * that gives a dispatched agent a way to tell "who am I, always" apart from "what am I doing right now" instead
+ * of both arriving folded into one prompt string. Optional and defaulted to nothing (not
+ * {@link DISPATCHED_AGENT_SYSTEM_PROMPT_FILE}) so this function stays PURE — no fs, no implicit path — the
+ * caller resolves the real path and decides whether to pass it.
+ *
  * THE PROMPT'S POSITION GUARANTEES NOTHING, which the first cut of this comment got wrong. `claude` parses with
  * commander, and commander accepts options intermixed with operands — a last positional beginning with `-` is
  * still read as a flag. Rather than bet on `--` being handled the way this file hopes (untested against the
  * real CLI, and a wrong bet turns into a dispatch with a mangled prompt), the dash is REFUSED outright. Every
  * legitimate brief starts with markdown, so the refusal costs nothing and proves what the position could not.
  */
-export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
+export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null }) {
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
@@ -813,6 +824,7 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [] }) {
     '--bg',
     '--session-id', String(sessionId),
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
+    ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...extraArgs.map(String),
     prompt,
   ];

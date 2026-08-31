@@ -56,6 +56,7 @@ import {
   classifyDispatchPr,
   createDispatchObservers,
   createDispatchSinks,
+  DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
   REPO_ROOT,
   forwardableBookkeeping,
   inFlightDispatchesFor,
@@ -674,6 +675,16 @@ describe('what the sink actually runs', () => {
   it('pins the handle with --session-id instead of racing to discover it', () => {
     expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).toEqual([
       '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037', '# build #3037',
+    ]);
+  });
+
+  it('#xqyyoje — appends --append-system-prompt-file only when the caller passes one, ahead of extraArgs', () => {
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--append-system-prompt-file');
+    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'] });
+    expect(argv).toEqual([
+      '--bg', '--session-id', 'sess-c3', '-n', 'conveyor-3037',
+      '--append-system-prompt-file', '/path/to/identity.md',
+      '--model', 'sonnet', '# build #3037',
     ]);
   });
 
@@ -1346,9 +1357,12 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(briefPath(REPO_ROOT)).toBe(briefPath(REPO_ROOT, 'build'));
     expect(briefPath(REPO_ROOT)).toMatch(/skills-src\/conveyor\/delivery-agent-brief\.md$/);
     // THE ARGV IS THE CONTRACT, and it is pinned whole — the prompt is the delivery brief filled with the
-    // item's OWN `scope:` frontmatter, not the one-file prepare scope.
+    // item's OWN `scope:` frontmatter, not the one-file prepare scope. `--append-system-prompt-file` (#xqyyoje)
+    // is the sink's own standing-identity flag, always present on a real dispatch — see
+    // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`.
     expect(spawned[0].argv).toEqual([
       '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
+      '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/',
