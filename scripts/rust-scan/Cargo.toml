@@ -1,0 +1,33 @@
+[package]
+name = "we-scan"
+version = "0.1.0"
+edition = "2021"
+# Not published; a subprocess CLI check-standards.mjs shells out to (#3417). No `[lib]` — main.rs is the
+# whole surface until a second binary/shared crate needs one.
+#
+# CROSS-LANE BUILD CACHE (#3417 follow-up to the operator's flag about 40+ parallel lane clones each doing a
+# from-scratch `cargo build`): opt in with `export RUSTC_WRAPPER=sccache` (after `cargo install sccache
+# --locked`), NOT a committed `.cargo/config.toml`. A crate-committed `rustc-wrapper` setting is a HARD
+# requirement, not a soft "use it if present" — Cargo refuses to build at all when the named wrapper binary
+# can't be found (confirmed the hard way: CI's `test` job failed with `error: could not execute process
+# sccache … No such file or directory` the moment this was a committed config rather than an env var). The
+# env var is the correct opt-in shape: set it in your own shell profile (or a CI workflow step that also
+# installs sccache) and every lane/checkout benefits; leave it unset anywhere sccache isn't installed and
+# the build is unaffected.
+
+[[bin]]
+name = "we-scan"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+# This runs on every check:standards invocation (#2833's foreground gate), so release-profile speed matters
+# more than link time for a crate this size.
+lto = true
+codegen-units = 1

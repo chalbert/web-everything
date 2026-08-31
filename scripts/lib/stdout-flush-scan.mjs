@@ -78,7 +78,12 @@ import { join, relative } from 'node:path';
 /** How far after a stdout write a `process.exit` still counts as "right after it". */
 export const WINDOW = 10;
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '_site', 'coverage', '__tests__']);
+// `target` (#3417) — Cargo's build-artifact dir (scripts/rust-scan/target): gitignored, so it never ships,
+// but `readdirSync` walks the real filesystem regardless of git's view of it. Measured: 2,186 files after one
+// `cargo build --release`, growing with every dependency the crate gains — walking it on every check:standards
+// invocation is pure waste (it holds no .mjs/.js this scan could ever match) and the cost compounds forever
+// if left unskipped, unlike a one-time miss.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '_site', 'coverage', '__tests__', 'target']);
 
 /** A stdout write — the raw form. Its ARGUMENT decides whether it is bounded. */
 const RAW_WRITE = /process\.stdout\.write\s*\(/;
