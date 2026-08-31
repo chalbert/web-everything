@@ -17,6 +17,32 @@ hiccup (delivery succeeded but surfaced something worth improving) gets filed on
 Both route through the existing learnings-pool/`/harvest` pipeline rather than a parallel one, triggered
 mechanically at the moment of the hiccup instead of waiting for a human `/note`.
 
+## Addendum (2026-08-31): the missing-operation risk axis, pinned from the same `#3422` discussion
+
+Per `#3383`'s own next-steps ("pin the missing-operation risk axis and fold it into `#3421`'s scope"), this
+amends this story's scope — it does not reopen or rewrite the Done-when items above. Captured faithfully from
+the operator's own framing, same 2026-08-31 discussion that produced `#3422`'s ruling:
+
+- **Missing operations specifically are Kanban-style, not ad hoc.** A missing-operation finding (the
+  `#3405`-ratified halt-and-surface path) raises a feature request that is then prepared like any other
+  backlog item — read the spec, predict what it touches, build it in a lane. This is the SAME mechanism
+  `#3412`'s own prepare-scope dispatch already proved end to end (see `#3383`'s 2026-08-31 session update,
+  section 1), not a new one.
+- **The low-risk-vs-escalate call is the building/reviewing agent's own confidence assessment, not a rigid
+  rule-based classifier.** Made during the normal prepare/build flow, against a small set of named criteria:
+  security risk, data-leak risk, performance, blast-radius/reversibility, and baseline correctness. Every
+  built operation still gets an agent review, always — the confidence call decides whether a HUMAN also has to
+  look at it, not whether it gets reviewed at all.
+  - High confidence, clean on every criterion → self-clears, no human in the loop.
+  - Any flagged criterion, or genuine uncertainty → joins a BATCHED list of AI-authored findings for a human
+    to clear on their own time — not a blocking interactive prompt.
+- **A standing blacklist of commands/APIs forces elevated review regardless of confidence.** Independent of
+  the confidence call — the same denylist-and-grow shape `#3405` already ratified for the dispatch doctrine
+  generally, applied here specifically to operations that call something on the list.
+- **Thresholds are eventually a Plateau admin-configurable surface, not a hardcoded constant** — the confidence
+  bar and the blacklist contents both. Pre-production, keep this light: a short list, a loose bar, tightened
+  later once there's real usage to tune against. None of this blocks building a first version.
+
 ## Done when
 
 1. **Executable** — a classifier derives blocking-vs-non-blocking directly off the tick core's own state
@@ -29,4 +55,10 @@ mechanically at the moment of the hiccup instead of waiting for a human `/note`.
 3. **Executable** — `/harvest` (or a lighter-weight companion trigger, whichever proves cheaper to wire) reads
    the approval-pending flag and refuses to file+queue a blocking-bucket entry's fix until it is cleared;
    a non-blocking entry files straight through with no gate check.
-4. `npm run check:standards` — no new errors.
+4. **Executable** — for the missing-operation case specifically (the addendum above), the confidence-assessment
+   axis (named criteria: security risk, data-leak risk, performance, blast-radius/reversibility, baseline
+   correctness) and the standing blacklist axis are both wired into the classifier from Done-when #1, with a
+   test pinning a clean-self-clears case, a flagged-criterion-batches case, and a blacklisted-call-escalates
+   case. The confidence bar and blacklist contents are a light, pre-production default (kept configurable, not
+   yet surfaced as a Plateau admin setting — that surface is future work, not required to close this item).
+5. `npm run check:standards` — no new errors.
