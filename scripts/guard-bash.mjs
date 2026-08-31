@@ -69,6 +69,22 @@
  *     there is no reliable way to tell a delegated subagent's own primary-reporting verify apart from the main
  *     session's own laziness (#2335) — so this is a stderr nudge only, never a deny.
  *
+ *   • a raw `gh pr merge <n>` or its REST equivalent `gh api repos/<owner>/<repo>/pulls/<n>/merge -X PUT` —
+ *     found this session (2026-08-31): `scripts/lib/pr-merge-gate.mjs`'s `assertMayMerge` is the documented
+ *     ONE place a PR may merge to `main` (#2290's sole-writer invariant), and it sits upstream of the
+ *     review-escalation check (`review:pending`/`review:human`) that only runs inside the drain's own
+ *     `classifyPr` call path (merge-ai-prs.mjs). But `assertMayMerge` is a plain JS function — nothing stops
+ *     an agent's Bash tool from shelling the merge directly, which skips BOTH the sole-writer invariant and
+ *     the review gate behind it, with no malice required (a carelessly-run command, or an ambiguous
+ *     mandate). Every PR this repo opens targets `main` (`pr-land.mjs` defaults `--base` to `main`;
+ *     `lane-stack.mjs`'s stacking rebases a lane's LOCAL git history onto a parent lane's tip — it never
+ *     changes a PR's GitHub base ref), so this is a blanket deny, not one gated on reading the PR's actual
+ *     base. Sanctioned path: label `ready-to-merge` and let the drain land it (`pr-land.mjs` / `/drain`) —
+ *     those call `assertMayMerge` internally and are untouched. Escape: `WE_MERGE_BREAK_GLASS=1` — reused
+ *     verbatim from `pr-merge-gate.mjs`'s own break-glass rather than inventing a second one; the CLI section
+ *     below writes a LOUD stderr audit line whenever it actually disarms this deny, mirroring
+ *     `assertMayMerge`'s own loud line.
+ *
  *   • a command the PARSER CANNOT REPRESENT — today that is exactly one state: an unterminated quoted run
  *     (#2994 review r3). Every loosening found across three rounds of that review reduced to ONE mechanism:
  *     the scanner hit a state it had no representation for, silently degraded to "consume to end of
@@ -1616,6 +1632,39 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
       return 'direct push to `main` is blocked (strict lane-only enforcement, #2203). Push to a `lane/*` ref and land via a PR so CI gates it: `git push origin HEAD:refs/heads/lane/<name>` then `pr-land`. Sanctioned override (rare): prefix `MAIN_PUSH_OK=1`.';
   }
 
+  // A raw `gh pr merge` or its REST equivalent bypasses `pr-merge-gate.mjs`'s `assertMayMerge` — the ONE
+  // place a PR may merge to `main` (#2290's sole-writer invariant) — and, upstream of it, the
+  // review-escalation check (`review:pending`/`review:human`) that only runs inside the drain's own
+  // `classifyPr` call path. Found this session: a perfectly drain-shaped PR can be merged straight past
+  // review by an agent that just shells the merge itself — no malice required. Scoped narrowly: `gh pr view`/
+  // `checks`/`comment`/`edit --add-label` and a read-only GET on the `.../merge` path (checking merged
+  // status) are untouched; only an actual `gh pr merge` invocation or a MUTATING (`PUT`) REST call to the
+  // merge endpoint fires. `atCommand`/`heads` (built above) already carry this segment through the same
+  // wrapper/env/quote normalization (`canonicalCommand`) the push arm uses, and `decide`'s nested-command
+  // recursion (`withNestedCommands`) re-runs `reason` on a `bash -c "gh pr merge …"` string the same way it
+  // does for a disguised push — so this arm gets that coverage for free rather than re-implementing it.
+  if (!/\bWE_MERGE_BREAK_GLASS=1\b/.test(s)) {
+    if (atCommand(/^gh\s+pr\s+merge\b/))
+      return 'a raw `gh pr merge` bypasses `scripts/lib/pr-merge-gate.mjs`\'s `assertMayMerge` — the ONE place a PR may merge to `main` (#2290\'s sole-writer invariant) — and, upstream of it, the review-escalation check (`review:pending`/`review:human`) that only runs inside the drain\'s own `classifyPr` call path (merge-ai-prs.mjs). That lets a drain-shaped PR merge straight past review. Apply the `ready-to-merge` label and let the drain land it (`node scripts/pr-land.mjs`, or the `/drain` skill) — that path calls `assertMayMerge` and is unaffected. Emergency-only escape (logged loudly): prefix `WE_MERGE_BREAK_GLASS=1`.';
+    // The REST route to the same endpoint: `gh api repos/<owner>/<repo>/pulls/<n>/merge` MUTATED with `-X
+    // PUT`/`--method PUT` (also the glued `-XPUT` form) — GitHub's merge endpoint requires PUT; a bare GET on
+    // the same path only checks merged status and is left alone. `shellTokens` is quote-aware (same helper the
+    // `gh pr edit --body` arm above uses), so a PUT value hiding in a quoted string is still seen.
+    if (atCommand(/^gh\s+api\b/) && /(?:^|[\s'"/])repos\/[^\s'"]+\/pulls\/\d+\/merge\b/.test(s)) {
+      const toks = shellTokens(s);
+      const isPut = (t) => /^put$/i.test(t);
+      const hasPutMethod = toks.some((t, i) => {
+        if (/^-x$/i.test(t.text)) return isPut((toks[i + 1] || {}).text || '');
+        if (/^-xput$/i.test(t.text)) return true;
+        if (/^--method$/i.test(t.text)) return isPut((toks[i + 1] || {}).text || '');
+        const eq = t.text.match(/^--method=(.+)$/i);
+        return eq ? isPut(eq[1]) : false;
+      });
+      if (hasPutMethod)
+        return 'a `gh api …/pulls/<n>/merge -X PUT` is the REST equivalent of a raw `gh pr merge` — the same bypass of `scripts/lib/pr-merge-gate.mjs`\'s `assertMayMerge` (#2290\'s sole-writer invariant) and the review-escalation check behind it. Apply the `ready-to-merge` label and let the drain land it (`node scripts/pr-land.mjs`, or the `/drain` skill). Emergency-only escape (logged loudly): prefix `WE_MERGE_BREAK_GLASS=1`.';
+    }
+  }
+
   return null;
 }
 
@@ -1860,6 +1909,23 @@ export function collateralStepsNotice(command, ctx = {}) {
   }
 }
 
+/** Did `WE_MERGE_BREAK_GLASS=1` actually disarm the raw-gh-merge deny in this command? Pure. The CLI uses
+ *  this to write a LOUD stderr audit line whenever the escape does something — mirroring `pr-merge-gate.mjs`'s
+ *  own `assertMayMerge`, which logs every break-glass merge the same way, so this escape is never silent
+ *  either. Strips the token and re-runs `decide`: if the command is ALLOWED as given but would have been
+ *  denied by the raw-gh-merge arm specifically (its message is the only one that names `assertMayMerge`)
+ *  with the token gone, the escape is what let it through — as opposed to a command that was going to be
+ *  allowed regardless (no audit noise for an ordinary `WE_MERGE_BREAK_GLASS=1`-prefixed no-op) or one still
+ *  denied by some other arm (the escape didn't do anything). */
+export function mergeBreakGlassUsed(command, ctx = {}) {
+  const s = String(command || '');
+  if (!/\bWE_MERGE_BREAK_GLASS=1\b/.test(s)) return false;
+  if (decide(s, ctx)) return false;
+  const stripped = s.replace(/\bWE_MERGE_BREAK_GLASS=1\b/g, '');
+  const wouldDeny = decide(stripped, ctx);
+  return !!(wouldDeny && /assertMayMerge/.test(wouldDeny));
+}
+
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
  *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule, and
  *  `foreignLiveLease` for the #2367 rule). */
@@ -2060,6 +2126,14 @@ if (IS_CLI) {
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r + collateral },
     }));
   }
+  // WE_MERGE_BREAK_GLASS=1 on a raw gh-merge command is never silent — mirrors `pr-merge-gate.mjs`'s own
+  // `assertMayMerge`, which writes a LOUD line to stderr on every break-glass merge. try/catch: an audit-log
+  // fault must never wedge the agent (same discipline as the nudge below).
+  try {
+    if (!r && mergeBreakGlassUsed(cmd, guardCtx))
+      process.stderr.write(`guard-bash: BREAK-GLASS — WE_MERGE_BREAK_GLASS=1 disarmed the raw gh-merge deny (pr-merge-gate.mjs's own escape, reused here) for: ${cmd.trim()}\n`);
+  } catch { /* never wedge on an audit-log fault */ }
+
   // #2749/#2788 — the WARN-only nudge for the un-script-decidable "should have delegated" half. Independent
   // of the deny channel above (fires even when `r` is null — this command wrote no tree); stderr only, never
   // blocks. try/catch: a guard bug here must never wedge the agent.

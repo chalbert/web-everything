@@ -15,7 +15,7 @@ import {
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
-  nestedCommandStrings, fileWriteTargets, collateralStepsNotice,
+  nestedCommandStrings, fileWriteTargets, collateralStepsNotice, mergeBreakGlassUsed,
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -506,6 +506,96 @@ describe('guard-bash — direct-push-to-main block (#2203)', () => {
     expect(decide('git rm backlog/2200-foo.md')).toMatch(/Never delete a backlog/);
     expect(decide('git mv backlog/2200-a.md backlog/2201-a.md')).toMatch(/immutable/);
     expect(reason('sed -i s/x/y/ backlog/2200-a.md')).toMatch(/locus-prefix/);
+  });
+});
+
+describe('guard-bash — raw gh-merge bypass block (#2290 assertMayMerge)', () => {
+  const blockedMerge = (c) => expect(decide(c), c).toMatch(/assertMayMerge/);
+  const allowed = (c) => expect(decide(c), c).toBeNull();
+
+  it('blocks a bare `gh pr merge <n>` in any of its usual flag forms', () => {
+    blockedMerge('gh pr merge 1234');
+    blockedMerge('gh pr merge 1234 --merge --delete-branch');
+    blockedMerge('gh pr merge 1234 --squash');
+    blockedMerge('gh pr merge 1234 --admin');
+    blockedMerge('gh pr merge --repo owner/repo 1234');
+  });
+
+  it('blocks disguised forms — wrapper/path/quote peeling, subshell, nested exec (mirrors the #2203 push arm)', () => {
+    blockedMerge('/usr/bin/gh pr merge 1234');
+    blockedMerge('"gh" pr merge 1234');
+    blockedMerge('env FOO=1 gh pr merge 1234');
+    blockedMerge('time gh pr merge 1234');
+    blockedMerge('sudo gh pr merge 1234');
+    blockedMerge('(gh pr merge 1234)');
+    blockedMerge('{ gh pr merge 1234; }');
+    blockedMerge('bash -c "gh pr merge 1234"');
+    blockedMerge('sh -c \'gh pr merge 1234\'');
+    blockedMerge('echo "$(gh pr merge 1234)"');
+    blockedMerge('echo done && gh pr merge 1234');
+    blockedMerge('gh pr checks 1234 ; gh pr merge 1234');
+  });
+
+  it('blocks the REST equivalent — `gh api …/pulls/<n>/merge` with a MUTATING method, every spelling', () => {
+    blockedMerge('gh api repos/acme/web-everything/pulls/1234/merge -X PUT');
+    blockedMerge('gh api /repos/acme/web-everything/pulls/1234/merge -X PUT');
+    blockedMerge('gh api repos/acme/web-everything/pulls/1234/merge --method PUT');
+    blockedMerge('gh api repos/acme/web-everything/pulls/1234/merge --method=PUT');
+    blockedMerge('gh api repos/acme/web-everything/pulls/1234/merge -XPUT'); // glued no-space form
+    blockedMerge('gh api repos/acme/web-everything/pulls/1234/merge -X put'); // case-insensitive method value
+    blockedMerge('bash -c "gh api repos/acme/web-everything/pulls/1234/merge -X PUT"'); // disguised too
+  });
+
+  it('does NOT block a read-only `gh api …/pulls/<n>/merge` (no mutating method — checks merged status)', () => {
+    allowed('gh api repos/acme/web-everything/pulls/1234/merge');
+    allowed('gh api repos/acme/web-everything/pulls/1234/merge -X GET');
+  });
+
+  it('does NOT block ordinary non-merging `gh pr`/`gh api` calls', () => {
+    allowed('gh pr view 1234');
+    allowed('gh pr checks 1234');
+    allowed('gh pr comment 1234 --body-file=/tmp/c.md');
+    allowed('gh pr edit 1234 --add-label ready-to-merge');
+    allowed('gh api repos/acme/web-everything/pulls/1234');
+    allowed('gh api repos/acme/web-everything/pulls/1234/reviews');
+  });
+
+  it('does NOT block the sanctioned land scripts — they call assertMayMerge internally, no raw gh-merge text', () => {
+    // No `--flag` on the pr-land invocation here (unlike a real call site) — deliberately, so this line
+    // isn't itself HARVESTED as a real invocation by #3321's repo-wide pr-land-posture sweep
+    // (scripts/__tests__/lane-verify.test.mjs), which would then want it to declare a verify posture it has
+    // no reason to. guard-bash doesn't inspect pr-land's flags at all; only the command WORD matters here.
+    allowed('node scripts/pr-land.mjs');
+    allowed('node scripts/merge-ai-prs.mjs --json');
+    allowed('node scripts/lane-resume.mjs --lane=3');
+  });
+
+  it('a mere MENTION of the merge command (a message, a grep) is not an invocation', () => {
+    allowed('echo "remember to gh pr merge later"');
+    allowed('git commit -m "wire gh pr merge into pr-merge-gate.mjs"');
+    allowed('grep "gh pr merge" docs/agent/delivery-loop.md');
+  });
+
+  it('the WE_MERGE_BREAK_GLASS=1 escape passes both raw forms through (pr-merge-gate.mjs\'s own escape, reused)', () => {
+    allowed('WE_MERGE_BREAK_GLASS=1 gh pr merge 1234');
+    allowed('WE_MERGE_BREAK_GLASS=1 gh api repos/acme/web-everything/pulls/1234/merge -X PUT');
+  });
+
+  it('mergeBreakGlassUsed: true only when the escape actually disarmed THIS arm, false otherwise', () => {
+    expect(mergeBreakGlassUsed('WE_MERGE_BREAK_GLASS=1 gh pr merge 1234')).toBe(true);
+    expect(mergeBreakGlassUsed('WE_MERGE_BREAK_GLASS=1 gh api repos/acme/web-everything/pulls/1234/merge -X PUT')).toBe(true);
+    // no escape token present
+    expect(mergeBreakGlassUsed('gh pr merge 1234')).toBe(false);
+    // escape present but this command was never denied by this arm in the first place
+    expect(mergeBreakGlassUsed('WE_MERGE_BREAK_GLASS=1 gh pr view 1234')).toBe(false);
+    expect(mergeBreakGlassUsed('WE_MERGE_BREAK_GLASS=1 npm run check:standards')).toBe(false);
+    // escape present but a DIFFERENT arm still denies (main push) — the merge escape didn't do anything here
+    expect(mergeBreakGlassUsed('WE_MERGE_BREAK_GLASS=1 git push origin main')).toBe(false);
+  });
+
+  it('still enforces the pre-existing rules (regression guard)', () => {
+    expect(decide('git push origin main')).toMatch(/direct push to `main` is blocked/);
+    expect(decide('pkill -f vite')).toMatch(/dev server/);
   });
 });
 
