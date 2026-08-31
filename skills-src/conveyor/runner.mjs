@@ -239,18 +239,32 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  resource from a lane lease), the reconcile-fix dispatch pass (#3438 — dispatches the fix agent
  *  `we:scripts/conveyor/reconcile-pass.mjs` decides is owed for a bounced PR with nothing live working it, a
  *  genuinely different population from `decisions.spawnFixes`'s own tick-core-launched-PRs-only scope; see that
- *  file's own header for the full reasoning), the blocking-hiccup sink (#3421), and the verify-dispatch pass
- *  (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's own process, unbound by an
- *  agent's 120s foreground window). All six are best-effort: a failure is swallowed (logged to stderr) and
- *  never gates the tick. Never a local merge — the drain stays the sole writer to `main`.
+ *  file's own header for the full reasoning), the review-reconcile pass (epic #3383: reads
+ *  `conveyor/reconcile-pass.mjs`'s own decision and dispatches `operations/review-dispatch.mjs` for every PR it
+ *  names — the review step is now actually mechanized, not merely planned), the blocking-hiccup sink (#3421),
+ *  and the verify-dispatch pass (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's
+ *  own process, unbound by an agent's 120s foreground window). All seven are best-effort: a failure is
+ *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer
+ *  to `main`.
  *
- *  THE HICCUP SINK is the ONLY one of the six that reads `out` (this tick's already-computed
+ *  THE HICCUP SINK is the ONLY one of the seven that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
  *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
  *  hiccup-sink.mjs `fileHiccup`.
+ *
+ *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
+ *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
+ *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
+ *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
+ *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
+ *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
+ *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` spawns
+ *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state —
+ *  parallel spawns have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
+ *  here.
  *
  *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
  *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
@@ -276,6 +290,55 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
     runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
+    // Epic #3383 — MECHANIZE THE REVIEW STEP. `conveyor/reconcile-pass.mjs` (#3296, already landed) already
+    // decides WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR,
+    // a live `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
+    // build/prepare/fix/ci-heal guards it needs NO session-ephemeral bookkeeping of its own; it can just be
+    // re-run every tick, safely, the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Until this,
+    // nothing ever consumed its `review` dispatch decisions — `operations/review-dispatch.mjs` (#3279) existed
+    // and worked standalone, but nothing called it automatically. This closes that gap.
+    //
+    // DOUBLE-DISPATCH IS ALREADY GUARDED, UPSTREAM, NOT HERE. `reconcile-core.mjs`'s own liveness read binds a
+    // live session to a PR (cwd → HEAD sha) and refuses (`live-process`) BEFORE the `review` dispatch decision
+    // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
+    // Nothing new needs to be added on this side for that; re-running the read is exactly what makes it safe.
+    //
+    // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
+    // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
+    // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
+    // rest of the tick, or the tick itself).
+    //
+    // `reconcileOut` (NOT `out`) — this block's own subprocess stdout, deliberately NOT named `out`: the outer
+    // `out` is this tick's own core read, which the hiccup-sink block below still needs untouched.
+    try {
+      const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
+      if (typeof repo === 'string' && repo) reconcileArgs.push(`--repo=${repo}`);
+      const reconcileOut = execFileSync('node', reconcileArgs, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+      });
+      const plan = JSON.parse(reconcileOut);
+      const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
+      if (reviewsOwed.length) {
+        // `review-dispatch.mjs` REQUIRES a real `owner/repo` slug (unlike `reconcile-pass.mjs`, which lets
+        // `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually a review to fire,
+        // so the common empty-plan tick never pays for an extra `gh` call.
+        const repoSlug = typeof repo === 'string' && repo
+          ? repo
+          : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+          }).trim();
+        for (const d of reviewsOwed) {
+          try {
+            execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+          } catch (e) {
+            process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+          }
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    }
     // #3105/#3404 — unlike the passes above, this one can legitimately run for as long as the gate itself
     // takes (150–350s, sometimes longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep.
     // That is fine here — this tick simply takes longer — but the lease must be heartbeated WHILE it runs, not
