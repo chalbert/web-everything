@@ -73,8 +73,11 @@ Whatever it prints, that IS the outcome of your dispatch — read it, do not re-
 
 ### 3. Release your lane and exit
 
+`$LANE` holds the lane's absolute PATH (that's what `acquire` printed to stdout in step 1), not a bare
+number — do not try to extract one from it. Release by session instead, which needs no lane number at all:
+
 ```bash
-node scripts/lane-pool.mjs release --lane=<the lane number LANE resolved to> --session={{SESSION_SLUG}}
+node scripts/lane-pool.mjs release --all-pools --session={{SESSION_SLUG}}
 ```
 
 Then exit. You opened no PR, merged nothing, and — whether the review bounced or was queued for a human — your
