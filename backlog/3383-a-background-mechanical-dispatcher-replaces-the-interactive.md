@@ -521,7 +521,7 @@ this." Not filed as its own card yet — noted here for whoever picks this up ne
 ## Where this stands, end of the 2026-08-30/31 session — everything above landed or resolved
 
 All four PRs from tonight are merged: `#1726` (`#3405` ratified + finding-9 branch-strategy correction),
-`#1727` (`#3416` fix confirmation + `3422` filed), `#1729` (`xqyyoje` — the dispatched-agent system
+`#1727` (`#3416` fix confirmation + `3422` filed), `#1729` (`3418` — the dispatched-agent system
 prompt), `#1731` (this review-mechanization note). Nothing from tonight is open or blocked.
 
 **Next, in priority order:**

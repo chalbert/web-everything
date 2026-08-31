@@ -3,7 +3,7 @@ bornAs: xirq9vf
 kind: story
 size: 3
 parent: "3029"
-blockedBy: ["xgbtds5"]
+blockedBy: ["3423"]
 status: open
 dateOpened: "2026-08-27"
 tags: [operations, conveyor, github, branch-protection, sole-writer]
@@ -74,12 +74,12 @@ anything would have stopped one that didn't.
    sole-writer design assumes, OR explicitly documents why that is intentionally not possible and what
    compensating control exists instead.
 2. **The enforcement decision, carved out.** This item no longer carries the fork — it is `blockedBy`
-   **[#xgbtds5](/backlog/xgbtds5-branch-protection-enforcement-of-the-sole-writer-invariant-p/)**, a prepared
+   **[#3423](/backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p/)**, a prepared
    `kind: decision` card holding the (a)/(b) fork, the prior-art + fact-check research, and a recommended
    default, per the "never take an unprepared decision" agent-memory rule (a decision-shaped fork does not get answered
    inline in a story). This item unblocks once that decision is ratified.
-3. **Once #xgbtds5 is ratified:** if the ruling is Fork 1(a), apply the branch-protection/ruleset change via
-   `gh api` (the exact call shape is recorded on #xgbtds5's Fork 1) and re-verify with the same
+3. **Once #3423 is ratified:** if the ruling is Fork 1(a), apply the branch-protection/ruleset change via
+   `gh api` (the exact call shape is recorded on #3423's Fork 1) and re-verify with the same
    `branches/main/protection` read this card used; if the ruling is Fork 1(b) (the current recommended
    default), nothing further to apply here beyond item 1's executable check.
 
@@ -97,6 +97,6 @@ Filed 2026-08-27 at the user's request, after "aren't temp ids supposed to be ch
 no?" — a fair challenge that turned out to have a real answer: no, not structurally, only by convention.
 
 **Carved 2026-08-31:** "Done when" item 2's (a)/(b) enforcement fork was split out to
-**[#xgbtds5](/backlog/xgbtds5-branch-protection-enforcement-of-the-sole-writer-invariant-p/)** (prepared
+**[#3423](/backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p/)** (prepared
 `kind: decision`), which this item is now `blockedBy`. The fork's full research, options, and recommended
 default live only there — see that card, not this one, for the enforcement call.
