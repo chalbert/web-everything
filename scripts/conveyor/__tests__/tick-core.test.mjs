@@ -33,11 +33,13 @@ import {
   computeTickCounts,
   planTick,
   HELD_NOTE_EXCLUDED_REASONS,
+  durableBuildNums,
   DEFAULT_BUILD_TTL_TICKS,
   DEFAULT_PREPARE_TTL_TICKS,
   DEFAULT_FIX_RETRY_CAP,
   DEFAULT_CI_HEAL_RETRY_CAP,
 } from '../tick-core.mjs';
+import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 
 // ── The in-flight dispatch (build) guard — filter by num OR lane ──────────────────────────────────────────────
 
@@ -65,6 +67,45 @@ describe('filterLaunches — the in-flight dispatch guard drops by num OR by lan
   it('normalizes ids so a padded/`#`-sigil num still matches its guard', () => {
     const { spawn } = filterLaunches([{ num: '#010', lane: 9 }], [{ num: 10, lane: 4 }]);
     expect(spawn).toEqual([]);
+  });
+});
+
+describe('durableBuildNums — #3403 the restart-surviving build-guard floor', () => {
+  it('extracts a num from a live BUILD session name', () => {
+    expect(durableBuildNums([{ name: 'conveyor-77' }])).toEqual(['77']);
+  });
+
+  it('accepts plain name strings, not only session objects', () => {
+    expect(durableBuildNums(['conveyor-77'])).toEqual(['77']);
+  });
+
+  it('normalizes a padded/`#`-sigil-free numeric id the same way the guard does', () => {
+    expect(durableBuildNums([{ name: 'conveyor-077' }])).toEqual(['77']);
+  });
+
+  it('reads a retry-attempt tag (#3110, e.g. conveyor-77b) as the same num', () => {
+    expect(durableBuildNums([{ name: 'conveyor-77b' }])).toEqual(['77']);
+  });
+
+  it('excludes fix / prepare / prepare-decision / ci-heal sessions — only BUILD counts', () => {
+    expect(durableBuildNums([
+      { name: 'fix-77' }, { name: 'prepare-77' }, { name: 'prepare-decision-77' }, { name: 'ci-heal-77' },
+    ])).toEqual([]);
+  });
+
+  it('ignores unnamed / unrelated sessions and a non-array input', () => {
+    expect(durableBuildNums([{ name: 'some-other-thing' }, {}, { name: null }])).toEqual([]);
+    expect(durableBuildNums(undefined)).toEqual([]);
+    expect(durableBuildNums(null)).toEqual([]);
+  });
+
+  it('agrees with sessionSlugFor(num, "build") — the two must never name a build session differently (#3403)', () => {
+    expect(durableBuildNums([{ name: sessionSlugFor(77, 'build') }])).toEqual(['77']);
+    expect(durableBuildNums([{ name: sessionSlugFor(77, 'build', 'b') }])).toEqual(['77']);
+    // Every OTHER kind's slug must stay excluded, cross-checked against the real function, not a copy of it.
+    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+      expect(durableBuildNums([{ name: sessionSlugFor(77, kind) }])).toEqual([]);
+    }
   });
 });
 
@@ -617,6 +658,38 @@ describe('planTick — composes the tick and threads nextState', () => {
       { num: 10, lane: 4, spawnedTick: 0 },
     ]));
     expect(out.nextState.launchedNums).toContain('10');
+  });
+
+  it('#3403 — a supervisor crash-restart (bookkeeping wiped to `{}`) does NOT re-launch a build whose OS session is still alive', () => {
+    // #77 was spawned on lane 4 last tick: it has not yet acquired its lane (state.lanes still empty) or left
+    // the cleared queue (state.queue still shows it buildQueued), so from `state`'s own ground truth alone it
+    // looks exactly like a never-dispatched item — the SAME shape a genuinely fresh #77 would have. Only the
+    // durable floor (`liveAgentSessions`) tells the two apart.
+    const out = planTick({
+      state: { queue: [{ num: 77, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 77, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 5, buildGuards: [] }, // wiped by the crash-restart — fails today without the fix
+      liveAgentSessions: [{ name: 'conveyor-77', pid: 12345 }],
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.suppressedBuilds).toEqual([{ num: 77, lane: 4, by: 'num' }]);
+    // The durable guard is carried into nextState too, so the SAME check holds again next tick even if the
+    // live-session read is momentarily unavailable.
+    expect(out.nextState.buildGuards).toEqual(expect.arrayContaining([
+      expect.objectContaining({ num: '77', lane: null }),
+    ]));
+  });
+
+  it('#3403 — a genuinely fresh item with no live session and no guard launches normally (the fix does not over-suppress)', () => {
+    const out = planTick({
+      state: { queue: [{ num: 78, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 78, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 5, buildGuards: [] },
+      liveAgentSessions: [{ name: 'conveyor-77', pid: 12345 }], // unrelated live session — must not block #78
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 78, lane: 4 }]);
   });
 
   it('#3398 — decisions.counts carries the same structured tallies as decisions.statusLine, not re-derived by a caller', () => {
