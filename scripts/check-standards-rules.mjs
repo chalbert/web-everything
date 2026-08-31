@@ -2219,7 +2219,9 @@ export function duplicateBornAs(items = []) {
  * hash-led file that the drain is already about to fix, and the OLD hard error's remedy
  * (`number-stranded`) is an out-of-lane mutation that races the drain's own numbering if run there.
  * Detection: for each candidate file, look at the epoch of the LAST commit that touched it on
- * `origin/main` (`commitTimeFor`, supplied by the caller via `git log -1 --format=%ct`). A file touched
+ * `origin/main` (`commitTimeFor`, supplied by the caller via `git log -1 --first-parent --format=%ct` — the
+ * `--first-parent` is load-bearing: without it, pathspec history simplification walks past a `--no-ff`
+ * merge into the lane's own commit and returns ITS timestamp, not the merge's, #2956 r1). A file touched
  * within `graceWindowSeconds` of now is presumed in-flight — downgraded to a WARNING that does not name
  * `number-stranded` (running it here would race the drain) — rather than a hard error. A file older than
  * the grace window is a genuine strand: the drain's window has long since closed, so the fix is safe to

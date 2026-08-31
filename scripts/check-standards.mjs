@@ -553,9 +553,18 @@ try {
   // #2956 — a hash-led file touched within the drain's own JIT-numbering window (see strandedHashesOnMain's
   // doc comment) is downgraded to a warning rather than a hard error. `commitTimeFor` is a live, local-only
   // git call (no fetch) per candidate path — cheap, since there are normally zero or one of these.
+  //
+  // `--first-parent` is NOT optional (independent review, #2956 r1). The drain lands with a real `--no-ff`
+  // merge (`pr-land.mjs`'s default `--method=merge`), and that merge commit's tree for a path added purely
+  // in the lane is byte-identical to the lane parent's — a merge git log calls TREESAME. Without
+  // `--first-parent`, git's pathspec history simplification walks PAST the merge and returns the LANE
+  // commit's own timestamp (push → PR → CI → queue latency baked in — measured 947-4605s on this repo's
+  // real history), not the merge's. `--first-parent` pins the walk to mainline, so the merge commit's own
+  // time comes back — verified against this repo's real #2954 land: merge `269a4f1a` at 09:53:14 vs. the
+  // lane commit's own 09:48:06 that a plain `git log` returns for the same path.
   const commitTimeFor = (path) => {
     try {
-      const raw = execFileSync('git', ['log', '-1', '--format=%ct', 'origin/main', '--', path], { cwd: ROOT, encoding: 'utf8' }).trim();
+      const raw = execFileSync('git', ['log', '-1', '--first-parent', '--format=%ct', 'origin/main', '--', path], { cwd: ROOT, encoding: 'utf8' }).trim();
       const epoch = Number.parseInt(raw, 10);
       return Number.isFinite(epoch) ? epoch : null;
     } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)

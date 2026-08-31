@@ -232,13 +232,26 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
       expect(warnings[0]).not.toMatch(/number-stranded/);
     });
 
-    it('a hash-led file committed exactly at the grace boundary (179s, < default 180s) → still WARNING', () => {
+    it('a hash-led file committed 1s inside the grace boundary (179s, < default 180s) → still WARNING', () => {
       const { errors, warnings } = strandedHashesOnMain([path], {
         commitTimeFor: () => NOW - 179,
         now: () => NOW,
       });
       expect(errors).toEqual([]);
       expect(warnings).toHaveLength(1);
+    });
+
+    // #2956 r1 (independent review) — pins the `<` boundary EXACTLY, not one second inside it. The prior
+    // "boundary" test above used 179s, which a `<` → `<=` mutation would survive unnoticed; this one uses
+    // age === graceWindowSeconds exactly, where `<` (not in-flight, i.e. ERROR) and `<=` (in-flight, i.e.
+    // WARNING) disagree, so flipping the operator reddens this test.
+    it('a hash-led file committed EXACTLY at the grace boundary (age === graceWindowSeconds) → ERROR, not a warning (the window is a half-open "< grace", not "<= grace")', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW - 180,
+        now: () => NOW,
+      });
+      expect(warnings).toEqual([]);
+      expect(errors).toHaveLength(1);
     });
 
     it('a hash-led file committed 1 hour ago (long past the drain\'s window) → ERROR, remedy intact', () => {
@@ -254,6 +267,19 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
     it('a hash-led file whose commit time is unknown (commitTimeFor → null, e.g. a git error) → ERROR, fails toward the old safe behaviour', () => {
       const { errors, warnings } = strandedHashesOnMain([path], {
         commitTimeFor: () => null,
+        now: () => NOW,
+      });
+      expect(warnings).toEqual([]);
+      expect(errors).toHaveLength(1);
+    });
+
+    // #2956 r1 (independent review) — the `ageSeconds >= 0` future-timestamp guard had no test: deleting it
+    // left 53/53 green. A commit timestamp is git-metadata (author/committer clock, not authoritative), so a
+    // FUTURE-dated commit must never read as "in-flight forever" — that would be an indefinite way to
+    // suppress a genuine strand's error. Pin it directly: `commitTimeFor` returns a time AFTER `now`.
+    it('a hash-led file whose commitTimeFor is in the FUTURE relative to now (negative age, e.g. clock skew) → ERROR, never treated as in-flight', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW + 3600, // committed "in the future" relative to `now`
         now: () => NOW,
       });
       expect(warnings).toEqual([]);
