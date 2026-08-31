@@ -4,9 +4,9 @@ kind: epic
 parent: "3029"
 status: open
 dateOpened: "2026-08-28"
-costTokens: "in:3344 cw:4360871 cr:595195088 out:1192963"
-costUsd: 371.05
-costSessions: 6
+costTokens: "in:4258 cw:5434832 cr:788205472 out:1469575"
+costUsd: 485.21
+costSessions: 7
 tags: []
 ---
 
