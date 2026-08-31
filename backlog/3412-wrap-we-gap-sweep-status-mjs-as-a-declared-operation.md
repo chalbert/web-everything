@@ -5,6 +5,8 @@ parent: "3273"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:scripts/operations/
 ---
 
 # Wrap we:gap-sweep-status.mjs as a declared operation
