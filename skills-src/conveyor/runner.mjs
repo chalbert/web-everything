@@ -281,6 +281,17 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
  *  hiccup-sink.mjs `fileHiccup`.
  *
+ *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
+ *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
+ *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
+ *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
+ *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
+ *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
+ *  flight for a PR simply does not appear in next tick's plan. Firing its per-PR `review-dispatch.mjs` spawns
+ *  SEQUENTIALLY mirrors `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state —
+ *  parallel spawns have no benefit and this keeps one bad dispatch's blast radius the same as every other pass
+ *  here.
+ *
  *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
  *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
  *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
