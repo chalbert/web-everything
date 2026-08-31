@@ -4,6 +4,9 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-08-31"
+costTokens: "in:1564 cw:2713920 cr:430189527 out:476649"
+costUsd: 254.16
+costSessions: 1
 tags: []
 ---
 
