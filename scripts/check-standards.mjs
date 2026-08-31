@@ -1223,77 +1223,113 @@ try {
 //     for why this dir needs a resolution check, not gate 3's membership check).
 // WARN-level for now (CITATION_GATES_ENFORCED=false) — the historical corpus carries many pre-gate hits;
 // see the flag's TODO. The fs reads live here; all resolution logic is the pure core.
-{
-  const anchorOwners = buildAnchorOwners(backlog);
+try {
   const emit = CITATION_GATES_ENFORCED ? err : warn;
-  const relExists = (p) => existsSync(join(ROOT, p));
-  // Memoized by repo-relative path (#2863) — `findDanglingLoci` calls this once per CITING locus, and a
-  // popular file (platform-decisions.md, merge-ai-prs.mjs) is cited from many loci across the corpus. Without
-  // the cache that re-reads and re-splits the same file once per citation (measured: 145x / 40x, 113.7 MB of
-  // redundant I/O in one gate pass); with it, each distinct file is read at most once for the whole pass.
-  const relLineCount = makeMemoizedLineCounter((p) => readFileSync(join(ROOT, p), 'utf8'));
-  // #3100 — gate 3b's resolution inputs, derived from the ALREADY-LOADED `backlog` array (no extra fs
-  // pass): a hash-named item still on disk is PENDING (in-flight, self-heals at its own land); a landed
-  // item's `bornAs` frontmatter names the hash it was born under (already landed — a citation still
-  // carrying that hash is stale, not merely mid-flight).
-  const pendingHashes = new Set(backlog.filter((b) => isHash(b.num)).map((b) => b.num));
-  const bornAsHashes = new Set(backlog.filter((b) => isHash(b.bornAs)).map((b) => b.bornAs));
 
-  // Scan one file at a time — read, run the four detectors, discard — rather than materializing the whole
-  // scanned corpus into an array first (#2863). Every detector below is per-file and stateless, so nothing
-  // ever needs two files' content at once; the prior shape held ~3848 files' text (≈54 MB resident, 73 MB
-  // peak) for the whole pass for no benefit.
-  const scanFile = (rel, content) => {
-    for (const f of findAnchorRulingMismatches(content, anchorOwners)) {
-      const ownerList = f.owners.map((n) => `#${n}`).join(', ');
-      emit(`${rel}: anchor \`#${f.anchor}\` is attributed to #${f.citedNum}, but that anchor's ruling ` +
-        `authorities (its codifiedIn / graduatedTo owners) are ${ownerList} — a wrong law citation that ` +
-        `outlives the session (#25/#2821 gate 10). Cite one of ${ownerList} for the ruling, or name the ` +
-        `build slice explicitly if you mean the implementation. Near: "${f.context}"`,
-        { kind: 'citation-anchor-authority', file: rel });
-    }
-    for (const f of findDanglingLoci(content, { fileExists: relExists, lineCount: relLineCount })) {
-      emit(`${rel}: code-locus \`${f.locus}\` does not resolve — ${f.reason === 'missing-file'
-        ? 'no such file in this checkout' : `line ${f.line} is past end-of-file`} (#2821 gate 5). Fix the ` +
-        `path/line, or use a \`we:<path>#<symbol>\` anchor for a definition. (\`fui:\`/\`plateau:\` loci ` +
-        `are cross-repo and not checked here.)`,
-        { kind: 'citation-locus-resolution', file: rel });
-    }
-    for (const f of findOutOfScopeHashSlugs(content, rel)) {
-      emit(`${rel}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
-        `outside the at-land rewrite scope (backlog/, docs/agent/, agent-memory-src/) — ` +
-        `numberPendingHashes never rewrites it, so it dangles permanently once the item lands with a real ` +
-        `NNN (#2821 gate 3). Name the epic/item in prose, or cite its resolved #NNN.`,
-        { kind: 'citation-hash-slug-scope', file: rel });
-    }
-    if (rel.startsWith('agent-memory-src/')) {
-      for (const f of findDanglingMemoryHashSlugs(content, { pendingHashes, bornAsHashes })) {
+  const emitFinding = (f) => {
+    switch (f.kind) {
+      case 'anchor': {
+        const ownerList = f.owners.map((n) => `#${n}`).join(', ');
+        emit(`${f.file}: anchor \`#${f.anchor}\` is attributed to #${f.citedNum}, but that anchor's ruling ` +
+          `authorities (its codifiedIn / graduatedTo owners) are ${ownerList} — a wrong law citation that ` +
+          `outlives the session (#25/#2821 gate 10). Cite one of ${ownerList} for the ruling, or name the ` +
+          `build slice explicitly if you mean the implementation. Near: "${f.context}"`,
+          { kind: 'citation-anchor-authority', file: f.file });
+        break;
+      }
+      case 'locus': {
+        emit(`${f.file}: code-locus \`${f.locus}\` does not resolve — ${f.reason === 'missing-file'
+          ? 'no such file in this checkout' : `line ${f.line} is past end-of-file`} (#2821 gate 5). Fix the ` +
+          `path/line, or use a \`we:<path>#<symbol>\` anchor for a definition. (\`fui:\`/\`plateau:\` loci ` +
+          `are cross-repo and not checked here.)`,
+          { kind: 'citation-locus-resolution', file: f.file });
+        break;
+      }
+      case 'hashslug': {
+        emit(`${f.file}: hash-slug \`${f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`}\` is cited ` +
+          `outside the at-land rewrite scope (backlog/, docs/agent/, agent-memory-src/) — ` +
+          `numberPendingHashes never rewrites it, so it dangles permanently once the item lands with a real ` +
+          `NNN (#2821 gate 3). Name the epic/item in prose, or cite its resolved #NNN.`,
+          { kind: 'citation-hash-slug-scope', file: f.file });
+        break;
+      }
+      case 'memoryhash': {
         const slugText = f.form === 'hash-ref' ? `#${f.slug}` : `${f.slug}-…​.md`;
         const why = f.reason === 'dead-landed'
           ? 'the item it names has already LANDED under a real number, so this citation should already ' +
             'read `#NNN` and does not'
           : 'it does not resolve to any pending or landed backlog item on this tree (typo, or an ' +
             'abandoned lane\'s throwaway id)';
-        emit(`${rel}: hash-slug \`${slugText}\` ${why} (#3100 gate 3b). Replace it with the item's ` +
+        emit(`${f.file}: hash-slug \`${slugText}\` ${why} (#3100 gate 3b). Replace it with the item's ` +
           `resolved #NNN (or drop the reference if the id never landed).`,
-          { kind: 'citation-memory-hash-dangling', file: rel });
+          { kind: 'citation-memory-hash-dangling', file: f.file });
+        break;
       }
+      default:
+        // Unknown kind (a future Rust-side addition the JS side hasn't caught up to) — never silently drop
+        // a finding, but don't crash the gate over an unrecognized shape either.
+        warn(`citation-check gate produced an unrecognized finding kind ${JSON.stringify(f.kind)} on ${f.file ?? '?'} — report it, this shouldn't happen.`, { kind: 'citation-unknown-finding', file: f.file ?? 'scripts/check-standards.mjs' });
     }
   };
-  // Same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog + docs/agent +
-  // agent-memory-src + reports + the two src/ research dirs (the latter render on the public /research/ page).
-  const scanDir = (dir, exts) => {
-    const abs = join(ROOT, dir);
-    if (!existsSync(abs)) return;
-    for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
-      scanFile(`${dir}${f}`, readFileSync(join(abs, f), 'utf8'));
-  };
-  scanDir('backlog/', ['.md']);
-  scanDir('docs/agent/', ['.md']);
-  scanDir('agent-memory-src/', ['.md']);
-  scanDir('reports/', ['.md']);
-  scanDir('src/_data/researchTopics/', ['.json']);
-  scanDir('src/_includes/research-descriptions/', ['.njk']);
+
+  // #3417 — the optional Rust `we-scan citation-check` port, verified byte-identical to the four
+  // JS gates combined; falls back to the JS scan whenever the binary is unbuilt/stale/wrongly-shaped/erroring.
+  const rustFindings = runWeScan('citation-check', [`--root=${ROOT}`], {
+    referenceFiles: [
+      join(ROOT, 'scripts', 'lib', 'citation-check.mjs'),
+      join(ROOT, 'scripts', 'backlog', 'id.mjs'),
+    ],
+  });
+
+  if (rustFindings) {
+    for (const f of rustFindings) emitFinding(f);
+  } else {
+    const anchorOwners = buildAnchorOwners(backlog);
+    const relExists = (p) => existsSync(join(ROOT, p));
+    // Memoized by repo-relative path (#2863) — `findDanglingLoci` calls this once per CITING locus, and a
+    // popular file (platform-decisions.md, merge-ai-prs.mjs) is cited from many loci across the corpus.
+    // Without the cache that re-reads and re-splits the same file once per citation (measured: 145x / 40x,
+    // 113.7 MB of redundant I/O in one gate pass); with it, each distinct file is read at most once.
+    const relLineCount = makeMemoizedLineCounter((p) => readFileSync(join(ROOT, p), 'utf8'));
+    // #3100 — gate 3b's resolution inputs, derived from the ALREADY-LOADED `backlog` array (no extra fs
+    // pass): a hash-named item still on disk is PENDING (in-flight, self-heals at its own land); a landed
+    // item's `bornAs` frontmatter names the hash it was born under (already landed — a citation still
+    // carrying that hash is stale, not merely mid-flight).
+    const pendingHashes = new Set(backlog.filter((b) => isHash(b.num)).map((b) => b.num));
+    const bornAsHashes = new Set(backlog.filter((b) => isHash(b.bornAs)).map((b) => b.bornAs));
+
+    // Scan one file at a time — read, run the four detectors, discard — rather than materializing the
+    // whole scanned corpus into an array first (#2863). Every detector below is per-file and stateless, so
+    // nothing ever needs two files' content at once; the prior shape held ~3848 files' text (≈54 MB
+    // resident, 73 MB peak) for the whole pass for no benefit.
+    const scanFile = (rel, content) => {
+      for (const f of findAnchorRulingMismatches(content, anchorOwners))
+        emitFinding({ kind: 'anchor', file: rel, anchor: f.anchor, citedNum: f.citedNum, owners: f.owners, context: f.context });
+      for (const f of findDanglingLoci(content, { fileExists: relExists, lineCount: relLineCount }))
+        emitFinding({ kind: 'locus', file: rel, locus: f.locus, line: f.line, reason: f.reason });
+      for (const f of findOutOfScopeHashSlugs(content, rel))
+        emitFinding({ kind: 'hashslug', file: rel, slug: f.slug, form: f.form });
+      if (rel.startsWith('agent-memory-src/'))
+        for (const f of findDanglingMemoryHashSlugs(content, { pendingHashes, bornAsHashes }))
+          emitFinding({ kind: 'memoryhash', file: rel, slug: f.slug, form: f.form, reason: f.reason });
+    };
+    // Same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog + docs/agent +
+    // agent-memory-src + reports + the two src/ research dirs (the latter render on the public /research/ page).
+    const scanDir = (dir, exts) => {
+      const abs = join(ROOT, dir);
+      if (!existsSync(abs)) return;
+      for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
+        scanFile(`${dir}${f}`, readFileSync(join(abs, f), 'utf8'));
+    };
+    scanDir('backlog/', ['.md']);
+    scanDir('docs/agent/', ['.md']);
+    scanDir('agent-memory-src/', ['.md']);
+    scanDir('reports/', ['.md']);
+    scanDir('src/_data/researchTopics/', ['.json']);
+    scanDir('src/_includes/research-descriptions/', ['.njk']);
+  }
+} catch (e) {
+  err(`citation-verification gate failed: ${e.message}`);
 }
 
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
