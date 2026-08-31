@@ -3,8 +3,9 @@ bornAs: xf3gv78
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-11"
+dateResolved: "2026-08-31"
 tags: [plateau-loop, delivery, operations, review, engine]
 scope:
   - we:scripts/operations/review-pr.mjs

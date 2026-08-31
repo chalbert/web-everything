@@ -3,8 +3,9 @@ bornAs: xsc9w09
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-25"
+dateResolved: "2026-08-31"
 tags: []
 scope:
   - we:scripts/operations/review-dispatch.mjs
