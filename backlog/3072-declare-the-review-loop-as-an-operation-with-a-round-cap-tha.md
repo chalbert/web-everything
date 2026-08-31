@@ -10,6 +10,8 @@ scope:
   - we:scripts/operations/review-pr.mjs
   - we:scripts/lib/judge-spawn.mjs
   - we:scripts/review-set-label.mjs
+  - we:scripts/lib/review-loop-policy.mjs
+  - we:scripts/operations/review-loop-cli.mjs
 ---
 
 # Declare the review loop as an operation, with a round cap that distinguishes converged from gave-up
@@ -122,9 +124,54 @@ with a human or a distinct agent well past the point where the mechanics are aut
 - Per-round cost belongs in the run record — nine reviews in one day cost roughly 1.1M tokens, and that was
   only knowable anecdotally.
 
+## 2026-08-31 fourth slice: the concrete unattended policy, and the queue for an impending accept
+
+**Still owed, per the third slice's own note, was exactly two things: "the round cap with distinguishable
+converged/exhausted/stuck, and answering the confirm step unattended for AGENT actors."** Re-checked against
+what was actually on `main` before this slice, both turned out to be MORE done than the note implied, and one
+genuinely new piece remained:
+
+- **The round cap and its distinguishable outcomes were already shipped**, same day as the note, one commit
+  later (`75b5a22d` / `6af76e24`, "the loop knows where it stands, and says so distinguishably") —
+  `deriveLoopOutcome` (`we:scripts/lib/jury-core.mjs`) and its wiring into `we:scripts/operations/review-pr.mjs`'s
+  `reduce` step (`run.verdict.loop`). **`stuck` was deliberately NOT built, on evidence, in that same commit**:
+  a finding-count-based detector was designed, tested against PR #1164's real four-round history (3→1→1→1
+  findings), and would have killed that review's most productive round. The three outcomes that exist —
+  `converged` / `in-progress` / `exhausted` (plus `escalated` for a human gate) — are the right, evidence-based
+  answer; this slice does not re-litigate that call, only reads it as the settled fact it is.
+- **The generic unattended-confirm MECHANISM was already shipped too** (`ee8c2ab6`, "an unattended confirm,
+  where the declaration allows one") — `driveRun`'s `autoConfirm` policy seam
+  (`we:scripts/operations/cli-adapter.mjs`), which refuses a HUMAN-addressed confirm and may answer an
+  AGENT-addressed one. But nothing shipped a CONCRETE policy: every caller, in production and in tests, either
+  passed none or a test-local stub built only to prove the seam works — and that stub answers `accept`
+  unattended, which the operator's 2026-08-31 ruling (under epic `#3383`) now forbids outright.
+- **What was genuinely still missing, and what this slice adds:**
+  1. `we:scripts/lib/review-loop-policy.mjs` — the first PRODUCTION `autoConfirm` policy
+     (`reviewLoopAutoConfirm`): declines a human-addressed confirm; declines — UNCONDITIONALLY — an
+     agent-addressed confirm whose verdict would be `accept`; answers `changes` unattended for everything else.
+     Also `buildAcceptQueueEntry`, which shapes the notification filed when a run parks on an impending accept,
+     reusing `we:scripts/conveyor/learnings-drop.mjs`'s EXISTING, unextended schema rather than pre-building
+     `#3421`'s not-yet-built approval-pending-flag mechanism.
+  2. `we:scripts/operations/review-loop-cli.mjs` — the driver that actually wires the policy into a real
+     `driveRun` call (`we:scripts/operations/run.mjs`'s own `runOperationCli` has no `autoConfirm` seam,
+     deliberately — see that file's own header), and files the queued-accept notice via `appendEntry` when the
+     policy declines. Callable standalone:
+     `node we:scripts/operations/review-loop-cli.mjs --pr=<N> --repo=<owner/repo> --cwd=<a lane>`.
+
+Both are real, unit-tested (36 new tests total between the two files), and neither touches
+`we:skills-src/conveyor/runner.mjs` or `we:scripts/conveyor/reconcile-pass.mjs` — wiring the mechanical
+dispatcher's own tick loop to CALL this is `#3279` / a later integration step, not this slice.
+
 ## Done when
 
-- [ ] One invocation runs spawn → gates → verdict → label without a person composing a prompt.
-- [ ] The reviewer's actor id is derived, never inherited, and that is asserted.
-- [ ] The loop terminates, and converged / exhausted / stuck are distinguishable in the run record.
-- [ ] A session dying mid-round loses no state.
+- [x] One invocation runs spawn → gates → verdict → label without a person composing a prompt — third slice
+      (the tool-bearing juror + the declared pipeline) plus this slice's `we:scripts/operations/review-loop-cli.mjs`,
+      which is the first thing that actually drives it unattended end to end, including the confirm step.
+- [x] The reviewer's actor id is derived, never inherited, and that is asserted — first slice
+      (`assertLaneCwd` + `judgeSpawn`'s derived `sessionId`), unchanged by this slice.
+- [x] The loop terminates, and converged / exhausted / stuck are distinguishable in the run record — second
+      slice shipped `converged` / `in-progress` / `exhausted` / `escalated`; `stuck` was designed and refused
+      on evidence in the SAME commit (see above) rather than shipped as a fourth outcome. Read as settled.
+- [x] A session dying mid-round loses no state — the round number folds over the verdict ledger's own history
+      (`priorRounds`), which survives a dead process; `we:scripts/operations/review-loop-cli.mjs`'s own
+      queued-accept park is a run record on disk, not in-memory state, for the same reason.
