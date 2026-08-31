@@ -506,7 +506,7 @@ doctrine. Re-attempt the live-fire dispatch against `#3412` once `#3416` lands.
 spawned for the first time all session (`conveyor-3412`). Two follow-ups from that run: `xk7amte` (should the
 dispatcher mechanically file+queue a fix item on a real delivery hiccup, gated by approval) and `xqyyoje`
 (gives a dispatched agent a static system-prompt identity separate from its per-item brief — landed to
-`main`, PR #1729, parked `review:pending`, operator reviewing directly).**
+`main`, PR #1729, reviewed and merged by the operator directly).**
 
 **A real gap surfaced answering the operator's own question tonight: `planTick` mechanizes build,
 prepare-scope, prepare-decision, fix, and ci-heal — there is no sixth launch kind for independently
@@ -517,3 +517,23 @@ epic's own "Done when" #1 ("zero interactive-session turns inside the loop") sti
 with `#3416` fixed: a dispatched build agent can now genuinely get a PR open, but nothing mechanized carries
 it from there to landed. The operator's own framing: "id be good to be able to use the prototype soon for
 this." Not filed as its own card yet — noted here for whoever picks this up next to scope properly.
+
+## Where this stands, end of the 2026-08-30/31 session — everything above landed or resolved
+
+All four PRs from tonight are merged: `#1726` (`#3405` ratified + finding-9 branch-strategy correction),
+`#1727` (`#3416` fix confirmation + `xk7amte` filed), `#1729` (`xqyyoje` — the dispatched-agent system
+prompt), `#1731` (this review-mechanization note). Nothing from tonight is open or blocked.
+
+**Next, in priority order:**
+1. **Re-attempt the live-fire dispatch against `#3412`** now that `#3416` is fixed — the guard-suppression bug
+   is gone, but the fix has not yet been exercised against a genuinely FRESH scratch clone (tonight's
+   `conveyor-3412` run used one with unrelated uncommitted work already in it, which is why THAT run stalled
+   on its own judgment call, not the fix). A clean re-run is what actually closes this epic's "Done when" #1.
+2. **Mechanize the review step** — no `planTick` launch kind turns `review:pending` into a verdict; only an
+   interactive `/review`/`/jury`/`converge` or a human does. This is very plausibly the remaining gap between
+   "a dispatched agent can open a PR" and "Done when #1's full fix→review→land cycle, zero interactive turns."
+   Not yet scoped as a card.
+3. **`xk7amte`** (auto-file+queue a fix on a real delivery hiccup, gated by approval) is a real, open decision
+   with forks stated but not ruled on.
+4. **`#3403`/`#3404`/`#3406`** can now be built — the branch-strategy question that blocked them is settled
+   (`mechanical-dispatcher`, not `-recovered`), and the branch is rebased current with `main`.
