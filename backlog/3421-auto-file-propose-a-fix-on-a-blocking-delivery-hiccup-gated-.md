@@ -1,7 +1,8 @@
 ---
+bornAs: x39jwee
 kind: story
 size: 5
-parent: "xk7amte"
+parent: "3422"
 status: open
 dateOpened: "2026-08-31"
 tags: []
@@ -9,7 +10,7 @@ tags: []
 
 # Auto-file+propose a fix on a blocking delivery hiccup, gated by approval; non-blocking hiccups file straight through
 
-Follow-up build story from `#xk7amte`'s ruling. A blocking hiccup (the tick did not proceed — a real code
+Follow-up build story from `#3422`'s ruling. A blocking hiccup (the tick did not proceed — a real code
 defect, or a dispatched agent punting to free-form prose instead of a predefined structured response) gets
 auto-filed with a proposed fix, gated behind explicit human approval before it lands or queues. A non-blocking
 hiccup (delivery succeeded but surfaced something worth improving) gets filed only, no gate, no proposed fix.

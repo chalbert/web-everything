@@ -503,7 +503,7 @@ the branch-strategy call, already settled above, but not this bug) and ahead of 
 doctrine. Re-attempt the live-fire dispatch against `#3412` once `#3416` lands.
 
 **Update: `#3416` landed on `origin/lane/mechanical-dispatcher` (`78234c18`), live-verified — a real agent
-spawned for the first time all session (`conveyor-3412`). Two follow-ups from that run: `xk7amte` (should the
+spawned for the first time all session (`conveyor-3412`). Two follow-ups from that run: `3422` (should the
 dispatcher mechanically file+queue a fix item on a real delivery hiccup, gated by approval) and `3418`
 (gives a dispatched agent a static system-prompt identity separate from its per-item brief — landed to
 `main`, PR #1729, reviewed and merged by the operator directly).**
@@ -521,7 +521,7 @@ this." Not filed as its own card yet — noted here for whoever picks this up ne
 ## Where this stands, end of the 2026-08-30/31 session — everything above landed or resolved
 
 All four PRs from tonight are merged: `#1726` (`#3405` ratified + finding-9 branch-strategy correction),
-`#1727` (`#3416` fix confirmation + `xk7amte` filed), `#1729` (`xqyyoje` — the dispatched-agent system
+`#1727` (`#3416` fix confirmation + `3422` filed), `#1729` (`xqyyoje` — the dispatched-agent system
 prompt), `#1731` (this review-mechanization note). Nothing from tonight is open or blocked.
 
 **Next, in priority order:**
@@ -533,7 +533,7 @@ prompt), `#1731` (this review-mechanization note). Nothing from tonight is open 
    interactive `/review`/`/jury`/`converge` or a human does. This is very plausibly the remaining gap between
    "a dispatched agent can open a PR" and "Done when #1's full fix→review→land cycle, zero interactive turns."
    Not yet scoped as a card.
-3. **`xk7amte`** (auto-file+queue a fix on a real delivery hiccup, gated by approval) is a real, open decision
+3. **`3422`** (auto-file+queue a fix on a real delivery hiccup, gated by approval) is a real, open decision
    with forks stated but not ruled on.
 4. **`#3403`/`#3404`/`#3406`** can now be built — the branch-strategy question that blocked them is settled
    (`mechanical-dispatcher`, not `-recovered`), and the branch is rebased current with `main`.

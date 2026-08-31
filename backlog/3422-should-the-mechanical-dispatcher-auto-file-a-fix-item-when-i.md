@@ -1,4 +1,5 @@
 ---
+bornAs: xk7amte
 kind: decision
 parent: "3383"
 status: resolved
@@ -82,6 +83,6 @@ so it does not warrant its own `we:docs/agent/platform-decisions.md` entry the w
 1. ~~A ruling is recorded here on (a)/(b)/(c).~~ **Done — see Ruling above.**
 2. ~~Names, explicitly, whether a dispatched agent's own free-form uncertainty is a covered hiccup shape.~~
    **Done — see Ruling above: yes, blocking bucket.**
-3. **Done — filed as `#x39jwee`**, naming the concrete build scope (the blocking/non-blocking classifier off
+3. **Done — filed as `#3421`**, naming the concrete build scope (the blocking/non-blocking classifier off
    tick-core state, the learnings-pool mechanical-trigger sink, and the approval-gate read before a
    blocking-bucket fix queues).
