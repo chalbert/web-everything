@@ -3179,6 +3179,51 @@ stop-then-resume rest on — are tracked on #3118 and the items it links (`#3165
 
 ---
 
+### A mechanically-dispatched agent never runs a command directly — denylist by verb-class, halt-and-surface on a gap {#dispatched-agent-never-runs-commands-directly}
+
+**Ratified 2026-08-30 (Nicolas Gilbert; #3405).** `#3383`'s own spec states the doctrine — *"Subagents only
+edit code. Every command they'd otherwise run themselves is delegated to the mechanical layer, which queues
+it and reports the result back."* `#3105` already enforces one narrow instance of it
+(`we:scripts/guard-bash.mjs`'s `dispatchedAgentVerificationReason`, gated on `WE_DISPATCH_KIND`, denying a
+dispatched agent from running the verification suite directly). This ruling generalizes it into a repo-wide
+rule with a scope and an escape hatch, rather than leaving it piecemeal-enforced one command at a time with
+no rule behind it.
+
+1. **Scope (Fork 1) — (a) denylist by verb-class, expand as each concrete case forces it.** `guard-bash.mjs`
+   gains a new `WE_DISPATCH_KIND`-gated rule per command class a dispatched agent should never run directly,
+   one at a time, each with its own named reason — mirroring exactly how `#3105`'s rule was built. Rejected:
+   (b) an allowlist of safe read-only commands, structurally closer to `#3383`'s letter but with a real
+   enumeration cost and a real risk of silently breaking a dispatch flow nobody remembered to allowlist; (c)
+   leaving it as `#3105` built it (one command, no general rule) — the piecemeal-enforcement gap this ruling
+   exists to close.
+2. **The missing-operation fallback (Fork 2) — (a) halt and surface a `missing-operation` finding.** A
+   dispatched agent has nobody watching it turn-by-turn — that is the whole premise of `#3383` — so silently
+   blocking or working around an undelegated command is worse here than for an interactive session, where a
+   human could at least notice. Mirrors the already-landed `no-hand-rolling-around-a-missing-operation` rule.
+   Rejected: (b) a human-approved break-glass — there is no human in the loop to approve one synchronously
+   for a headless dispatch, so it would have to route through the escalation/notification path `#3398`
+   builds, adding a real latency cost to every uncovered case.
+
+**Distinct from two adjacent cards, deliberately not settled by this ruling.** `#3188` (should an
+interactive operator session be restricted to declared operations) is about **prompt-injection blast
+radius** for the human-driven session — a different population and a different motivation, ratified or not
+independently of this one. `#3401` (the dispatch loop's own code is unregistered in TRUST_CHAIN) is about
+**review scrutiny on the code that enforces this doctrine**, not about what a dispatched agent may do at
+runtime — a dispatched agent can be perfectly doctrine-compliant while the code implementing that compliance
+is under-scrutinized. Neither is subsumed or resolved by this entry.
+
+**Mechanism left open on purpose.** A new `we:scripts/guard-bash.mjs` rule per newly-scoped command is the
+assumed default (matching `#3105`'s own precedent), but a `PreToolUse` hook or a harness-level permission
+mode remain live alternatives with different bypass properties for whichever command forces the next
+concrete case — this ruling fixes the doctrine's *scope*, not each future command's enforcement mechanism.
+
+**Lineage:** #3405 (ratified 2026-08-30, operator), resolving Fork 1 as (a) over (b)/(c) and Fork 2 as (a)
+over (b). Composes with, and does not re-declare,
+[#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (that
+ruling governs how a dispatch starts; this one governs what the dispatched agent may do once running).
+
+---
+
 ### State lives where its nature dictates — transient intent goes session-local, durable readiness goes committed-upstream {#state-lives-where-its-nature-dictates}
 
 **Ratified 2026-07-22 (Nicolas, merit-based; #2615 + #2617).** *Where* a piece of state lives is

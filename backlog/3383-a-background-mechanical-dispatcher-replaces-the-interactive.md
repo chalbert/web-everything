@@ -356,3 +356,148 @@ session.**
 - The three stuck `conveyor-*` agents (finding 8) are real, current, and easy to check —
   `claude agents --json` first, `we:scripts/operations/wake.mjs --resolve --force` per `#3353` to close them
   out if that's the call.
+
+## Session update (2026-08-30, continued) — finding 9 corrected with evidence, agents cleaned, #3405 ratified
+
+**Correction to finding 9: the branch-strategy decision was never actually a fork — `origin/lane/mechanical-
+dispatcher` is a strict superset of `origin/lane/mechanical-dispatcher-recovered`, verified by diffing the
+trees directly, not by re-reading commit messages.** Finding 9's framing (two branches with disjoint unique
+content, needing reconciliation) does not survive a direct comparison:
+
+- `git diff --stat origin/lane/mechanical-dispatcher origin/lane/mechanical-dispatcher-recovered` shows every
+  file `-recovered` touches also exists on `mechanical-dispatcher` — most in a strictly MORE advanced form
+  (e.g. `we:scripts/operations/dispatch-lane-io.mjs` on `mechanical-dispatcher` carries the `#3105`
+  `WE_DISPATCH_KIND` stamp and the `#3110` attempt-tag logic; `-recovered`'s version of the same file is the
+  pre-`#3105`/`#3110` version, going *to* `-recovered` from `mechanical-dispatcher` is a net 3058-line
+  deletion against 147 insertions).
+- `mechanical-dispatcher` also holds whole files `-recovered` never got at all:
+  `we:scripts/conveyor/verify-dispatch.mjs` (164 lines), the `#3390`/`#2924` lane-pool guard tests,
+  `we:.claude/commands/status.md` and `we:.claude/commands/eli5.md`.
+- The 147 lines unique to `-recovered` were checked directly (not assumed) — they are all OLDER/simpler
+  versions of code `mechanical-dispatcher` already improved on (the pre-`#3390` `we:scripts/lane-pool.mjs`
+  without the dirty-tree guard, the pre-`#3110` `classifyDispatchPr` without the attempt-tag axis), not novel
+  content.
+
+Read together with finding 9's own claim that `-recovered` holds "the lane-pool ref-lock +
+`computeFreeSlots` fixes" — that claim is now stale too: `computeFreeSlots` exists on `mechanical-dispatcher`
+as well, unchanged in relevant behavior, just reached via a different commit history because `-recovered`'s
+history was reconstructed from session transcripts rather than a normal rebase. **`-recovered` was a
+point-in-time rescue of lane-11's wiped files, taken before the same later session layered `#3390`/`#2924`/
+`#3105`/`#3110`/`#3398` onto `mechanical-dispatcher` directly — it is a strictly earlier snapshot, not a
+sibling with independent value.** Confirmed with the operator (2026-08-30): use `origin/lane/mechanical-
+dispatcher` going forward for `#3403`/`#3404`/`#3406` and the live-fire test; `-recovered` adds nothing and
+can be deleted or left to rot once nobody needs to double-check this finding.
+
+**`mechanical-dispatcher` is also 87 commits behind `origin/main`** (21 unique commits ahead) — not reconciled
+by the above; a separate, real step. 13 files changed on both sides since the branches diverged, including
+`we:scripts/lane-pool.mjs`, `we:scripts/verify-lane.mjs`, `we:scripts/lib/lane-lease.mjs`,
+`we:scripts/operations/wake.mjs` — real conflict risk, because `main` already landed `#3390`/`#2924`
+(PR #1710) in those exact files independently of the branch's own equivalent guards. Rebasing onto `main`
+and resolving those conflicts by hand is the next step, before the live-fire dispatch (which branch gets
+exercised is exactly what this settles) — in progress this session.
+
+**Stuck `claude agents` cleanup — six found, not three, and half were stale bookkeeping, not live
+processes.** `claude agents --json` showed six blocked/waiting `conveyor-*` sessions, not the three finding 8
+named: `conveyor-3154` (three separate launches, oldest from 2026-08-17 — 13 days, not "22+ hours"),
+`conveyor-3151` (2026-08-17), `conveyor-3` in lane-25 (2026-08-25), and `conveyor-3150`/`conveyor-3154` again
+(2026-08-29). Only two carried a live `pid` in the listing — `conveyor-3150` (30175) and `conveyor-3154`
+(30255), both genuinely stuck at `claude --resume ... waiting for dialog open`; `ps` confirmed both, and both
+were killed directly. The other four have no `pid` in the listing at all — `claude agents --json` is
+reporting stale bookkeeping for processes already gone, not agents actually waiting on anything. Left
+as-is (nothing to kill); this is itself live, current evidence for the exact liveness-reading gap `#3353`
+already documents (a stale/unreadable `claude agents` listing, not a code defect in the dispatcher).
+
+**`#3405` ratified.** Fork 1 → (a) denylist by verb-class, expand as each concrete case forces it. Fork 2 →
+(a) halt and surface a `missing-operation` finding. Both match the card's own stated defaults; full reasoning
+recorded on `#3405` itself and codified at
+`we:docs/agent/platform-decisions.md#dispatched-agent-never-runs-commands-directly`. One Done-when item
+(citing this ruling from `we:scripts/guard-bash.mjs`'s header) is deferred — `#3105`'s
+`dispatchedAgentVerificationReason` does not exist on `main` yet (confirmed by grep; branch-only), so the
+citation belongs in the branch copy of that file or with `#3105`'s own landing, not here.
+
+## Session update (2026-08-30/31) — the branch is rebased onto `main`; the live-fire dispatch found a real,
+## severe, reproducible bug and never got past it
+
+Continued the same session, per the operator's explicit go-ahead: `origin/lane/mechanical-dispatcher`
+rebased onto `origin/main` (finding 9's own next step), then the live-fire dispatch attempted for real from a
+scratch clone of the rebased branch. The dispatch never succeeded — but the reason it failed is itself the
+most important finding of the night.
+
+**1. `origin/lane/mechanical-dispatcher` is rebased onto `origin/main` and pushed.** Was 87 commits behind, 21
+ahead. Two commits were pure duplicates (patch-id matched, auto-dropped by `git rebase`). Six real conflicts,
+all resolved by hand and verified against the actual diff content, not guessed:
+- `we:scripts/lane-pool.mjs` (the `#3390`/`#2924` fetch — merged the branch's retry-wrapped
+  `fetchOriginPruneWithRetry` around the SAME `#2924` re-verify-containment logic already on `main`; both
+  fixes are real and now coexist).
+- `we:scripts/verify-lane.mjs` (docblock only — the branch's `#3105` `request` mode section combined with
+  `main`'s `#3378` own-lease-ok nuance to the `reset` line; the code body had no conflict).
+- Four separate conflicts in `backlog/3383-*.md` itself, each the same shape: two independent append-only
+  histories of this same epic card that had diverged. Every one resolved by reading BOTH sides in full and
+  interleaving them in chronological order — nothing dropped, nothing picked over the other — since each
+  held real, non-duplicate content (the branch's own 2026-08-29 "first live dispatch attempted" session, its
+  "third session — rebased onto main" session, its `#3105` build write-up, and its learnings-pool digest all
+  turned out to be genuine history `main`'s copy of this card never carried, not stale duplicates of anything
+  already here).
+Verified post-rebase: `npm run check:standards` 0 errors (matches baseline), 115 test files / 4181 tests /
+4 skipped, all green, against the full `scripts/__tests__/lane-pool*`, `scripts/operations`, `scripts/conveyor`,
+`scripts/lib`, `skills-src/conveyor` suites — not just the six touched files. Pushed with
+`--force-with-lease` (clean, no rejected-ref surprise).
+
+**2. The live-fire dispatch itself, run for real, twice, from a scratch clone
+(`~/workspace/wev-scratch-dispatcher`, deliberately non-`lane-N`).** `node we:scripts/conveyor/queue.mjs add
+3412` queued the target, then `WE_DISPATCH_AGENT_ARGS='["--permission-mode","acceptEdits"]' node
+we:skills-src/conveyor/runner.mjs --once --json` — twice, since a stray earlier `--help` invocation (no such
+flag exists; it silently ran the REAL resident loop with `maxTicks: Infinity` instead of erroring, a smaller
+finding of its own worth noting for whoever adds real `--help` support) left the singleton runner lease
+(`~/.claude/conveyor-runner-locks/`) held by a pid that no longer existed after it was killed via `TaskStop` —
+confirmed dead via `ps`, the stale `we:lock.json` removed by hand, a fresh acquire then worked cleanly.
+
+**Attempt 1 — `#3412` unscoped, routed to `spawnPrepareScope`.** The tick's own JSON output showed
+`dispatch.prepareScope: [{"num":"3412","lane":1}]`. The `.operations/runs/dispatch-lane-*.json` record for
+that same call showed `"dispatching": false`, `holdReason: "the tick core did not clear this item for
+dispatch — it is not in decisions.spawnBuilds, decisions.spawnPrepareScope, ..."` — the OPPOSITE of what the
+runner's own tick had just surfaced, moments earlier, in the same process. Re-ran; identical result both
+times — reproducible, not a race.
+
+**Attempt 2 — `#3412` given a `scope:` field by hand (the exact files its own card text already names, matching
+`#3273`'s "HOW to slice it" shape), to route it to `spawnBuilds` instead** (the path the 2026-08-29 session's
+successful `#2936` dispatch actually used). Same shape, same result: `dispatch.builds: [{"num":"3412",
+"lane":1}]` in the tick's own output, then `"dispatching": false`, `holdReason: "suppressed by the in-flight
+build guard (an agent is already in flight for this item)"` from `dispatch-lane`'s own run record. `claude
+agents --json` confirmed no `conveyor-3412` session ever existed; `we:scripts/lane-pool.mjs status` confirmed
+lane-1 stayed clean/unleased. Nothing was ever actually spawned, on either attempt.
+
+**Root cause, traced to the exact code, not left as a symptom.**
+`we:skills-src/conveyor/runner.mjs`'s `makeCliDispatchPass` (the function `dispatchPass` reduces to) computes
+BOTH the dispatch decision (`dispatch.builds`/`dispatch.prepareScope`) AND the updated guard bookkeeping
+(`nextState.buildGuards`/`nextState.prepareGuards`) in ONE tick-core call — the new guard entry for the item
+about to be dispatched (`{num, lane, spawnedTick, sawPr: false}` or the build equivalent) is already present in
+`nextState` before `dispatch-lane` is ever invoked. That exact `nextState` is then written verbatim to a
+bookkeeping file and handed to `dispatch-lane --num=<n> --bookkeepingFile=<file>` — whose own internal,
+independent `tick-core` re-plan reads that bookkeeping as the CURRENT guard state, sees the item's guard
+already live, and — correctly, by its own in-flight-duplicate-prevention logic — refuses to dispatch it a
+second time. Except there was no first time: the guard the second read is honoring was written by PLANNING,
+never by an actual spawn. The double-dispatch guard this epic itself calls out as load-bearing (`#3383`'s own
+"Done when" #1 depends on it, and Fable's blind review flagged the SAME class of problem — "in-flight liveness
+tracked via four overlapping heuristics rather than one source of truth," now with a concrete first instance)
+suppresses the very first dispatch it exists to protect.
+
+**Filed as `#xmjcqwz`** (JIT-numbered at land), parented under this epic, size 5, with an executable
+mutation-test Done-when reproducing the exact shape plus a bisect-or-name-it Done-when asking whether this is
+long-standing or a regression introduced by `#3105`/`#3110`'s later layering on top of whatever the
+2026-08-29 session's machinery actually was. **This is very possibly the reason `#3383`'s own "Done when" #1
+has never been observed succeeding through THIS exact call path** — the 2026-08-29 session's one successful
+live dispatch (`#2936`) predates both `#3105` and `#3110`, so it may simply never have exercised this exact
+`dispatchPass`/`makeCliDispatchPass` shape at all.
+
+**Per this line of work's own standing instruction** (improve the machinery, not deliver the item — restated
+explicitly by the operator across the 2026-08-29 and tonight's sessions): this is exactly what a first live
+run is for, and finding it is the success this criterion exists to produce, not a failure of tonight's
+attempt. `#3412` itself is untouched (no PR, no commit beyond the local, uncommitted `scope:` add in the
+scratch clone, which is not part of any landed change) — still available as the live-fire target once
+`#xmjcqwz` is fixed.
+
+**For the next session:** `#xmjcqwz` is now the single highest-leverage next action — fixing it is very
+plausibly the unblock for this epic's own core "Done when" #1, ahead of `#3403`/`#3404`/`#3406` (which need
+the branch-strategy call, already settled above, but not this bug) and ahead of `#3405`'s already-ratified
+doctrine. Re-attempt the live-fire dispatch against `#3412` once `#xmjcqwz` lands.

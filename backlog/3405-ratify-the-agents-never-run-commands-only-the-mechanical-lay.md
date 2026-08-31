@@ -2,8 +2,10 @@
 bornAs: xp940qf
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateResolved: "2026-08-30"
+codifiedIn: "docs/agent/platform-decisions.md#dispatched-agent-never-runs-commands-directly"
 relatedTo: ["3105", "3188", "3401"]
 tags: [governance, conveyor, dispatch, agent-surface]
 ---
@@ -135,15 +137,32 @@ harness-level permission mode are alternatives with different bypass properties,
 "What this decision does NOT settle" section already carves out for its own case. Choose the doctrine's
 scope here; the mechanism for each newly-covered command is that command's own implementation item.
 
+## Ruling — 2026-08-30, Nicolas Gilbert
+
+**Fork 1: (a) — denylist by verb-class, expand as each concrete case forces it.** Matches this repo's own
+established guard-authoring pattern (`#3105`'s rule was built exactly this way) and ships value
+immediately, at the accepted cost of staying reactive rather than structurally complete on day one. (b)'s
+enumeration cost and breakage risk are not worth paying before a second concrete case exists to justify it.
+
+**Fork 2: (a) — halt and surface a `missing-operation` finding.** A dispatched agent has no person watching
+it turn-by-turn; silently blocking or working around an undelegated command is worse than a visible stall a
+human can act on. This is also the cheaper, more reversible default, and it matches the already-landed
+`no-hand-rolling-around-a-missing-operation` rule rather than inventing a second escalation shape for this
+one case.
+
+Codified at we:docs/agent/platform-decisions.md#dispatched-agent-never-runs-commands-directly.
+
 ## Done when
 
-1. A ruling on Fork 1 and Fork 2 is recorded here with its reasoning.
-2. `we:scripts/guard-bash.mjs`'s own header comment (or a new doc-level note near
-   `dispatchedAgentVerificationReason`) is updated to cite this card as the doctrine `#3105`'s rule is
-   one instance of, so a future reader of that file finds the general rule, not just the one enforced
-   case.
-3. If Fork 1 rules (b) (the allowlist), a COVERAGE item is filed naming the gap between today's
-   dispatched-agent command surface and the allowlist — measured from real dispatch logs, not assumed.
-4. The learnings-pool note this card resolves (`note-20260830-091547.jsonl`) is not re-surfaced by a
-   future `/harvest` pass as still-open — either mark it consumed there, or accept that harvest will see
-   this card and dedupe against it.
+1. ~~A ruling on Fork 1 and Fork 2 is recorded here with its reasoning.~~ **Done — see Ruling above.**
+2. **Deferred, not done — `#3105`'s `dispatchedAgentVerificationReason` does not exist on `main` yet.**
+   Checked directly: `grep -n 'dispatchedAgentVerificationReason\|WE_DISPATCH' we:scripts/guard-bash.mjs`
+   on `main` returns nothing — that guard rule lives only on `origin/lane/mechanical-dispatcher`, per this
+   epic's own night-session correction 2. The citation update belongs in the branch's copy of the file (or
+   lands with `#3105` itself when it graduates to `main`), not here. Tracked so it isn't lost: whoever
+   lands `#3105` on `main` (or edits the branch copy directly) must add the citation to this ruling at the
+   same time.
+3. Fork 1 ruled (a), not (b) — no allowlist coverage item to file.
+4. The learnings-pool note this card resolves (`note-20260830-091547.jsonl`) is not filed separately;
+   a future `/harvest` pass will see this card and dedupe against it rather than re-surfacing the note as
+   still-open.
