@@ -501,3 +501,19 @@ scratch clone, which is not part of any landed change) — still available as th
 plausibly the unblock for this epic's own core "Done when" #1, ahead of `#3403`/`#3404`/`#3406` (which need
 the branch-strategy call, already settled above, but not this bug) and ahead of `#3405`'s already-ratified
 doctrine. Re-attempt the live-fire dispatch against `#3412` once `#3416` lands.
+
+**Update: `#3416` landed on `origin/lane/mechanical-dispatcher` (`78234c18`), live-verified — a real agent
+spawned for the first time all session (`conveyor-3412`). Two follow-ups from that run: `xk7amte` (should the
+dispatcher mechanically file+queue a fix item on a real delivery hiccup, gated by approval) and `xqyyoje`
+(gives a dispatched agent a static system-prompt identity separate from its per-item brief — landed to
+`main`, PR #1729, parked `review:pending`, operator reviewing directly).**
+
+**A real gap surfaced answering the operator's own question tonight: `planTick` mechanizes build,
+prepare-scope, prepare-decision, fix, and ci-heal — there is no sixth launch kind for independently
+reviewing a `review:pending` PR.** `planFixSpawns` mechanizes the BOUNCE (a `review:changes` PR gets a fix
+agent automatically), but the review verdict itself — `review:pending` → accepted/changes — only happens via
+an interactive session running `/review`/`/jury`/`converge`, or a human. This is very plausibly why this
+epic's own "Done when" #1 ("zero interactive-session turns inside the loop") still can't be fully met even
+with `#3416` fixed: a dispatched build agent can now genuinely get a PR open, but nothing mechanized carries
+it from there to landed. The operator's own framing: "id be good to be able to use the prototype soon for
+this." Not filed as its own card yet — noted here for whoever picks this up next to scope properly.
