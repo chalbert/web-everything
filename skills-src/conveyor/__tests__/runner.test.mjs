@@ -247,6 +247,28 @@ describe('runLoop — the runner control flow over injected effects', () => {
     expect(res.stoppedReason).toBe('idle-stop');  // the throw was swallowed; the tick still completed
   });
 
+  it('#3404 — threads its OWN heartbeat effect into mechanicalPasses, so a pass that outlasts the lease TTL can extend it mid-pass', async () => {
+    // Fails today (before #3404): `mechanicalPasses` was called with no `heartbeat` in its ctx at all, so a
+    // real long-running pass (the #3105 verify-dispatch pass) had no way to heartbeat until AFTER it returned
+    // — exactly the stale-lease-mid-run window #2453 already fixed for the plateau-app drain daemon.
+    let calls = 0;
+    const res = await runLoop({
+      tickOnce: () => ({ decisions: { idleStop: true }, nextState: {} }),
+      // Simulate a slow pass (like `runQuietHeartbeating`'s real interval) calling the heartbeat it was HANDED
+      // several times while it "runs", not merely receiving one bracketing call from the loop itself.
+      mechanicalPasses: async ({ heartbeat }) => {
+        expect(typeof heartbeat).toBe('function');
+        heartbeat(); heartbeat(); heartbeat(); // 3 mid-pass heartbeats simulating 3 elapsed intervals
+      },
+      heartbeat: () => { calls++; return true; },
+      sleep: () => {},
+    });
+    // The mechanicalPasses fake called the SAME heartbeat effect the loop itself uses after the tick — so all
+    // calls land on the one counter; asserting 3+ (not exactly 1) is what pins "mid-pass", not just "bracketed".
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(res.stoppedReason).toBe('idle-stop');
+  });
+
   it('requires a tickOnce effect', async () => {
     await expect(runLoop({})).rejects.toThrow(/tickOnce/);
   });

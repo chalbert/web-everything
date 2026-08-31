@@ -138,7 +138,9 @@ export function tickSurface(out) {
  *   call `dispatch-lane` once per surfaced decision (#3383) and return the nextState after all of them —
  *   defaults to an identity pass-through (`out.nextState`, unchanged) so a caller with nothing to dispatch
  *   through pays no cost and needs no override.
- * @param {(ctx:object)=>any} [effects.mechanicalPasses]              run the no-LLM passes (§4b infra, §4c/§4d reapers)
+ * @param {(ctx:{tick:number,out:object,heartbeat:Function})=>any} [effects.mechanicalPasses]  run the no-LLM
+ *   passes (§4b infra, §4c/§4d reapers, #3105 verify-dispatch) — `heartbeat` (#3404) is the SAME lease-extend
+ *   effect this loop calls after the tick, so a pass that itself outlasts the lease TTL can extend it mid-pass
  * @param {()=>boolean|Promise<boolean>} [effects.heartbeat]           extend the singleton lease; false ⇒ lost
  * @param {(ms:number)=>any} [effects.sleep]                           wait between ticks
  * @param {number} [effects.intervalMs]                                tick interval
@@ -178,8 +180,12 @@ export async function runLoop({
     try { dispatched = await dispatchPass({ tick, out }); } catch { /* best-effort */ }
 
     // Best-effort deterministic passes — a throw here must never wedge the loop (mirrors the SKILL's §4b/§4c/§4d
-    // "best-effort; its exit never gates the tick").
-    try { await mechanicalPasses({ tick, out }); } catch { /* best-effort — a pass failure never stalls a tick */ }
+    // "best-effort; its exit never gates the tick"). #3404 — `heartbeat` is threaded IN here so a pass that
+    // itself runs longer than the lease TTL (the #3105 verify-dispatch pass: "can legitimately run for as long
+    // as the gate itself takes, 150-350s, sometimes longer") can extend the lease MID-PASS, not only after it
+    // returns — a single heartbeat call placed after this line, the way it used to be, would still let the
+    // lease go stale while the pass that needs it most is still running.
+    try { await mechanicalPasses({ tick, out, heartbeat }); } catch { /* best-effort — a pass failure never stalls a tick */ }
 
     const stop = shouldStop(out, { tick, maxTicks });
     if (stop.stop) { stoppedReason = stop.reason; break; }
@@ -220,6 +226,12 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
   };
 }
 
+/** #3404 — how often the verify-dispatch pass's own long run heartbeats the singleton lease WHILE it is still
+ *  running, not only after it returns. Well under the 15-min lease TTL (`RUNNER_LEASE_MINUTES`,
+ *  {@link ./runner-lock.mjs}) and well under the pass's own typical 150-350s runtime, so a normal run
+ *  heartbeats at least once or twice mid-pass, not zero times. */
+const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
+
 /** Build the real `mechanicalPasses` effect: the deterministic, no-LLM passes the SKILL runs each tick —
  *  the infra-blocked recovery pass (§4b), the lease-reaper (§4c), the session-reaper (§4d, WE #3435 — stops
  *  a `claude agents` background session once ITS OWN process reports `done`/`failed`, a wholly separate
@@ -242,9 +254,13 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  VERIFY-DISPATCH (#3105) can legitimately run for as long as the gate itself takes (150–350s, sometimes
  *  longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep. That is fine here — this tick
  *  simply takes longer; nothing about the runner's own loop is bound by a per-turn window the way an
- *  interactive agent's Bash call is. */
+ *  interactive agent's Bash call is. #3404 — it is run through {@link runQuietHeartbeating}, not the plain
+ *  synchronous `runQuiet` the other passes use: it is the one pass whose runtime can outlast the singleton
+ *  lease's TTL if nothing heartbeats DURING it — a mid-pass heartbeat closes the exact stale-lease-mid-run
+ *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. The other passes are
+ *  quick bookkeeping sweeps; wrapping them the same way would add an async spawn + timer for no real benefit. */
 function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
-  return async ({ out } = {}) => {
+  return async ({ out, heartbeat = () => true } = {}) => {
     const { execFileSync } = await import('node:child_process');
     const runQuiet = (relPath, extraArgs = []) => {
       try {
@@ -259,7 +275,12 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
     runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
-    runQuiet('conveyor/verify-dispatch.mjs'); // #3105
+    // #3105/#3404 — unlike the passes above, this one can legitimately run for as long as the gate itself
+    // takes (150–350s, sometimes longer): it is a full `verify-lane.mjs` run, not a quick bookkeeping sweep.
+    // That is fine here — this tick simply takes longer — but the lease must be heartbeated WHILE it runs, not
+    // only once the whole tick returns.
+    await runQuietHeartbeating(join(scriptsDir, 'conveyor', 'verify-dispatch.mjs'),
+      { repo, heartbeat, label: 'conveyor/verify-dispatch.mjs' });
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
@@ -274,6 +295,43 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
       process.stderr.write(`⚠ mechanical pass hiccup-sink failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
     }
   };
+}
+
+/**
+ * Run one script async (never blocking the event loop the way `execFileSync` does), heartbeating the lease
+ * every {@link MECHANICAL_PASS_HEARTBEAT_MS} while it is still running, and resolving once it exits — best-
+ * effort like `runQuiet` (a non-zero exit or spawn error is swallowed, logged to stderr, never thrown). The
+ * heartbeat MUST run on an interval independent of the child's own completion — `execFileSync` cannot do this
+ * at all (it blocks the caller until the child exits, so nothing else can run meanwhile), which is why this
+ * pass alone needs `child_process.spawn` instead of the other two passes' synchronous call.
+ * @param {string} scriptPath
+ * @param {{ repo?:string|null, heartbeat:Function, label:string }} o
+ */
+async function runQuietHeartbeating(scriptPath, { repo = null, heartbeat = () => true, label } = {}) {
+  const { spawn } = await import('node:child_process');
+  const args = [scriptPath];
+  if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
+  let timer = null;
+  try {
+    await new Promise((resolvePromise) => {
+      const child = spawn('node', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      timer = setInterval(() => { try { heartbeat(); } catch { /* best-effort */ } }, MECHANICAL_PASS_HEARTBEAT_MS);
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += String(d); });
+      child.on('error', (e) => {
+        process.stderr.write(`⚠ mechanical pass ${label} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+        resolvePromise();
+      });
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          process.stderr.write(`⚠ mechanical pass ${label} failed (non-fatal): exit ${code} ${stderr.split('\n')[0]}\n`);
+        }
+        resolvePromise();
+      });
+    });
+  } finally {
+    if (timer) clearInterval(timer);
+  }
 }
 
 /**
