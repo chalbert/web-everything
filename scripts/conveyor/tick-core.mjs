@@ -1144,12 +1144,6 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const counts = computeTickCounts({
     queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
-  // #3398 — the numeric tallies behind the line above, structured (not re-parsed from `statusLine`'s text) so
-  // the supervisor's out-of-band alerting can tell "queued > 0 yet nothing dispatched, tick after tick" apart
-  // from a genuinely empty queue, over its own JSONL history.
-  const counts = computeTickCounts({
-    queue, lanes, prs, health, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
-  });
 
   return {
     decisions: {
