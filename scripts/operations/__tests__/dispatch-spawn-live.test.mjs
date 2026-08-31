@@ -72,6 +72,21 @@ describe('dispatching an agent, against a real process', () => {
     expect(seen[seen.length - 1]).toBe('# Deliver item 4242\n\nDo the thing.');
   });
 
+  it('#xqyyoje — --append-system-prompt-file is ACCEPTED alongside the rest, prompt still the trailing operand', () => {
+    fake = withFakeClaude();
+    const argv = buildAgentArgv({
+      sessionId: '22222222-3333-4444-5555-666666666666',
+      payload: { num: '4242', sessionSlug: 'conveyor-4242', prompt: '# Deliver item 4242\n\nDo the thing.' },
+      systemPromptFile: '/repo/skills-src/conveyor/dispatched-agent-system-prompt.md',
+    });
+
+    expect(() => spawnVia(fake, argv)).not.toThrow();
+
+    const seen = fake.lastArgv();
+    expect(seen[seen.indexOf('--append-system-prompt-file') + 1]).toBe('/repo/skills-src/conveyor/dispatched-agent-system-prompt.md');
+    expect(seen[seen.length - 1]).toBe('# Deliver item 4242\n\nDo the thing.');
+  });
+
   it('the spawn-to-observe round trip, through BOTH production seams', () => {
     fake = withFakeClaude();
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

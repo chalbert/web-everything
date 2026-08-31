@@ -65,13 +65,16 @@ if (argv[0] === 'agents') {
 // Parse the way a commander-style CLI would: options first, operands wherever they fall. A lone operand
 // beginning with '-' is read as an unknown FLAG and rejected — which is exactly the failure the real
 // dispatcher refuses a leading-dash brief to avoid, so the refusal can now be proven rather than assumed.
-let sessionId = null, name = null, bg = false;
+let sessionId = null, name = null, bg = false, systemPromptFile = null;
 const operands = [];
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--bg') { bg = true; continue; }
   if (a === '--session-id') { sessionId = argv[i += 1]; continue; }
   if (a === '-n' || a === '--name') { name = argv[i += 1]; continue; }
+  // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
+  // acceptance (the real CLI's own --help lists this flag), not file contents.
+  if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; continue; }
   // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
   // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
   // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.
@@ -94,7 +97,7 @@ if (bg) {
   // The real CLI returns IMMEDIATELY and the session may not be listed yet. It is listed here so the round
   // trip is assertable; the not-yet-listed grace window is the dispatcher's own concern and is unit-tested.
   const id = sessionId || 'generated-' + state.sessions.length;
-  state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, kind: 'background', state: 'running', cwd: process.cwd() });
+  state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
   write(state);
   process.stdout.write('  claude attach ' + id.slice(0, 8) + '    open in this terminal\\n');
   process.exit(0);
