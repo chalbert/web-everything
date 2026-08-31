@@ -130,16 +130,46 @@ function startsRegex(lastChar, lastWordTail) {
   return true;
 }
 
-export function stripLiterals(src) {
-  let out = '';
-  // Incremental tail state `startsRegex` reads instead of re-scanning `out` — see its doc above.
+/**
+ * The incremental tail-state tracker `stripLiterals` feeds one appended character at a time, in place of
+ * re-deriving `startsRegex`'s two facts (`lastChar`/`lastWordTail`) from the whole accumulated string on every
+ * `/` (the O(n²) cost this replaced — see `startsRegex`'s doc). Exported standalone (not just inlined in
+ * `stripLiterals`) so a differential test can drive it, and a reference whole-string re-derivation, off the
+ * SAME character stream and assert they agree at every position — the prevention #1730's review owed after
+ * finding that `note` wrongly bridged `lastWordTail` across whitespace (`x in` read as `'xin'`, not `'in'`,
+ * because `lastChar` — which skips whitespace by design, so trailing whitespace before a `/` doesn't erase the
+ * word tail — was also (mis)used to decide whether a *new* word char continues the run).
+ * @returns {{note: (c: string) => void, startsRegex: () => boolean}}
+ */
+export function createRegexTailTracker() {
   let lastChar = '';
   let lastWordTail = '';
-  const noteAppended = (c) => {
-    if (WS_CHAR.test(c)) return; // whitespace never changes "last non-whitespace" state
-    lastWordTail = WORD_CHAR.test(c) ? (WORD_CHAR.test(lastChar) ? lastWordTail + c : c) : '';
-    lastChar = c;
+  // Was the IMMEDIATELY PRECEDING appended char (of any kind, including whitespace) a word char? This is
+  // NOT the same question as "is `lastChar` a word char" — `lastChar` skips whitespace (so trailing
+  // whitespace before a `/` doesn't erase the word tail, matching the old `.replace(/\s+$/, '')` trim), but
+  // whether a *new* word char continues the run must see whitespace, or two whitespace-separated identifiers
+  // wrongly concatenate (the #1730 bug: `x in/…/` computed `lastWordTail = 'xin'` instead of `'in'`).
+  let prevAppendedWasWord = false;
+  return {
+    note(c) {
+      const isWord = WORD_CHAR.test(c);
+      if (isWord) {
+        lastWordTail = prevAppendedWasWord ? lastWordTail + c : c;
+        lastChar = c;
+      } else if (!WS_CHAR.test(c)) {
+        lastWordTail = '';
+        lastChar = c;
+      } // whitespace: lastChar/lastWordTail untouched (trailing-whitespace trim semantics) — only the flag moves
+      prevAppendedWasWord = isWord;
+    },
+    startsRegex: () => startsRegex(lastChar, lastWordTail),
   };
+}
+
+export function stripLiterals(src) {
+  let out = '';
+  const tracker = createRegexTailTracker();
+  const noteAppended = (c) => tracker.note(c);
   // Context stack. `'tpl'` = inside template TEXT; `{hole: n}` = inside a `${…}` expression with `n` plain
   // braces still open. The hole's own `}` is only the one that closes it at depth 0 — the first cut popped on
   // the FIRST `}`, so `` `${JSON.stringify({ error: msg })}` `` left one brace permanently open and every
@@ -179,7 +209,7 @@ export function stripLiterals(src) {
     // desynchronised the scanner for the remaining 1 100 lines — the file's `process.exit(main())` was blanked
     // and the rule reported it clean. `/` is a regex only where a VALUE may start; after an identifier, a
     // number, `)` or `]` it is division.
-    if (c === '/' && startsRegex(lastChar, lastWordTail)) {
+    if (c === '/' && tracker.startsRegex()) {
       keep(c); i++;
       let inClass = false;
       while (i < n) {
