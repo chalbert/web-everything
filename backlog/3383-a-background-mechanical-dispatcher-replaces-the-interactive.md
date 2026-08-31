@@ -504,7 +504,7 @@ doctrine. Re-attempt the live-fire dispatch against `#3412` once `#3416` lands.
 
 **Update: `#3416` landed on `origin/lane/mechanical-dispatcher` (`78234c18`), live-verified — a real agent
 spawned for the first time all session (`conveyor-3412`). Two follow-ups from that run: `xk7amte` (should the
-dispatcher mechanically file+queue a fix item on a real delivery hiccup, gated by approval) and `xqyyoje`
+dispatcher mechanically file+queue a fix item on a real delivery hiccup, gated by approval) and `3418`
 (gives a dispatched agent a static system-prompt identity separate from its per-item brief — landed to
 `main`, PR #1729, parked `review:pending`, operator reviewing directly).**
 
