@@ -2227,6 +2227,41 @@ export function strandedHashesOnMain(mainBacklogPaths = []) {
   return errors;
 }
 
+/**
+ * #2548 — hand-numbered-new-item gate, the MIRROR of `strandedHashesOnMain` above. Under JIT numbering
+ * (#2288) a new item is born with a provisional hash id (`xNNNNNN`) and the drain mints its real NNN AT
+ * LAND. So a working-tree backlog item whose `num` is a plain numeric NNN token that is NOT present in the
+ * on-`origin/main` id-token set was hand-picked rather than assigned by the drain — the #558 incident (a
+ * hand-numbered batch collided with a concurrent session and triggered the collision-heal that blanked
+ * files).
+ *
+ * Match by ID TOKEN ONLY, never the full filename: `docs/agent/backlog-workflow.md` documents that a
+ * landed item's slug may be legitimately reworded without changing its NNN — an ordinary edit that changes
+ * the filename while the item stays genuinely landed. Matching on the full path would false-positive on
+ * that edit; matching on the token alone is immune to it, because the same NNN is still present on main
+ * under SOME filename.
+ *
+ * @param {Array<{id?:string, num?:string}>} items       loaded backlog items (working tree)
+ * @param {string[]} mainBacklogPaths  `backlog/<id>-slug.md` paths tracked on origin/main
+ * @returns {string[]} one error per hand-numbered new item (empty when every new NNN is already on main)
+ */
+export function handNumberedNewItems(items = [], mainBacklogPaths = []) {
+  const mainNums = new Set();
+  for (const p of mainBacklogPaths) {
+    const m = String(p).match(/(?:^|\/)backlog\/([^/]+?)-[^/]*\.md$/);
+    if (!m) continue;
+    if (/^\d+$/.test(m[1])) mainNums.add(m[1]);
+  }
+  const errors = [];
+  for (const item of items) {
+    if (!item || !item.num) continue;
+    if (!/^\d+$/.test(item.num)) continue; // hash-keyed new item — the correct path, never fires
+    if (mainNums.has(item.num)) continue; // number is on origin/main — a landed item, possibly reworded
+    errors.push(`Backlog item "${item.id}" carries a hand-picked NNN id (#${item.num}) that is not on origin/main — new items must be hash-keyed (xNNNNNN); the drain assigns the real number at land (#2288). Rename it with a hash id, or set WE_SKIP_HAND_NUMBERED_GATE=1 if this is the sanctioned collision-heal renumbering path (#2548).`);
+  }
+  return errors;
+}
+
 export const DERIVED_ARTIFACT_DIRS = [
   'reports/',
   'src/_data/researchTopics/',

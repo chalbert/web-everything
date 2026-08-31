@@ -62,6 +62,7 @@ import {
   duplicateBacklogNums,
   duplicateBornAs,
   strandedHashesOnMain,
+  handNumberedNewItems,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
   findLockPointFiles, lockPointCandidatePaths,
@@ -550,6 +551,13 @@ try {
   const mainBacklog = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8' })
     .split('\n').filter(Boolean);
   for (const msg of strandedHashesOnMain(mainBacklog)) err(msg);
+  // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
+  // Guarded by WE_SKIP_HAND_NUMBERED_GATE (same family as WE_MERGE_BREAK_GLASS/STALE_LANE_OK/LANE_CLOBBER_OK)
+  // because pr-land.mjs's runHeal() self-check runs on a locally-renumbered, not-yet-pushed tree that this
+  // gate cannot distinguish from a real mistake — the heal IS the sanctioned numbering path.
+  if (!process.env.WE_SKIP_HAND_NUMBERED_GATE) {
+    for (const msg of handNumberedNewItems(backlog, mainBacklog)) err(msg);
+  }
 } catch { /* origin/main not resolvable here — the drain's post-land assert still guards the land path */ }
 // Every item's num — for `blockedBy`/parent resolution below (the dup check above owns collision reporting).
 const seenNums = new Set(backlog.map((i) => i.num).filter(Boolean));

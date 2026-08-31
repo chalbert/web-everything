@@ -1220,7 +1220,15 @@ function runCli() {
     if (renumbered.length === 0) return { healed: false, renumbered: [] };
     const tag = renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ');
     // A collision was healed on disk — full-gate the healed tree before committing (never push a red heal).
-    try { execFileSync('npm', ['run', 'check:standards'], { cwd: REPO, stdio: 'ignore' }); }
+    try {
+      execFileSync('npm', ['run', 'check:standards'], {
+        cwd: REPO, stdio: 'ignore',
+        // #2548 — this self-check runs on an unpushed, freshly-renumbered tree (checkout --detach at
+        // origin/main + the heal's own uncommitted writes) that the hand-numbered-item gate cannot tell
+        // apart from a real mistake by git state alone; the heal IS the sanctioned numbering path.
+        env: { ...process.env, WE_SKIP_HAND_NUMBERED_GATE: '1' },
+      });
+    }
     catch { return { healed: false, renumbered, warning: `id collision healed (${tag}) but check:standards is RED on the healed tree — NOT pushed; fix on ${BASE} by hand` }; }
     // #2312 — SCOPE the commit to the renumber's OWN file set (`plan.writePaths`/`deletePaths`), never a bare
     // `git diff --name-only`. This checkout is often the user's PRIMARY (REPO defaults to `process.cwd()`, and
