@@ -70,6 +70,50 @@ const cannedJudge = (answer) => () => async () => judgeOutcome(answer, {});
 
 const BASE_ARGV = ['--pr=1234', '--repo=chalbert/web-everything'];
 
+describe('runReviewLoopOnce — the loop field (converged/in-progress/exhausted/escalated) survives --json on EVERY stop', () => {
+  it('on a queued-accept stop, --json still carries run.verdict.loop unmodified, plus the queue fields', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-json-queued',
+      appendLearning: () => ({ record: {}, path: '/fake/path.jsonl' }),
+    });
+    expect(out.code).toBe(0);
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.verdict.loop).toEqual({ outcome: 'converged', round: 1, cap: 5, why: 'accepted at round 1' });
+    expect(payload.queued).toBe('accept-needs-human');
+    expect(payload.resumeCommand).toContain('--answer=accept');
+    expect(payload.filedTo).toBe('/fake/path.jsonl');
+  });
+
+  it('on a queued-accept stop where filing failed, --json still carries the loop AND the filingError', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-json-queued-fail',
+      appendLearning: () => { throw new Error('disk full'); },
+    });
+    expect(out.code).toBe(1);
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.verdict.loop.outcome).toBe('converged');
+    expect(payload.filingError).toBe('disk full');
+    expect(payload.filedTo).toBeNull();
+  });
+
+  it('on a bounced (changes) stop, --json carries the loop via the ordinary renderOutcome path', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(BLOCKING_ANSWER), mintRunId: () => 'r-json-bounce',
+    });
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.verdict.loop).toEqual({ outcome: 'in-progress', round: 1, cap: 5, why: 'round 1 of 5 returned `changes`' });
+  });
+});
+
 describe('runReviewLoopOnce — property 1: a clean verdict QUEUES, never auto-accepts', () => {
   it('files the learnings-pool notice and reports QUEUED, without ever answering accept', async () => {
     const { declaration, registry } = registryFor({});

@@ -47,7 +47,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { driveRun, parseOperationArgv, renderOutcome } from './cli-adapter.mjs';
+import { driveRun, outcomePayload, parseOperationArgv, renderOutcome } from './cli-adapter.mjs';
 import { startRun, runStatus } from './engine.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { resolveOperation, createCliJudgeFactory } from './run.mjs';
@@ -143,10 +143,19 @@ export async function runReviewLoopOnce({
   // The policy already declined (see `review-loop-policy.mjs`); this only decides whether to FILE the
   // notification and say so, or fall through to the SAME rendering the human CLI would give an ordinary
   // confirm stop (which still happens — a `review:human` PR still parks exactly as it always has).
+  //
+  // #x100grep — EVERY EXIT OF THIS FUNCTION CARRIES `run.verdict.loop` THROUGH UNMODIFIED, this branch
+  // included. A future caller (the reconcile/runner wiring this item deliberately does not build, or a human)
+  // decides whether to dispatch ANOTHER round or stop by reading `converged`/`in-progress`/`exhausted`/
+  // `escalated` off exactly this field — so a branch that rendered its own bespoke JSON shape here, without
+  // it, would be the one stop a caller most needs the loop status at (a clean review is precisely the round
+  // that would otherwise look done) and the one stop that omitted it.
   if (isQueuedAcceptStop(outcome)) {
     const { pr, repo } = outcome.run.input;
     const entry = buildAcceptQueueEntry({ repo, pr, runId: outcome.run.id });
-    let filed;
+    const resumeCmd = acceptResumeCommand({ runId: outcome.run.id, repo, pr });
+    let filed = null;
+    let filingError = null;
     try {
       filed = appendLearning(entry, { session });
     } catch (e) {
@@ -154,36 +163,40 @@ export async function runReviewLoopOnce({
       // so the worst this costs is a human finding out later than they might have, never a wrongly-recorded
       // accept. Reported loudly rather than swallowed, because "the notification silently never went out" is
       // exactly the failure mode this branch exists to avoid.
-      return {
-        code: 1,
-        lines: [
-          `run ${outcome.run.id} — QUEUED for a human: ${repo}#${pr}'s review reduced to ACCEPT and was `
-          + 'NOT recorded (an unattended agent never records one).',
-          `FAILED to file the learnings-pool notice: ${String(e?.message ?? e)}`,
-          `Clear it by hand: ${acceptResumeCommand({ runId: outcome.run.id, repo, pr })}`,
-        ],
-        run: outcome.run,
-        stopped: 'confirm',
+      filingError = String(e?.message ?? e);
+    }
+
+    if (parsed.control.json) {
+      const payload = {
+        ...outcomePayload({ run: outcome.run, stopped: outcome.stopped, ownedBy: declaration.ownedBy }),
+        queued: 'accept-needs-human',
+        resumeCommand: resumeCmd,
+        filedTo: filed ? filed.path : null,
+        ...(filingError ? { filingError } : {}),
       };
+      return { code: filingError ? 1 : 0, lines: [JSON.stringify(payload, null, 2)], run: outcome.run, stopped: outcome.stopped };
     }
     return {
-      code: 0,
+      code: filingError ? 1 : 0,
       lines: [
         `run ${outcome.run.id} — QUEUED for a human: ${repo}#${pr}'s review reduced to ACCEPT.`,
         'An unattended agent actor never records an accept — that verdict now needs a human to clear it on '
         + 'their own time.',
-        `filed → ${filed.path}`,
-        `clear it: ${acceptResumeCommand({ runId: outcome.run.id, repo, pr })}`,
+        ...(filingError
+          ? [`FAILED to file the learnings-pool notice: ${filingError}`]
+          : [`filed → ${filed.path}`]),
+        `clear it: ${resumeCmd}`,
       ],
       run: outcome.run,
-      stopped: 'confirm',
+      stopped: outcome.stopped,
     };
   }
 
   const rendered = renderOutcome({ outcome, json: parsed.control.json, declaration });
   // THE LOOP STATUS, NAMED IN WORDS, on a stop this file did not special-case (a bounce that landed, a stop
   // exhausted at the cap, an ordinary human-addressed park). `--json` already carries `run.verdict.loop`
-  // inside the printed `verdict` field; this adds nothing new to the record, only to what a human reads first.
+  // inside the printed `verdict` field (via `outcomePayload`, which `renderOutcome` calls); this adds nothing
+  // new to the record, only to what a human reads first.
   const loop = outcome.run?.verdict?.loop;
   const loopLine = (!parsed.control.json && loop && typeof loop === 'object')
     ? [`review loop: ${loop.outcome} — ${loop.why}`]
