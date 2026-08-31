@@ -77,7 +77,7 @@ rather than rounded away, because a 0 that means "no specimen" and a 0 that mean
 the same number and opposite facts.
 
 The 6 extras were adjudicated one by one and **all 6 are real uncited mechanism claims** — two of them the
-same card (`3182`/`xvpy20j`) at two revisions. The header's other term, *"fires zero times where no
+same card (`3182`/`3182`) at two revisions. The header's other term, *"fires zero times where no
 reviewer found anything"*, would forbid any gate that finds what reviewers missed, which is the thing
 `we:scripts/review-corpus/replay-gates.mjs` itself says an extra may be: *"either a false positive or a
 real defect nobody looked for … a number to ADJUDICATE, never a number to divide by."* Adjudicated, not
