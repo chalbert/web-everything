@@ -24,6 +24,10 @@ rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+# The `regex` crate is a linear-time engine with no lookahead/lookbehind support. A few ported patterns need
+# it (locus-prefix's `(?![a-z])`, citation-check's `(?<!\{)#`) — fancy-regex adds a backtracking engine for
+# exactly those, used ONLY where the plain `regex` crate structurally cannot express the pattern.
+fancy-regex = "0.14"
 clap = { version = "4", features = ["derive", "env"] }
 
 [profile.release]

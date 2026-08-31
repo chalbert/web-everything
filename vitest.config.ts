@@ -138,6 +138,7 @@ export default defineConfig({
       // the Rust toolchain; skips itself when `cargo` is absent rather than failing the default suite.
       'scripts/__tests__/rust-scan-stdout-flush-parity.test.mjs',
       'scripts/__tests__/rust-scan-secret-scrub-parity.test.mjs',
+      'scripts/__tests__/rust-scan-locus-prefix-parity.test.mjs',
       'scripts/__tests__/gate-entrypoint-integration.test.mjs',
       'scripts/operations/__tests__/wake-cli.test.mjs',
       'scripts/__tests__/lane-pool-acquire-base.test.mjs',
