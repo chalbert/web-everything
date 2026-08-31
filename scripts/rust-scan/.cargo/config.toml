@@ -1,8 +1,0 @@
-# Cross-lane build cache (#3417 follow-up to the operator's flag: with 40+ parallel lane clones, each doing a
-# from-scratch `cargo build --release` would waste real time recompiling identical, unchanged source). sccache
-# is a compilation cache DESIGNED for exactly this — many checkouts, safe concurrent writes — unlike sharing a
-# raw CARGO_TARGET_DIR across lane clones, which isn't safe for concurrent writers. Requires `sccache` on PATH
-# (installed via `cargo install sccache --locked`); if it's absent, Cargo falls back to a normal uncached build
-# rather than failing (see the crate README for the exact behavior notes).
-[build]
-rustc-wrapper = "sccache"
