@@ -65,6 +65,7 @@ import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { writeLineSync } from '../../scripts/lib/write-all-sync.mjs';
 import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
@@ -533,8 +534,15 @@ async function main(argv) {
   const outcome = await driveConveyor({ owner: runnerOwner(), buildEffects });
   if (!outcome.started) {
     process.stderr.write(`✗ another conveyor runner holds the singleton lease (heldBy=${outcome.heldBy}); standing down.\n`);
+    // #3406 — a stand-down and a genuine idle-stop both exit code 0, and were previously indistinguishable
+    // from the supervisor's side. Under `--json` (how the supervisor always launches this), surface the fact
+    // explicitly as one final structured line so the supervisor never has to guess from the exit code alone —
+    // a stand-down must still restart PROMPTLY (another runner already covers the singleton right), unlike an
+    // idle-stop, which the supervisor should back off from re-spawning immediately (see supervisor.mjs).
+    if (json) writeLineSync(1, JSON.stringify({ event: 'stood-down', heldBy: outcome.heldBy }));
   } else {
     process.stderr.write(`conveyor runner stopped: ${outcome.stoppedReason} after ${outcome.ticks} tick(s).\n`);
+    if (json) writeLineSync(1, JSON.stringify({ event: 'stopped', stoppedReason: outcome.stoppedReason, ticks: outcome.ticks }));
   }
   process.exit(0);
 }
