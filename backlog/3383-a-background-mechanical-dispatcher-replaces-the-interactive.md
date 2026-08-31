@@ -763,3 +763,38 @@ self-clear case specifically; this note generalizes it to the whole review loop.
    runner-wiring above is deferred — today nothing invokes it outside its own tests even standalone.
 3. `xf38r2m` (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
    deliberately deferred — a genuine, harder residual, not urgent.
+
+## Session update (2026-08-31, continued) — the review step is now fully mechanized; the one remaining gap
+## from the list above is closed
+
+Item 1 above is done. `we:skills-src/conveyor/runner.mjs` gained a fourth mechanical pass: each tick, shell
+`we:scripts/conveyor/reconcile-pass.mjs --json`, and for every PR its plan marks `kind: 'review'`, shell
+`we:scripts/operations/review-dispatch.mjs --pr=<n> --repo=<slug>` against it (the repo slug resolved once via
+`gh repo view`, lazily, only when a review is actually owed). Best-effort and sequential, mirroring every other
+mechanical pass's own contract — one PR's dispatch failure never stops the rest of the tick. No new guard
+bookkeeping was needed: `we:scripts/conveyor/reconcile-core.mjs`'s own liveness read already refuses
+(`live-process`) a PR with a bound live session before the `review` decision is ever reached, so a review
+already in flight is simply absent from next tick's plan — the exact reason `#3383`'s own text argued this
+pass could safely re-run every tick with no session-ephemeral state of its own.
+
+Pushed to `origin/lane/mechanical-dispatcher`. Before this landed, rebasing the branch onto `main` (needed to
+pick up `#3072`/`#3279`, which landed to `main` directly, not the branch) surfaced one real, pre-existing test
+regression: `we:scripts/operations/__tests__/dispatch-abort.test.mjs`'s fixture (part of `PR #1737`, landed to
+`main`) assumed the OLDER pre-`#3331` behavior where `createDispatchSinks` trusted `mintSessionId` directly as
+a dispatch's handle. The branch's own `#3331` fix (2026-08-28, verified against the real CLI) had already
+changed that: the handle is the short hex prefix read back off the spawn's own `backgrounded · <id> · <name>`
+stdout line, never the minted id directly. Fixed the fixture to emit a realistic line; full suite (385 files,
+10198 tests) green afterward.
+
+**What this means for item 3 above (`#3279`'s Done-when checklist), read literally against this epic's own
+"Done when" #1** ("A background process can run at least one real PR through a full fix → review → land cycle
+with zero interactive-session turns inside the loop"): the DISPATCH half is now real and automatic. What has
+NOT yet been exercised is a genuine live-fire proof of the WHOLE chain — a build dispatch opens a PR, the
+runner's own new pass notices it, dispatches a review with zero interactive turns, that review's verdict lands
+(bounce or the gated accept-queue), and the PR merges. Every individual piece has been proven separately
+tonight (the build→PR chain in an earlier session; the review loop against two real PRs, `#1754`/`#1756`, in
+this one) but never as ONE continuous run through the runner's own tick loop with nobody driving it. That is
+the next genuine test of this epic's own "Done when" #1, not a new build.
+
+**`xf38r2m`** (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
+deliberately deferred, unchanged from the prior update.
