@@ -103,27 +103,73 @@ const DECL = /(?:^|[^.\w$])(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|
 /** Keywords after which a `/` opens a regex rather than dividing. */
 const REGEX_PRECEDING_KEYWORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'case', 'do', 'else', 'yield', 'await']);
 
+const WORD_CHAR = /[\w$]/;
+const WS_CHAR = /\s/;
+
 /**
  * Is the `/` at the write head starting a REGEX (a value position) rather than dividing? Decided from the code
  * emitted so far: after an identifier, a number, `)`, `]` or a closing quote a `/` divides; everywhere else it
  * opens a literal.
- * @param {string} emitted  code produced so far (literals already blanked)
+ *
+ * Takes the INCREMENTAL tail state (`lastChar`/`lastWordTail`, tracked by `noteAppended` as `stripLiterals`
+ * appends each character), not the accumulated `out` string. Re-deriving this from `out` on every `/` — via
+ * `out.replace(/\s+$/, '')` then re-matching a trailing-word regex — was O(out.length) per call, and `stripLiterals`
+ * calls it once per `/` in the file: on a large tree, that is effectively O(fileLength²) per file. Measured on
+ * this repo: `scanStdoutFlush` (the caller, walking `scripts/` + `skills-src/`) alone cost 43.7s of
+ * `check:standards`'s 52.7s total. `lastChar`/`lastWordTail` are exactly the two facts the old code re-derived —
+ * trailing whitespace never changes them (mirroring the old code's `.replace(/\s+$/, '')` trim) — so this is an
+ * exact O(1) equivalent, not an approximation.
+ * @param {string} lastChar  most recent NON-WHITESPACE character appended, '' if none yet
+ * @param {string} lastWordTail  contiguous run of `[\w$]` chars ending at `lastChar`; '' unless `lastChar` is a word char
  * @returns {boolean}
  */
-function startsRegex(emitted) {
-  const t = emitted.replace(/\s+$/, '');
-  if (!t) return true;
-  const last = t.at(-1);
-  if (/[)\]'"`]/.test(last)) return false;
-  if (/[\w$]/.test(last)) {
-    const word = /[A-Za-z_$][\w$]*$/.exec(t);
-    return !!word && REGEX_PRECEDING_KEYWORDS.has(word[0]);
-  }
+function startsRegex(lastChar, lastWordTail) {
+  if (!lastChar) return true;
+  if (/[)\]'"`]/.test(lastChar)) return false;
+  if (WORD_CHAR.test(lastChar)) return REGEX_PRECEDING_KEYWORDS.has(lastWordTail);
   return true;
+}
+
+/**
+ * The incremental tail-state tracker `stripLiterals` feeds one appended character at a time, in place of
+ * re-deriving `startsRegex`'s two facts (`lastChar`/`lastWordTail`) from the whole accumulated string on every
+ * `/` (the O(n²) cost this replaced — see `startsRegex`'s doc). Exported standalone (not just inlined in
+ * `stripLiterals`) so a differential test can drive it, and a reference whole-string re-derivation, off the
+ * SAME character stream and assert they agree at every position — the prevention #1730's review owed after
+ * finding that `note` wrongly bridged `lastWordTail` across whitespace (`x in` read as `'xin'`, not `'in'`,
+ * because `lastChar` — which skips whitespace by design, so trailing whitespace before a `/` doesn't erase the
+ * word tail — was also (mis)used to decide whether a *new* word char continues the run).
+ * @returns {{note: (c: string) => void, startsRegex: () => boolean}}
+ */
+export function createRegexTailTracker() {
+  let lastChar = '';
+  let lastWordTail = '';
+  // Was the IMMEDIATELY PRECEDING appended char (of any kind, including whitespace) a word char? This is
+  // NOT the same question as "is `lastChar` a word char" — `lastChar` skips whitespace (so trailing
+  // whitespace before a `/` doesn't erase the word tail, matching the old `.replace(/\s+$/, '')` trim), but
+  // whether a *new* word char continues the run must see whitespace, or two whitespace-separated identifiers
+  // wrongly concatenate (the #1730 bug: `x in/…/` computed `lastWordTail = 'xin'` instead of `'in'`).
+  let prevAppendedWasWord = false;
+  return {
+    note(c) {
+      const isWord = WORD_CHAR.test(c);
+      if (isWord) {
+        lastWordTail = prevAppendedWasWord ? lastWordTail + c : c;
+        lastChar = c;
+      } else if (!WS_CHAR.test(c)) {
+        lastWordTail = '';
+        lastChar = c;
+      } // whitespace: lastChar/lastWordTail untouched (trailing-whitespace trim semantics) — only the flag moves
+      prevAppendedWasWord = isWord;
+    },
+    startsRegex: () => startsRegex(lastChar, lastWordTail),
+  };
 }
 
 export function stripLiterals(src) {
   let out = '';
+  const tracker = createRegexTailTracker();
+  const noteAppended = (c) => tracker.note(c);
   // Context stack. `'tpl'` = inside template TEXT; `{hole: n}` = inside a `${…}` expression with `n` plain
   // braces still open. The hole's own `}` is only the one that closes it at depth 0 — the first cut popped on
   // the FIRST `}`, so `` `${JSON.stringify({ error: msg })}` `` left one brace permanently open and every
@@ -131,8 +177,8 @@ export function stripLiterals(src) {
   /** @type {Array<'tpl'|{hole: number}>} */ const stack = [];
   let i = 0;
   const n = src.length;
-  const keep = (c) => { out += c; };
-  const blank = (c) => { out += c === '\n' ? '\n' : ' '; };
+  const keep = (c) => { out += c; noteAppended(c); };
+  const blank = (c) => { const b = c === '\n' ? '\n' : ' '; out += b; noteAppended(b); };
   const inTemplateText = () => stack.at(-1) === 'tpl';
   while (i < n) {
     const c = src[i];
@@ -163,7 +209,7 @@ export function stripLiterals(src) {
     // desynchronised the scanner for the remaining 1 100 lines — the file's `process.exit(main())` was blanked
     // and the rule reported it clean. `/` is a regex only where a VALUE may start; after an identifier, a
     // number, `)` or `]` it is division.
-    if (c === '/' && startsRegex(out)) {
+    if (c === '/' && tracker.startsRegex()) {
       keep(c); i++;
       let inClass = false;
       while (i < n) {
