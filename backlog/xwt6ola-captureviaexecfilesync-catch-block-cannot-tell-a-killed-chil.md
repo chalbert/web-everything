@@ -1,14 +1,19 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-31"
+dateStarted: "2026-08-31"
+dateResolved: "2026-08-31"
+graduatedTo: none
 tags: []
 ---
 
 # captureViaExecFileSync catch-block cannot tell a killed child from a genuine non-zero exit
 
-we:scripts/__tests__/citation-gate-dedup.test.mjs and we:scripts/__tests__/stdout-flush.test.mjs both use a captureViaExecFileSync pattern that, on execFileSync throwing, reads e.stdout and treats it as complete output. Under real full-suite contention this intermittently fails with SyntaxError: Unexpected end of JSON input -- twice in a row under load, never in isolation. Ruled out: pure CPU oversubscription alone and maxBuffer (256MB vs a 1.35MB payload). Likely mechanism: a kill signal under real contention truncates e.stdout mid-write, indistinguishable in the catch block from a genuine complete non-zero exit. Fix: check e.signal and/or validate JSON completeness before trusting it.
+we:scripts/__tests__/citation-gate-dedup.test.mjs and we:scripts/__tests__/stdout-flush.test.mjs both used a captureViaExecFileSync pattern that, on execFileSync throwing, read e.stdout and treated it as complete output. Under real full-suite contention this intermittently failed with SyntaxError: Unexpected end of JSON input -- reproduced 3x under load, never in isolation, never under up to 32-way concurrent synthetic subprocess load either.
+
+RESOLUTION -- the filed "kill signal" hypothesis was DISPROVEN, not confirmed. A signal-based retry fix was built and measured against a real reproduction: the failure recurred with the SAME plain SyntaxError, not the signal-retry path's new explicit error -- e.signal was null on the failing run. The actual fix (we:scripts/lib/capture-via-exec-file-sync.mjs) is mechanism-agnostic: validate the shape of every attempt's output (success or caught non-zero exit alike) via an optional `validate` option, retry once on an invalid one, throw explicitly if both attempts fail. This catches truncation from ANY cause, not just a kill signal. The exact trigger under real contention stayed elusive despite real effort; the fix does not depend on pinning it down.
 
 ## Done when
 
