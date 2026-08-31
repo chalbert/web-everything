@@ -15,7 +15,7 @@ template literal without complaint and the tests pass, but git (and GitHub) clas
 NUL byte as binary — `git diff` on this file prints only `Binary files ... differ`, with no line-level
 diff, for any future edit.
 
-This isn't hypothetical: it happened during the we:PR #1741 review (we:backlog/xwt6ola-captureviaexecfilesync-catch-block-cannot-tell-a-killed-chil.md)
+This isn't hypothetical: it happened during the we:PR #1741 review (we:backlog/3426-captureviaexecfilesync-catch-block-cannot-tell-a-killed-chil.md)
 — the reviewing juror could not see what the change to this file actually did and had to reconstruct it
 from context instead of the diff. Pre-existing, not introduced by that PR — carved out there as non-blocking.
 

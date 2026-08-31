@@ -16,7 +16,7 @@ references — any other reason to rebuild (a toolchain bump, `cargo clean`, a r
 also bumps the mtime, so the guard reads it as fresh even when the Rust source was never updated to match an
 earlier JS-side pattern change.
 
-Added by we:PR #1741 (we:backlog/xwt6ola-captureviaexecfilesync-catch-block-cannot-tell-a-killed-chil.md).
+Added by we:PR #1741 (we:backlog/3426-captureviaexecfilesync-catch-block-cannot-tell-a-killed-chil.md).
 This feeds `secret-scrub`, the credential-prevention gate (#3015): if a JS-only pattern is added, the JS
 reference file's mtime correctly marks the binary stale — but if an unrelated rebuild happens before anyone
 ports the pattern to Rust, that rebuild's mtime silently "un-stales" the binary again, and a real credential
