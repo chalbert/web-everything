@@ -553,7 +553,7 @@ stuck `conveyor-3412` session and unrelated uncommitted changes) was stopped and
 own framing. A genuinely fresh clone, `~/workspace/wev-scratch-dispatcher-2`, was cut from
 `origin/lane/mechanical-dispatcher` — which had drifted 18 commits behind `origin/main` again since the prior
 close-out, so it was rebased current first (3 real conflicts, all in files both sides had touched since
-diverging — `we:scripts/operations/dispatch-lane-io.mjs`'s `#xqyyoje` system-prompt param vs. `#3331`'s
+diverging — `we:scripts/operations/dispatch-lane-io.mjs`'s `#3418` system-prompt param vs. `#3331`'s
 session-identity fix, and the matching test/fixture files — resolved by hand, both sides' changes kept; 1791
 tests green, `check:standards` 0 errors; pushed with `--force-with-lease`). This also settles priority 4: the
 branch is current with `main` again as of tonight.
