@@ -40,15 +40,23 @@
  * #3383 — WHAT CHANGED FROM "THREADS `nextState` FORWARD UNCHANGED". The runner still never re-derives a
  * guard — that invariant is intact. But it is no longer accurate to say it carries THIS tick's own
  * `nextState` forward byte-identical: `dispatchPass` (below) calls `dispatch-lane` once per surfaced
- * decision, and EACH call runs its OWN nested `tick-core` read, which is where a newly-dispatched item's
- * guard entry actually gets ADDED to `nextState` — a fact the runner's own top-level tick read (made BEFORE
- * any dispatching happens) cannot know. Carrying that stale copy forward instead of the dispatch pass's own
- * updated one would make the runner's bookkeeping silently drift from what actually got dispatched: the same
- * item would re-surface and get RE-INVOKED every tick for its whole build lifetime, forever — not a second
- * live agent (dispatch-lane's OWN double-dispatch guard still catches that), but a wasted subprocess spawn
- * every ~120s for as long as anything is building. So `runLoop` now carries forward the DISPATCH PASS's
- * `nextState` when one ran, not the raw tick read's — still the tick core's own answer, just the latest one,
- * and still nothing the runner computed itself.
+ * decision, and EACH call runs its OWN nested `tick-core` read, which updates `nextState` again as it goes.
+ * Carrying a stale copy forward instead of the dispatch pass's own updated one would make the runner's
+ * bookkeeping silently drift from what actually got dispatched: the same item would re-surface and get
+ * RE-INVOKED every tick for its whole build lifetime, forever — not a second live agent (dispatch-lane's OWN
+ * double-dispatch guard still catches that), but a wasted subprocess spawn every ~120s for as long as
+ * anything is building. So `runLoop` now carries forward the DISPATCH PASS's `nextState` when one ran, not
+ * the raw tick read's — still the tick core's own answer, just the latest one, and still nothing the runner
+ * computed itself.
+ *
+ * #3416 — CORRECTION TO THE PARAGRAPH ABOVE'S ORIGINAL CLAIM. It used to say a newly-decided item's guard
+ * "gets ADDED to `nextState`" only INSIDE dispatch-lane's own nested call, "a fact the runner's own top-level
+ * tick read (made BEFORE any dispatching happens) cannot know." That is false: `tick-core.mjs`'s `planTick`
+ * writes a guard the MOMENT it decides to surface a spawn candidate — in the SAME call that produces
+ * `decisions.spawnBuilds`/`spawnPrepareScope`/etc, unconditionally, including the runner's own top-level
+ * read. Forwarding that already-guarded `nextState` to `dispatch-lane` verbatim made every dispatch through
+ * this pass suppress itself as "already in flight" — see `makeCliDispatchPass`'s own docblock below for the
+ * fix (strip an item's own guard immediately before its call, restoring the pre-dispatch view for it alone).
  */
 
 import { dirname, join } from 'node:path';
@@ -57,6 +65,7 @@ import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -272,10 +281,15 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
  * — builds, then prepareScope, then prepareDecision, then fixes, then ciHeals ({@link tickSurface}'s own
  * order) — and hand back the bookkeeping after all of them.
  *
- * SEQUENTIAL, NEVER PARALLEL. `dispatch-lane` runs its own nested `tick-core` read per call, which is where a
- * just-dispatched item's guard entry actually gets added to `nextState`. Item 2 must see item 1's guard or the
- * two could both read "not yet guarded" and both clear a lane the double-dispatch guard exists to serialize —
- * running them in parallel would reopen exactly the race the guard is for.
+ * SEQUENTIAL, NEVER PARALLEL. `dispatch-lane` runs its own nested `tick-core` read per call, which updates
+ * `nextState` again as it goes. Item 2 must see item 1's guard or the two could both read "not yet guarded"
+ * and both clear a lane the double-dispatch guard exists to serialize — running them in parallel would reopen
+ * exactly the race the guard is for.
+ *
+ * #3416 — EACH ITEM'S OWN GUARD IS STRIPPED FROM ITS BOOKKEEPING, RIGHT BEFORE ITS CALL, AND NOWHERE ELSE
+ * ({@link bookkeepingForDispatch} below owns the why). See the file header (#3416) for how this was found
+ * and confirmed unconditional, and for the still-open question of how the 2026-08-29 session's `#2936`
+ * dispatch succeeded through this same call path despite it.
  *
  * THE BOOKKEEPING FILE IS BARE, not `{ bookkeeping: … }`. `forwardableBookkeeping`
  * ({@link ../../scripts/operations/dispatch-lane-io.mjs}) accepts either shape, but the wrapped one recognizes
@@ -293,6 +307,38 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
  * unknown flag and fail every dispatch this tick, so the parameter exists only for call-site symmetry with
  * `makeCliTickOnce` / `makeCliMechanicalPasses`.
  */
+/**
+ * #3416 — bookkeeping for ONE item's own dispatch-lane call: `nextState` with THIS item's guard entries
+ * stripped from every guard list (build/prepare/fix/ciHeal), everything else untouched. Pure.
+ *
+ * WHY THIS EXISTS. `tick-core.mjs`'s `planTick` writes a guard entry the MOMENT it decides to surface an item
+ * as a spawn candidate — the same call that produces `decisions.spawnBuilds`/`spawnPrepareScope`/etc, not a
+ * later one. `nextState`, as `makeCliDispatchPass`'s loop holds it before calling this, already has a guard
+ * for the item about to be dispatched — the runner's own top-level read committed one for every item now
+ * being processed, and each prior iteration's own nested `tick-core` call re-committed one for every item
+ * STILL pending too. Left unstripped, dispatch-lane's nested read for this item sees an "already live" guard
+ * for itself and refuses to dispatch — correctly, by its own duplicate-prevention logic, but the guard it is
+ * honoring was written by PLANNING, never by an actual spawn, so nothing is ever dispatched. Stripping only
+ * this item's own guard restores the pre-dispatch view for it alone; every other item's guard — genuinely in
+ * flight, whether from a real prior dispatch or an earlier iteration of the same loop — is left exactly as
+ * `nextState` already has it, so the double-dispatch and lane-collision guards those protect are unaffected.
+ *
+ * @param {object} nextState the tick core's current bookkeeping (buildGuards/prepareGuards/fixGuards/ciHealGuards)
+ * @param {{num:*}} item the item about to be dispatched — only ITS OWN guard entries are stripped
+ * @returns {object} nextState with this item's own guard entries removed from each list; everything else identical
+ */
+export function bookkeepingForDispatch(nextState, item) {
+  const key = normNum(item && item.num);
+  const stripOwnGuard = (list) => (Array.isArray(list) ? list.filter((g) => normNum(g && g.num) !== key) : list);
+  return {
+    ...nextState,
+    buildGuards: stripOwnGuard(nextState && nextState.buildGuards),
+    prepareGuards: stripOwnGuard(nextState && nextState.prepareGuards),
+    fixGuards: stripOwnGuard(nextState && nextState.fixGuards),
+    ciHealGuards: stripOwnGuard(nextState && nextState.ciHealGuards),
+  };
+}
+
 function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
   void repo; // see the doc comment above: dispatch-lane declares no --repo input
   return async ({ out } = {}) => {
@@ -310,8 +356,10 @@ function makeCliDispatchPass({ scriptsDir, repo = null } = {}) {
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
         try {
+          // #3416 — see bookkeepingForDispatch's own docblock above for why this strip exists.
+          const bookkeeping = bookkeepingForDispatch(nextState, item);
           const file = join(dir, `bk-${i}.json`);
-          writeFileSync(file, JSON.stringify(nextState));
+          writeFileSync(file, JSON.stringify(bookkeeping));
           const args = [runMjs, 'dispatch-lane', `--num=${item.num}`, `--bookkeepingFile=${file}`, '--json'];
           const stdout = execFileSync('node', args, {
             encoding: 'utf8',

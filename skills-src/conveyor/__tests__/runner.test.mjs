@@ -22,6 +22,7 @@ import {
 } from '../runner-lock.mjs';
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
+  bookkeepingForDispatch,
 } from '../runner.mjs';
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
@@ -94,6 +95,50 @@ describe('carryForward — threads the core nextState UNCHANGED (never re-derive
   it('passes through only observed signals the runner may add', () => {
     const payload = carryForward({ nextState: { tick: 1 } }, { signals: { returnedBuildNums: [5] } });
     expect(payload.signals).toEqual({ returnedBuildNums: [5] });
+  });
+});
+
+describe('bookkeepingForDispatch (#3416) — strips ONLY the target item\'s own guard, nothing else', () => {
+  it('removes the target item\'s own entry from every guard list', () => {
+    const nextState = {
+      tick: 2,
+      buildGuards: [{ num: '3412', lane: 1, spawnedTick: 0 }, { num: '99', lane: 5, spawnedTick: 0 }],
+      prepareGuards: [{ num: '3412', kind: 'prepare', lane: 1, spawnedTick: 0 }],
+      fixGuards: [{ num: '3412', lane: 2, spawnedTick: 0 }],
+      ciHealGuards: [{ num: '3412', lane: 3, spawnedTick: 0 }],
+      watched: [{ pr: 9 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    // THE REGRESSION THIS GUARDS: before the fix, dispatch-lane's own nested tick-core read would see this
+    // exact entry already live for the item it is about to dispatch, and refuse — "suppressed by the
+    // in-flight build guard" — against a guard the SAME tick just planned, never a real spawn.
+    expect(bookkeeping.buildGuards).toEqual([{ num: '99', lane: 5, spawnedTick: 0 }]);
+    expect(bookkeeping.prepareGuards).toEqual([]);
+    expect(bookkeeping.fixGuards).toEqual([]);
+    expect(bookkeeping.ciHealGuards).toEqual([]);
+  });
+  it('leaves every OTHER item\'s guard untouched — a genuinely in-flight item still suppresses', () => {
+    const nextState = {
+      buildGuards: [{ num: '10', lane: 1, spawnedTick: 0 }, { num: '20', lane: 2, spawnedTick: 0 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '10' });
+    expect(bookkeeping.buildGuards).toEqual([{ num: '20', lane: 2, spawnedTick: 0 }]);
+  });
+  it('normalizes the num the same way the guard lists themselves are normalized (string vs number)', () => {
+    const nextState = { buildGuards: [{ num: 3412, lane: 1, spawnedTick: 0 }] };
+    expect(bookkeepingForDispatch(nextState, { num: '3412' }).buildGuards).toEqual([]);
+  });
+  it('tolerates a missing guard list on either side — no throw, nothing invented', () => {
+    expect(bookkeepingForDispatch({ tick: 1 }, { num: '3412' })).toEqual({
+      tick: 1, buildGuards: undefined, prepareGuards: undefined, fixGuards: undefined, ciHealGuards: undefined,
+    });
+  });
+  it('leaves every other field on nextState (tick, watched, fixAttempts, …) exactly as it was', () => {
+    const nextState = { tick: 5, watched: [{ pr: 1 }], fixAttempts: { 7: 2 }, buildGuards: [{ num: '3412', lane: 1 }] };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    expect(bookkeeping.tick).toBe(5);
+    expect(bookkeeping.watched).toBe(nextState.watched);
+    expect(bookkeeping.fixAttempts).toBe(nextState.fixAttempts);
   });
 });
 
