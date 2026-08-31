@@ -39,16 +39,20 @@
  * real filesystem, `claude agents --json`, `claude stop` and `~/.claude.json`.
  */
 
-import { existsSync, copyFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { closeOutEntry } from './wake.mjs';
-import { defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
+import { closeOutEntry, flagValue } from './wake.mjs';
+import { defaultListAgents, normalizeHandle } from './dispatch-lane-io.mjs';
 import { createFileRunStore } from './run-store.mjs';
-import { TRUST_PATH, readJsonConfig, withTrustedDirs, untrustedDirs } from '../bootstrap-session.mjs';
+import { defaultIo, withTrustedDirs, untrustedDirs } from '../bootstrap-session.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+
+// Named so a test can assert it survives, not just the call shape — a timeout buried as an inline default is
+// exactly what PR #1211's review F5 found silently deleted from `dispatch-lane-io.mjs` because nothing pinned
+// it (see that file's own `defaultSpawnAgent`/`defaultRunNode` for the precedent this follows).
+export const STOP_EXEC_OPTS = Object.freeze({ encoding: 'utf8', timeout: 30_000 });
 
 /**
  * `claude stop <id>` — the ONLY way to end a background session that also deregisters it. A raw `kill <pid>`
@@ -56,19 +60,26 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
  * the file header). Injectable `exec`, same shape as `we:scripts/operations/dispatch-lane-io.mjs`'s
  * `defaultSpawnAgent`.
  *
+ * A handle already gone (never started, or stopped by someone else already) is NOT an error here — `claude
+ * stop` on an unknown id exits 1 with `No job matching '<id>'…` on its stderr, and `abortDispatch` calls this
+ * unconditionally whenever a handle exists rather than pre-checking liveness itself (see that function's own
+ * doc for why: the pre-check was a second, redundant `claude agents --json` read that could also fail OPEN on
+ * a malformed listing). Any OTHER failure (missing `claude` binary, a real crash) still throws.
+ *
  * @param {{handle: string, exec?: Function}} o
- * @returns {{stopped: true, output: string}}
+ * @returns {{stopped: true, alreadyGone: boolean, output: string}}
  */
 export function stopSession({ handle, exec = execFileSync } = {}) {
   const id = normalizeHandle(handle);
   if (!id) throw new Error('dispatch-abort: stopSession needs a handle to stop');
-  let output;
   try {
-    output = String(exec('claude', ['stop', id], { encoding: 'utf8', timeout: 30_000 }));
+    const output = String(exec('claude', ['stop', id], STOP_EXEC_OPTS));
+    return { stopped: true, alreadyGone: false, output };
   } catch (e) {
-    throw new Error(`dispatch-abort: \`claude stop ${id}\` failed: ${String(e?.message ?? e).split('\n')[0]}`);
+    const said = String(e?.stderr ?? e?.message ?? e).split('\n')[0];
+    if (/No job matching/i.test(said)) return { stopped: true, alreadyGone: true, output: said };
+    throw new Error(`dispatch-abort: \`claude stop ${id}\` failed: ${said}`);
   }
-  return { stopped: true, output };
 }
 
 /**
@@ -76,7 +87,9 @@ export function stopSession({ handle, exec = execFileSync } = {}) {
  * — one additive boolean per directory in `~/.claude.json`, backed up first. Reuses `withTrustedDirs` rather
  * than re-deriving the shape, so this can never drift from what the bootstrap step itself considers "trusted".
  *
- * PURE over the injected `readConfig`/`writeConfig`; the CLI block binds the real file.
+ * PURE over the injected `readConfig`/`writeConfig`; the CLI block binds the real ones from
+ * `we:scripts/bootstrap-session.mjs#defaultIo` (its `readTrust`/`writeTrust`), the same pair the bootstrap
+ * step itself uses — not a second copy of the backup-then-write logic.
  *
  * @param {{dir: string, readConfig: () => object|null, writeConfig: (next: object) => void}} o
  * @returns {string} one operator-facing line.
@@ -87,29 +100,40 @@ export function trustCheckout({ dir, readConfig, writeConfig } = {}) {
     throw new TypeError('dispatch-abort: trustCheckout needs injected readConfig/writeConfig — see the CLI block for the real binding');
   }
   const before = readConfig();
-  if (before === null) return `dispatch-abort: could not read ${TRUST_PATH} — nothing trusted`;
+  if (before === null) return 'dispatch-abort: could not read the trust config — nothing trusted';
   if (!untrustedDirs(before, [dir]).length) return `dispatch-abort: ${dir} already trusted`;
   writeConfig(withTrustedDirs(before, [dir]));
   return `dispatch-abort: trusted ${dir}`;
 }
 
 /**
- * THE COMPOSITION: stop the dispatched agent (if its handle is still listed live), THEN close its run record
- * out — in that order, so `wake.mjs`'s own `assertHandleNotLive` passes on its own merits and this never needs
- * `--force`. Mirrors `we:scripts/operations/wake.mjs#closeOutEntry`'s signature closely on purpose; this is
- * that function plus the one step tonight's session kept doing by hand in front of it.
+ * THE COMPOSITION: stop the dispatched agent (unconditionally, whenever its run record carries a handle),
+ * THEN close the run record out — in that order, so `wake.mjs`'s own `assertHandleNotLive` passes on its own
+ * merits and this does not need `force: true` for the common case. Mirrors
+ * `we:scripts/operations/wake.mjs#closeOutEntry`'s signature closely on purpose; this is that function plus
+ * the one step tonight's session kept doing by hand in front of it.
+ *
+ * STOPS UNCONDITIONALLY RATHER THAN PRE-CHECKING LIVENESS ITSELF, DELIBERATELY. An earlier cut called
+ * `listAgents()` here first to decide whether a stop was needed at all — a second, redundant read of the same
+ * question `closeOutEntry`'s own `assertHandleNotLive` asks right after, AND one that failed OPEN (silently
+ * skipped the stop) on a listing that came back malformed or unreadable, rather than failing closed the way
+ * `assertHandleNotLive` and `stampLiveness` both do. `claude stop` on an already-gone handle is cheap and
+ * benign (see {@link stopSession}), so there is no case where skipping the pre-check costs anything but one
+ * subprocess call, and it removes an entire way this could get the fail-open case wrong.
  *
  * @param {object} o
  * @param {string} o.runId
  * @param {string} o.key - the effect key, exactly as `wake.mjs --status` printed it.
  * @param {'failed'|'applied'} [o.status]
  * @param {string} [o.note]
+ * @param {boolean} [o.force] - passed straight through to `closeOutEntry` — the same escape hatch
+ *   `wake.mjs --resolve --force` offers, for when `claude agents --json` itself is unreadable.
  * @param {{read: Function, write: Function}} o.store
  * @param {() => object[]} [o.listAgents]
  * @param {Function} [o.exec]
  * @returns {string} one operator-facing line, including a lane hint when the dispatch had one.
  */
-export function abortDispatch({ runId, key, status = 'failed', note = '', store, listAgents = defaultListAgents, exec = execFileSync } = {}) {
+export function abortDispatch({ runId, key, status = 'failed', note = '', force = false, store, listAgents = defaultListAgents, exec = execFileSync } = {}) {
   if (!runId || !key) throw new Error('dispatch-abort: needs both runId and key (wake.mjs --status prints them)');
   const run = store.read(runId);
   if (!run) throw new Error(`dispatch-abort: no run record for ${JSON.stringify(runId)}`);
@@ -119,17 +143,11 @@ export function abortDispatch({ runId, key, status = 'failed', note = '', store,
   const handle = normalizeHandle(entry.handle);
   let stopLine = 'no handle to stop';
   if (handle) {
-    const sessions = listAgents();
-    const listed = Array.isArray(sessions) ? listedSessionIds(sessions) : new Set();
-    if (listed.has(handle)) {
-      stopSession({ handle, exec });
-      stopLine = `stopped ${handle}`;
-    } else {
-      stopLine = `${handle} was not listed live — nothing to stop`;
-    }
+    const res = stopSession({ handle, exec });
+    stopLine = res.alreadyGone ? `${handle} was already gone — nothing to stop` : `stopped ${handle}`;
   }
 
-  const closeLine = closeOutEntry({ runId, key, status, note, store, listAgents });
+  const closeLine = closeOutEntry({ runId, key, status, note, force, store, listAgents });
   const lane = entry?.payload?.lane;
   const laneHint = lane != null
     ? ` Lane ${lane} may still be leased from this dispatch — release it by hand once you've checked it: `
@@ -141,36 +159,30 @@ export function abortDispatch({ runId, key, status = 'failed', note = '', store,
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   const argv = process.argv.slice(2);
-  const flagValue = (name) => {
-    const hit = argv.find((a) => a === `--${name}` || String(a).startsWith(`--${name}=`));
-    if (hit === undefined) return undefined;
-    const eq = String(hit).indexOf('=');
-    return eq === -1 ? '' : String(hit).slice(eq + 1);
-  };
+  const flag = (name) => flagValue(argv, name);
 
-  const trustDir = flagValue('trust');
+  const trustDir = flag('trust');
   if (trustDir !== undefined) {
     try {
-      writeAllSync(1, `${trustCheckout({
-        dir: resolve(trustDir),
-        readConfig: () => readJsonConfig(TRUST_PATH),
-        writeConfig: (next) => {
-          if (existsSync(TRUST_PATH)) copyFileSync(TRUST_PATH, `${TRUST_PATH}.bak`);
-          writeFileSync(TRUST_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-        },
-      })}\n`);
+      // EMPTY IS A REFUSAL, NOT "trust the cwd" — `--trust` with no `=value` returns `''` from `flagValue`,
+      // and `resolve('')` silently resolves to `process.cwd()`. Trust-granting is a deliberate, per-directory
+      // opt-in; an operator who forgot the directory argument (or hit a shell-quoting mistake) must see an
+      // error, not have whatever directory they happened to be standing in trusted for them.
+      if (!trustDir) throw new Error('dispatch-abort: --trust needs a directory, e.g. --trust=/path/to/scratch-clone');
+      const { readTrust, writeTrust } = defaultIo();
+      writeAllSync(1, `${trustCheckout({ dir: resolve(trustDir), readConfig: readTrust, writeConfig: writeTrust })}\n`);
     } catch (e) {
       writeLineSync(2, `error: ${String(e?.message ?? e)}`);
       process.exitCode = 1;
     }
   } else {
-    const runId = flagValue('abort');
     try {
       writeAllSync(1, `${abortDispatch({
-        runId,
-        key: flagValue('key'),
-        status: flagValue('status') || 'failed',
-        note: flagValue('note') || '',
+        runId: flag('abort'),
+        key: flag('key'),
+        status: flag('status') || 'failed',
+        note: flag('note') || '',
+        force: flag('force') !== undefined,
         store: createFileRunStore(),
       })}\n`);
     } catch (e) {

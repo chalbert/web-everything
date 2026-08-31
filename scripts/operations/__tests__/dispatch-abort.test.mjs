@@ -4,13 +4,17 @@
  *
  * WHAT THIS FILE COVERS:
  *   - `stopSession` shells `claude stop <id>`, never `kill` — the exact primitive whose absence let a stopped
- *     agent come back under a new pid and double-dispatch onto a lane.
+ *     agent come back under a new pid and double-dispatch onto a lane. An already-gone handle (`claude stop`'s
+ *     own `No job matching …` exit) is reported, not thrown; any OTHER failure still throws, and the exec
+ *     options (including the timeout) are asserted in full, not just `encoding` (PR #1211 review F5's lesson).
  *   - `trustCheckout` grants trust through the SAME `withTrustedDirs` primitive the bootstrap step uses, is a
  *     no-op when already trusted, and never touches an unreadable config.
- *   - `abortDispatch` stops the handle FIRST when (and only when) it is still listed live, then closes the run
- *     out — so `wake.mjs`'s own `assertHandleNotLive` passes without `--force`; and it never calls `claude
- *     stop` on a handle that already isn't listed.
+ *   - `abortDispatch` ALWAYS attempts the stop when the run has a handle (no redundant liveness pre-check —
+ *     see the source's own doc for why an earlier cut that pre-checked failed OPEN on a bad listing), then
+ *     closes the run out — so `wake.mjs`'s own `assertHandleNotLive` passes without `force: true` in the
+ *     common case, and `force` still threads through for the case it doesn't.
  *   - the lane hint names the lane from the effect's own payload, and says nothing when there wasn't one.
+ *   - the CLI's `--trust` refuses an empty value rather than silently trusting the CWD.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -24,7 +28,7 @@ import { createFileRunStore } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, dispatchLaneOperation } from '../dispatch-lane.mjs';
 import { createDispatchSinks } from '../dispatch-lane-io.mjs';
-import { abortDispatch, stopSession, trustCheckout } from '../dispatch-abort.mjs';
+import { abortDispatch, stopSession, trustCheckout, STOP_EXEC_OPTS } from '../dispatch-abort.mjs';
 
 const RUN_ID = 'run-dispatch-abort';
 const KEY = `${RUN_ID}#2#0`;
@@ -63,19 +67,30 @@ async function parkOneDispatch() {
 }
 
 describe('stopSession', () => {
-  it('shells `claude stop <id>`, never `kill`', () => {
+  it('shells `claude stop <id>`, never `kill`, with the FULL exec options (not just encoding)', () => {
     const exec = vi.fn(() => 'stopped aaaaaaaa');
     const res = stopSession({ handle: HANDLE, exec });
-    expect(exec).toHaveBeenCalledWith('claude', ['stop', HANDLE], expect.objectContaining({ encoding: 'utf8' }));
-    expect(res).toEqual({ stopped: true, output: 'stopped aaaaaaaa' });
+    expect(exec).toHaveBeenCalledWith('claude', ['stop', HANDLE], STOP_EXEC_OPTS);
+    expect(STOP_EXEC_OPTS.timeout).toBe(30_000); // the literal PR #1211 review F5 found silently deleted once
+    expect(res).toEqual({ stopped: true, alreadyGone: false, output: 'stopped aaaaaaaa' });
   });
 
   it('refuses with no handle', () => {
     expect(() => stopSession({ exec: vi.fn() })).toThrow(/needs a handle/);
   });
 
-  it('surfaces a failed `claude stop` rather than swallowing it', () => {
-    const exec = vi.fn(() => { throw new Error('exit 1: no such session'); });
+  it('treats an already-gone handle as benign, not an error', () => {
+    const exec = vi.fn(() => {
+      const e = new Error("Command failed: claude stop aaaaaaaa");
+      e.stderr = "No job matching 'aaaaaaaa'. Run 'claude agents' to list running sessions.\n";
+      throw e;
+    });
+    const res = stopSession({ handle: HANDLE, exec });
+    expect(res).toEqual({ stopped: true, alreadyGone: true, output: expect.stringMatching(/No job matching/) });
+  });
+
+  it('surfaces any OTHER `claude stop` failure rather than swallowing it', () => {
+    const exec = vi.fn(() => { const e = new Error('spawnSync claude ENOENT'); throw e; });
     expect(() => stopSession({ handle: HANDLE, exec })).toThrow(/claude stop .* failed/);
   });
 });
@@ -114,17 +129,16 @@ describe('trustCheckout', () => {
 });
 
 describe('abortDispatch', () => {
-  it('stops the handle FIRST, then closes out — no --force needed because the listing already agrees', async () => {
+  it('stops the handle, then closes out — no force needed once the (single) listing agrees it is gone', async () => {
     const { store } = await parkOneDispatch();
     const exec = vi.fn(() => 'stopped');
-    // First read (inside abortDispatch's own live check): still listed. Second read (inside closeOutEntry's
-    // assertHandleNotLive, called AFTER the stop): gone. This is the exact ordering the composition exists for.
-    const listAgents = vi.fn()
-      .mockReturnValueOnce([{ sessionId: HANDLE, name: 'prepare-3412' }])
-      .mockReturnValueOnce([]);
+    // ONE read only — inside closeOutEntry's own assertHandleNotLive, called AFTER the stop. There is no
+    // separate pre-check read any more (see the source's own doc for why that was removed).
+    const listAgents = vi.fn(() => []);
 
     const line = abortDispatch({ runId: RUN_ID, key: KEY, store, listAgents, exec });
 
+    expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith('claude', ['stop', HANDLE], expect.anything());
     expect(line).toMatch(new RegExp(`stopped ${HANDLE}`));
     expect(line).toMatch(/closed out as `failed`/);
@@ -134,28 +148,41 @@ describe('abortDispatch', () => {
     expect(after.effects[0].status).toBe('failed');
   });
 
-  it('never calls `claude stop` when the handle is already gone from the listing', async () => {
+  it('still calls `claude stop` even when the handle was already gone — cheap, and closes the fail-open gap', async () => {
     const { store } = await parkOneDispatch();
-    const exec = vi.fn();
-    const listAgents = vi.fn(() => []); // gone on every read
+    const exec = vi.fn(() => {
+      const e = new Error('Command failed');
+      e.stderr = `No job matching '${HANDLE}'. Run 'claude agents' to list running sessions.\n`;
+      throw e;
+    });
+    const listAgents = vi.fn(() => []);
 
     const line = abortDispatch({ runId: RUN_ID, key: KEY, store, listAgents, exec });
 
-    expect(exec).not.toHaveBeenCalled();
-    expect(line).toMatch(/was not listed live — nothing to stop/);
+    expect(exec).toHaveBeenCalledTimes(1); // attempted, not skipped — no pre-check decided it wasn't worth trying
+    expect(line).toMatch(/was already gone — nothing to stop/);
     expect(line).toMatch(/closed out as `failed`/);
   });
 
-  it('propagates assertHandleNotLive\'s refusal when the stop did not actually take (still listed after)', async () => {
+  it('propagates assertHandleNotLive\'s refusal when the listing still shows it live after the stop', async () => {
     const { store } = await parkOneDispatch();
     const exec = vi.fn(() => 'stopped');
-    // Both reads say still listed — the stop call happened but, per this test, did not actually clear the
-    // listing. closeOutEntry must still refuse rather than close out a possibly-live agent.
+    // The stop call happened but, per this test, the listing still reports it live — closeOutEntry must
+    // still refuse rather than close out a possibly-live agent.
     const listAgents = vi.fn(() => [{ sessionId: HANDLE, name: 'prepare-3412' }]);
 
     expect(() => abortDispatch({ runId: RUN_ID, key: KEY, store, listAgents, exec }))
       .toThrow(/STILL LISTED/);
     expect(exec).toHaveBeenCalledTimes(1); // the stop was attempted exactly once, not retried in a loop
+  });
+
+  it('force threads through to closeOutEntry, getting past a listing assertHandleNotLive would otherwise refuse on', async () => {
+    const { store } = await parkOneDispatch();
+    const exec = vi.fn(() => 'stopped');
+    const listAgents = vi.fn(() => [{ sessionId: HANDLE, name: 'prepare-3412' }]);
+
+    const line = abortDispatch({ runId: RUN_ID, key: KEY, store, listAgents, exec, force: true });
+    expect(line).toMatch(/closed out as `failed`.*--force: liveness not checked/);
   });
 
   it('reports no lane hint when the dispatch never had one', async () => {
