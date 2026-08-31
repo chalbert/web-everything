@@ -254,3 +254,105 @@ current as of round 2 landing (#3402/#3403), so nothing here has to be re-derive
 
 None of (d) or the #3390/#2924 land are done yet. This section exists so a fresh session doesn't have to
 re-run the verification or the design review to find them again.
+
+**Update: #3390/#2924 landed since the above was written** — `PR #1710` (`lane-pool: land #3390 dirty-tree
+guard + #2924 re-verify-containment fixes`), merged. (d) — the doctrine ratification — became `#3405`,
+filed under this epic, still open.
+
+## Session update (2026-08-30, night session) — a real bug landed via dogfooding, two prior claims corrected,
+## two items filed and landed, the live-fire dispatch still not attempted
+
+Picked this back up per the operator's own framing: exercise the prototype for real before trusting it to
+deliver, and treat every real snag as a machinery finding, same standing instruction as the 2026-08-29
+session above.
+
+**1. Landed `#1715`, a real, repeatedly-hit bug — not part of the dispatcher branch, but found while
+assessing it.** `we:scripts/operations/open-pr.mjs`'s `HOME_REASONS` table had no entry for `enqueued`/
+`labelled-on-green` (`pr-land`'s `--label-on-green` terminal reasons) — both fell to `unrun`, and the sink
+threw "the PR was NOT opened" for a PR that had, in fact, opened. Hit live 7 times across 2026-08-29/30, all
+in the (unharvested) learnings pool. Fixed directly rather than waiting for `/harvest`, per the operator's
+own steer that this was worth fixing now. **A second bug surfaced dogfooding the fix itself**: the `/pr`
+skill's own "dry-run first" step threw the same misleading error for a working rehearsal — the sink's
+dry-run exemption keyed off the *request* argv, not the *reported* reason. Fixed, then independent review
+(`review-pr`, correctness + security lenses, both CONFIRMED) found the first version of that fix had the
+SAME class of bug the other way — keying on request argv let a genuine crash during a dry-run request go
+unthrown. Fixed for real (`out.reason === 'dry-run'`), with the exact test the review asked for. Both
+rounds are on `main` now (`we:scripts/operations/open-pr.mjs`, `we:scripts/operations/open-pr-io.mjs`,
+`we:scripts/operations/__tests__/open-pr.test.mjs`).
+
+**2. Correction: `#3404` is NOT live on `main`, contrary to an earlier in-session claim this update
+retracts.** Checked `we:skills-src/conveyor/runner.mjs`'s actual `mechanicalPasses` body on `main` directly
+— it only shells `we:scripts/conveyor/infra-blocked.mjs retry` + `we:scripts/conveyor/lease-reaper.mjs`,
+both fast and deterministic. The long verify-dispatch pass that makes the stale-lease-during-a-long-pass
+window real (`#3105`'s work) exists only on `origin/lane/mechanical-dispatcher`. So
+`#3403`/`#3404`/`#3406` all remain genuinely branch-scoped — building any of them means picking a branch
+first (see the still-open branch-strategy question below).
+
+**3. Correction: the diff-driven test-selection shrink (`#2681`/`#3372`) would NOT have helped tonight's
+verify-lane flakiness, contrary to an earlier in-session claim.** `backlog/` is deliberately excluded — it's
+in `we:scripts/readiness/test-selection.mjs`'s own `GLOB_FIXTURE_ROOTS` (directory-scanning tests are
+invisible to the module graph the shrink relies on) and absent from `SHRINK_ALLOW_LIST`. A backlog-only diff
+correctly forces the full suite; shrinking it would risk a real false-green. Not a gap — working as designed.
+
+**4. A genuine, new finding: `we:scripts/verify-lane.mjs`'s local full-suite gate is unreliable under real
+host contention.** Four consecutive local `verify-lane` runs on the SAME backlog-only diff each failed on a
+DIFFERENT, unrelated, timing-sensitive integration test — `we:scripts/__tests__/lane-pool-reap-on-acquire.test.mjs`'s
+TTL-backdating cases (twice), then `we:scripts/__tests__/sync-skills-deploy.test.mjs`'s symlink-cycle test
+(`#3011`'s own precedent for the identical load-flake shape, recurring). Every one passed clean run in
+isolation. Filed `#3411` for the specific lane-pool-reap case. This host had, at the time, this session plus
+a review session plus several other lanes' dev servers all running concurrently — not a corner case for a
+dispatcher whose whole point is more concurrent local agents, not fewer.
+
+**5. An open design question, discussed with the operator but NOT ruled on or filed — flagged for the next
+session, not resolved here.** `we:scripts/lib/verify-lane-gate.mjs`'s own header already argues the local
+full-suite run is a LOCAL, pre-CI sanity check, not the authoritative gate — the real, required GitHub
+`test` check is, and `pr-land`/the drain already wait on and refuse-on-red against that CI check
+independently of the local marker. Given (a) CI proved green on this exact code while local flaked twice,
+and (b) this epic's own direction is more concurrent local dispatch over time, is the full local suite
+still pulling its weight as a hard land-blocker, or should it shrink to a fast-fail-only role? No card
+filed — the operator wanted the immediate flake fixed (`#3411`), not this reframed yet.
+
+**6. Two items filed and landed, both on `main`:**
+   - **`#3411`** — the `we:scripts/__tests__/lane-pool-reap-on-acquire.test.mjs` TTL-backdating flake from
+     finding 4.
+   - **`#3412`** — wrap `we:scripts/gap-sweep-status.mjs` as a declared operation, a small additive slice of
+     `#3273`'s census. Picked specifically as the live-fire dispatch target: self-contained, no hot-file
+     contention beyond the two registry lines `#3273` already clears for one slice.
+   Both landed via the documented `WE_LAND_UNVERIFIED=1` break-glass (operator-approved for this specific
+   case) after the local gate's repeated unrelated flakes, citing CI's independent green as the real proof —
+   CI itself came back green on both.
+
+**7. The live-fire dispatch itself is STILL not attempted this session.** `#3412` is filed, ready, and
+picked specifically for this purpose — but no scratch clone was set up and no real dispatch was fired.
+Nothing has actually tried this since the 2026-08-29 attempt documented in this epic's own history above.
+**This remains the single highest-leverage next action.**
+
+**8. Live, current evidence of the notification gap `#3398` already names — not cleaned up this session.**
+`claude agents --json` shows three `conveyor-*` background agents sitting `blocked`/`waiting for dialog
+open` right now: `conveyor-3150`, `conveyor-3151` (×2, different launches), `conveyor-3154` (×2) — one at
+least 22+ hours old. Found only by checking by hand. Either clean these up via `we:scripts/operations/wake.mjs
+--resolve --force` (`#3353`'s documented protocol) or leave them as further, current evidence for `#3398`'s
+urgency — both valid, neither done here.
+
+**9. Branch-strategy decision still not made.** `origin/lane/mechanical-dispatcher` (has `#3105`'s
+gate-delegation fix + the updated `we:skills-src/conveyor/delivery-agent-brief.md`) and
+`origin/lane/mechanical-dispatcher-recovered` (has `we:skills-src/conveyor/supervisor.mjs`, the lane-pool
+ref-lock + `computeFreeSlots` fixes, the runner→`dispatch-lane` wiring) remain diverged, never reconciled.
+`#3403`/`#3404`/`#3406` all need this decided before any of them can be built — see correction 2 above for
+why.
+
+**10. `#3405` (doctrine ratification) and the round-3 gap-sweep capture (candidate new gaps: a
+dev/local-vs-SaaS runtime-mode distinction, resource management, VM/container isolation per lane — distinct
+from the already-covered billing/lock-arbitration angles) remain open, untouched beyond conversation this
+session.**
+
+**For the next session, explicitly, so none of this has to be re-derived:**
+- Trust corrections 2 and 3 over anything earlier in this card that contradicts them.
+- Highest-leverage next action: the live-fire dispatch against `#3412` — scratch clone (non-`lane-N` name),
+  `WE_DISPATCH_AGENT_ARGS` with a real permission mode set, one real `we:skills-src/conveyor/runner.mjs
+  --once --json` tick.
+- The branch-strategy call (finding 9) blocks `#3403`/`#3404`/`#3406` and arguably should happen before or
+  alongside the live-fire attempt, since which branch gets exercised is exactly what that decision settles.
+- The three stuck `conveyor-*` agents (finding 8) are real, current, and easy to check —
+  `claude agents --json` first, `we:scripts/operations/wake.mjs --resolve --force` per `#3353` to close them
+  out if that's the call.
