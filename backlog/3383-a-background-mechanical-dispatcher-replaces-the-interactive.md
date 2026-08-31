@@ -482,7 +482,7 @@ never by an actual spawn. The double-dispatch guard this epic itself calls out a
 tracked via four overlapping heuristics rather than one source of truth," now with a concrete first instance)
 suppresses the very first dispatch it exists to protect.
 
-**Filed as `#xmjcqwz`** (JIT-numbered at land), parented under this epic, size 5, with an executable
+**Filed as `#3416`** (JIT-numbered at land), parented under this epic, size 5, with an executable
 mutation-test Done-when reproducing the exact shape plus a bisect-or-name-it Done-when asking whether this is
 long-standing or a regression introduced by `#3105`/`#3110`'s later layering on top of whatever the
 2026-08-29 session's machinery actually was. **This is very possibly the reason `#3383`'s own "Done when" #1
@@ -495,9 +495,9 @@ explicitly by the operator across the 2026-08-29 and tonight's sessions): this i
 run is for, and finding it is the success this criterion exists to produce, not a failure of tonight's
 attempt. `#3412` itself is untouched (no PR, no commit beyond the local, uncommitted `scope:` add in the
 scratch clone, which is not part of any landed change) — still available as the live-fire target once
-`#xmjcqwz` is fixed.
+`#3416` is fixed.
 
-**For the next session:** `#xmjcqwz` is now the single highest-leverage next action — fixing it is very
+**For the next session:** `#3416` is now the single highest-leverage next action — fixing it is very
 plausibly the unblock for this epic's own core "Done when" #1, ahead of `#3403`/`#3404`/`#3406` (which need
 the branch-strategy call, already settled above, but not this bug) and ahead of `#3405`'s already-ratified
-doctrine. Re-attempt the live-fire dispatch against `#3412` once `#xmjcqwz` lands.
+doctrine. Re-attempt the live-fire dispatch against `#3412` once `#3416` lands.
