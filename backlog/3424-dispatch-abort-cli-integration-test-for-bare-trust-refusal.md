@@ -3,6 +3,9 @@ bornAs: xfv12l6
 kind: task
 status: open
 dateOpened: "2026-08-31"
+costTokens: "in:120 cw:125418 cr:6440826 out:20722"
+costUsd: 4.99
+costSessions: 1
 tags: []
 ---
 
