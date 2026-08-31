@@ -2212,19 +2212,56 @@ export function duplicateBornAs(items = []) {
  * entirely. Pure + unit-tested — takes the `backlog/*.md` paths present ON MAIN (a git ls-tree, so in-lane
  * pre-land hashes that live only on a `lane/*` branch never false-trip). Fix a fire with
  * `node scripts/backlog.mjs number-stranded`.
+ *
+ * #2956 — the drain's OWN in-flight numbering window is not a strand. `pr-land` pushes the merge commit,
+ * then the drain pushes the JIT-numbering commit SEPARATELY, 7-73s later (measured across real lands — see
+ * the card). A checkout fast-forwarded onto the merge commit inside that window legitimately sees a
+ * hash-led file that the drain is already about to fix, and the OLD hard error's remedy
+ * (`number-stranded`) is an out-of-lane mutation that races the drain's own numbering if run there.
+ * Detection: for each candidate file, look at the epoch of the LAST commit that touched it on
+ * `origin/main` (`commitTimeFor`, supplied by the caller via `git log -1 --format=%ct`). A file touched
+ * within `graceWindowSeconds` of now is presumed in-flight — downgraded to a WARNING that does not name
+ * `number-stranded` (running it here would race the drain) — rather than a hard error. A file older than
+ * the grace window is a genuine strand: the drain's window has long since closed, so the fix is safe to
+ * run, and it still hard-errors with the remedy intact. The grace window (`STRANDED_HASH_GRACE_SECONDS`,
+ * default 180s) is set comfortably above the measured 7-73s trailing gap so the false-positive window is
+ * covered without materially delaying detection of a real strand (a re-run minutes later still catches
+ * one). When `commitTimeFor` can't produce a timestamp for a path (unknown git error), the file is treated
+ * as NOT in-flight — i.e. it still errors — so a signal failure fails toward the old, safe-but-noisy
+ * behaviour rather than silently swallowing a real strand.
  * @param {string[]} mainBacklogPaths  `backlog/<id>-slug.md` paths tracked on origin/main
- * @returns {string[]} one error per stranded hash (empty when every id on main is numeric)
+ * @param {object} [opts]
+ * @param {(path: string) => number|null} [opts.commitTimeFor]  epoch seconds of the last commit that
+ *   touched `path` on origin/main, or `null` if unknown. Defaults to "unknown" for every path (so callers
+ *   that don't pass it keep the old always-error behaviour).
+ * @param {() => number} [opts.now]  epoch seconds "now" — injectable for deterministic tests.
+ * @param {number} [opts.graceWindowSeconds]  in-flight window, default `STRANDED_HASH_GRACE_SECONDS`.
+ * @returns {{errors: string[], warnings: string[]}} one message per stranded hash, routed by recency.
  */
-export function strandedHashesOnMain(mainBacklogPaths = []) {
+export const STRANDED_HASH_GRACE_SECONDS = 180; // ~2.5x the measured 7-73s drain numbering-commit lag
+
+export function strandedHashesOnMain(mainBacklogPaths = [], {
+  commitTimeFor = () => null,
+  now = () => Date.now() / 1000,
+  graceWindowSeconds = STRANDED_HASH_GRACE_SECONDS,
+} = {}) {
   const errors = [];
+  const warnings = [];
   for (const p of mainBacklogPaths) {
     const m = String(p).match(/(?:^|\/)backlog\/([^/]+?)-[^/]*\.md$/);
     if (!m) continue;
     const lead = m[1];
-    if (!/^\d+$/.test(lead))
+    if (/^\d+$/.test(lead)) continue;
+    const committedAt = commitTimeFor(p);
+    const ageSeconds = typeof committedAt === 'number' && Number.isFinite(committedAt) ? now() - committedAt : null;
+    const inFlight = ageSeconds !== null && ageSeconds >= 0 && ageSeconds < graceWindowSeconds;
+    if (inFlight) {
+      warnings.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}", committed ${Math.round(ageSeconds)}s ago — within the drain's own JIT-numbering window (#2288/#2956, <${graceWindowSeconds}s grace). This looks like the drain's separate numbering commit hasn't landed yet, not a strand. No action needed here — re-run \`check:standards\` after a fresh fetch to confirm it cleared.`);
+    } else {
       errors.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}" — a land route bypassed JIT numbering (#2288) and stranded a hash (#2319). Number it: \`node scripts/backlog.mjs number-stranded\` (distinct from a duplicate NNN — a lone hash isn't a collision).`);
+    }
   }
-  return errors;
+  return { errors, warnings };
 }
 
 /**

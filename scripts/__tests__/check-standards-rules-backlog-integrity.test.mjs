@@ -197,20 +197,78 @@ describe('duplicateBacklogNums — the #2248 NNN-collision tripwire (pure detect
 
 describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detector)', () => {
   it('all-numeric ids on main → clean', () => {
-    expect(strandedHashesOnMain(['backlog/001-a.md', 'backlog/2322-b-slug.md', 'backlog/12345-c.md'])).toEqual([]);
+    expect(strandedHashesOnMain(['backlog/001-a.md', 'backlog/2322-b-slug.md', 'backlog/12345-c.md'])).toEqual({ errors: [], warnings: [] });
   });
-  it('a hash id on main → one error naming the file + the fix', () => {
-    const errs = strandedHashesOnMain(['backlog/001-a.md', 'backlog/xbvktb4-should-force-eat.md']);
-    expect(errs).toHaveLength(1);
-    expect(errs[0]).toMatch(/xbvktb4-should-force-eat\.md/);
-    expect(errs[0]).toMatch(/NON-NUMERIC leading id "xbvktb4"/);
-    expect(errs[0]).toMatch(/number-stranded/);
+  it('a hash id on main with NO commitTimeFor supplied → errors (old always-error behaviour preserved as the default)', () => {
+    const { errors, warnings } = strandedHashesOnMain(['backlog/001-a.md', 'backlog/xbvktb4-should-force-eat.md']);
+    expect(warnings).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/xbvktb4-should-force-eat\.md/);
+    expect(errors[0]).toMatch(/NON-NUMERIC leading id "xbvktb4"/);
+    expect(errors[0]).toMatch(/number-stranded/);
   });
   it('one error per stranded hash (multiple)', () => {
-    expect(strandedHashesOnMain(['backlog/x111111-a.md', 'backlog/x222222-b.md', 'backlog/003-ok.md'])).toHaveLength(2);
+    expect(strandedHashesOnMain(['backlog/x111111-a.md', 'backlog/x222222-b.md', 'backlog/003-ok.md']).errors).toHaveLength(2);
   });
   it('ignores non-backlog paths and non-.md files', () => {
-    expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual([]);
+    expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual({ errors: [], warnings: [] });
+  });
+
+  // #2956 — the drain's own in-flight numbering window (merge commit pushed, JIT-numbering commit not yet
+  // pushed, measured 7-73s trailing gap) must NOT hard-error; a genuine strand — same shape, just old — still
+  // must. Both directions pinned against the SAME pure function, varying only the injected commit age.
+  describe('#2956 — in-flight drain window vs. a genuine strand', () => {
+    const NOW = 1_000_000;
+    const path = 'backlog/xbvktb4-should-force-eat.md';
+
+    it('a hash-led file committed 40s ago (inside the 7-73s measured window) → WARNING, not an error, and does not recommend number-stranded', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW - 40,
+        now: () => NOW,
+      });
+      expect(errors).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/xbvktb4-should-force-eat\.md/);
+      expect(warnings[0]).not.toMatch(/number-stranded/);
+    });
+
+    it('a hash-led file committed exactly at the grace boundary (179s, < default 180s) → still WARNING', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW - 179,
+        now: () => NOW,
+      });
+      expect(errors).toEqual([]);
+      expect(warnings).toHaveLength(1);
+    });
+
+    it('a hash-led file committed 1 hour ago (long past the drain\'s window) → ERROR, remedy intact', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW - 3600,
+        now: () => NOW,
+      });
+      expect(warnings).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/number-stranded/);
+    });
+
+    it('a hash-led file whose commit time is unknown (commitTimeFor → null, e.g. a git error) → ERROR, fails toward the old safe behaviour', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => null,
+        now: () => NOW,
+      });
+      expect(warnings).toEqual([]);
+      expect(errors).toHaveLength(1);
+    });
+
+    it('a custom graceWindowSeconds is honoured (60s window: 70s ago is now a genuine strand)', () => {
+      const { errors, warnings } = strandedHashesOnMain([path], {
+        commitTimeFor: () => NOW - 70,
+        now: () => NOW,
+        graceWindowSeconds: 60,
+      });
+      expect(warnings).toEqual([]);
+      expect(errors).toHaveLength(1);
+    });
   });
 });
 

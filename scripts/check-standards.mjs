@@ -550,7 +550,19 @@ for (const msg of duplicateBacklogNums(backlog)) err(msg);
 try {
   const mainBacklog = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8' })
     .split('\n').filter(Boolean);
-  for (const msg of strandedHashesOnMain(mainBacklog)) err(msg);
+  // #2956 — a hash-led file touched within the drain's own JIT-numbering window (see strandedHashesOnMain's
+  // doc comment) is downgraded to a warning rather than a hard error. `commitTimeFor` is a live, local-only
+  // git call (no fetch) per candidate path — cheap, since there are normally zero or one of these.
+  const commitTimeFor = (path) => {
+    try {
+      const raw = execFileSync('git', ['log', '-1', '--format=%ct', 'origin/main', '--', path], { cwd: ROOT, encoding: 'utf8' }).trim();
+      const epoch = Number.parseInt(raw, 10);
+      return Number.isFinite(epoch) ? epoch : null;
+    } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
+  };
+  const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor });
+  for (const msg of stranded.errors) err(msg);
+  for (const msg of stranded.warnings) warn(msg);
   // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
   // Guarded by WE_SKIP_HAND_NUMBERED_GATE (same family as WE_MERGE_BREAK_GLASS/STALE_LANE_OK/LANE_CLOBBER_OK)
   // because pr-land.mjs's runHeal() self-check runs on a locally-renumbered, not-yet-pushed tree that this
