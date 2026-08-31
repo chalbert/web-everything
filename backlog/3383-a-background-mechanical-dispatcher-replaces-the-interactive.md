@@ -2,8 +2,9 @@
 bornAs: xyv0vbz
 kind: epic
 parent: "3029"
-status: open
+status: active
 dateOpened: "2026-08-28"
+dateStarted: "2026-08-31"
 costTokens: "in:4258 cw:5434832 cr:788205472 out:1469575"
 costUsd: 485.21
 costSessions: 7
@@ -537,3 +538,155 @@ prompt), `#1731` (this review-mechanization note). Nothing from tonight is open 
    with forks stated but not ruled on.
 4. **`#3403`/`#3404`/`#3406`** can now be built — the branch-strategy question that blocked them is settled
    (`mechanical-dispatcher`, not `-recovered`), and the branch is rebased current with `main`.
+
+## Session update (2026-08-31, follow-on session) — the live-fire dispatch finally completed end to end,
+## `xk7amte` ruled and landed as `#3422`, `dispatch-abort` built and PR'd, and the real permission-mode root
+## cause found
+
+Picked this back up per the operator's own priority order from tonight's close-out. All four items touched;
+one fully closed, one landed, one built-but-parked, one confirmed-unblocked-but-not-started.
+
+### 1. The live-fire dispatch against `#3412` — DONE, for real, first time all epic
+
+The confounded scratch clone from the prior session (`~/workspace/wev-scratch-dispatcher`, still holding a
+stuck `conveyor-3412` session and unrelated uncommitted changes) was stopped and abandoned per the operator's
+own framing. A genuinely fresh clone, `~/workspace/wev-scratch-dispatcher-2`, was cut from
+`origin/lane/mechanical-dispatcher` — which had drifted 18 commits behind `origin/main` again since the prior
+close-out, so it was rebased current first (3 real conflicts, all in files both sides had touched since
+diverging — `we:scripts/operations/dispatch-lane-io.mjs`'s `#xqyyoje` system-prompt param vs. `#3331`'s
+session-identity fix, and the matching test/fixture files — resolved by hand, both sides' changes kept; 1791
+tests green, `check:standards` 0 errors; pushed with `--force-with-lease`). This also settles priority 4: the
+branch is current with `main` again as of tonight.
+
+**Three real, previously-undiagnosed blockers stood between "fresh clone" and an actual dispatch, each found
+by hitting it directly, not guessed at:**
+
+- **A fresh scratch clone is never in Claude Code's own trusted-directories list.** `we:scripts/bootstrap-session.mjs`'s
+  `trustableDirs()` only ever trusts the primary checkout and lane-pool lanes — never an ad-hoc scratch clone,
+  which is exactly what `#3353`'s own live-run protocol calls for (a checkout named anything other than
+  `lane-N`). Every prior session's live-fire attempt used a clone that had, by luck, already been trusted from
+  an earlier manual dialog acceptance; tonight's genuinely-fresh one had not, and the dispatched agent stalled
+  on a permission-prompt dialog with nobody there to answer it. Fixed for this run by hand
+  (`withTrustedDirs`), and mechanized properly below (`we:scripts/operations/dispatch-abort.mjs --trust=<dir>`).
+- **Using `kill <pid>` instead of `claude stop <id>` to end a stuck dispatched agent does not actually end
+  it.** `kill` stops the OS process but does not deregister the session; something (unconfirmed what —
+  possibly the same machinery that backs the mobile "remote agent" view) resurrected it under a NEW pid
+  minutes later, twice, across two different scratch clones. One resurrection raced a second, legitimate
+  dispatch attempt onto the same lane and produced a real double-dispatch onto `lane-5` — caught and cleaned
+  up by hand, no damage done (the lane was still clean when found), but a genuine near-miss of the exact
+  double-dispatch hazard this epic's own "Done when" #1 depends on avoiding. `claude stop <id>` does not have
+  this problem — every stop issued through it stayed stopped.
+- **The real, root-cause finding: `acceptEdits` is NOT the "non-prompting permission mode" `#3353`'s own
+  protocol assumed it was, for a `--bg` dispatch specifically.** Confirmed directly, not guessed: the EXACT
+  bash command a dispatched agent's brief step 1 runs (`export LANE_SESSION=...; LANE=$(node
+  we:scripts/lane-pool.mjs acquire ...) && cd "$LANE"`) was run via `claude -p --permission-mode acceptEdits`
+  (headless foreground) against the same trusted checkout and completed with ZERO prompt. The identical
+  command, via `claude --bg --permission-mode acceptEdits`, stalls every time. `bypassPermissions` was ruled
+  out separately — it refuses outright on a machine that has never interactively accepted its one-time
+  disclaimer (`claude --dangerously-skip-permissions`, confirmed requires a real TTY; cannot be scripted). The
+  actual fix: **`--permission-mode dontAsk`**, a mode neither `#3353` nor any prior session's `WE_DISPATCH_AGENT_ARGS`
+  ever tried (found by re-reading `claude --help`'s full mode list — `acceptEdits`, `auto`, `bypassPermissions`,
+  `manual`, `dontAsk`, `plan` — not the two this epic had been cycling between all along). With `dontAsk`, the
+  SAME scratch clone, same brief, same everything: the dispatched agent went straight to `state: "working"`,
+  never touched a permission prompt.
+
+**The dispatch, run for real:** `WE_DISPATCH_AGENT_ARGS='["--permission-mode","dontAsk"]' node
+we:skills-src/conveyor/runner.mjs --once --json`, from `~/workspace/wev-scratch-dispatcher-2`, `claude 2.1.251`.
+Minted handle `aec264c2`, session name `prepare-3412`, `claude agents --json` row confirmed
+`{"pid":96364,"cwd":".../wev-scratch-dispatcher-2","state":"working","status":"busy"}` — never blocked.
+Acquired `lane-9` via its own `lane-pool acquire` (the exact scope-lease arbitration `#3037`'s acceptance
+names) roughly 90s after spawn. Ran to completion unattended: read `#3412`, predicted its `scope:`, opened
+`PR #1742` ("WE #3412: author scope: for #3412") through the canonical producer, watched it go green,
+confirmed `ready-to-merge`, exited without merging — per its own brief. The drain landed it: **`PR #1742`
+merged.** Full cycle, dispatch to merge, zero interactive-session turns anywhere inside it.
+
+**Honest scope of what this proves, not more.** This was a `prepare-scope` launch kind (author `scope:`
+frontmatter), not `build` (an actual code fix), and the PR never parked `review:pending` — it scored
+low-risk enough to self-approve straight through. So it did NOT have to cross the still-open gap named
+below (item 2): nothing here proves a `build` dispatch whose PR parks for review can complete unattended.
+It DOES prove, for the first time all epic, that the dispatch→spawn→lane-acquire→real-work→PR→CI→drain-land
+chain works end to end with a genuinely fresh checkout and zero interactive turns — the mechanism `#3037`'s
+acceptance and this epic's "Done when" #1 both depend on is real, not theoretical.
+
+### 2. `xk7amte` ruled, landed as `#3422` — the follow-up story is `#3421`
+
+`xk7amte` only existed on a stray, never-merged branch (`origin/lane/3416-fix-landed-and-3383-followups`) —
+this epic's own "filed" claim from the prior session's close-out was premature; the card was never on `main`.
+Brought over and ruled in discussion with the operator (not unilaterally): Forks (a)/(b) collapse onto one
+blocking/non-blocking axis — a blocking hiccup (delivery did not proceed) gets auto-filed with a proposed
+fix, gated behind approval before it lands; a non-blocking hiccup (delivery succeeded, something's still
+worth noting, e.g. perf) files straight through, no gate. Routes through the existing learnings-pool/
+`/harvest` pipeline rather than a parallel one, triggered mechanically at the hiccup instead of a human
+`/note`. `conveyor-3412`'s own free-form-question stall (named in the card) is explicitly ruled a blocking
+hiccup. Landed via `PR #1740`; JIT-numbered `xk7amte→#3422`, its follow-up build story `x39jwee→#3421`.
+
+**A live refinement, from the same discussion, not yet written into either card.** The operator: missing
+operations specifically should be Kanban-style — a missing operation raises a feature request, prepared like
+any other backlog item (read the spec, predict what it touches, build it in a lane — the SAME mechanism
+`#3412`'s own prepare-scope dispatch just proved end to end in section 1 above, not a new one). The
+low-risk-vs-escalate call is the building/reviewing AGENT'S OWN CONFIDENCE ASSESSMENT, made during that
+normal prepare/build flow, against a small set of named criteria — not a rigid rule-based classifier:
+security risk, data-leak risk, performance, blast-radius/reversibility, and baseline correctness (this
+session's own proposed additions to the operator's "perf, security risk, etc." + "data leak risks"). Every
+built operation gets an agent review, always — the confidence call decides whether a HUMAN also has to look
+at it, not whether it gets reviewed at all. High confidence + clean on every criterion → self-clears, retries
+the original call, no human in the loop. Any flagged criterion or genuine uncertainty → joins a BATCHED list
+of AI-authored findings for a human to clear on their own time, not a blocking interactive prompt. This
+sharpens `#3422`'s own blocking-bucket ruling (which said every blocking hiccup is gated, full stop) for the
+specific case where the hiccup IS a missing operation. Belongs as an addition to `#3421`'s scope, not a
+reopening of `#3422`'s ruling.
+
+**A second refinement, also from the operator, also not yet built:** independent of the confidence call,
+some commands/APIs should sit on a standing blacklist that forces elevated review regardless of how
+confident the agent is — the same denylist-and-grow shape `#3405` already ratified for the dispatch doctrine
+generally, applied here specifically to operations that call something on the list. And a third: the
+thresholds themselves (confidence bar, blacklist contents) are eventually a Plateau admin-configurable
+surface, not a hardcoded constant — pre-production, keep the parameter but keep it light (a short list, a
+loose bar), tighten later once there's real usage to tune against. None of this blocks building a first
+version; it's the shape the config should grow into, not a prerequisite.
+
+### 3. `we:scripts/operations/dispatch-abort.mjs` built — mechanizes the stop-then-close-out and trust-grant sequences from finding
+### 1 above — PR #1737, still parked, needs a genuinely independent clearance
+
+New declared-style operation (`we:scripts/operations/dispatch-abort.mjs`, plain-module shape matching
+`we:scripts/operations/wake.mjs`'s own precedent, not the full `op()` declarative engine): `stopSession`
+shells `claude stop <id>` (never `kill`); `trustCheckout` grants checkout trust via the same
+`withTrustedDirs` primitive `we:scripts/bootstrap-session.mjs` already uses for lanes; `abortDispatch`
+composes stop-then-close-out so `we:scripts/operations/wake.mjs`'s own `assertHandleNotLive` passes on its
+own merits without `--force` in the common case. 16 tests, `check:standards` clean. Two independent-review
+passes (a `code-review high` pass, then a `/jury` pass on the PR itself) found and got real fixes: a
+pre-emptive `listAgents()` read that failed OPEN on a malformed listing (removed — `claude stop` on an
+already-gone handle is cheap and benign, so the composition just always attempts it rather than
+pre-checking); a bare `--trust` with no value that silently resolved to and trusted the CWD (now refuses,
+and the refusal itself is now unit-tested — it had lived only in the untestable `IS_CLI` block); no `force`
+CLI escape hatch (added); three small pieces reimplemented instead of reused from
+`we:scripts/bootstrap-session.mjs`/`we:scripts/operations/wake.mjs` (now reused). **`PR #1737` is green and
+fixed but still parked `review:pending`** — the producer rubric scored it blast-radius (it grants trust and
+terminates sessions). This session's own attempt to clear it was refused BEFORE a juror even spent anything:
+the independence check keys off `CLAUDE_CODE_SESSION_ID`, and this session authored the PR, so it cannot be
+its own reviewer, full stop — not a bug, working as designed (`#2439`/`#2844`). Needs either the operator or
+a genuinely different session to run `/review 1737`.
+
+**A related, real finding for `#3383`'s "operation manager" thread, not yet built anywhere:** the operator's
+own framing of what "operation manager" should mean is bigger than `we:scripts/operations/dispatch-abort.mjs`
+— not a helper script, but a real execution chokepoint every command (not only dispatched-agent ones) routes
+through: semantically-named operations (no detail on HOW they execute, which also buys OS-independence),
+logged and telemetered even for cheap/read-only calls, tiered by cost (free-and-inline vs. CPU-scheduled vs.
+mutating-and-runner-only), and — the missing-operation case above — the point where the catalog grows from
+real usage rather than speculative up-front design. Discussed at length with the operator this session;
+explicitly NOT a final design, and not yet captured as its own card. Whoever picks this up next should read
+this section plus section 2's confidence-call/criteria/blacklist refinements before filing it, so the
+discussion is not re-derived from scratch.
+
+### For the next session, in priority order
+
+1. **File the "operation manager" design as its own card** under this epic — capture what's above, keep it
+   explicitly open/capture-only (matching `#3422`'s own shape), and continue the design conversation rather
+   than treating tonight's discussion as settled.
+2. **Clear or get `PR #1737` cleared** — genuinely independent review needed; this session cannot do it.
+3. **Mechanize the review step** — still the single largest remaining gap between "a dispatched agent can open
+   a PR" and this epic's full "Done when" #1 (a `build` dispatch, not just `prepare-scope`, completing
+   unattended through a `review:pending` park). Not yet scoped as a card.
+4. **`#3403`/`#3404`/`#3406`** can be built now — branch-strategy settled, branch current with `main`. Real,
+   separate build work; not started this session.
+5. **Pin the missing-operation risk axis** and fold it into `#3421`'s scope per section 2 above.
