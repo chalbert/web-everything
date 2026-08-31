@@ -22,17 +22,31 @@ the call becomes cold research masquerading as ratification. The two turns are d
 no judgment) then ratify. Surfacing a fork informally in conversation skips prep just as much as surfacing
 it via `/next` does — the channel doesn't matter, only whether the groundwork happened first.
 
-**How to apply:** when `/next` surfaces or is pointed at a decision, screen `preparedDate` FIRST. If null:
-do NOT present a proposed ruling and do NOT claim it as a decision-to-make. Route to `/prepare` (the
-legitimate handling — it brings forks to DoR without making the call) or pick a prepared/dev-ready item
-instead. Get an explicit go before burning prep tokens. The same screen applies before laying out ANY
-fork conversationally, even one embedded in a story/task rather than a `decision` item, and even when the
-user only asked an evaluative question ("do they add good value") rather than asking for a ruling — that
-question is not itself a request to be handed a pick-between-options menu. Surfaced twice:
+**How to apply — the checkable test:** before laying out options/tradeoffs/a recommendation for the
+user to pick between, ask (i) does the item body carry a **named fork** — an enumerated (a)/(b), or a
+"Done when" clause that requires a call to be recorded — that is **anchored to a tracked backlog
+item**? If no (an untracked, explicitly-informal exploration the user disclaims as such — "just
+thinking out loud, don't file this" — isn't a presented decision), this rule doesn't bind. If yes, ask
+(ii) has that fork already reached `kind: decision` + `preparedDate`? If (i) yes and (ii) no, do not
+present it as a menu — split the remedy by case:
+- **Already `kind: decision`:** screen `preparedDate` FIRST. If null, do NOT present a proposed
+  ruling and do NOT claim it as a decision-to-make. Route to `/prepare` (the legitimate handling — it
+  brings forks to DoR without making the call) or pick a prepared/dev-ready item instead. Get an
+  explicit go before burning prep tokens.
+- **Embedded in a non-decision item (story/task):** `/prepare` does not accept these — it builds its
+  candidate set from `kind: decision`/`review` and stamps `preparedDate`, which does not apply here.
+  **Carve first**, per [[feedback_decisions_are_workitems_not_plan_mode]]: split the fork out to its
+  own `kind: decision` card, set the original's `blockedBy` on it, trim the original to a one-line
+  pointer — *then* `/prepare` the carved card. Presenting the fork inline instead of carving it is the
+  same violation as skipping `/prepare` on a real decision item.
+
+The moment a fork is real enough to belong on a card, carve it rather than answering it inline —
+regardless of how the user's question was phrased (an evaluative "do they add good value" is not
+itself a request to be handed a pick-between-options menu). Surfaced twice:
 (1) #1457 (de-buried from #1442, no prep) — I jumped straight to a PENDING-RATIFICATION ruling; user: "this
 decision does not look prepared … we should not propose or accept to take unprepared decision."
-(2) #3373 (a `kind: story`, no `preparedDate`, no `/prepare` run) — asked to assess whether it "added good
-value," I laid out its two enforcement options with tradeoffs and a recommendation as if for the user to
-pick; user: "it should be forbidden to present an unprepared decision." Relates to
-[[feedback_decision_go_is_not_whole_arc]], [[feedback_remediate_before_escalate]],
-[[feedback_decisions_are_workitems_not_plan_mode]].
+(2) #3373 (a `kind: story`, no `preparedDate`, no `/prepare` run, "Done when" item 2 an explicit (a)/(b)
+enforcement fork) — asked to assess whether it "added good value," I laid out its two options with
+tradeoffs and a recommendation as if for the user to pick; user: "it should be forbidden to present an
+unprepared decision." Relates to [[feedback_decision_go_is_not_whole_arc]],
+[[feedback_remediate_before_escalate]], [[feedback_decisions_are_workitems_not_plan_mode]].
