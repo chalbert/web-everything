@@ -2,13 +2,16 @@
 bornAs: xoe1gys
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2319", "2288", "2348", "2419"]
 scope:
   - we:scripts/check-standards.mjs
   - we:scripts/pr-land.mjs
 tags: [gate, drain, backlog, jit-numbering, false-positive]
 dateOpened: "2026-08-06"
+dateStarted: "2026-08-31"
+dateResolved: "2026-08-31"
+graduatedTo: none
 ---
 
 # check:standards hard-errors on the drain's own intermediate state — the stranded-hash gate reads a moving origin/main
