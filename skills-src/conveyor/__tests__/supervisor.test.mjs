@@ -30,6 +30,7 @@ import {
   makeRealSpawnChild, makeJsonlLog,
   detectSupervisorAnomalies, healthFromAnomalies, decideAlert,
   DEFAULT_CRASH_THRESHOLD_MS, DEFAULT_BASE_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS, DEFAULT_LOG_PATH,
+  DEFAULT_IDLE_BASE_BACKOFF_MS, DEFAULT_IDLE_MAX_BACKOFF_MS,
   CRASH_CEILING_WARN_COUNT, CRASH_CEILING_CRIT_COUNT, IDLE_QUEUE_WARN_TICKS, IDLE_QUEUE_CRIT_TICKS, ALERT_RENAG_MS,
 } from '../supervisor.mjs';
 
@@ -61,6 +62,25 @@ describe('classifyExit — clean (idle-stop / polite stand-down) vs crash', () =
     expect(classifyExit({ code: 0, ranMs: 2_999 }).kind).toBe('crash');
     expect(classifyExit({ code: 0, ranMs: 3_000 }).kind).toBe('clean');
   });
+
+  // #3406 — `stoppedReason` (parsed off runner.mjs's own final --json line) is what tells a genuine idle-stop
+  // apart from a polite stand-down; both were previously indistinguishable `{kind:'clean', reason:'exit:0'}`.
+  it('a code:0 exit whose stoppedReason is "idle-stop" is classified distinctly from a plain clean exit', () => {
+    expect(classifyExit({ code: 0, signal: null, ranMs: 10_000, stoppedReason: 'idle-stop' }))
+      .toEqual({ kind: 'clean', reason: 'idle-stop' });
+  });
+  it('a code:0 exit whose stoppedReason is "stand-down" is classified distinctly too', () => {
+    expect(classifyExit({ code: 0, signal: null, ranMs: 10_000, stoppedReason: 'stand-down' }))
+      .toEqual({ kind: 'clean', reason: 'stand-down' });
+  });
+  it('an unset/unknown stoppedReason degrades to the old exit:0 reason, never a wrong classification', () => {
+    expect(classifyExit({ code: 0, signal: null, ranMs: 10_000 }).reason).toBe('exit:0');
+    expect(classifyExit({ code: 0, signal: null, ranMs: 10_000, stoppedReason: 'max-ticks' }).reason).toBe('exit:0');
+    expect(classifyExit({ code: 0, signal: null, ranMs: 10_000, stoppedReason: 'lease-lost' }).reason).toBe('exit:0');
+  });
+  it('a crash still classifies as crash regardless of stoppedReason (code/signal/timing win first)', () => {
+    expect(classifyExit({ code: 1, signal: null, ranMs: 10_000, stoppedReason: 'idle-stop' }).kind).toBe('crash');
+  });
 });
 
 // ── (2) decideRestart — the backoff curve ────────────────────────────────────────────────────────────────────
@@ -68,11 +88,11 @@ describe('classifyExit — clean (idle-stop / polite stand-down) vs crash', () =
 describe('decideRestart — no delay + reset on clean, doubling backoff (capped) on crash', () => {
   it('a clean classification restarts immediately and resets the streak', () => {
     expect(decideRestart({ classification: { kind: 'clean', reason: 'exit:0' }, consecutiveCrashes: 4 }))
-      .toEqual({ delayMs: 0, consecutiveCrashes: 0 });
+      .toEqual({ delayMs: 0, consecutiveCrashes: 0, consecutiveIdleStops: 0 });
   });
   it('the first crash backs off by exactly the base delay', () => {
     expect(decideRestart({ classification: { kind: 'crash', reason: 'exit:1' }, consecutiveCrashes: 0 }))
-      .toEqual({ delayMs: DEFAULT_BASE_BACKOFF_MS, consecutiveCrashes: 1 });
+      .toEqual({ delayMs: DEFAULT_BASE_BACKOFF_MS, consecutiveCrashes: 1, consecutiveIdleStops: 0 });
   });
   it('each further consecutive crash DOUBLES the delay', () => {
     let streak = 0;
@@ -95,6 +115,38 @@ describe('decideRestart — no delay + reset on clean, doubling backoff (capped)
     expect(r.delayMs).toBe(100);
     const r2 = decideRestart({ classification: { kind: 'crash', reason: 'exit:1' }, consecutiveCrashes: 1 }, { baseBackoffMs: 100, maxBackoffMs: 150 });
     expect(r2.delayMs).toBe(150); // 100*2=200 capped to 150
+  });
+
+  // #3406 — a repeated idle-stop grows its OWN streak/backoff, separate from the crash streak, so a
+  // freshly-respawned runner that idle-stops again immediately (the busy-loop this card exists to fix) no
+  // longer restarts with delayMs:0 every time.
+  it('a "stand-down" or any other clean exit still restarts with NO delay, exactly as before', () => {
+    expect(decideRestart({ classification: { kind: 'clean', reason: 'stand-down' }, consecutiveIdleStops: 3 }))
+      .toEqual({ delayMs: 0, consecutiveCrashes: 0, consecutiveIdleStops: 0 });
+    expect(decideRestart({ classification: { kind: 'clean', reason: 'exit:0' }, consecutiveIdleStops: 3 }))
+      .toEqual({ delayMs: 0, consecutiveCrashes: 0, consecutiveIdleStops: 0 });
+  });
+  it('the first idle-stop backs off by exactly the idle base delay, NOT the crash base delay', () => {
+    expect(DEFAULT_IDLE_BASE_BACKOFF_MS).toBe(30_000);
+    expect(decideRestart({ classification: { kind: 'clean', reason: 'idle-stop' }, consecutiveIdleStops: 0 }))
+      .toEqual({ delayMs: 30_000, consecutiveCrashes: 0, consecutiveIdleStops: 1 });
+  });
+  it('each further consecutive idle-stop DOUBLES the delay, capped at DEFAULT_IDLE_MAX_BACKOFF_MS', () => {
+    expect(DEFAULT_IDLE_MAX_BACKOFF_MS).toBe(900_000);
+    let streak = 0;
+    const seen = [];
+    for (let i = 0; i < 6; i++) {
+      const r = decideRestart({ classification: { kind: 'clean', reason: 'idle-stop' }, consecutiveIdleStops: streak });
+      streak = r.consecutiveIdleStops;
+      seen.push(r.delayMs);
+    }
+    expect(seen).toEqual([30_000, 60_000, 120_000, 240_000, 480_000, 900_000]); // 960_000 would-be capped to 900_000
+  });
+  it('a crash resets the idle-stop streak, and an idle-stop resets the crash streak — the two never compound', () => {
+    const afterCrash = decideRestart({ classification: { kind: 'crash', reason: 'exit:1' }, consecutiveCrashes: 2, consecutiveIdleStops: 5 });
+    expect(afterCrash.consecutiveIdleStops).toBe(0);
+    const afterIdle = decideRestart({ classification: { kind: 'clean', reason: 'idle-stop' }, consecutiveCrashes: 4, consecutiveIdleStops: 1 });
+    expect(afterIdle.consecutiveCrashes).toBe(0);
   });
 });
 
@@ -162,6 +214,40 @@ describe('runSupervisorLoop — spawn, classify, backoff-or-not, repeat', () => 
       // clean run 4 → no sleep entry
       DEFAULT_BASE_BACKOFF_MS,       // crash 5, streak reset by the clean run — back to base, not *8
     ]);
+  });
+
+  // #3406 — Done-when 1: N consecutive clean exits reporting the SAME idle-stop reason in immediate
+  // succession (simulating the operator staying away — assessIdleStop reads wall-clock time since the
+  // operator last acted, which a fresh respawn does not reset) must produce a GROWING delay between spawns,
+  // not `sleeps` staying `[]`/all-zero. Fails before #3406 (every clean exit — idle-stop included — restarted
+  // with delayMs:0, a genuine busy-loop); passes once idle-stop backs off specifically.
+  it('repeated idle-stop clean exits back off with a GROWING delay, simulating the operator staying away', async () => {
+    const sleeps = [];
+    const res = await runSupervisorLoop({
+      spawnChild: () => ({ code: 0, signal: null, ranMs: 10_000, stoppedReason: 'idle-stop' }),
+      sleep: (ms) => sleeps.push(ms),
+      maxRestarts: 4,
+    });
+    expect(res.restarts).toBe(4);
+    expect(sleeps).toEqual([DEFAULT_IDLE_BASE_BACKOFF_MS, DEFAULT_IDLE_BASE_BACKOFF_MS * 2, DEFAULT_IDLE_BASE_BACKOFF_MS * 4]);
+  });
+
+  it('a polite stand-down interleaved into a run of idle-stops restarts PROMPTLY, not slowed by the same fix', async () => {
+    // idle-stop, idle-stop, then another runner grabs the lease (stand-down) — the stand-down must NOT inherit
+    // the idle backoff that was building, and must itself sleep 0.
+    const exits = [
+      { code: 0, signal: null, ranMs: 10_000, stoppedReason: 'idle-stop' },
+      { code: 0, signal: null, ranMs: 10_000, stoppedReason: 'idle-stop' },
+      { code: 0, signal: null, ranMs: 10_000, stoppedReason: 'stand-down' },
+    ];
+    let n = 0;
+    const sleeps = [];
+    await runSupervisorLoop({
+      spawnChild: () => exits[Math.min(n++, exits.length - 1)],
+      sleep: (ms) => sleeps.push(ms),
+      maxRestarts: exits.length + 1,
+    });
+    expect(sleeps).toEqual([DEFAULT_IDLE_BASE_BACKOFF_MS, DEFAULT_IDLE_BASE_BACKOFF_MS * 2]); // stand-down's own backoff never appears — it is 0
   });
 
   it('logs one line per spawn/exit/backoff, with kind "initial" on the first spawn and "restart" after', async () => {
@@ -263,6 +349,32 @@ describe('detectSupervisorAnomalies — crash-loop-at-ceiling, from fixture spaw
       { event: 'backoff', at: 'tN', delayMs: DEFAULT_BASE_BACKOFF_MS }, // streak reset by a clean run in between
     ];
     expect(detectSupervisorAnomalies({ history })).toEqual([]);
+  });
+
+  // #3406 — an idle-stop backoff's OWN delayMs can legitimately climb past the CRASH ceiling
+  // (DEFAULT_MAX_BACKOFF_MS) on its way to its own, higher DEFAULT_IDLE_MAX_BACKOFF_MS ceiling. Without the
+  // `kind` check this would misfire the crash-loop-at-ceiling alert on a conveyor that is merely idle, not
+  // crash-looping at all.
+  it('a sustained idle-stop backoff never triggers crash-loop-at-ceiling, even once its own delayMs exceeds the crash ceiling', () => {
+    const idleHistory = Array.from({ length: 5 }, (_, i) => ({
+      event: 'backoff', at: `t${i}`, kind: 'idle-stop', delayMs: DEFAULT_IDLE_MAX_BACKOFF_MS, consecutiveIdleStops: 6 + i,
+    }));
+    expect(DEFAULT_IDLE_MAX_BACKOFF_MS).toBeGreaterThan(DEFAULT_MAX_BACKOFF_MS); // the premise this test needs to be meaningful
+    expect(detectSupervisorAnomalies({ history: idleHistory })).toEqual([]);
+  });
+
+  it('an idle-stop backoff interleaved into an OLDER crash-ceiling run still breaks that run (not merely skipped over)', () => {
+    // 5 crash-ceiling hits (alone: CRITICAL), then an idle-stop, then 2 FRESH crash-ceiling hits (alone: warn,
+    // below CRASH_CEILING_CRIT_COUNT=3). If the idle-stop entry were silently skipped over (rather than
+    // breaking the run) the trailing count would bridge to 7 and read CRITICAL; it must read WARN instead.
+    const history = [
+      ...backoffAtCeiling(5),
+      { event: 'backoff', at: 'tMid', kind: 'idle-stop', delayMs: DEFAULT_IDLE_MAX_BACKOFF_MS, consecutiveIdleStops: 1 },
+      ...backoffAtCeiling(2),
+    ];
+    const anomalies = detectSupervisorAnomalies({ history });
+    expect(anomalies[0]).toMatchObject({ type: 'crash-loop-at-ceiling', severity: 'warn' });
+    expect(anomalies[0].evidence.ceilingHits).toBe(2);
   });
 });
 
@@ -409,6 +521,29 @@ describe('makeRealSpawnChild — real node child processes, never runner.mjs its
     const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: [script], onChild: () => {}, onTickLine: (t) => ticks.push(t) });
     await spawnChild();
     expect(ticks).toEqual([]);
+  }, 15_000);
+
+  // #3406 — runner.mjs's own final `--json` line off REAL stdout must reach `classifyExit` as `stoppedReason`,
+  // exactly the fact `decideRestart`'s idle-stop backoff is keyed on.
+  it('#3406 — captures stoppedReason:"idle-stop" off a real child\'s final {event:"stopped"} JSON line', async () => {
+    const script = 'console.log(JSON.stringify({event:"stopped",stoppedReason:"idle-stop",ticks:3}));process.exit(0)';
+    const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: [script], onChild: () => {} });
+    const result = await spawnChild();
+    expect(result.stoppedReason).toBe('idle-stop');
+    expect(result.code).toBe(0);
+  }, 15_000);
+
+  it('#3406 — captures stoppedReason:"stand-down" off a real child\'s final {event:"stood-down"} JSON line', async () => {
+    const script = 'console.log(JSON.stringify({event:"stood-down",heldBy:"other-pid"}));process.exit(0)';
+    const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: [script], onChild: () => {} });
+    const result = await spawnChild();
+    expect(result.stoppedReason).toBe('stand-down');
+  }, 15_000);
+
+  it('#3406 — a child with no final event line at all (an older runner, or max-ticks/lease-lost) leaves stoppedReason null', async () => {
+    const spawnChild = makeRealSpawnChild({ runnerPath: '-e', extraArgs: ['process.exit(0)'], onChild: () => {} });
+    const result = await spawnChild();
+    expect(result.stoppedReason).toBeNull();
   }, 15_000);
 
   it('a child that fails to even start running (a nonexistent script path) still resolves — not a hang', async () => {

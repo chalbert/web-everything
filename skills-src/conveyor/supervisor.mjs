@@ -62,34 +62,76 @@ export const DEFAULT_CRASH_THRESHOLD_MS = 3_000;
 export const DEFAULT_BASE_BACKOFF_MS = 5_000;
 export const DEFAULT_MAX_BACKOFF_MS = 300_000;
 
+/** #3406 — backoff base + ceiling for consecutive IDLE-STOP respawns, DISTINCT from the crash backoff above.
+ *  Before this fix, `assessIdleStop` (`../../scripts/conveyor/tick-core.mjs`) reads wall-clock time since the
+ *  operator last acted — a fact a fresh respawn does NOT reset — so a freshly-respawned runner idle-stops on
+ *  its very FIRST tick again once the operator has been away past the idle window, and `decideRestart` gave
+ *  every clean exit `delayMs: 0`: spawn → tick-once → idle-stop → exit(0) → immediate respawn, a genuine
+ *  busy-loop bounded only by process-launch speed, for as long as the conveyor is legitimately idle (i.e.
+ *  potentially most of the time between operator sessions). The cap (15 min) matches
+ *  `DEFAULT_IDLE_WINDOW_MS` (`../../scripts/conveyor/tick-core.mjs`) deliberately: it bounds how stale the
+ *  queue can get before the conveyor notices new work again to roughly the SAME window the runner itself
+ *  already waited before idle-stopping in the first place, not an arbitrarily longer one. */
+export const DEFAULT_IDLE_BASE_BACKOFF_MS = 30_000;
+export const DEFAULT_IDLE_MAX_BACKOFF_MS = 900_000;
+
 /**
  * Classify one child exit as `'clean'` (an ordinary stop — idle-stop, or a polite stand-down because another
  * runner legitimately holds the singleton lease; both exit `runner.mjs` with code 0, see its `main()`) or
  * `'crash'` (a non-zero exit, death by signal, or a suspiciously fast exit that suggests a crash-loop even at
  * code 0). Pure — takes the raw exit facts, decides nothing about WHEN to restart (that's {@link decideRestart}).
+ *
+ * #3406 — `stoppedReason` (parsed by `makeRealSpawnChild` off `runner.mjs`'s own final `--json` line: `{event:
+ * 'stopped', stoppedReason}` or `{event: 'stood-down'}`) is what tells idle-stop and stand-down apart; BOTH
+ * were previously indistinguishable `{kind:'clean', reason:'exit:0'}`. Its absence (an older runner, or a
+ * non-JSON run) degrades to the old `'exit:0'` reason, never to a wrong classification — the two callers of
+ * this fact (`decideRestart`'s idle-stop backoff below) treat an unset/unknown reason exactly like the
+ * genuinely-prompt cases (stand-down, max-ticks, lease-lost), which is the SAFE direction: mis-reading an
+ * idle-stop as "some other clean exit" only means the busy-loop this card exists to fix is not slowed down
+ * for THAT one run, never that a stand-down is wrongly delayed.
  * @returns {{ kind: 'clean'|'crash', reason: string }}
  */
-export function classifyExit({ code = null, signal = null, ranMs = 0 } = {}, { crashThresholdMs = DEFAULT_CRASH_THRESHOLD_MS } = {}) {
+export function classifyExit({ code = null, signal = null, ranMs = 0, stoppedReason = null } = {}, { crashThresholdMs = DEFAULT_CRASH_THRESHOLD_MS } = {}) {
   if (signal) return { kind: 'crash', reason: `signal:${signal}` };
   if (code !== 0) return { kind: 'crash', reason: `exit:${code}` };
   if (ranMs < crashThresholdMs) return { kind: 'crash', reason: 'too-short' };
+  if (stoppedReason === 'idle-stop') return { kind: 'clean', reason: 'idle-stop' };
+  if (stoppedReason === 'stand-down') return { kind: 'clean', reason: 'stand-down' };
   return { kind: 'clean', reason: 'exit:0' };
 }
 
 /**
- * Decide the delay before the NEXT spawn, and the new consecutive-crash streak, from one classified exit. A
- * `'clean'` exit restarts with no delay and resets the streak — the child did real work and stopped for a
- * legitimate reason, so there is nothing to back off from. A `'crash'` grows the streak and doubles the delay
- * (capped), exactly the drain-daemon `decideNextDelaySec` shape, simplified: no exit-3-style fixed-ceiling
- * special case, because unlike a globally-red `main` (an operator-only fix), no conveyor-runner crash mode is
- * known in advance to be unrecoverable — every crash gets the same doubling treatment.
- * @returns {{ delayMs: number, consecutiveCrashes: number }}
+ * Decide the delay before the NEXT spawn, and the new consecutive-crash / consecutive-idle-stop streaks, from
+ * one classified exit. A `'crash'` grows ITS streak and doubles the delay (capped), exactly the drain-daemon
+ * `decideNextDelaySec` shape, simplified: no exit-3-style fixed-ceiling special case, because unlike a
+ * globally-red `main` (an operator-only fix), no conveyor-runner crash mode is known in advance to be
+ * unrecoverable — every crash gets the same doubling treatment.
+ *
+ * #3406 — a repeated `'idle-stop'` clean exit grows its OWN separate streak/backoff, the SAME doubling shape
+ * but with its own (much larger) base/ceiling — this is what stops the busy-loop described at
+ * {@link DEFAULT_IDLE_BASE_BACKOFF_MS}'s own doc comment. EVERY OTHER clean exit (`'stand-down'`, `'exit:0'`
+ * covering max-ticks / lease-lost / an unknown reason) restarts with NO delay, exactly as before — a stand-
+ * down in particular MUST stay prompt: another runner already holds the singleton right, so there is nothing
+ * to back off from, and slowing it down would only delay this process taking over once that runner is truly
+ * gone. Both streaks are mutually exclusive (each classification resets the OTHER to 0): a crash after a run
+ * of idle-stops is not "on top of" that idle backoff, and vice versa.
+ * @returns {{ delayMs: number, consecutiveCrashes: number, consecutiveIdleStops: number }}
  */
-export function decideRestart({ classification, consecutiveCrashes = 0 } = {}, { baseBackoffMs = DEFAULT_BASE_BACKOFF_MS, maxBackoffMs = DEFAULT_MAX_BACKOFF_MS } = {}) {
-  if (!classification || classification.kind !== 'crash') return { delayMs: 0, consecutiveCrashes: 0 };
-  const crashes = consecutiveCrashes + 1;
-  const delayMs = Math.min(baseBackoffMs * 2 ** (crashes - 1), maxBackoffMs);
-  return { delayMs, consecutiveCrashes: crashes };
+export function decideRestart({ classification, consecutiveCrashes = 0, consecutiveIdleStops = 0 } = {}, {
+  baseBackoffMs = DEFAULT_BASE_BACKOFF_MS, maxBackoffMs = DEFAULT_MAX_BACKOFF_MS,
+  idleBaseBackoffMs = DEFAULT_IDLE_BASE_BACKOFF_MS, idleMaxBackoffMs = DEFAULT_IDLE_MAX_BACKOFF_MS,
+} = {}) {
+  if (classification && classification.kind === 'crash') {
+    const crashes = consecutiveCrashes + 1;
+    const delayMs = Math.min(baseBackoffMs * 2 ** (crashes - 1), maxBackoffMs);
+    return { delayMs, consecutiveCrashes: crashes, consecutiveIdleStops: 0 };
+  }
+  if (classification && classification.kind === 'clean' && classification.reason === 'idle-stop') {
+    const stops = consecutiveIdleStops + 1;
+    const delayMs = Math.min(idleBaseBackoffMs * 2 ** (stops - 1), idleMaxBackoffMs);
+    return { delayMs, consecutiveCrashes: 0, consecutiveIdleStops: stops };
+  }
+  return { delayMs: 0, consecutiveCrashes: 0, consecutiveIdleStops: 0 };
 }
 
 /**
@@ -107,6 +149,8 @@ export function decideRestart({ classification, consecutiveCrashes = 0 } = {}, {
  * @param {()=>boolean} [effects.shouldStop]              polled before each spawn AND before each backoff sleep
  * @param {number} [effects.baseBackoffMs]
  * @param {number} [effects.maxBackoffMs]
+ * @param {number} [effects.idleBaseBackoffMs]  #3406 — base delay for a repeated idle-stop respawn
+ * @param {number} [effects.idleMaxBackoffMs]   #3406 — ceiling for the idle-stop backoff, distinct from the crash ceiling
  * @param {number} [effects.crashThresholdMs]
  * @returns {Promise<{ restarts: number, stoppedReason: 'max-restarts'|'signal' }>}
  */
@@ -118,10 +162,13 @@ export async function runSupervisorLoop({
   shouldStop = () => false,
   baseBackoffMs = DEFAULT_BASE_BACKOFF_MS,
   maxBackoffMs = DEFAULT_MAX_BACKOFF_MS,
+  idleBaseBackoffMs = DEFAULT_IDLE_BASE_BACKOFF_MS,
+  idleMaxBackoffMs = DEFAULT_IDLE_MAX_BACKOFF_MS,
   crashThresholdMs = DEFAULT_CRASH_THRESHOLD_MS,
 } = {}) {
   if (typeof spawnChild !== 'function') throw new TypeError('runSupervisorLoop requires a spawnChild effect');
   let consecutiveCrashes = 0;
+  let consecutiveIdleStops = 0;
   let restarts = 0;
   for (;;) {
     // Checked BEFORE every spawn, not just between backoffs — a shutdown signal that arrives while we're idle
@@ -141,12 +188,25 @@ export async function runSupervisorLoop({
       // on purpose" apart from "it died on its own" without coupling the pure classifier to IO-only state.
       shutdownRequested: shouldStop(),
     });
-    const restart = decideRestart({ classification, consecutiveCrashes }, { baseBackoffMs, maxBackoffMs });
+    const restart = decideRestart(
+      { classification, consecutiveCrashes, consecutiveIdleStops },
+      { baseBackoffMs, maxBackoffMs, idleBaseBackoffMs, idleMaxBackoffMs },
+    );
     consecutiveCrashes = restart.consecutiveCrashes;
+    consecutiveIdleStops = restart.consecutiveIdleStops;
     if (attempt >= maxRestarts) return { restarts, stoppedReason: 'max-restarts' };
     if (shouldStop()) return { restarts, stoppedReason: 'signal' };
     if (restart.delayMs > 0) {
-      log({ event: 'backoff', at: new Date().toISOString(), delayMs: restart.delayMs, consecutiveCrashes });
+      // #3406 — `kind` distinguishes a CRASH backoff from an IDLE-STOP backoff on the log entry itself: the two
+      // now have independent ceilings (`maxBackoffMs` vs `idleMaxBackoffMs`, the latter deliberately LARGER),
+      // so `trailingCeilingBackoffRun`'s crash-loop-at-ceiling alert (#3398) must not mistake a sustained
+      // idle-stop backoff (whose `delayMs` legitimately grows past `maxBackoffMs` on its way to its own,
+      // higher ceiling) for a crash-looping runner.
+      log({
+        event: 'backoff', at: new Date().toISOString(), delayMs: restart.delayMs,
+        kind: restart.consecutiveIdleStops > 0 ? 'idle-stop' : 'crash',
+        consecutiveCrashes, consecutiveIdleStops,
+      });
       await sleep(restart.delayMs);
     }
   }
@@ -178,10 +238,16 @@ export const CRASH_CEILING_CRIT_COUNT = 3;
 export const IDLE_QUEUE_WARN_TICKS = 8;
 export const IDLE_QUEUE_CRIT_TICKS = 20;
 
-/** The trailing run of consecutive `backoff` log entries whose `delayMs` is AT the ceiling — i.e. crashes that
- *  kept happening after backoff had nothing left to escalate. Walks the FULL log backward (not just `backoff`
- *  entries) so a `spawn`/`exit` in between does not break the run (those always sit between two `backoff`
- *  entries in a real crash-loop) — only a NON-ceiling `backoff` (or the absence of one) ends it. Pure. */
+/** The trailing run of consecutive CRASH `backoff` log entries whose `delayMs` is AT the crash ceiling — i.e.
+ *  crashes that kept happening after backoff had nothing left to escalate. Walks the FULL log backward (not
+ *  just `backoff` entries) so a `spawn`/`exit` in between does not break the run (those always sit between
+ *  two `backoff` entries in a real crash-loop) — only a NON-ceiling CRASH `backoff` (or the absence of one)
+ *  ends it. #3406 — an IDLE-STOP backoff entry (`kind: 'idle-stop'`) ALSO ends the run, even though it shares
+ *  the same `event: 'backoff'` shape: its `delayMs` can legitimately grow past the crash ceiling on its way to
+ *  its OWN, separate, higher ceiling (`DEFAULT_IDLE_MAX_BACKOFF_MS`), and mistaking that for more crash-loop
+ *  ceiling hits would false-positive this alert on a conveyor that is merely sitting idle, not crash-looping.
+ *  `kind` absent (an older log line, before #3406) reads as `'crash'` — the pre-existing behaviour for every
+ *  log this alert has ever seen before this fix. Pure. */
 function trailingCeilingBackoffRun(history, maxBackoffMs) {
   const src = Array.isArray(history) ? history : [];
   let count = 0;
@@ -189,6 +255,7 @@ function trailingCeilingBackoffRun(history, maxBackoffMs) {
   for (let i = src.length - 1; i >= 0; i--) {
     const h = src[i];
     if (!h || typeof h !== 'object' || h.event !== 'backoff') continue;
+    if ((h.kind ?? 'crash') !== 'crash') break;
     if (!(Number.isFinite(h.delayMs) && h.delayMs >= maxBackoffMs)) break;
     count++;
     since = h.at || since;
@@ -303,17 +370,24 @@ export function decideAlert({ health = 'healthy', anomalies = [], lastAlert = nu
 export function makeRealSpawnChild({ runnerPath, extraArgs, onChild, onTickLine = () => {} }) {
   return () => new Promise((resolveSpawn) => {
     const startedAt = Date.now();
+    // #3406 — captured off the runner's own final `--json` line (`{event:'stopped', stoppedReason}` or
+    // `{event:'stood-down'}`, `runner.mjs`'s `main()`), so `classifyExit` can tell a genuine idle-stop apart
+    // from a polite stand-down — both exit code 0 and were previously indistinguishable from this side.
+    let stoppedReason = null;
     const child = spawn(process.execPath, [runnerPath, ...extraArgs], { stdio: ['ignore', 'pipe', 'inherit'] });
     onChild(child);
     createInterface({ input: child.stdout }).on('line', (line) => {
       process.stdout.write(line + '\n');
       try {
         const parsed = JSON.parse(line);
-        if (parsed && typeof parsed === 'object' && Number.isFinite(parsed.tick)) onTickLine(parsed);
-      } catch { /* not a tick line (or malformed) — mirrored above; never fatal */ }
+        if (!parsed || typeof parsed !== 'object') return;
+        if (Number.isFinite(parsed.tick)) { onTickLine(parsed); return; }
+        if (parsed.event === 'stopped') stoppedReason = parsed.stoppedReason || null;
+        else if (parsed.event === 'stood-down') stoppedReason = 'stand-down';
+      } catch { /* not a tick/stopped line (or malformed) — mirrored above; never fatal */ }
     });
-    child.on('exit', (code, signal) => { onChild(null); resolveSpawn({ code, signal, ranMs: Date.now() - startedAt }); });
-    child.on('error', (e) => { onChild(null); resolveSpawn({ code: null, signal: null, ranMs: Date.now() - startedAt, spawnError: String((e && e.message) || e) }); });
+    child.on('exit', (code, signal) => { onChild(null); resolveSpawn({ code, signal, ranMs: Date.now() - startedAt, stoppedReason }); });
+    child.on('error', (e) => { onChild(null); resolveSpawn({ code: null, signal: null, ranMs: Date.now() - startedAt, stoppedReason, spawnError: String((e && e.message) || e) }); });
   });
 }
 
@@ -397,7 +471,10 @@ function finiteOr(val, fallback) {
 /** Flags this supervisor consumes itself — everything else on argv (e.g. `--interval-ms`, `--repo`, `--json`,
  *  `--once`, `--max-ticks`) is forwarded to the `runner.mjs` child verbatim, so the supervisor never has to
  *  learn a new copy of the runner's own flag surface. */
-const OWN_FLAGS = new Set(['max-restarts', 'base-backoff-ms', 'max-backoff-ms', 'crash-threshold-ms', 'log-path', 'alert-state-path']);
+const OWN_FLAGS = new Set([
+  'max-restarts', 'base-backoff-ms', 'max-backoff-ms', 'crash-threshold-ms', 'log-path', 'alert-state-path',
+  'idle-base-backoff-ms', 'idle-max-backoff-ms', // #3406
+]);
 
 async function main(argv) {
   const flags = parseFlags(argv);
@@ -419,6 +496,8 @@ async function main(argv) {
   const maxRestarts = finiteOr(flags['max-restarts'], Infinity);
   const baseBackoffMs = finiteOr(flags['base-backoff-ms'], DEFAULT_BASE_BACKOFF_MS);
   const maxBackoffMs = finiteOr(flags['max-backoff-ms'], DEFAULT_MAX_BACKOFF_MS);
+  const idleBaseBackoffMs = finiteOr(flags['idle-base-backoff-ms'], DEFAULT_IDLE_BASE_BACKOFF_MS);
+  const idleMaxBackoffMs = finiteOr(flags['idle-max-backoff-ms'], DEFAULT_IDLE_MAX_BACKOFF_MS);
   const crashThresholdMs = finiteOr(flags['crash-threshold-ms'], DEFAULT_CRASH_THRESHOLD_MS);
 
   const baseLog = makeJsonlLog(logPath);
@@ -463,7 +542,8 @@ async function main(argv) {
 
   const result = await runSupervisorLoop({
     spawnChild, log, sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    maxRestarts, shouldStop: () => stopRequested, baseBackoffMs, maxBackoffMs, crashThresholdMs,
+    maxRestarts, shouldStop: () => stopRequested,
+    baseBackoffMs, maxBackoffMs, idleBaseBackoffMs, idleMaxBackoffMs, crashThresholdMs,
   });
   log({ event: 'stopped', at: new Date().toISOString(), reason: result.stoppedReason, restarts: result.restarts });
   process.exit(0);
