@@ -136,4 +136,29 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     })).toThrow(/positive integer/);
     expect(readBriefCalls).toBe(0);
   });
+
+  // #xw3k2v9 — PR #1756 review finding: `extraArgs` was accepted and documented as forwarded, but the call to
+  // `buildAgentArgv` never referenced it, so any caller-supplied flag (a `--permission-mode`, a `--model`
+  // override) was silently dropped. This is the regression test for that fix.
+  it('forwards extraArgs to buildAgentArgv, exactly like dispatch-lane-io.mjs does for its own dispatch', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234,
+      repo: 'chalbert/web-everything',
+      root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      extraArgs: ['--permission-mode', 'plan'],
+    });
+    expect(calls[0].argv).toEqual([
+      '--bg',
+      '--session-id', '11111111-1111-4111-8111-111111111111',
+      '-n', 'review-1234',
+      '--permission-mode', 'plan',
+      '# brief for 1234 in chalbert/web-everything\n'
+      + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
+      + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
+    ]);
+  });
 });

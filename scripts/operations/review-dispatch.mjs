@@ -52,6 +52,18 @@
  * IMPURE: reads the brief template off disk, mints a UUID, and spawns one `claude --bg` process — through
  * INJECTED handles (mirroring `we:scripts/operations/dispatch-abort.mjs` and `dispatch-lane-io.mjs`), so the
  * whole thing is testable with no real subprocess and no real session.
+ *
+ * WHAT THIS FILE DOES NOT CLOSE, STATED PLAINLY (an independent review of PR #1756, security lens, CONFIRMED
+ * this — the #2895 discipline: a residual left silent is worse than one left open). The dispatched session's
+ * "never self-accept, never merge" rule (`we:skills-src/review/review-agent-brief.md`) is enforced only as
+ * PROSE the session reads — nothing in `dispatchReview` technically restricts its tools, so a prompt-injection
+ * payload embedded in the very PR it is reviewing could in principle talk it into running
+ * `review-pr --answer=accept` (or worse) directly, bypassing `review-loop-cli.mjs`'s own code-enforced
+ * `reviewLoopAutoConfirm` refusal entirely, since that policy only binds a caller who goes THROUGH it. `caller`
+ * here means a Bash-capable session persuaded to run a different command instead — the same trust boundary
+ * `we:scripts/lib/review-independence.mjs`'s own header names for `CLAUDE_CODE_SESSION_ID` ("not an unforgeable
+ * actor signal … #2895 ruled that deferred"). Filed as its own item rather than solved here or left unfiled:
+ * `we:backlog/xf38r2m-technically-enforce-review-dispatch-s-never-self-accept-neve.md`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -61,7 +73,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
+  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
@@ -199,7 +211,11 @@ export function dispatchReview({
     PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
   });
   const sessionId = String(mintSessionId());
-  const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug: planned.sessionSlug } });
+  // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
+  // buildAgentArgv, exactly like dispatch-lane-io.mjs's own" but the call below never referenced it — every
+  // caller-supplied flag (a `--permission-mode`, a `--model` override) was silently dropped. Fixed by actually
+  // passing it through, matching `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`'s own call.
+  const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug: planned.sessionSlug }, extraArgs });
   spawnAgent(argv, { cwd: root });
   return { sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens };
 }
@@ -212,7 +228,11 @@ if (IS_CLI) {
     return hit ? hit.slice(name.length + 3) : undefined;
   };
   try {
-    const result = dispatchReview({ pr: flag('pr'), repo: flag('repo') });
+    // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
+    // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
+    // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
+    // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
+    const result = dispatchReview({ pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv() });
     writeAllSync(
       1,
       `dispatch-review: started session ${result.sessionId} (slug ${result.sessionSlug}) reviewing `
