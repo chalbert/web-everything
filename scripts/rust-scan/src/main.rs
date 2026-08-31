@@ -20,6 +20,7 @@ use clap::{Parser, Subcommand};
 use rayon::ThreadPoolBuilder;
 use std::path::PathBuf;
 
+mod locus_prefix;
 mod secret_scrub;
 mod stdout_flush;
 
@@ -52,6 +53,13 @@ enum Command {
         #[arg(long, env = "WE_SCAN_MAX_WORKERS", default_value_t = DEFAULT_MAX_WORKERS)]
         max_workers: usize,
     },
+    /// Port of scripts/check-standards-rules.mjs's scanRepoLocusPrefixes.
+    LocusPrefix {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long, env = "WE_SCAN_MAX_WORKERS", default_value_t = DEFAULT_MAX_WORKERS)]
+        max_workers: usize,
+    },
 }
 
 fn build_pool(max_workers: usize) -> rayon::ThreadPool {
@@ -75,6 +83,11 @@ fn main() {
             let pool = build_pool(max_workers);
             let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
             let hits = pool.install(|| secret_scrub::scan_publish_secrets_parallel(&root, &label_refs));
+            println!("{}", serde_json::to_string(&hits).expect("serialize"));
+        }
+        Command::LocusPrefix { root, max_workers } => {
+            let pool = build_pool(max_workers);
+            let hits = pool.install(|| locus_prefix::scan_locus_prefixes_parallel(&root));
             println!("{}", serde_json::to_string(&hits).expect("serialize"));
         }
     }
