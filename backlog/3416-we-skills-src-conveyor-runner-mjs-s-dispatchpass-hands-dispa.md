@@ -35,24 +35,37 @@ despite this logic. Not resolved — the exact commit that ran on 2026-08-29 was
 diffable point in this branch's reconstructed history, so a real bisect against it is not possible with what
 is on disk.
 
-## Done when
+## Fix landed on `origin/lane/mechanical-dispatcher` (2026-08-31, commit `78234c18`) — still open, one gap remains
 
-1. **Executable — a mutation test on `we:skills-src/conveyor/runner.mjs`'s `makeCliDispatchPass`** reproducing
-   this exact shape: a tick-core read that surfaces one new build (or prepare-scope) candidate with no prior
-   guard, fed through `dispatchPass` end to end (a fake `dispatch-lane` CLI stand-in, mirroring the existing
-   `-live` test pattern), asserts the stand-in actually receives a bookkeeping snapshot in which the candidate's
-   OWN guard is NOT yet present — i.e. `dispatch-lane` gets a chance to decide before the guard that would
-   suppress it exists. Must fail before this item's fix lands (bookkeeping already contains the new guard) and
-   pass after.
-2. A real live tick against a queued, unblocked item with no prior in-flight guard (mirroring tonight's #3412
-   reproduction) results in `dispatching: true` and an actual `claude --bg` spawn — verified via `claude agents
-   --json` showing a new session and the target lane going leased — not `holdReason: "suppressed by the
-   in-flight build guard"` against a guard the SAME tick just planned.
-3. ~~Root-caused against the branch's own commit history...~~ **Partially done — see the 2026-08-31 update
-   above.** Confirmed NOT a `#3105`/`#3110` regression (`we:scripts/conveyor/tick-core.mjs`'s guard-planning
-   logic is byte-identical across both commits, and unconditional since `#2702`). What remains open, and
-   should still be named explicitly in the fix's own PR description: reconcile this unconditional-suppression
-   reading against the 2026-08-29 session's own account of a successful `#2936` dispatch through the same
-   `we:skills-src/conveyor/runner.mjs --once` wiring — either the "recovered from transcripts" reconstruction
-   subtly altered this file relative to what actually ran that day, or something session-specific let it
-   through. Neither is confirmed; the fix should settle it, not just patch around it.
+**`we:skills-src/conveyor/runner.mjs` gained `bookkeepingForDispatch(nextState, item)`**, an exported, pure
+function called immediately before each item's own `dispatch-lane` call inside `makeCliDispatchPass`: it
+strips ONLY that item's own guard entries (by num) from `buildGuards`/`prepareGuards`/`fixGuards`/
+`ciHealGuards`, leaving every other item's guard — genuinely in flight, from a real prior dispatch or an
+earlier iteration of the same loop — untouched. Restores the pre-dispatch view for the one item actually
+being dispatched, without weakening the guard for anything else.
+
+1. **Done.** `we:skills-src/conveyor/__tests__/runner.test.mjs` gained 5 tests for `bookkeepingForDispatch`
+   directly (not a full CLI-shim stand-in — the function was factored out to be independently pure-testable,
+   matching this file's own documented pure-core/IO-shell split, which is at least as strong a proof for this
+   specific claim). Confirmed reddening pre-fix by hand: swapping the function for the old passthrough
+   behavior fails 3 of the 5 new tests. 31/31 green post-fix; the full `skills-src/conveyor`, `scripts/conveyor`,
+   `scripts/operations` suites (52 files / 1769 tests) green; `check:standards` 0 errors.
+2. **Partially done — the spawn half is proven live; the lane-lease half was not observed.** Re-queued `#3412`
+   (scope added by hand for the test, matching its own card text, not committed), fired
+   `WE_DISPATCH_AGENT_ARGS='["--permission-mode","acceptEdits"]' node
+   we:skills-src/conveyor/runner.mjs --once --json` for real from a scratch clone of the fixed branch.
+   `dispatch.builds: [{"num":"3412","lane":4}]`, and — for the first time all session, across every attempt —
+   `claude agents --json` showed a REAL new session: `conveyor-3412`, pid 76466, session
+   `9bca2076-e799-40d6-8f83-e15ce2b037ec`, `claude` 2.1.251. The suppression is gone. What did NOT happen: the
+   agent read its own starting cwd (the scratch clone, which had this very fix's own uncommitted work sitting
+   in it — a testing artifact, not the target lane), correctly judged that wasn't a clean checkout to build in,
+   and paused to ask rather than run `lane-pool acquire` over it — so lane-4 never actually went leased. Closed
+   out cleanly per `#3353`'s protocol: `we:scripts/operations/wake.mjs --resolve` refused first (proof the
+   handle read live), then `--force` closed it; the process was killed after. A cleaner re-run (a genuinely
+   fresh scratch clone, no in-progress work sitting in it) would be needed to observe the lane-acquire half of
+   this criterion directly — the spawn half, which is what this bug actually blocked, is now proven.
+3. **Still open, not settled by this fix.** How the 2026-08-29 session's `#2936` dispatch succeeded through
+   this same call path, despite the suppression being unconditional and present since `#2702`'s original
+   tick-core, remains unreconciled. The fix removes the bug going forward; it does not explain why it was ever
+   survivable. Left for whoever next has reason to care — not blocking, since the current behavior is now
+   independently verified correct.
