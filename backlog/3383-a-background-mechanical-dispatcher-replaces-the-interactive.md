@@ -690,3 +690,76 @@ discussion is not re-derived from scratch.
 4. **`#3403`/`#3404`/`#3406`** can be built now — branch-strategy settled, branch current with `main`. Real,
    separate build work; not started this session.
 5. **Pin the missing-operation risk axis** and fold it into `#3421`'s scope per section 2 above.
+
+## Session update (2026-08-31, follow-on session) — all five of the prior list closed; the review step is a
+## real, callable operation now, but not yet wired into the dispatcher's own loop
+
+Picked up the prior session's numbered list in order. All five are done:
+
+1. **`#3427`** filed — the "operation manager" design card, capture-only, citing `we:scripts/operations/dispatch-abort.mjs`
+   (PR #1737) as precedent. Landed via `PR #1751`.
+2. `PR #1737` — not directly addressed this session (superseded by finding a cleaner path for the SAME
+   bootstrapping problem; see below).
+3. **`#3403`/`#3404`/`#3406`** built, tested, pushed to `origin/lane/mechanical-dispatcher` — a durable
+   ground-truth floor for the build guard (a live `conveyor-<num>` session now counts even if the in-memory
+   guard was wiped by a crash-restart), a mid-pass heartbeat so the singleton lease survives the long
+   verify-dispatch pass, and a separate backoff curve for repeated idle-stops (distinct from a polite
+   stand-down, which still restarts instantly).
+4. **`#3421`** amended with the missing-operation risk-axis addendum (confidence assessment against named
+   criteria, a standing blacklist, a future admin-config surface). Landed via `PR #1751` alongside `#3427`.
+5. **Mechanize the review step — `#3072`'s remainder and `#3279` both landed to `main`** (`PR #1754`,
+   `PR #1756`). `#3072` already had the round-cap (`converged`/`in-progress`/`exhausted`/`escalated`, built
+   2026-08-12) and the actor-tier confirm declaration (`CONFIRM_ACTORS.HUMAN`/`AGENT`) — this session's actual
+   gap was narrower than it first looked: a concrete `autoConfirm` policy (`we:scripts/lib/review-loop-policy.mjs`)
+   that answers `changes`/`abstain` unattended but NEVER `accept` (an accept queues for a human, mirroring
+   `#3421`/`#3422`'s gated-bucket shape), and the CLI that wires it in
+   (`we:scripts/operations/review-loop-cli.mjs`). `#3279` (dispatch a genuinely independent session to run
+   that loop) was unscoped going in — its own Done-when was written fresh this session: mints a fresh session
+   id, starts a real `claude --bg` session, refuses a bad brief/PR/repo/in-lane-checkout dispatch the same way
+   `we:scripts/operations/dispatch-lane.mjs` does.
+
+   **Both PRs went through the machinery they themselves built, for real, and it worked.** `PR #1754` (self-
+   authored, inherited this session's own id) parked `review:pending` and could not self-clear — resolved by
+   spawning a genuinely independent `claude --session-id=<fresh-uuid>` process to run the new review
+   operation against it (the exact bootstrapping answer `PR #1737` above was still waiting on). `PR #1756`
+   went three real rounds: round 1 found 3 genuine bugs (dropped `extraArgs`, missing
+   `WE_DISPATCH_AGENT_ARGS` wiring, a prose-only self-accept/merge enforcement — the last filed as its own
+   residual, `xf38r2m`, not silently dropped); round 2, after two of those were fixed, found a NEW bug (the
+   dispatched agent's own brief told it to substitute "the lane number" into a release command, but `LANE`
+   holds a path, not a number — unexecutable as written); round 3 converged clean. Both landed;
+   `check:standards` + the full suite green on each.
+
+**The one thing this does NOT yet do: nothing calls it automatically.** `we:scripts/operations/review-loop-cli.mjs`
+is a real, correct, callable operation today — `node we:scripts/operations/review-loop-cli.mjs --pr=<N>
+--repo=<repo> --cwd=<a lane>` runs one independent round and answers honestly. But
+`we:scripts/conveyor/reconcile-pass.mjs` (the pass that already decides WHEN a review is owed, landed under
+`#3296`) still does not call it, and nothing schedules `we:scripts/conveyor/reconcile-pass.mjs` itself yet. So
+"the review step is mechanized" is true of the OPERATION, not yet of the LOOP — a PR still does not get
+reviewed unless someone (a session, an operator) actually invokes `we:scripts/operations/review-loop-cli.mjs`
+against it.
+
+**The interim instruction this implies, until that wiring lands:** whenever a PR under this epic's own work
+(or any dispatch-built PR) parks `review:pending`, the session driving the epic should invoke the review
+MECHANICALLY via `we:scripts/operations/review-loop-cli.mjs` — not the old ad hoc `/review` skill — and should
+drive it through the FULL fix → re-review convergence loop itself when a round comes back `changes`, exactly
+as this session did for `PR #1756` above (three rounds, real fixes each time, never stopping after round one
+just because a verdict came back). Treat this as standing in for the automatic loop the machinery will
+eventually run itself: the session's job, until the wiring exists, is to BE that loop by hand — fix,
+re-invoke, repeat until converged/exhausted/escalated — not merely to trigger one round and hand it back for
+someone else to notice. This mirrors exactly what
+`we:agent-memory-src/standing-authorization-independent-review-self-clear.md` already authorizes for the
+self-clear case specifically; this note generalizes it to the whole review loop.
+
+### For the next session, in priority order
+
+1. **Wire `we:scripts/conveyor/reconcile-pass.mjs` into `we:skills-src/conveyor/runner.mjs`'s mechanical
+   passes** (branch work, `origin/lane/mechanical-dispatcher`) so a `review` dispatch decision actually calls
+   `#3279`'s operation — the one remaining gap between "the review step is a real operation" and "the review
+   step is mechanized" per this epic's own goal. `we:scripts/conveyor/reconcile-core.mjs`'s liveness reads are
+   already ground-truth based (not session-ephemeral), so this can run as a plain quick mechanical pass, the
+   same way `we:scripts/conveyor/infra-blocked.mjs`/`we:scripts/conveyor/lease-reaper.mjs` already do — no new
+   resident process needed.
+2. Decide whether/when to actually schedule `we:scripts/conveyor/reconcile-pass.mjs` at all if the
+   runner-wiring above is deferred — today nothing invokes it outside its own tests even standalone.
+3. `xf38r2m` (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
+   deliberately deferred — a genuine, harder residual, not urgent.
