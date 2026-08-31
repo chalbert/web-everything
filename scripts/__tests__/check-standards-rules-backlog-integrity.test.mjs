@@ -14,6 +14,7 @@ import {
   duplicateBornAs,
   duplicateBacklogNums,
   strandedHashesOnMain,
+  handNumberedNewItems,
   extractPlaywrightContainerTags,
   validatePlaywrightContainerPin, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
@@ -210,6 +211,42 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
   });
   it('ignores non-backlog paths and non-.md files', () => {
     expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual([]);
+  });
+});
+
+describe('handNumberedNewItems — the #2548 hand-numbered-new-item gate (pure detector)', () => {
+  it('a new item with an NNN not on main → one error naming the item', () => {
+    const errs = handNumberedNewItems(
+      [{ num: '9999', id: '9999-hand-picked' }],
+      ['backlog/001-a.md', 'backlog/2322-b-slug.md'],
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatch(/9999-hand-picked/);
+    expect(errs[0]).toMatch(/#9999/);
+    expect(errs[0]).toMatch(/hash-keyed/);
+  });
+  it('a new item with an xNNNNNN hash → clean (the correct path never fires)', () => {
+    expect(handNumberedNewItems(
+      [{ num: 'xbvktb4', id: 'xbvktb4-new-idea' }],
+      ['backlog/001-a.md'],
+    )).toEqual([]);
+  });
+  it('a LANDED item with a reworded slug (same NNN, different filename) → clean', () => {
+    // Main has `backlog/2322-old-slug.md`; the working-tree item is the same #2322 but with a
+    // different filename/slug — matched by NNN TOKEN, never full path, so this must NOT false-positive.
+    expect(handNumberedNewItems(
+      [{ num: '2322', id: '2322-reworded-slug' }],
+      ['backlog/2322-old-slug.md'],
+    )).toEqual([]);
+  });
+  it('a landed item unmodified → clean', () => {
+    expect(handNumberedNewItems(
+      [{ num: '001', id: '001-a' }],
+      ['backlog/001-a.md', 'backlog/2322-b-slug.md'],
+    )).toEqual([]);
+  });
+  it('items missing a num are skipped', () => {
+    expect(handNumberedNewItems([{ id: 'no-num' }], ['backlog/001-a.md'])).toEqual([]);
   });
 });
 
