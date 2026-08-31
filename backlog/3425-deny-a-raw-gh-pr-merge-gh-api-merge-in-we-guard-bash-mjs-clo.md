@@ -2,11 +2,13 @@
 bornAs: xs4zmfh
 kind: task
 parent: "2405"
-status: active
+status: resolved
 scaffoldedBy: "guard-bash-merge-gate-lane-10-b3fcb952"
 dateScaffolded: "2026-08-31"
 dateOpened: "2026-08-31"
 dateStarted: "2026-08-31"
+dateResolved: "2026-08-31"
+graduatedTo: none
 tags: []
 ---
 
