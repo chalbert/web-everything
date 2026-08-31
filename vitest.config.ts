@@ -133,6 +133,11 @@ export default defineConfig({
       // more than every git-fixture file above combined. Found via the CI slow-test report
       // (`scripts/dev/report-slow-tests.mjs`), not the original file-by-file audit that found the rest.
       'scripts/__tests__/stdout-flush.test.mjs',
+      // #3417 — a real `cargo build --release` plus a real spawned `we-scan` binary (#3264 mechanics
+      // qualifier: the whole claim is cross-language behavioral parity, which no stub can observe). Requires
+      // the Rust toolchain; skips itself when `cargo` is absent rather than failing the default suite.
+      'scripts/__tests__/rust-scan-stdout-flush-parity.test.mjs',
+      'scripts/__tests__/rust-scan-secret-scrub-parity.test.mjs',
       'scripts/__tests__/gate-entrypoint-integration.test.mjs',
       'scripts/operations/__tests__/wake-cli.test.mjs',
       'scripts/__tests__/lane-pool-acquire-base.test.mjs',

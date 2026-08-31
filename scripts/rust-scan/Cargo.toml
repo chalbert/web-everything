@@ -1,0 +1,23 @@
+[package]
+name = "we-scan"
+version = "0.1.0"
+edition = "2021"
+# Not published; a subprocess CLI check-standards.mjs shells out to (#3417). No `[lib]` — main.rs is the
+# whole surface until a second binary/shared crate needs one.
+
+[[bin]]
+name = "we-scan"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+# This runs on every check:standards invocation (#2833's foreground gate), so release-profile speed matters
+# more than link time for a crate this size.
+lto = true
+codegen-units = 1
