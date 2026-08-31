@@ -15,7 +15,7 @@ never rewritten and dangles permanently once the item lands.
 
 ## Why it is owed
 
-The class is already proven to rot in this repo: `we:scripts/lane-drain.mjs` cites `xnsk54v`, which resolves
+The class is already proven to rot in this repo: `we:scripts/lane-drain.mjs` cites `2411`, which resolves
 to nothing. PR #1046 (`#2942`) planted roughly 60 more across `scripts/**` and `skills-src/**` in a single
 change; three of them were RUNTIME-emitted text handed to a live reviewing model (a mandate line and two
 JSON-schema `description` fields), which is strictly worse than a stale comment — a reviewer cannot look up
