@@ -540,7 +540,7 @@ prompt), `#1731` (this review-mechanization note). Nothing from tonight is open 
    (`mechanical-dispatcher`, not `-recovered`), and the branch is rebased current with `main`.
 
 ## Session update (2026-08-31, follow-on session) — the live-fire dispatch finally completed end to end,
-## `xk7amte` ruled and landed as `#3422`, `dispatch-abort` built and PR'd, and the real permission-mode root
+## `3422` ruled and landed as `#3422`, `dispatch-abort` built and PR'd, and the real permission-mode root
 ## cause found
 
 Picked this back up per the operator's own priority order from tonight's close-out. All four items touched;
@@ -608,9 +608,9 @@ It DOES prove, for the first time all epic, that the dispatch→spawn→lane-acq
 chain works end to end with a genuinely fresh checkout and zero interactive turns — the mechanism `#3037`'s
 acceptance and this epic's "Done when" #1 both depend on is real, not theoretical.
 
-### 2. `xk7amte` ruled, landed as `#3422` — the follow-up story is `#3421`
+### 2. `3422` ruled, landed as `#3422` — the follow-up story is `#3421`
 
-`xk7amte` only existed on a stray, never-merged branch (`origin/lane/3416-fix-landed-and-3383-followups`) —
+`3422` only existed on a stray, never-merged branch (`origin/lane/3416-fix-landed-and-3383-followups`) —
 this epic's own "filed" claim from the prior session's close-out was premature; the card was never on `main`.
 Brought over and ruled in discussion with the operator (not unilaterally): Forks (a)/(b) collapse onto one
 blocking/non-blocking axis — a blocking hiccup (delivery did not proceed) gets auto-filed with a proposed
@@ -618,7 +618,7 @@ fix, gated behind approval before it lands; a non-blocking hiccup (delivery succ
 worth noting, e.g. perf) files straight through, no gate. Routes through the existing learnings-pool/
 `/harvest` pipeline rather than a parallel one, triggered mechanically at the hiccup instead of a human
 `/note`. `conveyor-3412`'s own free-form-question stall (named in the card) is explicitly ruled a blocking
-hiccup. Landed via `PR #1740`; JIT-numbered `xk7amte→#3422`, its follow-up build story `x39jwee→#3421`.
+hiccup. Landed via `PR #1740`; JIT-numbered `3422→#3422`, its follow-up build story `3421→#3421`.
 
 **A live refinement, from the same discussion, not yet written into either card.** The operator: missing
 operations specifically should be Kanban-style — a missing operation raises a feature request, prepared like
