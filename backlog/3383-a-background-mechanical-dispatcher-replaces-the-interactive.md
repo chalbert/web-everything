@@ -356,3 +356,61 @@ session.**
 - The three stuck `conveyor-*` agents (finding 8) are real, current, and easy to check —
   `claude agents --json` first, `we:scripts/operations/wake.mjs --resolve --force` per `#3353` to close them
   out if that's the call.
+
+## Session update (2026-08-30, continued) — finding 9 corrected with evidence, agents cleaned, #3405 ratified
+
+**Correction to finding 9: the branch-strategy decision was never actually a fork — `origin/lane/mechanical-
+dispatcher` is a strict superset of `origin/lane/mechanical-dispatcher-recovered`, verified by diffing the
+trees directly, not by re-reading commit messages.** Finding 9's framing (two branches with disjoint unique
+content, needing reconciliation) does not survive a direct comparison:
+
+- `git diff --stat origin/lane/mechanical-dispatcher origin/lane/mechanical-dispatcher-recovered` shows every
+  file `-recovered` touches also exists on `mechanical-dispatcher` — most in a strictly MORE advanced form
+  (e.g. `we:scripts/operations/dispatch-lane-io.mjs` on `mechanical-dispatcher` carries the `#3105`
+  `WE_DISPATCH_KIND` stamp and the `#3110` attempt-tag logic; `-recovered`'s version of the same file is the
+  pre-`#3105`/`#3110` version, going *to* `-recovered` from `mechanical-dispatcher` is a net 3058-line
+  deletion against 147 insertions).
+- `mechanical-dispatcher` also holds whole files `-recovered` never got at all:
+  `we:scripts/conveyor/verify-dispatch.mjs` (164 lines), the `#3390`/`#2924` lane-pool guard tests,
+  `we:.claude/commands/status.md` and `we:.claude/commands/eli5.md`.
+- The 147 lines unique to `-recovered` were checked directly (not assumed) — they are all OLDER/simpler
+  versions of code `mechanical-dispatcher` already improved on (the pre-`#3390` `we:scripts/lane-pool.mjs`
+  without the dirty-tree guard, the pre-`#3110` `classifyDispatchPr` without the attempt-tag axis), not novel
+  content.
+
+Read together with finding 9's own claim that `-recovered` holds "the lane-pool ref-lock +
+`computeFreeSlots` fixes" — that claim is now stale too: `computeFreeSlots` exists on `mechanical-dispatcher`
+as well, unchanged in relevant behavior, just reached via a different commit history because `-recovered`'s
+history was reconstructed from session transcripts rather than a normal rebase. **`-recovered` was a
+point-in-time rescue of lane-11's wiped files, taken before the same later session layered `#3390`/`#2924`/
+`#3105`/`#3110`/`#3398` onto `mechanical-dispatcher` directly — it is a strictly earlier snapshot, not a
+sibling with independent value.** Confirmed with the operator (2026-08-30): use `origin/lane/mechanical-
+dispatcher` going forward for `#3403`/`#3404`/`#3406` and the live-fire test; `-recovered` adds nothing and
+can be deleted or left to rot once nobody needs to double-check this finding.
+
+**`mechanical-dispatcher` is also 87 commits behind `origin/main`** (21 unique commits ahead) — not reconciled
+by the above; a separate, real step. 13 files changed on both sides since the branches diverged, including
+`we:scripts/lane-pool.mjs`, `we:scripts/verify-lane.mjs`, `we:scripts/lib/lane-lease.mjs`,
+`we:scripts/operations/wake.mjs` — real conflict risk, because `main` already landed `#3390`/`#2924`
+(PR #1710) in those exact files independently of the branch's own equivalent guards. Rebasing onto `main`
+and resolving those conflicts by hand is the next step, before the live-fire dispatch (which branch gets
+exercised is exactly what this settles) — in progress this session.
+
+**Stuck `claude agents` cleanup — six found, not three, and half were stale bookkeeping, not live
+processes.** `claude agents --json` showed six blocked/waiting `conveyor-*` sessions, not the three finding 8
+named: `conveyor-3154` (three separate launches, oldest from 2026-08-17 — 13 days, not "22+ hours"),
+`conveyor-3151` (2026-08-17), `conveyor-3` in lane-25 (2026-08-25), and `conveyor-3150`/`conveyor-3154` again
+(2026-08-29). Only two carried a live `pid` in the listing — `conveyor-3150` (30175) and `conveyor-3154`
+(30255), both genuinely stuck at `claude --resume ... waiting for dialog open`; `ps` confirmed both, and both
+were killed directly. The other four have no `pid` in the listing at all — `claude agents --json` is
+reporting stale bookkeeping for processes already gone, not agents actually waiting on anything. Left
+as-is (nothing to kill); this is itself live, current evidence for the exact liveness-reading gap `#3353`
+already documents (a stale/unreadable `claude agents` listing, not a code defect in the dispatcher).
+
+**`#3405` ratified.** Fork 1 → (a) denylist by verb-class, expand as each concrete case forces it. Fork 2 →
+(a) halt and surface a `missing-operation` finding. Both match the card's own stated defaults; full reasoning
+recorded on `#3405` itself and codified at
+`we:docs/agent/platform-decisions.md#dispatched-agent-never-runs-commands-directly`. One Done-when item
+(citing this ruling from `we:scripts/guard-bash.mjs`'s header) is deferred — `#3105`'s
+`dispatchedAgentVerificationReason` does not exist on `main` yet (confirmed by grep; branch-only), so the
+citation belongs in the branch copy of that file or with `#3105`'s own landing, not here.
