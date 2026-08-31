@@ -76,9 +76,13 @@ export function stopSession({ handle, exec = execFileSync } = {}) {
     const output = String(exec('claude', ['stop', id], STOP_EXEC_OPTS));
     return { stopped: true, alreadyGone: false, output };
   } catch (e) {
-    const said = String(e?.stderr ?? e?.message ?? e).split('\n')[0];
-    if (/No job matching/i.test(said)) return { stopped: true, alreadyGone: true, output: said };
-    throw new Error(`dispatch-abort: \`claude stop ${id}\` failed: ${said}`);
+    const full = String(e?.stderr ?? e?.message ?? e);
+    const firstLine = full.split('\n')[0];
+    // Matched against the FULL text, not just the first line — the CLI's real "already gone" message is the
+    // whole of its stderr today, but nothing guarantees it stays that way, and matching only the first line
+    // would misclassify an already-gone handle as a hard failure the moment anything gets prepended to it.
+    if (/No job matching/i.test(full)) return { stopped: true, alreadyGone: true, output: firstLine };
+    throw new Error(`dispatch-abort: \`claude stop ${id}\` failed: ${firstLine}`);
   }
 }
 
@@ -156,6 +160,26 @@ export function abortDispatch({ runId, key, status = 'failed', note = '', force 
   return `dispatch-abort: ${stopLine}; ${closeLine}${laneHint}`;
 }
 
+/**
+ * VALIDATE THE `--trust` ARGUMENT BEFORE IT REACHES `resolve()`, extracted out of the `IS_CLI` block so a
+ * unit test can exercise it directly — the jury review of PR #1737 found the guarantee this implements
+ * ("empty is a refusal, not trust the cwd") was asserted in prose across three files but tested nowhere: the
+ * check lived only inside `IS_CLI`, which a `vitest` import can never make true, so the guard itself was dead
+ * code as far as the suite could tell.
+ *
+ * `--trust` with no `=value` returns `''` from `flagValue`, and `resolve('')` silently resolves to
+ * `process.cwd()`. Trust-granting is a deliberate, per-directory opt-in; an operator who forgot the directory
+ * argument (or hit a shell-quoting mistake) must see an error, not have whatever directory they happened to
+ * be standing in trusted for them.
+ *
+ * @param {string} trustDir - `flag('trust')`'s raw return value (`''` for a bare `--trust`, a path otherwise).
+ * @returns {string} the validated directory, unresolved — the caller still owns `resolve()`.
+ */
+export function requireTrustDir(trustDir) {
+  if (!trustDir) throw new Error('dispatch-abort: --trust needs a directory, e.g. --trust=/path/to/scratch-clone');
+  return trustDir;
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   const argv = process.argv.slice(2);
@@ -164,13 +188,8 @@ if (IS_CLI) {
   const trustDir = flag('trust');
   if (trustDir !== undefined) {
     try {
-      // EMPTY IS A REFUSAL, NOT "trust the cwd" — `--trust` with no `=value` returns `''` from `flagValue`,
-      // and `resolve('')` silently resolves to `process.cwd()`. Trust-granting is a deliberate, per-directory
-      // opt-in; an operator who forgot the directory argument (or hit a shell-quoting mistake) must see an
-      // error, not have whatever directory they happened to be standing in trusted for them.
-      if (!trustDir) throw new Error('dispatch-abort: --trust needs a directory, e.g. --trust=/path/to/scratch-clone');
       const { readTrust, writeTrust } = defaultIo();
-      writeAllSync(1, `${trustCheckout({ dir: resolve(trustDir), readConfig: readTrust, writeConfig: writeTrust })}\n`);
+      writeAllSync(1, `${trustCheckout({ dir: resolve(requireTrustDir(trustDir)), readConfig: readTrust, writeConfig: writeTrust })}\n`);
     } catch (e) {
       writeLineSync(2, `error: ${String(e?.message ?? e)}`);
       process.exitCode = 1;

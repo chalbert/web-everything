@@ -28,7 +28,7 @@ import { createFileRunStore } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, dispatchLaneOperation } from '../dispatch-lane.mjs';
 import { createDispatchSinks } from '../dispatch-lane-io.mjs';
-import { abortDispatch, stopSession, trustCheckout, STOP_EXEC_OPTS } from '../dispatch-abort.mjs';
+import { abortDispatch, stopSession, trustCheckout, requireTrustDir, STOP_EXEC_OPTS } from '../dispatch-abort.mjs';
 
 const RUN_ID = 'run-dispatch-abort';
 const KEY = `${RUN_ID}#2#0`;
@@ -93,6 +93,31 @@ describe('stopSession', () => {
     const exec = vi.fn(() => { const e = new Error('spawnSync claude ENOENT'); throw e; });
     expect(() => stopSession({ handle: HANDLE, exec })).toThrow(/claude stop .* failed/);
   });
+
+  it('recognizes an already-gone handle even when other text precedes it on stderr', () => {
+    // Matched against the FULL stderr, not just its first line — a prior cut only checked the first line,
+    // which would misclassify this as a hard failure.
+    const exec = vi.fn(() => {
+      const e = new Error('Command failed');
+      e.stderr = `warning: some unrelated CLI banner\nNo job matching '${HANDLE}'. Run 'claude agents' to list running sessions.\n`;
+      throw e;
+    });
+    const res = stopSession({ handle: HANDLE, exec });
+    expect(res.alreadyGone).toBe(true);
+  });
+});
+
+describe('requireTrustDir', () => {
+  it('refuses an empty --trust value rather than letting it fall through to resolve(cwd)', () => {
+    // The exact regression the jury review of PR #1737 flagged as untestable in its prior shape: this guard
+    // used to live only inside the `IS_CLI` block, which a unit test can never make true.
+    expect(() => requireTrustDir('')).toThrow(/--trust needs a directory/);
+    expect(() => requireTrustDir(undefined)).toThrow(/--trust needs a directory/);
+  });
+
+  it('passes a real directory through unchanged', () => {
+    expect(requireTrustDir('/scratch/wev-2')).toBe('/scratch/wev-2');
+  });
 });
 
 describe('trustCheckout', () => {
@@ -140,6 +165,9 @@ describe('abortDispatch', () => {
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith('claude', ['stop', HANDLE], expect.anything());
+    // The single-read invariant the removal of the pre-check exists to guarantee — enforced, not just
+    // described in the comment above (the jury review of PR #1737 flagged that gap).
+    expect(listAgents).toHaveBeenCalledTimes(1);
     expect(line).toMatch(new RegExp(`stopped ${HANDLE}`));
     expect(line).toMatch(/closed out as `failed`/);
     expect(line).toMatch(/Lane 5 may still be leased/);
