@@ -16,8 +16,9 @@ use std::path::Path;
 
 pub const WINDOW: usize = 10;
 
+// `target` (#3417) — kept in parity with `stdout-flush-scan.mjs`'s SKIP_DIRS; see its comment for why.
 fn skip_dirs() -> HashSet<&'static str> {
-    ["node_modules", ".git", "dist", "_site", "coverage", "__tests__"].into_iter().collect()
+    ["node_modules", ".git", "dist", "_site", "coverage", "__tests__", "target"].into_iter().collect()
 }
 
 struct Patterns {
