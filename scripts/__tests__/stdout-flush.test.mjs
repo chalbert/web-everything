@@ -35,6 +35,11 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { findStdoutFlushViolations, scanStdoutFlush } from '../lib/stdout-flush-scan.mjs';
+// #xwt6ola — single-sourced (was a local copy here, and a separate one in citation-gate-dedup.test.mjs)
+// and hardened: the original pattern silently trusted a truncated capture as a complete result. See
+// capture-via-exec-file-sync.mjs's header for the fix (validate the shape of every attempt, retry on an
+// invalid one) and scripts/lib/__tests__/capture-via-exec-file-sync.test.mjs for its coverage.
+import { captureViaExecFileSync, isParseableJson } from '../lib/capture-via-exec-file-sync.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -44,25 +49,9 @@ const LANE_REVIEW = join(ROOT, 'scripts', 'lane-review.mjs');
 /** The macOS pipe-buffer floor an `execFileSync` consumer truncated at. Payloads must clear it comfortably. */
 const PIPE_FLOOR = 8192;
 
-/**
- * Run a node script and CAPTURE its stdout through a genuine `execFileSync` pipe (property 4). A non-zero exit
- * is expected for a gate, so the thrown error's own `stdout` is returned — the payload is what is under test,
- * never the status. `maxBuffer` is generous so a real truncation is the ONLY thing that can shorten the result.
- */
-function captureViaExecFileSync(script, args, opts = {}) {
-  try {
-    return execFileSync(process.execPath, [script, ...args], {
-      encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], ...opts,
-    });
-  } catch (e) {
-    if (typeof e.stdout === 'string') return e.stdout;
-    throw e;
-  }
-}
-
 describe('check-standards.mjs --json survives a capturing parent (#3061)', () => {
   let out;
-  beforeAll(() => { out = captureViaExecFileSync(CHECK_STANDARDS, ['--json']); }, 120_000);
+  beforeAll(() => { out = captureViaExecFileSync(CHECK_STANDARDS, ['--json'], { validate: isParseableJson }); }, 120_000);
 
   it('delivers far more than the pipe-buffer floor through execFileSync', () => {
     expect(Buffer.byteLength(out, 'utf8')).toBeGreaterThan(PIPE_FLOOR * 10);

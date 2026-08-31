@@ -41,6 +41,7 @@ import { loadAdapters } from './lib/adapters-loader.cjs';
 import { localToday } from './lib/local-date.mjs';
 import { findUtcDaySlices, utcDaySliceMessage } from './lib/utc-day-slice-scan.mjs';
 import { scanStdoutFlush, stdoutFlushMessage } from './lib/stdout-flush-scan.mjs';
+import { runWeScan } from './lib/rust-scan-bridge.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
@@ -960,7 +961,12 @@ try {
 try {
   // Attributed per hit (#952/#1389/#1144) — an unattributed finding reds a concurrent session on a file it
   // never touched, and `--local --files=<lane set>` would demote a real one to a note.
-  for (const hit of scanStdoutFlush(ROOT))
+  // #3417 — the optional Rust `we-scan stdout-flush` port, verified byte-identical to scanStdoutFlush; falls
+  // back to the JS scan whenever the binary is unbuilt/stale/wrongly-shaped/erroring (see rust-scan-bridge.mjs).
+  const hits = runWeScan('stdout-flush', [`--root=${ROOT}`], {
+    referenceFiles: [join(ROOT, 'scripts', 'lib', 'stdout-flush-scan.mjs')],
+  }) ?? scanStdoutFlush(ROOT);
+  for (const hit of hits)
     err(stdoutFlushMessage(hit), { kind: 'stdout-flush', fix: 'model', file: hit.file, line: hit.line });
 } catch (e) {
   err(`stdout-flush scan failed: ${e.message}`);
@@ -1168,15 +1174,28 @@ try {
 // landed it produced exactly two findings, both true (a real committer email in one card, and #3015's own
 // synthetic test marker), both fixed in that same change. It is narrower than the learnings append-seam
 // scrub by design — see we:scripts/lib/secret-scrub.mjs's header for the enumerated gaps.
-{
-  const docs = [];
-  for (const label of ['backlog', 'agent-memory-src']) {
-    const dir = join(ROOT, label);
-    if (!existsSync(dir)) continue;
-    for (const f of readdirSync(dir).filter((n) => n.endsWith('.md')))
-      docs.push({ file: `${label}/${f}`, content: readFileSync(join(dir, f), 'utf8') });
-  }
-  for (const { file, reasons } of scanPublishSecrets(docs)) {
+try {
+  // #3417 — the optional Rust `we-scan secret-scrub` port, verified byte-identical to scanPublishSecrets;
+  // it does its OWN file walk, so the JS `docs` array (and its file reads) is only built on fallback.
+  // Wrapped in try/catch (PR #1741 review finding 1) to match the stdout-flush call site above — a bare
+  // top-level block here had no wrapping try, so any exception downstream of a malformed `findings` value
+  // would have aborted the whole check-standards.mjs script rather than degrading this one section.
+  const findings = runWeScan('secret-scrub', [`--root=${ROOT}`], {
+    referenceFiles: [
+      join(ROOT, 'scripts', 'check-standards-rules.mjs'),
+      join(ROOT, 'scripts', 'lib', 'secret-scrub.mjs'),
+    ],
+  }) ?? (() => {
+    const docs = [];
+    for (const label of ['backlog', 'agent-memory-src']) {
+      const dir = join(ROOT, label);
+      if (!existsSync(dir)) continue;
+      for (const f of readdirSync(dir).filter((n) => n.endsWith('.md')))
+        docs.push({ file: `${label}/${f}`, content: readFileSync(join(dir, f), 'utf8') });
+    }
+    return scanPublishSecrets(docs);
+  })();
+  for (const { file, reasons } of findings) {
     err(
       `${file} carries ${reasons.join('; ')} — this file is COMMITTED and PUSHED, so a credential in it is a ` +
       `published credential (#3015). Remove the value (and rotate it if it was ever real) and describe it ` +
@@ -1185,6 +1204,8 @@ try {
       { kind: 'publish-secret-scrub', file },
     );
   }
+} catch (e) {
+  err(`publish-secret sweep failed: ${e.message}`);
 }
 
 // ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────
