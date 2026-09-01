@@ -812,8 +812,9 @@ base to the mechanics and reruns it after. this should be in the epic so it is c
 issue — a stuck session, a broken assumption, a mechanism that silently does the wrong thing — the response is
 to diagnose the root cause, apply the real fix on its own merits DIRECTLY TO THE MECHANISM (the script, the
 operation, the doctrine text), and rerun. Not to stop and surface a menu of options for the operator to pick
-from. This generalizes the same judgment-call standard [[conveyor-file-decisions-not-inline-questions]] already
-sets for routing calls the driving session owns: a live-fire attempt hitting friction is exactly this kind of
+from. This generalizes the same judgment-call standard the agent-memory note
+`conveyor-file-decisions-not-inline-questions` already sets for routing calls the driving session owns: a
+live-fire attempt hitting friction is exactly this kind of
 call, not a decision that needs the operator's input. Reserve actually asking the operator for genuine
 authorization gates this epic already treats as such (dispatching something live for the first time, a
 destructive/irreversible action) — not for "which of these four workarounds do you want."
