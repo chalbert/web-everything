@@ -804,16 +804,20 @@ deliberately deferred, unchanged from the prior update.
 Set while attempting the live-fire test above (priority 1 from the prior update). Mid-attempt, the driving
 session hit a real obstacle (a stuck-session cleanup path that would not confirm) and stopped to ask the
 operator which of several options to take, using a closed multiple-choice tool. The operator's correction,
-verbatim in substance: *"I though my instruction on my use were clear, I dislike those closed up question UI.
-second, we need to work kanban style, each time we find an issue you have to apply the real best fix merit
-base to the mechanics and reruns it after. this should be in the epic so it is clear from now on."*
+verbatim (their own typo kept): *"I though my instruction on my use were clear, I dislike those closed up
+question UI. second, we need to work kanban style, each time we find an issue you have to apply the real best
+fix merit base to the mechanics and reruns it after. this should be in the epic so it is clear from now on."*
 
 **The rule, standing for this epic from now on:** when a session driving this epic's own machinery hits an
 issue — a stuck session, a broken assumption, a mechanism that silently does the wrong thing — the response is
-to diagnose the root cause, apply the real fix on its own merits DIRECTLY TO THE MECHANISM (the script, the
-operation, the doctrine text), and rerun. Not to stop and surface a menu of options for the operator to pick
-from. This generalizes the same judgment-call standard the agent-memory note
-`conveyor-file-decisions-not-inline-questions` already sets for routing calls the driving session owns: a
+to diagnose the root cause and apply the real fix on its own merits, not to stop and surface a menu of options
+for the operator to pick from. **This changes when to ask, not whether the fix gets reviewed** — a real
+mechanism-code fix (a script, an operation, this doctrine text itself) still lands the normal way, committed
+in a lane and landed through the reviewed PR pipeline, never a silent edit. A 2026-09-01 independent review of
+this doctrine's own first cut (PR #1764) correctly caught an earlier draft that read as authorizing silent,
+unreviewed mechanism edits — the language above is the corrected version; see the agent-memory note's own
+2026-09-01 sharpening for the full finding. This generalizes the same judgment-call standard the agent-memory
+note `conveyor-file-decisions-not-inline-questions` already sets for routing calls the driving session owns: a
 live-fire attempt hitting friction is exactly this kind of
 call, not a decision that needs the operator's input. Reserve actually asking the operator for genuine
 authorization gates this epic already treats as such (dispatching something live for the first time, a

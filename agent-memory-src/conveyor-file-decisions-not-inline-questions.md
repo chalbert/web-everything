@@ -19,22 +19,28 @@ Corollary to the standing "decisions are workitems, not plan-mode" guidance, sha
 **Sharpened 2026-09-01, a repeat correction — closed-choice questions specifically, and "kanban style."**
 Mid a live-fire dispatcher test on epic #3383, a stuck-session cleanup path hit friction (`claude stop`
 wouldn't confirm) and I stopped to surface a 4-option `AskUserQuestion` menu instead of just fixing it.
-Operator, verbatim in substance: *"I though my instruction on my use were clear, I dislike those closed up
-question UI. second, we need to work kanban style, each time we find an issue you have to apply the real best
-fix merit base to the mechanics and reruns it after. this should be in the epic so it is clear from now on."*
-Also written into `backlog/3383` itself as a standing working doctrine for that epic (2026-09-01 entry), since
-the operator asked for it to live there, not only in agent memory.
+Operator, verbatim (their own typo kept): *"I though my instruction on my use were clear, I dislike those
+closed up question UI. second, we need to work kanban style, each time we find an issue you have to apply the
+real best fix merit base to the mechanics and reruns it after. this should be in the epic so it is clear from
+now on."* Also written into `backlog/3383` itself as a standing working doctrine for that epic (2026-09-01
+entry), since the operator asked for it to live there, not only in agent memory.
 
 **Why (sharpened):** this isn't only "the operator can't track it" (the 2026-07-27 framing above) — the
 operator actively dislikes the `AskUserQuestion` UI itself for this kind of call, independent of session
-speed. And it generalizes past the conveyor specifically: ANY time I'm driving a mechanism (a script, an
-operation, a dispatcher) and hit an obstacle that has a diagnosable root cause, the move is to diagnose it,
-apply the real fix on its own merits directly to the mechanism, and rerun — not present it as a menu of
-workarounds. Reserve `AskUserQuestion` for genuinely binary/trivial confirmations the instructions already
-carve out, not for "here are 4 ways to handle this obstacle, which do you want."
+speed. And it generalizes past the conveyor specifically: when I'm driving a mechanism (a script, an
+operation, a dispatcher) and hit an obstacle with a diagnosable root cause, the move is to diagnose it and
+apply the real fix — not present it as a menu of workarounds. Reserve `AskUserQuestion` for genuinely
+binary/trivial confirmations the instructions already carve out, not for "here are N ways to handle this
+obstacle, which do you want."
 
-**How to apply (sharpened):** when a live run hits friction, default to fix-and-rerun on my own judgment,
-same as bullet 3 above but now explicit that this covers debugging/tooling obstacles too, not just PR-label-
-style routing calls. Only escalate to the operator when it's a genuine authorization gate (dispatching
-something live for the first time, an irreversible/destructive action) or a real unresolved decision — and
-even then, prefer prose discussion or a filed decision card over `AskUserQuestion`.
+**How to apply (sharpened) — and the boundary a 2026-09-01 independent review correctly caught: this is about
+not STOPPING TO ASK before acting, never about skipping review of the resulting change.** When a live run
+hits friction, default to diagnosing and fixing it on my own judgment rather than presenting a menu — same as
+bullet 3 above but now explicit that this covers debugging/tooling obstacles too, not just PR-label-style
+routing calls. But "apply the fix" still means the SAME thing it always has for any code/doc/mechanism change
+in this repo: commit it in a lane and land it through the normal reviewed PR pipeline
+[[edit-work-runs-in-a-lane-clone]] — never a silent edit nobody but a later `git diff` would catch. What this
+rule removes is the interactive stop-and-ask-a-menu step, not the review step. Escalate to the operator
+(prose discussion or a filed decision card, never `AskUserQuestion`) only for a genuine authorization gate
+(dispatching something live for the first time, an irreversible/destructive action) or a real unresolved
+decision.
