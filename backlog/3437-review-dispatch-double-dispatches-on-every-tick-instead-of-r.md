@@ -5,6 +5,9 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/conveyor/
+  - we:scripts/operations/
 ---
 
 # review-dispatch double-dispatches on every tick instead of respecting a live review session
