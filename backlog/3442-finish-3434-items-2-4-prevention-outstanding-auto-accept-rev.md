@@ -3,9 +3,11 @@ bornAs: xp9fgj2
 kind: story
 size: 3
 parent: "3434"
-status: open
-scope: ["we:scripts/lib/review-loop-policy.mjs", "we:scripts/lib/__tests__/review-loop-policy.test.mjs", "we:skills-src/review/review-agent-brief.md", "we:backlog/3433-technically-enforce-review-dispatch-s-never-self-accept-neve.md"]
+status: resolved
+scope: ["we:scripts/lib/review-loop-policy.mjs", "we:scripts/lib/__tests__/review-loop-policy.test.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:skills-src/review/review-agent-brief.md", "we:backlog/3433-technically-enforce-review-dispatch-s-never-self-accept-neve.md"]
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-01"
+dateResolved: "2026-09-01"
 tags: []
 ---
 

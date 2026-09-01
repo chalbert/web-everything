@@ -22,8 +22,8 @@
 ## Your job (one sentence)
 
 Acquire your own lane, run the mechanized review-loop against **{{REPO}}#{{PR}}** exactly once
-(`review-loop-cli.mjs` — see step 2), read what it reports, and **exit** — you do not merge, you do not answer
-a queued accept yourself, and you do not keep looping: one dispatch is one round.
+(`review-loop-cli.mjs` — see step 2), read what it reports, and **exit** — you do not merge, you do not clear a
+`review:human` park yourself, and you do not keep looping: one dispatch is one round.
 
 ## Nobody is watching this session turn by turn
 
@@ -59,15 +59,21 @@ two independent jurors, both spawned by the operation, neither is you), reduce t
 either:
 
 - **bounce it** (`changes`) — the operation answers this UNATTENDED, on your behalf, whenever the verdict
-  carries findings. This posts a comment, swaps the label, and completes the run. You did not decide this; the
-  operation's own ratified policy did, exactly as the automated fix-loop already bounces unattended today.
-- **queue it** (the verdict would otherwise be `accept`) — the command prints `QUEUED for a human` and a
-  `--resume=… --answer=accept` line. **Stop here.** Do not run that resume command yourself, under any
-  circumstance, no matter how obviously clean the diff looked to you while it ran. The whole reason this
-  operation exists is that an unattended agent — including you — never records an accept. A human clears it on
-  their own time.
-- **park for a human anyway** (`review:human`, gate-self) — this is the SAME stop the interactive `/review`
-  session would hit; nothing about being dispatched changes it. Report it and exit; do not attempt to clear it.
+  carries findings that still block. This posts a comment, swaps the label, and completes the run. You did not
+  decide this; the operation's own ratified policy did, exactly as the automated fix-loop already bounces
+  unattended today.
+- **auto-clear it** (the verdict is `accept`, or `prevention-outstanding` with its named guard(s) filed) — for
+  an AGENT-addressed (`review:pending`) PR, the operation itself records `review:accepted`, swaps the label,
+  and completes the run — unattended, on your behalf (`#3434`). A `prevention-outstanding` verdict means every
+  actual finding was already resolved and the sole remaining debt is a named "prevention" guard nobody filed;
+  the operation files it to the learnings pool as it clears, so that debt is not lost even though nothing
+  bounced (`#3442`). **There is nothing for you to do here** — no resume command exists to run, nothing to
+  stop for. Read what it printed (it names what, if anything, it filed) and move on to step 3.
+- **park for a human** (`review:human`, gate-self, or a `needs-human` verdict) — this is the SAME stop the
+  interactive `/review` session would hit; nothing about being dispatched changes it, and this tier's own
+  human-only ceremony (`--to=clear-human`) is UNCHANGED by any of the above — it applies to `review:human`
+  only, never to `review:pending`. Report it and exit; do not attempt to clear it yourself, under any
+  circumstance, no matter how obviously clean the diff looked to you while it ran.
 
 Whatever it prints, that IS the outcome of your dispatch — read it, do not re-interpret it.
 
@@ -80,17 +86,21 @@ number — do not try to extract one from it. Release by session instead, which 
 node scripts/lane-pool.mjs release --all-pools --session={{SESSION_SLUG}}
 ```
 
-Then exit. You opened no PR, merged nothing, and — whether the review bounced or was queued for a human — your
-job for this dispatch is done either way. A later dispatch, once the PR's diff has actually changed, is a
-DIFFERENT session's job, not a loop inside this one.
+Then exit. You opened no PR, merged nothing, and — whichever way it landed (bounced, auto-cleared, or parked
+for a human) — your job for this dispatch is done either way. A later dispatch, once the PR's diff has actually
+changed, is a DIFFERENT session's job, not a loop inside this one.
 
 ## What you must NEVER do, stated plainly because getting this wrong is the one failure this brief exists to
 ## prevent
 
-- **Never answer a queued accept.** Not by running the printed `--resume` command, not by re-deriving your own
-  verdict and posting it some other way, not by convincing yourself this one case is obviously fine. There is
-  no exception.
+- **Never clear a `review:human` park yourself.** Not by running a `--resume … --answer=accept` (or any other)
+  command, not by re-deriving your own verdict and posting it some other way, not by convincing yourself this
+  one case is obviously fine. That tier exists specifically because the review's own independence is the thing
+  most in question — only a human clears it, on their own time (`--to=clear-human`). There is no exception.
+  (This does NOT apply to an `accept` or `prevention-outstanding` verdict on a `review:pending` PR — the
+  operation already clears those itself, unattended; see step 2.)
 - **Never merge the PR, or run `gh pr merge` / `gh pr merge -X PUT` against it.** That is the drain's job, once
-  a human has cleared the accept.
+  the PR carries `ready-to-merge` (mechanically, for `review:pending`) or a human has cleared it (for
+  `review:human`).
 - **Never re-run the loop hoping for a different verdict.** One dispatch, one round. A verdict you disagree
   with is not a reason to retry it — report it and exit.
