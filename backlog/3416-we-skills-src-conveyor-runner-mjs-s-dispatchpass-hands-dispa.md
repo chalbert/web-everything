@@ -6,6 +6,8 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:skills-src/conveyor/
 ---
 
 # we:skills-src/conveyor/runner.mjs's dispatchPass hands dispatch-lane a bookkeeping snapshot that already contains the guard it just planned, suppressing the very spawn it exists to record
