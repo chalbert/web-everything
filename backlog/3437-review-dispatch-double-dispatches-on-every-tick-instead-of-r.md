@@ -2,8 +2,10 @@
 bornAs: xh0vtzh
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-01"
+dateResolved: "2026-09-01"
 tags: []
 scope:
   - we:scripts/conveyor/reconcile-core.mjs

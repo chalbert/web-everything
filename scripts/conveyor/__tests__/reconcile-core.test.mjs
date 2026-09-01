@@ -38,6 +38,7 @@ import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
+import { reviewSessionSlug } from '../review-session-slug.mjs';
 
 // ── fixtures — measured shapes, 2026-08-26 ───────────────────────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-26T17:34:00Z');
@@ -369,6 +370,77 @@ describe('case 5 — refusal 4: liveness from a live PROCESS, and the listing is
       { sessionId: 's-blocked', cwd: '/lanes/lane-35', pid: 101, pidAlive: true, laneHeadOid: SHA, status: 'waiting', waitingFor: 'permission prompt', startedAt: BLOCKED_SINCE },
     ];
     expect(assessLiveness(bindAgents(pr1563(), agents)).kind).toBe('awaiting-permission');
+  });
+});
+
+// ── CASE 5b — THE NAME-BASED BIND: A REVIEW DISPATCH THE cwd/oid RULE CANNOT EVER CATCH (#3437) ─────────────────
+describe('case 5b — refusal 4, name-based bind: a review session the cwd/oid rule cannot catch (#3437)', () => {
+  /** #1576 re-armed `review:changes → review:pending` — one prior finding, one re-arm marker; label back to
+   *  `review:pending`. Mirrors the real PR (`#1765`) whose re-arm round is what let the bug run seven ticks. */
+  const rearmed1576 = (over = {}) => ({
+    number: 1576, state: 'OPEN',
+    headRefName: 'lane/review-slice-scopes', headRefOid: '1576'.repeat(10),
+    labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pendingRollup, comments: [{ body: REARM_COMMENT_MARKER }], ...over,
+  });
+
+  it('bindAgents matches on session NAME alone — cwd/oid deliberately NOT matching', () => {
+    const agents = [{
+      sessionId: 's-review', cwd: '/Users/op/workspace/webeverything', pid: 4242, pidAlive: true,
+      laneHeadOid: 'deadbeef'.repeat(5), // the PRIMARY checkout's HEAD — never the PR's headRefOid.
+      name: reviewSessionSlug(1576),
+    }];
+    const bound = bindAgents(rearmed1576(), agents);
+    expect(bound).toHaveLength(1);
+    expect(bound[0].agent.sessionId).toBe('s-review');
+    // `sha` is the PR's OWN headRefOid regardless of which path matched — it never equals the agent's
+    // `laneHeadOid` here, which is exactly the point: path 1 did NOT match; path 2 (the name) did.
+    expect(bound[0].sha).toBe(rearmed1576().headRefOid);
+    expect(bound[0].agent.laneHeadOid).not.toBe(bound[0].sha);
+  });
+
+  it('a session named for a DIFFERENT PR does not bind — the slug is PR-specific', () => {
+    const agents = [{ sessionId: 's-other', cwd: '/x', pid: 1, pidAlive: true, name: reviewSessionSlug(9999) }];
+    expect(bindAgents(rearmed1576(), agents)).toEqual([]);
+  });
+
+  it('THE FIX: re-armed, fed through planReconcile TWICE, dispatches review exactly ONCE — the second call refuses `live-process`', () => {
+    // Round 1: nothing live yet — the PR is owed a review and gets exactly one dispatch.
+    const round1 = planReconcile({ prs: [rearmed1576()], agents: [], durableCounts: {}, now: NOW });
+    expect(round1.dispatch).toHaveLength(1);
+    expect(round1.dispatch[0]).toMatchObject({ kind: 'review', prNumber: 1576 });
+
+    // That dispatch spawns a `review-1576`-named session in the PRIMARY checkout (never the lane it later
+    // acquires for itself) — exactly the shape that made the pre-fix cwd/oid bind miss it on every later tick.
+    const agents = [{
+      sessionId: 's-review', cwd: '/Users/op/workspace/webeverything', pid: 4242, pidAlive: true,
+      laneHeadOid: 'deadbeef'.repeat(5), name: reviewSessionSlug(1576),
+    }];
+    const round2 = planReconcile({ prs: [rearmed1576()], agents, durableCounts: {}, now: NOW });
+    expect(round2.dispatch).toHaveLength(0);
+    expect(round2.refusals).toMatchObject([{ kind: 'live-process', prNumber: 1576, pid: 4242 }]);
+    // The refused session's `cwd` is the PRIMARY checkout, never a lane whose HEAD equals this PR's sha —
+    // proof the bind that caught it was the NAME path, not the cwd/oid one.
+    expect(round2.refusals[0].cwd).toBe('/Users/op/workspace/webeverything');
+  });
+
+  it('a review dispatch that IS dead (`pidAlive:false`) does not block a re-dispatch', () => {
+    const agents = [{
+      sessionId: 's-dead', cwd: '/Users/op/workspace/webeverything', pid: 4242, pidAlive: false,
+      laneHeadOid: 'deadbeef'.repeat(5), name: reviewSessionSlug(1576),
+    }];
+    const plan = planReconcile({ prs: [rearmed1576()], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(1);
+    expect(plan.dispatch[0].kind).toBe('review');
+  });
+
+  it('the two bind paths union rather than double-count a session that happens to satisfy both', () => {
+    const sha = pr1563().headRefOid;
+    const agents = [{
+      sessionId: 's-both', cwd: '/lanes/lane-9', pid: 7, pidAlive: true, laneHeadOid: sha,
+      name: reviewSessionSlug(1563),
+    }];
+    expect(bindAgents(pr1563(), agents)).toHaveLength(1);
   });
 });
 

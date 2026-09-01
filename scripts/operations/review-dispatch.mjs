@@ -80,6 +80,13 @@ import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
+
+// re-exported so nothing that already imports `reviewSessionSlug` from this file has to change (#3437) — the
+// slug itself now lives in `we:scripts/conveyor/review-session-slug.mjs`, a PURE module both this file and
+// `we:scripts/conveyor/reconcile-core.mjs` import, so the pure reconciler never pulls in this file's impure
+// transitive imports (`node:child_process`/`node:crypto`/`node:fs`, via `dispatch-lane-io.mjs`).
+export { reviewSessionSlug };
 
 /** The template `we:skills-src/review/review-agent-brief.md` — read once per dispatch, never cached across
  *  calls, so an edited brief takes effect on the very next dispatch with no process restart. */
@@ -154,16 +161,6 @@ export function fillReviewBrief(template, values = {}) {
     );
   }
   return { prompt, unknownTokens: [...unknown].sort() };
-}
-
-/** The lane-lease session slug a dispatched review carries — deliberately its OWN namespace (`review-<pr>`),
- *  distinct from `we:scripts/operations/dispatch-lane.mjs#sessionSlugFor`'s `conveyor-<num>` / `prepare-<num>`
- *  slugs: a review dispatch is not a build or a prepare, and a shared namespace risks two different dispatch
- *  kinds racing to release the SAME slug's lane lease. */
-export function reviewSessionSlug(pr) {
-  const id = String(pr ?? '').trim();
-  if (!id) throw new Error('review-dispatch: needs a PR number to derive a session slug');
-  return `review-${id}`;
 }
 
 /**
