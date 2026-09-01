@@ -992,3 +992,31 @@ failure — an instruction given once, in conversation, does not survive past th
 this epic's own machinery is supposed to enforce has to live somewhere a later session (or a later turn of this
 same session, once context has rolled over) will actually read it before repeating the mistake — which is this
 file, not a chat transcript.
+
+## Working doctrine (2026-09-01, continued): the main/interactive session is the orchestrator only — it never
+## edits or commits directly, not even for a small doc change
+
+Set after the operator watched the main/interactive session driving this epic hand-run lane acquisition,
+`we:scripts/verify-lane.mjs`, and `we:scripts/operations/open-pr.mjs` itself tonight, for what was only a small
+doc-only change. The operator's correction, verbatim (their own phrasing kept): *"main session should not be
+allow do make any edit by itself"* and *"all should be delegated. you are the orchestrator only."*
+
+**The rule, standing for this epic from now on:** the main/interactive session driving this epic must NEVER
+itself run `Edit`/`Write` against repo files, or `git commit`/`git add`, in the primary checkout — it is the
+orchestrator only. ALL edits, including small doc-only backlog-card updates and agent-memory notes, go through
+a dispatched subagent (which does its own work inside a lane clone, same as this note's own edits did) or the
+real conveyor (`node we:scripts/conveyor/queue.mjs add <NNN>` + `node we:scripts/operations/run.mjs
+dispatch-lane --num=<NNN>`). The main session's job is to acquire the lane, brief the delegate, and relay the
+result — not to hold the pen.
+
+**Why:** this is the same thesis this epic already states for build and review work — a mechanically-dispatched
+change proves the mechanism only if the mechanism actually does it, and a driving session quietly doing the work
+itself "because it's small" or "faster to just do it myself" is exactly the interactive hand-holding this epic
+exists to remove, just relocated from build/review to editing. A doc-only change is not exempt: it is still a
+repo write, and the smallness of the change is precisely what makes it tempting to skip delegation — which is
+why the operator called it out on a small doc change rather than a large one.
+
+**This generalizes past tonight's one incident.** It is a standing rule for every future session driving this
+epic, not a one-off fix for this session's toil: any time a main/interactive session catches itself about to run
+`Edit`, `Write`, `git add`, or `git commit` against this repo, that is the signal to stop and dispatch instead,
+regardless of how small or "just a doc tweak" the change looks.
