@@ -860,7 +860,7 @@ a dispatched fix agent, because no such dispatch exists yet: `we:scripts/conveyo
 PLANS a `kind: 'fix'` entry for a bounced PR with nothing live working it (confirmed live, `attempts: 1`/`2` on
 the real PRs), but nothing in `we:skills-src/conveyor/runner.mjs`'s mechanical passes — nor tick-core's own
 older `planFixSpawns`, which never fired across 20+ real ticks tonight either — ever executes it. Filed as
-`#xsldreq` two updates ago on a hypothesis; tonight is the direct, repeated, first-hand evidence for it. This
+`#3438` two updates ago on a hypothesis; tonight is the direct, repeated, first-hand evidence for it. This
 is THE remaining gap between "review is mechanized" (true, landed, proven twice more tonight) and this epic's
 own "Done when" #1 (a full fix → review → land cycle with zero interactive turns) — not one gap among several,
 the one that's left.
@@ -871,7 +871,7 @@ letting `we:skills-src/conveyor/runner.mjs`'s own tick loop run continuously (no
 distinct, genuinely co-live `review-1765` processes over ~15 minutes, none of which ever posted a verdict —
 directly contradicting the runner's own docblock claim that `we:scripts/conveyor/reconcile-core.mjs`'s liveness
 read refuses a re-dispatch while one is already live. The runner had to be killed by hand; 10 stray sessions
-stopped by hand. Filed as `#xh0vtzh`, high priority — a real safety/cost hazard, confirmed, not theoretical.
+stopped by hand. Filed as `#3437`, high priority — a real safety/cost hazard, confirmed, not theoretical.
 
 **A third, still-unexplained failure mode, found retrying the SAME rounds by hand (single dispatch, no
 overlap):** dispatching exactly ONE `we:scripts/operations/review-dispatch.mjs` call per PR (not through the
@@ -882,7 +882,7 @@ explanation) is in progress as this update is written; `claude logs <id>` is bei
 failed run rather than guessing again. This is DISTINCT from the double-dispatch bug above (this reproduces
 with a single, non-overlapping dispatch) and from round 1/2's real findings (those DID post verdicts) — a
 genuine third finding, not yet filed as its own item pending the `claude logs` read. Whoever picks this up
-next: do not conflate it with `#xh0vtzh`.
+next: do not conflate it with `#3437`.
 
 **Two new informative-only PR labels landed and are live on real PRs right now** (the operator, mid-session:
 "expose if a reviewing is currently reviewing and if a fixer is currently fixing... visibility on what is
@@ -892,7 +892,7 @@ actioned upon... periodically verify real state and tag stay aligned, doesn't ha
 `we:scripts/conveyor/review-status-tag.mjs` (`review-status:reviewing` / `review-status:review-stalled` /
 `-fixing` / `-fix-stalled`, from a fresh `claude agents --json` read matched by session name — deliberately
 independent of `we:scripts/conveyor/reconcile-core.mjs`'s own liveness binding, which is under live suspicion
-per `#xh0vtzh` above). Both purely cosmetic — nothing reads them back to decide anything — and both
+per `#3437` above). Both purely cosmetic — nothing reads them back to decide anything — and both
 self-correcting with no new poller: they ride the runner's existing ~120s tick, re-deriving and re-applying
 idempotently every time. Confirmed live: `PR #1765` currently carries `review-round:3` +
 `review-status:reviewing`, `PR #1764` carries `review-round:2` + `review-status:reviewing`, both matching real
