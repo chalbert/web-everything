@@ -1,6 +1,7 @@
 ---
 bornAs: xkp1mv8
 kind: task
+buildQueued: true
 parent: "3273"
 status: resolved
 dateOpened: "2026-08-30"
