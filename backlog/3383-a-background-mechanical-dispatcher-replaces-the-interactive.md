@@ -1020,3 +1020,54 @@ why the operator called it out on a small doc change rather than a large one.
 epic, not a one-off fix for this session's toil: any time a main/interactive session catches itself about to run
 `Edit`, `Write`, `git add`, or `git commit` against this repo, that is the signal to stop and dispatch instead,
 regardless of how small or "just a doc tweak" the change looks.
+
+## Working doctrine (2026-09-01, continued): a bug found testing the prototype branch can be fixed ON the
+## prototype branch directly — no story, no PR, no review — because the prototype itself never went through
+## that ceremony; only GRADUATING it to `main` does
+
+Set after the operator was asked whether an issue found while running/testing `origin/lane/mechanical-dispatcher`
+needs its own backlog story and a reviewed PR before the fix can land. The operator's rule, given directly: a
+quick fix to the prototype can go straight onto `lane/mechanical-dispatcher` — no scaffolded story, no PR, no
+independent review — because that branch has never carried that ceremony for its own work, and that is
+intentional, not a gap to correct.
+
+**Verified against the actual history, not assumed.** `git log --oneline --first-parent
+origin/lane/mechanical-dispatcher` shows merge commits, but every one of them is a normal PR that landed on
+`main` through the standard pipeline and was later carried into the lane branch — confirmed by diffing the
+branch against `main`: `git log --oneline --first-parent origin/lane/mechanical-dispatcher ^origin/main` returns
+28 commits unique to the prototype, and **zero** of those 28 are merge commits. Every one of the branch's own
+commits — `runner:`, `tick-core:`, `dispatch-lane:`, `supervisor:`, and the rest of this epic's machinery — is a
+direct push straight onto the branch, never a PR merged into it. The prototype has no merge-PR history of its
+own to preserve; a quick fix pushed straight to it does not skip a ceremony the branch already has, because it
+never had one.
+
+**The rule, standing for this epic from now on:** an issue found while running or testing
+`origin/lane/mechanical-dispatcher` may be fixed there directly — diagnose it, fix it, commit it, push it
+straight to `lane/mechanical-dispatcher`. Skip filing a backlog story and skip opening a PR for independent
+review; that full ceremony (claim a story → lane clone → PR → independent review → drain-land) exists for work
+landing on `main`, where other work depends on what's there and a bad change has real blast radius. The
+prototype branch is nobody's dependency yet — it graduates to `main` piece by piece, tracked by `#3443`, and
+**that graduation is where the full story/PR/review pipeline applies**, because that is the boundary where a
+piece of it becomes production code. **One thing does not change even for a prototype-only fix:** the fix still
+needs a lane clone — the git-branch-mutation guard (`#104`/`#2183`) applies regardless of which branch is the
+target — commit and push from the lane, never from a primary checkout.
+
+**`#3437` is NOT an instance of this rule, even though it was found testing the prototype loop — its fix goes
+through the FULL `main` pipeline like normal work.** `we:backlog/3437-review-dispatch-double-dispatches-on-every-tick-instead-of-r.md`
+documents this precisely: the double-dispatch bug was *discovered* live-firing the prototype's tick loop, but
+its root cause — `bindAgents` in `we:scripts/conveyor/reconcile-core.mjs`, plus `we:scripts/conveyor/reconcile-pass.mjs`
+and `we:scripts/operations/review-dispatch.mjs` — is code that is **already on `main` today**; only the runner
+wiring that calls it continuously is still confined to the prototype. Fixing code already on `main` is ordinary
+`main`-bound work regardless of where the bug was noticed, so `#3437` claims a story, builds in a lane, opens a
+PR, and goes through independent review like any other item — it is not a "quick prototype fix" in this
+doctrine's sense. **The distinguishing question going forward:** does the fix touch code that lives only on
+`lane/mechanical-dispatcher` (this doctrine's fast path), or code already on `main` that the prototype merely
+exercises first (the full pipeline, no exception)? Check which is true before picking a path — don't assume
+"found while testing the prototype" settles it.
+
+**The fast path here does not make the branch disposable early.** The operator, directly: "make sure we do not
+stray from this. Only once main contains all the changes from the mechanical branch will we drop it." Being
+able to fix the prototype quickly is a convenience for iterating on it, not a reason to treat it as throwaway —
+`origin/lane/mechanical-dispatcher` stays alive until `#3443`'s graduation is fully done (every commit unique to
+the branch landed on `main` through its own reviewed PR, or explicitly noted as dropped/superseded), and only
+then is it deleted.
