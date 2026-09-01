@@ -1,0 +1,143 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/3400-the-ratified-hosted-key-billed-delivery-mode-has-no-metering/">Backlog #3400</a>:
+    <a href="/docs/agent/platform-decisions.md#operations-declared-once-callers-generated">clause 4</a> of the
+    operation-engine statute (ratified #3031) names two <strong>permanent</strong> delivery modes —
+    solo-local (subscription-funded, the operator's own machine) and hosted-key-billed (behind the same
+    seam, billed per key) — as "two permanent products for different people, not a migration". The solo mode
+    is built. The hosted mode has zero design past its name: no card describes <strong>attribution</strong>
+    (whose key, which run), <strong>metering</strong> (what unit, read from where), or an
+    <strong>auth</strong> story for
+    <code>scripts/operations/http-adapter.mjs</code> — which today has no auth/token concept at all
+    (grepped for <code>localhost|auth|token|apiKey|bearer</code>: the only hits are unrelated doc prose) and
+    is mounted only into <code>plateau-app:tools/dev-panel/vite-plugin.ts</code>, an implicitly-trusted
+    localhost dev panel. This survey grounds the design — not the build — of the three missing pieces
+    against comparable metered, key-authenticated HTTP APIs.
+</p>
+
+<h3>Recommendation (to ratify in #3400)</h3>
+<ol>
+    <li><strong>Per-run dollar metering already exists and is already engine-level</strong> — see Finding 4,
+        added after a skeptic sub-agent pass found the original "metering is greenfield" framing false.
+        <code>judge</code>-step cost is already tracked, automatically, caller-agnostically. The only real
+        gap is <code>callerId</code> attribution on that existing telemetry, plus cost capture for the one
+        effect kind with none today (<code>dispatch: true</code>, an agent spawn) — both still engine-level,
+        never a per-operation opt-in declaration field, for the same forced-invariant reason
+        <a href="/backlog/2779-reliable-per-build-cost-metering-attribution-model-tier-poli/">#2779</a> (a
+        <em>plateau-app</em>-scoped sibling card, different consumer) names an opt-in scheme as an
+        under-billing risk.</li>
+    <li><strong>Auth is a bearer API key</strong>, checked by the HTTP transport adapter ahead of the derived
+        route table — never OAuth/end-user login (this caller shape is machine-to-machine, not an end-user
+        session) and never a per-operation declaration field (would repeat the exact "hand-written route for
+        something that could be declared once" defect clause 1 of the same statute already forbids, applied
+        to auth instead of routing).</li>
+    <li><strong>Attribution is a corollary, not a third fork</strong> — once auth resolves a
+        <code>callerId</code> and metering threads that <code>callerId</code> onto the run's existing
+        judge-cost telemetry (and, for a dispatch effect, its resolved cost — see Finding 4, not a discrete
+        metering-event ledger), "whose key, which run" is answered by composing the two defaults above; no
+        separate design choice remains.</li>
+    <li><strong>Building any of this is NOT-YET</strong> — gated on a concrete trigger (the run-store
+        becoming a shared, cross-actor store per the still-open
+        <a href="/backlog/2626-operational-state-store-session-local-sidecars-now-a-shared-/">#2626</a> /
+        <a href="/backlog/2742-un-gate-stand-up-the-shared-durable-operational-state-store-/">#2742</a>
+        migration, or a caller of the HTTP adapter that is not the operator's own co-located session),
+        mirroring how #2626 and
+        <a href="/backlog/3049-the-conveyor-as-a-shippable-product-not-machinery-and-what-t/">#3049</a>
+        both dissolve a "build now vs later" question to accepted-on-merit + a named trigger rather than a
+        ratifiable fork.</li>
+</ol>
+
+<h3>Finding 1 — 2026 metered billing converges on backing-meter-per-price, idempotent event reporting</h3>
+<p>
+    <strong>Superseded in shape by Finding 4 below — read this finding for the billing-industry pattern only,
+    not for how #3400 actually implements metering.</strong> Stripe changed metered billing for 2026: since
+    API version <code>2025-03-31.basil</code> the legacy usage records API is retired and every metered price
+    requires a backing <strong>Meter</strong>. The pattern: create a meter, attach a metered price to a
+    subscription, report usage <strong>events</strong> at usage time with an <strong>idempotency key</strong>,
+    and let the billing platform aggregate events into an invoice at cycle end. The shape that matters for
+    this decision is not Stripe's API surface (a plateau-app-scoped concern, per #2779/#2780) — it is the
+    <strong>event shape</strong>: a metered fact is reported as a discrete, idempotent fact at the moment work
+    happens, never inferred after the fact from a log. This finding originally proposed mapping that onto the
+    operation engine's <code>effect</code> step kind as a new, generic per-effect ledger event — <strong>Finding
+    4 corrects this</strong>: a skeptic sub-agent pass found real per-run cost telemetry already ships for
+    <code>judge</code> steps, so the idempotent-event-at-usage-time <em>principle</em> survives, but the
+    concrete shape #3400 actually ratifies is a <code>callerId</code>/<code>costUsd</code> field addition to
+    that existing telemetry (plus a <code>resolveInFlight</code>-keyed capture for <code>dispatch</code>
+    effects), not a new, separate metering-event ledger.
+</p>
+
+<h3>Finding 2 — every surveyed multi-tenant HTTP API resolves the caller by API key, not per-request identity</h3>
+<p>
+    AWS API Gateway's usage-plan model: a custom API key <em>is</em> the tenant identifier — the gateway
+    evaluates policy and looks up the usage plan by the key on every request, and a per-request DynamoDB
+    write plus a Lambda billing glue layer ties usage to Stripe. Cloudflare's own Workers for Platforms
+    (the constellation's own substrate, already leaned on by <a
+    href="/backlog/2626-operational-state-store-session-local-sidecars-now-a-shared-/">#2626</a>'s DO/D1
+    ruling) states the identical pattern in its own terms: "meter every request for billing," with
+    per-tenant limits enforced by a dispatch layer in front of the tenant's own code, authenticated by a
+    scoped API token. Anthropic's and OpenAI's own consumer APIs — the closest analog to "an AI-development
+    engine billed per call" — use a bearer API key in an <code>Authorization</code>/<code>x-api-key</code>
+    header, never OAuth, for exactly this caller shape: a programmatic, account-level credential, not an
+    end-user session. The multi-tenant literature is explicit about <em>why</em> OAuth is the wrong tool
+    here: "many multi-tenant platforms end up using both: API keys for backend integrations and internal
+    automation, OAuth for anything acting on behalf of an individual user... the mistake to avoid is
+    defaulting to whichever one was easiest to implement first, and then stretching it to cover use cases it
+    was never designed for." The operation engine's callers include the console
+    (<code>plateau-app:tools/dev-panel</code>) — a browser UI a person operates, not purely
+    machine-to-machine — but the credential it authenticates is still the <em>account's</em> key, not a
+    per-person login, since <code>key-billed</code> bills a key/account rather than a person; OAuth's
+    delegation/consent model has no third party to delegate to here, so the API-key branch is still the one
+    every comparable system converges on.
+</p>
+
+<h3>Finding 3 — key storage and entropy, so the default has a concrete shape when it is eventually built</h3>
+<p>
+    Convergent guidance across the surveyed sources: generate keys with enough entropy that brute-forcing is
+    unrealistic (a random 256-bit value, encoded as a string, is a reasonable baseline), store keys as hashed
+    values rather than plaintext — the same discipline as a password — and record which tenant/account a key
+    was issued for so the lookup on use is a simple table read, not a live identity-provider round trip. This
+    is recorded here as the shape the eventual build would take; nothing here is built by this decision.
+</p>
+
+<h3>Finding 4 — corrected in-session by a skeptic sub-agent pass: per-run dollar metering already ships</h3>
+<p>
+    The first-drafted design (above, before correction) proposed metering as if it were wholly greenfield,
+    wrapping a new generic hook around every applied effect. A skeptic sub-agent pass, checking the claim
+    against the WE tree, found this false: <code>TELEMETRY_NUMBERS = ['costUsd', 'durationMs', 'wallMs',
+    'numTurns', 'loadedContextTokens']</code> (<code>scripts/operations/run-record.mjs:109</code>) is already
+    populated from every <code>judge</code>-step spawn's own reported cost
+    (<code>scripts/lib/judge-spawn.mjs:642,676</code>), already packaged by <code>createDefaultJudge</code>'s
+    judge wrapper (<code>scripts/operations/cli-adapter.mjs:488</code>) and threaded onto the run by
+    <code>driveRun</code> (<code>scripts/operations/cli-adapter.mjs:571</code>) — the one shared path every
+    real caller funnels through — and already printed as <code>judge spend: $X.XXXX over N juror(s)</code>
+    (<code>scripts/operations/cli-adapter.mjs:792</code>). Metering-by-dollars for <code>judge</code> steps is
+    shipped, not an open question. The one real gap is the effect kind with zero cost capture today —
+    <code>dispatch: true</code>, an agent spawn (<code>scripts/operations/effect-executor.mjs:87</code>) —
+    whose cost is not known at the moment the effect is applied (it returns an <code>inFlight</code> marker,
+    <code>:114</code>, and reports back later). That reshapes the default: thread <code>callerId</code> onto
+    the existing telemetry (a small addition), and capture dispatch cost specifically at
+    <code>resolveInFlight</code> (<code>:411</code>, the only supported way an in-flight dispatch closes out)
+    rather than at the generic effect-apply choke point. This finding is the canonical illustration of why
+    prep runs prior-art research against the <em>real tree</em>, not just comparable external systems — an
+    external survey alone would never have surfaced that half the target already ships.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li><a href="/docs/agent/platform-decisions.md#operations-declared-once-callers-generated">Clause 4</a> —
+        the ratified statute this design serves.</li>
+    <li><a href="/backlog/2626-operational-state-store-session-local-sidecars-now-a-shared-/">#2626</a> /
+        <a href="/backlog/2742-un-gate-stand-up-the-shared-durable-operational-state-store-/">#2742</a> — the
+        store-seam discipline this decision cites rather than re-litigates; the shared-store trigger this
+        decision's own NOT-YET gate borrows.</li>
+    <li><a href="/backlog/3049-the-conveyor-as-a-shippable-product-not-machinery-and-what-t/">#3049</a> — the
+        sibling NOT-YET validation gate this decision's own gate mirrors in shape, while gating on a
+        different, WE-internal trigger (not an external customer ask).</li>
+    <li><a href="/backlog/2779-reliable-per-build-cost-metering-attribution-model-tier-poli/">#2779</a> /
+        <a href="/backlog/2780-per-tenant-budget-gate-refuse-a-build-that-would-exceed-rema/">#2780</a> — the
+        plateau-app-scoped billing cards this decision is distinct from (a different consumer, the AI
+        page-building product, not the operation engine), whose "reliable" framing this design borrows as
+        the warrant for an engine-level (never opt-in) metering default.</li>
+</ul>
+{% endraw %}

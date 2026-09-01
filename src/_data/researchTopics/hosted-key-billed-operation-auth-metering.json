@@ -1,0 +1,19 @@
+{
+  "id": "hosted-key-billed-operation-auth-metering",
+  "title": "Hosted Key-Billed Delivery Mode: Caller Auth, Attribution, and Metering",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #3400 — the ratified hosted-key-billed delivery mode (platform-decisions.md#operations-declared-once-callers-generated clause 4) names a permanent architectural seam but no auth, attribution, or metering design. Surveys the metered-billing substrate (Stripe's 2026 Meters API — every metered price now requires a backing Meter, idempotent per-event reporting), the API-key/usage-plan pattern multi-tenant HTTP APIs converge on (AWS API Gateway: API key -> usage plan -> per-request quota/throttle, tenant ID resolved by key lookup; Anthropic/OpenAI: bearer API keys for machine callers, never OAuth/end-user login for this caller shape), and Cloudflare's own per-tenant metering primitive (Workers for Platforms: \"meter every request for billing\", scoped API tokens) since the constellation's shared-store ruling (#2626) already leans Cloudflare. Grounds two design defaults against the real tree: metering must be engine-level and automatic (a per-operation opt-in effect step risks silent revenue leakage, the exact failure #2779 titles itself against), and auth is a bearer API key resolved by a transport-layer adapter check ahead of the derived route table (scripts/operations/http-adapter.mjs), never a per-operation declaration field or an OAuth/end-user identity flow this caller shape does not need.",
+  "dateOpened": "2026-09-01",
+  "tags": [
+    "operations-engine",
+    "billing",
+    "metering",
+    "auth",
+    "api-key",
+    "attribution",
+    "hosted-tier",
+    "conveyor"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
