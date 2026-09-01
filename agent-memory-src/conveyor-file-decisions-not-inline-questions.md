@@ -38,8 +38,8 @@ not STOPPING TO ASK before acting, never about skipping review of the resulting 
 hits friction, default to diagnosing and fixing it on my own judgment rather than presenting a menu — same as
 bullet 3 above but now explicit that this covers debugging/tooling obstacles too, not just PR-label-style
 routing calls. But "apply the fix" still means the SAME thing it always has for any code/doc/mechanism change
-in this repo: commit it in a lane and land it through the normal reviewed PR pipeline
-[[edit-work-runs-in-a-lane-clone]] — never a silent edit nobody but a later `git diff` would catch. What this
+in this repo: commit it in a lane and land it through the normal reviewed PR pipeline (edits run in a lane
+clone, never direct to main) — never a silent edit nobody but a later `git diff` would catch. What this
 rule removes is the interactive stop-and-ask-a-menu step, not the review step. Escalate to the operator
 (prose discussion or a filed decision card, never `AskUserQuestion`) only for a genuine authorization gate
 (dispatching something live for the first time, an irreversible/destructive action) or a real unresolved
