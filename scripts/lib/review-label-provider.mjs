@@ -54,8 +54,14 @@ export const GH_ARGV = Object.freeze({
   // The removals are INTERSECTED with the PR's live labels by `presentRemoveLabels` before they reach here —
   // `gh pr edit --remove-label` errors on a label the PR does not carry, so passing an absent one is a failure,
   // not a no-op. The port does not re-derive that; it is a decision and it stays above the seam.
+  // `add` is OPTIONAL (#2026-09-01, `we:scripts/conveyor/review-status-tag.mjs`'s own caller): a purely
+  // informative label can go from "something to show" to "nothing live" with no replacement, and `gh pr edit`
+  // has no way to add nothing — omitting `--add-label` entirely, rather than passing a falsy value through, is
+  // the only remove-only shape `gh` accepts. Every EXISTING caller always supplies a real `add` (a verdict
+  // transition never adds nothing), so this is additive — the byte-identical two-arg shape above is unchanged.
   setLabels: (repo, pr, { add, remove = [] }) => {
-    const argv = ['pr', 'edit', String(pr), '--repo', repo, '--add-label', add];
+    const argv = ['pr', 'edit', String(pr), '--repo', repo];
+    if (add) argv.push('--add-label', add);
     for (const rm of remove) { argv.push('--remove-label', rm); }
     return argv;
   },
@@ -63,6 +69,14 @@ export const GH_ARGV = Object.freeze({
   // kind of thing that works until one comment does not.
   postComment: (repo, pr, bodyFile) => ['pr', 'comment', String(pr), '--repo', repo, '--body-file', bodyFile],
   currentRepo: () => ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'],
+  // `--force` makes this CREATE-OR-UPDATE, never an error on an already-existing label — the only shape that
+  // is safe to call unconditionally before every `setLabels`. `gh pr edit --add-label` REFUSES a label that
+  // does not exist in the repo yet ("'X' not found"), unlike `we:scripts/review-set-label.mjs`'s own small,
+  // long-lived FIXED label set (created once, years ago) — an open-ended label family like
+  // `we:scripts/conveyor/review-round-tag.mjs`'s `review-round:<N>` mints a brand new name on its very first
+  // use at every N, so ensuring existence has to be part of applying it, not a one-time setup step.
+  ensureLabel: (repo, name, { color = 'ededed', description = '' } = {}) =>
+    ['label', 'create', name, '--repo', repo, '--color', color, '--description', description, '--force'],
 });
 
 /**
@@ -93,6 +107,10 @@ export function createGhProvider({
 
     setLabels(repo, pr, spec) {
       exec(GH_ARGV.setLabels(repo, pr, spec), { maxBuffer: 16 * 1024 * 1024 });
+    },
+
+    ensureLabel(repo, name, opts) {
+      exec(GH_ARGV.ensureLabel(repo, name, opts), { maxBuffer: 16 * 1024 * 1024 });
     },
 
     // The temp file is written and removed HERE rather than by the caller: it is an artefact of this adapter's

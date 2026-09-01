@@ -43,6 +43,11 @@ describe('GH_ARGV is byte-identical to the pre-port inline calls', () => {
       .toEqual(['pr', 'edit', '7', '--repo', 'o/n', '--add-label', 'review:accepted']);
   });
 
+  it('omits --add-label entirely for a remove-only call (no `add` supplied)', () => {
+    expect(GH_ARGV.setLabels('o/n', 7, { remove: ['review-status:reviewing'] }))
+      .toEqual(['pr', 'edit', '7', '--repo', 'o/n', '--remove-label', 'review-status:reviewing']);
+  });
+
   // --body-file, never --body: the verdict body carries newlines and emoji.
   it('posts the comment by FILE', () => {
     expect(GH_ARGV.postComment('o/n', 7, '/tmp/x.md'))
@@ -51,6 +56,16 @@ describe('GH_ARGV is byte-identical to the pre-port inline calls', () => {
 
   it('names the state fields once, so a stub cannot drift from the real read', () => {
     expect(PR_STATE_FIELDS).toEqual(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt']);
+  });
+
+  it('creates a label with --force — create-or-update, never an error on one that already exists', () => {
+    expect(GH_ARGV.ensureLabel('o/n', 'review-round:3'))
+      .toEqual(['label', 'create', 'review-round:3', '--repo', 'o/n', '--color', 'ededed', '--description', '', '--force']);
+  });
+
+  it('ensureLabel accepts an optional color/description override', () => {
+    expect(GH_ARGV.ensureLabel('o/n', 'review-status:reviewing', { color: 'c5def5', description: 'a reviewer is actively working this PR' }))
+      .toEqual(['label', 'create', 'review-status:reviewing', '--repo', 'o/n', '--color', 'c5def5', '--description', 'a reviewer is actively working this PR', '--force']);
   });
 });
 
@@ -95,6 +110,13 @@ describe('the gh adapter', () => {
   it('trims the repo slug it derives for a caller that omitted --repo', () => {
     const p = createGhProvider({ exec: () => 'chalbert/web-everything\n' });
     expect(p.currentRepo()).toBe('chalbert/web-everything');
+  });
+
+  it('ensureLabel shells the exact argv GH_ARGV builds', () => {
+    let seenArgv = null;
+    const p = createGhProvider({ exec: (argv) => { seenArgv = argv; return ''; } });
+    p.ensureLabel('o/n', 'review-round:3');
+    expect(seenArgv).toEqual(GH_ARGV.ensureLabel('o/n', 'review-round:3'));
   });
 });
 
