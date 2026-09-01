@@ -97,38 +97,68 @@ describe('gapSweepStatusArgv', () => {
 });
 
 describe('baselinePathContained', () => {
-  const ROOT = '/repo/reports/gap-sweep-snapshots';
+  // `cwdRoot` is REPO root (what the spawned CLI's own `resolve(baselinePath)` actually resolves against,
+  // once `cwd` is pinned there — see `createGapSweepRunner`) — NOT the snapshot dir itself. A legitimate
+  // baseline is always repo-root-relative: `reports/gap-sweep-snapshots/<date>.json`, exactly what
+  // `--snapshot` prints and what the integration test round-trips.
+  const CWD_ROOT = '/repo';
+  const CONTAIN_ROOT = '/repo/reports/gap-sweep-snapshots';
+  const opts = { cwdRoot: CWD_ROOT, containRoot: CONTAIN_ROOT };
 
-  it('accepts a plain filename inside the root', () => {
-    expect(baselinePathContained('2026-06-20.json', { root: ROOT })).toBe(true);
+  it('accepts the real shape: a repo-root-relative snapshot path', () => {
+    expect(baselinePathContained('reports/gap-sweep-snapshots/2026-06-20.json', opts)).toBe(true);
   });
   it('accepts an already-rooted path', () => {
-    expect(baselinePathContained('/repo/reports/gap-sweep-snapshots/x.json', { root: ROOT })).toBe(true);
+    expect(baselinePathContained('/repo/reports/gap-sweep-snapshots/x.json', opts)).toBe(true);
   });
   it('refuses a `../` traversal that escapes the root', () => {
-    expect(baselinePathContained('../../etc/passwd', { root: ROOT })).toBe(false);
+    expect(baselinePathContained('../etc/passwd', opts)).toBe(false);
   });
   it('refuses an absolute path outside the root', () => {
-    expect(baselinePathContained('/etc/passwd', { root: ROOT })).toBe(false);
+    expect(baselinePathContained('/etc/passwd', opts)).toBe(false);
   });
   it('refuses a sibling directory whose name merely starts with the root string', () => {
     // e.g. "/repo/reports/gap-sweep-snapshots-evil/x.json" — a naive startsWith(root) would wrongly accept this.
-    expect(baselinePathContained('../gap-sweep-snapshots-evil/x.json', { root: ROOT })).toBe(false);
+    expect(baselinePathContained('reports/gap-sweep-snapshots-evil/x.json', opts)).toBe(false);
+  });
+  it('refuses a cwd-relative path outside the snapshot dir — the round-2 review-verified bypass', () => {
+    // The exact exploit shape a reviewer reproduced against the shipped round-1 fix: a bare, non-traversal
+    // relative filename that is NOT under reports/gap-sweep-snapshots/ but IS reachable from repo root.
+    expect(baselinePathContained('package.json', opts)).toBe(false);
+    expect(baselinePathContained('SECRET_TOKEN.json', opts)).toBe(false);
   });
 });
 
-describe('createGapSweepRunner — baseline containment (security, #3412 review finding)', () => {
+describe('createGapSweepRunner — baseline containment (security, #3412 review findings r1+r2)', () => {
+  const cwdRoot = '/repo';
+  const baselineRoot = '/repo/reports/gap-sweep-snapshots';
+
   it('refuses a `diff` baseline that escapes the snapshot root, without spawning', () => {
     const spawn = () => { throw new Error('must not spawn for an escaping baseline'); };
-    const runner = createGapSweepRunner({ spawn, baselineRoot: '/repo/reports/gap-sweep-snapshots' });
+    const runner = createGapSweepRunner({ spawn, cwdRoot, baselineRoot });
     const result = runner({ mode: 'diff', baseline: '../../etc/passwd' });
     expect(result.outcome).toBe('unrun');
     expect(result.reason).toMatch(/escapes .*\(security\)/);
   });
 
+  it('refuses the round-2 bypass shape (a cwd-relative, non-snapshot-dir path), without spawning', () => {
+    const spawn = () => { throw new Error('must not spawn for the bypass shape'); };
+    const runner = createGapSweepRunner({ spawn, cwdRoot, baselineRoot });
+    const result = runner({ mode: 'diff', baseline: 'package.json' });
+    expect(result.outcome).toBe('unrun');
+  });
+
+  it('pins the spawn cwd to the SAME root the containment check validated against', () => {
+    let sawCwd;
+    const spawn = (_cmd, _argv, opts) => { sawCwd = opts?.cwd; return { status: 0, stdout: '✓ invariants ok\n✓ no-op delta\n', stderr: '' }; };
+    const runner = createGapSweepRunner({ spawn, cwdRoot, baselineRoot });
+    runner({ mode: 'diff', baseline: 'reports/gap-sweep-snapshots/2026-06-20.json' });
+    expect(sawCwd).toBe(cwdRoot);
+  });
+
   it('does not gate `status`/`snapshot`, which never take a baseline', () => {
     const spawn = () => ({ status: 0, stdout: '✓ invariants ok\n', stderr: '' });
-    const runner = createGapSweepRunner({ spawn, baselineRoot: '/repo/reports/gap-sweep-snapshots' });
+    const runner = createGapSweepRunner({ spawn, cwdRoot, baselineRoot });
     expect(runner({ mode: 'status' }).outcome).toBe('ok');
     expect(runner({ mode: 'snapshot' }).outcome).toBe('ok');
   });

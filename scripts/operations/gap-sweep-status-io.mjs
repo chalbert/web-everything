@@ -29,6 +29,20 @@ import { GAP_SWEEP_STATUS_EFFECT } from './gap-sweep-status.mjs';
 export const GAP_SWEEP_STATUS_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'gap-sweep-status.mjs');
 
 /**
+ * The repo root — the SAME base a `baseline` path is resolved against by BOTH {@link baselinePathContained}
+ * and the spawned CLI itself (pinned as that spawn's `cwd` in {@link createGapSweepRunner}, below). This is
+ * the fix for a real, review-verified bypass (#3412 review round 2, security/CONFIRMED, PID-reproduced):
+ * round 1's containment check resolved `baseline` against the SNAPSHOT directory, but the spawned CLI's own
+ * `resolve(baselinePath)` resolves against its INHERITED `process.cwd()` — one directory shallower and,
+ * critically, never pinned — so a path the check called "contained" (e.g. a bare `package.json`) could still
+ * make the real read land outside `GAP_SWEEP_BASELINE_ROOT` entirely. A legitimate `baseline` value is always
+ * repo-root-relative (`reports/gap-sweep-snapshots/<date>.json`, exactly what `--snapshot` itself prints and
+ * what the integration test passes straight back in), so repo root is the ONE base both computations must
+ * share — never re-derive it independently.
+ */
+export const GAP_SWEEP_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
  * The ONLY directory a `baseline` path may resolve into (#3412 review finding, security/CONFIRMED). The
  * underlying CLI's own `--snapshot` mode is the sole writer of a legitimate baseline, and it only ever writes
  * under `reports/gap-sweep-snapshots/` (`we:scripts/gap-sweep-status.mjs`'s own `SNAP_DIR`). Unlike a direct
@@ -39,13 +53,16 @@ export const GAP_SWEEP_STATUS_CLI = join(dirname(fileURLToPath(import.meta.url))
  * through the diff report this operation returns as `report`. Root-contained here, in the IO shell, before the
  * path ever reaches the CLI — never in the pure declaration, which holds no fs boundary to check against.
  */
-export const GAP_SWEEP_BASELINE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reports', 'gap-sweep-snapshots');
+export const GAP_SWEEP_BASELINE_ROOT = join(GAP_SWEEP_REPO_ROOT, 'reports', 'gap-sweep-snapshots');
 
-/** True iff `baselinePath`, once resolved, stays inside {@link GAP_SWEEP_BASELINE_ROOT}. PURE. */
-export function baselinePathContained(baselinePath, { root = GAP_SWEEP_BASELINE_ROOT } = {}) {
-  const resolvedRoot = resolve(root);
-  const resolvedPath = resolve(resolvedRoot, baselinePath);
-  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep);
+/**
+ * True iff `baselinePath`, resolved against `cwdRoot` (the SAME base the spawned CLI resolves it against —
+ * never a base independently re-derived), stays inside `containRoot`. PURE.
+ */
+export function baselinePathContained(baselinePath, { cwdRoot = GAP_SWEEP_REPO_ROOT, containRoot = GAP_SWEEP_BASELINE_ROOT } = {}) {
+  const resolvedContainRoot = resolve(containRoot);
+  const resolvedPath = resolve(resolve(cwdRoot), baselinePath);
+  return resolvedPath === resolvedContainRoot || resolvedPath.startsWith(resolvedContainRoot + sep);
 }
 
 /** How long one invocation may run before the spawn is abandoned. A kill lands as `unrun`, never `ok`. */
@@ -122,9 +139,12 @@ export function classifyGapSweepResult({ mode, status, stdout = '', stderr = '',
  * The runner the declaration is injected with. ONE spawn of the single home; `spawn` is injected so every
  * branch above is reachable with no `node` spawn.
  */
-export function createGapSweepRunner({ spawn = spawnSync, cliPath = GAP_SWEEP_STATUS_CLI, baselineRoot = GAP_SWEEP_BASELINE_ROOT } = {}) {
+export function createGapSweepRunner({
+  spawn = spawnSync, cliPath = GAP_SWEEP_STATUS_CLI,
+  cwdRoot = GAP_SWEEP_REPO_ROOT, baselineRoot = GAP_SWEEP_BASELINE_ROOT,
+} = {}) {
   return ({ mode, baseline = '' }) => {
-    if (mode === 'diff' && !baselinePathContained(baseline, { root: baselineRoot })) {
+    if (mode === 'diff' && !baselinePathContained(baseline, { cwdRoot, containRoot: baselineRoot })) {
       return {
         mode, outcome: 'unrun',
         reason: `baseline path escapes ${baselineRoot} — refusing to read outside the snapshot directory (security)`,
@@ -133,7 +153,11 @@ export function createGapSweepRunner({ spawn = spawnSync, cliPath = GAP_SWEEP_ST
     const argv = gapSweepStatusArgv({ mode, baseline }, { cliPath });
     let r;
     try {
-      r = spawn(process.execPath, argv, { encoding: 'utf8', timeout: GAP_SWEEP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+      // `cwd: cwdRoot` — pinned to the EXACT SAME root `baselinePathContained` just validated against, so the
+      // CLI's own `resolve(baselinePath)` (relative to its inherited cwd) can never disagree with what was
+      // checked. Leaving this unset (as round 1 did) is the bypass: an unset `cwd` inherits the CALLER's own
+      // process.cwd(), a base the containment check above never saw.
+      r = spawn(process.execPath, argv, { cwd: cwdRoot, encoding: 'utf8', timeout: GAP_SWEEP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
     } catch (e) {
       r = { error: e };
     }

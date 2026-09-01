@@ -51,7 +51,13 @@ async function withTmpGapSweepData(fn) {
       cpSync(join(REPO_ROOT, 'src', '_data', name), join(dataDir, name));
     }
     const cliPath = join(scriptsDir, 'gap-sweep-status.mjs');
-    const runner = createGapSweepRunner({ cliPath });
+    // `cwdRoot`/`baselineRoot` PINNED TO SCRATCH — the exact correctness gap a 2026-09-01 review round caught:
+    // leaving these at their real-repo defaults here meant this test's own "isolated" `diff` calls silently
+    // resolved `baseline` against the REAL repo's own reports/gap-sweep-snapshots/, not this scratch copy, and
+    // the round trip only ever passed because the real repo happened to carry a matching snapshot file.
+    const cwdRoot = scratch;
+    const baselineRoot = join(scratch, 'reports', 'gap-sweep-snapshots');
+    const runner = createGapSweepRunner({ cliPath, cwdRoot, baselineRoot });
     await fn({
       tmp: scratch,
       cliPath,
