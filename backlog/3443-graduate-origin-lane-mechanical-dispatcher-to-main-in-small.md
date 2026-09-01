@@ -6,6 +6,18 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/conveyor/
+  - we:scripts/operations/
+  - we:scripts/operator/
+  - we:scripts/readiness/
+  - we:scripts/lib/
+  - we:scripts/guard-bash.mjs
+  - we:scripts/lane-pool.mjs
+  - we:scripts/verify-lane.mjs
+  - we:scripts/__tests__/
+  - we:skills-src/conveyor/
+  - we:backlog/
 ---
 
 # Graduate origin/lane/mechanical-dispatcher to main in small, independently reviewable pieces
