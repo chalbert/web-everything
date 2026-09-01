@@ -724,7 +724,7 @@ Picked up the prior session's numbered list in order. All five are done:
    operation against it (the exact bootstrapping answer `PR #1737` above was still waiting on). `PR #1756`
    went three real rounds: round 1 found 3 genuine bugs (dropped `extraArgs`, missing
    `WE_DISPATCH_AGENT_ARGS` wiring, a prose-only self-accept/merge enforcement — the last filed as its own
-   residual, `xf38r2m`, not silently dropped); round 2, after two of those were fixed, found a NEW bug (the
+   residual, `3433`, not silently dropped); round 2, after two of those were fixed, found a NEW bug (the
    dispatched agent's own brief told it to substitute "the lane number" into a release command, but `LANE`
    holds a path, not a number — unexecutable as written); round 3 converged clean. Both landed;
    `check:standards` + the full suite green on each.
@@ -761,7 +761,7 @@ self-clear case specifically; this note generalizes it to the whole review loop.
    resident process needed.
 2. Decide whether/when to actually schedule `we:scripts/conveyor/reconcile-pass.mjs` at all if the
    runner-wiring above is deferred — today nothing invokes it outside its own tests even standalone.
-3. `xf38r2m` (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
+3. `3433` (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
    deliberately deferred — a genuine, harder residual, not urgent.
 
 ## Session update (2026-08-31, continued) — the review step is now fully mechanized; the one remaining gap
@@ -796,5 +796,5 @@ tonight (the build→PR chain in an earlier session; the review loop against two
 this one) but never as ONE continuous run through the runner's own tick loop with nobody driving it. That is
 the next genuine test of this epic's own "Done when" #1, not a new build.
 
-**`xf38r2m`** (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
+**`3433`** (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
 deliberately deferred, unchanged from the prior update.
