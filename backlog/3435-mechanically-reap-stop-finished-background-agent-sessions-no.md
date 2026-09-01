@@ -5,6 +5,11 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/conveyor/
+  - we:skills-src/conveyor/
+  - we:scripts/operations/dispatch-lane-io.mjs
+  - we:scripts/operations/dispatch-abort.mjs
 ---
 
 # Mechanically reap/stop finished background agent sessions -- nothing does this today
