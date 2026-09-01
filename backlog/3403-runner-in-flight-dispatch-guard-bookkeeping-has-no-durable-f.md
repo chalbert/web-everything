@@ -6,6 +6,9 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:skills-src/conveyor/
+  - we:scripts/conveyor/
 ---
 
 # Runner in-flight dispatch-guard bookkeeping has no durable floor, so a crash-restart reopens the double-dispatch race #3177 already reproduced live
