@@ -20,13 +20,33 @@
  * IMPURE by construction: subprocess only, no direct fs.
  */
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { GAP_SWEEP_STATUS_EFFECT } from './gap-sweep-status.mjs';
 
 /** The single home. Resolved from THIS file, never from cwd. */
 export const GAP_SWEEP_STATUS_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'gap-sweep-status.mjs');
+
+/**
+ * The ONLY directory a `baseline` path may resolve into (#3412 review finding, security/CONFIRMED). The
+ * underlying CLI's own `--snapshot` mode is the sole writer of a legitimate baseline, and it only ever writes
+ * under `reports/gap-sweep-snapshots/` (`we:scripts/gap-sweep-status.mjs`'s own `SNAP_DIR`). Unlike a direct
+ * terminal invocation of that CLI (trusted-operator-only), this operation is reachable over HTTP
+ * (`./http-adapter.mjs`'s route table serves the `effect` step on `POST /<base>/gap-sweep-status/runs`), so an
+ * unvalidated `baseline` lets any caller reaching that route read an arbitrary file the process can access —
+ * `resolve()` alone does not confine a `../../` or absolute path, and the CLI reflects file content back
+ * through the diff report this operation returns as `report`. Root-contained here, in the IO shell, before the
+ * path ever reaches the CLI — never in the pure declaration, which holds no fs boundary to check against.
+ */
+export const GAP_SWEEP_BASELINE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reports', 'gap-sweep-snapshots');
+
+/** True iff `baselinePath`, once resolved, stays inside {@link GAP_SWEEP_BASELINE_ROOT}. PURE. */
+export function baselinePathContained(baselinePath, { root = GAP_SWEEP_BASELINE_ROOT } = {}) {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(resolvedRoot, baselinePath);
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep);
+}
 
 /** How long one invocation may run before the spawn is abandoned. A kill lands as `unrun`, never `ok`. */
 export const GAP_SWEEP_TIMEOUT_MS = 60 * 1000;
@@ -102,8 +122,14 @@ export function classifyGapSweepResult({ mode, status, stdout = '', stderr = '',
  * The runner the declaration is injected with. ONE spawn of the single home; `spawn` is injected so every
  * branch above is reachable with no `node` spawn.
  */
-export function createGapSweepRunner({ spawn = spawnSync, cliPath = GAP_SWEEP_STATUS_CLI } = {}) {
+export function createGapSweepRunner({ spawn = spawnSync, cliPath = GAP_SWEEP_STATUS_CLI, baselineRoot = GAP_SWEEP_BASELINE_ROOT } = {}) {
   return ({ mode, baseline = '' }) => {
+    if (mode === 'diff' && !baselinePathContained(baseline, { root: baselineRoot })) {
+      return {
+        mode, outcome: 'unrun',
+        reason: `baseline path escapes ${baselineRoot} — refusing to read outside the snapshot directory (security)`,
+      };
+    }
     const argv = gapSweepStatusArgv({ mode, baseline }, { cliPath });
     let r;
     try {

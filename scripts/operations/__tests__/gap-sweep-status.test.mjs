@@ -20,7 +20,10 @@ import {
   assessRun, shapeRunFinding, gapSweepStatusOperation, GAP_SWEEP_STATUS_OP, GAP_SWEEP_STATUS_EFFECT,
   GAP_SWEEP_MODES, GAP_SWEEP_OUTCOMES,
 } from '../gap-sweep-status.mjs';
-import { gapSweepStatusArgv, classifyGapSweepResult, GAP_SWEEP_STATUS_CLI } from '../gap-sweep-status-io.mjs';
+import {
+  gapSweepStatusArgv, classifyGapSweepResult, GAP_SWEEP_STATUS_CLI,
+  baselinePathContained, createGapSweepRunner,
+} from '../gap-sweep-status-io.mjs';
 
 const finding = (over = {}) => shapeRunFinding({ mode: 'status', outcome: 'ok', report: '…', ...over });
 
@@ -90,6 +93,44 @@ describe('gapSweepStatusArgv', () => {
   });
   it('defaults to the real CLI path when none is given', () => {
     expect(gapSweepStatusArgv({ mode: 'status' })[0]).toBe(GAP_SWEEP_STATUS_CLI);
+  });
+});
+
+describe('baselinePathContained', () => {
+  const ROOT = '/repo/reports/gap-sweep-snapshots';
+
+  it('accepts a plain filename inside the root', () => {
+    expect(baselinePathContained('2026-06-20.json', { root: ROOT })).toBe(true);
+  });
+  it('accepts an already-rooted path', () => {
+    expect(baselinePathContained('/repo/reports/gap-sweep-snapshots/x.json', { root: ROOT })).toBe(true);
+  });
+  it('refuses a `../` traversal that escapes the root', () => {
+    expect(baselinePathContained('../../etc/passwd', { root: ROOT })).toBe(false);
+  });
+  it('refuses an absolute path outside the root', () => {
+    expect(baselinePathContained('/etc/passwd', { root: ROOT })).toBe(false);
+  });
+  it('refuses a sibling directory whose name merely starts with the root string', () => {
+    // e.g. "/repo/reports/gap-sweep-snapshots-evil/x.json" — a naive startsWith(root) would wrongly accept this.
+    expect(baselinePathContained('../gap-sweep-snapshots-evil/x.json', { root: ROOT })).toBe(false);
+  });
+});
+
+describe('createGapSweepRunner — baseline containment (security, #3412 review finding)', () => {
+  it('refuses a `diff` baseline that escapes the snapshot root, without spawning', () => {
+    const spawn = () => { throw new Error('must not spawn for an escaping baseline'); };
+    const runner = createGapSweepRunner({ spawn, baselineRoot: '/repo/reports/gap-sweep-snapshots' });
+    const result = runner({ mode: 'diff', baseline: '../../etc/passwd' });
+    expect(result.outcome).toBe('unrun');
+    expect(result.reason).toMatch(/escapes .*\(security\)/);
+  });
+
+  it('does not gate `status`/`snapshot`, which never take a baseline', () => {
+    const spawn = () => ({ status: 0, stdout: '✓ invariants ok\n', stderr: '' });
+    const runner = createGapSweepRunner({ spawn, baselineRoot: '/repo/reports/gap-sweep-snapshots' });
+    expect(runner({ mode: 'status' }).outcome).toBe('ok');
+    expect(runner({ mode: 'snapshot' }).outcome).toBe('ok');
   });
 });
 
