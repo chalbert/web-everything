@@ -5,6 +5,10 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/operations/review-dispatch.mjs
+  - we:scripts/lib/main-staleness.mjs
+  - we:scripts/operations/__tests__/review-dispatch.test.mjs
 ---
 
 # A review dispatched from a stale checkout silently runs old code regardless of what's on main
