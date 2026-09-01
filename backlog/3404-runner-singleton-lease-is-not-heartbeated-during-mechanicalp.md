@@ -6,6 +6,12 @@ status: open
 dateOpened: "2026-08-30"
 relatedTo: ["2453", "3403"]
 tags: [conveyor, lease, timing, flagged-by-review]
+scope:
+  - we:skills-src/conveyor/runner.mjs
+  - we:skills-src/conveyor/runner-lock.mjs
+  - we:skills-src/conveyor/__tests__/
+  - we:scripts/conveyor/verify-dispatch.mjs
+  - we:scripts/conveyor/__tests__/
 ---
 
 # Runner singleton lease is not heartbeated during mechanicalPasses, so a long verify-dispatch pass can let it go TTL-stale mid-run
