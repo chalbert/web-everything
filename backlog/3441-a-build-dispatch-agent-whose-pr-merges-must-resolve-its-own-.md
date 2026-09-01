@@ -1,4 +1,5 @@
 ---
+bornAs: xg5ml6o
 kind: task
 parent: "3383"
 status: open
@@ -13,7 +14,7 @@ Found live 2026-09-01, closing out this same session. `#3412`'s own build agent 
 stayed `state: working` the entire time, never releasing its lane, never resolving the item, never exiting.
 Both had to be cleaned up by hand at session close (`claude stop`, then `node we:scripts/backlog.mjs resolve`).
 The operator, 2026-09-01: "we'll have to make sure our mechanic closes the item once done." Distinct from
-`#xjx2n2s` (mechanically REAP a finished session's process registration) — this is about the ITEM's own
+`#3435` (mechanically REAP a finished session's process registration) — this is about the ITEM's own
 status, not the session's; a dispatch could in principle exit cleanly while still leaving its backlog item
 `active` forever, or vice versa. Related, not the same gap.
 

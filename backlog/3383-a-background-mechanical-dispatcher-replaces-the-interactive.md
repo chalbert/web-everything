@@ -950,7 +950,7 @@ here so they aren't lost:**
    skip past.
 
 **Filed this session, under this epic:** `#3437` (review-dispatch double-dispatches a re-armed PR — real,
-cost-burning, confirmed, still open), `#xjx2n2s` (nothing mechanically reaps a finished `claude agents`
+cost-burning, confirmed, still open), `#3435` (nothing mechanically reaps a finished `claude agents`
 session — 16 stopped by hand tonight), `#3436` (a dispatched agent writes no structured completion
 record — every real outcome tonight required stripping ANSI from `claude logs` by hand to learn), `#3434`
 (ratified + built, this update). `#3438`'s own prior text was corrected in place after a review finding
