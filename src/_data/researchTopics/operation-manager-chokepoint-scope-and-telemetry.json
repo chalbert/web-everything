@@ -1,0 +1,14 @@
+{
+  "id": "operation-manager-chokepoint-scope-and-telemetry",
+  "title": "The \"operation manager\" — how much of it is already ratified, and what's actually still open",
+  "status": "open",
+  "summary": "Grounds decision #3427 (a real execution chokepoint every command routes through). Surveys the operations engine already shipped under epic #3029 (#3031's declared-once/generated-callers statute, #3405's dispatched-agent doctrine, #3421/#3422's missing-operation catalog-growth ruling) against #3427's own four framing bullets, and finds three of the four already ratified or already reasoned in shipped code — leaving exactly two live axes: the catalog's candidacy-scope boundary, and whether cheap/read-only calls should carry any telemetry at all given the existing run-store deliberately skips them.",
+  "dateOpened": "2026-09-01",
+  "lastReviewed": "2026-09-01",
+  "reviewHorizon": "P6M",
+  "tags": ["governance", "conveyor", "operations", "decision-prep", "instrumentation"],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor",
+  "relatedReport": "reports/2026-09-01-operation-manager-chokepoint-scope-and-telemetry.md"
+}
