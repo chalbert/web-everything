@@ -9,14 +9,15 @@ import { FIELD_CAPS, KINDS, validateEntry } from '../../conveyor/learnings-drop.
 const humanPending = { of: CONFIRM_ACTORS.HUMAN };
 const agentPending = { of: CONFIRM_ACTORS.AGENT };
 
-describe('reviewLoopAutoConfirm — the #3072/#3383 ruling, in code', () => {
-  it('declines a HUMAN-addressed confirm no matter what the verdict is', () => {
+describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () => {
+  it('declines a HUMAN-addressed confirm no matter what the verdict is — UNCHANGED by #3434', () => {
     expect(reviewLoopAutoConfirm(humanPending, { verdict: { verdict: VERDICTS.CHANGES } })).toBeNull();
     expect(reviewLoopAutoConfirm(humanPending, { verdict: { verdict: VERDICTS.ACCEPT } })).toBeNull();
   });
 
-  it('NEVER answers accept, even for an agent-addressed confirm — the one property this file exists for', () => {
-    expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.ACCEPT } })).toBeNull();
+  it('answers accept unattended for an agent-addressed clean verdict — #3434, mechanical acceptance', () => {
+    expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.ACCEPT } }))
+      .toEqual({ value: 'accept' });
   });
 
   it('answers `changes` unattended for an agent-addressed non-accept verdict', () => {
@@ -39,16 +40,21 @@ describe('reviewLoopAutoConfirm — the #3072/#3383 ruling, in code', () => {
   });
 });
 
-describe('#x100grep — literal grep proof the policy never returns accept', () => {
-  it('the source contains the string "accept" only in a comparison, never inside a returned literal', async () => {
-    // A cheap, load-bearing self-check: read this module's OWN source and assert no `value: 'accept'` shape
-    // appears anywhere in it, so a future edit cannot silently reintroduce the one answer that must never ship.
+describe('#x100grep — literal grep proof `value: \'accept\'` appears EXACTLY where #3434 put it', () => {
+  it('the source returns accept from exactly one place: the agent-addressed accept-verdict branch', async () => {
+    // #3434 (2026-09-01) deliberately reverses the #x100grep canary this test used to be: instead of asserting
+    // `value: 'accept'` never appears (the OLD, now-superseded invariant), this pins it to appear EXACTLY
+    // once, and only inside `reviewLoopAutoConfirm` itself — so a future edit can still add mechanical accept
+    // to some OTHER function without this test noticing, but cannot silently make `reviewLoopAutoConfirm`
+    // answer accept from more than the one reviewed, ratified branch.
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, '..', 'review-loop-policy.mjs'), 'utf8');
-    expect(src).not.toMatch(/value:\s*['"]accept['"]/);
+    const matches = src.match(/value:\s*['"]accept['"]/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(src).toMatch(/VERDICTS\.ACCEPT\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
   });
 });
 

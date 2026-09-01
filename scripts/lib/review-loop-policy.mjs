@@ -22,13 +22,16 @@
  * does not record — a genuine input to a future observability spike, not something to approximate here. So
  * this file does not re-litigate that call; it reads `run.verdict.loop` as the settled fact it already is.
  *
- * THE RULING THIS FILE ENCODES, VERBATIM (operator, 2026-08-31, under epic #3383, consulted specifically on how
- * much unattended trust an AI review verdict gets): an AGENT actor may unattended-answer `confirm` with
- * `changes` or `abstain` — both are safe and reversible, a bounce just asks for more work, exactly like the
- * existing automated fix-loop already does unattended — but must NEVER unattended-answer `accept`. A verdict
- * that would otherwise accept is instead QUEUED for a human to clear on their own time, mirroring the
- * "gated, not blocking" shape `backlog/3421-*.md` / `backlog/3422-*.md` already ratified for a blocking
- * delivery hiccup: file it into the pool, do not stop the world, let a human clear it when they get to it.
+ * THE 2026-08-31 RULING THIS FILE USED TO ENCODE, VERBATIM, NOW SUPERSEDED (operator, 2026-09-01, `#3434` /
+ * `backlog/xpfuj64-*.md`, "I want the acceptance to be mechanical from the verdict" — found live: two real
+ * PRs, `#1764` and `#1765`, both reduced to a clean `accept` during this same epic's own live-fire test and
+ * sat queued for a human for no reason other than this policy's old refusal). The ORIGINAL ruling (2026-08-31)
+ * said an AGENT actor may unattended-answer `changes` or `abstain` but must NEVER unattended-answer `accept`.
+ * `#3434` REVERSES that specifically for the AGENT-addressed (`review:pending`) tier: a genuinely independent
+ * `accept` now answers unattended, exactly like `changes` already did — a clean, independent verdict IS the
+ * clearance. `review:human` is UNCHANGED and UNTOUCHED by this reversal: it never reaches the accept branch
+ * below at all, because refusal 1 (the actor check) declines it first, same as always — that tier's own
+ * human-only ceremony (`--to=clear-human`) is exactly what `#3434` confirmed should stay in place.
  *
  * WHY THE QUEUE REUSES `learnings-drop.mjs` AS-IS RATHER THAN EXTENDING ITS SCHEMA. `#3421` (the general
  * "approval-pending flag on a learnings-pool entry" mechanism) is NOT YET BUILT — it is still an open story
@@ -66,22 +69,25 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  * cli-adapter.mjs`): return `null` to decline (the run stays suspended, exactly as if no policy had been
  * supplied), or `{ value: <one of CONFIRM_OPTIONS> }` to answer.
  *
- * TWO REFUSALS, IN ORDER, EACH ENOUGH ON ITS OWN TO EXPLAIN THE WHOLE FUNCTION:
+ * ONE REFUSAL, THEN TWO ANSWERS:
  *
  *   1. `pending.of !== CONFIRM_ACTORS.AGENT` → decline. A HUMAN-addressed confirm (`review:human`, gate-self)
  *      is precisely the case the step exists to stop for — see `review-pr.mjs`'s `of` derivation. This policy
  *      must not know better than that classification; it only ever activates on the tier the operation itself
- *      already decided is agent-answerable.
- *   2. `run.verdict.verdict === VERDICTS.ACCEPT` → decline, UNCONDITIONALLY, no matter how clean the review.
- *      This is the whole of the operator's 2026-08-31 ruling, and it is the one line in this file that must
- *      never change without a fresh ruling: an unattended agent actor may never be the one that lets a PR merge
- *      on its own recorded acceptance.
+ *      already decided is agent-answerable. UNCHANGED by `#3434` — `review:human` never reaches the branches
+ *      below at all; its own human-only ceremony (`--to=clear-human`) is exactly what `#3434` confirmed stays.
+ *   2. `run.verdict.verdict === VERDICTS.ACCEPT` → answer `accept`. A genuinely independent, clean verdict on
+ *      the AGENT-addressed (`review:pending`) tier IS the clearance — `#3434` (2026-09-01) reversed the prior
+ *      2026-08-31 ruling that declined here unconditionally, found live-fire against two real PRs (`#1764`,
+ *      `#1765`) both queued for no reason other than this line.
  *
  * EVERYTHING ELSE (`changes`, `prevention-outstanding`, any future verdict this fails open on) answers
  * `changes` — safe and reversible by construction, since `record`'s own reasonless-bounce guard only refuses a
  * `changes` answer when the juror(s) returned ZERO findings, and a non-accept verdict from `derivePanelVerdict`
  * implies at least one admitted finding drove it (see that guard in `review-pr.mjs`'s `record` step) — so this
- * policy never needs to compose a `--reason` of its own to satisfy it.
+ * policy never needs to compose a `--reason` of its own to satisfy it. `prevention-outstanding`'s own
+ * file-the-guard-then-accept treatment (`#3434`'s second ruling) is DEFERRED — filed as its own scoped
+ * follow-up, not built here, so this change stays the one thing it verifiably does: mechanical `accept`.
  *
  * @param {{of?: string}|null} pending - the run's `pending` record at an `awaiting-confirm` stop.
  * @param {{verdict?: {verdict?: string}}} run - the run so far; `run.verdict` is `reduce`'s full finding.
@@ -89,7 +95,7 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  */
 export function reviewLoopAutoConfirm(pending, run) {
   if (!pending || pending.of !== CONFIRM_ACTORS.AGENT) return null;
-  if (run?.verdict?.verdict === VERDICTS.ACCEPT) return null;
+  if (run?.verdict?.verdict === VERDICTS.ACCEPT) return { value: 'accept' };
   return { value: UNATTENDED_ANSWER };
 }
 
