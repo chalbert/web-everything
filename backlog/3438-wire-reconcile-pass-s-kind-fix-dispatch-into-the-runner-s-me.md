@@ -5,6 +5,13 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/conveyor/reconcile-pass.mjs
+  - we:scripts/conveyor/reconcile-core.mjs
+  - we:scripts/conveyor/tick-core.mjs
+  - we:scripts/conveyor/__tests__/
+  - we:skills-src/conveyor/runner.mjs
+  - we:skills-src/conveyor/__tests__/
 ---
 
 # Wire reconcile-pass's kind:'fix' dispatch into the runner's mechanical passes
