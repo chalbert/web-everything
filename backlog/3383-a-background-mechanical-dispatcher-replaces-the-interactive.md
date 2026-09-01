@@ -898,3 +898,67 @@ idempotently every time. Confirmed live: `PR #1765` currently carries `review-ro
 `review-status:reviewing`, `PR #1764` carries `review-round:2` + `review-status:reviewing`, both matching real
 state at the moment of writing. Landed on `origin/lane/mechanical-dispatcher` (not yet graduated to `main`,
 same as the rest of the runner infrastructure).
+
+## Session update (2026-09-01, close-out) — mechanical acceptance ratified, built, and proven live twice;
+## two new real findings; both blocking PRs landed
+
+**The "third finding" above is resolved, not a bug.** `claude logs <id>` (raw ANSI, stripped and grepped by
+hand) showed both PRs' repeated "no verdict posted" rounds were genuinely clean, independent ACCEPT verdicts
+correctly queued for a human per the then-standing 2026-08-31 never-auto-accept ruling — not a crash, not a
+hang, not a mechanism failure. That mystery being hard to solve at all is itself real evidence for the new
+`#x7q7xvl` item below.
+
+**Mechanical acceptance ratified and shipped (`#3434` / `backlog/xpfuj64-*.md`).** The operator, live, mid
+this same session: "I want the acceptance to be mechanical from the verdict." Ratified in discussion (not
+unilaterally): a genuinely independent clean verdict on `review:pending` now clears mechanically, no human
+step — reversing the 2026-08-31 ruling for that tier specifically; `review:human` stays human-only, confirmed
+("yes review human are for human"). A related, real fourth-verdict finding surfaced in the same discussion:
+`we:scripts/lib/jury-core.mjs`'s `prevention-outstanding` verdict (bug fixed, a suggested guard never filed)
+is currently folded into "bounce as changes" in the real flow (`we:scripts/operations/review-loop-cli.mjs` →
+`reviewLoopAutoConfirm` — NOT the function `deriveNegotiationOutcome`, in `we:scripts/lib/jury-core.mjs`, a
+separate, differently-behaving consumer of the same enum; do not conflate them) — ratified as its own,
+deferred Done-when item: file the guard, then treat as accept-worthy, never bounce forever over a
+documentation debt the code doesn't have.
+
+Implemented: `reviewLoopAutoConfirm`'s one gating line now answers `accept` for `review:pending`; `PR #1768`
+carried it, correctly parked `review:pending` itself (blast-radius), and — bootstrapping paradox, expected —
+its OWN review necessarily ran under the OLD policy (not yet merged) and queued for a human too. Cleared via
+the standing self-clear-independent-session authorization; the independent session's first resume attempt hit
+a real, orthogonal CLI-shape error (`--answer` on an already-answered `awaiting-effect` run) — fixed by
+re-running the plain resume. `PR #1768` merged. **Then `#1765` and `#1764` (the two real PRs blocking this
+whole live-fire test) were redispatched and BOTH cleared mechanically** — `review:accepted` +
+`ready-to-merge` appeared in one shot, zero human step, real independent jurors, real diffs — and both merged.
+This is this epic's own "Done when" #1, proven twice, back to back, on real PRs, tonight.
+
+**Two more real findings, both now fixed for tonight's own work but NOT YET filed/fully addressed — flagging
+here so they aren't lost:**
+1. **A review dispatched from a stale/unmerged-branch checkout silently runs OLD code, regardless of what's
+   on `main`.** `we:scripts/operations/review-dispatch.mjs` spawns the review agent with its start-of-life
+   `cwd` at the DISPATCHING checkout's own location; if that checkout (e.g. a scratch clone still pinned to
+   `origin/lane/mechanical-dispatcher`, not rebased since `#3434` merged) is stale,
+   `we:scripts/operations/review-loop-cli.mjs` loads ITS copy of `we:scripts/lib/review-loop-policy.mjs`, not
+   the target lane's fresh one — even though the agent later acquires a lane synced to current `main` for the
+   PR's OWN data. Found live: two redispatched rounds kept reporting the pre-`#3434` "queued for a human"
+   behavior until dispatching from a genuinely current `main` clone instead. **Not yet filed as its own
+   item** — whoever picks this up next should file it under `#3383` before building anything else that
+   assumes a dispatch always runs current code.
+2. **The primary checkout's trust had drifted** (flagged at THIS session's own startup hook, never acted on
+   until a background review agent stalled on it hours later — "every Bash command touching
+   `/Users/nicolasgilbert/workspace/webeverything` is auto-denied... that checkout is one of the 45 not yet
+   trusted"). Fixed with the existing remedy, `npm run bootstrap install`. Not a new gap — the detection
+   already existed — but a reminder that a `drift` line at startup is a real, actionable warning, not FYI to
+   skip past.
+
+**Filed this session, under this epic:** `#xh0vtzh` (review-dispatch double-dispatches a re-armed PR — real,
+cost-burning, confirmed, still open), `#xjx2n2s` (nothing mechanically reaps a finished `claude agents`
+session — 16 stopped by hand tonight), `#x7q7xvl` (a dispatched agent writes no structured completion
+record — every real outcome tonight required stripping ANSI from `claude logs` by hand to learn), `#3434`
+(ratified + built, this update). `#xsldreq`'s own prior text was corrected in place after a review finding
+(it mis-cited unmerged-branch code as if verified against `main`) — a live lesson in the same vein as finding
+1 above: verify a code claim against the actual checkout you mean, not from memory of a different branch.
+
+**For the next session:** the two unfiled findings above are the highest-leverage next items. `#xh0vtzh`
+(double-dispatch) and the `prevention-outstanding` accept-treatment (folded into `#3434`'s own Done-when) are
+the two concrete pieces of unfinished work this epic's "Done when" #1 still owes, now that the accept step
+itself is proven. The `lane/mechanical-dispatcher` branch still needs eventual graduation to `main` in small
+pieces — unchanged from every prior update's own note.
