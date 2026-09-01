@@ -906,7 +906,7 @@ same as the rest of the runner infrastructure).
 hand) showed both PRs' repeated "no verdict posted" rounds were genuinely clean, independent ACCEPT verdicts
 correctly queued for a human per the then-standing 2026-08-31 never-auto-accept ruling — not a crash, not a
 hang, not a mechanism failure. That mystery being hard to solve at all is itself real evidence for the new
-`#x7q7xvl` item below.
+`#3436` item below.
 
 **Mechanical acceptance ratified and shipped (`#3434` / `backlog/xpfuj64-*.md`).** The operator, live, mid
 this same session: "I want the acceptance to be mechanical from the verdict." Ratified in discussion (not
@@ -949,15 +949,15 @@ here so they aren't lost:**
    already existed — but a reminder that a `drift` line at startup is a real, actionable warning, not FYI to
    skip past.
 
-**Filed this session, under this epic:** `#xh0vtzh` (review-dispatch double-dispatches a re-armed PR — real,
+**Filed this session, under this epic:** `#3437` (review-dispatch double-dispatches a re-armed PR — real,
 cost-burning, confirmed, still open), `#xjx2n2s` (nothing mechanically reaps a finished `claude agents`
-session — 16 stopped by hand tonight), `#x7q7xvl` (a dispatched agent writes no structured completion
+session — 16 stopped by hand tonight), `#3436` (a dispatched agent writes no structured completion
 record — every real outcome tonight required stripping ANSI from `claude logs` by hand to learn), `#3434`
-(ratified + built, this update). `#xsldreq`'s own prior text was corrected in place after a review finding
+(ratified + built, this update). `#3438`'s own prior text was corrected in place after a review finding
 (it mis-cited unmerged-branch code as if verified against `main`) — a live lesson in the same vein as finding
 1 above: verify a code claim against the actual checkout you mean, not from memory of a different branch.
 
-**For the next session:** the two unfiled findings above are the highest-leverage next items. `#xh0vtzh`
+**For the next session:** the two unfiled findings above are the highest-leverage next items. `#3437`
 (double-dispatch) and the `prevention-outstanding` accept-treatment (folded into `#3434`'s own Done-when) are
 the two concrete pieces of unfinished work this epic's "Done when" #1 still owes, now that the accept step
 itself is proven. The `lane/mechanical-dispatcher` branch still needs eventual graduation to `main` in small
