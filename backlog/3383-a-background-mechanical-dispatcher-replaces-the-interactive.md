@@ -798,3 +798,103 @@ the next genuine test of this epic's own "Done when" #1, not a new build.
 
 **`3433`** (technically enforce review-dispatch's never-self-accept/never-merge rule) remains open, filed,
 deliberately deferred, unchanged from the prior update.
+
+## Working doctrine (2026-09-01), the operator's own words: kanban-style, not stop-and-ask
+
+Set while attempting the live-fire test above (priority 1 from the prior update). Mid-attempt, the driving
+session hit a real obstacle (a stuck-session cleanup path that would not confirm) and stopped to ask the
+operator which of several options to take, using a closed multiple-choice tool. The operator's correction,
+verbatim (their own typo kept): *"I though my instruction on my use were clear, I dislike those closed up
+question UI. second, we need to work kanban style, each time we find an issue you have to apply the real best
+fix merit base to the mechanics and reruns it after. this should be in the epic so it is clear from now on."*
+
+**The rule, standing for this epic from now on:** when a session driving this epic's own machinery hits an
+issue — a stuck session, a broken assumption, a mechanism that silently does the wrong thing — the response is
+to diagnose the root cause and apply the real fix on its own merits, not to stop and surface a menu of options
+for the operator to pick from. **This changes when to ask, not whether the fix gets reviewed** — a real
+mechanism-code fix (a script, an operation, this doctrine text itself) still lands the normal way, committed
+in a lane and landed through the reviewed PR pipeline, never a silent edit. A 2026-09-01 independent review of
+this doctrine's own first cut (PR #1764) correctly caught an earlier draft that read as authorizing silent,
+unreviewed mechanism edits — the language above is the corrected version; see the agent-memory note's own
+2026-09-01 sharpening for the full finding. This generalizes the same judgment-call standard the agent-memory
+note `conveyor-file-decisions-not-inline-questions` already sets for routing calls the driving session owns: a
+live-fire attempt hitting friction is exactly this kind of
+call, not a decision that needs the operator's input. Reserve actually asking the operator for genuine
+authorization gates this epic already treats as such (dispatching something live for the first time, a
+destructive/irreversible action) — not for "which of these four workarounds do you want."
+
+**Concrete instance this session, for calibration.** Two real issues surfaced back to back while queuing
+`#3412` for the live-fire build, both fixed directly rather than asked about: (1) `node we:scripts/backlog.mjs
+build-queue add <NNN>` writes committed `buildQueued:true` frontmatter, but
+`we:scripts/readiness/conveyor-state.mjs`'s CLI always reads the session-local sidecar (`we:.conveyor/queue.json`,
+#2613) when present — even empty — so the committed frontmatter path is DEAD in practice today; fixed by
+reverting that commit and using `node we:scripts/conveyor/queue.mjs add <NNN>` instead (the sidecar CLI
+`we:scripts/conveyor/queue-store.mjs`'s own docblock already names as canonical). This is itself a real,
+unfiled papercut — the legacy `build-queue add` CLI still exists, still prints a success message, and still
+does nothing the dispatcher will ever see; worth its own small item (remove or hard-redirect it) so a future
+session doesn't repeat the same dead end. (2) Four background `conveyor-*` sessions (`#3154`×2, `#3151`, an
+unresolvable `#3`) were stuck `state: blocked`, all pointed at already-`resolved` items — debris from earlier
+test runs, not live work. `claude stop <id>` refused to confirm on any of the four, repeatedly, even after
+retries ("couldn't confirm... background service may be restarting"). Left unresolved rather than blocking on
+it further — the stale guards did not actually block a DIFFERENT item (`#3412`) from being planned/launched,
+so the live-fire attempt proceeded around them rather than being gated on fixing session cleanup first. **This
+is a second real, still-open instance of the self-clear/independent-dispatch class of gap** named in the prior
+update's open question 4 (stop not reliably landing, not just `kill`) — worth its own look, separate from
+tonight's live-fire attempt, not re-derived from scratch.
+
+## Session update (2026-09-01, continued) — the fix half of the loop is confirmed missing, not hypothetical;
+## two new informative PR labels landed; a second real bug class found in review
+
+**`#3412`'s build completed for real** — a genuinely dispatched agent (`conveyor-3412`) built the operation,
+opened `PR #1765`, and it went through THREE real independent-review rounds tonight (round 1: a confirmed
+path-traversal — the containment check validated against one root while the spawned CLI read relative to
+another, unpinned one; round 2, after fixing round 1: a genuinely different bug the same class of check missed
+— the fix and the check now share one root, pinned via `cwd`; round 3 in progress as this update is written).
+`PR #1764` (this epic's own doctrine note, below) went through its own two rounds — round 1 correctly caught
+the doctrine text over-broadening "apply the fix" into something a reader could take as "skip review of the
+result," which it was never meant to authorize.
+
+**The fix half of the fix→review→land loop is now demonstrated missing, not just suspected.** Every one of
+those four bounces — two on `#1765`, two on `#1764` — was repaired by THIS interactive session by hand, not by
+a dispatched fix agent, because no such dispatch exists yet: `we:scripts/conveyor/reconcile-pass.mjs` correctly
+PLANS a `kind: 'fix'` entry for a bounced PR with nothing live working it (confirmed live, `attempts: 1`/`2` on
+the real PRs), but nothing in `we:skills-src/conveyor/runner.mjs`'s mechanical passes — nor tick-core's own
+older `planFixSpawns`, which never fired across 20+ real ticks tonight either — ever executes it. Filed as
+`#xsldreq` two updates ago on a hypothesis; tonight is the direct, repeated, first-hand evidence for it. This
+is THE remaining gap between "review is mechanized" (true, landed, proven twice more tonight) and this epic's
+own "Done when" #1 (a full fix → review → land cycle with zero interactive turns) — not one gap among several,
+the one that's left.
+
+**A second real, cost-burning mechanism bug, found and stopped live: `review-dispatch` double-dispatches a
+re-armed PR.** After the round-1 fixes, re-arming `#1765`/`#1764` (`review:changes → review:pending`) and
+letting `we:skills-src/conveyor/runner.mjs`'s own tick loop run continuously (not `--once`) produced SEVEN
+distinct, genuinely co-live `review-1765` processes over ~15 minutes, none of which ever posted a verdict —
+directly contradicting the runner's own docblock claim that `we:scripts/conveyor/reconcile-core.mjs`'s liveness
+read refuses a re-dispatch while one is already live. The runner had to be killed by hand; 10 stray sessions
+stopped by hand. Filed as `#xh0vtzh`, high priority — a real safety/cost hazard, confirmed, not theoretical.
+
+**A third, still-unexplained failure mode, found retrying the SAME rounds by hand (single dispatch, no
+overlap):** dispatching exactly ONE `we:scripts/operations/review-dispatch.mjs` call per PR (not through the
+buggy loop — by hand, via the real operation) after a re-arm still, twice in a row for each PR, finished
+`state: done` with ZERO PR activity — no comment, no label change. A THIRD single dispatch (after confirming
+the lane pool was NOT exhausted — 41 of 42 lanes free at dispatch time, ruling out the most obvious
+explanation) is in progress as this update is written; `claude logs <id>` is being used to inspect an actual
+failed run rather than guessing again. This is DISTINCT from the double-dispatch bug above (this reproduces
+with a single, non-overlapping dispatch) and from round 1/2's real findings (those DID post verdicts) — a
+genuine third finding, not yet filed as its own item pending the `claude logs` read. Whoever picks this up
+next: do not conflate it with `#xh0vtzh`.
+
+**Two new informative-only PR labels landed and are live on real PRs right now** (the operator, mid-session:
+"expose if a reviewing is currently reviewing and if a fixer is currently fixing... visibility on what is
+actioned upon... periodically verify real state and tag stay aligned, doesn't have to be an internal
+[design]"). `we:scripts/conveyor/review-round-tag.mjs` (`review-round:<N>`, from
+`we:scripts/conveyor/reconcile-pass.mjs`'s own durable re-arm count) and
+`we:scripts/conveyor/review-status-tag.mjs` (`review-status:reviewing` / `review-status:review-stalled` /
+`-fixing` / `-fix-stalled`, from a fresh `claude agents --json` read matched by session name — deliberately
+independent of `we:scripts/conveyor/reconcile-core.mjs`'s own liveness binding, which is under live suspicion
+per `#xh0vtzh` above). Both purely cosmetic — nothing reads them back to decide anything — and both
+self-correcting with no new poller: they ride the runner's existing ~120s tick, re-deriving and re-applying
+idempotently every time. Confirmed live: `PR #1765` currently carries `review-round:3` +
+`review-status:reviewing`, `PR #1764` carries `review-round:2` + `review-status:reviewing`, both matching real
+state at the moment of writing. Landed on `origin/lane/mechanical-dispatcher` (not yet graduated to `main`,
+same as the rest of the runner infrastructure).
