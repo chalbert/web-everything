@@ -6,6 +6,10 @@ status: open
 dateOpened: "2026-08-30"
 relatedTo: ["3397"]
 tags: [conveyor, supervisor, timing, flagged-by-review]
+scope:
+  - we:skills-src/conveyor/supervisor.mjs
+  - we:skills-src/conveyor/runner.mjs
+  - we:skills-src/conveyor/__tests__/
 ---
 
 # Supervisor's clean-exit restart has zero backoff delay — an idle-stopped runner can busy-loop respawning
