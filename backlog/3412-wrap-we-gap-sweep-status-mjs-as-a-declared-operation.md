@@ -2,9 +2,11 @@
 bornAs: xkp1mv8
 kind: task
 parent: "3273"
-status: active
+status: resolved
 dateOpened: "2026-08-30"
 dateStarted: "2026-09-01"
+dateResolved: "2026-09-01"
+graduatedTo: "we:scripts/operations/gap-sweep-status.mjs"
 tags: []
 scope:
   - we:scripts/operations/
