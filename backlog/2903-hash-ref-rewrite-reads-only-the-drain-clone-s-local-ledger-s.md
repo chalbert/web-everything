@@ -101,7 +101,7 @@ un-rewritten. Classified by hand rather than by count, because the raw number ov
 | where | ref | verdict |
 | --- | --- | --- |
 | `we:backlog/2692-…md:245` | `#2685` → landed as #2685 | **genuine dangling ref** — a live pointer ("the convergence loop's own mechanization is …") that resolves to nothing |
-| `we:backlog/2431-…md:7` | `#x1vw9g7` → landed as #2431 | **borderline** — inside a `resolutionNote` quoting a real commit title, so it is a faithful quote, but a reader cannot resolve it |
+| `we:backlog/2431-…md:7` | `#2431` → landed as #2431 | **borderline** — inside a `resolutionNote` quoting a real commit title, so it is a faithful quote, but a reader cannot resolve it |
 | `we:backlog/2428-…md:15` | `#2421` → landed as #2421 | **not damage** — a deliberately quoted example demonstrating this very bug class |
 | `we:backlog/2899-…md:31` | `xo75zon` → landed as #2450 | **not damage** — a `bornAs` value quoted as prose in a table |
 
