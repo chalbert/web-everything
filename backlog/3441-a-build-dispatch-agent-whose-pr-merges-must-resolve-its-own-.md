@@ -5,6 +5,11 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:skills-src/conveyor/
+  - we:scripts/operations/
+  - we:scripts/conveyor/
+  - we:scripts/backlog.mjs
 ---
 
 # A build-dispatch agent whose PR merges must resolve its own backlog item, not leave it active forever
