@@ -6,6 +6,8 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:skills-src/conveyor/
 ---
 
 # Conveyor supervisor/runner residency has no out-of-band alerting — only a JSONL log nobody watches
