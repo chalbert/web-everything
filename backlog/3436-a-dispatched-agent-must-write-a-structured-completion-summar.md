@@ -5,6 +5,11 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:skills-src/review/
+  - we:skills-src/conveyor/
+  - we:scripts/conveyor/
+  - we:scripts/operations/
 ---
 
 # A dispatched agent must write a structured completion summary -- raw claude logs is unusable for machine or quick human read
