@@ -56,13 +56,23 @@
  *     `status` + `waitingFor` on 3. **A missing `pid` is not a dead process and a missing `state` is not a
  *     healthy one.** Absence is UNKNOWN, and unknown refuses — it never reads as idle.
  *   • THE LISTING CARRIES NO PR. There is no `pr`, `item`, `num`, `branch` or `ref` field on ANY entry, so the
- *     PR↔session binding must be DERIVED. The only derivation available today is `cwd` → that lane's `HEAD` →
- *     the PR's `headRefOid`, and that rule PRODUCED A FALSE POSITIVE while #3296 was being prepared: it bound the
- *     preparing session to PR `#1571`, because a second agent had reset the shared `lane-35` checkout to
- *     `#1571`'s head underneath it (`#3283`, observed live rather than argued). So the binding is ITSELF a proxy.
- *     Every liveness refusal therefore carries the `cwd` and the `sha` it turned on, so a false bind is visible
- *     to a reader instead of silently authoritative. Widening the listing to carry a PR field would fix this
- *     properly — it is a change to a tool this repo does not own, so it is named, not absorbed.
+ *     PR↔session binding must be DERIVED. For a build/prepare dispatch the only derivation available is `cwd` →
+ *     that lane's `HEAD` → the PR's `headRefOid`, and that rule PRODUCED A FALSE POSITIVE while #3296 was being
+ *     prepared: it bound the preparing session to PR `#1571`, because a second agent had reset the shared
+ *     `lane-35` checkout to `#1571`'s head underneath it (`#3283`, observed live rather than argued). So the
+ *     binding is ITSELF a proxy. For a REVIEW dispatch it is worse than a rare false positive — it essentially
+ *     NEVER matches at all: `review-dispatch.mjs` spawns the review agent with `cwd: REPO_ROOT` (the primary
+ *     checkout) and its brief never `cd`s into the lane it later acquires for itself, so the cwd/oid rule reads
+ *     the wrong checkout's HEAD on every review session, first round or re-armed (#3437, confirmed live
+ *     2026-09-01: SEVEN independent sessions spawned across ~15 minutes against one re-armed PR, because none
+ *     ever bound). {@link bindAgents} therefore carries a SECOND bind path for this dispatch kind — the session
+ *     `name` (`review-<pr>`, 100% populated on a review-dispatch session, unlike `pid`/`state`) — unioned with
+ *     the cwd/oid path rather than replacing it, since no PR-specific session name exists for build/prepare.
+ *     Every liveness refusal still carries the `cwd` and the `sha` it turned on — `sha` is always the PR's own
+ *     `headRefOid`, so when only the name path matched it reads as evidence the reader can compare against the
+ *     bound agent's OWN `laneHeadOid` (they will differ, which is exactly what proves the cwd/oid path did not
+ *     catch it). Widening the listing to carry a PR field would fix the cwd/oid path properly — it is a change
+ *     to a tool this repo does not own, so it is named, not absorbed.
  *   • `waitingFor: 'permission prompt'` IS A FIFTH STATE, neither alive nor dead. Three sessions have held one
  *     for 211.4 hours. It refuses dispatch AND surfaces under its own kind, or the 211-hour case repeats
  *     silently.
@@ -96,6 +106,7 @@ import { NEGOTIATION_ROUND_CAP } from '../lib/jury-core.mjs';
 import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
+import { reviewSessionSlug } from './review-session-slug.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the only two things this pass ever asks for. Frozen,
@@ -209,28 +220,70 @@ export function countFindings(comments) {
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#bindAgents — derive which live sessions are working THIS PR, and return
- * them with the evidence the derivation turned on. Pure.
+ * them with the evidence the derivation turned on. Pure. Two independent bind paths, UNIONED (#3437 — a review
+ * dispatch essentially never matches the first one; see below):
  *
- * THE BINDING IS A PROXY AND IT IS RETURNED AS ONE. `claude agents --json` carries no `pr`, `item`, `num`,
- * `branch` or `ref` field on any entry — measured over all 17 live sessions — so the only available rule is
- * `cwd` → that lane's `HEAD` → the PR's `headRefOid`. `laneHeadOid` is resolved by the IO shell (this file
- * cannot read a git ref) and compared here. The rule is known to produce false positives when two agents share a
- * checkout and one resets it under the other (#3283, observed live at 17:34Z), which is precisely why each
- * binding carries its `cwd` and `sha` out to the refusal: a reader must be able to audit the bind, not just
- * inherit its verdict.
+ * PATH 1 — `cwd` → that lane's `HEAD` → the PR's `headRefOid`. THE BINDING IS A PROXY AND IT IS RETURNED AS ONE.
+ * `claude agents --json` carries no `pr`, `item`, `num`, `branch` or `ref` field on any entry — measured over
+ * all 17 live sessions — so this is the only rule available for a build/prepare dispatch, which carries no
+ * PR-specific session identity at all. `laneHeadOid` is resolved by the IO shell (this file cannot read a git
+ * ref) and compared here. The rule is known to produce false positives when two agents share a checkout and one
+ * resets it under the other (#3283, observed live at 17:34Z). A blank/absent `headRefOid` or `laneHeadOid` binds
+ * NOTHING on this path — two unknowns are not a match, and treating them as one would bind every session to
+ * every PR.
  *
- * A blank/absent `headRefOid` or `laneHeadOid` binds NOTHING. Two unknowns are not a match, and treating them as
- * one would bind every session to every PR.
- * @param {{headRefOid?:string}} pr
+ * PATH 2 — session `name` === `review-<pr>`. THIS PATH EXISTS BECAUSE PATH 1 CANNOT EVER MATCH A REVIEW-DISPATCH
+ * SESSION, first round or re-armed, working or not (#3437, confirmed live 2026-09-01: SEVEN independent
+ * `review-1765` sessions spawned across ~15 minutes of ticks against one re-armed PR, because none ever bound).
+ * `we:scripts/operations/review-dispatch.mjs` spawns the review agent with `cwd: REPO_ROOT` — the PRIMARY
+ * checkout, per that file's own docblock — and the review agent's own brief never `cd`s the agent's shell into
+ * the lane it later acquires for itself (the lane is a flag to a subprocess, not the agent's own cwd). So
+ * `resolveLaneHead(cwd)` for a `review-<pr>` session always reads the PRIMARY checkout's HEAD, which essentially
+ * never equals `pr.headRefOid` — path 1 is not "rare false positives" for this dispatch kind, it is a near-total
+ * miss. What a review-dispatch session DOES carry, 100% of the time, is a PR-specific `name`
+ * (`we:scripts/conveyor/review-session-slug.mjs#reviewSessionSlug`, spawned via `-n <slug>` and echoed verbatim
+ * on every `claude agents --json` entry — unlike `pid`/`state`, `name` is on all 17 measured entries). Matching
+ * on it needs no `headRefOid` at all, so it still binds when path 1's sha is blank.
+ *
+ * A NAME IS A WEAKER PROXY THAN A GIT SHA — NAMED DELIBERATELY. Nothing stops a `claude agents --json` entry
+ * from carrying `name: "review-1234"` for a reason that has nothing to do with reviewing PR #1234 (a person's
+ * own manually-named debug session, for instance); that entry would now bind and could suppress a real
+ * dispatch. This repo does not treat `claude agents --json` as adversarial input — it reflects genuinely
+ * running local processes, and forging an entry in it already requires local code execution — so the
+ * trade is accepted rather than defended against here.
+ *
+ * Both paths' hits are unioned into one bound list, keyed by AGENT OBJECT IDENTITY in the `Map` below (so a
+ * session that happens to satisfy both paths is stored once, not twice, with no separate dedup check needed —
+ * a second `.set()` on the same key simply overwrites with the same value), and pass through the SAME liveness
+ * assessment below — the union widens WHAT can bind, it does not change what a bind MEANS.
+ * @param {{headRefOid?:string, number?:number|string}} pr
  * @param {Array<object>} agents
  * @returns {Array<{agent:object, cwd:string, sha:string}>}
  */
 export function bindAgents(pr, agents) {
   const sha = String(pr?.headRefOid ?? '');
-  if (!sha) return [];
-  return (Array.isArray(agents) ? agents : [])
-    .filter((a) => a && String(a.laneHeadOid ?? '') && String(a.laneHeadOid) === sha)
-    .map((a) => ({ agent: a, cwd: String(a.cwd ?? ''), sha }));
+  const list = Array.isArray(agents) ? agents : [];
+  const bound = new Map();
+
+  if (sha) {
+    for (const a of list) {
+      if (a && String(a.laneHeadOid ?? '') && String(a.laneHeadOid) === sha) {
+        bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
+      }
+    }
+  }
+
+  const prNumber = Number(pr?.number);
+  if (Number.isInteger(prNumber) && prNumber > 0) {
+    const slug = reviewSessionSlug(prNumber);
+    for (const a of list) {
+      if (a && String(a.name ?? '') === slug) {
+        bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
+      }
+    }
+  }
+
+  return [...bound.values()];
 }
 
 /**
