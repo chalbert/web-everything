@@ -5,6 +5,12 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/readiness/
+  - we:scripts/lane-drain.mjs
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/drain-push-at-close.mjs
+  - we:scripts/__tests__/
 ---
 
 # The drain's whole-process lease is machine-wide, not per-repo -- one project's daemon can silently starve another's
