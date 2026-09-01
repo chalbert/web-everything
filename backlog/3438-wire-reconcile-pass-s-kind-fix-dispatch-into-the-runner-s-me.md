@@ -9,9 +9,10 @@ scope:
   - we:scripts/conveyor/reconcile-pass.mjs
   - we:scripts/conveyor/reconcile-core.mjs
   - we:scripts/conveyor/tick-core.mjs
-  - we:scripts/conveyor/__tests__/
+  - we:scripts/conveyor/__tests__/reconcile-core.test.mjs
+  - we:scripts/conveyor/__tests__/tick-core.test.mjs
   - we:skills-src/conveyor/runner.mjs
-  - we:skills-src/conveyor/__tests__/
+  - we:skills-src/conveyor/__tests__/runner.test.mjs
 ---
 
 # Wire reconcile-pass's kind:'fix' dispatch into the runner's mechanical passes

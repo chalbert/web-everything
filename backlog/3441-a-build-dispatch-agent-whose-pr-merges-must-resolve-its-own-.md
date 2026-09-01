@@ -6,9 +6,7 @@ status: open
 dateOpened: "2026-09-01"
 tags: []
 scope:
-  - we:skills-src/conveyor/
-  - we:scripts/operations/
-  - we:scripts/conveyor/
+  - we:skills-src/conveyor/delivery-agent-brief.md
   - we:scripts/backlog.mjs
 ---
 
