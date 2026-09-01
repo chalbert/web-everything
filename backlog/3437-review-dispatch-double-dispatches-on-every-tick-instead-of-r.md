@@ -6,8 +6,9 @@ status: open
 dateOpened: "2026-09-01"
 tags: []
 scope:
-  - we:scripts/conveyor/
-  - we:scripts/operations/
+  - we:scripts/conveyor/reconcile-core.mjs
+  - we:scripts/conveyor/__tests__/reconcile-core.test.mjs
+  - we:scripts/operations/review-dispatch.mjs
 ---
 
 # review-dispatch double-dispatches on every tick instead of respecting a live review session

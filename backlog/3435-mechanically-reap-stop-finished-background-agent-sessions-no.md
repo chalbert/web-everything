@@ -6,8 +6,7 @@ status: open
 dateOpened: "2026-09-01"
 tags: []
 scope:
-  - we:scripts/conveyor/
-  - we:skills-src/conveyor/
+  - we:skills-src/conveyor/runner.mjs
   - we:scripts/operations/dispatch-lane-io.mjs
   - we:scripts/operations/dispatch-abort.mjs
 ---
