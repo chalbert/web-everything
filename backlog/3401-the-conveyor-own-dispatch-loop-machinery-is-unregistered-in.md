@@ -6,6 +6,10 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:scripts/lib/gate-config.mjs
+  - we:scripts/lib/__tests__/gate-invariants.test.mjs
+  - we:scripts/lib/__tests__/gate-config.test.mjs
 ---
 
 # The conveyor's own dispatch-loop machinery is unregistered in TRUST_CHAIN — a dispatched agent can weaken it via ordinary agent-clearable review
