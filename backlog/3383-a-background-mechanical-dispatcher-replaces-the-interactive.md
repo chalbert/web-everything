@@ -962,3 +962,33 @@ record — every real outcome tonight required stripping ANSI from `claude logs`
 the two concrete pieces of unfinished work this epic's "Done when" #1 still owes, now that the accept step
 itself is proven. The `lane/mechanical-dispatcher` branch still needs eventual graduation to `main` in small
 pieces — unchanged from every prior update's own note.
+
+## Working doctrine (2026-09-01, continued): a mechanically-dispatched item runs on the card + the generic
+## brief, never a bespoke prompt — otherwise the session driving the epic isn't proving the mechanism, it's
+## routing around it
+
+Set when the driving session, picking up `#3437`, wrote a long custom investigative prompt into an `Agent`-tool
+subagent instead of dispatching it the way the epic's own conveyor would. The operator's correction: *"if we
+want the system to be mechanical, like a ui button would do, we should not pass a custom brief, all should be
+in the card to be built and general instructions passed with all items."* Followed by the sharper point once
+asked why the instruction hadn't landed the first time: *"I wonder why our instruction was not clear enough,
+ideally we would save durable instruction in the epic."*
+
+**The rule, standing for this epic from now on:** any investigation, root-cause, or design work a driving
+session does on a child item belongs written INTO that item's own card — never folded into a one-off prompt
+handed to a subagent. Dispatch (of a build, a review, anything this epic mechanizes) happens through the actual
+mechanism under test — `we:scripts/operations/dispatch-lane.mjs` / `we:scripts/operations/review-dispatch.mjs`
+via `we:scripts/operations/run.mjs`, or whatever the current wiring is — using the SAME generic brief every
+item gets (`we:skills-src/conveyor/delivery-agent-brief.md` / `we:skills-src/review/review-agent-brief.md`),
+filled only with the small closed set of placeholders those briefs declare (item number, lane, session slug,
+spec path). A driving session's own `Agent`-tool subagent, however well-briefed, is not that mechanism — using
+one to "get the work done" proves nothing about whether the real dispatcher works, and is exactly the
+interactive hand-holding this epic exists to remove. **This generalizes past this one incident**: whenever a
+driving session finds itself about to write a paragraph of context into a dispatch prompt, that paragraph
+belongs on the card instead, and the prompt goes back to being the generic one.
+
+**Why writing this into the epic, not just doing it once:** the operator's own second remark names the actual
+failure — an instruction given once, in conversation, does not survive past that conversation. A rule that only
+this epic's own machinery is supposed to enforce has to live somewhere a later session (or a later turn of this
+same session, once context has rolled over) will actually read it before repeating the mistake — which is this
+file, not a chat transcript.
