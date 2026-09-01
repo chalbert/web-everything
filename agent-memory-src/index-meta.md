@@ -21,6 +21,7 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 117. Self-Contained Plans — handoff plans carry full context; lead title+goal, surface via backlog
 - 128. Forward Background Progress Into Chat — VS Code ext has NO /workflows TUI; forward via file-watcher re-invoke
 - 134. Delegate By Default — inline = talk · the call · choose+brief · below-floor · the gate it reports; all else spawns; the CALL is never delegated; canon = backlog-workflow.md#model-routing
+- [Main session never edits directly](feedback-main-session-no-direct-edits.md) — the main/interactive session is the orchestrator only: it never runs Edit/Write or git commit/add itself, not even a small doc change — delegate to a subagent or the conveyor instead; operator: "main session should not be allow do make any edit by itself... all should be delegated. you are the orchestrator only" (#3383)
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
 - 144. Session Cost-On-Card Accrual — close accrues session $ to the card(s) worked; decision/prepare accumulate, workflow even-splits, slice/resolve skip
 - [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item
