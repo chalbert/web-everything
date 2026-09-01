@@ -5,6 +5,10 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:docs/agent/
+  - we:skills-src/conveyor/SKILL.md
+  - we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md
 ---
 
 # No operator runbook exists for running, monitoring, or recovering the mechanical dispatcher
