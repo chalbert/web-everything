@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   reviewLoopAutoConfirm, buildAcceptQueueEntry, acceptResumeCommand, isQueuedAcceptStop, ACCEPT_QUEUE_AREA,
+  buildPreventionQueueEntry, isPreventionOutstandingClear, PREVENTION_QUEUE_AREA,
 } from '../review-loop-policy.mjs';
 import { CONFIRM_ACTORS } from '../../operations/review-pr.mjs';
 import { VERDICTS } from '../jury-core.mjs';
@@ -10,9 +11,10 @@ const humanPending = { of: CONFIRM_ACTORS.HUMAN };
 const agentPending = { of: CONFIRM_ACTORS.AGENT };
 
 describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () => {
-  it('declines a HUMAN-addressed confirm no matter what the verdict is — UNCHANGED by #3434', () => {
+  it('declines a HUMAN-addressed confirm no matter what the verdict is — UNCHANGED by #3434/#3442', () => {
     expect(reviewLoopAutoConfirm(humanPending, { verdict: { verdict: VERDICTS.CHANGES } })).toBeNull();
     expect(reviewLoopAutoConfirm(humanPending, { verdict: { verdict: VERDICTS.ACCEPT } })).toBeNull();
+    expect(reviewLoopAutoConfirm(humanPending, { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } })).toBeNull();
   });
 
   it('answers accept unattended for an agent-addressed clean verdict — #3434, mechanical acceptance', () => {
@@ -20,10 +22,16 @@ describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () =
       .toEqual({ value: 'accept' });
   });
 
-  it('answers `changes` unattended for an agent-addressed non-accept verdict', () => {
-    expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.CHANGES } }))
-      .toEqual({ value: 'changes' });
+  it('answers accept unattended for an agent-addressed prevention-outstanding verdict — #3442, no longer bounces', () => {
+    // #3434's second ratified item, finished here: every finding is already resolved by definition of this
+    // verdict, so the only remaining debt is an unfiled prevention guard — accept-worthy, not another round of
+    // `changes` over documentation debt the code itself doesn't have.
     expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } }))
+      .toEqual({ value: 'accept' });
+  });
+
+  it('answers `changes` unattended for an agent-addressed non-accept, non-prevention verdict', () => {
+    expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.CHANGES } }))
       .toEqual({ value: 'changes' });
   });
 
@@ -40,21 +48,23 @@ describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () =
   });
 });
 
-describe('#x100grep — literal grep proof `value: \'accept\'` appears EXACTLY where #3434 put it', () => {
-  it('the source returns accept from exactly one place: the agent-addressed accept-verdict branch', async () => {
-    // #3434 (2026-09-01) deliberately reverses the #x100grep canary this test used to be: instead of asserting
-    // `value: 'accept'` never appears (the OLD, now-superseded invariant), this pins it to appear EXACTLY
-    // once, and only inside `reviewLoopAutoConfirm` itself — so a future edit can still add mechanical accept
-    // to some OTHER function without this test noticing, but cannot silently make `reviewLoopAutoConfirm`
-    // answer accept from more than the one reviewed, ratified branch.
+describe('#x100grep — literal grep proof `value: \'accept\'` appears EXACTLY where #3434/#3442 put it', () => {
+  it('the source returns accept from exactly the two reviewed, ratified branches', async () => {
+    // #3434's FIRST ratified item narrowed this canary to exactly one occurrence; #3442 finishes its SECOND
+    // ratified item (`prevention-outstanding` also auto-clears) and widens the canary to exactly two — still
+    // pinned, still inside `reviewLoopAutoConfirm` only, still one `if` per verdict rather than a combined
+    // condition, so each branch's own regex keeps proving THAT specific verdict is the one deciding it. A
+    // future edit can still add mechanical accept to some OTHER function without this test noticing, but
+    // cannot silently make `reviewLoopAutoConfirm` answer accept from a THIRD, unreviewed branch.
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, '..', 'review-loop-policy.mjs'), 'utf8');
     const matches = src.match(/value:\s*['"]accept['"]/g) ?? [];
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(2);
     expect(src).toMatch(/VERDICTS\.ACCEPT\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
+    expect(src).toMatch(/VERDICTS\.PREVENTION_OUTSTANDING\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
   });
 });
 
@@ -131,5 +141,87 @@ describe('isQueuedAcceptStop', () => {
   it('false for a missing outcome', () => {
     expect(isQueuedAcceptStop(null)).toBe(false);
     expect(isQueuedAcceptStop(undefined)).toBe(false);
+  });
+});
+
+describe('buildPreventionQueueEntry — the notification filed per unfiled prevention guard (#3442)', () => {
+  const finding = { prevention: 'add a lint rule that catches this class of defect at write-time', preventionCaptured: false };
+  const entry = buildPreventionQueueEntry({ repo: 'chalbert/web-everything', pr: 1234, runId: 'r-abc123', finding });
+
+  it('produces a kind learnings-drop still recognizes', () => {
+    expect(KINDS).toContain(entry.kind);
+  });
+
+  it('validates clean against the live learnings-drop schema', () => {
+    const { ok, errors } = validateEntry(entry);
+    expect(ok, errors?.join('; ')).toBe(true);
+  });
+
+  it('names the PR in `summary` and carries the guard text in `suggestion`', () => {
+    expect(entry.summary).toContain('chalbert/web-everything#1234');
+    expect(entry.summary).toContain('PREVENTION-OUTSTANDING');
+    expect(entry.suggestion).toContain('r-abc123');
+    expect(entry.suggestion).toContain(finding.prevention);
+  });
+
+  it('stays within every field cap, for a realistic repo/pr/runId/guard', () => {
+    for (const [field, cap] of Object.entries(FIELD_CAPS)) {
+      expect(entry[field].length).toBeLessThanOrEqual(cap);
+    }
+  });
+
+  it('area names the operation, for a reader of the pool with no other context', () => {
+    expect(entry.area).toBe(PREVENTION_QUEUE_AREA);
+  });
+
+  it('refuses rather than truncates when an input is too long to fit', () => {
+    const hugeGuard = 'x'.repeat(500);
+    expect(() => buildPreventionQueueEntry({
+      repo: 'o/r', pr: 1, runId: 'r', finding: { prevention: hugeGuard },
+    })).toThrow(/over the pool's/);
+  });
+});
+
+describe('isPreventionOutstandingClear', () => {
+  const outstandingFindings = [{ prevention: 'guard A', preventionCaptured: false }];
+
+  it('true for a non-parked outcome whose verdict is prevention-outstanding with an uncaptured guard', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'complete',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(true);
+  });
+
+  it('true on an effect-in-flight stop too — the accept already recorded, the PR-comment effect just has not settled', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'effect-in-flight',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(true);
+  });
+
+  it('false for a `confirm` stop — a review:human PR carrying this verdict is still parked, nothing to file yet', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'confirm',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(false);
+  });
+
+  it('false for any other verdict', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'complete',
+      run: { verdict: { verdict: VERDICTS.ACCEPT, findings: outstandingFindings } },
+    })).toBe(false);
+  });
+
+  it('false when the verdict carries no actually-uncaptured finding (defensive — should not happen in practice)', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'complete',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: [{ prevention: 'g', preventionCaptured: true }] } },
+    })).toBe(false);
+  });
+
+  it('false for a missing outcome', () => {
+    expect(isPreventionOutstandingClear(null)).toBe(false);
+    expect(isPreventionOutstandingClear(undefined)).toBe(false);
   });
 });

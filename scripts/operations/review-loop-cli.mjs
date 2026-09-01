@@ -2,8 +2,9 @@
 /**
  * @file scripts/operations/review-loop-cli.mjs
  * @description #3072's REMAINING SLICE, MADE CALLABLE — drives ONE `review-pr` run unattended, using
- * `we:scripts/lib/review-loop-policy.mjs`'s ratified confirm policy, and files the queued-accept notification
- * when the policy declines because the run's own verdict would otherwise accept.
+ * `we:scripts/lib/review-loop-policy.mjs`'s ratified confirm policy, and files a notification either way the
+ * policy leaves a debt behind: the queued-accept notice when it DECLINES an accept (`review:human`), or the
+ * filed-prevention notice when it ANSWERS accept over an unfiled prevention guard (#3442, `review:pending`).
  *
  *   node scripts/operations/review-loop-cli.mjs --pr=1234 --repo=chalbert/web-everything --cwd=<a lane>
  *   node scripts/operations/review-loop-cli.mjs --resume=<run-id> --repo=chalbert/web-everything --pr=1234
@@ -53,8 +54,10 @@ import { createFileRunStore, newRunId } from './run-store.mjs';
 import { resolveOperation, createCliJudgeFactory } from './run.mjs';
 import { appendEntry } from '../conveyor/learnings-drop.mjs';
 import {
-  acceptResumeCommand, buildAcceptQueueEntry, isQueuedAcceptStop, reviewLoopAutoConfirm,
+  acceptResumeCommand, buildAcceptQueueEntry, buildPreventionQueueEntry, isPreventionOutstandingClear,
+  isQueuedAcceptStop, reviewLoopAutoConfirm,
 } from '../lib/review-loop-policy.mjs';
+import { hasUncapturedPrevention } from '../lib/jury-core.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /** The operation this driver always runs. Not a flag: this file has exactly one job. */
@@ -186,6 +189,58 @@ export async function runReviewLoopOnce({
           ? [`FAILED to file the learnings-pool notice: ${filingError}`]
           : [`filed → ${filed.path}`]),
         `clear it: ${resumeCmd}`,
+      ],
+      run: outcome.run,
+      stopped: outcome.stopped,
+    };
+  }
+
+  // ── THE PREVENTION-FILED BRANCH (#3442, #3434's second ratified item) — the run already auto-cleared to
+  // `accept` (see `reviewLoopAutoConfirm`'s `PREVENTION_OUTSTANDING` branch): unlike the queued-accept branch
+  // above, nothing is parked here — this only files the named guard(s) as the notification a human still
+  // needs, mirroring that branch's file-then-notify shape, then falls through to the ordinary rendering below
+  // (an `accept` outcome, same as a genuinely clean verdict would render) with the filing result spliced in.
+  if (isPreventionOutstandingClear(outcome)) {
+    const { pr, repo } = outcome.run.input;
+    // PER-FINDING, NOT PER-RUN (review, finding 1). `buildPreventionQueueEntry` REFUSES rather than truncates
+    // a guard whose own text overflows `FIELD_CAPS` (see that function) — a single oversized `prevention`
+    // string must not (a) crash this whole invocation uncaught (the accept already recorded; a caller with no
+    // try/catch of its own would get an unhandled rejection over a PR that already cleared) or (b) block filing
+    // every OTHER guard in the same run that would have fit. So both the BUILD and the APPEND are inside one
+    // try/catch, per finding — one bad guard's failure is isolated and reported, the rest still file.
+    const filedPaths = [];
+    const buildOrFileErrors = [];
+    for (const finding of outcome.run.verdict.findings.filter(hasUncapturedPrevention)) {
+      try {
+        const entry = buildPreventionQueueEntry({ repo, pr, runId: outcome.run.id, finding });
+        filedPaths.push(appendLearning(entry, { session }).path);
+      } catch (e) {
+        // NEITHER FAILURE UN-DOES THE ACCEPT — it already recorded. The worst this costs is a human finding
+        // out about this one unfiled guard later than they might have; reported loudly rather than swallowed,
+        // same posture as the queued-accept branch's own filing failure.
+        buildOrFileErrors.push(String(e?.message ?? e));
+      }
+    }
+    const filingError = buildOrFileErrors.length ? buildOrFileErrors.join('; ') : null;
+
+    if (parsed.control.json) {
+      const payload = {
+        ...outcomePayload({ run: outcome.run, stopped: outcome.stopped, ownedBy: declaration.ownedBy }),
+        preventionFiled: filedPaths,
+        ...(filingError ? { preventionFilingError: filingError } : {}),
+      };
+      return { code: filingError ? 1 : 0, lines: [JSON.stringify(payload, null, 2)], run: outcome.run, stopped: outcome.stopped };
+    }
+    const rendered = renderOutcome({ outcome, json: false, declaration });
+    return {
+      code: filingError ? 1 : rendered.code,
+      lines: [
+        ...rendered.lines,
+        '',
+        `prevention-outstanding auto-cleared to accept — ${filedPaths.length} named guard(s) filed to the `
+        + 'learnings pool:',
+        ...filedPaths.map((p) => `  filed → ${p}`),
+        ...(filingError ? [`FAILED to file (some guard(s) may be unfiled): ${filingError}`] : []),
       ],
       run: outcome.run,
       stopped: outcome.stopped,

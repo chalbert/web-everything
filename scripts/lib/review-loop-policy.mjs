@@ -49,7 +49,7 @@
  */
 
 import { CONFIRM_ACTORS, CONFIRM_OPTIONS } from '../operations/review-pr.mjs';
-import { VERDICTS } from './jury-core.mjs';
+import { VERDICTS, hasUncapturedPrevention } from './jury-core.mjs';
 import { FIELD_CAPS, KINDS } from '../conveyor/learnings-drop.mjs';
 
 /**
@@ -81,13 +81,29 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  *      2026-08-31 ruling that declined here unconditionally, found live-fire against two real PRs (`#1764`,
  *      `#1765`) both queued for no reason other than this line.
  *
- * EVERYTHING ELSE (`changes`, `prevention-outstanding`, any future verdict this fails open on) answers
- * `changes` — safe and reversible by construction, since `record`'s own reasonless-bounce guard only refuses a
- * `changes` answer when the juror(s) returned ZERO findings, and a non-accept verdict from `derivePanelVerdict`
- * implies at least one admitted finding drove it (see that guard in `review-pr.mjs`'s `record` step) — so this
- * policy never needs to compose a `--reason` of its own to satisfy it. `prevention-outstanding`'s own
- * file-the-guard-then-accept treatment (`#3434`'s second ruling) is DEFERRED — filed as its own scoped
- * follow-up, not built here, so this change stays the one thing it verifiably does: mechanical `accept`.
+ *   3. `run.verdict.verdict === VERDICTS.PREVENTION_OUTSTANDING` → answer `accept` (#3442, `#3434`'s SECOND
+ *      ratified item, finished here — the first item's own docblock used to call this DEFERRED). Every actual
+ *      finding is already resolved by definition of this verdict (`deriveVerdict`/`derivePanelVerdict` only
+ *      reach it once no finding still blocks) — the sole remaining debt is a named prevention guard nobody
+ *      filed. Nothing about the CODE is wrong, so re-entering the bounce/retry loop over documentation debt the
+ *      code itself doesn't have would spend a round fixing nothing (the exact thing `#1765`/`#1764` did,
+ *      repeatedly, the night this decision was made). This function stays PURE — it does not file the guard(s)
+ *      itself; the impure caller does that off the SAME `run.verdict.findings` this branch answered from, one
+ *      {@link buildPreventionQueueEntry} per outstanding guard, once {@link isPreventionOutstandingClear} says
+ *      so, mirroring {@link buildAcceptQueueEntry}'s file-then-notify shape exactly as `#3434` asked.
+ *
+ * EVERYTHING ELSE (`changes`, `needs-human` reaching here at all, any future verdict this fails open on)
+ * answers `changes` — safe and reversible by construction, since `record`'s own reasonless-bounce guard only
+ * refuses a `changes` answer when the juror(s) returned ZERO findings, and a non-accept, non-prevention verdict
+ * from `derivePanelVerdict` implies at least one admitted finding drove it (see that guard in `review-pr.mjs`'s
+ * `record` step) — so this policy never needs to compose a `--reason` of its own to satisfy it.
+ *
+ * @verdicts-partial `changes` and `needs-human` are never referenced by name: BOTH intentionally fall through
+ * to the SAME `UNATTENDED_ANSWER` branch above (undeclared-verdict fail-safe included) rather than earning
+ * their own `=== VERDICTS.X` line — `needs-human` cannot reach this function's body at all in practice (refusal
+ * 1 always declines a HUMAN-addressed confirm first), so writing a branch for it would assert a case this
+ * policy structurally never sees. Only `accept` and `prevention-outstanding` are the REVIEWED, RATIFIED
+ * branches this file's own canary test (`review-loop-policy.test.mjs`) pins to exactly these two.
  *
  * @param {{of?: string}|null} pending - the run's `pending` record at an `awaiting-confirm` stop.
  * @param {{verdict?: {verdict?: string}}} run - the run so far; `run.verdict` is `reduce`'s full finding.
@@ -96,6 +112,7 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
 export function reviewLoopAutoConfirm(pending, run) {
   if (!pending || pending.of !== CONFIRM_ACTORS.AGENT) return null;
   if (run?.verdict?.verdict === VERDICTS.ACCEPT) return { value: 'accept' };
+  if (run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING) return { value: 'accept' };
   return { value: UNATTENDED_ANSWER };
 }
 
@@ -174,4 +191,92 @@ export function isQueuedAcceptStop(outcome) {
   return outcome?.stopped === 'confirm'
     && outcome?.run?.pending?.of === CONFIRM_ACTORS.AGENT
     && outcome?.run?.verdict?.verdict === VERDICTS.ACCEPT;
+}
+
+/** Where a filed-prevention entry is filed from, for a reader of the pool who has never heard of this operation. */
+export const PREVENTION_QUEUE_AREA = 'review-loop prevention-outstanding auto-accept (#3442)';
+
+/**
+ * BUILD ONE learnings-pool entry for ONE outstanding prevention guard. PURE — mirrors {@link buildAcceptQueueEntry}
+ * field-for-field (same defensive cap assertions, same "refuse rather than truncate" posture), one finding at a
+ * time rather than one entry per run: a `prevention-outstanding` verdict can carry several named guards at once
+ * (`derivePanelVerdict` does not cap it at one), and folding them all into a single `summary`/`suggestion` would
+ * risk exactly the overflow this file already refuses to silently truncate — one entry per guard keeps each
+ * comfortably inside `FIELD_CAPS` on its own.
+ *
+ * @param {{repo: string, pr: number|string, runId: string, finding: {prevention?: string}}} o
+ * @returns {{kind: string, summary: string, area: string, suggestion: string}}
+ */
+export function buildPreventionQueueEntry({ repo, pr, runId, finding } = {}) {
+  const subject = `${repo}#${pr}`;
+  const entry = {
+    kind: 'improvement',
+    summary: `${subject}'s independent review reduced to PREVENTION-OUTSTANDING and auto-cleared to accept — `
+      + 'a named prevention guard was never filed as its own backlog item.',
+    area: PREVENTION_QUEUE_AREA,
+    suggestion: `File as a backlog item (run ${runId}): ${finding?.prevention ?? '(no guard text recorded)'}`,
+  };
+  // SAME DEFENSIVE ASSERTION AS buildAcceptQueueEntry, AND FOR THE SAME REASON — a human acts on this field;
+  // silently cutting a guard's own text short would hand them a broken lead instead of a working one.
+  for (const [field, cap] of Object.entries(FIELD_CAPS)) {
+    if (entry[field].length > cap) {
+      throw new Error(
+        `review-loop-policy: the filed-prevention entry's \`${field}\` is ${entry[field].length} chars, over `
+        + `the pool's ${cap}-char cap — ${JSON.stringify(subject)}, the run id, or the guard text is unusually `
+        + 'long. Refusing to truncate a value a human will act on; shorten the inputs or widen the cap deliberately.',
+      );
+    }
+  }
+  if (!KINDS.includes(entry.kind)) {
+    throw new Error(`review-loop-policy: 'improvement' is no longer one of learnings-drop's KINDS (${KINDS.join(', ')}) — pick a live one`);
+  }
+  return entry;
+}
+
+/**
+ * IS THIS OUTCOME THE "PREVENTION-OUTSTANDING AUTO-CLEARED TO ACCEPT" CASE? PURE — the one fact
+ * `review-loop-cli.mjs` needs to decide whether to file one {@link buildPreventionQueueEntry} per outstanding
+ * guard, mirroring {@link isQueuedAcceptStop}'s role for the OTHER file-then-notify branch. (The caller does
+ * its OWN `findings.filter(hasUncapturedPrevention)` to get the list to file — kept there, not wrapped in a
+ * `buildPreventionQueueEntries` batch helper here, so a single oversized guard's `buildPreventionQueueEntry`
+ * throw can be caught PER FINDING and never blocks filing the others in the same run; see the caller.)
+ *
+ * DELIBERATELY A DIFFERENT SHAPE FROM `isQueuedAcceptStop`: that predicate matches a STOP (the policy declined,
+ * the run is still parked at `confirm`). This one matches the OPPOSITE — the policy ANSWERED `accept` for this
+ * verdict (see {@link reviewLoopAutoConfirm}), so the run already advanced past `confirm` and `pending` is
+ * cleared. `outcome.stopped !== 'confirm'` is the guard that keeps this `false` for a `review:human` PR
+ * carrying the same verdict — refusal 1 in `reviewLoopAutoConfirm` declines it unconditionally, so THAT run is
+ * still sitting at `confirm` with nothing to file yet.
+ *
+ * `hasUncapturedPrevention` (`we:scripts/lib/jury-core.mjs`, #2823) is the WIDE "notice" predicate — NOT the
+ * same one `deriveVerdict` gates the verdict itself on (`blocksAcceptance`, that same file, narrows it further
+ * by `impactIfUnfixed` against `PREVENTION_IMPACT_BAR`). Using the wide predicate here is deliberate, matching
+ * `renderPreventionSummary`'s own convention (see that file's "notice-wide / verdict-narrow split"): a finding
+ * whose guard is real but sits BELOW the bar still gets filed, even though it did not by itself drive this run
+ * to `PREVENTION_OUTSTANDING` — the debt exists either way, and this only ever runs once at least one OTHER
+ * finding already crossed the bar and produced this verdict in the first place.
+ *
+ * A KNOWN, ACCEPTED GAP (review, finding 2, deliberately not closed here): this reads the run's TERMINAL
+ * state, not "did the confirm step answer THIS call" — so a stale re-`--resume=<id>` of an already-COMPLETE
+ * `prevention-outstanding` run (an operator/automation checking status, a retried dispatch) re-satisfies this
+ * predicate every time and re-files duplicate learnings-pool entries. `driveRun` short-circuits to `stopped:
+ * 'complete'` at TURN ZERO for an already-finished run (`we:scripts/operations/cli-adapter.mjs`), so nothing
+ * here can tell "just answered" from "answered a while ago" without a durable per-run "already filed" marker
+ * this size-scoped item does not add. This is the SAME shape `isQueuedAcceptStop`'s permanently-parked
+ * `confirm` state already has (a repeated status check there re-files too) — not a new class of risk, only a
+ * wider surface, since `complete` is far cheaper to re-hit than a park. A cheap-looking fix (require
+ * `outcome.applied.length > 0`, i.e. "this call itself did the work") was considered and rejected: a run that
+ * resumes past an `effect-in-flight` halt whose effect later resolved via `wake.mjs` (out of process) can
+ * legitimately reach `complete` with an EMPTY `applied` on the call that observes it — that guard would silently
+ * DROP a real, first-time filing, which is worse than an occasional duplicate. Left as a follow-up rather than
+ * guessed at here.
+ *
+ * @param {{stopped?: string, run?: {pending?: object, verdict?: {verdict?: string, findings?: Array<object>}}}} outcome
+ * @returns {boolean}
+ */
+export function isPreventionOutstandingClear(outcome) {
+  return outcome?.stopped !== 'confirm'
+    && outcome?.run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING
+    && Array.isArray(outcome?.run?.verdict?.findings)
+    && outcome.run.verdict.findings.some(hasUncapturedPrevention);
 }
