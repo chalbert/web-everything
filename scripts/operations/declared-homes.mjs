@@ -71,4 +71,8 @@ export const DECLARED_HOMES = Object.freeze({
   // "IT DECLARES OVER THE TICK CORE; IT DOES NOT RE-DERIVE IT". A skill telling an agent to run the core by
   // hand is telling it to execute a dispatch the operation exists to make structural.
   'dispatch-lane': Object.freeze(['we:scripts/conveyor/tick-core.mjs']),
+
+  // `gap-sweep-status` SHELLS the home and classifies its fixed text output — its own header states the
+  // relationship outright, same as `verify` above. No subcommand: the CLI takes flags only.
+  'gap-sweep-status': Object.freeze(['we:scripts/gap-sweep-status.mjs']),
 });

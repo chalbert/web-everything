@@ -65,6 +65,8 @@ import { mutationCheckOperation, MUTATION_CHECK_OP } from './mutation-check.mjs'
 import { createMutationCheckSinks } from './mutation-check-io.mjs';
 import { exploreOperation, EXPLORE_OP } from './explore.mjs';
 import { createExploreSinks, agentArgsFromEnv as exploreAgentArgsFromEnv } from './explore-io.mjs';
+import { gapSweepStatusOperation, GAP_SWEEP_STATUS_OP } from './gap-sweep-status.mjs';
+import { createGapSweepSinks } from './gap-sweep-status-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -105,6 +107,14 @@ export const OPERATIONS = Object.freeze({
   [MUTATION_CHECK_OP]: () => ({
     declaration: mutationCheckOperation(),
     sinks: createMutationCheckSinks(),
+  }),
+  // #xkp1mv8 — a thin wrap of the existing `we:scripts/gap-sweep-status.mjs` CLI. UNLIKE `verify` above, its
+  // one step is an `effect`: `mode: 'snapshot'` writes a file, so the step kind must keep the whole operation
+  // off `./http-adapter.mjs`'s GET-only surface regardless of which mode a given call chooses. See the
+  // declaration's own comment.
+  [GAP_SWEEP_STATUS_OP]: () => ({
+    declaration: gapSweepStatusOperation(),
+    sinks: createGapSweepSinks(),
   }),
   // #xrrpfo7 — `claim`'s sibling: the CLOSE of the lifecycle whose OPEN #3034 declared. Same shape (read →
   // plan → write), same guarded writer, and the guards are REPLAYED from `we:scripts/backlog.mjs`'s
