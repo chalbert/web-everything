@@ -54,6 +54,7 @@ import { VERIFY_OP } from '../verify.mjs';
 import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
 import { PR_STATUS_OP } from '../pr-status.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
+import { GAP_SWEEP_STATUS_OP } from '../gap-sweep-status.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -339,6 +340,12 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // step creates the card. Listed for map coverage; the declaring module reaches nothing that can act and
     // every write lives in `scaffold-io.mjs`, behind the guarded writer.
     [SCAFFOLD_OP]: 'scaffold.mjs',
+    // #xkp1mv8 — `gap-sweep-status`'s one step is an `effect` (its own header explains why: `mode: 'snapshot'`
+    // writes a file, and the step kind cannot depend on which mode a given call chooses), so it is NOT
+    // read-only; listed here for map coverage. The declaring module still reaches nothing that can act — the
+    // one shell of the CLI lives entirely in `gap-sweep-status-io.mjs`, behind the sink `../run.mjs` wires it
+    // through.
+    [GAP_SWEEP_STATUS_OP]: 'gap-sweep-status.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
