@@ -6,6 +6,9 @@ parent: "3383"
 status: open
 dateOpened: "2026-08-31"
 tags: []
+scope:
+  - we:scripts/operations/
+  - we:skills-src/conveyor/
 ---
 
 # Give a dispatched delivery agent a static system-prompt identity, separate from its per-item brief
