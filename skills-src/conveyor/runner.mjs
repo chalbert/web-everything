@@ -453,6 +453,31 @@ export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession
               process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
             }
           }
+          // PURELY INFORMATIVE (`we:scripts/conveyor/review-round-tag.mjs`) — a `review-round:<N>` label so a
+          // human scanning the PR list can see how many rounds a PR has been through with no click-through.
+          // `d.attempts` is `reconcile-pass.mjs`'s own durable re-arm count (#2643) for THIS PR — the round
+          // about to run is always one past that. Best-effort like every other step in this loop: a failed tag
+          // write never blocks a review from actually being dispatched, and nothing downstream reads this label
+          // to decide anything.
+          try {
+            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
+              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+          } catch (e) {
+            process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+          }
+        }
+        // PURELY INFORMATIVE (`we:scripts/conveyor/review-status-tag.mjs`) — "is a reviewer or a fixer actually
+        // working this PR right now, or is a live session stuck" (the operator: visibility into a crashed/hung
+        // agent, not just whether one was dispatched). A SEPARATE loop from the one above: it must ALSO cover
+        // PRs that are NOT being freshly dispatched this tick (an already-live session, or one that just
+        // finished and needs its stale label cleared) — `reviewsOwed` alone misses both.
+        for (const c of statusCandidates) {
+          try {
+            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
+              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+          } catch (e) {
+            process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+          }
         }
       }
     } catch (e) {
