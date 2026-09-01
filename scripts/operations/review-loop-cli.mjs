@@ -224,12 +224,21 @@ export async function runReviewLoopOnce({
     const filingError = buildOrFileErrors.length ? buildOrFileErrors.join('; ') : null;
 
     if (parsed.control.json) {
+      // FIXED (independent review of PR #1784, CONFIRMED): this used to hardcode `code: filingError ? 1 : 0`,
+      // ignoring `outcome.stopped` entirely — the SAME `renderOutcome`-bypass shape the plain-text branch
+      // below never had (it already delegates to `rendered.code`, which IS `renderOutcome`'s own stopped-aware
+      // value). `isPreventionOutstandingClear` narrows entry to this branch to the two genuine-success stops
+      // (`'complete'`, `'effect-in-flight'`), so `baseCode` is 0 in the only cases this branch runs today —
+      // but deriving it from `outcome.stopped`, the same success set `renderOutcome`'s own JSON path uses
+      // (minus `'confirm'`, not reachable here), keeps this branch correct on its own terms rather than
+      // correct only because a guard elsewhere happens to protect it.
+      const baseCode = outcome.stopped === 'complete' || outcome.stopped === 'effect-in-flight' ? 0 : 1;
       const payload = {
         ...outcomePayload({ run: outcome.run, stopped: outcome.stopped, ownedBy: declaration.ownedBy }),
         preventionFiled: filedPaths,
         ...(filingError ? { preventionFilingError: filingError } : {}),
       };
-      return { code: filingError ? 1 : 0, lines: [JSON.stringify(payload, null, 2)], run: outcome.run, stopped: outcome.stopped };
+      return { code: filingError ? 1 : baseCode, lines: [JSON.stringify(payload, null, 2)], run: outcome.run, stopped: outcome.stopped };
     }
     const rendered = renderOutcome({ outcome, json: false, declaration });
     return {

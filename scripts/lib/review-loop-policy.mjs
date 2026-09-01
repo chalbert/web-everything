@@ -271,11 +271,28 @@ export function buildPreventionQueueEntry({ repo, pr, runId, finding } = {}) {
  * DROP a real, first-time filing, which is worse than an occasional duplicate. Left as a follow-up rather than
  * guessed at here.
  *
+ * FIXED (independent review of PR #1784, CONFIRMED): this predicate used to read `outcome?.stopped !==
+ * 'confirm'`, which does not mean "this run actually succeeded" — it means "this run stopped anywhere other
+ * than the human-park stop", and `driveRun` (`we:scripts/operations/cli-adapter.mjs`) has several OTHER
+ * terminal stops that are failures, not successes: `'effect-halted'` (an effect — e.g. the accept label swap —
+ * threw), `'step-refused'` (a declaration fn refused deterministically) and `'stuck'` (the run made no
+ * progress). A `prevention-outstanding` verdict can still be sitting on `run.verdict` when any of those fires
+ * (the verdict is computed at `reduce`, upstream of `confirm`/the effect apply this predicate is meant to gate
+ * on), so the old check would call a HALTED or REFUSED run "clear" and the caller below would file the
+ * prevention guard(s) and report success for a PR whose accept never actually landed. The only two terminal
+ * stops that legitimately mean "the accept went through" are named two paragraphs up: `'complete'` and
+ * `'effect-in-flight'` (a dispatched effect that will resolve later, out of process — still a SUCCESSFUL stop,
+ * per `driveRun`'s own comment on that branch). Narrowed to exactly those two, matching the success set
+ * `renderOutcome`'s own JSON-code branch uses (`stopped === 'complete' || stopped === 'confirm' || stopped ===
+ * 'effect-in-flight'`) minus `'confirm'`, which is excluded here on purpose — that stop means the run is still
+ * PARKED (only reachable for a `review:human` PR, since refusal 1 in `reviewLoopAutoConfirm` declines those
+ * unconditionally), not cleared.
+ *
  * @param {{stopped?: string, run?: {pending?: object, verdict?: {verdict?: string, findings?: Array<object>}}}} outcome
  * @returns {boolean}
  */
 export function isPreventionOutstandingClear(outcome) {
-  return outcome?.stopped !== 'confirm'
+  return (outcome?.stopped === 'complete' || outcome?.stopped === 'effect-in-flight')
     && outcome?.run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING
     && Array.isArray(outcome?.run?.verdict?.findings)
     && outcome.run.verdict.findings.some(hasUncapturedPrevention);

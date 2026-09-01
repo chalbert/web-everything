@@ -224,4 +224,31 @@ describe('isPreventionOutstandingClear', () => {
     expect(isPreventionOutstandingClear(null)).toBe(false);
     expect(isPreventionOutstandingClear(undefined)).toBe(false);
   });
+
+  // Independent review of PR #1784 (CONFIRMED): the original predicate read `outcome?.stopped !== 'confirm'`,
+  // which wrongly treats every OTHER `driveRun` stop as success too — including these three genuine FAILURE
+  // stops, each of which can still carry a `prevention-outstanding` verdict on `run.verdict` (that field is
+  // computed upstream, at `reduce`, before the effect apply / step that then halts or refuses). A caller that
+  // trusted the old predicate here would file the guard(s) and report success for a PR whose accept never
+  // actually landed.
+  it('false for an `effect-halted` stop — the accept label swap (or similar effect) threw, nothing actually cleared', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'effect-halted',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(false);
+  });
+
+  it('false for a `step-refused` stop — a declaration fn refused deterministically, the run did not complete', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'step-refused',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(false);
+  });
+
+  it('false for a `stuck` stop — the run made no progress, definitely not a cleared accept', () => {
+    expect(isPreventionOutstandingClear({
+      stopped: 'stuck',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING, findings: outstandingFindings } },
+    })).toBe(false);
+  });
 });

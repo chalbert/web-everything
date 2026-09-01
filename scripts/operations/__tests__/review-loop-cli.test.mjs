@@ -351,6 +351,48 @@ describe('runReviewLoopOnce — property 4: prevention-outstanding also ACCEPTS 
     expect(out.run.pending.of).toBe('human');
     expect(filedCount).toBe(0);
   });
+
+  // Independent review of PR #1784 (CONFIRMED): `isPreventionOutstandingClear` used to treat every stop
+  // OTHER than `confirm` as success, so a mid-apply failure (the label-swap effect throwing) on a
+  // `prevention-outstanding` run would still take this branch, file the guard(s), and — via the JSON branch's
+  // old `code: filingError ? 1 : 0` — report exit code 0 even though the accept never actually landed. Both
+  // are fixed now: the halted stop no longer satisfies `isPreventionOutstandingClear`, so this run falls
+  // through to the ORDINARY `renderOutcome` rendering for an `effect-halted` stop (code 1, no filing).
+  it('an effect-halted run (the accept label swap threw) is NOT treated as prevention-outstanding-clear — no filing, exit code 1', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    let filedCount = 0;
+    const throwingSinks = {
+      ...recordingSinks([]),
+      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
+    };
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: throwingSinks,
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-effect-halted',
+      appendLearning: () => { filedCount += 1; return { record: {}, path: '' }; },
+    });
+    expect(out.stopped).toBe('effect-halted');
+    expect(out.code).toBe(1);
+    expect(filedCount).toBe(0);
+  });
+
+  it('same effect-halted case, --json: exit code still 1, no `preventionFiled` field — `outcome.stopped` is honored, not ignored', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const throwingSinks = {
+      ...recordingSinks([]),
+      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
+    };
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: throwingSinks,
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-effect-halted-json',
+      appendLearning: () => { throw new Error('must not be called'); },
+    });
+    expect(out.code).toBe(1);
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.stopped).toBe('effect-halted');
+    expect(payload).not.toHaveProperty('preventionFiled');
+  });
 });
 
 describe('runReviewLoopOnce — property 3: a gate-self PR is UNCHANGED', () => {
