@@ -3,13 +3,16 @@
  * subprocess and no real learnings-pool file: a stub `readPr`, a canned judge, recording sinks, an in-memory
  * run store and an injected `appendLearning`.
  *
- * THE THREE PROPERTIES THIS FILE EXISTS TO PIN:
- *   1. A clean (or already-agreeing) verdict on a non-gate-self PR QUEUES — it never records `accepted`
- *      unattended, and it FILES the notification so a human finds out.
+ * THE THREE PROPERTIES THIS FILE EXISTS TO PIN (#3434, 2026-09-01, reverses property 1's old shape — it used
+ * to say "queues, never auto-accepts"; the operator's live-fire finding, two real PRs sitting queued for no
+ * reason, is what prompted the reversal):
+ *   1. A clean (or already-agreeing) verdict on a non-gate-self PR ACCEPTS MECHANICALLY — the effects apply,
+ *      the run completes, and nothing is queued for a human (the old queue-and-notify path is now dead for
+ *      this tier; the learnings-pool filing machinery it used stays for `review:human`'s own, unchanged, park).
  *   2. A verdict carrying findings BOUNCES unattended (`changes`, effects applied, run completes) — the round
  *      the operator's automated fix-loop already expects.
  *   3. A gate-self (`review:human`) PR is UNCHANGED: the policy declines (wrong actor), the run parks exactly
- *      as it does for the ordinary human CLI, and nothing is queued (queuing is an ACCEPT-only concept).
+ *      as it does for the ordinary human CLI, and no accept — mechanical or manual — happens without one.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -71,35 +74,20 @@ const cannedJudge = (answer) => () => async () => judgeOutcome(answer, {});
 const BASE_ARGV = ['--pr=1234', '--repo=chalbert/web-everything'];
 
 describe('runReviewLoopOnce — the loop field (converged/in-progress/exhausted/escalated) survives --json on EVERY stop', () => {
-  it('on a queued-accept stop, --json still carries run.verdict.loop unmodified, plus the queue fields', async () => {
+  it('on a mechanically-accepted stop, --json carries run.verdict.loop unmodified, no queue fields at all — #3434', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
     const out = await runReviewLoopOnce({
       declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
-      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-json-queued',
-      appendLearning: () => ({ record: {}, path: '/fake/path.jsonl' }),
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-json-accept',
+      appendLearning: () => { throw new Error('must not be called — nothing to file when accept lands mechanically'); },
     });
     expect(out.code).toBe(0);
     const payload = JSON.parse(out.lines[0]);
     expect(payload.verdict.loop).toEqual({ outcome: 'converged', round: 1, cap: 5, why: 'accepted at round 1' });
-    expect(payload.queued).toBe('accept-needs-human');
-    expect(payload.resumeCommand).toContain('--answer=accept');
-    expect(payload.filedTo).toBe('/fake/path.jsonl');
-  });
-
-  it('on a queued-accept stop where filing failed, --json still carries the loop AND the filingError', async () => {
-    const { declaration, registry } = registryFor({});
-    const store = createMemoryRunStore();
-    const out = await runReviewLoopOnce({
-      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
-      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-json-queued-fail',
-      appendLearning: () => { throw new Error('disk full'); },
-    });
-    expect(out.code).toBe(1);
-    const payload = JSON.parse(out.lines[0]);
-    expect(payload.verdict.loop.outcome).toBe('converged');
-    expect(payload.filingError).toBe('disk full');
-    expect(payload.filedTo).toBeNull();
+    expect(payload).not.toHaveProperty('queued');
+    expect(payload).not.toHaveProperty('resumeCommand');
+    expect(payload).not.toHaveProperty('filedTo');
   });
 
   it('on a bounced (changes) stop, --json carries the loop via the ordinary renderOutcome path', async () => {
@@ -114,46 +102,34 @@ describe('runReviewLoopOnce — the loop field (converged/in-progress/exhausted/
   });
 });
 
-describe('runReviewLoopOnce — property 1: a clean verdict QUEUES, never auto-accepts', () => {
-  it('files the learnings-pool notice and reports QUEUED, without ever answering accept', async () => {
+describe('runReviewLoopOnce — property 1: a clean verdict on review:pending ACCEPTS MECHANICALLY (#3434)', () => {
+  it('applies the effects, completes the run, and never files a learnings-pool notice', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
     const seen = [];
-    const filed = [];
     const out = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
       makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-clean',
-      appendLearning: (entry, opts) => { filed.push({ entry, opts }); return { record: entry, path: '/fake/pool/file.jsonl' }; },
+      appendLearning: () => { throw new Error('must not be called — nothing to file when accept lands mechanically'); },
     });
 
     expect(out.code).toBe(0);
-    expect(out.stopped).toBe('confirm');
-    expect(out.lines.join('\n')).toMatch(/QUEUED for a human/);
-    expect(out.lines.join('\n')).toMatch(/--answer=accept/);
-    // NOTHING was applied — no comment, no label swap, no ledger row. The run stayed suspended.
-    expect(seen).toHaveLength(0);
-    expect(out.run.findings.confirm).toBeUndefined();
-
-    // The filed entry itself — the notification a human actually reads.
-    expect(filed).toHaveLength(1);
-    expect(filed[0].entry.kind).toBe('friction');
-    expect(filed[0].entry.summary).toContain('chalbert/web-everything#1234');
-    expect(filed[0].entry.suggestion).toContain('--answer=accept');
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    // The SAME effect application a bounce gets — a label swap lands, this time to accepted, not parked.
+    expect(seen.map((s) => s.type)).toContain(REVIEW_EFFECTS.LABEL);
+    expect(out.lines.join('\n')).not.toMatch(/QUEUED for a human/);
   });
 
-  it('reports the filing failure loudly rather than silently losing the notice', async () => {
+  it('names the round-cap outcome in its text output, same shape a bounce gets', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
     const out = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
-      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-filing-fails',
-      appendLearning: () => { throw new Error('pool file is not writable'); },
+      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-clean-loop-line',
+      appendLearning: () => { throw new Error('must not be called'); },
     });
-    expect(out.code).toBe(1);
-    expect(out.lines.join('\n')).toMatch(/FAILED to file the learnings-pool notice/);
-    expect(out.lines.join('\n')).toMatch(/pool file is not writable/);
-    // Still queued, not lost: the resume command is still printed so a human can act anyway.
-    expect(out.lines.join('\n')).toMatch(/--answer=accept/);
+    expect(out.lines.join('\n')).toMatch(/review loop: converged — accepted at round 1/);
   });
 });
 
@@ -204,24 +180,30 @@ describe('runReviewLoopOnce — property 3: a gate-self PR is UNCHANGED', () => 
 });
 
 describe('runReviewLoopOnce — an explicit --resume --answer still works, exactly like the human CLI', () => {
-  it('a human resuming with --answer=accept on a first-round run records it (unattended path never runs twice)', async () => {
-    const { declaration, registry } = registryFor({});
+  it('a human resuming a PARKED review:human run with --answer=changes records it — parking itself is UNCHANGED by #3434', async () => {
+    // Uses `changes`, not `accept`: clearing a gate-self PR's own accept has a SEPARATE independence guard
+    // (unrelated to #3434, untouched by it) that this synthetic stub reader does not satisfy — out of scope
+    // here. The property this test exists to pin is narrower and still holds: `review:human` still parks
+    // (wrong actor) exactly as before, and the general `--resume=<id> --answer=<x>` mechanism still works.
+    const { declaration, registry } = registryFor({ labels: ['review:human'] });
     const store = createMemoryRunStore();
     const seen = [];
+    // BLOCKING_ANSWER (real findings), not CLEAN_ANSWER: `record`'s own reasonless-bounce guard refuses a
+    // `changes` answer with zero findings behind it (see review-pr.mjs), which is orthogonal to this test's
+    // actual property (that review:human still parks and a resume still clears it) — a zero-finding verdict
+    // would trip that unrelated guard on resume regardless of #3434.
     const opened = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
-      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'r-explicit',
-      appendLearning: () => ({ record: {}, path: '' }),
+      makeJudge: cannedJudge(BLOCKING_ANSWER), mintRunId: () => 'r-explicit',
     });
-    expect(opened.stopped).toBe('confirm'); // queued, unattended
+    expect(opened.stopped).toBe('confirm'); // parked — wrong actor (human-addressed), unchanged by #3434
 
-    // A HUMAN now clears it by hand, on their own time — exactly the resume command the queue printed.
     const resumed = await runReviewLoopOnce({
-      declaration, registry, argv: ['--resume=r-explicit', '--answer=accept'], store, sinks: recordingSinks(seen),
-      makeJudge: cannedJudge(CLEAN_ANSWER), mintRunId: () => 'unused',
+      declaration, registry, argv: ['--resume=r-explicit', '--answer=changes'], store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(BLOCKING_ANSWER), mintRunId: () => 'unused',
     });
     expect(resumed.stopped).toBe('complete');
-    expect(resumed.run.findings.confirm).toBe('accept');
+    expect(resumed.run.findings.confirm).toBe('changes');
     expect(seen.map((s) => s.type)).toContain(REVIEW_EFFECTS.LABEL);
   });
 });

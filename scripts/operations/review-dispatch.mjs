@@ -54,13 +54,17 @@
  * whole thing is testable with no real subprocess and no real session.
  *
  * WHAT THIS FILE DOES NOT CLOSE, STATED PLAINLY (an independent review of PR #1756, security lens, CONFIRMED
- * this — the #2895 discipline: a residual left silent is worse than one left open). The dispatched session's
- * "never self-accept, never merge" rule (`we:skills-src/review/review-agent-brief.md`) is enforced only as
- * PROSE the session reads — nothing in `dispatchReview` technically restricts its tools, so a prompt-injection
+ * this — the #2895 discipline: a residual left silent is worse than one left open). CORRECTED 2026-09-01
+ * (`#3434`): `review-loop-policy.mjs#reviewLoopAutoConfirm` no longer refuses `accept` for the agent-addressed
+ * (`review:pending`) tier — a genuinely independent clean verdict clears mechanically now, by design, THROUGH
+ * `review-loop-cli.mjs`. The residual risk this paragraph names is narrower than it used to read: not "bypass
+ * the never-self-accept refusal" (there is no such refusal left to bypass on `review:pending`), but "skip the
+ * judging entirely" — nothing in `dispatchReview` technically restricts its tools, so a prompt-injection
  * payload embedded in the very PR it is reviewing could in principle talk it into running
- * `review-pr --answer=accept` (or worse) directly, bypassing `review-loop-cli.mjs`'s own code-enforced
- * `reviewLoopAutoConfirm` refusal entirely, since that policy only binds a caller who goes THROUGH it. `caller`
- * here means a Bash-capable session persuaded to run a different command instead — the same trust boundary
+ * `review-pr --answer=accept` directly WITHOUT the two independent jurors ever running, forging the SAME
+ * outcome the mechanical path produces honestly. `review:human`'s own refusal is UNCHANGED by `#3434` and
+ * still fully real — this residual is `review:pending`-only. `caller` here means a Bash-capable session
+ * persuaded to run a different command instead — the same trust boundary
  * `we:scripts/lib/review-independence.mjs`'s own header names for `CLAUDE_CODE_SESSION_ID` ("not an unforgeable
  * actor signal … #2895 ruled that deferred"). Filed as its own item rather than solved here or left unfiled:
  * `we:backlog/xf38r2m-technically-enforce-review-dispatch-s-never-self-accept-neve.md`.
