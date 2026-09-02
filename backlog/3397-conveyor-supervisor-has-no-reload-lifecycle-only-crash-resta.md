@@ -4,6 +4,7 @@ kind: story
 size: 3
 parent: "3383"
 status: open
+blockedBy: ["3443"]
 dateOpened: "2026-08-30"
 tags: []
 ---
@@ -12,7 +13,7 @@ tags: []
 
 we:skills-src/conveyor/supervisor.mjs (built this epic, still unlanded on lane/mechanical-dispatcher) only handles two events: a child crash (restart with backoff) and SIGINT/SIGTERM (forward to the child, then exit). Neither path lets a running supervisor+runner pair pick up new code without a human finding and killing the process by hand — exactly the residency gap #2468/#2501 already solved for the sibling drain daemon (self-update-then-reload via clean-exit + launchd KeepAlive relaunch, ratified 2026-07-27). Nothing extends that ratified pattern to this newer resident process.
 
-**Landing-order note:** we:skills-src/conveyor/supervisor.mjs does not exist on `main` yet — it lives only on `origin/lane/mechanical-dispatcher`. Check #3383's own "what's still not done" list for that branch's current landing status before designing against this file; its shape may shift before it merges.
+**Landing-order note:** we:skills-src/conveyor/supervisor.mjs does not exist on `main` yet — it lives only on `origin/lane/mechanical-dispatcher`. Check #3383's own "what's still not done" list for that branch's current landing status before designing against this file; its shape may shift before it merges. Recorded mechanically via `blockedBy: ["3443"]` (graduation of that branch) so the dispatcher's readiness engine excludes this item until #3443 resolves — do not re-dispatch before then.
 
 ## Done when
 
