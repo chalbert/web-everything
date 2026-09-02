@@ -2,14 +2,61 @@
 bornAs: xfmw9pt
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateStarted: "2026-09-01"
+dateResolved: "2026-09-01"
+codifiedIn: "docs/agent/platform-decisions.md#operations-declared-once-callers-generated"
 preparedDate: "2026-09-01"
+ratifiedBy: "Nicolas Gilbert (operator)"
 relatedReport: reports/2026-09-01-hosted-key-billed-operation-auth-metering.md
 tags: [operations-engine, billing, metering, auth]
 ---
 
 # The ratified hosted-key-billed delivery mode has no metering, billing, or auth design named anywhere
+
+## Ruling (2026-09-01) — Fork 1 = (a), Fork 2 = (a), gate = NOT-YET
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-09-01, as presented.** Both fork defaults ratified as
+prepared, and the validation gate's own NOT-YET verdict ratified alongside them:
+
+- **Fork 1 = (a).** Thread `callerId` through the existing `driveRun`/`TELEMETRY_NUMBERS` judge-cost path;
+  capture a dispatched agent's own reported cost at `resolveInFlight` (the only point it's known), not a new
+  generic `applyPendingEffects` hook. Rejected (b): a per-operation opt-in `effect` step — repeats, for
+  billing, the hand-authored-step shape clause 1 already forbids for routing.
+- **Fork 2 = (a).** Bearer API key, checked ahead of the route table in `we:scripts/operations/http-adapter.mjs`'s
+  `createNodeRequestListener`, resolved to a `callerId`; `resolveCaller` stays undefined by default so
+  solo-local's implicit localhost trust is unchanged. Rejected (b): OAuth/JWT end-user identity — presupposes
+  an identity provider and a login ceremony this caller shape (an account, not a person) doesn't have.
+- **Attribution** composes from the two ratified defaults above (Fork 2 resolves the `callerId`, Fork 1 threads
+  it onto the telemetry) — no separate fork, as prepared.
+- **Validation gate: NOT-YET, ratified as the standing verdict.** Ratifying the gate means the fork *shapes*
+  above are settled precedent — a future implementer doesn't re-litigate them cold when the trigger fires — it
+  is **not** a license to build any of it now. Un-gate on either named trigger (either is sufficient, and they
+  are not equally merit-grounded): (1) the operational-state store goes shared per
+  [#2626](/backlog/2626-operational-state-store-session-local-sidecars-now-a-shared-/)/[#2742](/backlog/2742-un-gate-stand-up-the-shared-durable-operational-state-store-/)'s
+  own already-ratified trigger (#2742's live remaining blocker is [#2642](/backlog/2642-juror-management-page-review-and-manage-jurors-from-the-cons/),
+  still `open`) — the budget-independent blocker, since no engineering effort makes caller auth testable
+  against a store structurally unreachable by a second actor; or (2) a real second off-machine caller of
+  `we:scripts/operations/http-adapter.mjs` materializes (a market-timing trigger, named honestly as weaker
+  than trigger 1, not smuggled in as equally load-bearing). Absent either, hold — no build/task item is
+  scaffolded off this ratification.
+
+**On Fork 1(a)-1 (threading `callerId` onto the already-shipped judge-cost telemetry) — left for gate-time,
+not scaffolded as its own item.** The prepared card itself notes this half "has no dependency on a second
+caller or a shared store... nothing here prevents authoring it whenever convenient," and that stands
+un-amended by ratification. Weighed anyway against filing it as a narrow follow-on now, and declined: with
+solo-local's implicit single session as the only real caller today, a threaded `callerId` would carry one
+constant value with nothing yet on the other end to attribute it against — it only becomes a load-bearing
+field once Fork 2's auth actually produces distinct caller identities. A standalone card for a few-line
+plumbing change with no live consumer is the same premature-build motion the gate exists to hold off elsewhere
+in this decision, even though this one slice is technically unblocked. Recorded here as a one-line
+implementation note for whoever builds Fork 1 + Fork 2 together once a trigger fires, rather than as separate
+tracked work.
+
+Codified as an extension to
+[`#operations-declared-once-callers-generated`](../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)
+clause 4 (the two-tier seam clause this decision gives its hosted-tier shape to).
 
 we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated clause 4 (ratified, #3031) names two permanent delivery modes: solo-local (subscription-funded) and hosted-key-billed. The solo mode is built; the hosted mode has zero design past its name — no card describes key-to-spend attribution, metering, or how `we:scripts/operations/http-adapter.mjs` (no auth/token concept today) would authenticate a caller once it isn't localhost-only. The backlog's only billing cards (#2531, #2779, #2780, #554) are scoped to plateau-app's own paid page-building product — a different consumer, not this operation engine.
 

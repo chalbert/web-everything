@@ -3120,6 +3120,24 @@ principle, not on #2626 being ruled). The
 rejected branch — agents calling HTTP services — fails on lane clones (N checkouts, N ports, no answer to "which
 server acts on which clone") and on the session-free direction of #2701/#2703.
 
+**Extended 2026-09-01 (operator; #3400)** — clause 4's hosted tier gets a named shape, ratified ahead of being
+built. Metering, for the `judge` step kind, is not open: real per-run dollar telemetry already ships
+(`we:scripts/operations/run-record.mjs`'s `TELEMETRY_NUMBERS`, populated from every juror spawn's own reported
+cost). Two forks fill the actual gaps: **(1)** a `dispatch: true` effect's cost — unknown at apply-time because
+the spawned work hasn't finished — is captured where it resolves, at `resolveInFlight`, never by a new generic
+hook over effect application; **(2)** a caller authenticates via a bearer API key checked at the transport
+adapter (`we:scripts/operations/http-adapter.mjs`), resolved to a `callerId`, with `resolveCaller` (proposed) undefined by
+default so solo-local's implicit trust is untouched — never OAuth/end-user identity, which presupposes a login
+ceremony this caller shape (an account, not a person) doesn't have. Attribution ("whose key, which run") falls
+out of composing the two: Fork 2's resolved `callerId` threaded onto Fork 1's existing telemetry. **The shape is
+ratified; building it is not** — a **NOT-YET** validation gate stands over all of it except the one slice with
+no dependency on either trigger (threading `callerId` onto the already-shipped judge telemetry, buildable
+whenever convenient but left unscaffolded pending a real second caller to attribute against). Un-gates on
+either: the operational-state store going shared per
+[#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates)'s own #2626/#2742 trigger, or a
+real second off-machine caller of the HTTP adapter materializing. Full reasoning, skeptic passes and the
+prior-art survey: [#3400](/backlog/3400-the-ratified-hosted-key-billed-delivery-mode-has-no-metering/).
+
 ---
 
 ### The conveyor's headless dispatch starts agents by CALLING the declared `dispatch-lane` operation — never a second spawn implementation, never a cross-process call into a sibling repo's server {#conveyor-dispatch-calls-the-declared-operation}
