@@ -7,12 +7,14 @@
  *   (#2449/#2458) — all exported from `scripts/merge-ai-prs.mjs` (plus a couple from
  *   `scripts/lib/review-escalation.mjs`).
  */
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
+import { acquireDrainLease, drainLeaseStatus, localRepoSlug } from '../readiness/drain-lock.mjs';
 import { claudeCommit, humanCommit, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
@@ -742,6 +744,53 @@ describe('merge-ai-prs — decideDrainLeaseGate (#2449 always-on whole-process l
     expect(decideDrainLeaseGate({ dryRun: true, onlyPr: '3', status: free }).reason).toBe('dry-run');
     expect(decideDrainLeaseGate({ onlyPr: '3', noLease: true, status: free }).reason).toBe('single-pr-fast-drain');
     expect(decideDrainLeaseGate({ noLease: true, status: free }).reason).toBe('no-drain-lease');
+  });
+});
+
+describe('merge-ai-prs — cross-repo lease-key MISMATCH regression (2026-09-01 incident): a --under-lease child gates against the REAL acquireDrainLease/drainLeaseStatus/localRepoSlug, not a fixture status object', () => {
+  // The 2026-09-01 live incident: PRs #1804/#1808 sat ready-to-merge+green 20+ min unlanded. Root cause was
+  // NOT in this file or drain-lock.mjs — both behave exactly as #3440 designed (a repoKey-scoped lease lives in
+  // its OWN lock dir, distinct from the legacy unscoped one — already proven by drain-lock.test.mjs's "invisible
+  // to a legacy status read" case). The bug was in the RESIDENT DAEMON caller (plateau-app's daemon.mjs): it
+  // acquired/heartbeat/released its OWN top-level lease WITHOUT a repoKey (the legacy lock dir), while the CHILD
+  // pass it spawns (this file, run from the daemon's dedicated WE clone) resolves `localRepoSlug()` and gates
+  // `--under-lease` against the REPO-SCOPED lock dir — two different lock dirs for what must be one lease. This
+  // test drives the full real chain (acquireDrainLease → drainLeaseStatus → decideDrainLeaseGate, plus the real
+  // localRepoSlug) against a temp lock root, to pin the exact failure signature and its fix, as a durable guard
+  // against any FUTURE caller repeating the same mismatch.
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'drain-lock-mismatch-')); });
+  afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
+
+  const fakeExec = (url) => () => url; // stands in for `git remote get-url origin` in localRepoSlug's injected exec
+
+  it('BUGGY shape: daemon acquires UNSCOPED, child gates SCOPED → declared-holder-gone despite a genuinely live, sole-owner daemon', () => {
+    const OWNER = 'Mac:73384:drain-daemon';
+    // The daemon's own top-level acquire, exactly as the pre-fix daemon.mjs called it: no repoKey.
+    expect(acquireDrainLease(root, OWNER, { nowMs: 0 }).ok).toBe(true);
+    // The child resolves ITS OWN repoKey from the clone it runs in (real localRepoSlug, real parse).
+    const childRepoKey = localRepoSlug({ exec: fakeExec('git@github.com:chalbert/web-everything.git') });
+    expect(childRepoKey).toBe('chalbert/web-everything');
+    // The child's --under-lease gate reads status at the SCOPED path — but the daemon never wrote a lease
+    // there, only at the legacy unscoped one. So it reads as free, not "held by OWNER".
+    const status = drainLeaseStatus(root, { nowMs: 60_000, repoKey: childRepoKey });
+    expect(status.held).toBe(false);
+    const gate = decideDrainLeaseGate({ underLease: OWNER, status });
+    // This IS the observed incident: exit 0, "no-op", reason declared-holder-gone, considered:0 — despite the
+    // daemon genuinely being the sole live holder (just at a different lock dir than the child checked).
+    expect(gate).toMatchObject({ action: 'noop', reason: 'declared-holder-gone' });
+  });
+
+  it('FIXED shape: daemon acquires with the SAME repoKey the child resolves → the child correctly sees under-lease and proceeds', () => {
+    const OWNER = 'Mac:73384:drain-daemon';
+    const repoKey = localRepoSlug({ exec: fakeExec('git@github.com:chalbert/web-everything.git') });
+    // The fix: the daemon computes repoKey the same way (from the SAME clone) and threads it through its own
+    // acquire — now both sides key off the identical lock dir.
+    expect(acquireDrainLease(root, OWNER, { nowMs: 0, repoKey }).ok).toBe(true);
+    const status = drainLeaseStatus(root, { nowMs: 60_000, repoKey });
+    expect(status).toMatchObject({ held: true, owner: OWNER });
+    const gate = decideDrainLeaseGate({ underLease: OWNER, status });
+    expect(gate).toMatchObject({ action: 'under-lease', heldBy: OWNER }); // the child now proceeds to sweep
   });
 });
 
