@@ -219,6 +219,10 @@ function buildGuardBashFixtures() {
     { id: 'git-push-main', cmd: 'git push origin main', ctx: {}, basis: '#2203 strict lane-only' },
     { id: 'git-push-lane-ref', cmd: 'git push origin HEAD:refs/heads/lane/batch-example-1', ctx: {}, basis: 'allowed: lane ref' },
     { id: 'benign-test-run', cmd: 'npm test -- run', ctx: {}, basis: 'allowed baseline' },
+    // #2968 — the exact 2026-08 `/converge` read command PR #1064's review found: a blocked
+    // `git add --intent-to-add --all` re-spelled as an enumerate-then-add pipe, same effect, different letters.
+    { id: 'git-add-enumerate-then-add-pipe', cmd: 'git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --', ctx: {}, basis: '#2968 / PR #1064 — pipe-to-xargs sink, matched by effect not flag spelling' },
+    { id: 'git-add-explicit-paths', cmd: 'git add path/a path/b', ctx: {}, basis: '#2968 — allowed: an explicitly-named path set' },
     // #2367/#2413/#2997 — the lane-clobber repro table, pinned row by row. Rows 1-3 are the SHIPPED
     // behaviour; row 4 is the residual #2413 left open by gating its minted-slug regime on the
     // `workflowLane` marker, which only `--purpose=workflow-lane` sets. A guard change that silently

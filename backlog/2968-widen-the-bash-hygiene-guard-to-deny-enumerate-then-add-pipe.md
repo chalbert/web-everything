@@ -2,8 +2,9 @@
 bornAs: xb7cima
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-08-06"
+dateStarted: "2026-09-01"
 tags: []
 scope:
   - we:scripts/guard-bash.mjs
@@ -58,3 +59,19 @@ we:scripts/guard-bash.mjs (so it stays unit-testable and rides the golden corpus
 - An explicit `git add path/a path/b` still passes.
 - The deny message names the EFFECT ("stages a path set you did not name"), not a flag list, so the next
   re-spelling has nothing to route around.
+
+## Progress
+
+- Confirmed at readiness pre-check: no persistent we:scripts/guard-bash.mjs rule for `git add -A`/`.`/`--all`
+  actually ships today (only reasoned about in PR #1064's own review) — this item builds it net-new rather
+  than literally "widening" a rule that exists in the tree; the DoD is otherwise buildable as written.
+- `reason()` gets a new per-segment DIRECT-shape arm (`-A`/`--all`/a bare `.`).
+- `decide()` gets a new whole-command `gitAddEnumerationReason` check (pipe-to-xargs, while-read, `-exec`
+  shapes) — `parseSegments` now also reports `pipedFrom` (a bare `|` vs `;`/`&&`) so a real data pipe into
+  `git add` is told apart from two unrelated sequenced commands.
+- we:scripts/__tests__/guard-bash.test.mjs: new `#2968` describe block covers all four sink shapes + the
+  explicit-path pass-through + the `;`/`&&`/`||` non-pipe negatives; four PRE-EXISTING tests that used
+  `git add -A` incidentally (unrelated to this rule) were updated to an explicit path so they still exercise
+  what they were actually testing.
+- we:scripts/mine-golden-corpus.mjs: added the exact 2026-08 `/converge` pre-fix command (PR #1064) plus an
+  explicit-path allow case to the hand-curated `hook-guard-bash` seed set; re-mined we:scripts/golden-corpus/.

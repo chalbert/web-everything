@@ -1,0 +1,9 @@
+{
+  "id": "git-add-explicit-paths",
+  "cmd": "git add path/a path/b",
+  "ctx": {},
+  "basis": "#2968 — allowed: an explicitly-named path set",
+  "expect": {
+    "reason": null
+  }
+}
