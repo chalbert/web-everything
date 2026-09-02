@@ -315,6 +315,36 @@ describe('the ledger and notice sinks', () => {
 });
 
 /**
+ * #xlw02hw — the `advise` step's sink. UNLIKE the label sink, it goes nowhere near
+ * `we:scripts/review-set-label.mjs`: it posts a bare comment through the SAME `postComment` primitive that
+ * single home itself calls, injected here exactly as `runNode` is injected above, so this is testable with no
+ * `gh` on PATH and asserts the argv it would build without running it.
+ */
+describe('the advisory-note sink', () => {
+  it('posts the body through the injected `postComment`, touching no label and no ledger', async () => {
+    const calls = [];
+    const sinks = createReviewPrSinks({ root, postComment: (repo, pr, body) => { calls.push({ repo, pr, body }); } });
+    const result = await sinks[REVIEW_EFFECTS.ADVISORY_NOTE](
+      { pr: 9, repo: 'o/n', body: '⚠️ advisory only' },
+      { ...CTX, type: REVIEW_EFFECTS.ADVISORY_NOTE, step: 'advise' },
+    );
+    expect(calls).toEqual([{ repo: 'o/n', pr: 9, body: '⚠️ advisory only' }]);
+    expect(result).toEqual({ posted: true });
+    // No label swap and no local sidecar write — this sink's only side effect is the one `postComment` call
+    // asserted above. (Not asserting the ledger here: unlike the block above, this describe does not redirect
+    // `WE_VERDICT_LEDGER_DIR`, and this sink never touches the ledger at all, so there is nothing to check.)
+    expect(existsSync(reviewSidecarDir(root))).toBe(false);
+  });
+
+  it('defaults to the real `gh`-backed provider when no `postComment` is injected', () => {
+    // Just proves the default is wired, not a live `gh` call: `createReviewPrSinks({ root })` must not throw
+    // while BUILDING the sink map (the provider is constructed eagerly as the default parameter value).
+    const sinks = createReviewPrSinks({ root });
+    expect(typeof sinks[REVIEW_EFFECTS.ADVISORY_NOTE]).toBe('function');
+  });
+});
+
+/**
  * THE ROUND NUMBER IS ROUNDS SINCE THE LAST CLEAR, not rows ever written (#3072; PR #1178 review, finding 3).
  *
  * `history` holds every verdict a PR has ever carried, including rows from an already-CONVERGED loop, so

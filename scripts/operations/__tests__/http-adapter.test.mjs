@@ -39,7 +39,7 @@ import { inFlight } from '../effect-executor.mjs';
 import { validateInput } from '../registry.mjs';
 import { buildCliSpec, judgeOutcome, parseOperationArgv, runOperationCli } from '../cli-adapter.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
-import { reviewPrOperation, REVIEW_PR_OP } from '../review-pr.mjs';
+import { reviewPrOperation, REVIEW_PR_OP, REVIEW_EFFECTS } from '../review-pr.mjs';
 import { suggestNextOperation, SUGGEST_NEXT_OP } from '../suggest-next.mjs';
 import { GATE_HEALTH_OP } from '../gate-health.mjs';
 import { DISPATCH_LANE_OP } from '../dispatch-lane.mjs';
@@ -190,7 +190,7 @@ describe('the read-only path is given nothing to write WITH', () => {
 
   it('`runReadOnly` takes no store, no sinks and no judge — and refuses a declaration that can suspend', () => {
     expect(() => runReadOnly(REVIEW_PR_DECL(), { input: { pr: 1, repo: 'a/b' }, id: 'r-1', registry: createRegistry() }))
-      .toThrow(/is not `compute`-only — judge\(judge\), judgeSecurity\(judge\), confirm\(confirm\), record\(effect\)/);
+      .toThrow(/is not `compute`-only — judge\(judge\), judgeSecurity\(judge\), advise\(effect\), confirm\(confirm\), record\(effect\)/);
     expect(() => assertReadOnlyDeclaration(REVIEW_PR_DECL())).toThrow(/is not `compute`-only/);
     expect(assertReadOnlyDeclaration(SUGGEST_DECL()).name).toBe(SUGGEST_NEXT_OP);
   });
@@ -418,7 +418,7 @@ describe('describe — one declaration, one description', () => {
   it('the index lists every declared operation and whether it can write', async () => {
     const res = await handleOperationRequest({ method: 'GET', url: '/operations' }, { ...wiring(), newRunId: idMinter() });
     expect(res.body.operations).toEqual([
-      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'judgeSecurity(judge)', 'reduce(compute)', 'confirm(confirm)', 'record(effect)'] },
+      { op: REVIEW_PR_OP, readOnly: false, describe: '/operations/review-pr', steps: ['read(compute)', 'judge(judge)', 'judgeSecurity(judge)', 'reduce(compute)', 'advise(effect)', 'confirm(confirm)', 'record(effect)'] },
       { op: SUGGEST_NEXT_OP, readOnly: true, describe: '/operations/suggest-next', steps: ['board(compute)', 'shortlist(compute)'] },
     ]);
   });
@@ -549,7 +549,14 @@ describe('genericity — the adapter knows nothing about either operation', () =
   // route's `settled` check (unedited) falls through to its own 500 branch with the FULL `outcomePayload`.
   it('a refused declaration fn 500s with the full run payload, not a bare error string', async () => {
     const store = createMemoryRunStore();
-    const deps = { ...wiring({ readerOptions: { labels: ['review:human'] } }), store, judge: stubJudge, newRunId: idMinter() };
+    // A `humanRequired` PR runs `advise`'s (#xlw02hw) automatic advisory-note effect on the way to `confirm`,
+    // which needs a sink even though this test's whole point is the LATER `record` refusal.
+    const deps = {
+      ...wiring({ readerOptions: { labels: ['review:human'] }, sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) } }),
+      store,
+      judge: stubJudge,
+      newRunId: idMinter(),
+    };
     const started = await handleOperationRequest(
       { method: 'POST', url: '/operations/review-pr/runs', body: { pr: 1153, repo: 'chalbert/web-everything' } },
       deps,

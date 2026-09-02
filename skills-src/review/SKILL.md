@@ -195,6 +195,21 @@ which says in words that this was not an override.
 > 3. It implied every `--reason` rendered as **Why this was overridden**. It did, and that was the defect:
 >    `--answer=accept --reason="fyi"` posted a durable claim of disagreement where there was none.
 
+## An automatic advisory note now posts itself on `review:human` — you don't have to (#xlw02hw)
+
+Before this, the ONLY thing that ever posted anything to a PR was `record`, reachable only through a real
+`confirm` answer — and on a `review:human` PR no session running an independent advisory pass (not the human
+ceremony) had a legitimate one to give: `--answer=accept` is refused, `--answer=changes` would be the real
+ceremony's bounce with no human behind it, and `--answer=abstain` records nothing. Twice live (PRs #1814/#1815)
+a juror ran, found real findings, and nothing durable ever landed — the session had to `gh pr comment` by hand.
+
+Now the `advise` step posts a clearly-marked **advisory-only** comment automatically the moment `reduce` has a
+verdict, on every `review:human` PR — no `--resume`, no answer, no extra step of yours required. It happens
+inside the SAME `node scripts/operations/run.mjs review-pr …` invocation you already run above, so you do not
+call anything new. It is unmistakably NOT the real ceremony's comment: no `**Decision:**` line, no label ever
+touched, an explicit "advisory only — the human ceremony is still required" statement top and bottom. A
+`review:pending` PR is completely unaffected — the step declares no effect at all for it.
+
 ## What still needs you
 
 **The two shapes of a `review:human` park.** Read the drain's comment to tell them apart (`deriveReviewDisposition`,
