@@ -5,6 +5,8 @@ size: 3
 status: open
 dateOpened: "2026-08-16"
 tags: [review-pr, operations, security, correctness]
+scope:
+  - we:scripts/operations/
 ---
 
 # Fix review-pr silently degrading to an empty diff on a cross-repo `--repo=` target
