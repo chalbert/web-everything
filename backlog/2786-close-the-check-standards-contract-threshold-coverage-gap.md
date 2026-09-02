@@ -5,6 +5,10 @@ size: 2
 status: open
 dateOpened: "2026-07-28"
 tags: []
+scope:
+  - we:scripts/check-standards.contract.json
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/lib/__tests__/check-standards.conformance.test.mjs
 ---
 
 # Close the check:standards contract threshold-coverage gap
