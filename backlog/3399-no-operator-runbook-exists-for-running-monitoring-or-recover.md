@@ -2,8 +2,9 @@
 bornAs: xfhficz
 kind: task
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-08-30"
+dateStarted: "2026-09-02"
 tags: []
 scope:
   - we:docs/agent/
@@ -21,3 +22,16 @@ Everything a person needs to operate this epic's dispatcher — checking livenes
 
 1. A `we:docs/agent/*.md` runbook exists (or a section of an existing operations doc) covering: how to tell if the supervisor/runner is alive, how to stop it safely, how to close out a stuck dispatch, the required env vars before a real dispatch, and where its logs live — sourced from the operational knowledge already recorded across #3383's session updates, not re-derived from scratch.
 2. The runbook is discoverable without reading #3383's full history — linked from wherever a future operator would naturally land (we:skills-src/conveyor/SKILL.md, or the epic itself).
+
+## Progress
+
+- **Done:** Wrote `we:docs/agent/dispatcher-runbook.md` — liveness (the runner's singleton-lease read), safe
+  stop (runner vs. dispatched agent), closing out a stuck `--bg` agent (`claude stop`, never `kill`, plus
+  `we:scripts/operations/dispatch-abort.mjs`'s stop-then-close-out and `--trust` composition), the `WE_DISPATCH_AGENT_ARGS`/
+  `--permission-mode dontAsk` requirement, and the state/log-location table. All sourced from #3383's own
+  session-update history, not re-derived.
+- **Landing-order honored:** `we:skills-src/conveyor/supervisor.mjs` is still branch-only (confirmed absent on
+  `main` at build time) — the runbook covers only what's landed and flags the supervisor gap explicitly for
+  whoever adds that section once #3443's graduation lands it.
+- **Linked from** `we:skills-src/conveyor/SKILL.md` §2 (Start the runner), the natural landing spot for an
+  operator running the dispatcher.
