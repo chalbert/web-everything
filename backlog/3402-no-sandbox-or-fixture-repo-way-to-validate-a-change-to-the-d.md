@@ -203,11 +203,11 @@ genuine, not cost-driven, fork.
 
 ## Follow-on builds (scaffolded at ratification)
 
-- [Finish the dispatcher fixture-root thread](/backlog/xediz51/) (Fork 1) — close the `--repo` thread gap + add a
+- [Finish the dispatcher fixture-root thread](/backlog/3445/) (Fork 1) — close the `--repo` thread gap + add a
   `--backlog-dir` override; ship `withFakeGh()`; add the fixture harness test asserting
   `we:conveyor-state.mjs` → `we:dispatch-plan.mjs` → `we:tick-core.mjs` end to end · build ·
   scope: `we:scripts/readiness/conveyor-state.mjs,we:scripts/readiness/dispatch-plan.mjs,we:scripts/backlog.mjs,we:scripts/conveyor/tick-core.mjs,we:scripts/conveyor/__tests__/`
-- [Extend the fixture harness through we:dispatch-lane.mjs](/backlog/xny5uon/) (Fork 2) — real argv-building/guard
+- [Extend the fixture harness through we:dispatch-lane.mjs](/backlog/3446/) (Fork 2) — real argv-building/guard
   logic with only `spawnAgent` faked via `withFakeClaude()`, asserting the produced argv against the fixture ·
   build · `blockedBy` the item above ·
   scope: `we:scripts/operations/dispatch-lane.mjs,we:scripts/operations/dispatch-lane-io.mjs,we:scripts/operations/__tests__/`

@@ -1,9 +1,10 @@
 ---
+bornAs: xny5uon
 kind: story
 size: 3
 parent: "3402"
 status: open
-blockedBy: ["xediz51"]
+blockedBy: ["3445"]
 scope: ["we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/"]
 dateOpened: "2026-09-01"
 tags: []
