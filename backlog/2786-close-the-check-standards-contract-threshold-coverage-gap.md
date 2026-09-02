@@ -105,3 +105,28 @@ structurally miss (none found — `we:scripts/lib/research-freshness.cjs` has ex
 already accounted for), and stress-tested the warn-only exclusions again independently. Found nothing new.
 Converged: `THRESHOLD_KNOBS` is complete modulo the one documented, structurally-forced residual
 (`SITE_SURFACE_MATCHERS`/`STANDARD_SURFACE_MATCHERS`). 7/7 green.
+
+**Independent `/review` pass on the parked PR** (a fresh juror with no memory of the three rounds above)
+found the "one pre-existing exception" claim about `DIGEST_MAX_WORDS` was still false: enumerating the
+same 52 exports again on the PR's own head turned up 7 that round 3's "nothing new" had missed —
+`COMPOSE_DENY_LIST`, `FORK_HEADING_TERMS`, `HTML_ELEMENTS`, `LOCK_POINT_CODE_LINES_THRESHOLD`,
+`LOCK_POINT_COLLISIONS_THRESHOLD`, `NON_BATCHABLE_MARKERS`, `SCOPE_BASENAME_MAX_SUGGESTIONS`. Verified
+each individually before deciding what to do with it:
+- `LOCK_POINT_CODE_LINES_THRESHOLD`, `LOCK_POINT_COLLISIONS_THRESHOLD`, `SCOPE_BASENAME_MAX_SUGGESTIONS`
+  are genuine misses — plain numeric budgets, wired into the live gate (`we:scripts/check-standards.mjs`),
+  ratified or documented as permanently WARN-only in exactly the same shape as `DIGEST_MAX_WORDS`. Added
+  to `THRESHOLD_KNOBS` + the contract (as `lockPointCodeLinesThreshold`, `lockPointCollisionsThreshold`,
+  `scopeBasenameMaxSuggestions`), and corrected the doc comment's "one exception" overclaim.
+- `COMPOSE_DENY_LIST` is real and wired (the allowed-set companion of the already-registered
+  `COMPOSE_TRAITS_ENFORCED` flag) but each rule embeds a `signature` array of REGEXES inside an object —
+  not JSON-representable by the conformance suite's `sameValue`, so it joins `SITE_SURFACE_MATCHERS`/
+  `STANDARD_SURFACE_MATCHERS` as a documented, structurally-forced residual rather than a naively-pinned
+  entry that would silently not actually check the signatures.
+- `HTML_ELEMENTS`, `FORK_HEADING_TERMS`, `NON_BATCHABLE_MARKERS` are pure, unit-tested rule functions
+  (`findRawHtmlInMarkdown`, `findBuriedForkSections`, `findNonBatchableMarkers`) with NO caller anywhere
+  in `we:scripts/check-standards.mjs` — confirmed by a repo-wide grep for each function name. They gate
+  nothing the live check:standards gate runs today, so they are out of scope for this contract by its
+  own stated boundary ("the check:standards gate's definition of green"); documented as excluded for
+  that reason.
+
+Suite re-verified green (7/7) after the fix; `npm run check:standards` still 0 errors.

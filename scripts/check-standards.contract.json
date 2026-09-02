@@ -198,6 +198,21 @@
       "value": ["src/"],
       "impl": "SURFACE_ZONE_PREFIXES",
       "description": "The path prefixes `classifySurfacePaths` considers in-zone; a path outside them is `neutral` and simply skipped, never reaching the unclassified hard ERROR. Narrowing this list exempts more of the tree from the site/standard classification (and its unclassified-path error) entirely — the companion scope of SITE_SURFACE_MATCHERS/STANDARD_SURFACE_MATCHERS, which this registry cannot itself declare (see THRESHOLD_KNOBS' doc comment: they're arrow-function arrays, not JSON-representable)."
+    },
+    "lockPointCodeLinesThreshold": {
+      "value": 800,
+      "impl": "LOCK_POINT_CODE_LINES_THRESHOLD",
+      "description": "Half of the #2678 Fork 1 ratified lock-point composite (docs/agent/platform-decisions.md#small-file-preference) — a file this large, combined with enough queued-item scope collisions, gets flagged as a throughput lock point. Permanently WARN (never an error, never a deny, by the ratification itself), same shape as DIGEST_MAX_WORDS: raising this silently quiets the warn for ever-larger files, loosening a real budget the contract still governs even though nothing here can become a hard error."
+    },
+    "lockPointCollisionsThreshold": {
+      "value": 5,
+      "impl": "LOCK_POINT_COLLISIONS_THRESHOLD",
+      "description": "The other half of the #2678 lock-point composite — how many queued (non-resolved) items' `scope:` must name a file before it counts as collision-heavy. Permanently WARN, same shape as DIGEST_MAX_WORDS: raising this silently quiets the warn for ever-more-contended files."
+    },
+    "scopeBasenameMaxSuggestions": {
+      "value": 3,
+      "impl": "SCOPE_BASENAME_MAX_SUGGESTIONS",
+      "description": "The #3337 basename-mismatch lint's suggestion-count ceiling — a wide top tier (more candidates than this) is treated as silence rather than a noisy suggestion list. Permanently WARN, per its own doc comment (\"WARNING, NEVER AN ERROR\"), same shape as DIGEST_MAX_WORDS: raising this silently quiets the warn for an ever-wider ambiguous-basename set."
     }
   }
 }

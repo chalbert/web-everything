@@ -31,11 +31,15 @@ import { scrubPublish } from './lib/secret-scrub.mjs';
 //     to decide a pass/fail (or error/warning) boundary — almost always a HARD-ERROR allowed-set/bound
 //     with no accompanying warn-first flag (BACKLOG_KINDS-style, or the allowed-set companion of an
 //     already-declared enforcement flag, e.g. MANDATE_FENCE_ALLOWED_PARAMS alongside
-//     UNFENCED_MANDATE_ENFORCED); DIGEST_MAX_WORDS is the one pre-existing exception (warn-only), kept
-//     here because widening it still loosens a real budget the contract governs, even though nothing
-//     downgrades an error to a warning for it. Adding a new such knob to the engine means adding its
-//     symbol HERE *and* its value to the contract's `thresholds` — two independent declarations that
-//     must agree (checked by the conformance suite), so a silent widening of either turns the suite red.
+//     UNFENCED_MANDATE_ENFORCED). DIGEST_MAX_WORDS, LOCK_POINT_CODE_LINES_THRESHOLD,
+//     LOCK_POINT_COLLISIONS_THRESHOLD and SCOPE_BASENAME_MAX_SUGGESTIONS are the warn-only exceptions
+//     (an independent review caught the first attempt at this registry naming DIGEST_MAX_WORDS as "the
+//     one" exception, which was itself false — these three are permanently-warn numeric budgets in
+//     exactly the same shape, #2678/#3337), kept here because widening any of them still loosens a real
+//     budget the contract governs, even though nothing downgrades an error to a warning for them.
+//     Adding a new such knob to the engine means adding its symbol HERE *and* its value to the
+//     contract's `thresholds` — two independent declarations that must agree (checked by the
+//     conformance suite), so a silent widening of either turns the suite red.
 // RESIDUAL GAP (accepted, not closed by either strategy): a boolean or bound INLINED at its call site
 // — never a named export — is invisible to both discovery strategies. Only a named export can be
 // governed this way; that is the boundary of what a coverage guard over `import * as rules` can see.
@@ -67,15 +71,33 @@ export const THRESHOLD_KNOBS = new Set([
   'GITHOOK_ALL_ALLOW',
   'GRADUATED_REF',
   'SURFACE_ZONE_PREFIXES',
+  'LOCK_POINT_CODE_LINES_THRESHOLD',
+  'LOCK_POINT_COLLISIONS_THRESHOLD',
+  'SCOPE_BASENAME_MAX_SUGGESTIONS',
 ]);
-// NOT in this registry, by necessity rather than oversight: SITE_SURFACE_MATCHERS /
-// STANDARD_SURFACE_MATCHERS (check-standards-rules.mjs) gate the SAME hard error `classifySurfacePaths`
-// feeds (via SURFACE_ZONE_PREFIXES, above) the same unconditional way, but each is an array of
-// ARROW-FUNCTION predicates — not JSON-representable, so neither this registry's string-symbol list nor
-// the contract's JSON `value` field can hold them. A silent narrowing of either array is a real gate
-// weakening this mechanism cannot see; closing that gap would need a different representation (e.g.
-// named, individually-declared predicates) than this #2786 registry provides. Documented here so it
-// reads as a known boundary, not a missed entry.
+// NOT in this registry, by necessity rather than oversight:
+//   • SITE_SURFACE_MATCHERS / STANDARD_SURFACE_MATCHERS (check-standards-rules.mjs) gate the SAME hard
+//     error `classifySurfacePaths` feeds (via SURFACE_ZONE_PREFIXES, above) the same unconditional way,
+//     but each is an array of ARROW-FUNCTION predicates — not JSON-representable, so neither this
+//     registry's string-symbol list nor the contract's JSON `value` field can hold them.
+//   • COMPOSE_DENY_LIST is the allowed-set companion of the already-declared COMPOSE_TRAITS_ENFORCED
+//     flag (same shape as MANDATE_FENCE_ALLOWED_PARAMS/UNFENCED_MANDATE_ENFORCED above) but each rule
+//     embeds a `signature` array of REGEXES inside an object — also not representable as one JSON
+//     `value` the conformance suite's `sameValue` can compare, so pinning it here would either need a
+//     new comparison shape or silently pass without actually checking the signatures.
+// A silent narrowing of any of these is a real gate weakening this mechanism cannot see; closing that
+// gap would need a different representation (e.g. named, individually-declared predicates/signatures)
+// than this #2786 registry provides. Documented here so each reads as a known boundary, not a missed
+// entry.
+//
+// ALSO NOT in this registry, but for a different reason — out of the check:standards GATE entirely
+// today: HTML_ELEMENTS (findRawHtmlInMarkdown), FORK_HEADING_TERMS (findBuriedForkSections) and
+// NON_BATCHABLE_MARKERS (findNonBatchableMarkers) are pure, unit-tested rule functions with no caller
+// anywhere in check-standards.mjs — verified by a repo-wide grep for each function name. A knob that
+// gates nothing the gate actually runs is out of scope for "the check:standards gate's definition of
+// green" by the contract's own stated boundary (see check-standards.contract.json's `summary`); wiring
+// any of the three into the gate is a separate, first-class change that would earn its own THRESHOLD_KNOBS
+// entry at that point, not before.
 
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
