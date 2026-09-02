@@ -46,6 +46,23 @@ Each candidate carries: `kind`, `area`, `summary`, `suggestion`, `count`, `sessi
 member `summaries`/`suggestions` — a member's own suggestion is never dropped in favour of the
 representative's.
 
+### Gated entries — blocking hiccups awaiting approval (#3421)
+
+A **blocking** delivery hiccup (a live dispatch guard held a launch, or a dispatched agent returned
+free-form prose instead of a structured verdict — `we:scripts/conveyor/hiccup-classify.mjs`) is
+auto-filed by the mechanical sink (`we:scripts/conveyor/hiccup-sink.mjs`) with its own proposed fix, but
+stamped `approvalPending:true`. `harvestPool`'s `gated` array (printed under `⏸ GATED` by the plain-text
+CLI) holds these OUT of `candidates` entirely — **do not route a gated entry's proposed fix**, even if it
+looks obviously right. It only becomes a normal candidate on a LATER harvest run, after a human clears it:
+
+```bash
+node scripts/conveyor/hiccup-approve.mjs --session=<slug> --ts=<iso>   # from the gated entry's own print line
+```
+
+A **non-blocking** hiccup (delivery succeeded but surfaced something worth improving) carries no
+`blocking` field at all — it is the pre-existing shape and files/routes exactly as any other candidate,
+with no gate.
+
 ## Step 1b — corpus health (moved here from the close, #1878)
 
 ```bash

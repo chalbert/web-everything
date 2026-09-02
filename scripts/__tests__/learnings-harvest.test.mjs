@@ -15,8 +15,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   resolvePoolDir, poolFiles, readPool, ageStats, harvest, harvestPool, poolStatus, archivePool, ARCHIVE_DIR,
+  partitionGated,
 } from '../conveyor/learnings-harvest.mjs';
 import { poolDir as dropPoolDir, resolveDropboxPath } from '../conveyor/learnings-drop.mjs';
+import { approveEntry, approvalsPath } from '../conveyor/hiccup-approve.mjs';
 
 const e = (kind, area, summary, suggestion = 'fix it', ts = '2026-08-01T00:00:00.000Z') =>
   JSON.stringify({ kind, area, summary, suggestion, ts });
@@ -258,5 +260,78 @@ describe('archivePool — an explicit acknowledgement, bounded to what was actua
     session('sess-a', e('friction', 'gating', 'the gate reruns everything every time'));
     harvestPool({ dir });
     expect(poolFiles(dir)).toHaveLength(1);
+  });
+});
+
+describe('the #3421 gate — a blocking, approval-pending entry is held OUT of candidates', () => {
+  const blockingLine = ({ num, ts = '2026-08-31T00:00:00.000Z' }) => JSON.stringify({
+    kind: 'friction',
+    area: 'conveyor dispatch guard',
+    summary: `Dispatch for #${num} suppressed by the live in-flight guard (num) — tick did not proceed.`,
+    suggestion: 'investigate before approving',
+    blocking: true,
+    proposedFix: 'confirm the guard is still legitimate',
+    approvalPending: true,
+    ts,
+  });
+
+  it('partitionGated separates an unapproved blocking entry from an eligible one', () => {
+    const gatedEntry = { session: 'runner', ts: '2026-08-31T00:00:00.000Z', blocking: true, approvalPending: true };
+    const plainEntry = { session: 'runner', ts: '2026-08-31T00:00:00.000Z', kind: 'friction' };
+    const { gated, eligible } = partitionGated([gatedEntry, plainEntry], { approvals: {} });
+    expect(gated).toEqual([gatedEntry]);
+    expect(eligible).toEqual([plainEntry]);
+  });
+
+  it('an approved blocking entry moves to eligible', () => {
+    const entry = { session: 'runner', ts: '2026-08-31T00:00:00.000Z', blocking: true, approvalPending: true };
+    const approvals = { 'runner#2026-08-31T00:00:00.000Z': { approvedAt: '2026-09-01T00:00:00.000Z' } };
+    const { gated, eligible } = partitionGated([entry], { approvals });
+    expect(gated).toEqual([]);
+    expect(eligible).toEqual([entry]);
+  });
+
+  it('harvestPool never surfaces an unapproved blocking entry as a candidate — it reports it as gated instead', () => {
+    session('runner', blockingLine({ num: 3416 }));
+    const r = harvestPool({ dir });
+    expect(r.candidates).toEqual([]);
+    expect(r.gated).toHaveLength(1);
+    expect(r.gated[0]).toMatchObject({ blocking: true, approvalPending: true, session: 'runner' });
+    expect(r.stats.gated).toBe(1);
+  });
+
+  it('approving the entry lets a LATER harvestPool run surface it as a normal candidate', () => {
+    session('runner', blockingLine({ num: 3416 }));
+    const first = harvestPool({ dir });
+    expect(first.candidates).toEqual([]);
+
+    approveEntry({ session: 'runner', ts: '2026-08-31T00:00:00.000Z' }, { dir });
+    const second = harvestPool({ dir });
+    expect(second.gated).toEqual([]);
+    expect(second.candidates).toHaveLength(1);
+    expect(second.candidates[0].kind).toBe('friction');
+  });
+
+  it('#3421 review fix: an approved entry\'s proposedFix SURVIVES into the candidate — not silently dropped', () => {
+    // Pins the bug the adversarial review caught: dedup()'s cluster shaping used to emit only
+    // {kind,area,summary,suggestion,...}, so the whole point of "propose a fix" was lost the moment an
+    // entry left the gated list. The candidate must still carry blocking:true + proposedFixes.
+    session('runner', blockingLine({ num: 3416 }));
+    approveEntry({ session: 'runner', ts: '2026-08-31T00:00:00.000Z' }, { dir });
+    const { candidates } = harvestPool({ dir });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].blocking).toBe(true);
+    expect(candidates[0].proposedFixes).toEqual(['confirm the guard is still legitimate']);
+  });
+
+  it('a non-blocking entry (no blocking field) is never gated — files straight through as before', () => {
+    session('runner', e('doc-gap', 'memory docs', 'the memory doc omits the sub-index budget rule'));
+    const r = harvestPool({ dir });
+    expect(r.gated).toEqual([]);
+    expect(r.candidates).toHaveLength(1);
+  });
+
+  it('the approvals store lives inside the SAME resolved pool dir, not the machine-fixed default', () => {
+    expect(approvalsPath({ dir })).toBe(join(dir, 'approvals.json'));
   });
 });

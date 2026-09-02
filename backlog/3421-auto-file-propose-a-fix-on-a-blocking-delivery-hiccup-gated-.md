@@ -3,8 +3,10 @@ bornAs: x39jwee
 kind: story
 size: 5
 parent: "3422"
-status: open
+status: resolved
 dateOpened: "2026-08-31"
+dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 tags: []
 scope:
   - we:scripts/conveyor/
@@ -67,3 +69,18 @@ the operator's own framing, same 2026-08-31 discussion that produced `#3422`'s r
    case. The confidence bar and blacklist contents are a light, pre-production default (kept configurable, not
    yet surfaced as a Plateau admin setting — that surface is future work, not required to close this item).
 5. `npm run check:standards` — no new errors.
+
+## Progress
+
+- Built the #3421 classifier core (we:scripts/conveyor/hiccup-classify.mjs): guard-suppression + free-form-response
+  detection, plus the missing-operation confidence/blacklist axis from the addendum. Tests pin the #3416 and
+  #3412 fixtures and all three confidence outcomes.
+- Extended the learnings-drop schema (we:scripts/conveyor/learnings-drop.mjs) with optional
+  blocking/proposedFix/approvalPending fields, backward-compatible with every existing non-blocking entry.
+- Added the mechanical sink (we:scripts/conveyor/hiccup-sink.mjs, idempotent per hiccup) and wired it into the
+  headless runner's mechanical pass (we:skills-src/conveyor/runner.mjs) so a guard-suppression hiccup is
+  auto-filed without waiting for a human /note.
+- Added the approval store (we:scripts/conveyor/hiccup-approve.mjs) and gated we:scripts/conveyor/learnings-harvest.mjs's
+  candidate list on it (partitionGated) so an un-approved blocking entry never routes; documented in
+  we:skills-src/harvest-learnings/SKILL.md.
+- All new + touched conveyor/learnings test suites green (526 tests).

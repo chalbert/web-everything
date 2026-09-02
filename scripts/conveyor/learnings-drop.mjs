@@ -57,12 +57,23 @@ import { dirname, join, isAbsolute } from 'node:path';
 export const KINDS = ['friction', 'missing-convention', 'doc-gap', 'skill-gap', 'improvement'];
 // The ALLOW-LIST is the privacy boundary: any key outside it is rejected, so a caller can't smuggle a
 // `path`/`code`/`diff`/`secret` field past the schema. `ts` is the ONE envelope field the helper stamps.
-export const ALLOWED_KEYS = ['kind', 'summary', 'area', 'suggestion'];
+// The three OPTIONAL hiccup fields (#3421): a BLOCKING hiccup (the tick did not proceed — a live guard
+// suppression or a dispatched agent's free-form return, scripts/conveyor/hiccup-classify.mjs) is stamped
+// with a generalized `proposedFix` and an explicit `approvalPending` flag; a non-blocking entry (the
+// pre-existing shape) carries neither — see validateEntry's blocking branch below.
+export const OPTIONAL_HICCUP_KEYS = ['blocking', 'proposedFix', 'approvalPending'];
+export const ALLOWED_KEYS = ['kind', 'summary', 'area', 'suggestion', ...OPTIONAL_HICCUP_KEYS];
 const TEXT_FIELDS = ['summary', 'area', 'suggestion'];
 // STRUCTURAL leak-class kill (review fix A): a summary is a sentence, a suggestion a short recommendation, an
 // area a coarse label. Capping each field forecloses whole leak classes (PEM keys, code blocks, pasted files
 // can't FIT) with zero false positives on real prose — cheaper and stronger than any regex list.
 export const FIELD_CAPS = { summary: 240, area: 60, suggestion: 400 };
+// The optional hiccup field's own cap — DELIBERATELY separate from FIELD_CAPS (review fix, #3421): a
+// consumer that iterates FIELD_CAPS to validate a record (e.g. scripts/lib/review-loop-policy.mjs's
+// buildAcceptQueueEntry) treats every key as a REQUIRED field present on every entry it checks. proposedFix
+// is OPTIONAL (blocking entries only), so folding it into FIELD_CAPS broke that consumer with a bare
+// `entry[field].length` on an absent field — a real regression this split fixes.
+export const PROPOSED_FIX_CAP = 400;
 
 // ── scrub core (moved out — #3015) ───────────────────────────────────────────────────────────────
 // The regex/entropy detectors now live in we:scripts/lib/secret-scrub.mjs, the shared pure home for BOTH
@@ -127,6 +138,34 @@ export function validateEntry(entry) {
       errors.push(`${f}: too long (${v.length} > ${FIELD_CAPS[f]} chars) — a ${f} is a short generalized lesson, not a paste`);
     }
   }
+  // (4) the BLOCKING branch (#3421) — OPTIONAL. Absent/false `blocking` is the pre-existing shape
+  // (non-blocking entry, carries neither `proposedFix` nor `approvalPending`); `blocking: true` requires a
+  // generalized `proposedFix` (same shape rules as `suggestion` — a short recommendation, not a paste) and,
+  // when present, `approvalPending` must be `true` — the mechanical sink (hiccup-sink.mjs) ALWAYS stamps a
+  // freshly-filed blocking entry as approval-pending; nothing may append one pre-cleared.
+  const hasBlocking = Object.prototype.hasOwnProperty.call(entry, 'blocking');
+  if (hasBlocking && typeof entry.blocking !== 'boolean') {
+    errors.push('blocking must be a boolean when present');
+  }
+  const blocking = hasBlocking && entry.blocking === true;
+  if (blocking) {
+    const pf = entry.proposedFix;
+    if (typeof pf !== 'string' || !pf.trim()) {
+      errors.push('proposedFix is required and must be a non-empty string when blocking is true');
+    } else if (pf.length > PROPOSED_FIX_CAP) {
+      errors.push(`proposedFix: too long (${pf.length} > ${PROPOSED_FIX_CAP} chars) — a proposedFix is a short generalized recommendation, not a paste`);
+    }
+    if (Object.prototype.hasOwnProperty.call(entry, 'approvalPending') && entry.approvalPending !== true) {
+      errors.push('approvalPending must be true when blocking is true — a fresh blocking entry is always approval-pending at append time');
+    }
+  } else {
+    if (Object.prototype.hasOwnProperty.call(entry, 'proposedFix')) {
+      errors.push('proposedFix is only allowed when blocking is true');
+    }
+    if (Object.prototype.hasOwnProperty.call(entry, 'approvalPending')) {
+      errors.push('approvalPending is only allowed when blocking is true');
+    }
+  }
   if (errors.length) return { ok: false, errors, clean: null };
   const clean = {
     kind: entry.kind,
@@ -135,6 +174,14 @@ export function validateEntry(entry) {
     suggestion: entry.suggestion.trim(),
     ts: normalizeTs(entry.ts),
   };
+  // Conditionally spread — a non-blocking entry's `clean` shape is BYTE-IDENTICAL to before this field
+  // existed (no stray `blocking:false` key), so every pre-#3421 consumer that does an exact-shape compare
+  // is undisturbed.
+  if (blocking) {
+    clean.blocking = true;
+    clean.proposedFix = entry.proposedFix.trim();
+    clean.approvalPending = true;
+  }
   return { ok: true, errors: [], clean };
 }
 
