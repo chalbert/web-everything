@@ -4,6 +4,7 @@ kind: decision
 parent: "3383"
 status: open
 dateOpened: "2026-09-02"
+preparedDate: "2026-09-02"
 relatedTo: ["3427", "3451", "3449", "3411", "3405"]
 tags: [conveyor, capacity, concurrency, lane-pool, throttle, admission-queue]
 relatedReport: reports/2026-09-02-heavy-command-admission-queue.md
