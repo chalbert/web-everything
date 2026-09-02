@@ -8,8 +8,10 @@
  * measured against. The IMPLEMENTATION — scripts/check-standards.mjs + scripts/check-standards-rules.mjs —
  * is the hand-written realization of that policy: it holds the live constants (COMPOSE_TRAITS_ENFORCED,
  * DIGEST_MAX_WORDS, FIB, …) and the imperative rules that consume them. This suite proves the impl CONFORMS
- * to the contract — every declared knob equals its live constant, and no enforcement knob exists in the impl
- * that the contract fails to declare — so that:
+ * to the contract — every declared knob equals its live constant, and no knob of EITHER class exists in the
+ * impl that the contract fails to declare (#2786 closed the threshold half of this: see rules.THRESHOLD_KNOBS'
+ * doc comment for why enforcement flags are discovered by type while thresholds are a maintained registry) —
+ * so that:
  *
  *   • a diff to the CONTRACT is a definition-of-green change (its basename is registered on the trust-chain
  *     POLICY tier in ../gate-config.mjs → review:human), and
@@ -41,8 +43,9 @@ const CONTRACT = JSON.parse(
   readFileSync(join(here, '..', '..', 'check-standards.contract.json'), 'utf8'),
 );
 
-/** Deep-equal for the threshold values (numbers and the allowed-size array/Set). */
+/** Deep-equal for the threshold values (numbers, strings, the allowed-size array/Set, or a bound regex). */
 function sameValue(contractValue, implValue) {
+  if (implValue instanceof RegExp) return contractValue === implValue.source;
   const impl = implValue instanceof Set ? [...implValue] : implValue;
   return JSON.stringify(impl) === JSON.stringify(contractValue);
 }
@@ -91,14 +94,46 @@ describe('value conformance — contract knobs equal the live impl constants', (
 });
 
 describe('coverage conformance — no enforcement knob escapes the contract', () => {
-  it('every *_ENFORCED constant exported by the engine is declared in the contract', () => {
+  it('every boolean flag exported by the engine is declared in the contract', () => {
+    // Type-based, not name-based (#2786): every enforcement flag is a boolean, so discovering by
+    // `typeof === 'boolean'` catches a future flag under ANY name — a `_ENFORCED`-suffix string match
+    // would miss a flag that doesn't follow the convention. See THRESHOLD_KNOBS' doc comment in
+    // ../../check-standards-rules.mjs for why the threshold class (below) can't use the same trick.
     const declared = new Set(Object.values(CONTRACT.enforcement.flags).map((e) => e.impl));
-    const exported = Object.keys(rules).filter((k) => k.endsWith('_ENFORCED'));
+    const exported = Object.keys(rules).filter((k) => typeof rules[k] === 'boolean');
     expect(exported.length).toBeGreaterThan(0); // guard: the engine really does export enforcement flags
     for (const symbol of exported) {
       expect(
         declared.has(symbol),
-        `engine exports ${symbol} but the contract does not declare it — a new definition-of-green knob must be added to check-standards.contract.json (the policy tier), not left un-governed`,
+        `engine exports boolean ${symbol} but the contract does not declare it — a new definition-of-green knob must be added to check-standards.contract.json (the policy tier), not left un-governed`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('coverage conformance — no threshold knob escapes the contract', () => {
+  it('every registered THRESHOLD_KNOBS symbol is declared in the contract', () => {
+    // Thresholds are heterogeneous (numbers, Sets, arrays) so, unlike the boolean enforcement class
+    // above, there is no runtime predicate that finds them all — rules.THRESHOLD_KNOBS is the engine's
+    // hand-maintained registry of which exports are hard-error allowed-sets/bounds (see its doc comment
+    // for why, and the accepted residual gap it cannot close).
+    const declared = new Set(Object.keys(CONTRACT.thresholds).filter((k) => k !== 'description').map((k) => CONTRACT.thresholds[k].impl));
+    expect(rules.THRESHOLD_KNOBS.size).toBeGreaterThan(0); // guard: the registry really does list knobs
+    for (const symbol of rules.THRESHOLD_KNOBS) {
+      expect(rules[symbol], `THRESHOLD_KNOBS names ${symbol} but the engine does not export it`).not.toBeUndefined();
+      expect(
+        declared.has(symbol),
+        `THRESHOLD_KNOBS names ${symbol} but the contract does not declare it — a new definition-of-green knob must be added to check-standards.contract.json (the policy tier), not left un-governed`,
+      ).toBe(true);
+    }
+  });
+
+  it('every declared threshold is a registered knob (the contract declares nothing extraneous)', () => {
+    for (const [key, entry] of Object.entries(CONTRACT.thresholds)) {
+      if (key === 'description') continue;
+      expect(
+        rules.THRESHOLD_KNOBS.has(entry.impl),
+        `contract declares thresholds.${key} (impl ${entry.impl}) but it is not in THRESHOLD_KNOBS — either the impl symbol is stale or the registry is missing it`,
       ).toBe(true);
     }
   });

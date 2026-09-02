@@ -17,6 +17,88 @@ import { validateFidelityContract } from './lib/fidelity-contract.mjs';
 import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
 import { scrubPublish } from './lib/secret-scrub.mjs';
 
+// ── Definition-of-green THRESHOLD registry (#2786) ─────────────────────────────────────────────
+// check-standards.conformance.test.mjs proves no definition-of-green knob escapes
+// check-standards.contract.json. The suite's two knob classes use two different discovery
+// strategies, because they differ in kind:
+//   • ENFORCEMENT flags are homogeneous (every one is a boolean), so the suite auto-discovers them
+//     by `typeof export === 'boolean'` — a future flag is caught regardless of its name, closing
+//     the #2786 gap where a `_ENFORCED`-suffix name heuristic would miss a flag named anything else.
+//   • THRESHOLDS are heterogeneous (numbers, Sets, arrays, strings, a bound regex) — no runtime
+//     predicate distinguishes a definition-of-green tuning knob from an unrelated exported constant
+//     (this module exports many constants that are reference data, not a pass/fail boundary). So this
+//     list is maintained BY HAND: every symbol here names a value a check compares a finding against
+//     to decide a pass/fail (or error/warning) boundary — almost always a HARD-ERROR allowed-set/bound
+//     with no accompanying warn-first flag (BACKLOG_KINDS-style, or the allowed-set companion of an
+//     already-declared enforcement flag, e.g. MANDATE_FENCE_ALLOWED_PARAMS alongside
+//     UNFENCED_MANDATE_ENFORCED). DIGEST_MAX_WORDS, LOCK_POINT_CODE_LINES_THRESHOLD,
+//     LOCK_POINT_COLLISIONS_THRESHOLD and SCOPE_BASENAME_MAX_SUGGESTIONS are the warn-only exceptions
+//     (an independent review caught the first attempt at this registry naming DIGEST_MAX_WORDS as "the
+//     one" exception, which was itself false — these three are permanently-warn numeric budgets in
+//     exactly the same shape, #2678/#3337), kept here because widening any of them still loosens a real
+//     budget the contract governs, even though nothing downgrades an error to a warning for them.
+//     Adding a new such knob to the engine means adding its symbol HERE *and* its value to the
+//     contract's `thresholds` — two independent declarations that must agree (checked by the
+//     conformance suite), so a silent widening of either turns the suite red.
+// RESIDUAL GAP (accepted, not closed by either strategy): a boolean or bound INLINED at its call site
+// — never a named export — is invisible to both discovery strategies. Only a named export can be
+// governed this way; that is the boundary of what a coverage guard over `import * as rules` can see.
+export const THRESHOLD_KNOBS = new Set([
+  'FIB',
+  'DIGEST_MAX_WORDS',
+  'MANDATE_FENCE_ALLOWED_PARAMS',
+  'BACKLOG_KINDS',
+  'BACKLOG_STATUSES',
+  'PARKED_REASONS',
+  'STANDARD_ENTITY_KINDS',
+  'LIFECYCLE',
+  'PROJECT_TIERS',
+  'CAP_POLYFILL',
+  'REFERENCE_RUNTIME_FORMS',
+  'LOCUS_NAMES',
+  'TIER_STATES',
+  'LIBRARY_TIER_STATES',
+  'MATURITY_TRIGGER_RE',
+  'PILOT_EVIDENCE_NUMS',
+  'POLYGLOT_WIDENING_TAG',
+  'POLYGLOT_CARVEOUT_TAGS',
+  'STRANDED_HASH_GRACE_SECONDS',
+  'PLUG_SHARED_CORE_FILES',
+  'WEBEVERYTHING_PUBLISHED_SCOPE',
+  'MODULE_RESOLUTION_LOCKED_SCOPE',
+  'DERIVED_ARTIFACT_DIRS',
+  'PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES',
+  'GITHOOK_ALL_ALLOW',
+  'GRADUATED_REF',
+  'SURFACE_ZONE_PREFIXES',
+  'LOCK_POINT_CODE_LINES_THRESHOLD',
+  'LOCK_POINT_COLLISIONS_THRESHOLD',
+  'SCOPE_BASENAME_MAX_SUGGESTIONS',
+]);
+// NOT in this registry, by necessity rather than oversight:
+//   • SITE_SURFACE_MATCHERS / STANDARD_SURFACE_MATCHERS (check-standards-rules.mjs) gate the SAME hard
+//     error `classifySurfacePaths` feeds (via SURFACE_ZONE_PREFIXES, above) the same unconditional way,
+//     but each is an array of ARROW-FUNCTION predicates — not JSON-representable, so neither this
+//     registry's string-symbol list nor the contract's JSON `value` field can hold them.
+//   • COMPOSE_DENY_LIST is the allowed-set companion of the already-declared COMPOSE_TRAITS_ENFORCED
+//     flag (same shape as MANDATE_FENCE_ALLOWED_PARAMS/UNFENCED_MANDATE_ENFORCED above) but each rule
+//     embeds a `signature` array of REGEXES inside an object — also not representable as one JSON
+//     `value` the conformance suite's `sameValue` can compare, so pinning it here would either need a
+//     new comparison shape or silently pass without actually checking the signatures.
+// A silent narrowing of any of these is a real gate weakening this mechanism cannot see; closing that
+// gap would need a different representation (e.g. named, individually-declared predicates/signatures)
+// than this #2786 registry provides. Documented here so each reads as a known boundary, not a missed
+// entry.
+//
+// ALSO NOT in this registry, but for a different reason — out of the check:standards GATE entirely
+// today: HTML_ELEMENTS (findRawHtmlInMarkdown), FORK_HEADING_TERMS (findBuriedForkSections) and
+// NON_BATCHABLE_MARKERS (findNonBatchableMarkers) are pure, unit-tested rule functions with no caller
+// anywhere in check-standards.mjs — verified by a repo-wide grep for each function name. A knob that
+// gates nothing the gate actually runs is out of scope for "the check:standards gate's definition of
+// green" by the contract's own stated boundary (see check-standards.contract.json's `summary`); wiring
+// any of the three into the gate is a separate, first-class change that would earn its own THRESHOLD_KNOBS
+// entry at that point, not before.
+
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
 // `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
@@ -94,6 +176,11 @@ export const LOCI = {
     closeoutDiscipline: 'platform-first build; if you must bypass a standard, tag a GAP — a required, non-skippable close-out step (see /exercise-app)',
   },
 };
+// The hard-error boundary LOCI actually gates (`validateReadinessTargets` / item.locus) is just the
+// KEY set — the per-locus gateCommand/devServerProbe/commitTarget are operational routing, never
+// compared against a finding. Declared separately so the #2786 threshold registry governs exactly
+// the allowed-set that can loosen the gate, not LOCI's full operational config.
+export const LOCUS_NAMES = new Set(Object.keys(LOCI));
 export const FIB = new Set([1, 2, 3, 5, 8, 13]);
 // The digest is each item's lead paragraph (the loader's derived `summary`), surfaced for one-glance
 // selection. Presence is a required-field error; length is a soft nudge — a runaway opener defeats the

@@ -2,8 +2,9 @@
 bornAs: x2rosdy
 kind: story
 size: 2
-status: open
+status: active
 dateOpened: "2026-07-28"
+dateStarted: "2026-09-01"
 tags: []
 scope:
   - we:scripts/check-standards.contract.json
@@ -28,3 +29,104 @@ Surfaced during the human review of **PR #907** (`/review 907` — the #2769 gat
 
 - Precedent / parent ruling: **#2625** (contract-split for tier ownership, fork (d)); shipped by **#2769**.
 - Artifacts: `we:scripts/check-standards.contract.json`, `we:scripts/lib/__tests__/check-standards.conformance.test.mjs`.
+
+## Progress
+
+Took option (b) — the stronger close. `we:scripts/check-standards-rules.mjs` gained `THRESHOLD_KNOBS`,
+a hand-maintained registry of every hard-error allowed-set/bound export (thresholds are heterogeneous
+in type, so unlike enforcement flags they can't be auto-discovered), plus a derived `LOCUS_NAMES`
+export (the key-set slice of `LOCI` that's actually the gate boundary — its per-locus `gateCommand`/
+`devServerProbe` are operational routing, not a threshold). The contract gained 11 new `thresholds`
+entries: `backlogKinds`, `backlogStatuses`, `parkedReasons`, `standardEntityKinds`, `lifecycleStates`,
+`projectTiers`, `capPolyfillClasses`, `referenceRuntimeForms`, `locusNames`, `tierStates`,
+`libraryTierStates` (version bumped to 2). `we:scripts/lib/__tests__/check-standards.conformance.test.mjs`
+gained a threshold coverage guard (mirroring the enforcement one) plus a reverse check (no contract
+entry is un-registered).
+
+Also closed fix 2 (generalize the coverage key): the enforcement-flag discovery switched from a
+`_ENFORCED` name-suffix match to `typeof export === 'boolean'` — type-based, name-agnostic, verified
+the two sets are currently identical (11 booleans = 11 `_ENFORCED` exports). Threshold discovery stays
+registry-based by necessity (heterogeneous types defeat a type predicate); this is documented as a
+deliberate, hand-maintained declaration, not a heuristic. The one gap neither strategy closes — a
+boolean/bound inlined at its call site with no named export — is documented as an accepted residual in
+both the registry's doc comment and the contract summary.
+
+Verified the new coverage guard actually fires (not just value-pinning) by transiently adding an
+undeclared engine export and confirming the suite reds, then reverting.
+
+**Adversarial review round 1** found the new `THRESHOLD_KNOBS` registry itself omitted three
+unconditional hard-error constants that gate the #2089 polyglot-widening start-gate —
+`PILOT_EVIDENCE_NUMS`, `POLYGLOT_WIDENING_TAG`, `POLYGLOT_CARVEOUT_TAGS` — plus (medium confidence)
+`STRANDED_HASH_GRACE_SECONDS` (the error/warning boundary for a stranded backlog hash) and (worth a
+look) `MATURITY_TRIGGER_RE` (a regex bound gating a hard error, previously unrepresentable in the
+value-comparison helper). All five were real, unconditional-hard-error knobs by the registry's own
+stated criterion — fixed: added to `THRESHOLD_KNOBS`, added matching contract entries
+(`pilotEvidenceNums`, `polyglotWideningTag`, `polyglotCarveoutTags`, `strandedHashGraceSeconds`,
+`maturityTriggerPattern`), and extended the conformance suite's value comparator to compare a `RegExp`
+export against its `.source` string. Also softened the registry's doc comment, which had overclaimed
+"every entry is hard-error-only" — the pre-existing `DIGEST_MAX_WORDS` is actually warn-only; now
+documented as the one acknowledged exception. Suite re-verified green (7/7) after the fix.
+
+**Adversarial review round 2** (fresh subagent, no memory of round 1's findings) confirmed the round-1
+fix landed correctly (values byte-match, the `RegExp` branch is correctly oriented, 7/7 green), then
+swept the ~3900-line engine again and found seven MORE unconditional-hard-error / enforcement-flag-
+companion knobs still missing: `PLUG_SHARED_CORE_FILES` (companion of `PLUG_DRIFT_ENFORCED`),
+`WEBEVERYTHING_PUBLISHED_SCOPE` (companion of `RENDERERS_PUBLISH_ENFORCED`), `MODULE_RESOLUTION_LOCKED_SCOPE`,
+`DERIVED_ARTIFACT_DIRS`, `PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES`, `GITHOOK_ALL_ALLOW` (all four
+unconditional hard errors, no flag), and (lower confidence) `GRADUATED_REF` (a regex whose NARROWING,
+not widening, is the loosening direction — it exempts more `graduatedTo` values from resolution
+checking). All seven verified directly against source and added to `THRESHOLD_KNOBS` + the contract
+(as `pluginSharedCoreFiles`, `webeverythingPublishedScope`, `moduleResolutionLockedScope`,
+`derivedArtifactDirs`, `playwrightContainerPinRequiredFiles`, `githookAllAllow`, `graduatedRefPattern`).
+The review also confirmed `SITE_SURFACE_MATCHERS`/`STANDARD_SURFACE_MATCHERS` gate a hard error the
+same way but are arrays of arrow-function predicates — not JSON-representable, so this registry
+mechanism cannot govern them; documented as an explicit, named residual limitation (not a missed entry)
+in `THRESHOLD_KNOBS`'s doc comment rather than silently left out. Suite re-verified green (7/7).
+
+Two review rounds of manual grep sweeps kept finding MORE missed knobs rather than converging, so
+rather than trust a third manual sweep, did an EXHAUSTIVE programmatic one: enumerated all 52
+non-function exports from `we:scripts/check-standards-rules.mjs` (`Object.keys(rules).filter(k =>
+typeof rules[k] !== 'function')`) and individually classified every one — in `THRESHOLD_KNOBS`, a
+boolean enforcement flag, or explicitly excluded with a reason. Four more turned up unclassified:
+`FILE` (descriptor-location metadata, never compared for pass/fail — excluded), `LOCI` (superseded by
+the already-registered `LOCUS_NAMES` key-set proxy — excluded), `RESEARCH_REVIEW_HORIZON_DEFAULT`
+(warn-only default, only appears in an error-message EXAMPLE string, never a comparison bound —
+excluded), `STATUS_SYNONYMS` (changes which of two hard-error MESSAGES a deprecated status gets, never
+whether the gate passes or fails — excluded), and one genuine miss: `SURFACE_ZONE_PREFIXES` (the
+plain-string-array scope companion of the SITE/STANDARD_SURFACE_MATCHERS pair above — narrowing it
+exempts paths from classification entirely; JSON-representable unlike its matcher siblings, so added
+as `surfaceZonePrefixes`). The programmatic sweep script confirms zero remaining unclassified exports.
+Suite re-verified green (7/7) after the fix.
+
+**Adversarial review round 3** independently re-derived the full 52-export enumeration from the live
+module (not trusting this note's counts), spot-checked the `STATUS_SYNONYMS`/`LOCI`/`SURFACE_ZONE_PREFIXES`
+reasoning directly against source, checked for re-export aliasing this enumeration method could
+structurally miss (none found — `we:scripts/lib/research-freshness.cjs` has exactly the three bindings
+already accounted for), and stress-tested the warn-only exclusions again independently. Found nothing new.
+Converged: `THRESHOLD_KNOBS` is complete modulo the one documented, structurally-forced residual
+(`SITE_SURFACE_MATCHERS`/`STANDARD_SURFACE_MATCHERS`). 7/7 green.
+
+**Independent `/review` pass on the parked PR** (a fresh juror with no memory of the three rounds above)
+found the "one pre-existing exception" claim about `DIGEST_MAX_WORDS` was still false: enumerating the
+same 52 exports again on the PR's own head turned up 7 that round 3's "nothing new" had missed —
+`COMPOSE_DENY_LIST`, `FORK_HEADING_TERMS`, `HTML_ELEMENTS`, `LOCK_POINT_CODE_LINES_THRESHOLD`,
+`LOCK_POINT_COLLISIONS_THRESHOLD`, `NON_BATCHABLE_MARKERS`, `SCOPE_BASENAME_MAX_SUGGESTIONS`. Verified
+each individually before deciding what to do with it:
+- `LOCK_POINT_CODE_LINES_THRESHOLD`, `LOCK_POINT_COLLISIONS_THRESHOLD`, `SCOPE_BASENAME_MAX_SUGGESTIONS`
+  are genuine misses — plain numeric budgets, wired into the live gate (`we:scripts/check-standards.mjs`),
+  ratified or documented as permanently WARN-only in exactly the same shape as `DIGEST_MAX_WORDS`. Added
+  to `THRESHOLD_KNOBS` + the contract (as `lockPointCodeLinesThreshold`, `lockPointCollisionsThreshold`,
+  `scopeBasenameMaxSuggestions`), and corrected the doc comment's "one exception" overclaim.
+- `COMPOSE_DENY_LIST` is real and wired (the allowed-set companion of the already-registered
+  `COMPOSE_TRAITS_ENFORCED` flag) but each rule embeds a `signature` array of REGEXES inside an object —
+  not JSON-representable by the conformance suite's `sameValue`, so it joins `SITE_SURFACE_MATCHERS`/
+  `STANDARD_SURFACE_MATCHERS` as a documented, structurally-forced residual rather than a naively-pinned
+  entry that would silently not actually check the signatures.
+- `HTML_ELEMENTS`, `FORK_HEADING_TERMS`, `NON_BATCHABLE_MARKERS` are pure, unit-tested rule functions
+  (`findRawHtmlInMarkdown`, `findBuriedForkSections`, `findNonBatchableMarkers`) with NO caller anywhere
+  in `we:scripts/check-standards.mjs` — confirmed by a repo-wide grep for each function name. They gate
+  nothing the live check:standards gate runs today, so they are out of scope for this contract by its
+  own stated boundary ("the check:standards gate's definition of green"); documented as excluded for
+  that reason.
+
+Suite re-verified green (7/7) after the fix; `npm run check:standards` still 0 errors.
