@@ -2,9 +2,10 @@
 bornAs: xu4j03b
 kind: story
 size: 3
-status: active
+status: resolved
 dateOpened: "2026-08-16"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 tags: [review-pr, operations, security, correctness]
 scope:
   - we:scripts/operations/
