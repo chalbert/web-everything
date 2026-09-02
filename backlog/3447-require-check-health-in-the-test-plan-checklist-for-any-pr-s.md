@@ -6,6 +6,9 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:skills-src/prepare-decision-item/
+  - we:docs/agent/
 ---
 
 # Require check:health in the test-plan checklist for any PR stamping preparedDate on a decision with Fork sections
