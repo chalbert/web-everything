@@ -93,6 +93,13 @@ changed, is a DIFFERENT session's job, not a loop inside this one.
 ## What you must NEVER do, stated plainly because getting this wrong is the one failure this brief exists to
 ## prevent
 
+**This is not prose alone (#3433).** `review-dispatch.mjs` bakes a `--disallowedTools` deny list into YOUR OWN
+session's `claude` invocation before you ever start — the whole `gh` CLI (not just `gh pr merge`; a label edit
+or a raw `gh api` call reaches the same outcomes under a different verb), `review-set-label.mjs`,
+`apply-review-request.mjs`, and `run.mjs` are all refused by the harness itself, before your own judgment is
+even consulted. Do not treat that as permission to test the edges of it; a refused command still means stop and
+report, not "try a different phrasing."
+
 - **Never clear a `review:human` park yourself.** Not by running a `--resume … --answer=accept` (or any other)
   command, not by re-deriving your own verdict and posting it some other way, not by convincing yourself this
   one case is obviously fine. That tier exists specifically because the review's own independence is the thing
