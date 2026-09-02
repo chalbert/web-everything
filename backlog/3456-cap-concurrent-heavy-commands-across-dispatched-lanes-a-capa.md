@@ -95,7 +95,7 @@ JIT-numbering follow-up commit stalled the same way, under the same kind of conc
 `we:scripts/check-standards-rules.mjs` sets `STRANDED_HASH_GRACE_SECONDS = 180`, documented as "~2.5x
 the measured 7-73s drain numbering-commit lag" — the window `check:standards` tolerates between a PR
 merging (item still under its `bornAs` hash-id filename) and the drain's own commit renaming it to its
-permanent number. For one real case tonight, `we:backlog/xhxezum-...md` → `#3455`: the merge landed at
+permanent number. For one real case tonight, `we:backlog/3455-...md` → `#3455`: the merge landed at
 `2026-09-02 14:27:02` (`9dc873eb`) and the drain's numbering commit landed at `2026-09-02 14:46:52`
 (`027ee219`) — a **19m50s** gap, **6.6x** past the documented 180s grace window, not a near-miss. This
 fell inside a burst of concurrent merges (#1835 at 14:30:43, #1837 at 14:41:52, #1838 at 14:50:50,

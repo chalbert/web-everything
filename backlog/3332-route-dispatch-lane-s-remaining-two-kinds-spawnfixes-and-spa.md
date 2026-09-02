@@ -125,7 +125,7 @@ with the refusal's own message text widened so it no longer reads as build-exclu
   pre-existing tests were adjusted to the new (correct) shapes they now exercise: the delivery-brief mangling
   test scopes its per-token loop to `BRIEF_REQUIRED_BY_KIND.build` instead of the now-wider
   `BRIEF_PLACEHOLDERS`, and the build-refusal assertion matches the widened (not build-exclusive) message text.
-- Filed follow-up `#xm33exe` for the known, out-of-scope gap: `we:scripts/conveyor/tick-core.mjs#releaseSessionForNum`
+- Filed follow-up `#3458` for the known, out-of-scope gap: `we:scripts/conveyor/tick-core.mjs#releaseSessionForNum`
   has no `fix`/`ci-heal` branch, so a merge-time auto-release of a fix/ci-heal agent's OWN lane (were one ever
   wired up) would use the wrong session slug. `blockedBy: ["3332"]`.
 - `node --test`-equivalent (`npx vitest run we:scripts/operations/__tests__/dispatch-lane.test.mjs`, this repo's
