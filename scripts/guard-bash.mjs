@@ -1468,6 +1468,12 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
 //     spelled with `for` instead of `while … read`.
 //   • `git diff --name-only | xargs git add`, a bare `git status | xargs git add` — `isPathEnumerationSource`
 //     below is scoped to the sources #1064's incident and this item's DoD actually name.
+//
+// PR #1816 review (2026-09) found and fixed a NARROWER class in the same family — not a new sink, but
+// EQUIVALENT SPELLINGS of the four shapes ABOVE this list slipping past an exact-token/exact-`\b` match
+// (`./` for a bare `.`, `-Av`/`-vA` for `-A`, `-su` for `-s`) — see `gitAddEnumeratesUnnamedPaths` and
+// `statusClusterHasShort` below. That review is exactly the class of recurrence this comment exists to warn
+// about, so a fuzz/property test guarding it going forward is filed as backlog#x63kvwg (parent #3383).
 const GIT_ADD_ENUMERATION_MESSAGE =
   '`git add` here stages a path set you did not name — the operand is an ENUMERATION (a wildcard `-A`/`--all`/`.` '
   + 'flag, a piped `ls-files`/`status`/`find`/`ls` listing feeding an `xargs` sink, a `while read` loop variable, '
@@ -1484,13 +1490,26 @@ const GIT_ADD_ENUMERATION_MESSAGE =
  *  while-read/-exec needed here: the flag itself is what does the enumerating. Quoting is IRRELEVANT to every
  *  operand tested here — `git add "-A"` and `git add -A` reach git's argv identically, so `t.quoted` is never
  *  read (an adversarial review caught an earlier draft that guarded ONLY the `-A`/`--all` arm on `!t.quoted`,
- *  inconsistently with the `.` arm three tokens later — `git add "-A"`/`git add "--all"` slipped through). */
+ *  inconsistently with the `.` arm three tokens later — `git add "-A"`/`git add "--all"` slipped through).
+ *
+ *  Also equivalent-spelling widened (PR #1816 review — confirmed bypass, same class as the two gaps above):
+ *  `./` and `./.` are the same "everything under cwd" operand as a bare `.` — git resolves all three
+ *  identically. And `-A` is a POSIX-combinable short flag: `-Av`/`-vA`/any single-dash letter CLUSTER
+ *  containing `A` reaches git's argv exactly as a bare `-A` would (`git add -Av` == `git add -A -v`) — matching
+ *  only the exact two-character token `-A` let `-Av`/`-vA` slip through untouched. */
 function gitAddEnumeratesUnnamedPaths(seg) {
   if (gitSubcommand(seg) !== 'add') return false;
   const toks = shellTokens(canonicalCommand(seg)).filter((t) => !t.op);
   const addIdx = toks.findIndex((t) => !t.quoted && t.text === 'add');
   if (addIdx < 0) return false;
-  return toks.slice(addIdx + 1).some((t) => t.text === '-A' || t.text === '--all' || t.text === '.');
+  return toks.slice(addIdx + 1).some((t) => {
+    const text = t.text;
+    if (text === '--all' || text === '.' || text === './' || text === './.') return true;
+    // A single-dash cluster of bare letters (never `--long`, the leading `(?!-)` excludes that) is a POSIX
+    // short-flag COMBINATION — every letter in it reaches argv as if passed separately, so any cluster
+    // containing `A` enumerates just as much as a lone `-A` does.
+    return /^-(?!-)[A-Za-z]+$/.test(text) && text.includes('A');
+  });
 }
 
 /** Enumeration-SOURCE commands whose output is a bare path/status listing — the LEFT side of the #2968
@@ -1500,9 +1519,31 @@ function gitAddEnumeratesUnnamedPaths(seg) {
 function isPathEnumerationSource(seg) {
   const sub = gitSubcommand(seg);
   if (sub === 'ls-files') return true;
-  if (sub === 'status') return /(?:^|\s)(?:--porcelain\b|--short\b|-s\b)/.test(canonicalCommand(seg));
+  if (sub === 'status') {
+    const cmd = canonicalCommand(seg);
+    if (/(?:^|\s)(?:--porcelain\b|--short\b)/.test(cmd)) return true;
+    // `-s` is a POSIX short flag too, so it can ride inside a combined cluster (`-su`, `-sb`, …) that the
+    // bare `-s\b` word-boundary regex above can never see (`\b` never fires between two letters) — PR #1816
+    // review's confirmed bypass. Token-scanned, not regexed, so the cluster is examined letter-by-letter.
+    return shellTokens(cmd).some((t) => !t.op && statusClusterHasShort(t.text));
+  }
   const prog = programWord(seg);
   return prog === 'find' || prog === 'ls';
+}
+
+/** Does this `git status` token's short-flag CLUSTER effectively enable `-s`/`--short`? Pure. Verified
+ *  against real git (git 2.50.1): `-u` takes an OPTIONAL attached argument, so once `-u` appears in a cluster,
+ *  every character AFTER it is consumed as `-u`'s mode value rather than parsed as further short flags —
+ *  `git status -us` really means `--untracked-files=s` and git itself rejects it ("Invalid untracked files
+ *  mode 's'"), so it is deliberately NOT treated as `-s` here. `-su` (the `-s` flag comes first, `-u` is last
+ *  and takes no attached value) has no such consumption and genuinely IS `-s -u` — the PR #1816 review's
+ *  confirmed bypass (`git status -su | xargs git add`). */
+function statusClusterHasShort(text) {
+  if (!/^-(?!-)[A-Za-z]+$/.test(text)) return false;
+  const chars = text.slice(1);
+  const uIdx = chars.indexOf('u');
+  const effective = uIdx < 0 ? chars : chars.slice(0, uIdx + 1);
+  return effective.includes('s');
 }
 
 /** The PIPE/`xargs`-SINK shape: a bare `|` (real data pipe, not `||`) from a path-enumeration source into a

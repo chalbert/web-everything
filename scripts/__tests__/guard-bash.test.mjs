@@ -1909,6 +1909,31 @@ describe('guard-bash — git add of an ENUMERATED path set is denied by EFFECT (
       expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
   });
 
+  /**
+   * PR #1816 review — CONFIRMED bypass: several spellings functionally identical to the four shapes above
+   * still returned `allow`. `git add ./` is the same "everything under cwd" operand as a bare `.`; `-Av`/`-vA`
+   * are POSIX-combined short-flag CLUSTERS equivalent to `-A -v` (git's own argv parsing does not care which
+   * order the letters land in, or whether they're spelled as one token or two); and `git status -su` is the
+   * SAME combined-cluster gap on the pipe-sink's enumeration-source side — `-s\b`'s word-boundary regex can
+   * never match inside `-su` since a boundary only exists between a word char and a non-word char, and 's' and
+   * 'u' are both word chars. Verified against real git 2.50.1 before fixing: `-su` == `-s -u`, but `-us`
+   * actually errors ("Invalid untracked files mode 's'") because `-u` takes an optional attached argument that
+   * consumes the rest of the cluster — so `-us` is deliberately NOT treated as an enumeration source below.
+   */
+  it('DIRECT — equivalent spellings of the bare-dot and combined-short-flag shapes (PR #1816 review)', () => {
+    for (const cmd of ['git add ./', 'git add ./.', 'git add -Av', 'git add -vA', 'git add -fA', 'git add -Af'])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('PIPE/XARGS SINK — a combined `git status -su` short-flag cluster reaches the same sink (PR #1816 review)', () => {
+    for (const cmd of ['git status -su | xargs git add', 'git status -sb | xargs git add'])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('PIPE/XARGS SINK — `git status -us` is NOT an enumeration source: `-u`\'s optional arg consumes the `s`, and real git rejects it outright (verified against git 2.50.1)', () => {
+    expect(decide('git status -us | xargs git add', {})).toBeNull();
+  });
+
   it('PIPE/XARGS SINK — the exact 2026-08 /converge read command (before its PR #1064 fix)', () => {
     expect(decide('git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --', {}))
       .toMatch(/stages a path set you did not name/);
@@ -1949,6 +1974,11 @@ describe('guard-bash — git add of an ENUMERATED path set is denied by EFFECT (
       'find . -name "*.md"',                                      // -exec absent
       'git status --porcelain',                                   // no pipe into add
     ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('a narrow `git add` with an unrelated short-flag cluster (no `A`) still passes (PR #1816 review — no new false positive)', () => {
+    for (const cmd of ['git add -p file.txt', 'git add -uv file.txt', 'git add -v path/a', 'git add path/a.dot'])
+      expect(decide(cmd, {}), cmd).toBeNull();
   });
 
   it('a `;`/`&&`-separated ls-files and add are UNRELATED commands, not a pipeline — stays allowed', () => {

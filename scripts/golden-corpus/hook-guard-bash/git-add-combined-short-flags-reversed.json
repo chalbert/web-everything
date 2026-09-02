@@ -1,0 +1,9 @@
+{
+  "id": "git-add-combined-short-flags-reversed",
+  "cmd": "git add -vA",
+  "ctx": {},
+  "basis": "#2968 PR #1816 review — flag order within the cluster does not matter",
+  "expect": {
+    "reason": "`git add` here stages a path set you did not name — the operand is an ENUMERATION (a wildcard `-A`/`--all`/`.` flag, a piped `ls-files`/`status`/`find`/`ls` listing feeding an `xargs` sink, a `while read` loop variable, or a `find -exec`), not paths written out in the command itself (#2968). A broad/enumerated add sweeps up whatever a CONCURRENT session has in flight — the exact incident PR #1064 reproduced by RE-SPELLING a blocked `git add --all --intent-to-add` as `git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --`, same effect, different letters. Left-behind intent-to-add entries also make `git restore <path>` TRUNCATE a swept file to 0 bytes and make every `pull --ff-only --autostash` in the repo die. Stage the EXACT paths you mean: `git add path/a path/b`. There is no override — an unnamed path set is never the right add here."
+  }
+}
