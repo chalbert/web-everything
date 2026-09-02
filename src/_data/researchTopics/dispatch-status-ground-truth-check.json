@@ -1,0 +1,20 @@
+{
+  "id": "dispatch-status-ground-truth-check",
+  "title": "Cross-checking an open item's status against real merged-PR history before dispatch — prior art from infra reconciliation",
+  "summary": "Prior-art survey for decision #3457 (prepared 2026-09-02): the conveyor dispatches an item off its own status frontmatter, which can lag real completion (#3434 was dispatched twice -- once via the operator's direct we:scripts/operations/dispatch-lane.mjs call, once via the automatic per-tick sweep -- after its work had already merged as PR #1768). THE CORRECTED FINDING (post-skeptic) -- an earlier draft of this survey claimed both dispatch paths already funnel through the same we:scripts/operations/dispatch-lane.mjs spawn convention, based on this prepare session's own append-system-prompt boilerplate. A skeptic sub-agent refuted that by reading we:skills-src/conveyor/SKILL.md's actual automatic-sweep spawn instructions (sec 3/3b: 'spawn one background Agent' directly, with NO mention of dispatch-lane.mjs) and we:backlog/3096-*.md (status: open, blockedBy: [3353], itself open) -- SKILL.md's own inline comment at line 77 names routing the spawnBuilds/spawnPrepareScope halves through the declared operation as 'its own item', i.e. #3096, still unbuilt. we:docs/agent/platform-decisions.md's ratified #conveyor-dispatch-calls-the-declared-operation anchor describes the convergence as the TARGET architecture, not yet the current one. CORRECTED CONCLUSION -- today, we:scripts/operations/dispatch-lane.mjs's guard (Fork 1 option c) is the ONLY check point on the manual dispatch path, and we:scripts/readiness/dispatch-plan.mjs's enrichment (option b) is the ONLY check point upstream of the automatic sweep's direct Agent-tool spawn -- neither substitutes for the other while the two paths stay architecturally separate, so the card's Ruling 1 is a SUPPORT-BOTH requirement (implement both b and c now), not the 'mandatory floor + optional efficiency layers' framing an earlier draft wrongly derived, and not a three-way pick either. Once #3096 lands (routing the automatic sweep through the declared operation too), a single guard at (c) would cover both paths and (b) could be retired -- left to #3096's own follow-on. THE EXTERNAL PRECEDENT (independent of the corrected Fork 1, still valid for Fork 2's cadence question) -- three established infra-automation systems independently converge on a two-tier check-cadence shape (an authoritative check immediately before the actuation, plus a cheaper advance-visibility pass upstream of it): Kubernetes controllers are level-triggered at the reconcile layer specifically so a missed event is still caught by the next reconciliation reading LIVE state, with a periodic full resync as a backstop rather than the primary mechanism; Terraform's plan/apply always runs an implicit refresh of real infrastructure state first ('all plan and apply commands run refresh first, prior to any other work'), with a cheaper -refresh-only mode for drift detection alone; and the widely used skip-duplicate-actions GitHub Action puts its authoritative dedup check INSIDE the triggered job (a backtracking search over commit history for a prior successful run), not only at trigger-time filtering. This validates Fork 2's one-time-at-(c) + age-gated-at-(b) cadence split, and previews the shape a future post-#3096 consolidation would take. Full grounding, including the skeptic's refutation trail, in we:reports/2026-09-02-dispatch-status-ground-truth-check.md.",
+  "status": "open",
+  "dateOpened": "2026-09-02",
+  "lastReviewed": "2026-09-02",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "conveyor",
+    "dispatch",
+    "reconciliation",
+    "ground-truth",
+    "decision-prep",
+    "delivery"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-09-02-dispatch-status-ground-truth-check.md"
+}
