@@ -57,6 +57,90 @@ state, exactly as `converge.py` already did all of tonight. "Not yet merged" is 
 guarantee as "not yet running." Whoever builds this owes the same care to what it's allowed to
 touch unattended as to the code itself, from the first real run, not just at graduation time.
 
+## Standing doctrine — quick reference for a new session
+
+Seven rules accumulated while building and live-firing this epic's own machinery. Each paragraph
+below is enough to act on without re-reading the full history; the full evidence and reasoning for
+each sits in the named section further down this same file — read that section before you need to
+defend or extend the rule, not before you can follow it day to day.
+
+1. **Kanban-style: fix it, don't ask.** When a session driving this epic's machinery hits an issue —
+   a stuck session, a broken assumption, a mechanism doing the wrong thing — diagnose the root cause
+   and apply the real fix on its own merits. Do not stop to surface a menu of options via a closed
+   multiple-choice question tool. This changes *when* to ask, not whether the fix gets reviewed: a
+   real mechanism-code fix still lands the normal way, in a lane, through the reviewed PR pipeline.
+   Reserve actually asking the operator for genuine authorization gates (dispatching something live
+   for the first time, a destructive/irreversible action) — not for "which workaround do you want."
+   (Full rationale: the "Working doctrine (2026-09-01), the operator's own words: kanban-style, not
+   stop-and-ask" section below.)
+2. **Mechanical dispatch runs on the card + the generic brief, never a bespoke prompt.** Any
+   investigation, root-cause, or design work belongs written INTO the item's own card, never folded
+   into a one-off prompt handed to a subagent. Dispatch a build, review, or anything else this epic
+   mechanizes through the actual mechanism under test (`we:scripts/operations/dispatch-lane.mjs` /
+   `we:scripts/operations/review-dispatch.mjs`), using the SAME generic brief every item gets, filled
+   only with the small closed set of placeholders those briefs declare. A driving session's own
+   hand-briefed `Agent`-tool subagent is not that mechanism — using one to "get the work done" proves
+   nothing about whether the real dispatcher works. (Full rationale: the "Working doctrine
+   (2026-09-01, continued): a mechanically-dispatched item runs on the card + the generic brief,
+   never a bespoke prompt" section below.)
+3. **The orchestrating session never edits or commits directly.** The main/interactive session
+   driving this epic must never itself run `Edit`/`Write` against repo files, or `git commit`/`git
+   add`, in the primary checkout — not even for a small doc-only change. All edits, including
+   backlog-card updates and agent-memory notes, go through a dispatched subagent working inside a
+   lane clone, or the real conveyor. The orchestrating session's job is to acquire the lane, brief
+   the delegate, and relay the result — never to hold the pen. (Full rationale: the "Working doctrine
+   (2026-09-01, continued): the main/interactive session is the orchestrator only" section below.)
+4. **A bug found testing the prototype can be fixed ON the prototype directly — no story, no PR, no
+   review ceremony; only graduating a piece TO `main` needs the full pipeline.**
+   `origin/lane/mechanical-dispatcher` has no merge-PR history of its own — every one of its 28
+   unique commits was pushed straight to the branch — so a quick fix pushed straight there skips no
+   ceremony the branch ever had. A lane clone is still required (the git-branch-mutation guard
+   applies regardless of target branch), just not the story/PR/independent-review ceremony. **This
+   does NOT cover fixing code that already lives on `main`**, even when the bug was noticed while
+   running the prototype — that always takes the full pipeline (`#3437` is the worked example: found
+   live-firing the prototype, but its root cause lived in `main` code, so it claimed a story, built
+   in a lane, and went through independent review like any other item). The branch itself is never
+   dropped until `#3443`'s graduation is fully done, with the operator's explicit approval. (Full
+   rationale: the "Working doctrine (2026-09-01, continued): a bug found testing the prototype branch
+   can be fixed ON the prototype branch directly" section below.)
+5. **Every `review:human` PR gets an independent AI review pass before the human ceremony, not
+   instead of it.** A PR labelled `review:human` (the conflict-of-interest gate for a diff touching
+   gate machinery or the statute file) must be run through a genuinely independent `review-pr` pass —
+   dispatched as a separate OS process with its own fresh session id, never the authoring session or
+   the `Agent` tool (which inherits the parent's session id) — and any real, confirmed findings must
+   be fixed and pushed before the PR reaches the operator. This does NOT change who may clear
+   `review:human`: the human ceremony only, unconditionally; `--answer=accept` stays refused on a
+   `review:human` PR by construction. (Full rationale: the "Working doctrine (2026-09-02): a
+   `review:human` PR gets an independent AI review pass BEFORE the human ceremony" section below.)
+6. **The operator's in-conversation "I approve `<PR>`", naming the PR, IS the explicit instruction
+   the clear-human ceremony already requires.** This states nothing new — it names, in one place,
+   what already counts as the explicit in-conversation instruction
+   `we:.claude/skills/review/SKILL.md` demands before the ceremony may run. On sight, run
+   `we:scripts/review-set-label.mjs <PR> --repo=<owner/repo> --to=clear-human
+   --actor="Nicolas Gilbert (operator)" --reason="<verbatim quote>" --body-file=<a small clearance
+   note under /tmp>` — `--reason` carries the operator's own words verbatim, never a paraphrase.
+   "Looks fine" or a batch approval that never names a PR number does not qualify. (Full rationale:
+   the "Working doctrine (2026-09-02, continued): the operator's in-conversation 'I approve `<PR>`'
+   naming a PR IS the explicit instruction" section below.)
+7. **NEW — resume the prototype's own continuous runner loop as the primary delivery mechanism.**
+   This is not a new plan; it is a return to the one this epic already stated at the top, in "How to
+   build it" above: build/iterate quickly on `origin/lane/mechanical-dispatcher` (rule 4 governs how
+   a fix lands there), run it live, and when a piece is genuinely stable, file the real story and
+   open the real PR to graduate it to `main` (rule 4's own graduation path) — "only once everything
+   has transferred does the real system execute from `main` instead of the branch." Tonight's
+   live-fire troubleshooting — one-shot `we:scripts/operations/dispatch-lane.mjs`/
+   `we:scripts/conveyor/queue.mjs` calls, heavy manual lease/session babysitting — was a necessary
+   detour to root-cause and fix `#3437` (a real live-safety bug in the double-dispatch guard), not a
+   new direction; now that `#3437` is fixed and merged, the loop itself should resume as the default
+   way work gets done, with one-shot dispatcher calls as the FALLBACK for whatever the loop doesn't
+   cover yet, not a replacement for it. **Recommended, not a hard precondition** (the operator did
+   not state it as one): before leaning on the loop again, sanity-check live that `#3437`'s fix
+   actually holds under the continuous tick loop, not just `--once` calls — it merged tonight but was
+   never re-exercised by running the loop continuously afterward, the same way `#3434` was proven
+   live twice before being trusted. (See "How to build it" above for the founding plan this restates;
+   the close-out session update at the end of this file has the evidence for why the detour happened
+   and what unblocks resuming it.)
+
 ## Why this card exists, not more work in the session that wrote it
 
 This session is itself an instance of the problem this epic describes — large, deep into
@@ -1187,3 +1271,89 @@ is narrower and purely evidentiary: the operator's own chat message, naming the 
 in-conversation instruction… naming that PR" the skill already requires before the ceremony may run — so a
 future session may act on "I approve `<PR>`" (or plainly equivalent phrasing that names the PR) on sight,
 without re-deriving whether that counts or re-justifying that the ceremony is allowed.
+
+## Session update (2026-09-02, close-out) — handoff to next session
+
+Close-out for tonight's session (2026-09-01 into 2026-09-02). Brief by design — the detailed doctrine
+sections above and this session's own PRs already carry the evidence. Every claim below was checked
+fresh against the live repo (PR state, `status:` frontmatter, `we:scripts/lane-pool.mjs status`), not
+transcribed from what this session expected to find — two things did NOT match the initial
+expectation, both called out explicitly below.
+
+**Landed tonight:**
+- **`#3437` (the epic's top blocker) fixed and merged — `PR #1799`.** `review-dispatch` now binds
+  sessions by session name, not just cwd/HEAD-oid, closing the double-dispatch hole where the
+  runner's own planning tick wrote a guard entry for a dispatch that had never actually happened.
+- **The scope-overlap root cause found and fixed — `PR #1798`.** Directory-wide `scope:` predictions
+  were colliding under the lease guard; narrowing four over-broad predictions (on `#3438`, `#3441`,
+  `#3435`, `#3398`) unblocked them for building. **Correction to expect going in: "unblocked" means
+  buildable, not built** — as of this write-up `#3438`, `#3441`, `#3435`, and `#3398` are all still
+  `status: open`, along with `#3403`, `#3404`, `#3406`, `#3399`, `#3416`, `#3418`, `#3443`, `#3446`.
+  Resolved tonight: `#3440`, `#3401`, `#3400`, `#3402`, `#3427`, `#3445`, `#3405`, `#3422`. `#3439`
+  is `status: active`, not resolved — its own "Progress" section already shows `assertMainNotStale`
+  built, tested, and its design decision documented, so it reads as functionally done but was never
+  formally closed; worth a look, not a re-build.
+- **Two lane-pool lease-leak incidents found tonight, filed as `#3449`** (`bornAs: xelgqmw`, `PR
+  #1811`) — twice, a finished build/prepare session's PR merged but its lane lease stayed held with no
+  live process behind it (12 stale leases the first time, 10 of 12 the second), starving dispatch
+  capacity until force-released by hand. **Correction: `#3449` is still `status: open` — `PR #1811`
+  only files the root-cause card, it does not yet ship the actual fix** (a reconciliation cadence
+  independent of a live `/conveyor` session). Do not read "filed" as "fixed" for this one. Its own
+  root-cause section already names two candidate fixes (a drain-daemon sweep, or making the read-only
+  capacity check trigger the existing acquire-time reap) and a regression-test shape.
+- **A live instance of the exact same lease-leak class found and cleaned up during this close-out's
+  own WIP verification, not part of the count above.** `we:scripts/lane-pool.mjs status --json`
+  showed two lanes (lane-1, lane-9) still holding leases from already-merged tonight's work
+  (`3437-review-dispatch-live-bind`, acquired before `PR #1799` merged; `drain-lease-cross-repo-
+  regression`, acquired before `PR #1810` merged) — neither released after its PR landed. Both
+  carried only stray, superseded local diffs (a stale `status: active` edit to `#3437`'s own card,
+  pre-dating its resolution on `main`; an orphaned PR-body scratch note) — nothing worth preserving —
+  and were released as part of this close-out. **This means "all WIP clean" was not actually true
+  until this verification ran it down**; it is genuinely clean now (`gh pr list --state open` empty
+  in both `web-everything` and `plateau-app`; `we:scripts/lane-pool.mjs status --json` shows zero
+  held leases).
+- **The drain daemon's cross-repo lease-key mismatch fixed in `plateau-app` — `PR plateau-app#147`**
+  (merged), plus a regression test pinning the fix (`PR #1810`, this repo). The daemon is keying its
+  own drain lease per-repo now, matching the child pass, and is landing merges normally again.
+- **Decisions `#3400`, `#3402`, `#3427` ratified**, all now `status: resolved`. Follow-on build items:
+  `#3402` → `#3445` (resolved — the dispatcher fixture-root thread finished) and `#3446` (open — extend
+  the fixture harness through `we:scripts/operations/dispatch-lane.mjs`'s own remainder); `#3427` →
+  `#3451` (open — the new call-visibility-signal item, "build the lightweight call-visibility signal
+  for every operation," filed under `#3427` as its parent).
+- **The `review:human` independent-review-first doctrine (see the standing-doctrine section above,
+  rule 5) established and applied live to four PRs**: `#1804`, `#1808`, `#1814`, `#1815` — all cleared
+  via the sanctioned `--to=clear-human` ceremony on the operator's own "I approve `<PR>`," with `#1814`
+  and `#1815` (both postdating the doctrine's own landing PR `#1817`) each carrying a genuinely
+  independent `review-pr` pass first, per rule 5 and rule 6 above.
+- **The `review-pr` silent-suspend gap fixed — `PR #1821`, now `#3453`, `status: resolved`.**
+  `review-pr` now posts an automatic advisory note on a `review:human` PR before the point where it
+  would otherwise wait on a confirm answer it can structurally never get — advisory findings post
+  durably instead of silently going nowhere.
+
+**What's next, in priority order:**
+
+1. **Sanity-check `#3437`'s fix live before leaning on it under continuous dispatch.** It merged
+   tonight and was exercised via `--once` calls during tonight's own bug-hunt, but never re-run
+   through the actual continuous tick loop afterward — the same live-fire proof `#3434` got twice
+   before being trusted. Recommended, not a hard gate (see standing-doctrine rule 7 above).
+2. **Resume the prototype's own continuous runner loop as the primary delivery mechanism** — this is
+   the epic's own original "How to build it" plan, not a new one; see rule 7 above for the full
+   framing and why tonight's one-shot dispatching was a detour, not a redirection.
+3. **`#3438`'s own remaining scope** (wire `reconcile-pass`'s `kind: 'fix'` into the runner's
+   mechanical passes — the fix half of fix→review→land still has nothing executing it) if not yet
+   built — still `status: open`.
+4. **`#3443`'s graduation work** (moving `origin/lane/mechanical-dispatcher`'s unique commits to
+   `main` in small reviewed pieces) — continuing; still `status: open`.
+5. **`#3427`'s new call-visibility-signal follow-on, `#3451`** — still `status: open`, not yet built.
+6. **Everything else still genuinely open under this epic, so nothing slips through silently:**
+   `#3441` (a build-dispatch agent's PR must resolve its own item), `#3435` (mechanically reap
+   finished `claude agents` sessions), `#3398` (supervisor/runner has no out-of-band alerting),
+   `#3403`/`#3404`/`#3406` (durable build-guard floor, singleton-lease heartbeat, idle-stop backoff —
+   the epic's text above says these were "built, tested, pushed to the branch," but their cards
+   themselves still read `status: open`, worth reconciling), `#3399` (no operator runbook), `#3416`
+   (the guard-suppression double-dispatch fix, branch-only pending graduation), `#3418` (dispatched-
+   agent system-prompt identity), `#3446` (fixture-harness extension), `#3449` (the lease-leak fix
+   itself, not just its filing), `#3433` (technically enforce review-dispatch's never-self-accept
+   rule), `#3436` (a dispatched agent writes no structured completion record), `#3421` (the
+   missing-operation confidence-call follow-on to `#3422`), and `#3411` (the `lane-pool-reap-on-
+   acquire` TTL-backdating test flake) — all confirmed `status: open` tonight, none silently dropped.
