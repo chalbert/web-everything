@@ -1071,3 +1071,50 @@ able to fix the prototype quickly is a convenience for iterating on it, not a re
 `origin/lane/mechanical-dispatcher` stays alive until `#3443`'s graduation is fully done (every commit unique to
 the branch landed on `main` through its own reviewed PR, or explicitly noted as dropped/superseded), and only
 then is it deleted.
+
+## Working doctrine (2026-09-02): a `review:human` PR gets an independent AI review pass BEFORE the human
+## ceremony, not instead of it — the human approves an already-vetted diff, never does first-pass review
+
+Set by the operator as a new standing process, stated directly: *"even a `review:human` PR (gate-self, never
+mechanically accepted) must get a genuinely independent AI review first — any real findings get fixed before
+the PR is ever presented to the human for their ceremony. The human's job is to approve an already-vetted
+diff, not to be the first reviewer."*
+
+**The rule, standing from now on:** every PR labelled `review:human` — the conflict-of-interest gate for a
+diff that edits gate machinery or the statute file itself (`we:docs/agent/platform-decisions.md`) — must be
+run through a genuinely independent `review-pr` pass, and any real (confirmed, blocking-bar) findings that
+pass surfaces must be fixed and pushed to the same PR branch, **before** the PR is handed to the operator for
+the human ceremony. This is an addition ahead of the ceremony, not a change to it: `review:human` still can
+only ever be cleared by the human ceremony itself
+(`we:scripts/review-set-label.mjs --to=clear-human --actor=… --reason="<quoted instruction>"`) — `--answer=accept`
+stays refused on a `review:human` PR by `decideSetLabel`'s own pure core, unconditionally, exactly as before
+this doctrine. Nothing here grants a mechanical override of `review:human`; it only guarantees the diff the
+human eventually looks at has already had a real, independent pass over it, so their review is confirmation
+of vetted work, not the first read.
+
+**Why this needed stating, not just doing once:** `review:human` exists precisely because the author cannot
+be trusted to grade their own statute edit — but "wait for the human" had silently come to mean "the human is
+the first reviewer," which defeats the same logic `review:pending`'s independent-juror requirement already
+encodes for every lower-tier PR. A gate-self PR is exactly the diff most worth a real independent look before
+anyone spends ceremony time on it, not the one exempted from getting one.
+
+**Concrete instance this rule was written from: PR #1814** (`backlog/3427` ratification +
+`we:docs/agent/platform-decisions.md` statute extension + the new follow-on item card, `review:human` for editing
+the statute file). Running `review-pr` from the session that authored it hit the expected, correct refusal —
+`review-pr.read: SELF-CLEAR REFUSED — the clearing actor … is the PR's author` — because this repo's own
+independence check (`we:scripts/lib/review-independence.mjs`) keys on `CLAUDE_CODE_SESSION_ID`, and the
+authoring session cannot review its own diff, `review:human` or not. The fix was not to route around the
+refusal but to use the already-standing answer to it
+(`we:.claude/agent-memory/standing-authorization-independent-review-self-clear.md`, and
+`we:scripts/operator/dispatch.mjs`'s `runAgent`/`buildReviewPrompt`): dispatch a genuinely separate `claude -p`
+OS process — never the `Agent` tool, which inherits the parent session's id verbatim — with its own
+freshly-minted session id, running the same declared `review-pr` operation from its own lane. That
+independent pass is the deliverable this doctrine requires for every `review:human` PR going forward, not a
+one-off workaround for this PR alone.
+
+**What this doctrine does not change.** It adds a review-then-fix step ahead of the human ceremony; it does
+not touch who may clear `review:human` (unchanged: the human ceremony only, `#2771`/`#2785`'s
+[we:docs/agent/platform-decisions.md#review-human-declarative-leash-only](/docs/agent/platform-decisions.md#review-human-declarative-leash-only)
+statute unchanged), and it does not authorize `--answer=accept` on a `review:human` PR under any circumstance
+— the independent pass's job is to find and fix real defects, then hand the (now-vetted) diff onward, never
+to clear the label itself.
