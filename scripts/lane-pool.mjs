@@ -119,8 +119,12 @@ for (const a of rest) {
 }
 
 // ── git helpers (throw-on-error wrappers) ───────────────────────────────────────────────────────────
-// `opts` merges into execFileSync's options (e.g. `{ timeout: 8000 }`) — needed by callers that must
-// never let a slow/hung git call stall a dispatch acquire, matching the adjacent `gh` call's timeout.
+// `opts` merges into execFileSync's options (e.g. `{ timeout: 20_000 }`) — needed by callers that must
+// never let a slow/hung git call stall a dispatch acquire, matching the adjacent `gh` call's timeout. 20s,
+// not the original 8s: under real concurrent host load a trivial child (even one that ultimately errors
+// fast, like `gh` against a non-GitHub origin) can take multiple seconds just to be scheduled, and an
+// 8s bound fired with no hang present — silently degrading the reap axis and flaking
+// lane-pool-reap-on-acquire.test.mjs red twice on 2026-08-30 (#x01b2gj, mirrors #3011's precedent exactly).
 const git = (args, cwd, opts = {}) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
 const gitQuiet = (args, cwd) =>
@@ -612,7 +616,7 @@ function aheadIsProvablyPushed(dir, remoteShas) {
 /** Live remote tip SHAs (one network call, `timeout` guarded like the adjacent `gh` call — #2920). Returns
  *  an EMPTY set on any failure/timeout, so callers fail closed. */
 function liveRemoteShas(dir) {
-  const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 8000 });
+  const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 20_000 });
   if (out === null) return new Set();
   return new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean));
 }
@@ -890,7 +894,7 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
   try {
     // `timeout` bounds the worst case: a slow/hung/unauthenticated gh must NEVER stall a dispatch acquire —
     // it degrades the PR axis to OFF (the offline item-resolved axis + TTL still apply), never blocks.
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 });
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 });
     prStates = prStatesFromList(JSON.parse(out));
   } catch { prStates = null; }
   // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer
