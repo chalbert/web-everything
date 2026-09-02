@@ -67,6 +67,51 @@ describe('TRUST_CHAIN — drain-daemon gate-deciding files are registered (WE #2
   });
 });
 
+// The conveyor's own dispatch-loop machinery (WE #3401, under epic #3383). Before this, four of these five
+// files were absent from TRUST_CHAIN entirely, and the fifth (runner.mjs) only escalated via the generic
+// `skills-src/` blast-radius PATTERN (#2909) — agent-clearable but not a portable trust-chain member. Each
+// maps a registered basename to its home path so the regression proves the basename match travels to the
+// real WE location (not just the bare basename). `skills-src/conveyor/supervisor.mjs` is registered ahead of
+// its own landing to `main` — it exists today only on `origin/lane/mechanical-dispatcher`.
+const DISPATCH_LOOP_ENGINE_MEMBERS = [
+  { file: 'tick-core.mjs', home: 'scripts/conveyor/tick-core.mjs', why: 'planTick decides which agents to spawn' },
+  { file: 'dispatch-lane.mjs', home: 'scripts/operations/dispatch-lane.mjs', why: 'starts a real delivery agent unattended' },
+  { file: 'dispatch-lane-io.mjs', home: 'scripts/operations/dispatch-lane-io.mjs', why: 'the sink/observer that realizes the dispatch' },
+  { file: 'runner.mjs', home: 'skills-src/conveyor/runner.mjs', why: 'the headless runner that drives the loop, unattended' },
+  { file: 'supervisor.mjs', home: 'skills-src/conveyor/supervisor.mjs', why: 'keeps the runner alive across crashes' },
+];
+
+describe('TRUST_CHAIN — conveyor dispatch-loop gate-deciding files are registered (WE #3401)', () => {
+  it('every dispatch-loop basename is a member of TRUST_CHAIN_BASENAMES', () => {
+    for (const { file } of DISPATCH_LOOP_ENGINE_MEMBERS) {
+      expect(TRUST_CHAIN_BASENAMES.has(file)).toBe(true);
+    }
+  });
+
+  it('every dispatch-loop basename has a TRUST_CHAIN entry tagged ENGINE tier (obeys the gate, agent-reviewable)', () => {
+    for (const { file } of DISPATCH_LOOP_ENGINE_MEMBERS) {
+      const entry = TRUST_CHAIN.find((m) => m.file === file);
+      expect(entry, `TRUST_CHAIN entry for ${file}`).toBeTruthy();
+      expect(entry.tier).toBe('engine');
+      expect(entry.leash).toBeUndefined(); // engine members never carry a leash
+      expect(entry.desc).toMatch(/3401/); // the registration cites its ticket
+    }
+  });
+
+  it('dispatch-loop files are ENGINE, not POLICY — they escalate but are NOT human-forced', () => {
+    for (const { file } of DISPATCH_LOOP_ENGINE_MEMBERS) {
+      expect(POLICY_CORE_BASENAMES.has(file)).toBe(false);
+    }
+  });
+
+  it('the basename match TRAVELS to the real WE path — the file escalates there', () => {
+    for (const { home } of DISPATCH_LOOP_ENGINE_MEMBERS) {
+      expect(isTrustChainPath(home)).toBe(true);  // a PR touching the real path always gets an independent review
+      expect(isPolicyCorePath(home)).toBe(false); // engine tier — a converged agent panel may clear it (no human forced)
+    }
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 // THE POLICY-TIER `leash` SPLIT (#2771 / #2785). The roster is now the single source of truth for TWO
 // questions, not one: "is this the policy tier?" (`tier`) and "does it force a human?" (`leash`). These pins

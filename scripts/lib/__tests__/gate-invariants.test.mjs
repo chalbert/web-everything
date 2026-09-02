@@ -98,6 +98,13 @@ const POLICY_CORE_FILES = [...DECLARATIVE_LEASH_FILES, ...DERIVATION_CODE_FILES]
 const ENGINE_FILES = [
   'scripts/merge-ai-prs.mjs',                 // the lander — obeys the gate, so agent-reviewable (#2445 flip)
   'frontierui/scripts/merge-ai-prs.mjs',      // a repo-prefixed clone path still counts
+  // the conveyor's own dispatch-loop machinery (#3401, under epic #3383) — see gate-config.test.mjs for the
+  // dedicated roster-membership pins (basename registration, tier, homes)
+  'scripts/conveyor/tick-core.mjs',
+  'scripts/operations/dispatch-lane.mjs',
+  'scripts/operations/dispatch-lane-io.mjs',
+  'skills-src/conveyor/runner.mjs',
+  'skills-src/conveyor/supervisor.mjs',       // registered ahead of its own landing to `main`
 ];
 // The STATUTE layer (#2412) — governance rules a human must ratify; forces review:human like the policy tier.
 const STATUTE_FILES = ['docs/agent/platform-decisions.md', 'docs/agent/2026-06-example-statute.md'];
