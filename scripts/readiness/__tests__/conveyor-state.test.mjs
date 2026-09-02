@@ -246,6 +246,20 @@ describe('itemNumFromRef — item id out of a lane headRef', () => {
     expect(itemNumFromRef('main')).toBe(null);
     expect(itemNumFromRef(null)).toBe(null);
   });
+  // #xaa7r2n — a RETRY ref glues an attempt-tag letter directly onto the id (mirrors lease-reaper.mjs's
+  // itemNumFromSession/laneRefItemNum grammar for the dispatcher's own retry-naming convention). Confirmed
+  // live: PR #1851's headRefName is exactly this shape and used to resolve to null.
+  it('a retried numeric ref (attempt-tag letter glued onto the number) still resolves to the base item', () => {
+    expect(itemNumFromRef('lane/3441b-resolve-on-land-extractor')).toBe('3441');
+  });
+  it('a retried JIT-slug ref, base slug at the 7-char cap, resolves to the slug (not slug+retry-letter)', () => {
+    // Only a MAX-LENGTH (7-char) base slug disambiguates: {5,7} cannot absorb an 8th char into the slug
+    // itself, so the trailing retry letter is forced into the separate [a-z]? group. A base slug SHORTER
+    // than 7 chars plus a retry letter is genuinely ambiguous with a longer valid slug of the same total
+    // length (e.g. 'xe2fmixb' reads as a plain 7-char slug, not '6-char slug + b') — accepted as a known,
+    // currently-unreachable limitation: JIT-slug items don't get attempt-tag retries today (#xaa7r2n).
+    expect(itemNumFromRef('lane/xe2fmixyb-slug')).toBe('xe2fmixy');
+  });
 });
 
 describe('ciRollup — statusCheckRollup → one CI token', () => {
@@ -323,6 +337,9 @@ describe('shapePrs — gh pr list → the in-flight PR shape', () => {
     expect(shapePrs([{ number: 9, headRefName: 'lane/3-x' }])[0].mergeStateStatus).toBe('');
   });
   it('null list → []', () => expect(shapePrs(null)).toEqual([]));
+  it('#xaa7r2n — a retried PR headRef (attempt-tag letter) still resolves num, not null', () => {
+    expect(shapePrs([{ number: 1851, headRefName: 'lane/3441b-resolve-on-land-extractor', state: 'OPEN' }])[0].num).toBe('3441');
+  });
 });
 
 // A lane-pool `status --json` row + the scope-lease-collect picture leases share the lane index.
