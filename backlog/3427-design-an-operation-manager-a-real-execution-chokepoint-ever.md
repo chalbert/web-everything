@@ -46,7 +46,7 @@ is a straight acceptance of the prepared defaults, not a re-opening of either fo
 **Follow-on build scaffolded at ratification** (Fork 2 requires one; Fork 1 needs none — it is a scope ruling
 on an already-shipped mechanism, not new work):
 
-- [Build the lightweight call-visibility signal for every operation call](/backlog/xadrqhr-build-the-lightweight-call-visibility-signal-for-every-opera/)
+- [Build the lightweight call-visibility signal for every operation call](/backlog/3451-build-the-lightweight-call-visibility-signal-for-every-opera/)
   (parent: this item) — names the storage shape (a `we:scripts/operations/call-log.mjs` /
   `we:scripts/operations/call-log-store.mjs` pure-core/io-shell pair, mirroring
   `we:scripts/operations/run-record.mjs`/`we:scripts/operations/run-store.mjs`, writing to a new

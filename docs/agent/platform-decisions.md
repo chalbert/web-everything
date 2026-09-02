@@ -3154,7 +3154,7 @@ blind spot of `compute`-only operations (`gate-health`, `suggest-next`, `verify`
 trace of being called. A per-declaration opt-in to full run-record persistence for specific high-value
 `compute` operations remains a live, un-foreclosed option layered on top of the lightweight signal, not a
 replacement for it. Build tracked at
-[the follow-on item](/backlog/xadrqhr-build-the-lightweight-call-visibility-signal-for-every-opera/). Full
+[the follow-on item](/backlog/3451-build-the-lightweight-call-visibility-signal-for-every-opera/). Full
 reasoning, skeptic passes and prior art:
 [#3427](/backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever/).
 
