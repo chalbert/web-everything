@@ -3,10 +3,12 @@ bornAs: xf38r2m
 kind: story
 size: 5
 parent: "3279"
-status: active
+status: resolved
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:skills-src/review/review-agent-brief.md"]
 dateOpened: "2026-08-31"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
+graduatedTo: none
 tags: []
 ---
 

@@ -3,8 +3,10 @@ bornAs: xpfuj64
 kind: decision
 tier: pinned
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-01"
+dateResolved: "2026-09-02"
+codifiedIn: "docs/agent/platform-decisions.md#review-pending-clean-verdict-mechanical-accept"
 tags: []
 ---
 
