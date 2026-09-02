@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
@@ -962,6 +962,56 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     expect(shouldPostParkReasonComment({})).toBe(true); // absent flag defaults to agent-reviewable
     // review:human park → NO park comment (the #2324 body-block already states the same reason — no dup).
     expect(shouldPostParkReasonComment({ humanRequired: true })).toBe(false);
+  });
+
+  // xsbyo56 — the #2832 held-reconcile comment must name the SPECIFIC file(s) that forced the hold (read back
+  // from the PR body's #2324 `## Escalation reason` block), not just the hold label. PR #1814 is the observed
+  // failure: it touched 3 files but only `docs/agent/platform-decisions.md` is gate-self/sensitive, and the
+  // comment the drain actually posted named only `review:human` — no file. Fixture below is that PR's real
+  // shape, verbatim.
+  describe('buildHeldReviewHoldReason (xsbyo56 — name the file(s), not just the label)', () => {
+    const PR_1814_BODY = [
+      '## Summary',
+      '',
+      'some PR body text unrelated to escalation',
+      '',
+      '## Escalation reason',
+      '',
+      '- blast-radius (docs/agent/platform-decisions.md)',
+      '- statute (docs/agent/platform-decisions.md) — human review required',
+      '',
+      '<!-- policy-set: v1 87688229b08c -->',
+    ].join('\n');
+
+    it('names the specific file(s) from the escalation-reason block when the PR body carries one', () => {
+      const reason = buildHeldReviewHoldReason({ labels: [{ name: 'review:human' }], body: PR_1814_BODY });
+      expect(reason).toContain('docs/agent/platform-decisions.md');
+      expect(reason).toContain('statute (docs/agent/platform-decisions.md) — human review required');
+      // The generic scaffolding survives — this ADDS detail, it doesn't replace the existing wording.
+      expect(reason).toContain('held — a review hold (review:human) stands');
+      expect(reason).toContain('Clear the review to release it.');
+    });
+
+    it('falls back to the pre-existing generic wording when the body carries no escalation-reason block', () => {
+      const reason = buildHeldReviewHoldReason({ labels: [{ name: 'review:pending' }], body: 'no block here' });
+      expect(reason).toBe('held — a review hold (review:pending) stands, so the "ready-to-merge" go-ahead is withheld even though the required check is green (#2832). Clear the review to release it.');
+    });
+
+    it('falls back to the generic wording when the body is absent entirely', () => {
+      const reason = buildHeldReviewHoldReason({ labels: [{ name: 'review:changes' }] });
+      expect(reason).not.toContain('Specifically:');
+      expect(reason).toContain('held — a review hold (review:changes) stands');
+    });
+
+    it('names every hold label present, same as before (multi-label case unaffected)', () => {
+      const reason = buildHeldReviewHoldReason({ labels: [{ name: 'review:pending' }, { name: 'review:changes' }], body: '' });
+      expect(reason).toContain('review:pending, review:changes');
+    });
+
+    it('respects a non-default label name in the go-ahead phrase', () => {
+      const reason = buildHeldReviewHoldReason({ labels: [{ name: 'review:human' }], body: '', label: 'custom-label' });
+      expect(reason).toContain('the "custom-label" go-ahead is withheld');
+    });
   });
 
   it('#2399 remoteManifestApiArgs — GET is explicit, so an -f/--field param never silently switches gh api to POST', () => {
