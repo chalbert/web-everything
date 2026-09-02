@@ -1,0 +1,119 @@
+{% raw %}
+<h2>The question</h2>
+
+<p><a href="/backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever/">#3427</a> captures a
+2026-08-31 discussion under one framing: WE needs a real execution chokepoint <em>"every command — not only
+dispatched-agent commands — routes through,"</em> with four properties: (1) semantically-named operations,
+never raw commands; (2) logged and telemetered, even for cheap/read-only calls; (3) tiered by cost
+(free-inline / CPU-scheduled / mutating-runner-only); (4) a catalog that grows from real usage, not up-front
+enumeration. The card itself says none of this is settled. This survey asks the prior question a prep pass
+owes before authoring forks: <strong>how much of this is already built and already ratified, and what is
+actually still open?</strong></p>
+
+<h2>Finding — three of the four bullets are already closed; two narrow axes remain</h2>
+
+<p>The operations engine this card describes already exists, under epic #3029, and has been growing since
+before this card was opened. Reading its own shipped code and the statute anchors it composes with answers
+three of #3427's four bullets directly:</p>
+
+<table>
+<thead><tr><th>#3427's bullet</th><th>Status</th><th>Where it's already answered</th></tr></thead>
+<tbody>
+<tr><td>Semantically-named operations, no raw-command leakage</td><td>Ratified, shipped</td>
+<td><code>docs/agent/platform-decisions.md#operations-declared-once-callers-generated</code> (#3031, clause 1)
++ <code>scripts/operations/registry.mjs</code>'s <code>op()</code> + two derived adapters
+(<code>cli-adapter.mjs</code>, <code>http-adapter.mjs</code>)</td></tr>
+<tr><td>Tiered by cost (three tiers discussed)</td><td>Already the closed step-kind vocabulary</td>
+<td>#3031 clause 2 (<code>compute | judge | confirm | effect</code>, closed) + clause 4 (solo vs. hosted
+backend, one seam) — see <a href="#tiers">below</a></td></tr>
+<tr><td>Catalog grows from real usage, not up-front design</td><td>Ratified, with a build already scaffolded</td>
+<td><code>#dispatched-agent-never-runs-commands-directly</code> (#3405) Fork 2(a) — halt-and-surface a
+<code>missing-operation</code> finding — generalized by <a href="/backlog/3422-should-the-mechanical-dispatcher-auto-file-a-fix-item-when-i/">#3422</a>'s
+ruling and built out in <a href="/backlog/3421-auto-file-propose-a-fix-on-a-blocking-delivery-hiccup-gated-.md">#3421</a>
+(confidence-assessment self-clear/batch/blacklist, routed through the learnings-pool/<code>/harvest</code>
+pipeline)</td></tr>
+<tr><td>Logged and telemetered, even for cheap/read-only calls</td><td><strong>Open</strong> — and shipped
+code argues the opposite today</td><td>see <a href="#telemetry">below</a></td></tr>
+</tbody>
+</table>
+
+<p>What's left, after subtracting the three closed bullets, is narrower than the card's own language ("every
+command… not only dispatched-agent commands") suggests: (A) whether the catalog's <em>candidacy scope</em> is
+"delivery-loop operations" (#3031's literal text, growing organically) or something wider ("every command,"
+literally), and (B) whether the deliberate choice to skip telemetry for cheap/read-only calls should be
+revisited. Two more filed items sit adjacent to this ground and must not be re-decided by it:
+<a href="/backlog/3188-should-an-agent-session-be-restricted-to-declared-operations/">#3188</a> (still open —
+should an agent SESSION be restricted to declared-operations-only, a prompt-injection blast-radius question
+for a different population) and <a href="/backlog/3398-conveyor-supervisor-runner-residency-has-no-out-of-band-aler/">#3398</a>
+(a filed story — out-of-band alerting specifically for the conveyor supervisor/runner PROCESS's liveness, a
+narrower target than "every operation call").</p>
+
+<h2 id="tiers">Cost tiers — the three-tier framing maps onto machinery that already exists</h2>
+
+<p>#3031 clause 2 closes the engine's step vocabulary at four kinds, and clause 4 names two backend tiers.
+Read together against a real declaration (<code>scripts/operations/http-adapter.mjs</code>'s own route-table
+comment, which is itself derived purely from step kind), the mapping is close to 1:1 with what the operator's
+"three tiers" discussion named:</p>
+
+<table>
+<thead><tr><th>Operator's tier</th><th>Existing mechanism</th></tr></thead>
+<tbody>
+<tr><td>free-and-inline</td><td><code>compute</code> step — pure fn, no io, completes inside one
+<code>advance</code> sweep (<code>engine.mjs</code>)</td></tr>
+<tr><td>CPU-scheduled (needs a model, not the full runner)</td><td><code>judge</code> step — suspends for a
+spawned juror; the spawn's cost is recorded on the resume (<code>engine.mjs</code>'s <code>withTelemetry</code>)</td></tr>
+<tr><td>mutating-and-runner-only</td><td><code>effect</code> step — declares effects, applied only by the
+executor keyed by run+step (idempotent replay); the human-in-loop case the operator's three tiers didn't name
+gets its own kind, <code>confirm</code></td></tr>
+</tbody>
+</table>
+
+<p>Adding a parallel "operation tier" field alongside step kind would duplicate a closed vocabulary #3031
+already argues should stay closed ("an operation that appears to need a fifth kind is a signal to change the
+model, not to extend the vocabulary") — there is nothing here to design.</p>
+
+<h2 id="telemetry">Telemetry for cheap calls — the run-store deliberately skips this today, on a stated reason</h2>
+
+<p><code>scripts/operations/http-adapter.mjs</code>'s own header is explicit and already reasoned, not silent:
+a <code>compute</code>-only declaration's run <strong>is never persisted</strong> — <em>"a record per
+page-load is landfill"</em> — because the run store (<code>we:.operations/runs/</code>) is a session-local
+sidecar nothing prunes, and a <code>compute</code>-only run completes inside one sweep with nothing to cross
+surfaces with. <code>gate-health.mjs</code>'s own header confirms the same thing from the producer side:
+<em>"Both steps are <code>compute</code>, so <code>http-adapter.mjs</code> derives a GET-only surface with no
+run records — the path <code>suggest-next</code> already exercises."</em> Today, at least four shipped
+operations (<code>gate-health</code>, <code>suggest-next</code>, <code>verify</code>, <code>pr-status</code>)
+are all-<code>compute</code> and therefore produce <strong>zero</strong> trace of having been called — not a
+run record, and nothing else either; no separate log or counter exists for this path. That absence is exactly the shape #3427 cites as its
+motivation (#3398's alerting gap; this same epic's own 2026-08-30 blind-review naming "four overlapping
+heuristics" for liveness with none of them agreeing) — a real, present gap, not a hypothetical one.</p>
+
+<p>The question this decision actually owns, narrowed by the above, is not "should we log calls" in the
+abstract (uncontroversial) but <strong>where a lightweight call-visibility signal should live without
+undoing the run-store's own reasoned "no landfill" design</strong> — persisting a full run record for every
+compute call reopens a choice that was made for a stated reason, not an oversight.</p>
+
+<h2>Prior art for the shape — a chokepoint whose catalog grows, kept separate from its access log</h2>
+
+<p>Two well-documented, independent precedents for the surviving shape converge on the same split #3427's own
+text half-proposes:</p>
+
+<ul>
+<li><strong>Kubernetes' API server</strong> is the single execution chokepoint every client (<code>kubectl</code>,
+controllers, other services) must route through, yet its resource <em>catalog</em> is not enumerated up front —
+built-in resources ship with the server and the type catalog grows incrementally via Custom Resource
+Definitions, registered as real usage demands them. This is the "one chokepoint, organically-grown catalog"
+half of #3427's framing, already a mainstream, load-bearing pattern elsewhere — not a novel risk.</li>
+<li><strong>Standard web-server architecture</strong> keeps an ephemeral, cheap, rotated <strong>access log</strong>
+(every request, minimal cost, prunable) structurally separate from the <strong>durable application data
+store</strong> (a database row per meaningful transaction) — exactly the split the run-store's "landfill" reasoning
+above is reaching for without a name: a call-visibility signal is an access-log concern, a persisted run record
+is an application-data concern, and conflating the two is what the existing design is refusing to do.</li>
+</ul>
+
+<h2>What this changes about #3427's own framing</h2>
+
+<p>#3427's "does this include every <code>npm run</code> invocation" question and its "how is telemetry
+stored/queried" question are real, but narrower and more concrete than the card states — both are shaped as
+forks in the prepared item, each with a bold default grounded in the citations above, rather than left as open
+prose. Full grounding in <code>reports/2026-09-01-operation-manager-chokepoint-scope-and-telemetry.md</code>.</p>
+{% endraw %}
