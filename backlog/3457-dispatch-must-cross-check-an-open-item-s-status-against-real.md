@@ -4,11 +4,45 @@ kind: decision
 parent: "3383"
 status: open
 dateOpened: "2026-09-02"
+preparedDate: "2026-09-02"
 relatedTo: ["3435", "3449", "3434", "3433"]
+relatedReport: reports/2026-09-02-dispatch-status-ground-truth-check.md
 tags: [conveyor, dispatch, verification, ground-truth]
 ---
 
 # Dispatch must cross-check an open item's status against real merged-PR history before treating it as needing work
+
+## Grounding digest
+
+Full survey in
+[`we:reports/2026-09-02-dispatch-status-ground-truth-check.md`](../reports/2026-09-02-dispatch-status-ground-truth-check.md),
+research topic [`dispatch-status-ground-truth-check`](/research/dispatch-status-ground-truth-check/).
+
+- **Traced both dispatch paths' actual spawn calls — they do NOT converge on one file today.** The manual
+  operator path (`node we:scripts/operations/run.mjs dispatch-lane --num=<N>`) is the only caller of
+  `we:scripts/operations/dispatch-lane.mjs`. The automatic per-tick sweep is a SEPARATE path:
+  `we:skills-src/conveyor/SKILL.md` §3/§3b instructs the live conveyor session to "spawn one background
+  `Agent`" directly, with **no mention of `we:scripts/operations/dispatch-lane.mjs`** in either spawn step —
+  confirmed by reading `we:skills-src/conveyor/SKILL.md`'s text itself, not inferred. Its own inline comment
+  (line 77) names the gap explicitly:
+  "routing the spawnBuilds and spawnPrepareScope halves through the operation is its own item" —
+  `we:backlog/3096-*.md` (`status: open`, `blockedBy: ["3353"]`, itself `status: open`). The ratified statute
+  [`we:docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation`](../docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)
+  describes this convergence as the TARGET state, not the current one — its own governing card (`#3096`)
+  is still open. (An earlier draft of this card asserted the opposite — that both paths already funnel
+  through `we:scripts/operations/dispatch-lane.mjs` — based on this prepare session's own system-prompt boilerplate; that
+  inference was wrong and is corrected in Fork 1 below.)
+- **This means Fork 1 is not "one forced floor plus optional layers" — it is support-both: two currently
+  independent chokepoints, each covering a dispatch path the other does not reach.** Recorded as a ruling
+  rather than a pick, below.
+- **Three independent infra-automation systems converge on a two-tier check-cadence shape** relevant to
+  Fork 2: Kubernetes controllers are level-triggered at the reconcile layer specifically so a missed event
+  is still caught by the next reconciliation reading live state (periodic full resync is a backstop, not
+  the primary mechanism); Terraform's `plan`/`apply` always refreshes real infrastructure state first, with
+  a cheaper `-refresh-only` mode for drift visibility alone; `skip-duplicate-actions` (GitHub Actions) puts
+  its authoritative dedup check inside the triggered job, not only at trigger-time filtering. All three: an
+  authoritative check immediately before the actuation, plus a cheaper advance-visibility pass upstream of
+  it — directly relevant once (or if) the two chokepoints above are ever consolidated into one.
 
 ## The problem, evidenced tonight (2026-09-02), not hypothesized
 
@@ -86,44 +120,86 @@ guess.**
 
 ## Why this needs a ruling, not a direct build
 
-Three genuinely different, real integration points exist, each catching a different real failure path, each
-with a real cost tradeoff — this is not a forced invariant with one buildable branch and one flawed one (the
-shape that would make this a plain story instead).
+Two genuinely different, real integration points exist, each catching a different real failure path — this
+is not a forced invariant with one buildable branch and one flawed one (the shape that would make this a
+plain story instead), and the WHERE question resolves to a ruling rather than a pick (see Ruling 1).
 
-## Fork 1 — WHERE does the check run?
+## Ruling 1 — WHERE does the check run? (support-both, not a fork)
 
-- **(a) `we:scripts/conveyor/queue.mjs add`-time only.** Cheapest, and catches an already-done item before it
-  ever competes for a dispatch slot. **Insufficient alone**: it is a session-local, manual/orchestrator-facing
-  path — `#3434`'s own double-dispatch happened via a DIRECT `dispatch-lane` call plus the runner's automatic
-  sweep, neither of which is gated by `we:scripts/conveyor/queue.mjs add`. A queue-add-only check would have
-  missed both actual dispatches of `#3434` tonight.
-- **(b) `we:scripts/readiness/dispatch-plan.mjs`'s read/enrichment step.** Sits on the automatic runner sweep
-  (confirmed: `we:scripts/conveyor/tick-core.mjs` calls it every tick) and enriches every candidate row from
-  the same backlog loader already in hand — a natural place to add one more per-item enrichment field.
-  **Insufficient alone**: a direct `we:scripts/operations/dispatch-lane.mjs --num=<N>` call (the operator's own
-  manual path, and the exact other half of `#3434`'s double-dispatch) does not route through
-  `we:scripts/readiness/dispatch-plan.mjs` at all, per `we:scripts/operations/dispatch-lane.mjs`'s own docblock
-  ("the tick already decides multiplicity").
-- **(c) A guard inside `we:scripts/operations/dispatch-lane.mjs` itself, immediately before spawn.** Closest
-  to the actual waste (the token/session cost is spent exactly here) and covers the manual-call path (b)
-  misses. Per-item, not batch — runs once per dispatch attempt rather than once per tick, which actually suits
-  a live network call better (see Fork 2).
+**Not a genuine fork, per the standing test:** the original framing of this as "pick among (a)/(b)/(c)"
+does not survive tracing the real code (see Grounding digest and the folded-in Skeptic finding below).
+Today, (b) and (c) are **both independently required** — they are two coherent branches that must coexist,
+not alternatives, because each is the *only* check point on a dispatch path the other does not reach:
 
-**Bold default: (b) + (c) together, not a single chokepoint.** The evidence above shows each single point
-demonstrably misses a real path that already caused waste tonight — (b) alone misses the manual path that
-delivered half of `#3434`'s double-dispatch; (c) alone would still let the automatic sweep waste a full
-tick-to-dispatch-plan cycle deciding to launch something already-done, only to discover it late. (a) is worth
-keeping as a cheap, non-authoritative nicety (`we:scripts/conveyor/queue.mjs` already does a similar advisory
-check for `kind`), but should not be the sole enforcement point given it provably doesn't cover the
-direct-dispatch path.
+- **(c) — a guard inside `we:scripts/operations/dispatch-lane.mjs`, immediately before spawn.** The ONLY
+  point the operator's manual `dispatch-lane --num=<N>` CLI path passes through. Nothing upstream of it
+  (queue-add, dispatch-plan) sits on this path at all.
+- **(b) — `we:scripts/readiness/dispatch-plan.mjs`'s read/enrichment step.** The ONLY point the automatic
+  per-tick sweep passes through *today*, because `we:skills-src/conveyor/SKILL.md`'s spawn steps (§3/§3b)
+  read `dispatch-plan`'s output and spawn directly via the Agent tool — they do not call
+  `we:scripts/operations/dispatch-lane.mjs` (see Grounding digest). A guard placed only at (c) would leave the automatic sweep
+  completely unguarded, which is the literal shape of `#3434`'s double-dispatch (one of its two dispatches
+  WAS the automatic sweep).
+- **(a) `we:scripts/conveyor/queue.mjs add`-time only** remains a cheap, optional, non-authoritative nicety
+  — it catches an already-done item before it competes for a slot, but is session-local and gates neither
+  the manual nor the automatic path on its own, so it cannot substitute for (b) or (c).
+
+**Ruling: implement the check at BOTH (b) and (c) now; keep (a) as an optional nicety.** Neither (b) nor
+(c) is dispensable while the two dispatch paths remain architecturally separate. This is contingent on the
+CURRENT architecture, not a permanent shape: once `#3096` lands (routing the automatic sweep through the
+declared `dispatch-lane` operation too, per the ratified
+[`#conveyor-dispatch-calls-the-declared-operation`](../docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)
+statute), a single guard at (c) would cover both paths and (b) could be retired as redundant — but deciding
+whether/when to retire it is `#3096`'s own follow-on concern, not this card's.
+
+```js
+// Ruling 1 — the check needed at EACH of the two current chokepoints. Exact query shape is explicitly
+// left to the follow-on build item (see "What this decision does not settle"); this sketch only fixes
+// WHERE the calls sit and what each gates.
+async function guardAgainstAlreadyDone({ num, gh }) {
+  const mergedPr = await gh.prListSearch({ query: `#${num}`, state: 'merged', limit: 5 });
+  if (mergedPr.length) return { dispatch: false, reason: `already closed by ${mergedPr[0].url}` };
+  return { dispatch: true };
+}
+// Called from we:scripts/operations/dispatch-lane.mjs immediately before the spawn effect (guards the
+// manual path), AND surfaced as a flag from we:scripts/readiness/dispatch-plan.mjs's enrichment (guards
+// the automatic sweep, which reads dispatch-plan's output directly — see Grounding digest).
+```
+
+**Skeptic:** REFUTED, then AMENDED. A skeptic sub-agent attacked the prior draft's central claim — that
+both dispatch paths already funnel through `we:scripts/operations/dispatch-lane.mjs` — and refuted it by
+reading `we:skills-src/conveyor/SKILL.md`'s actual spawn steps (no mention of `we:scripts/operations/dispatch-lane.mjs`) and
+`we:backlog/3096-*.md` (still `status: open`, `blockedBy: ["3353"]`, itself open — confirmed via
+`gh pr list --search "3096"`/`"3353"`, which show `#3096` and `#3353`'s own PREPARE/harden/split PRs merged
+but no PR yet routing the SKILL's dispatch bridge through the declared operation). The prior draft's
+"(c) mandatory + (b)/(a) optional" framing is wrong under the corrected facts and is replaced by the
+support-both ruling above. This also corrects the two-confusion screen's earlier "flagged(prio)" verdict
+(below), which was evaluated against the now-refuted framing.
+
+**Screen:** clear (re-assessed against the corrected, support-both framing — the original fresh-context
+screen ran on the earlier, refuted "(c) mandatory + optional layers" draft and flagged it as prioritization;
+that flag is now moot because the fork it evaluated no longer exists). Whether a given dispatch path is
+checked at all is externally observable (a duplicate spawn happens, or it doesn't), not an implementation
+detail; and under a free/instant-engineering-time test a real requirement survives — building (c) does not
+reduce or remove the need for (b), because they gate two architecturally separate spawn call sites, so this
+is a genuine support-both requirement, not prioritization in disguise.
 
 ## Fork 2 — how does the check stay cheap and non-blocking?
+
+**Fork-existence:** (a) is the excluded/broken branch — a per-tick, per-item, unconditional `gh pr list` call
+does not scale and duplicates a rate-limit risk this codebase already designed around elsewhere
+(`PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT`). The real either/or is between (b) (age-gated, periodic) and (c)/(d)
+(one-time or batched) — genuine, because a periodic policy trades staleness-tolerance for a standing per-tick
+cost while a one-time gate trades a small blind spot (an item that goes stale again after its one check) for
+near-zero steady-state cost. **Because Ruling 1 above establishes that (b) is currently the sole enforcement
+point for the automatic-sweep path** (not merely an optional efficiency layer), this fork's answer for (b) is
+now a correctness-latency parameter — how quickly a stale item stops being re-planned on the automatic path —
+not just a cost-saving knob.
 
 A `gh pr list --search "#NNN"` call per candidate item, on every tick, for every queued item, does not scale —
 this epic's own machinery already treats `gh pr list` as an expensive, rate-limitable resource elsewhere
 (`we:scripts/operations/dispatch-lane-io.mjs`'s own `PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT` bounds exist for
-exactly this reason, and `we:scripts/conveyor/lease-reaper.mjs` shares one bounded page rather than issuing a
-call per lease). Real options, not exhaustive:
+exactly this reason). Real options, not exhaustive:
 
 - **(a) Check every tick, every item.** Simplest, always-fresh. Rejected as the default: does not scale past a
   handful of queued items and duplicates the rate-limit risk this codebase already designed around elsewhere.
@@ -132,25 +208,75 @@ call per lease). Real options, not exhaustive:
   definition, a thing that has had time to happen), but adds a tunable threshold and a "since when" clock to
   maintain per item.
 - **(c) One-time gate at first dispatch only** — check once, the first time an item is actually about to be
-  spawned (naturally fits Fork 1's option (c), inside `we:scripts/operations/dispatch-lane.mjs`, immediately
+  spawned (naturally fits Ruling 1's (c), inside `we:scripts/operations/dispatch-lane.mjs`, immediately
   before spawn), never re-checked on subsequent ticks for the same item. Cheapest steady-state cost (bounded by
   dispatch attempts, not by tick frequency × queue depth), and matches the actual failure shape: the waste
   happened AT the moment of dispatch, so a check exactly there, exactly once per attempt, closes it without
   adding per-tick overhead anywhere.
 - **(d) Cached/batched — one `gh pr list --state merged --search "#3383"` (or similar, scoped to the epic) per
   runner tick, shared across every candidate item that tick**, mirroring
-  `we:scripts/conveyor/lease-reaper.mjs`'s existing one-bounded-page-shared-across-many-leases pattern.
-  Cheapest amortized cost at high queue depth, but only covers the automatic-sweep path (Fork 1(b)), not a
-  direct manual `dispatch-lane` call, and needs a cache-freshness policy of its own.
+  `we:scripts/conveyor/lease-reaper.mjs`'s own independent, analogous bounded-page-per-tick pattern (a
+  separate `gh pr list` call, bounded per invocation — not literally sharing
+  `we:scripts/operations/dispatch-lane-io.mjs`'s `PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT` constants, which
+  `we:scripts/conveyor/lease-reaper.mjs` does not reference). Cheapest amortized cost at high queue depth, but only covers the
+  automatic-sweep path (Ruling 1's (b)), not a direct manual `dispatch-lane` call, and needs a
+  cache-freshness policy of its own.
 
-**Bold default: (c) for the `we:scripts/operations/dispatch-lane.mjs` guard (Fork 1's (c)) — check once,
+**Bold default: (c) for the `we:scripts/operations/dispatch-lane.mjs` guard (Ruling 1's (c)) — check once,
 immediately before spawn, never on a tick cadence** — this is the cheapest shape that still closes the exact
-`#3434` gap (a check that runs at the actual spawn point, at the actual moment of waste, costs one `gh pr list
---search` call per dispatch ATTEMPT, not per tick). For `we:scripts/readiness/dispatch-plan.mjs`'s enrichment
-step (Fork 1's (b)), **age-gate per (b)** — only enrich-and-flag items that have been `open`/`active` for some
+`#3434` gap on the manual path (a check that runs at the actual spawn point costs one `gh pr list --search`
+call per dispatch ATTEMPT, not per tick). For `we:scripts/readiness/dispatch-plan.mjs`'s enrichment step
+(Ruling 1's (b)), **age-gate per (b)** — only enrich-and-flag items that have been `open`/`active` for some
 minimum age (e.g. items that predate the current tick's own dispatch cycle), so a freshly-opened item never
-pays the cost and a long-stale one gets caught before it even reaches the spawn point. Both defaults avoid a
-per-tick, per-item, unconditional `gh pr list` call — the shape this fork exists to rule out.
+pays the cost while a long-stale one still gets caught on the automatic path within a bounded delay. Both
+defaults avoid a per-tick, per-item, unconditional `gh pr list` call — the shape this fork exists to rule
+out. This hybrid (immediate check at (c) + periodic check at (b)) mirrors, independently, Kubernetes'
+event-driven-plus-periodic-resync reconcile loop, Terraform's implicit refresh-before-apply, and
+`skip-duplicate-actions`'s in-job authoritative check (see Grounding digest) — three unrelated systems
+converging on the same two-tier cadence for the same underlying reason, though here the two tiers currently
+also happen to be gating two different code paths (Ruling 1), not just two cost tiers of the same path.
+
+```js
+// Fork 2(b) — the age-gated periodic check, inside we:scripts/readiness/dispatch-plan.mjs's enrichment
+// step. Currently load-bearing for the automatic-sweep path (Ruling 1), not merely a cost optimization —
+// its threshold bounds how long a stale item can keep being re-planned before it's caught. Exact
+// threshold left to the follow-on build item.
+const STALE_AGE_MS = /* left to the follow-on build item */ 0;
+function needsGroundTruthCheck(item, now) {
+  return now - Date.parse(item.dateOpened || item.dateStarted) > STALE_AGE_MS;
+}
+```
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT. A skeptic sub-agent found two issues in the prior draft, both folded
+in above: (1) framing (b)'s age-gate as purely an "optional upstream filter" whose absence "only costs
+efficiency" no longer holds once Ruling 1 establishes (b) as currently the sole enforcement point for the
+automatic path — its cadence is now a correctness-latency parameter, reflected in the Fork-existence line
+and bold default above; (2) the prior citation "`we:scripts/conveyor/lease-reaper.mjs` shares one bounded page" with
+`we:scripts/operations/dispatch-lane-io.mjs`'s `PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT` overstated the code reuse —
+`we:scripts/conveyor/lease-reaper.mjs` does not reference either constant, it independently applies an analogous pattern — corrected in option (d)
+above. The core cadence recommendation (one-time at (c), age-gated at (b)) survives both corrections.
+
+**Screen:** clear. The cadence question is externally visible as "how quickly does a stale item get caught
+on each path" — not an implementation detail hidden from a consumer — and it is a genuine merit tradeoff
+(steady-state API cost vs. staleness-detection latency on the automatic path specifically, now that Ruling 1
+establishes (b) as load-bearing there), not prioritization: even with free, instant engineering time,
+unconditional per-tick checking would still cost real rate-limit budget on every tick, which the "free to
+build" test does not erase.
+
+### Review jury (provisional — pre-registered #2638)
+
+Care level: `elevated` (dispatch/build machinery — `we:scripts/operations/dispatch-lane.mjs`,
+`we:scripts/operations/dispatch-lane-io.mjs`, `we:scripts/readiness/dispatch-plan.mjs`,
+`we:scripts/conveyor/queue.mjs` — is system-machinery, not a routine change). This jury binds against the
+item's predicted scope and is re-checked against the real diff at PR open.
+
+| juror | lens | grounding method | pre-registered expectation |
+| --- | --- | --- | --- |
+| correctness#1 | correctness | static-review | The change does what the spec says with no behaviour regression — every changed branch is exercised, and no test is missing, weakened, or gamed to pass while the behaviour is wrong. |
+| security#1 | security | static-review | No untrusted input, secret, auth, or file/network path is left unguarded and the trust boundary is not widened — anything touching those earns an explicit security check. |
+| simplicity#1 | simplicity | static-review | The change is the smallest one that solves the problem — it reuses what already exists and adds no dead code or needless abstraction. |
+| standards-conformance#1 | standards-conformance | static-review | The change follows this repo's conventions and platform-native defaults, and does not diverge from a ratified standard or placement rule. |
+| claim-accuracy#1 | claim-accuracy | static-review | Every factual claim the change makes about the repo holds against the repo: a cited path:line names what is actually there, a quoted grep literal really matches, a stated count is the real count, a referenced id or link resolves, and anything the description says was changed appears in the diff. |
 
 ## What this decision does not settle
 
@@ -158,15 +284,18 @@ The exact `gh pr` search query shape (search by `#NNN` in title/body vs. a head-
 the specific age threshold for Fork 2(b), and whether a stale-status find should auto-resolve the item, only
 flag it, or hold the dispatch pending a human/agent look, are implementation — left to the follow-on build
 item(s) once this ruling stands, matching how `we:backlog/3427-*.md` (the closest sibling decision in this
-epic) left its own wire-shape questions to its build item rather than pre-deciding them here.
+epic) left its own wire-shape questions to its build item rather than pre-deciding them here. Also not
+settled here: whether/when to retire Ruling 1's (b) once `#3096` lands — that is `#3096`'s own follow-on
+concern.
 
 ## Done when
 
-1. A ruling is recorded on Fork 1 (which chokepoint(s) run the check) and Fork 2 (how the check stays cheap and
-   non-blocking) — ratify or override the bold defaults above.
+1. A ruling is recorded on Ruling 1 (which chokepoint(s) run the check) and Fork 2 (how the check stays cheap
+   and non-blocking) — ratify or override the defaults above.
 2. A follow-on build item is scaffolded under this card (mirroring how `#3427` → `#3451` scaffolded its own
-   follow-on), naming: the exact `gh pr` query, which file(s) from Fork 1's ruling gain the check, the
+   follow-on), naming: the exact `gh pr` query, which file(s) from Ruling 1 gain the check, the
    age/caching policy from Fork 2's ruling, and what happens to an item the check flags (hold, auto-resolve, or
    surface — a real, small design choice of its own, not pre-answered here).
-3. This card `resolve`s once both forks are ruled — building the follow-on item is separate work tracked on its
-   own card, not a precondition of this card's own resolution (matching `#3427`'s same convention).
+3. This card `resolve`s once both Ruling 1 and Fork 2 are ruled — building the follow-on item is separate work
+   tracked on its own card, not a precondition of this card's own resolution (matching `#3427`'s same
+   convention).

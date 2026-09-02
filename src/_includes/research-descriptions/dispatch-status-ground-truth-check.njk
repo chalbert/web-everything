@@ -1,0 +1,70 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/3457/">#3457</a> asks: the conveyor dispatches an item off its own
+  <code>status:</code> frontmatter, which can lag real completion by hours — <code>#3434</code> was
+  dispatched TWICE (once by the operator's direct <code>we:scripts/operations/dispatch-lane.mjs</code>
+  call, once by the automatic per-tick sweep) after its actual work had already merged as PR #1768.
+  Where should a "does real merged-PR history already close this out" check run, and how does it stay
+  cheap enough to not become a second rate-limit problem on top of the ones this repo already designed
+  around (<code>PR_LIST_TIMEOUT_MS</code>/<code>PR_LIST_LIMIT</code>)?
+</p>
+
+<h2>Finding 1 — the two dispatch paths do NOT converge on one file today (a skeptic-corrected finding)</h2>
+<p>
+  An earlier draft of this research claimed both dispatch paths already funnel through
+  <code>we:scripts/operations/dispatch-lane.mjs</code>. A skeptic sub-agent, prompted only to refute,
+  re-traced the automatic sweep's actual spawn instructions and found that claim false:
+  <code>we:skills-src/conveyor/SKILL.md</code> §3/§3b instruct the live conveyor session to "spawn one
+  background <code>Agent</code>" <em>directly</em>, with no mention of <code>dispatch-lane.mjs</code>
+  anywhere in either step. The SKILL's own inline comment (line 77) names the gap explicitly: routing
+  those spawn steps through the declared operation "is its own item" —
+  <code>we:backlog/3096-*.md</code>, read directly as <code>status: open</code>,
+  <code>blockedBy: ["3353"]</code> (itself also <code>open</code>). The ratified statute
+  <code>we:docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation</code>
+  describes the convergence as the TARGET architecture, not the current one.
+</p>
+
+<h2>Finding 2 — the corrected conclusion: both chokepoints are currently required, not one mandatory plus optional layers</h2>
+<p>
+  Today, <code>we:scripts/operations/dispatch-lane.mjs</code>'s guard is the ONLY check point on the
+  manual dispatch path, and <code>we:scripts/readiness/dispatch-plan.mjs</code>'s enrichment is the
+  ONLY check point upstream of the automatic sweep's direct spawn. Neither substitutes for the other
+  while the two paths stay architecturally separate — this is a <strong>support-both</strong>
+  requirement (implement both now), correcting an earlier draft's "one mandatory floor, others merely
+  optional efficiency layers" framing, which itself over-corrected the card's original three-way
+  reading. Once <code>#3096</code> lands (routing the automatic sweep through the declared operation
+  too), a single guard would cover both paths and the second could be retired — a call left to
+  <code>#3096</code>'s own follow-on, not this decision.
+</p>
+
+<h2>Finding 3 — three unrelated infra-automation systems independently land on the same two-tier check-cadence shape</h2>
+<p>
+  Kubernetes controllers are watch-driven at the trigger layer but <strong>level-triggered</strong> at
+  the reconcile layer: <code>Reconcile()</code> re-reads live observed state and re-derives the needed
+  action every time it runs, specifically so a missed event is still caught by the next reconciliation
+  — with a periodic full resync as a backstop, not the primary correctness mechanism. Terraform's
+  <code>plan</code>/<code>apply</code> always runs an implicit refresh of real infrastructure state
+  first — "all plan and apply commands run refresh first, prior to any other work" — with a cheaper
+  <code>-refresh-only</code> mode for drift visibility alone. And <code>skip-duplicate-actions</code>, a
+  widely used GitHub Action for this exact class of problem, puts its authoritative dedup check
+  <em>inside</em> the triggered job (a backtracking commit-history search), not only at trigger-time
+  filtering. All three put an authoritative check immediately before the actuation, with a cheaper
+  earlier check treated as a complement, never a substitute — the same shape Fork 2's cadence default
+  already lands on, and a preview of what a future post-<code>#3096</code> consolidation of the two
+  current chokepoints would look like.
+</p>
+
+<h2>The recommended default</h2>
+<p>
+  For "WHERE": ratify implementing the check at BOTH
+  <code>we:scripts/operations/dispatch-lane.mjs</code> (guards the manual path) and
+  <code>we:scripts/readiness/dispatch-plan.mjs</code>'s enrichment (guards the automatic sweep) —
+  support-both, not a pick. For "cadence" (Fork 2): one-time-at-dispatch for the
+  <code>dispatch-lane.mjs</code> guard, age-gated for the <code>dispatch-plan.mjs</code> enrichment —
+  the same hybrid shape Kubernetes, Terraform, and CI dedup tooling each converge on independently,
+  now understood as gating two distinct, currently-necessary code paths rather than two cost tiers of
+  one path. Full reasoning, the skeptic's refutation trail, and the resolved screen findings are in
+  <a href="/backlog/3457/">#3457</a>.
+</p>
+{% endraw %}
