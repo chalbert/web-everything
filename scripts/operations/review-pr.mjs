@@ -20,11 +20,49 @@
  *   |                  |           | distinct juror, blind to the first                                           |
  *   | `reduce`         | `compute` | `derivePanelVerdict` + `buildPanelFindings` (`we:scripts/lib/jury-core.mjs`); |
  *   |                  |           | `humanRequired` off the LABELS                                               |
+ *   | `advise`         | `effect`  | (#xlw02hw) `renderAdvisoryNote` — an AUTOMATIC, non-recording PR comment on   |
+ *   |                  |           | a `review:human` PR only; `[]` (no-op) on every other PR — DECLARED only      |
  *   | `confirm`        | `confirm` | the engine SUSPENDS — the human stop, as machinery instead of prose           |
  *   | `record`         | `effect`  | `decideSetLabel` (`we:scripts/review-set-label.mjs`) + `renderPanelComment`   |
  *   |                  |           | (`we:scripts/lib/review-render.mjs`) + `renderReviewNotice` — DECLARED only   |
  *
  * If a reader finds review LOGIC in this file rather than a call into one of those, that is the bug.
+ *
+ * ── `advise`: THE PRE-HUMAN-CEREMONY ADVISORY NOTE (#xlw02hw) ──────────────────────────────────────────────────
+ *
+ * THE GAP THIS STEP CLOSES. Before this step existed, the ONLY thing that ever posted anything to a PR was
+ * `record`, which runs only once `confirm` has a real answer. For a `review:human` PR reviewed by a session
+ * running independently of the `/review` human ceremony — no operator to answer `confirm` at all — there was NO
+ * answer that could ever reach `record` and produce a comment: `accept` is refused by `decideSetLabel`
+ * (INVARIANT 2, correct and untouched by this item), `changes` would apply the real human-ceremony bounce with
+ * no human behind it, and `abstain` — the only answer an advisory-only pass could honestly give — makes
+ * `record`'s `effects` fn return `[]`. Observed live twice (PRs #1814/#1815, 2026-09-01/02): a juror ran, found
+ * real findings, and NOTHING was ever written anywhere, because every reachable path through `confirm`/`record`
+ * for this PR type was either refused or vacuous.
+ *
+ * WHY A NEW STEP, PLACED BEFORE `confirm`, RATHER THAN WIDENING `record`'s `abstain` CASE. `confirm` is a real
+ * suspend — the engine stops the run and prints a question — and the whole failure mode this item exists to fix
+ * is a session that never reaches an operator to answer it. Widening `abstain` fixes nothing for a run that
+ * never gets that far. `advise` is an `effect` step (never a `confirm`), so it runs UNCONDITIONALLY as part of
+ * ordinary `advance`/`driveRun` progress the moment `reduce` has a verdict — no operator, no `--resume`, no
+ * answer of any kind required. On a non-`review:human` PR it declares `[]`, which `advance` resolves inline
+ * (see `step-kinds.mjs`'s "effect" case) with no suspend at all — so the `review:pending` path is BYTE-IDENTICAL
+ * to before this item: same steps run, same nothing happens until `confirm` is answered.
+ *
+ * WHY IT MUST NEVER LOOK LIKE `record`'s COMMENT. `renderAdvisoryNote` shares no heading, no `**Decision:**`
+ * line and no label-swap payload with `renderVerdictWriteUp` — see its own docblock. It posts through a bare
+ * `gh pr comment` (via `we:scripts/lib/review-label-provider.mjs#createGhProvider`'s `postComment`, the same
+ * primitive `review-set-label.mjs` itself uses), never through `we:scripts/review-set-label.mjs`, because that
+ * single home ALWAYS couples a comment with a label swap (#2644) and this step swaps no label, ever.
+ *
+ * THE RESIDUAL THIS INHERITS, STATED RATHER THAN HIDDEN. `resolvePending` addresses a suspended run's step by
+ * the NUMERIC index frozen on `run.pending` at suspend time, and `declarationFor` only refuses a stale run whose
+ * cursor now runs PAST the end of a shortened step list — it does not detect a step INSERTED earlier, which
+ * shifts every later index. A run that suspended at `confirm` under the six-step declaration and is resumed
+ * after this deploy, against the new seven-step one, would resolve against the wrong step. This is not a new
+ * class of risk: #3319 inserted `judgeSecurity` the same way, at index 2, with no migration guard either — this
+ * item does not introduce the residual, it exercises an already-accepted one. Fixing it for good would be a
+ * versioned-declaration or step-name-keyed `pending` record, which is a real, separate item, not this one's bill.
  *
  * ── WHY TWO `judge` STEPS AND NOT A PANEL (#3319) ───────────────────────────────────────────────────────────
  *
@@ -429,12 +467,18 @@ export const CONFIRM_ACTORS = Object.freeze({ HUMAN: 'human', AGENT: 'agent' });
 /** The closed answer set for the `confirm` step. `abstain` is the non-mutating exit: it declares NO effects. */
 export const CONFIRM_OPTIONS = Object.freeze(['accept', 'changes', 'abstain']);
 
-/** The four effect types `record` declares. `verdict-ledger.append` is #3032's reserved seam for #3007. */
+/**
+ * The effect types this operation declares. Four belong to `record`; `verdict-ledger.append` is #3032's
+ * reserved seam for #3007. `ADVISORY_NOTE` (#xlw02hw) belongs to `advise` and is deliberately its OWN type,
+ * never `WRITE_UP`/`LABEL` — those two are the real ceremony's write and a caller (or a sink lookup keyed by
+ * type) must never be able to confuse the two kinds of comment this operation can post.
+ */
 export const REVIEW_EFFECTS = Object.freeze({
   WRITE_UP: 'review.write-up',
   LABEL: 'review.label-swap',
   LEDGER: LEDGER_EFFECT_TYPE,
   NOTICE: 'review.notice',
+  ADVISORY_NOTE: 'review.advisory-note',
 });
 
 /**
@@ -914,6 +958,63 @@ function renderRevProvenance(netBasis) {
 }
 
 /**
+ * THE PRE-HUMAN-CEREMONY ADVISORY NOTE (#xlw02hw) — the `advise` step's comment body. PURE.
+ *
+ * DELIBERATELY SHARES NO SHAPE WITH `renderVerdictWriteUp`'s output beyond the findings table itself
+ * (`renderPanelComment`, which both reuse rather than re-render). Everything ABOVE and BELOW that shared table
+ * differs on purpose, because a reader — a human about to clear this PR, or a script grepping past comments for
+ * the real ceremony's shape — must never mistake this for a recorded verdict:
+ *   - no `**Decision:** \`x\` — recorded by …` line. That exact string is `renderVerdictWriteUp`'s fingerprint —
+ *     the shape `we:skills-src/review/SKILL.md`'s own live comment sweep matches — and this function never emits
+ *     it;
+ *   - no `addLabel`/`removeLabels` payload anywhere near it, because this step never calls `decideSetLabel` and
+ *     declares no label-swap effect, ever;
+ *   - an explicit "NOT a recorded verdict" statement at BOTH the top and the bottom, so it reads that way
+ *     whichever end a human sees first.
+ *
+ * @param {{read: object, verdict: object}} o
+ * @returns {string} the comment body.
+ */
+export function renderAdvisoryNote({ read, verdict } = {}) {
+  const v = verdict && typeof verdict === 'object' ? verdict : {};
+  const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
+  const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
+  const body = renderPanelComment({
+    findings: v.findings,
+    verdict: v.verdict,
+    disposition: read.disposition,
+    lensVerdicts,
+    lenses,
+    mandatoryLenses: MANDATORY_LENSES.filter((l) => lenses.includes(l)),
+    heading: `⚠️ Advisory review (informational only) — ${read.repo}#${read.pr}`,
+  });
+  const basis = read.degraded
+    ? `⚠️ DEGRADED BASIS (\`${read.degradedReason}\`) — the net diff vs current main could not be resolved, so `
+      + 'the file list above may be inflated by sibling-lane content this PR does not touch (#2450).'
+    : `Net basis: \`${read.netBasis.base ?? '?'}..${read.netBasis.rev ?? '?'}\`${renderRevProvenance(read.netBasis)} — `
+      + `${read.netChangedFiles.length} net changed file(s) vs current main (#2450), not \`gh pr diff\`'s three-dot list.`;
+  return [
+    '**⚠️ THIS IS AN ADVISORY REVIEW, NOT A RECORDED VERDICT.** This PR carries `review:human`. The independent',
+    'AI review below ran automatically, before the required human review ceremony — it has neither accepted nor',
+    'bounced this PR. No label was changed and no decision was recorded.',
+    '',
+    body,
+    '',
+    '---',
+    '',
+    basis,
+    '',
+    '**This PR still needs the human ceremony.** Clearing `review:human` requires the operator to run '
+      + `\`/review ${read.pr}\` or \`we:scripts/review-set-label.mjs --to=clear-human --actor=… `
+      + '--reason="<the operator instruction>"` — nothing above this line performs, substitutes for, or '
+      + 'shortcuts that ceremony.',
+    '',
+    `_Posted automatically by the declared \`${REVIEW_PR_OP}\` operation's \`advise\` step (#xlw02hw) as soon as `
+      + 'this PR reached `reduce` — this is advisory only, never a `record`._',
+  ].join('\n');
+}
+
+/**
  * BUILD THE DECLARATION. `readPr` is the injected reader (see the header); {@link ./review-pr-io.mjs} supplies
  * the real one and tests supply a stub. Built per call so nothing leaks between registries.
  *
@@ -1300,7 +1401,33 @@ export function reviewPrOperation({ readPr } = {}) {
       },
     }),
 
-    // ── 5. confirm ──────────────────────────────────────────────────────────────────────────────────────────
+    // ── 5. advise ───────────────────────────────────────────────────────────────────────────────────────────
+    // #xlw02hw — THE AUTOMATIC PRE-HUMAN-CEREMONY NOTE. An `effect` step, NOT a `confirm` — it runs the moment
+    // `reduce` has a verdict, unconditionally, with no operator and no `--resume` of any kind required (see the
+    // file header for why `confirm`'s suspend is exactly the thing a session with no legitimate answer never
+    // gets past). On a PR that is NOT `humanRequired` this declares `[]`, which `advance` resolves INLINE with
+    // no suspend at all (`step-kinds.mjs`'s effect case) — so the `review:pending` path is byte-identical to
+    // before this step existed: nothing happens here, exactly as nothing happened here before.
+    advise: effectStep({
+      reads: ['input.pr', 'input.repo', 'findings.read', 'verdict'],
+      effects: (view) => {
+        const read = view.findings.read;
+        if (read.humanRequired !== true) return [];
+        return [{
+          type: REVIEW_EFFECTS.ADVISORY_NOTE,
+          payload: {
+            pr: view.input.pr,
+            repo: view.input.repo,
+            body: renderAdvisoryNote({ read, verdict: view.verdict }),
+          },
+          // IDEMPOTENT: FALSE. It posts a real, durable `gh pr comment` — replaying it on an unknown outcome
+          // would risk a second one, exactly the reason `record`'s own LABEL effect is `false` (see there).
+          idempotent: false,
+        }];
+      },
+    }),
+
+    // ── 6. confirm ──────────────────────────────────────────────────────────────────────────────────────────
     // THE STOP POINT, AS MACHINERY. The engine suspends here and records what is asked and OF WHOM; the run is
     // resumable from any surface. `of` is `human` on a gate-self PR and `agent` otherwise, so the record itself
     // says which tier of actor was owed — the skill no longer has to.
@@ -1333,7 +1460,7 @@ export function reviewPrOperation({ readPr } = {}) {
       options: [...CONFIRM_OPTIONS],
     }),
 
-    // ── 6. record ───────────────────────────────────────────────────────────────────────────────────────────
+    // ── 7. record ───────────────────────────────────────────────────────────────────────────────────────────
     // DECLARES four effects and applies NONE. See the per-effect idempotency notes below — each is decided on
     // its own, because the executor's refusal to replay an indeterminate attempt is only as strong as the flag.
     //

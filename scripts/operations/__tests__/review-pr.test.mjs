@@ -38,6 +38,7 @@ import {
   REVIEW_JUDGE_SHAPE,
   renderJudgeInput,
   renderVerdictWriteUp,
+  renderAdvisoryNote,
   overridesJuror,
   reviewPrOperation,
   shapeReadFinding,
@@ -135,6 +136,37 @@ function atConfirm({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 
     const step = run.pending.step;
     requests[step] = run.pending.request;
     run = advanceWhileRunning(run, { registry, resume: { value: answers[step] ?? answer } });
+  }
+  expect(runStatus(run, { registry })).toBe('awaiting-confirm');
+  return { run, requests, request: requests[JUDGE_STEPS[0]] };
+}
+
+/**
+ * LIKE `atConfirm`, but also drains the `advise` step's `awaiting-effect` suspend along the way (#xlw02hw) —
+ * needed only once a PR is `humanRequired`, since that is the one case `advise` declares a real effect instead
+ * of `[]`. Every OTHER test in this file stays on the plain sync `atConfirm` above: a non-`humanRequired` PR
+ * resolves `advise` INLINE with zero effects (see `step-kinds.mjs`'s effect case), so nothing here would ever
+ * fire for it and there is no reason to pay the async ceremony everywhere.
+ */
+async function atConfirmDrainingAdvisory({ registry, input, answer = CLEAN_ANSWER, answers = {}, id = 'run-rp' }) {
+  const store = createMemoryRunStore();
+  const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) };
+  let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id, input, registry }), { registry });
+  const requests = {};
+  for (;;) {
+    const status = runStatus(run, { registry });
+    if (status === 'awaiting-judge') {
+      const step = run.pending.step;
+      requests[step] = run.pending.request;
+      run = advanceWhileRunning(run, { registry, resume: { value: answers[step] ?? answer } });
+      continue;
+    }
+    if (status === 'awaiting-effect') {
+      ({ run } = await applyPendingEffects(run, { sinks, store }));
+      run = advanceWhileRunning(run, { registry });
+      continue;
+    }
+    break;
   }
   expect(runStatus(run, { registry })).toBe('awaiting-confirm');
   return { run, requests, request: requests[JUDGE_STEPS[0]] };
@@ -600,17 +632,17 @@ describe('a juror that judged must say what it judged', () => {
 
 // ── PROPERTY 2: THE GATE-SELF REFUSAL LIVES IN THE PURE CORE ──────────────────────────────────────────────
 describe('the gate-self invariant', () => {
-  it('reduces a `review:human` PR to `needs-human` however clean the findings are', () => {
+  it('reduces a `review:human` PR to `needs-human` however clean the findings are', async () => {
     const { registry } = registryFor({ labels: ['review:human'] });
-    const { run } = atConfirm({ registry, input: BASE_INPUT, answer: CLEAN_ANSWER, id: 'run-gs1' });
+    const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, answer: CLEAN_ANSWER, id: 'run-gs1' });
     expect(run.verdict.humanRequired).toBe(true);
     expect(run.verdict.verdict).toBe('needs-human');
     expect(run.verdict.findings).toEqual([]);
   });
 
-  it('records the decision as owed by a HUMAN on a gate-self PR and by an AGENT otherwise', () => {
+  it('records the decision as owed by a HUMAN on a gate-self PR and by an AGENT otherwise', async () => {
     const gateSelf = registryFor({ labels: ['review:human'] });
-    expect(atConfirm({ registry: gateSelf.registry, input: BASE_INPUT, id: 'run-gs2' }).run.pending.of)
+    expect((await atConfirmDrainingAdvisory({ registry: gateSelf.registry, input: BASE_INPUT, id: 'run-gs2' })).run.pending.of)
       .toBe(CONFIRM_ACTORS.HUMAN);
 
     const ordinary = registryFor({ labels: ['review:pending'] });
@@ -618,9 +650,9 @@ describe('the gate-self invariant', () => {
       .toBe(CONFIRM_ACTORS.AGENT);
   });
 
-  it('REFUSES to declare any effect when the operator answers `accept` on a gate-self PR', () => {
+  it('REFUSES to declare any effect when the operator answers `accept` on a gate-self PR', async () => {
     const { registry } = registryFor({ labels: ['review:human'] });
-    const { run } = atConfirm({ registry, input: BASE_INPUT, id: 'run-gs4' });
+    const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, id: 'run-gs4' });
 
     // The operator tries to accept it anyway — the exact thing INVARIANT 2 exists to stop.
     const answered = advance(run, { registry, resume: { value: 'accept' } });
@@ -631,21 +663,82 @@ describe('the gate-self invariant', () => {
     expect(thrown).toBeTruthy();
     expect(String(thrown.message)).toMatch(/gate-self: review:human is human-ceremony-only/);
     expect(String(thrown.message)).toMatch(/decideSetLabel/);
-    // NOTHING was declared, so there is nothing to apply and nothing half-done.
-    expect(answered.effects).toEqual([]);
+    // `record` ITSELF declared nothing, so there is nothing OF ITS OWN to apply and nothing half-done — the
+    // run's `effects` array still carries the earlier `advise` step's own (unrelated) advisory-note entry
+    // (#xlw02hw), which is not what this invariant is about.
+    expect(answered.effects.filter((e) => e.step === 'record')).toEqual([]);
   });
 
-  it('still allows a `changes` bounce on a gate-self PR — a bounce lands nothing', () => {
+  it('still allows a `changes` bounce on a gate-self PR — a bounce lands nothing', async () => {
     const { registry } = registryFor({ labels: ['review:human'] });
-    const { run } = atConfirm({ registry, input: BASE_INPUT, answer: BLOCKING_ANSWER, id: 'run-gs5' });
+    const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, answer: BLOCKING_ANSWER, id: 'run-gs5' });
     const answered = advance(run, { registry, resume: { value: 'changes' } });
     const declared = advance(answered, { registry });
-    const types = declared.effects.map((e) => e.type);
+    const types = declared.effects.filter((e) => e.step === 'record').map((e) => e.type);
     expect(types).toEqual([REVIEW_EFFECTS.WRITE_UP, REVIEW_EFFECTS.LABEL, REVIEW_EFFECTS.LEDGER, REVIEW_EFFECTS.NOTICE]);
     const label = declared.effects.find((e) => e.type === REVIEW_EFFECTS.LABEL);
     expect(label.payload.to).toBe('changes');
     // A bounce never removes the human gate.
     expect(label.payload.removeLabels).not.toContain('review:human');
+  });
+});
+
+// ── #xlw02hw — THE ADVISORY NOTE FIRES AUTOMATICALLY, WITH NO CONFIRM ANSWER EVER SUPPLIED ─────────────────
+// Root cause: before this step existed, the ONLY thing that ever posted anything to a PR was `record`, which
+// runs only once `confirm` has a real answer — and on a `review:human` PR there was NO answer an independent
+// advisory-only session could legitimately give (`accept` refused by `decideSetLabel`, `changes` would be the
+// real human-ceremony bounce with no human behind it, `abstain` declares zero effects). These tests drive a
+// run to the `confirm` suspend WITHOUT EVER ANSWERING IT — mirroring the session that never resumes — and
+// assert the advisory comment is already posted regardless.
+describe('#xlw02hw the advise step posts an advisory note on review:human, before confirm is ever answered', () => {
+  it('declares and applies an ADVISORY_NOTE effect on a `review:human` PR before `confirm` is reached', async () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const store = createMemoryRunStore();
+    const posted = [];
+    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; } };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-1', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    // The run is STILL stopped waiting for a human — no answer was ever supplied, exactly as before this item.
+    expect(out.stopped).toBe('confirm');
+    expect(out.run.pending.of).toBe(CONFIRM_ACTORS.HUMAN);
+    // But the advisory note was posted regardless, BEFORE that stop was ever reached — the whole point.
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ repo: BASE_INPUT.repo, pr: BASE_INPUT.pr });
+    expect(posted[0].body).toContain('ADVISORY REVIEW, NOT A RECORDED VERDICT');
+    expect(posted[0].body).not.toContain('**Decision:**');
+  });
+
+  it('declares ZERO effects on a `review:pending` PR — the ordinary path is unchanged', async () => {
+    const { registry } = registryFor({ labels: ['review:pending'] });
+    const store = createMemoryRunStore();
+    const posted = [];
+    const sinks = { [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => { posted.push(payload); return { ok: true }; } };
+    const out = await driveRun({
+      run: startRun({ op: REVIEW_PR_OP, id: 'run-adv-2', input: BASE_INPUT, registry }),
+      registry, store, sinks, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+    });
+    expect(out.stopped).toBe('confirm');
+    expect(posted).toEqual([]);
+    expect(out.run.effects).toEqual([]);
+  });
+
+  it('the advisory note can never be confused with the real record-step verdict comment', async () => {
+    const { registry } = registryFor({ labels: ['review:human'] });
+    const { run } = await atConfirmDrainingAdvisory({ registry, input: BASE_INPUT, id: 'run-adv-3' });
+    const advisory = renderAdvisoryNote({ read: run.findings.read, verdict: run.verdict });
+    const recorded = renderVerdictWriteUp({
+      read: run.findings.read, verdict: run.verdict, answer: 'changes', actor: 'operator', reason: 'bounced for real',
+    });
+    // The real ceremony's own fingerprint — a live-comment sweep matches on this exact string
+    // (`we:skills-src/review/SKILL.md`) — never appears on the advisory note.
+    expect(advisory).not.toContain('**Decision:**');
+    expect(recorded).toContain('**Decision:**');
+    // And the advisory note says, unambiguously, what it is — at both ends.
+    expect(advisory).toContain('ADVISORY REVIEW, NOT A RECORDED VERDICT');
+    expect(advisory).toMatch(/still needs the human ceremony/);
+    expect(recorded).not.toContain('ADVISORY REVIEW');
   });
 });
 
@@ -691,11 +784,15 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     // tell that the second seat's bill was silently dropped from the operator's picture.
     expect(text).toContain('judge spend: $0.9198 over 2 juror(s)');
 
-    // NOTHING WAS RECORDED: cursor unchanged, the confirm answer still `accept`, effects still empty.
+    // NOTHING WAS RECORDED BY `record`: cursor unchanged, the confirm answer still `accept`, and `record`
+    // itself declared no effects. `record`'s own stepIndex is 6 now that `advise` (#xlw02hw) sits between
+    // `reduce` and `confirm` — and this `humanRequired` run's `effects` array already carries the EARLIER
+    // `advise` step's own advisory-note entry, which this invariant is not about.
     const record = store.read('run-refuse');
-    expect(record.cursor).toBe(5);
+    expect(record.cursor).toBe(6);
     expect(record.findings.confirm).toBe('accept');
-    expect(record.effects).toEqual([]);
+    expect(record.effects.filter((e) => e.step === 'record')).toEqual([]);
+    expect(record.effects.map((e) => e.step)).toEqual(['advise']);
   });
 
   it('is idempotent — a repeat --resume produces byte-identical output and the same exit code', async () => {
@@ -823,14 +920,14 @@ describe('the record step', () => {
 
     const first = await applyPendingEffects(declared, { sinks, store });
     expect(first.error).toBeTruthy();
-    expect(first.applied).toEqual(['run-replay#5#0', 'run-replay#5#1']);
+    expect(first.applied).toEqual(['run-replay#6#0', 'run-replay#6#1']);
 
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(second.error).toBeNull();
     // THE ASSERTION: the label/comment sink ran exactly ONCE across both passes.
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.LABEL)).toHaveLength(1);
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.WRITE_UP)).toHaveLength(1);
-    expect(second.skipped).toEqual(['run-replay#5#0', 'run-replay#5#1']);
+    expect(second.skipped).toEqual(['run-replay#6#0', 'run-replay#6#1']);
   });
 
   it('REFUSES to replay the label effect when its outcome is unknown', async () => {
@@ -872,7 +969,7 @@ describe('the derived command line', () => {
     // lens shows up in `--help` the moment it is declared, with no second list to remember.
     expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
     expect(spec.usage).not.toContain('--lens=<string>');
-    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → confirm(confirm) → record(effect)');
+    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → advise(effect) → confirm(confirm) → record(effect)');
   });
 
   // #3094 — `--aim` IS DERIVED, NOT HAND-ADDED. It appears in `--help` because it is declared on the operation;
@@ -919,7 +1016,9 @@ describe('the derived command line', () => {
       newRunId: () => 'unused',
     });
     expect(second.stopped).toBe('complete');
-    expect(applied).toEqual(Object.values(REVIEW_EFFECTS));
+    // NOT `Object.values(REVIEW_EFFECTS)` — this PR is `review:pending` (not `humanRequired`), so `advise`
+    // declares `[]` and its `ADVISORY_NOTE` type is never applied. Only `record`'s four fire.
+    expect(applied).toEqual([REVIEW_EFFECTS.WRITE_UP, REVIEW_EFFECTS.LABEL, REVIEW_EFFECTS.LEDGER, REVIEW_EFFECTS.NOTICE]);
   });
 
   it('refuses an --answer outside the declared option set', async () => {
@@ -1406,7 +1505,12 @@ describe('#3072 autoConfirm answers an agent confirm and never a human one', () 
     const store = createMemoryRunStore();
     const out = await driveRun({
       run: startRun({ op: REVIEW_PR_OP, id: 'r-human', input: BASE_INPUT, registry }),
-      registry, store, sinks: {}, judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
+      registry,
+      store,
+      // A `humanRequired` PR now runs `advise` (#xlw02hw) on the way to `confirm`, which needs a sink even
+      // though this test's whole point is about the LATER `confirm` suspend, not this earlier one.
+      sinks: { [REVIEW_EFFECTS.ADVISORY_NOTE]: async () => ({ ok: true }) },
+      judge: async () => judgeOutcome(CLEAN_ANSWER, {}),
       autoConfirm: agentOnly,
     });
     expect(out.run.pending.of).toBe(CONFIRM_ACTORS.HUMAN);

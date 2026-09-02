@@ -32,6 +32,10 @@ import { fileURLToPath } from 'node:url';
 import { assembleReviewDetail } from '../review-detail.mjs';
 import { computeNetDiffPaths, computeNetDiffText, resolveNetDiffBasis } from '../merge-ai-prs.mjs';
 import { currentActorId } from '../lib/review-independence.mjs';
+// #xlw02hw — the `advise` step's sink posts a BARE comment (never `we:scripts/review-set-label.mjs`, which
+// always couples a comment with a label swap — #2644 — and this step swaps no label). `createGhProvider`'s
+// `postComment` is the SAME primitive that single home already uses, imported rather than re-implemented.
+import { createGhProvider } from '../lib/review-label-provider.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
 import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
@@ -355,16 +359,19 @@ export function isPreWriteRefusal(text) {
 }
 
 /**
- * THE FOUR SINKS, bound to a repo root and an output channel.
+ * THE SINKS, bound to a repo root and an output channel.
  *
- * @param {{root?: string, out?: (line: string) => void, runNode?: Function}} [o] - `runNode` is the injectable
- *   subprocess runner (`(argv) => stdout`), so the label sink is testable without `gh`.
+ * @param {{root?: string, out?: (line: string) => void, runNode?: Function, postComment?: Function}} [o] -
+ *   `runNode` is the injectable subprocess runner (`(argv) => stdout`), so the label sink is testable without
+ *   `gh`; `postComment` is the injectable `(repo, pr, body) => void` the `advise` sink posts through (#xlw02hw),
+ *   so it too is testable without `gh` — defaults to `createGhProvider().postComment`.
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
   out = (line) => process.stdout.write(`${line}\n`),
   runNode = (argv, opts) => execFileSync(process.execPath, argv, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...opts }),
+  postComment = createGhProvider().postComment,
 } = {}) {
   return {
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
@@ -505,6 +512,18 @@ export function createReviewPrSinks({
     [REVIEW_EFFECTS.NOTICE]: async (payload) => {
       out(String(payload.notice));
       return { reported: true };
+    },
+
+    // ── `advise`'s ADVISORY_NOTE — a BARE comment, no label touched (#xlw02hw). ─────────────────────────────
+    // Deliberately NOT `we:scripts/review-set-label.mjs`: that single home always couples a comment with a
+    // label swap (#2644), and this step declares no label-swap effect, ever — reaching for it here would mean
+    // either inventing a `to` this step has no business deciding, or teaching the single home a comment-only
+    // mode it does not have and every OTHER caller must then be trusted not to misuse. `createGhProvider`'s
+    // `postComment` is the exact primitive that single home itself calls for its own comment write, so this
+    // reuses it directly rather than re-implementing a `gh pr comment` invocation a third time.
+    [REVIEW_EFFECTS.ADVISORY_NOTE]: async (payload) => {
+      postComment(payload.repo, payload.pr, String(payload.body));
+      return { posted: true };
     },
   };
 }
