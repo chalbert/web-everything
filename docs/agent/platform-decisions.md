@@ -3138,6 +3138,26 @@ either: the operational-state store going shared per
 real second off-machine caller of the HTTP adapter materializing. Full reasoning, skeptic passes and the
 prior-art survey: [#3400](/backlog/3400-the-ratified-hosted-key-billed-delivery-mode-has-no-metering/).
 
+**Extended 2026-09-01 (operator; #3427)** — two more clauses, on catalog scope and on call-visibility
+telemetry. **(1) Candidacy scope.** The operation catalog stays bounded to delivery-loop operations, growing
+organically only through the already-ratified missing-operation mechanism
+([#dispatched-agent-never-runs-commands-directly](#dispatched-agent-never-runs-commands-directly), #3421,
+#3422) — never "every command in the repo." A raw inspection command (`git status`, `ls`, an ad hoc `grep`) is
+not a declaration candidate on its own; it becomes one only when a dispatched agent actually halts on it as a
+gap. **(2) Call-visibility telemetry is a separate, purpose-built signal, never a run record.** Every operation
+call, regardless of step kind, emits a lightweight, access-log-shaped record — operation name, timestamp,
+caller kind, and an `outcome` carrying a compact digest of the result (never bare success/failure) — kept
+structurally distinct from the run-record store (`we:scripts/operations/run-record.mjs`/`run-store.mjs`). The
+schema is a categorical mismatch, not a cost one: a `compute`-only call never suspends and has no `run+step` to
+key a resume off, so it never earns a run record no matter how cheap persistence gets. This closes the measured
+blind spot of `compute`-only operations (`gate-health`, `suggest-next`, `verify`, `pr-status`) leaving zero
+trace of being called. A per-declaration opt-in to full run-record persistence for specific high-value
+`compute` operations remains a live, un-foreclosed option layered on top of the lightweight signal, not a
+replacement for it. Build tracked at
+[the follow-on item](/backlog/xadrqhr-build-the-lightweight-call-visibility-signal-for-every-opera/). Full
+reasoning, skeptic passes and prior art:
+[#3427](/backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever/).
+
 ---
 
 ### The conveyor's headless dispatch starts agents by CALLING the declared `dispatch-lane` operation — never a second spawn implementation, never a cross-process call into a sibling repo's server {#conveyor-dispatch-calls-the-declared-operation}

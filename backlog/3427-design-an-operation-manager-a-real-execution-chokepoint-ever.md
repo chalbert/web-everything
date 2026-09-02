@@ -2,14 +2,60 @@
 bornAs: xxlgpf7
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-31"
+dateResolved: "2026-09-01"
+codifiedIn: "docs/agent/platform-decisions.md#operations-declared-once-callers-generated"
 preparedDate: "2026-09-01"
 relatedTo: ["3421", "3422", "3405", "3031", "3188", "3398"]
 tags: [governance, conveyor, operations, design]
 ---
 
 # Design an "operation manager": a real execution chokepoint every command routes through
+
+## Ruling (2026-09-01) — both forks' recommended defaults accepted, as presented
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-09-01** — Fork 1 = **(a) the operation catalog stays
+bounded to delivery-loop operations**, growing organically only through the already-ratified
+missing-operation mechanism (#3405/#3421/#3422), and Fork 2 = **(b) a separate, purpose-built lightweight
+call-visibility signal** (access-log-shaped: operation name, timestamp, caller kind, outcome) for every
+operation call regardless of step kind, structurally distinct from the run-record store — both accepted as
+presented, no alternative picked in either fork's place, no dissent raised. Both forks were already prepared
+with a `Skeptic: SURVIVES`/`SURVIVES-WITH-AMENDMENT` verdict and a `Screen: clear` pass, so this ratification
+is a straight acceptance of the prepared defaults, not a re-opening of either fork's reasoning.
+
+- **Fork 1 = (a).** Rejected (b) — "every command in the repo, including one-off inspection/tooling commands,
+  becomes a declaration candidate" — for the reason the prepared card gives: #3188's own session measurement
+  found a long tail of raw `git`/`npm`/`vitest`/`sed`/`python3`/`curl` calls against a handful of real
+  operations, and declaring all of it up front is exactly the speculative up-front design this card's own text
+  already rejects for the catalog generally. The catalog keeps growing one real gap at a time, through the
+  missing-operation halt-and-surface mechanism already ratified for the dispatched-agent population, not by
+  enumeration.
+- **Fork 2 = (b).** Rejected (a) — persisting a full run record for every `compute`-only call — on the
+  schema-mismatch ground the prepared card gives as load-bearing (not merely the volume/"landfill" framing):
+  the run-record store's `run+step` keying exists to model a *resumable* effect, and a `compute`-only call
+  never suspends and has no step to key a resume off, so forcing it into that schema is a categorical mismatch
+  independent of storage cost. A separate, cheap, prunable access-log-shaped signal — emitted for every call
+  regardless of step kind — closes the real, measured gap (`gate-health`, `suggest-next`, `verify`,
+  `pr-status` are all `compute`-only today and produce zero trace of being called) without touching the
+  run-store's own no-landfill property.
+- **The skeptic's debuggability amendment is carried forward, not dropped.** The lightweight signal's
+  `outcome` field must carry a compact digest of the result, not bare success/failure — folded into the
+  follow-on build item's own contract below, per #3427's own Done-when #2.
+
+**Follow-on build scaffolded at ratification** (Fork 2 requires one; Fork 1 needs none — it is a scope ruling
+on an already-shipped mechanism, not new work):
+
+- [Build the lightweight call-visibility signal for every operation call](/backlog/xadrqhr-build-the-lightweight-call-visibility-signal-for-every-opera/)
+  (parent: this item) — names the storage shape (a `we:scripts/operations/call-log.mjs` /
+  `we:scripts/operations/call-log-store.mjs` pure-core/io-shell pair, mirroring
+  `we:scripts/operations/run-record.mjs`/`we:scripts/operations/run-store.mjs`, writing to a new
+  `we:.operations/calls/` sidecar structurally distinct from `we:.operations/runs/`), names both caller
+  surfaces that must emit it (`we:scripts/operations/cli-adapter.mjs` and
+  `we:scripts/operations/http-adapter.mjs`, including the HTTP adapter's currently-silent `compute`-only
+  `runReadOnly` branch), specifies that `outcome` carries a compact digest rather than bare success/failure,
+  and names — without foreclosing it — a per-declaration opt-in to full run-record persistence for specific
+  high-value `compute` operations as a third option for that item to weigh.
 
 Captures a 2026-08-31 operator discussion about a real execution chokepoint every command — not only
 dispatched-agent commands — routes through. **Prepared 2026-09-01**: a prior-art survey (published as
