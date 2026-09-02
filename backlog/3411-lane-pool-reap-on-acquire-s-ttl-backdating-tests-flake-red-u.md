@@ -4,6 +4,10 @@ kind: task
 status: open
 dateOpened: "2026-08-30"
 tags: []
+scope:
+  - we:scripts/lane-pool.mjs
+  - we:scripts/lib/lane-lease.mjs
+  - we:scripts/__tests__/lane-pool-reap-on-acquire.test.mjs
 ---
 
 # lane-pool-reap-on-acquire's TTL-backdating tests flake red under real host load
