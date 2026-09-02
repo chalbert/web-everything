@@ -6,6 +6,11 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-01"
 tags: []
+scope:
+  - we:scripts/check-standards-rules.mjs
+  - we:scripts/check-standards.mjs
+  - we:scripts/__tests__/check-standards-rules-content-lint.test.mjs
+  - we:scripts/__tests__/fixtures/check-standards-rules-fixtures.mjs
 ---
 
 # check:standards rule: fail the build on leaked harness-scaffolding markers in tracked backlog/report content
