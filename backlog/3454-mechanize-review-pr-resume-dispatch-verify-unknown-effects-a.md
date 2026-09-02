@@ -7,6 +7,10 @@ relatedTo: ["3437", "2439", "2844"]
 status: open
 dateOpened: "2026-09-02"
 tags: [conveyor, review-pr, resume, dispatch]
+scope:
+  - we:scripts/operations/
+  - we:scripts/__tests__/
+  - we:skills-src/review/
 ---
 
 # Mechanize review-pr resume-dispatch: verify UNKNOWN effects against ground truth, then dispatch a fresh session to resume
