@@ -35,7 +35,13 @@ const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 // — same shape, same code path, zero content drift. The LIVE docs build (`npm run build:docs`,
 // `npm run dev`, `check:standards`, `npm test`, …) never sets this env var, so its behavior is completely
 // unchanged. See tests/visual/pages.json's header comment for how to add a new fixture-backed target.
-const BACKLOG_DIR = process.env.WE_VISUAL_FIXTURES
+// #3445 — an explicit `WE_BACKLOG_DIR` override (the dispatcher-fixture-root thread, mirroring
+// `--backlog-dir` on `scripts/backlog.mjs` / `scripts/readiness/dispatch-plan.mjs`) wins over both the
+// visual-fixture mode and the live directory, so a harness test can point this SAME loader at a throwaway
+// `mkdtemp` corpus without also having to fake `WE_VISUAL_FIXTURES`'s checked-in fixture set.
+const BACKLOG_DIR = process.env.WE_BACKLOG_DIR
+  ? process.env.WE_BACKLOG_DIR
+  : process.env.WE_VISUAL_FIXTURES
   ? join(__dirname, '../../tests/visual/fixtures/backlog')
   : join(__dirname, '../../backlog');
 const ROOT = join(__dirname, '../..');

@@ -329,7 +329,15 @@ async function main(argv) {
   const { readQueueFile, resolveQueuePath, normNum } = await import('../conveyor/queue-store.mjs');
   const sidecar = readQueueFile(resolveQueuePath()); // script-location + env override — matches conveyor-state
   const cleared = new Set(sidecar.map((e) => normNum(e.num)));
-  const bq = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], 'backlog build-queue');
+  // `--backlog-dir` (#3445) points this read (and, via `WE_BACKLOG_DIR` below, the byNum enrichment require
+  // just past it) at a fixture corpus instead of the live `backlog/` directory — the dispatcher-fixture-root
+  // thread (#3402).
+  const bqArgs = ['build-queue', '--json'];
+  if (typeof flags['backlog-dir'] === 'string') {
+    bqArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
+    process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
+  }
+  const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
   const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
   const rows = selectClearedRows(bqRows, cleared, normNum);
   // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never

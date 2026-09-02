@@ -3,9 +3,11 @@ bornAs: xediz51
 kind: story
 size: 5
 parent: "3402"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/conveyor-state.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/backlog.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/conveyor/__tests__/"]
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-01"
+dateResolved: "2026-09-02"
 tags: []
 ---
 
