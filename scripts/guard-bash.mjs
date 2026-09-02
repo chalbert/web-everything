@@ -880,6 +880,14 @@ export function shellTokens(segment) {
 export function parseSegments(command, { spliceContinuations = true } = {}) {
   const s = String(command || '');
   const segs = [];
+  // `pipedFrom[i]` — is `segs[i]` fed by a bare `|` (a real data pipe) from `segs[i - 1]`? `segs[0]` has no
+  // predecessor, so `pipedFrom[0]` is always false. #2968 — needed to tell `git ls-files … | xargs git add`
+  // (one pipeline, the RIGHT side's paths come from the LEFT) apart from `git ls-files …; git add path` (two
+  // unrelated commands) — a distinction every OTHER caller of this function has never needed (#2994's own
+  // callers only ask "where does one command end"), so it rides as an extra field rather than a second parser.
+  // `||` (logical or, not a pipe) is excluded: its second `|` is what the very next char test below reads.
+  const pipedFrom = [];
+  let pendingPiped = false;      // segs[0] (the first segment) has no predecessor
   let cur = '';
   let unterminated = false;
   let continued = false;
@@ -887,7 +895,7 @@ export function parseSegments(command, { spliceContinuations = true } = {}) {
   let inComment = false;
   // A comment switches quoting off until END OF LINE — a separator does NOT end it (bash agrees: `# a; b`
   // is all comment). Only a newline clears it.
-  const cut = () => { segs.push(cur); cur = ''; atWordStart = true; };
+  const cut = () => { segs.push(cur); pipedFrom.push(pendingPiped); cur = ''; atWordStart = true; };
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     // Inside a `#` comment ONLY quoting is switched off; the comment TEXT and every separator in it are
@@ -920,6 +928,9 @@ export function parseSegments(command, { spliceContinuations = true } = {}) {
     }
     if (ch === ';' || ch === '&' || ch === '|' || ch === '\n') {
       cut();
+      // The NEXT segment's pipedFrom: a bare `|` (not the first `|` of a `||`) — recorded now, consumed by
+      // the `cut()` that finalizes THIS next segment.
+      pendingPiped = ch === '|' && s[i + 1] !== '|';
       if (ch === '\n') inComment = false;
       while (i + 1 < s.length && /[;&|\n]/.test(s[i + 1])) { if (s[i + 1] === '\n') inComment = false; i += 1; }
       continue;
@@ -928,7 +939,8 @@ export function parseSegments(command, { spliceContinuations = true } = {}) {
     atWordStart = /[\s()]/.test(ch);      // bash starts a comment at a `#` that BEGINS a word (`(#c` counts)
   }
   segs.push(cur);
-  return { segments: segs, unterminated, continued };
+  pipedFrom.push(pendingPiped);
+  return { segments: segs, unterminated, continued, pipedFrom };
 }
 
 /** The segments-only view of `parseSegments` (the raw text of each `&&`/`||`/`;`/`&`/`|`/newline-separated
@@ -1432,6 +1444,193 @@ export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve)
   return reportedCwd;
 }
 
+// ── #2968 — `git add` of an ENUMERATED path set, matched by EFFECT not flag spelling ──────────────────────
+// PR #1064: a `git add --intent-to-add --all` was blocked, then RE-SPELLED as
+// `git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --` — same effect (a broad
+// stage that sweeps up a concurrent session's in-flight work), different letters. Left-behind intent-to-add
+// entries also make `git restore <path>` TRUNCATE a swept file to 0 bytes and every `pull --ff-only
+// --autostash` in the repo die. Four sink shapes reach the same effect: the flag ITSELF enumerates (`-A`,
+// `--all`, a bare `.`) — no pipe needed, so this is a per-segment arm in `reason()` below; or the path set
+// comes from an ENUMERATION the `git add` invocation's own text never named — a pipe from a listing command
+// into an (optionally `xargs`-wrapped) `git add`, a `while … read` loop body, or a `find -exec`. Those three
+// need whole-command context `reason()`'s per-segment walk doesn't have (the enumeration source is a
+// DIFFERENT segment, or the `git add` sits inside a compound whose head word is `while`/`find`, not `git`),
+// so they are one whole-command function called from `decide()`, the same shape as
+// `commitIdentityCommandReason`/`backgroundedVerificationReason` above.
+//
+// KNOWN RESIDUAL GAPS (an adversarial review found these; scoped OUT of this item's four named shapes —
+// `pipe-to-xargs, while-read, -exec, direct` — deliberately, not by oversight, so a NEXT re-spelling has a
+// named place to land rather than a silent hole):
+//   • `git add $(git ls-files --others)` / `` git add `git ls-files --others` `` — the SAME effect (an
+//     enumeration feeds the add) reached via command substitution rather than a pipe. No `|` exists for
+//     `pipeGitAddEnumerationReason` to key on.
+//   • `for f in $(git ls-files --others); do git add "$f"; done` — the same loop-variable shape as WHILE-READ,
+//     spelled with `for` instead of `while … read`.
+//   • `git diff --name-only | xargs git add`, a bare `git status | xargs git add` — `isPathEnumerationSource`
+//     below is scoped to the sources #1064's incident and this item's DoD actually name.
+//
+// PR #1816 review (2026-09) found and fixed a NARROWER class in the same family — not a new sink, but
+// EQUIVALENT SPELLINGS of the four shapes ABOVE this list slipping past an exact-token/exact-`\b` match
+// (`./` for a bare `.`, `-Av`/`-vA` for `-A`, `-su` for `-s`) — see `gitAddEnumeratesUnnamedPaths` and
+// `statusClusterHasShort` below. That review is exactly the class of recurrence this comment exists to warn
+// about, so a fuzz/property test guarding it going forward is filed as backlog#x63kvwg (parent #3383).
+const GIT_ADD_ENUMERATION_MESSAGE =
+  '`git add` here stages a path set you did not name — the operand is an ENUMERATION (a wildcard `-A`/`--all`/`.` '
+  + 'flag, a piped `ls-files`/`status`/`find`/`ls` listing feeding an `xargs` sink, a `while read` loop variable, '
+  + 'or a `find -exec`), not paths written out in the command itself (#2968). A broad/enumerated add sweeps up '
+  + "whatever a CONCURRENT session has in flight — the exact incident PR #1064 reproduced by RE-SPELLING a "
+  + 'blocked `git add --all --intent-to-add` as `git ls-files --others --exclude-standard -z | xargs -0 git add '
+  + '--intent-to-add --`, same effect, different letters. Left-behind intent-to-add entries also make `git '
+  + 'restore <path>` TRUNCATE a swept file to 0 bytes and make every `pull --ff-only --autostash` in the repo '
+  + 'die. Stage the EXACT paths you mean: `git add path/a path/b`. There is no override — an unnamed path set '
+  + 'is never the right add here.';
+
+/** The DIRECT shape: does this `git add` invocation's OWN text enumerate an unnamed, unbounded path set —
+ *  `-A`/`--all` (the whole index+worktree) or a bare `.` operand (everything under cwd)? Pure. No pipe/xargs/
+ *  while-read/-exec needed here: the flag itself is what does the enumerating. Quoting is IRRELEVANT to every
+ *  operand tested here — `git add "-A"` and `git add -A` reach git's argv identically, so `t.quoted` is never
+ *  read (an adversarial review caught an earlier draft that guarded ONLY the `-A`/`--all` arm on `!t.quoted`,
+ *  inconsistently with the `.` arm three tokens later — `git add "-A"`/`git add "--all"` slipped through).
+ *
+ *  Also equivalent-spelling widened (PR #1816 review — confirmed bypass, same class as the two gaps above):
+ *  `./` and `./.` are the same "everything under cwd" operand as a bare `.` — git resolves all three
+ *  identically. And `-A` is a POSIX-combinable short flag: `-Av`/`-vA`/any single-dash letter CLUSTER
+ *  containing `A` reaches git's argv exactly as a bare `-A` would (`git add -Av` == `git add -A -v`) — matching
+ *  only the exact two-character token `-A` let `-Av`/`-vA` slip through untouched. */
+function gitAddEnumeratesUnnamedPaths(seg) {
+  if (gitSubcommand(seg) !== 'add') return false;
+  const toks = shellTokens(canonicalCommand(seg)).filter((t) => !t.op);
+  const addIdx = toks.findIndex((t) => !t.quoted && t.text === 'add');
+  if (addIdx < 0) return false;
+  return toks.slice(addIdx + 1).some((t) => {
+    const text = t.text;
+    if (text === '--all' || text === '.' || text === './' || text === './.') return true;
+    // A single-dash cluster of bare letters (never `--long`, the leading `(?!-)` excludes that) is a POSIX
+    // short-flag COMBINATION — every letter in it reaches argv as if passed separately, so any cluster
+    // containing `A` enumerates just as much as a lone `-A` does.
+    return /^-(?!-)[A-Za-z]+$/.test(text) && text.includes('A');
+  });
+}
+
+/** Enumeration-SOURCE commands whose output is a bare path/status listing — the LEFT side of the #2968
+ *  pipe-to-`git add` sink shape. Scoped to the sources the incident and this item's own definition-of-done
+ *  name (`ls-files`, `status --porcelain`/`--short`/`-s`, `find`, `ls`), not every read-only command, so
+ *  `git log --oneline | xargs …` reading commit hashes is not swept in. */
+function isPathEnumerationSource(seg) {
+  const sub = gitSubcommand(seg);
+  if (sub === 'ls-files') return true;
+  if (sub === 'status') {
+    const cmd = canonicalCommand(seg);
+    if (/(?:^|\s)(?:--porcelain\b|--short\b)/.test(cmd)) return true;
+    // `-s` is a POSIX short flag too, so it can ride inside a combined cluster (`-su`, `-sb`, …) that the
+    // bare `-s\b` word-boundary regex above can never see (`\b` never fires between two letters) — PR #1816
+    // review's confirmed bypass. Token-scanned, not regexed, so the cluster is examined letter-by-letter.
+    return shellTokens(cmd).some((t) => !t.op && statusClusterHasShort(t.text));
+  }
+  const prog = programWord(seg);
+  return prog === 'find' || prog === 'ls';
+}
+
+/** Does this `git status` token's short-flag CLUSTER effectively enable `-s`/`--short`? Pure. Verified
+ *  against real git (git 2.50.1): `-u` takes an OPTIONAL attached argument, so once `-u` appears in a cluster,
+ *  every character AFTER it is consumed as `-u`'s mode value rather than parsed as further short flags —
+ *  `git status -us` really means `--untracked-files=s` and git itself rejects it ("Invalid untracked files
+ *  mode 's'"), so it is deliberately NOT treated as `-s` here. `-su` (the `-s` flag comes first, `-u` is last
+ *  and takes no attached value) has no such consumption and genuinely IS `-s -u` — the PR #1816 review's
+ *  confirmed bypass (`git status -su | xargs git add`). */
+function statusClusterHasShort(text) {
+  if (!/^-(?!-)[A-Za-z]+$/.test(text)) return false;
+  const chars = text.slice(1);
+  const uIdx = chars.indexOf('u');
+  const effective = uIdx < 0 ? chars : chars.slice(0, uIdx + 1);
+  return effective.includes('s');
+}
+
+/** The PIPE/`xargs`-SINK shape: a bare `|` (real data pipe, not `||`) from a path-enumeration source into a
+ *  `git add` — directly, or through an `xargs` wrapper (`canonicalCommand`/`gitSubcommand` already peel that
+ *  wrapper, #2367, so the sink segment resolves to `git add` either way). Pure. */
+function pipeGitAddEnumerationReason(command) {
+  const parsed = parseSegments(String(command || ''));
+  if (parsed.unterminated) return null;
+  const segs = parsed.segments;
+  for (let i = 1; i < segs.length; i++) {
+    if (!parsed.pipedFrom[i]) continue;
+    if (gitSubcommand(segs[i]) === 'add' && isPathEnumerationSource(segs[i - 1])) return GIT_ADD_ENUMERATION_MESSAGE;
+  }
+  return null;
+}
+
+/** `command` with every QUOTED run (`'…'`, `"…"`, `$'…'`, `$"…"`) and `#` COMMENT blanked out — length
+ *  preserved (so a `\b` word boundary lands where it would in the original), quote-aware via the same
+ *  `scanRun` scanner every other parser in this file shares. The WHILE-READ/`-exec` regexes below scan THIS
+ *  view, never the raw command: an adversarial review found the first cut ran them against raw text, so
+ *  `git commit -m "while read f; do git add \"$f\"; done"` — a commit MESSAGE, never executed as shell syntax
+ *  at all — read as a real while-loop and was wrongly denied (#2968 r1). `pipeGitAddEnumerationReason` above
+ *  needs no such mask: it already goes through `parseSegments`/`gitSubcommand`/`canonicalCommand`, which
+ *  resolve quoting token-by-token rather than pattern-matching raw text. */
+function maskQuoted(command) {
+  const s = String(command || '');
+  let out = '';
+  let i = 0;
+  let atWordStart = true;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '\n') { out += ch; i += 1; atWordStart = true; continue; }
+    const run = scanRun(s, i, atWordStart);
+    if (run && (run.kind === 'quote' || run.kind === 'unterminated' || run.kind === 'comment')) {
+      out += ' '.repeat(run.end - i + 1);
+      i = run.end + 1;
+      atWordStart = false;
+      continue;
+    }
+    if (run && (run.kind === 'escape' || run.kind === 'continuation')) {
+      out += s.slice(i, run.end + 1);
+      i = run.end + 1;
+      atWordStart = false;
+      continue;
+    }
+    out += ch;
+    atWordStart = /[\s()]/.test(ch);
+    i += 1;
+  }
+  return out;
+}
+
+/** The WHILE-READ-SINK shape: a `while … read …` loop whose body runs `git add` before the loop's OWN `done`.
+ *  Bounded to one loop body (the negative lookahead stops at the first `done`), so an unrelated LATER loop —
+ *  or an unrelated `git add` after this loop closes — can't be implicated. Matched against `maskQuoted`'s
+ *  output, not raw text (#2968 r1). Same accidental-collision threat model as the rest of this file (#2367)
+ *  — not adversarial-proof. */
+const WHILE_READ_GIT_ADD = /\bwhile\b(?:(?!\bdone\b)[\s\S])*?\bread\b(?:(?!\bdone\b)[\s\S])*?\bgit\s+add\b(?:(?!\bdone\b)[\s\S])*?\bdone\b/;
+
+/** The `-exec`-SINK shape: a `find … -exec[dir] … git add … ;`/`+` clause. Each `-exec` clause is scoped to
+ *  the text BETWEEN it and its OWN terminator (`\;`, or `{}`-then-`+`, or a bare `+`), so an unrelated `git
+ *  add` elsewhere on the same line can't be implicated. `masked` is `maskQuoted`'s output (#2968 r1) — a
+ *  quoted `-exec`/`git add` inside a string is never mistaken for shell syntax. */
+const EXEC_CLAUSE = /-exec(?:dir)?\b([\s\S]*?)(?:\\;|\{\}\s*\+|\+)/g;
+function hasExecGitAdd(masked) {
+  let m;
+  EXEC_CLAUSE.lastIndex = 0;
+  while ((m = EXEC_CLAUSE.exec(masked))) {
+    if (/\bgit\s+add\b/.test(m[1])) return true;
+  }
+  return false;
+}
+
+/** The #2968 whole-command deny reason for the three sink shapes that need more than one segment to see
+ *  (pipe/xargs, while-read, `-exec`) — the DIRECT shape (`-A`/`--all`/`.`) needs none of this and lives as a
+ *  per-segment arm in `reason()` instead. Pure; called from `decide()` alongside the other whole-command
+ *  checks (`commitIdentityCommandReason`, `backgroundedVerificationReason`). */
+export function gitAddEnumerationReason(command) {
+  const text = String(command || '');
+  const p = pipeGitAddEnumerationReason(text);
+  if (p) return p;
+  const masked = maskQuoted(text);
+  if (WHILE_READ_GIT_ADD.test(masked)) return GIT_ADD_ENUMERATION_MESSAGE;
+  if (hasExecGitAdd(masked)) return GIT_ADD_ENUMERATION_MESSAGE;
+  return null;
+}
+
 /** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
  *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule.
  *  `ctx.staleBehind` = how many commits the lane's HEAD sits behind its upstream (computed by the CLI via a git
@@ -1550,6 +1749,12 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
 
   if (atCommand(/^(?:git\s+)?rm\b/) && BACKLOG_MD.test(s))
     return "Never delete a backlog/*.md — a done item becomes status:resolved (the file stays as the record). Resolve it, don't rm it.";
+
+  // #2968 DIRECT shape — the `-A`/`--all`/`.` flag itself enumerates an unnamed path set; no pipe needed, so
+  // this is a per-segment check (the three pipe/while-read/-exec sink shapes are `decide()`'s whole-command
+  // gitAddEnumerationReason, called below before this segment loop runs).
+  if (gitAddEnumeratesUnnamedPaths(s))
+    return GIT_ADD_ENUMERATION_MESSAGE;
 
   for (const h of heads) {
     const mv = h.match(/^(?:git\s+)?mv\s+(.+)/);
@@ -1953,6 +2158,11 @@ export function decide(command, ctx = {}) {
   // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
   const ident = commitIdentityCommandReason(command);
   if (ident) return ident;
+  // #2968 — the pipe/xargs, while-read, and `-exec` enumerate-then-`git add` sink shapes all need more than
+  // one segment to see (the enumeration source is a DIFFERENT segment, or the `git add` sits inside a
+  // compound whose head word is `while`/`find`). Whole-command, same shape as the two checks above it.
+  const addEnum = gitAddEnumerationReason(command);
+  if (addEnum) return addEnum;
   // #2994 — QUOTE-AWARE split: tokenize quotes first, cut only on UNQUOTED separators.
   const parsed = parseSegments(command);
   // #2994 review r3 — FAIL CLOSED on a command the parser cannot represent. Every loosening signature this

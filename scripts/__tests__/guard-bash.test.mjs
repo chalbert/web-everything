@@ -1689,7 +1689,7 @@ describe('commit identity override (#3269)', () => {
   it('leaves an ordinary chained commit, and a standalone config write, alone', () => {
     // A `git config` write on its own is legitimate — the machine's identity is the operator's to set.
     for (const cmd of [
-      'git add -A && git commit -m hi',
+      'git add file.txt && git commit -m hi',
       'npm test && git commit -m ok',
       'git config user.email noreply@anthropic.com',
       'git config user.email x@y && git log',
@@ -1752,7 +1752,7 @@ describe('commit identity override (#3269)', () => {
  */
 describe('guard-bash — a refusal names the collateral it takes down with it (#3311)', () => {
   // The three real incidents, in the shape they were actually typed.
-  const HEREDOC_THEN_ADD = "cat > /tmp/pr-body.md <<'EOF'\n## Summary\nwhat changed\nEOF\ngit add -A && git commit -m wip && git push origin main";
+  const HEREDOC_THEN_ADD = "cat > /tmp/pr-body.md <<'EOF'\n## Summary\nwhat changed\nEOF\ngit add pr-body.md && git commit -m wip && git push origin main";
   const HEREDOC_THEN_FORCE_PUSH = "cat > /tmp/body.md <<'EOF'\nbody\nEOF\ngit commit -m fix && git push --force-with-lease origin main";
 
   it('the notice is STRICTLY additive — `decide` still returns exactly its own reason', () => {
@@ -1870,7 +1870,7 @@ describe('guard-bash — the collateral notice reaches the real deny channel (#3
   }).trim();
 
   it('a denied chain carries BOTH the original reason and the collateral list', () => {
-    const out = run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add -A && git push origin main");
+    const out = run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add pr-body.md && git push origin main");
     const parsed = JSON.parse(out);
     expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
     const msg = parsed.hookSpecificOutput.permissionDecisionReason;
@@ -1887,6 +1887,113 @@ describe('guard-bash — the collateral notice reaches the real deny channel (#3
 
   it('an ALLOWED command is still allowed and still emits nothing — the notice cannot deny', () => {
     expect(run('git push origin HEAD:refs/heads/lane/x')).toBe('');
-    expect(run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add -A && git commit -m hi")).toBe('');
+    expect(run("cat > /tmp/pr-body.md <<'EOF'\nbody\nEOF\ngit add pr-body.md && git commit -m hi")).toBe('');
+  });
+});
+
+/**
+ * #2968 — widen the `git add` hygiene guard to deny an ENUMERATED path set by EFFECT, not flag spelling.
+ * PR #1064's own incident: a blocked `git add --intent-to-add --all` was RE-SPELLED as
+ * `git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --` — the guard's old
+ * flag-spelling matcher (never actually shipped as a persistent rule, only reasoned about in that PR's
+ * review) would have missed it entirely. Four sink shapes reach the same effect; each gets its own case.
+ */
+describe('guard-bash — git add of an ENUMERATED path set is denied by EFFECT (#2968)', () => {
+  it('DIRECT — `-A`/`--all`/a bare `.` enumerates on its own, no pipe needed', () => {
+    for (const cmd of ['git add -A', 'git add --all', 'git add .', 'git add -A .', 'git add -- .'])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('DIRECT — a QUOTED flag reaches git\'s argv identically, so quoting it is not an escape (adversarial review)', () => {
+    for (const cmd of ['git add "-A"', "git add '-A'", 'git add "--all"', "git add '--all'"])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  /**
+   * PR #1816 review — CONFIRMED bypass: several spellings functionally identical to the four shapes above
+   * still returned `allow`. `git add ./` is the same "everything under cwd" operand as a bare `.`; `-Av`/`-vA`
+   * are POSIX-combined short-flag CLUSTERS equivalent to `-A -v` (git's own argv parsing does not care which
+   * order the letters land in, or whether they're spelled as one token or two); and `git status -su` is the
+   * SAME combined-cluster gap on the pipe-sink's enumeration-source side — `-s\b`'s word-boundary regex can
+   * never match inside `-su` since a boundary only exists between a word char and a non-word char, and 's' and
+   * 'u' are both word chars. Verified against real git 2.50.1 before fixing: `-su` == `-s -u`, but `-us`
+   * actually errors ("Invalid untracked files mode 's'") because `-u` takes an optional attached argument that
+   * consumes the rest of the cluster — so `-us` is deliberately NOT treated as an enumeration source below.
+   */
+  it('DIRECT — equivalent spellings of the bare-dot and combined-short-flag shapes (PR #1816 review)', () => {
+    for (const cmd of ['git add ./', 'git add ./.', 'git add -Av', 'git add -vA', 'git add -fA', 'git add -Af'])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('PIPE/XARGS SINK — a combined `git status -su` short-flag cluster reaches the same sink (PR #1816 review)', () => {
+    for (const cmd of ['git status -su | xargs git add', 'git status -sb | xargs git add'])
+      expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('PIPE/XARGS SINK — `git status -us` is NOT an enumeration source: `-u`\'s optional arg consumes the `s`, and real git rejects it outright (verified against git 2.50.1)', () => {
+    expect(decide('git status -us | xargs git add', {})).toBeNull();
+  });
+
+  it('PIPE/XARGS SINK — the exact 2026-08 /converge read command (before its PR #1064 fix)', () => {
+    expect(decide('git ls-files --others --exclude-standard -z | xargs -0 git add --intent-to-add --', {}))
+      .toMatch(/stages a path set you did not name/);
+    // …and the other named enumeration sources.
+    for (const cmd of [
+      'git status --porcelain | xargs git add',
+      'find . -name "*.md" | xargs git add',
+      'ls *.md | xargs git add',
+    ]) expect(decide(cmd, {}), cmd).toMatch(/stages a path set you did not name/);
+  });
+
+  it('WHILE-READ SINK — a loop variable fed into `git add`', () => {
+    expect(decide(
+      "git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do git add -- \"$f\"; done", {},
+    )).toMatch(/stages a path set you did not name/);
+  });
+
+  it('-exec SINK — `find … -exec git add … ;`/`+`', () => {
+    expect(decide('find . -name "*.md" -exec git add {} \\;', {})).toMatch(/stages a path set you did not name/);
+    expect(decide('find . -type f -exec git add {} +', {})).toMatch(/stages a path set you did not name/);
+  });
+
+  it('WHILE-READ/-exec text INSIDE quotes is DATA, not shell syntax — never denied (adversarial review)', () => {
+    // The commit MESSAGE merely mentions the shapes above; none of it is actually executed as shell.
+    for (const cmd of [
+      'git commit -m "while read f; do git add \\"$f\\"; done"',
+      'git commit -m "find . -exec git add {} \\\\;"',
+      'echo "while read f; do git add $f; done"',
+      'echo "find . -exec git add {} +"',
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('an EXPLICIT named path set still passes — the sanctioned form the deny message steers to', () => {
+    for (const cmd of [
+      'git add path/a path/b',
+      'git add -- path/a',
+      'git ls-files --others --exclude-standard',                 // enumeration alone, no add sink
+      'find . -name "*.md"',                                      // -exec absent
+      'git status --porcelain',                                   // no pipe into add
+    ]) expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('a narrow `git add` with an unrelated short-flag cluster (no `A`) still passes (PR #1816 review — no new false positive)', () => {
+    for (const cmd of ['git add -p file.txt', 'git add -uv file.txt', 'git add -v path/a', 'git add path/a.dot'])
+      expect(decide(cmd, {}), cmd).toBeNull();
+  });
+
+  it('a `;`/`&&`-separated ls-files and add are UNRELATED commands, not a pipeline — stays allowed', () => {
+    // Only a real `|` implicates the enumeration source; `;`/`&&` just sequences two independent commands.
+    expect(decide('git ls-files --others --exclude-standard; git add path/a', {})).toBeNull();
+    expect(decide('git ls-files --others --exclude-standard && git add path/a', {})).toBeNull();
+  });
+
+  it('`||` is logical-or, not a data pipe — does not trip the pipe-sink shape', () => {
+    expect(decide('git ls-files --others --exclude-standard || git add path/a', {})).toBeNull();
+  });
+
+  it('names the EFFECT, not a flag list, in the deny message (DoD)', () => {
+    const msg = decide('git add -A', {});
+    expect(msg).toMatch(/ENUMERATION/);
+    expect(msg).not.toMatch(/^\s*flags?:/i);
   });
 });
