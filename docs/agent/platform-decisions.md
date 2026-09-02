@@ -3672,6 +3672,52 @@ footgun, option (a) guideline-only rejected as too weak). Enabler for finer scop
 
 ---
 
+### A clean, independent verdict clears `review:pending` mechanically; `review:human` stays human-only {#review-pending-clean-verdict-mechanical-accept}
+
+**Ratified 2026-09-01 by the operator (Nicolas Gilbert) (#3434).** The operator, mid this epic's own live-fire
+test (real independent verdicts landing on real PRs all night): "I want the acceptance to be mechanical from
+the verdict." This **reverses** the prior 2026-08-31 ruling encoded in `reviewLoopAutoConfirm`
+(`we:scripts/lib/review-loop-policy.mjs`), which forbade an unattended AGENT-addressed run from ever
+answering `accept` — found live, against two real PRs (`#1764`, `#1765`) that reduced to a clean `accept` and
+sat queued for a human for no reason but that refusal. **New rule:** when a genuinely independent verdict on a
+`review:pending` PR comes back a clean `accept`, the mechanism records `review:accepted` unattended and lets
+the drain land it — no human step, full stop, for that tier. **`review:human` is UNCHANGED** — "yes review
+human are for human" (operator, same conversation): that tier's human-only ceremony (`--to=clear-human`) is
+untouched: `reviewLoopAutoConfirm`'s own actor check declines a `review:human`-addressed confirm before the
+accept branch is ever reached, so the tier structurally never sees this rule at all. **`prevention-outstanding`
+gets its own branch, not the bounce/retry loop.** The `VERDICTS` enum (`we:scripts/lib/jury-core.mjs`, #2823)
+has a fourth member for the case where every real finding is already fixed but a finding's own "Prevention
+(OWED — file it)" note was never filed as its own item — `reviewLoopAutoConfirm` used to fold that into the
+generic `changes` answer, bouncing and retrying a PR whose code has nothing wrong with it (the exact thing
+`#1764`/`#1765` suffered, repeatedly, the night this was ratified). Ruled: file the named prevention(s) first
+(reusing the file-then-notify shape `buildAcceptQueueEntry` already established), THEN treat the PR as
+accept-worthy — never re-enter the bounce loop over a documentation debt the code itself doesn't have.
+
+**A distinct mechanism from the enforce-flip above — not a loosening of it.**
+[#enforce-flip-triple-gated](#enforce-flip-triple-gated) (#2838) gates a *different* code path — the
+**scheduled shadow review runner**'s `landMode` (`we:scripts/lib/auto-land-seam.mjs` /
+`we:scripts/lib/decision-routing.mjs`), which stays `shadow`-default and triple-gated exactly as ruled there.
+This rule governs the **live dispatched review-loop's own unattended-confirm seam**
+(`we:scripts/operations/review-loop-cli.mjs` → `review-pr.mjs` → `reviewLoopAutoConfirm`) — a narrower,
+already-independent verdict-driven confirm, not the scheduled runner's broader auto-land sweep. The two compose
+without conflict: neither reads the other's gate, and nothing here arms or bypasses `landMode`.
+
+**Lineage:** ratified by #3434 (operator, 2026-09-01). Item 1 (the `accept` branch, `reviewLoopAutoConfirm`)
+shipped in PR #1768. Items 2-4 — the `prevention-outstanding` branch (#3442, `PREVENTION_QUEUE_AREA`),
+updating `we:skills-src/review/review-agent-brief.md`'s "never resume yourself" instruction to scope to
+`review:human` only, and reconciling [#3433](/backlog/3433-technically-enforce-review-dispatch-s-never-self-accept-neve.md)
+(re-scoped, not superseded: narrowed to `review:human`'s never-self-accept and never-merge on both tiers, since
+this rule removed `review:pending`'s self-accept as a thing to harden against) — shipped in PR #1784, with
+`#3433`'s own narrowed technical enforcement (a `--disallowedTools` deny list baked into every dispatched
+review session's argv) landing separately in PR #1829. Composes with
+[#agent-convergence-independent-validation](#agent-convergence-independent-validation) (#2398 — the independence
+this rule leans on rests on a distinct fresh validator, unchanged by this ruling) and
+[#review-human-declarative-leash-only](#review-human-declarative-leash-only) (#2771 — defines what stays
+`review:human`; this rule never touches that boundary, it only removes the human step from the tier that was
+never `review:human` to begin with).
+
+---
+
 ### A learning is admitted to agent memory by verified grounding; recurrence diagnoses and ranks, never admits {#memory-admission-verified-grounding}
 
 **Ratified 2026-08-08 by the operator (Nicolas Gilbert) (#2978).** The learnings pipeline **consolidates and prioritizes**; it is not an authentication checkpoint and no human stands in its path. Four rules, ruled together because each makes the next affordable. **(1) Admission is verified grounding, plus the red-team.** A note reaches agent memory only if it carries the **quoted grounding turn** plus a **transcript pointer**, and the harvest confirms the quote is really in that file — a check against a file the *harness* writes, not one the emitter controls. Grounding proves the **moment**, never the **merit**, so admission reads *grounded **and** survives the red-team*; a note that cannot be tied to a real moment routes to `we:backlog/`, never to memory. A **recurrence count may never gate admission**: `session` and `ts` are emitter-written, so counting authenticates nothing (four hand-written lines manufacture "2 sessions across 2 days"), and a recurrence bar structurally excludes the **one-off user directive** — the source that produced essentially the entire existing `feedback_*` corpus. **(2) Recurrence is a diagnostic signal first, a ranking key second.** N similar notes are evidence of **one cause with N symptoms**, so a cluster's output is a design-level **story naming that cause**, not N patches on a faulty design — and the cluster reaches synthesis with all its members, never an elected "representative" (which elects the best-described *symptom*). A single grounded note becomes a memory rule; a cluster becomes a backlog story. Those are different destinations. No admission floor: a one-session cluster is a real signal that merely sorts lower. **(3) While single-tenant, the pool entry carries the full evidence, uncapped** — storing the real context beats storing a digest and hoping it reconstructs, and cause-synthesis is impossible from a count alone. The secret/entropy scrub therefore **relocates rather than dies**: it moves from the *append* seam to the **publish seam**, because the pool is untracked machine-local state but harvest *output* is committed and pushed. Size limits belong on **what the harvest sends per cluster** (a model-context budget) — never on what is stored. **(4) The harvest fires on a cadence, with the manual command retained**, the two sharing one lock so a tick and a manual run cannot double-file; and a harvest **may defer** a cluster whose cause is not yet clear, re-emitting it to the pool with a reason and a deferral count rather than draining everything. A repeatedly-deferred cluster is itself a finding.
