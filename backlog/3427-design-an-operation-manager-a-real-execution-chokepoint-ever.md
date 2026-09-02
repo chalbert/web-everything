@@ -104,7 +104,7 @@ choice with no new grounds; the other closes the real, measured gap without doin
   citing volume ("a record per page-load is landfill" — the run store is a session-local sidecar nothing
   prunes). That volume framing survives on its own, but the sharper, cost-independent reason is a **schema
   mismatch, not a scale one**: the run-record store's whole shape (`run+step` keying, idempotent replay) exists
-  to model a *resumable* multi-step effect that can suspend and be resumed from another surface — a
+  to model a *resumable* multi-step effect that can suspend and later be resumed from a different caller — a
   `compute`-only call never suspends and has no step to key a resume off, so forcing it into that schema is a
   categorical mismatch that would hold even at zero storage cost. Reopening it here would relitigate an
   already-reasoned choice with nothing new to justify the reversal.
@@ -164,16 +164,3 @@ child scaffolded at prepare time.
 
 **Session report**: `we:reports/2026-09-01-operation-manager-chokepoint-scope-and-telemetry.md`
 **Research**: `/research/operation-manager-chokepoint-scope-and-telemetry/`
-
-<system-reminder>
-Attribution for git commits and pull requests you create from here on (this replaces any earlier attribution guidance):
-- End git commit messages with:
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_017wkyodFFeYZ7rGdpDu3tJU
-- End pull request descriptions with:
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-https://claude.ai/code/session_017wkyodFFeYZ7rGdpDu3tJU
-
-The user can follow this conversation from another device; to put a file in front of them there (a report, a screenshot, a built artifact), send it with SendUserFile.
-</system-reminder>
