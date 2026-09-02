@@ -39,6 +39,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
 import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
+import { defaultOriginRepo } from './record-verdict-io.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
 
@@ -192,16 +193,37 @@ export function resolveViewReader(env = process.env) {
  * ONE `gh pr view`, then ONE net-diff basis shared by the text and the path list — the same economy
  * `computeNetDiffSignals` documents (independent resolution measured 5 → 11 subprocesses per PR).
  *
- * @param {{pr: number, repo: string, exec?: Function, cwd?: string, readView?: Function}} o
+ * @param {{pr: number, repo: string, exec?: Function, cwd?: string, readView?: Function, originRepo?: Function}} o
  * @returns {{detail: object, net: object, diff: object, headRefName: string, body: string}}
  */
-export function readPr({ pr, repo, exec = null, cwd = REPO_ROOT, readView = resolveViewReader() } = {}) {
+export function readPr({
+  pr, repo, exec = null, cwd = REPO_ROOT, readView = resolveViewReader(), originRepo = defaultOriginRepo,
+} = {}) {
   // The net-diff helpers take no `cwd`, so it is baked into the injected `exec` (the drain does the same thing
   // for the opposite reason — see the `escCwd` note in `we:scripts/merge-ai-prs.mjs`).
   const gitExec = exec || execFileIn(cwd);
   if (!Number.isInteger(pr) || pr <= 0) throw new TypeError(`review-pr-io: \`pr\` must be a positive integer, got ${JSON.stringify(pr)}`);
   if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     throw new TypeError(`review-pr-io: \`repo\` must be <owner/name>, got ${JSON.stringify(repo)}`);
+  }
+  // #3137 — REFUSE A CROSS-REPO TARGET LOUDLY, BEFORE ANY NET-DIFF WORK. The net-diff git calls below are
+  // rooted at `cwd` (this checkout by default) with no per-call repo override, so a `--repo=` pointed at a
+  // DIFFERENT repository cannot resolve its head ref here. `shapeReadFinding`'s `ref-unresolved` degrade path
+  // was written for that failure INSIDE the same repo (a lane branch this clone has not fetched yet), where
+  // limping through with a note is the right call; a cross-repo target hits the identical path for a
+  // completely different reason and used to degrade the same way — `degraded: true`, an EMPTY diff — handing
+  // the judge nothing to find fault with and no error anywhere in the run (a false-pass hazard, live on
+  // plateau-app#139). Checked here, ahead of the `gh pr view` call too, so a mismatched target fails fast
+  // rather than spending a network round trip it cannot use.
+  const haveRepo = originRepo(cwd);
+  if (haveRepo !== repo) {
+    throw new Error(
+      `review-pr-io: refusing to review ${repo}#${pr} — this checkout's origin is ${haveRepo || '(unknown)'}, `
+      + `not ${repo}. review-pr's diff comes from LOCAL git rooted at this checkout, so a cross-repo target `
+      + 'cannot be resolved here; it used to silently degrade to an empty diff instead (#3137). Run review-pr '
+      + `from a checkout of ${repo}, or add a lane-cwd override for \`read\` (mirroring `
+      + '`JUDGE_LANE_CWD`) if cross-repo review-pr support becomes a real requirement.',
+    );
   }
 
   const view = readView({ pr, repo, cwd });
@@ -319,8 +341,10 @@ export function priorRoundsFor(repo, pr) {
   try { return (foldRepo(repo).get(pr)?.outstandingHolds ?? []).length; } catch { return 0; }
 }
 
-export function createReviewPrReader({ exec = null, cwd = REPO_ROOT } = {}) {
-  return ({ pr, repo }) => readPr({ pr, repo, exec, cwd });
+export function createReviewPrReader({ exec = null, cwd = REPO_ROOT, originRepo = defaultOriginRepo } = {}) {
+  return ({ pr, repo }) => readPr({
+    pr, repo, exec, cwd, originRepo,
+  });
 }
 
 /**

@@ -2,8 +2,10 @@
 bornAs: xu4j03b
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-16"
+dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 tags: [review-pr, operations, security, correctness]
 scope:
   - we:scripts/operations/
@@ -36,3 +38,13 @@ An empty (or near-empty) diff handed to a judge juror very plausibly comes back 
 **(b) Real fix, if cross-repo `review-pr` support is wanted later — accept a lane-cwd override for `read`, mirroring `judge`.** Thread a `cwd` (or `REVIEW_PR_LANE_CWD`-style env var) through `createReviewPrReader`/`readPr` the same way we:scripts/operations/run.mjs already threads `JUDGE_LANE_CWD` into `createDefaultJudge`, so a caller reviewing a PR in another repo can point `read` at an actual checkout of that repo. This is the properly general fix but is more work and needs its own care around lane isolation (the same concern `assertLaneCwd` exists for on the `judge` side).
 
 Filing this as the safe (a) fix by default; (b) is the escalation path if cross-repo review-pr support becomes a real requirement. This is a real correctness/security gap in the review tooling's own trust boundary — a reviewer that can be made to see nothing and still report "accepted" — so it should not sit at low priority.
+
+## Progress
+
+Implemented fix direction (a) from this card: `readPr` (we:scripts/operations/review-pr-io.mjs) now compares
+`--repo=` against this checkout's own `origin` (reusing the existing `defaultOriginRepo` single home from
+we:scripts/operations/record-verdict-io.mjs, the same helper `resolveTransportRoot`/`ownsRepo` already use) and throws loudly
+before doing any net-diff git work when they differ, instead of falling through to `shapeReadFinding`'s
+`ref-unresolved` degrade path. `createReviewPrReader` threads the new `originRepo` override through so the
+check stays swappable in tests. Added dedicated tests for the refusal plus updated the existing `readPr`
+wiring tests to inject a matching `originRepo` stub.
