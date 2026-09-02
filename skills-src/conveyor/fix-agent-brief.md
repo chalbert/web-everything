@@ -23,7 +23,7 @@
 | `{{PR_NUM}}` | the bounced PR's number (the one carrying `review:changes`) — e.g. `701` |
 | `{{LANE_REF}}` | the PR's head ref — `lane/{{ITEM_NUM}}-<slug>` (`gh pr view {{PR_NUM}} --json headRefName`) |
 | `{{LANE}}` | a FREE lane id the conveyor assigned this repair (a fresh clone; the repair is reconstituted from `{{LANE_REF}}`, not the original lease) |
-| `{{SESSION_SLUG}}` | a stable per-repair session slug, e.g. `fix-{{ITEM_NUM}}` (ties `acquire`↔`release`) |
+| `{{SESSION_SLUG}}` | a stable per-repair session slug, e.g. `fix-{{PR_NUM}}` (ties `acquire`↔`release`) |
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
 
 > **`{{LIKE_THIS}}`** are **conveyor-injected** (the table above). **`<like-this>`** are **agent-runtime values**
