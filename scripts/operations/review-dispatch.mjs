@@ -68,6 +68,32 @@
  * `we:scripts/lib/review-independence.mjs`'s own header names for `CLAUDE_CODE_SESSION_ID` ("not an unforgeable
  * actor signal … #2895 ruled that deferred"). Filed as its own item rather than solved here or left unfiled:
  * `we:backlog/xf38r2m-technically-enforce-review-dispatch-s-never-self-accept-neve.md`.
+ *
+ * NARROWED AND TECHNICALLY BACKED, 2026-09-02 (`#3433`, re-scoped by `#3434` to `review:human`'s never-
+ * self-accept and never-merge — `review:pending`'s auto-clear is the ratified mechanism working as intended,
+ * not a bypass to harden against). `dispatchReview` now bakes a `--disallowedTools` deny list
+ * ({@link REVIEW_DISPATCH_DISALLOWED_TOOLS}) into EVERY spawned review session's own `claude` argv — a
+ * harness-enforced refusal the model's own judgment is never consulted on, closer to what "restricted
+ * tool/permission default" (this item's own words) means than prose alone. It denies `gh` OUTRIGHT (the r1
+ * self-review below is why: an earlier draft denied only `gh pr merge`, and `gh pr edit --add-label
+ * review:accepted --remove-label review:human` turned out to be the same self-clear one un-denied `gh` call
+ * away), plus every script that can reach the `--to=clear-human` ceremony (`review-set-label.mjs` directly,
+ * `apply-review-request.mjs`'s cloud-VM path, `run.mjs record-verdict`'s staging path) — none of which
+ * `review-agent-brief.md`'s own sanctioned arc (lane-pool acquire → `review-loop-cli.mjs` → lane-pool release)
+ * ever calls, so nothing legitimate is lost. STILL NOT A SANDBOX: a `Bash(<prefix>:*)` rule matches the
+ * LITERAL command string the harness sees, so a sufficiently adversarial rewrite (`bash -c '...'`, a
+ * relative-path indirection) is not caught by this alone — see {@link REVIEW_DISPATCH_DISALLOWED_TOOLS}'s own
+ * header for what this narrows the residual to.
+ *
+ * R1 SELF-REVIEW (#3433, this item's own step-6 adversarial pass, CONFIRMED then fixed before the PR opened):
+ * the first draft's deny list read `Bash(gh pr merge:*)` — literal-prefix-correct, but far too narrow. The
+ * reviewer found `gh pr edit --add-label review:accepted --remove-label review:human` (a label flip, no merge
+ * verb at all) reaches the exact same outcome as the `--to=clear-human` ceremony this file already denies three
+ * scripts over, and `gh api`'s raw PUT-a-pull-request-merge-endpoint form reaches the same outcome as
+ * `gh pr merge` under a different verb. Both are closed now by denying `gh` wholesale rather than by naming
+ * merge/label/api shapes
+ * one at a time — see {@link REVIEW_DISPATCH_DISALLOWED_TOOLS}'s own header for why enumerating GitHub-mutation
+ * shapes individually is the game this file was already losing.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -111,6 +137,70 @@ export function canonicalReviewPlaceholder(name) {
  *  `dispatch-lane.mjs#BRIEF_TOKEN_RE` uses, and for the identical reason: a near-miss spelling must be
  *  CAUGHT, not silently invisible to the scan that looks for it. */
 const REVIEW_BRIEF_TOKEN_RE = /\{\{\s*([^{}\n]*?)\s*\}\}/g;
+
+/**
+ * BASH DENY LIST baked into every dispatched review session's own `claude` invocation (#3433). Prefix-match
+ * rules, in this repo's own `Bash(<prefix>:*)` convention (`we:.claude/settings.json`'s
+ * `Bash(node scripts/backlog.mjs:*)` is the same shape) — the harness refuses a matching command BEFORE the
+ * model's own judgment is consulted, so a prompt-injection payload in the reviewed diff cannot talk the session
+ * into it merely by asking.
+ *
+ * THE FOUR, AND WHY EXACTLY THESE FOUR. `review-agent-brief.md`'s own sanctioned arc never calls any of them —
+ * one `lane-pool.mjs acquire`, one `review-loop-cli.mjs`, one `lane-pool.mjs release` — so denying all four
+ * costs a well-behaved dispatch nothing:
+ *   • `gh` — THE WHOLE CLI, not just `gh pr merge`. An adversarial review (`#3433` r1) found that denying only
+ *     `gh pr merge` still left `gh pr edit --add-label review:accepted --remove-label review:human` reachable —
+ *     the exact same self-clear the `review-set-label.mjs` deny below exists to stop, just one `gh` call away
+ *     with no script involved at all — and `gh api`'s raw PUT-a-pull-request-merge-endpoint form reachable as
+ *     an un-prefixed merge. The sanctioned arc never calls `gh` directly (whatever it needs from GitHub happens INSIDE
+ *     `review-loop-cli.mjs`'s own subprocess, never as a fresh top-level Bash-tool command), so there is no
+ *     narrower `gh ...` prefix worth carving out — the whole CLI is denied.
+ *   • `review-set-label.mjs` — the #2895 SINGLE HOME the `--to=clear-human` ceremony actually writes through.
+ *     `review-loop-cli.mjs` never shells this directly for a dispatched review (its own auto-clear path for
+ *     `review:pending` is a DIFFERENT, already-independence-checked route) — a dispatched session invoking it
+ *     by hand has no legitimate reason to.
+ *   • `apply-review-request.mjs` — the cloud-VM applier. Its `clear-human` guard is a NAMED field
+ *     (`operatorInstruction`), not a verified one — any Bash-capable actor can populate it with a fabricated
+ *     "operator instruction" and a self-authored request.json. Denied outright.
+ *   • `run.mjs` (the whole operations CLI, not just `record-verdict`) — `record-verdict --to=clear-human`
+ *     stages exactly the same ceremony for `apply-review-request.mjs` to later apply, and the dispatched
+ *     session's brief never calls `run.mjs` for anything at all, so the broader deny costs nothing and closes
+ *     the door on whatever OTHER operation might reach the ceremony later.
+ *
+ * NOT A SANDBOX — see the file header's own note on what a literal-prefix rule does and does not catch. This is
+ * why `gh` is denied WHOLESALE rather than pattern-by-pattern against every mutation it can perform (a label
+ * edit, a merge, a review submission) — enumerating GitHub-mutation shapes one at a time is exactly the game
+ * the r1 finding proved this file was already losing.
+ */
+export const REVIEW_DISPATCH_DISALLOWED_TOOLS = Object.freeze([
+  'Bash(gh:*)',
+  'Bash(node scripts/review-set-label.mjs:*)',
+  'Bash(node scripts/apply-review-request.mjs:*)',
+  'Bash(node scripts/operations/run.mjs:*)',
+]);
+
+/**
+ * The `--disallowedTools=<patterns>` argv element for {@link REVIEW_DISPATCH_DISALLOWED_TOOLS} — ONE `=`-joined
+ * string, never `['--disallowedTools', '<value>']` as two separate elements. `--disallowedTools` is documented
+ * (`claude --help`) as `<tools...>`, a VARIADIC option: `claude`'s commander-style parser keeps consuming
+ * subsequent non-flag argv tokens as MORE tool patterns, not just the one immediately after the flag — so a
+ * two-element `['--disallowedTools', joined]` form still swallows the prompt that `buildAgentArgv` appends
+ * right after it (its own header already warns the prompt's position guarantees nothing; this is that hazard,
+ * hit for real).
+ *
+ * R2 SELF-REVIEW (#3433, CONFIRMED then fixed before the PR opened): an earlier draft of THIS function shipped
+ * the two-element form on the theory that "one flag, one already-joined value" was safe from variadic
+ * swallowing. It was not — the parser does not care how many logical values are packed into the token after
+ * the flag, only how many SEPARATE argv elements follow it, and two elements is still two. Verified empirically
+ * against the real `claude` binary (local-only, no PR, no `gh`, cleaned up after): the two-element form started
+ * a session with the prompt silently swallowed as bogus deny patterns ("Permission deny rule 'hello' matches no
+ * known tool") and NOTHING to review; the single `=`-joined element correctly preserved the prompt. A regression
+ * back to the two-element form does not fail loud — it silently no-ops every dispatched review — so the r2 test
+ * below asserts the argv shape directly, not just its stringified contents.
+ */
+export function reviewDispatchDisallowedToolsArgs() {
+  return [`--disallowedTools=${REVIEW_DISPATCH_DISALLOWED_TOOLS.join(',')}`];
+}
 
 /** What a placeholder VALUE may safely contain — an id, a repo-qualified path, an `owner/repo` slug, a lane
  *  session slug. Deliberately the same narrow allowlist `dispatch-lane.mjs#BRIEF_VALUE_RE` uses: these values
@@ -254,7 +344,14 @@ export function dispatchReview({
   // buildAgentArgv, exactly like dispatch-lane-io.mjs's own" but the call below never referenced it — every
   // caller-supplied flag (a `--permission-mode`, a `--model` override) was silently dropped. Fixed by actually
   // passing it through, matching `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`'s own call.
-  const argv = buildAgentArgv({ sessionId, payload: { prompt, sessionSlug: planned.sessionSlug }, extraArgs });
+  // #3433 — the mandatory deny list comes FIRST, ahead of any caller-supplied `extraArgs`: it is baked into
+  // every dispatch regardless of what an operator's WE_DISPATCH_AGENT_ARGS sets, not something a caller opts
+  // into. See `REVIEW_DISPATCH_DISALLOWED_TOOLS`'s own header for what it denies and why.
+  const argv = buildAgentArgv({
+    sessionId,
+    payload: { prompt, sessionSlug: planned.sessionSlug },
+    extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
+  });
   spawnAgent(argv, { cwd: root });
   return { sessionId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, prompt, unknownTokens };
 }

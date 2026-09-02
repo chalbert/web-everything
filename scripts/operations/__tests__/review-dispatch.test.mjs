@@ -11,8 +11,13 @@ import { describe, it, expect } from 'vitest';
 
 import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
-  reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
+  reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
+  REVIEW_DISPATCH_DISALLOWED_TOOLS,
 } from '../review-dispatch.mjs';
+
+// #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
+// below don't hand-duplicate the join.
+const DISALLOWED_TOOLS_ARGV = reviewDispatchDisallowedToolsArgs();
 
 // A `checkStaleness` stub that never touches git — every `dispatchReview` test below injects one, so none of
 // them depend on real subprocess/network fail-soft behavior for a nonexistent `root`.
@@ -112,6 +117,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
@@ -163,11 +169,75 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--bg',
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '-n', 'review-1234',
+      ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
     ]);
+  });
+});
+
+// #3433 — PR #1756 r1's residual: nothing technically restricted a dispatched review session's tools, so a
+// prompt-injection payload in the reviewed diff could in principle talk it into merging the PR it is reviewing,
+// or clearing the `review:human` park on it, directly. These prove the deny list is real, is baked in
+// unconditionally (not opt-in), and covers every script that can reach either.
+describe('REVIEW_DISPATCH_DISALLOWED_TOOLS (#3433)', () => {
+  // r1 (this item's own step-6 adversarial pass): denying only `Bash(gh pr merge:*)` still left `gh pr edit
+  // --add-label review:accepted --remove-label review:human` and `gh api repos/*/pulls/*/merge -X PUT` open —
+  // the same two outcomes under a different verb. Denying `gh` wholesale is what actually closes both.
+  it('denies the WHOLE gh CLI — not just `gh pr merge` (r1: a label-edit or gh api call reaches the same '
+    + 'outcomes under a different verb)', () => {
+    expect(REVIEW_DISPATCH_DISALLOWED_TOOLS).toContain('Bash(gh:*)');
+    expect(REVIEW_DISPATCH_DISALLOWED_TOOLS).not.toContain('Bash(gh pr merge:*)');
+  });
+
+  it('denies every script that can reach the review:human --to=clear-human ceremony', () => {
+    expect(REVIEW_DISPATCH_DISALLOWED_TOOLS).toContain('Bash(node scripts/review-set-label.mjs:*)');
+    expect(REVIEW_DISPATCH_DISALLOWED_TOOLS).toContain('Bash(node scripts/apply-review-request.mjs:*)');
+    expect(REVIEW_DISPATCH_DISALLOWED_TOOLS).toContain('Bash(node scripts/operations/run.mjs:*)');
+  });
+
+  // r2 (this item's own SECOND adversarial pass, verified against the real `claude` binary): a `['--disallowedTools',
+  // '<joined>']` TWO-element form still gets eaten whole by the variadic parser — the joined value AND the
+  // prompt right after it both get consumed as "tool patterns", and the dispatched session starts with NO
+  // prompt at all. Only a single `--disallowedTools=<joined>` element is safe. This must stay exactly ONE argv
+  // element, or every dispatched review silently no-ops.
+  it('reviewDispatchDisallowedToolsArgs returns exactly ONE `=`-joined argv element, never a separate flag+value '
+    + 'pair (r2: a variadic CLI option eats the prompt that follows a two-element form)', () => {
+    expect(DISALLOWED_TOOLS_ARGV).toEqual([
+      `--disallowedTools=${REVIEW_DISPATCH_DISALLOWED_TOOLS.join(',')}`,
+    ]);
+    expect(DISALLOWED_TOOLS_ARGV).toHaveLength(1);
+    expect(DISALLOWED_TOOLS_ARGV[0]).not.toBe('--disallowedTools');
+  });
+
+  it('the deny list is baked in even when the caller supplies NO extraArgs at all — not opt-in', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+    });
+    expect(calls[0].argv).toEqual(expect.arrayContaining(DISALLOWED_TOOLS_ARGV));
+  });
+
+  it('the deny list comes BEFORE any caller-supplied extraArgs — a caller cannot push it later or shadow it', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      extraArgs: ['--model', 'sonnet'],
+      checkStaleness: FRESH,
+    });
+    const disallowedIdx = calls[0].argv.findIndex((a) => a.startsWith('--disallowedTools='));
+    const modelIdx = calls[0].argv.indexOf('--model');
+    expect(disallowedIdx).toBeGreaterThan(-1);
+    expect(modelIdx).toBeGreaterThan(disallowedIdx);
   });
 });
 
