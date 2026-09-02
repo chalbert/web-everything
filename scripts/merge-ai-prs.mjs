@@ -115,7 +115,7 @@ import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBase
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
-import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime
+import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime + (#3440) localRepoSlug keys that lease per-repo
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, isItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
@@ -2925,13 +2925,7 @@ async function runCli() {
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
   // resolve the repo set: `--repos=a,b` (explicit) / `--this-repo` (scoped single-repo) / neither → the
   // constellation (the #2287 default; `--all-repos` is accepted as a harmless no-op alias of the default).
-  const localSlug = (() => {
-    try {
-      const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
-      return m ? m[1] : null;
-    } catch { return null; }
-  })();
+  const localSlug = localRepoSlug(); // #3440 — also THIS run's whole-process drain-lease repoKey (below)
   const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, singleRepo: !!flags['this-repo'], self: localSlug });
   // #xc7p3q9 (Fix 1 / B8) — the CONTEXT repo set for `collectOpenPrContext` is the FULL constellation, UNION'd
   // with REPOS, regardless of `--only`/`--repos`/`--this-repo` narrowing. The couple gate reads carrier HEALTH
@@ -4514,12 +4508,14 @@ async function runCli() {
   // covers the run's FULL lifetime (one-shot AND watch) and is released on EVERY exit path (normal, break,
   // signal) via the `exit` handler. `--only` fast drains, `--dry-run`, and `--no-drain-lease` bypass;
   // a daemon child pass runs `under-lease` without acquiring (the parent heartbeats).
+  // #3440 — the lease is keyed by THIS checkout's own repo identity (`localSlug`), so a resident drain running
+  // from a DIFFERENT project's checkout on this machine never blocks (or falsely appears to cover) this run.
   const leaseOwner = drainOwner();
-  const leaseGate = decideDrainLeaseGate({ dryRun: DRY_RUN, onlyPr, noLease: NO_DRAIN_LEASE, underLease: UNDER_LEASE, repos: leaseScope, status: drainLeaseStatus(DRAIN_LOCK_ROOT) });
+  const leaseGate = decideDrainLeaseGate({ dryRun: DRY_RUN, onlyPr, noLease: NO_DRAIN_LEASE, underLease: UNDER_LEASE, repos: leaseScope, status: drainLeaseStatus(DRAIN_LOCK_ROOT, { repoKey: localSlug }) });
   let leaseHeld = false;
-  if (leaseGate.action === 'acquire') leaseHeld = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope }).ok === true;
+  if (leaseGate.action === 'acquire') leaseHeld = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope, repoKey: localSlug }).ok === true;
   if (leaseGate.action === 'noop' || (leaseGate.action === 'acquire' && !leaseHeld)) {
-    const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
+    const st = drainLeaseStatus(DRAIN_LOCK_ROOT, { repoKey: localSlug });
     const heldBy = st.owner || leaseGate.heldBy || null;
     const uncovered = Array.isArray(leaseGate.uncovered) ? leaseGate.uncovered : [];
     const detail = leaseGate.reason === 'declared-holder-gone'
@@ -4536,7 +4532,7 @@ async function runCli() {
   if (leaseHeld) {
     // Release on ANY exit path (the watch loop has several `break`s + signal kills). Idempotent + owner-fenced:
     // releaseDrainLease only frees a lease THIS owner still holds, so a reclaimer who seized it is never stomped.
-    process.on('exit', () => { releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); });
+    process.on('exit', () => { releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { repoKey: localSlug }); });
     for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0)); // → triggers the exit handler → frees the lease
   }
 
@@ -4600,7 +4596,7 @@ async function runCli() {
   let lastDup = [];
   let redMainStopped = false; // #2681 — a freeze raised MID-watch stops the line this pass
   for (let pass = 1; ; pass++) {
-    if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite
+    if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope, repoKey: localSlug }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite; #3440 repoKey selects the same per-repo lock dir
     // #2681 — RE-CHECK the red-main dispatch-freeze EVERY pass: a post-land red can be raised DURING a running
     // watch (the resident drain daemon is a long-lived `--watch`), and stop-the-line must catch it, not just a
     // freeze that predated process start. Symmetric to the dup-id stop below — break and surface with exit 5.

@@ -422,7 +422,9 @@ describe('lane-drain on-land cleanup contract guard (source-level, #2748)', () =
 describe('lane-drain whole-process lease heartbeat (#2453 — per-couple, not just per-pass)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
   it('heartbeats the lease inside the per-couple drain loop, not only at the top of a watch pass', () => {
-    const heartbeatCalls = src.match(/heartbeatDrainLease\(DRAIN_LOCK_ROOT, leaseOwner\)/g) || [];
+    // #3440 — the call now threads a repoKey through (`{ repoKey: leaseRepoKey }`), so match the call HEAD
+    // rather than the old exact-closing-paren literal.
+    const heartbeatCalls = src.match(/heartbeatDrainLease\(DRAIN_LOCK_ROOT, leaseOwner,/g) || [];
     // #2391 kept ONE call at the top of the watch loop; #2453 adds a SECOND inside onePass's per-couple
     // for-loop so a single pass that runs long (many couples, each waiting on GitHub checks) never goes
     // stale mid-sweep — a pass-boundary-only heartbeat is provably insufficient for that case.
@@ -431,7 +433,7 @@ describe('lane-drain whole-process lease heartbeat (#2453 — per-couple, not ju
     // the loop's opening brace and drainOneCouple's invocation — not merely present anywhere in the file.
     const loopStart = src.indexOf('for (const num of toDrain)');
     const drainCall = src.indexOf('drainOneCouple(CWD, num, mpath, bodyFile)');
-    const heartbeatInLoop = src.indexOf('heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner)', loopStart);
+    const heartbeatInLoop = src.indexOf('heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner,', loopStart);
     expect(loopStart).toBeGreaterThan(-1);
     expect(heartbeatInLoop).toBeGreaterThan(loopStart);
     expect(heartbeatInLoop).toBeLessThan(drainCall);

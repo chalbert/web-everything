@@ -16,6 +16,7 @@ import {
   NUMBERING_LOCK_PATH, DRAIN_LEASE_PATH,
   makeOwner, tryAcquireNumberingLock, releaseNumberingLockIfOwned, withNumberingLock, withLandWriteLock,
   acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus,
+  drainLeasePathFor, localRepoSlug,
 } from '../drain-lock.mjs';
 
 const T0 = Date.parse('2026-07-10T12:00:00.000Z');
@@ -190,5 +191,76 @@ describe('drain lease REPO-SCOPE metadata (#2458)', () => {
     const stale = T0 + 16 * MIN; // past the 15-min TTL
     expect(acquireDrainLease(root, 'drainB', { nowMs: stale }).ok).toBe(true); // B reclaims, supplies no scope
     expect(drainLeaseStatus(root, { nowMs: stale }).scope).toBeNull(); // B's lease is unscoped, not A's old scope
+  });
+});
+
+describe('drain lease PER-REPO key (#3440 — one project\'s daemon never blocks another\'s)', () => {
+  it('drainLeasePathFor: distinct repoKeys ⇒ distinct lock paths; null ⇒ the legacy global sentinel', () => {
+    expect(drainLeasePathFor('o/web-everything')).not.toBe(drainLeasePathFor('o/plateau-app'));
+    expect(drainLeasePathFor(null)).toBe(DRAIN_LEASE_PATH);
+    expect(drainLeasePathFor()).toBe(DRAIN_LEASE_PATH);
+    // both repo-keyed paths still derive from (and so remain distinguishable from) the base sentinel
+    expect(drainLeasePathFor('o/web-everything')).toContain(DRAIN_LEASE_PATH);
+  });
+
+  it('THE CORE PROOF: two DIFFERENT repos\' drain runs hold their OWN leases concurrently on the same machine', () => {
+    // Mirrors the #3440 incident: plateau-app's resident daemon (repoKey 'o/plateau-app') holds a live lease
+    // while web-everything's own drain (repoKey 'o/web-everything') tries to acquire ITS lease on the SAME
+    // lock root (a shared machine-global home, #91's whole point). Before this fix both shared ONE lock dir
+    // (repoKey ignored) so the second acquire would have been BLOCKED; now it is NOT.
+    expect(acquireDrainLease(root, 'plateau-daemon', { nowMs: T0, repoKey: 'o/plateau-app' }).ok).toBe(true);
+    const weAcquire = acquireDrainLease(root, 'we-drain', { nowMs: T0 + MIN, repoKey: 'o/web-everything' });
+    expect(weAcquire.ok).toBe(true); // NOT blocked by the other repo's live lease
+    // Both leases are independently live, each reporting its OWN owner — proving true concurrency, not a race
+    // where the second silently stomped the first.
+    expect(drainLeaseStatus(root, { nowMs: T0 + MIN, repoKey: 'o/plateau-app' })).toMatchObject({ held: true, owner: 'plateau-daemon' });
+    expect(drainLeaseStatus(root, { nowMs: T0 + MIN, repoKey: 'o/web-everything' })).toMatchObject({ held: true, owner: 'we-drain' });
+  });
+
+  it('the SAME repoKey still mutually excludes — the sole-serial-writer invariant is preserved WITHIN one repo', () => {
+    expect(acquireDrainLease(root, 'drainA', { nowMs: T0, repoKey: 'o/web-everything' }).ok).toBe(true);
+    const second = acquireDrainLease(root, 'drainB', { nowMs: T0 + MIN, repoKey: 'o/web-everything' });
+    expect(second).toMatchObject({ ok: false, reason: 'held', heldBy: 'drainA' });
+  });
+
+  it('heartbeat and release are scoped by repoKey — they act on THAT repo\'s lease only, never a stranger repo\'s', () => {
+    acquireDrainLease(root, 'we-drain', { nowMs: T0, repoKey: 'o/web-everything' });
+    acquireDrainLease(root, 'plateau-daemon', { nowMs: T0, repoKey: 'o/plateau-app' });
+    // Heartbeating the WE lease never touches plateau-app's, and vice versa.
+    expect(heartbeatDrainLease(root, 'we-drain', { nowMs: T0 + MIN, repoKey: 'o/web-everything' })).toBe(true);
+    expect(heartbeatDrainLease(root, 'we-drain', { nowMs: T0 + MIN, repoKey: 'o/plateau-app' })).toBe(false); // wrong repo's lease — not owned there
+    // Releasing WE's lease leaves plateau-app's fully intact.
+    expect(releaseDrainLease(root, 'we-drain', { repoKey: 'o/web-everything' })).toBe(true);
+    expect(drainLeaseStatus(root, { nowMs: T0 + MIN, repoKey: 'o/web-everything' }).held).toBe(false);
+    expect(drainLeaseStatus(root, { nowMs: T0 + MIN, repoKey: 'o/plateau-app' })).toMatchObject({ held: true, owner: 'plateau-daemon' });
+  });
+
+  it('a repoKey-scoped lease is invisible to a legacy (repoKey-less) status read — distinct lock dirs, not a filter', () => {
+    acquireDrainLease(root, 'we-drain', { nowMs: T0, repoKey: 'o/web-everything' });
+    expect(drainLeaseStatus(root, { nowMs: T0 }).held).toBe(false); // the legacy global path never saw this acquire
+    acquireDrainLease(root, 'legacy-drain', { nowMs: T0 });
+    expect(drainLeaseStatus(root, { nowMs: T0 }).owner).toBe('legacy-drain');
+    expect(drainLeaseStatus(root, { nowMs: T0, repoKey: 'o/web-everything' }).owner).toBe('we-drain'); // untouched
+  });
+
+  describe('localRepoSlug — the invoking checkout\'s own repo identity, parsed from `git remote get-url origin`', () => {
+    it('parses an https origin URL to an org/repo slug', () => {
+      const exec = () => 'https://github.com/chalbert/web-everything.git\n';
+      expect(localRepoSlug({ exec })).toBe('chalbert/web-everything');
+    });
+    it('parses an ssh origin URL (no .git suffix) the same way', () => {
+      const exec = () => 'git@github.com:chalbert/plateau-app\n';
+      expect(localRepoSlug({ exec })).toBe('chalbert/plateau-app');
+    });
+    it('returns null when git/origin is unavailable (no remote, detached, not a repo) — never throws', () => {
+      const exec = () => { throw new Error('fatal: not a git repository'); };
+      expect(localRepoSlug({ exec })).toBeNull();
+    });
+    it('threads `cwd` through to the git call, so it reads the RIGHT checkout\'s origin', () => {
+      let seenCwd = null;
+      const exec = (_cmd, _args, opts) => { seenCwd = opts.cwd; return 'https://github.com/o/r.git'; };
+      localRepoSlug({ cwd: '/some/checkout', exec });
+      expect(seenCwd).toBe('/some/checkout');
+    });
   });
 });

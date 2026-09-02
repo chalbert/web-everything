@@ -78,7 +78,7 @@ import { isHash, isNum, idFromName, applyLedger, swapHashes } from './backlog/id
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease
+import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo)
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -981,11 +981,14 @@ function runWatch({ follow }) {
   // STALE lease (a crashed drain) is reclaimed via the TTL. Heartbeated each pass; released at the end. A
   // DRY-RUN lands nothing, so it does NOT take the exclusive lease — it must be free to PLAN alongside a live
   // drain (and never block a real one launched right after it).
+  // #3440 — keyed by THIS checkout's own repo identity, so a resident drain for a DIFFERENT project's checkout
+  // on this machine never blocks (or falsely appears to cover) this WE-root run.
   const leaseOwner = drainOwner();
+  const leaseRepoKey = localRepoSlug({ cwd: CWD });
   if (!DRY_RUN) {
-    const lease = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
+    const lease = acquireDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { repoKey: leaseRepoKey });
     if (!lease.ok) {
-      const st = drainLeaseStatus(DRAIN_LOCK_ROOT);
+      const st = drainLeaseStatus(DRAIN_LOCK_ROOT, { repoKey: leaseRepoKey });
       if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: true, mode: follow ? 'watch' : 'drain', skipped: 'drain-in-progress', heldBy: st.owner, detail: `another drain already holds the lease (${st.owner}) — no-op (#2391)` }) + '\n');
       else process.stderr.write(`lane-drain · another drain already running (lease held by ${st.owner || '?'}) — no-op (#2391)\n`);
       process.exit(0);
@@ -1025,7 +1028,7 @@ function runWatch({ follow }) {
       // lets it go stale mid-sweep — a concurrent drain would then reclaim it, reopening the #2424
       // double-drain window for any sweep longer than the TTL. Heartbeating before each couple keeps a live,
       // still-running sweep's lease fresh no matter how long the pass takes.
-      if (!DRY_RUN) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner);
+      if (!DRY_RUN) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { repoKey: leaseRepoKey });
       attempted.add(num);
       const mpath = join(tmpDir, `${num}.lane-manifest.json`);
       writeFileSync(mpath, JSON.stringify(manifestByNum[num], null, 2));
@@ -1044,7 +1047,7 @@ function runWatch({ follow }) {
 
   let idlePolls = 0;
   for (;;) {
-    if (!DRY_RUN) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2391 — keep the whole-process lease alive across a long watch
+    if (!DRY_RUN) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { repoKey: leaseRepoKey }); // #2391 — keep the whole-process lease alive across a long watch (#3440 repoKey selects the same per-repo lock dir)
     const n = onePass();
     if (n > 0) { idlePolls = 0; continue; } // a NEW couple landed — re-poll immediately (a landed head may free a dependent)
     if (idlePolls >= maxIdle) break;         // drained/stuck and no more idle budget → done
@@ -1090,7 +1093,7 @@ function runWatch({ follow }) {
     derivedFailed: derived.failed,
     detail: `${DRY_RUN ? 'dry-run: ' : ''}landed ${landed.length} couple(s)${landed.length ? ` (${landed.map((n) => '#' + n).join(', ')})` : ''}${failedCouples.length ? `, ${failedCouples.length} failed (left queued)` : ''}${landedButQueued.length ? `, ${landedButQueued.length} landed-but-not-cleared` : ''}${lastPlan.deferred.length ? `, ${lastPlan.deferred.length} deferred` : ''}${!DRY_RUN && !fullyDrained ? `, ${remainingQueue.length} still queued` : ''}`,
   };
-  if (!DRY_RUN) releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner); // #2391 — free the whole-process lease for the next drain launch
+  if (!DRY_RUN) releaseDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { repoKey: leaseRepoKey }); // #2391 — free the whole-process lease for the next drain launch
   if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
   else process.stderr.write(`lane-drain ${follow ? 'watch' : 'drain'} ${fullyDrained ? '✓' : '⚠'} ${result.detail}\n`);
   // Exit 0 ONLY when the queue fully drained (nothing left needing attention); else 2. A dry-run reports 0

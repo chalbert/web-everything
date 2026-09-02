@@ -27,6 +27,21 @@
  *      drain) is reclaimed via the TTL. push-at-close reads {@link drainLeaseStatus} to know a drain is
  *      mid-flight before it publishes.
  *
+ *      #3440 — the lease is keyed by the INVOKING CHECKOUT'S OWN repo identity ({@link localRepoSlug}, threaded
+ *      through as `repoKey`), not just hostname+pid. Before this, ALL drains on a machine (regardless of which
+ *      project's checkout launched them) shared the ONE fixed {@link DRAIN_LEASE_PATH} lock dir, so a resident
+ *      drain for one project (e.g. `plateau-app`'s own `tools/drain-daemon/daemon.mjs`) held the SAME lease a
+ *      `web-everything` drain invocation contended on — even though the two structurally never sweep each
+ *      other's repo. That let one project's daemon silently starve another's: the blocked launch either false
+ *      no-op'd (a legacy/unscoped holder reads as "covers everything", #2458) or, when scoped, correctly
+ *      reported itself uncovered but still could not run concurrently. Keying the lock PATH by `repoKey`
+ *      ({@link drainLeasePathFor}) gives each invoking checkout its own lock dir, so two DIFFERENT repos' drain
+ *      runs hold independent leases and never block each other — while drains launched from the SAME checkout
+ *      (the actual sole-serial-writer-to-that-repo's-main invariant #2391/#2449 exists for) still serialize on
+ *      the SAME key, exactly as before. `repoKey` is OPTIONAL and defaults to `null` ⇒ the legacy global path,
+ *      so a caller that never supplies one (a stale mirror, a test) keeps today's coarse, still-correct
+ *      (if imprecise) behaviour.
+ *
  * SHARED, MACHINE-GLOBAL LOCK ROOT: the contenders run in DIFFERENT checkouts (a lane clone, the user's
  * primary, a `/pr` fast-drain), so the lock home is a fixed HOME-level dir ({@link DRAIN_LOCK_ROOT}), NOT the
  * per-checkout `.claude/locks` file-locks uses — otherwise two checkouts would never see each other's lock.
@@ -40,6 +55,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, hostname } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import {
   reserve, readLockEntry, releaseLockDir, heartbeat, isLeaseExpired, DEFAULT_LEASE_MINUTES,
 } from './file-locks.mjs';
@@ -67,6 +83,27 @@ export const DRAIN_LEASE_MINUTES = DEFAULT_LEASE_MINUTES;
 export function makeOwner(kind) { return `${hostname()}:${process.pid}:${kind}`; }
 /** The whole-process drain lease owner for this process. */
 export function drainOwner() { return makeOwner('drain'); }
+
+// ── #3440 — per-repo lease key ────────────────────────────────────────────────────
+/** The invoking checkout's own repo identity — an `org/repo` slug parsed from `git remote get-url origin` run
+ *  in `cwd`. Used to key the whole-process drain lease PER REPO ({@link drainLeasePathFor}) so a drain launched
+ *  from one project's checkout never contends with (or falsely reads as covering) one launched from another's.
+ *  `null` when it can't be determined (no git / no origin remote / detached) — callers then fall back to the
+ *  legacy global lease key via `repoKey: null`. Pure enough to inject `exec`/`cwd` for tests. */
+export function localRepoSlug({ cwd = process.cwd(), exec = execFileSync } = {}) {
+  try {
+    const url = exec('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+/** The actual lock-dir key for the whole-process drain lease: `repoKey` given ⇒ a repo-specific path (distinct
+ *  lock dir from every other repo's); omitted/`null` ⇒ the legacy fixed sentinel {@link DRAIN_LEASE_PATH}
+ *  (today's behaviour, unchanged). Pure. */
+export function drainLeasePathFor(repoKey = null) {
+  return repoKey ? `${DRAIN_LEASE_PATH}::${repoKey}` : DRAIN_LEASE_PATH;
+}
 
 // ── impure helpers ────────────────────────────────────────────────────────────────
 function ensureRoot(lockRoot) { try { mkdirSync(lockRoot, { recursive: true }); } catch { /* best-effort; reserve() also self-heals a missing root */ } }
@@ -158,32 +195,37 @@ export function withLandWriteLock(fn, opts = {}) {
  * lease, or reclaimed a STALE one via the TTL). `ok:false, reason:'held'` ⇒ a LIVE drain already holds it —
  * the caller must NO-OP (a second drain launch). Thin over file-locks `reserve`.
  */
-export function acquireDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, leaseMinutes = DRAIN_LEASE_MINUTES, nowMs = Date.now(), scope = null } = {}) {
+export function acquireDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, leaseMinutes = DRAIN_LEASE_MINUTES, nowMs = Date.now(), scope = null, repoKey = null } = {}) {
   ensureRoot(lockRoot);
+  const path = drainLeasePathFor(repoKey); // #3440 — per-repo lock dir; null repoKey ⇒ the legacy global path
   // #2458 — record THIS drain's repo scope in the lease so a differently-scoped launch can tell whether the
   // holder's next pass actually covers its repos, instead of blindly no-op'ing with a false coverage claim.
   // On a re-acquire of an OWN live lease (reserve's 'own' path is a heartbeat) a null `scope` carries the
   // existing recorded scope forward — mirrors heartbeatDrainLease so a re-acquire never silently drops it.
-  const cur = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
+  const cur = readLockEntry(lockRoot, path);
   const keep = normalizeScope(scope) || (cur && cur.owner === owner && cur.meta && normalizeScope(cur.meta.scope)) || null;
-  return reserve(lockRoot, DRAIN_LEASE_PATH, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes, keep ? { scope: keep } : null);
+  return reserve(lockRoot, path, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes, keep ? { scope: keep } : null);
 }
 
 /** Refresh the drain lease heartbeat (a live drain extends its lease each pass). No-op if the lease was
  *  reclaimed away from `owner` (returns false — the caller's next acquire attempt will surface it). The
  *  recorded repo `scope` (#2458) is PRESERVED across heartbeats: a caller-supplied scope refreshes it, else
- *  the existing lease's scope is carried forward (heartbeat rebuilds the entry, so it must be re-supplied). */
-export function heartbeatDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, nowMs = Date.now(), scope = null } = {}) {
-  const cur = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
+ *  the existing lease's scope is carried forward (heartbeat rebuilds the entry, so it must be re-supplied).
+ *  `repoKey` (#3440) MUST match the value passed to {@link acquireDrainLease} — it selects the same lock dir. */
+export function heartbeatDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { pid = process.pid, nowMs = Date.now(), scope = null, repoKey = null } = {}) {
+  const path = drainLeasePathFor(repoKey);
+  const cur = readLockEntry(lockRoot, path);
   if (!cur || cur.owner !== owner) return false;
   const keep = normalizeScope(scope) || (cur.meta && normalizeScope(cur.meta.scope)) || null;
-  return heartbeat(lockRoot, DRAIN_LEASE_PATH, owner, nowIsoFrom(nowMs), pid, keep ? { scope: keep } : null);
+  return heartbeat(lockRoot, path, owner, nowIsoFrom(nowMs), pid, keep ? { scope: keep } : null);
 }
 
-/** Release the drain lease, but ONLY if `owner` still holds it (never stomp a reclaimer). Idempotent. */
-export function releaseDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner()) {
-  const cur = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
-  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, DRAIN_LEASE_PATH); return true; }
+/** Release the drain lease, but ONLY if `owner` still holds it (never stomp a reclaimer). Idempotent.
+ *  `repoKey` (#3440) MUST match the value passed to {@link acquireDrainLease}. */
+export function releaseDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner(), { repoKey = null } = {}) {
+  const path = drainLeasePathFor(repoKey);
+  const cur = readLockEntry(lockRoot, path);
+  if (cur && cur.owner === owner) { releaseLockDir(lockRoot, path); return true; }
   return false;
 }
 
@@ -192,10 +234,12 @@ export function releaseDrainLease(lockRoot = DRAIN_LOCK_ROOT, owner = drainOwner
  *   • `held:true`  — a LIVE drain holds the lease (heartbeat within the TTL); push-at-close should wait/skip.
  *   • `held:false, stale:true`  — a lease exists but its holder crashed (heartbeat past the TTL) → reclaimable.
  *   • `held:false, stale:false` — no lease at all → no drain running.
+ * `repoKey` (#3440) selects WHICH repo's lease to read — omitted ⇒ the legacy global lease (the lock dir every
+ * caller shared before this repo-keying existed).
  * @returns {{ held: boolean, stale: boolean, owner: string|null, heartbeatAt: string|null }}
  */
-export function drainLeaseStatus(lockRoot = DRAIN_LOCK_ROOT, { nowMs = Date.now(), leaseMinutes = DRAIN_LEASE_MINUTES } = {}) {
-  const entry = readLockEntry(lockRoot, DRAIN_LEASE_PATH);
+export function drainLeaseStatus(lockRoot = DRAIN_LOCK_ROOT, { nowMs = Date.now(), leaseMinutes = DRAIN_LEASE_MINUTES, repoKey = null } = {}) {
+  const entry = readLockEntry(lockRoot, drainLeasePathFor(repoKey));
   if (!entry) return { held: false, stale: false, owner: null, heartbeatAt: null, scope: null };
   const stale = isLeaseExpired(entry, nowMs, leaseMinutes);
   // #2458 — surface the holder's recorded repo scope (or null when a legacy/unscoped lease didn't record it).

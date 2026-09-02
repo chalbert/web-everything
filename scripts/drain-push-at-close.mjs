@@ -51,7 +51,7 @@ import { openSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { drainLeaseStatus, DRAIN_LOCK_ROOT } from './readiness/drain-lock.mjs';
+import { drainLeaseStatus, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #3440 — localRepoSlug keys the lease check per-repo
 import { writeAllSync } from './lib/write-all-sync.mjs';
 
 // ── pure decision + arg building (unit-tested; no side effects) ───────────────────────────────────────
@@ -102,8 +102,9 @@ export function runPushAtClose({
   now = Date.now,
   spawnFn = spawn,
   openLog = defaultOpenLog,
+  repoKey = null, // #3440 — the fast-path lease check below must read the SAME per-repo lock dir the fired child will acquire
 } = {}) {
-  const status = drainLeaseStatus(lockRoot, { nowMs: now() });
+  const status = drainLeaseStatus(lockRoot, { nowMs: now(), repoKey });
   const decision = decidePushAtClose(status);
   if (!decision.fire) return { fired: false, reason: decision.reason, heldBy: decision.heldBy };
 
@@ -149,7 +150,7 @@ if (IS_CLI) {
 
   let result;
   try {
-    result = runPushAtClose({ repo, drainScript, intervalSec, maxRuntimeMin, batchFeed, dryRun: DRY_RUN });
+    result = runPushAtClose({ repo, drainScript, intervalSec, maxRuntimeMin, batchFeed, dryRun: DRY_RUN, repoKey: localRepoSlug({ cwd: repo }) });
   } catch (e) {
     result = { fired: false, reason: 'spawn-failed', detail: String((e && e.message) || e).split('\n')[0] };
     if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
