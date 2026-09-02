@@ -941,6 +941,13 @@ async function main(argv) {
   const stateArgs = ['--json'];
   const planArgs = ['--json'];
   if (typeof flags.repo === 'string') { stateArgs.push(`--repo=${flags.repo}`); }
+  // `--backlog-dir` (#3445) points BOTH children at a fixture corpus instead of the live `backlog/` directory
+  // — the dispatcher-fixture-root thread (#3402) that lets a harness test validate this whole
+  // state → plan → tick chain against a synthetic corpus rather than production.
+  if (typeof flags['backlog-dir'] === 'string') {
+    stateArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
+    planArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
+  }
   const state = runJson('node', [STATE_CLI, ...stateArgs], 'conveyor-state');
   const plan = runJson('node', [PLAN_CLI, ...planArgs], 'dispatch-plan');
 

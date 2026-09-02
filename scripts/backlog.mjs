@@ -26,7 +26,7 @@
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   node scripts/backlog.mjs queue     <NNN...> [--lane=<ref>] [--session=<slug>]  # mark ready-to-merge (#2138 Fork 4) — claim/release refuse a queued item until the drain lands it
  *   node scripts/backlog.mjs unqueue   <NNN...>                     # clear the ready-to-merge mark (the drain's single clear point at landing)
- *   node scripts/backlog.mjs build-queue [--next] [--config=<path>]  # READ-ONLY (#2527): the ordered build queue — ready items in next-to-build order (tier→score→rank), each row annotated with its tier + score + buildQueued; --next prints the top CLEARED item (what the builder pulls); --config previews under a hypothetical config WITHOUT persisting. Distinct from the drain `queue` verb above
+ *   node scripts/backlog.mjs build-queue [--next] [--config=<path>] [--backlog-dir=<path>]  # READ-ONLY (#2527): the ordered build queue — ready items in next-to-build order (tier→score→rank), each row annotated with its tier + score + buildQueued; --next prints the top CLEARED item (what the builder pulls); --config previews under a hypothetical config WITHOUT persisting; --backlog-dir points the whole read at a fixture corpus instead of the live backlog/ dir (#3445). Distinct from the drain `queue` verb above
  *   node scripts/backlog.mjs build-queue add|remove <NNN>            # MANUAL CLEAR-FOR-BUILD gate (#2530): `add` sets buildQueued:true (the supervised builder may pull it); `remove` clears it. Frontmatter-only, lane-gated; never touches blockedBy/readiness. The builder pulls ONLY cleared items, so re-prioritizing never arms a build
  *   add --json to any verb for machine-readable output.
  */
@@ -70,7 +70,13 @@ import { claimOperation } from './operations/claim.mjs';
 import { createClaimReader, createClaimSinks } from './operations/claim-io.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DIR = join(ROOT, 'backlog');
+// #3445 — `--backlog-dir=<path>` points this CLI's own file reads (and, via `WE_BACKLOG_DIR`, the
+// `src/_data/backlog.js` loader `buildQueue()` requires) at a fixture corpus instead of the live `backlog/`
+// directory — the dispatcher-fixture-root thread (#3402). Read straight off `process.argv` here (before the
+// `flag()` helper below exists) since DIR must be settled before any other module-level path is built.
+const backlogDirFlag = process.argv.slice(2).find((a) => a.startsWith('--backlog-dir='));
+const DIR = backlogDirFlag ? backlogDirFlag.slice('--backlog-dir='.length) : join(ROOT, 'backlog');
+if (backlogDirFlag) process.env.WE_BACKLOG_DIR = DIR;
 const requireCjs = createRequire(import.meta.url);
 const BUILD_QUEUE_CONFIG_PATH = join(ROOT, 'scripts', 'build-queue-config.json');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');

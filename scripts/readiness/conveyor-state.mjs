@@ -722,8 +722,15 @@ async function main(argv) {
   const errors = [];
   const nowMs = Date.now();
 
-  // 1. Build queue (ready + queued items, ranked) — READ-ONLY.
-  const buildQueue = runJson('node', [BACKLOG_CLI, 'build-queue', '--json'], { errors, label: 'build-queue' });
+  // 1. Build queue (ready + queued items, ranked) — READ-ONLY. `--backlog-dir` (#3445) points the whole read
+  //    (and, via `WE_BACKLOG_DIR` below, the enrichment require at 1b) at a fixture corpus instead of the
+  //    live `backlog/` directory — the dispatcher-fixture-root thread (#3402).
+  const buildQueueArgs = ['build-queue', '--json'];
+  if (typeof flags['backlog-dir'] === 'string') {
+    buildQueueArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
+    process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
+  }
+  const buildQueue = runJson('node', [BACKLOG_CLI, ...buildQueueArgs], { errors, label: 'build-queue' });
 
   // 1b. Enrich the build-queue rows with each item's predicted `scope`, `kind`, `epicState`, and `preparedDate`
   //     (the `build-queue` view omits them) so the tick picture can flag UNSHAPED armed items — cleared-for-build
@@ -774,7 +781,9 @@ async function main(argv) {
   // 3. In-flight lane PRs (this repo's open PRs).
   let prList;
   try {
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+    const prArgs = ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus'];
+    if (typeof flags.repo === 'string') prArgs.push(`--repo=${flags.repo}`);
+    const out = execFileSync('gh', prArgs, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
     prList = JSON.parse(out || '[]');
   } catch (e) {
     errors.push(`gh pr list: ${String(e.message || e).split('\n')[0]}`);
