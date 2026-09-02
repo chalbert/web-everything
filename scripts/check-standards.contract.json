@@ -1,7 +1,7 @@
 {
   "contract": "check-standards-definition-of-green",
-  "version": 1,
-  "summary": "The check:standards gate's DEFINITION OF GREEN as an explicit, machine-diffable CONTRACT (#2769, executing the #2625 contract-split ruling, fork (d), under the #2564 spec-based-programming line and the #2445 two-tier trust chain). The gate's IMPLEMENTATION — the ~3900 lines of imperative rules in scripts/check-standards.mjs + scripts/check-standards-rules.mjs — stays in the ENGINE tier (a behaviour-preserving refactor is agent-clearable). What moves here, as DATA not code, is the small set of knobs that DECIDE PASS-VS-FAIL: (1) the per-rule ENFORCEMENT flags — the *_ENFORCED booleans that decide whether a rule's finding is a hard ERROR (fails the gate) or merely a WARNING (does not), and (2) the semantic THRESHOLDS — the tunable numbers/allowed-sets a finding is measured against. The gate's meta-rule is fixed: check-standards.mjs exits non-zero iff there is at least one ERROR; WARNINGS never fail the gate. So flipping any enforcement flag from true to false, or loosening a threshold, is a REAL WEAKENING of the gate — it demotes a hard failure to advisory. Because every such knob is declared HERE and its value is pinned to the impl by the conformance suite (check-standards.conformance.test.mjs), 'did the definition of green change?' collapses to 'did this file change?' — a deterministic yes/no. This contract's basename is registered on the trust-chain POLICY tier (scripts/lib/gate-config.mjs), so a diff to it forces review:human (an agent may not clear an edit to its own leash, #2285); a behaviour-preserving impl edit that keeps the conformance suite green does not. Precedent: scripts/lib/review-policy.contract.json (#2566/#2564). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the MEANING is the 'description' prose on each entry. NOTE ON SINGLE-SOURCING: unlike review-policy (where the impl imports the numbers from the contract), this contract MIRRORS the impl's exported constants and the conformance suite PINS the two equal — because the #2769 scope deliberately does not edit the engine files. The guarantee is identical: the impl and the contract cannot diverge silently (divergence turns the suite red), so a weakening edit to the engine forces a matching contract edit → the policy tier → review:human.",
+  "version": 2,
+  "summary": "The check:standards gate's DEFINITION OF GREEN as an explicit, machine-diffable CONTRACT (#2769, executing the #2625 contract-split ruling, fork (d), under the #2564 spec-based-programming line and the #2445 two-tier trust chain). The gate's IMPLEMENTATION — the ~3900 lines of imperative rules in scripts/check-standards.mjs + scripts/check-standards-rules.mjs — stays in the ENGINE tier (a behaviour-preserving refactor is agent-clearable). What moves here, as DATA not code, is the small set of knobs that DECIDE PASS-VS-FAIL: (1) the per-rule ENFORCEMENT flags — the *_ENFORCED booleans that decide whether a rule's finding is a hard ERROR (fails the gate) or merely a WARNING (does not), and (2) the semantic THRESHOLDS — the tunable numbers/allowed-sets a finding is measured against. The gate's meta-rule is fixed: check-standards.mjs exits non-zero iff there is at least one ERROR; WARNINGS never fail the gate. So flipping any enforcement flag from true to false, or loosening a threshold, is a REAL WEAKENING of the gate — it demotes a hard failure to advisory. Because every such knob is declared HERE and its value is pinned to the impl by the conformance suite (check-standards.conformance.test.mjs), 'did the definition of green change?' collapses to 'did this file change?' — a deterministic yes/no. COVERAGE (v2, #2786): the suite guards BOTH classes against a knob silently escaping this file — every boolean the engine exports (type-based, name-agnostic) must be an enforcement flag declared here, and every symbol in the engine's hand-maintained THRESHOLD_KNOBS registry (check-standards-rules.mjs; thresholds are heterogeneous so cannot be auto-discovered by type) must be declared here too. The one residual gap neither strategy closes: a boolean or bound INLINED at its call site, never a named export, is invisible to a coverage guard over the module's exports. This contract's basename is registered on the trust-chain POLICY tier (scripts/lib/gate-config.mjs), so a diff to it forces review:human (an agent may not clear an edit to its own leash, #2285); a behaviour-preserving impl edit that keeps the conformance suite green does not. Precedent: scripts/lib/review-policy.contract.json (#2566/#2564). Per #2564 a spec is a schema skeleton + a first-class prose layer in one artifact: the machine-checkable shape is the fields below, the MEANING is the 'description' prose on each entry. NOTE ON SINGLE-SOURCING: unlike review-policy (where the impl imports the numbers from the contract), this contract MIRRORS the impl's exported constants and the conformance suite PINS the two equal — because the #2769 scope deliberately does not edit the engine files. The guarantee is identical: the impl and the contract cannot diverge silently (divergence turns the suite red), so a weakening edit to the engine forces a matching contract edit → the policy tier → review:human.",
   "enforcement": {
     "description": "The per-rule ENFORCEMENT switches — for each rule that is enforced behind a named flag, whether its finding is emitted as a hard ERROR (fails check:standards) or suppressed/demoted to a WARNING. Each key mirrors a boolean constant exported from scripts/check-standards-rules.mjs (named in `impl`); the conformance suite asserts `value` equals that live constant, so flipping the flag in the engine without editing this file turns the suite red. Flipping any true to false is a definition-of-green weakening (a hard gate error becomes advisory) — the exact change #2625 requires a human to clear.",
     "flags": {
@@ -78,6 +78,126 @@
       "value": ["lens", "round", "roundCap", "contextIsolation", "subjectNoun", "findingAnchor", "fenced"],
       "impl": "MANDATE_FENCE_ALLOWED_PARAMS",
       "description": "The build…Mandate parameters exempt from the #2438 fence (#2967b) — CLOSED vocabularies, never caller free text: a validated lens name, round numbers, an isolation mode, the structural nouns a subject adapter supplies, and the boolean that turns the fence on. Adding a name here EXEMPTS a parameter from the gate, so it is a definition-of-green loosening and lives only in this file."
+    },
+    "backlogKinds": {
+      "value": ["story", "epic", "task", "decision", "feature"],
+      "impl": "BACKLOG_KINDS",
+      "description": "The allowed values for a backlog item's `kind` field (#466/#487/#2691). A kind outside this set is a hard ERROR. Adding a value widens what the gate accepts as a valid backlog item shape."
+    },
+    "backlogStatuses": {
+      "value": ["open", "active", "preparing", "parked", "resolved"],
+      "impl": "BACKLOG_STATUSES",
+      "description": "The allowed values for a backlog item's `status` field (#375). A status outside this set is a hard ERROR. Adding a value widens the backlog's state machine without a matching workflow."
+    },
+    "parkedReasons": {
+      "value": ["platform-gated", "maturityGated"],
+      "impl": "PARKED_REASONS",
+      "description": "The allowed values for a parked item's `parkedReason` field (#1392, tightened 2026-06-22). A reason outside this set is a hard ERROR — parking is not a prioritisation escape. Adding a value re-opens a soft park reason the tightening retired."
+    },
+    "standardEntityKinds": {
+      "value": ["block", "intent", "protocol", "project", "plug", "capability", "adapter"],
+      "impl": "STANDARD_ENTITY_KINDS",
+      "description": "The allowed entity kinds for a `<repo>:` standard reference. A kind outside this set fails to resolve as a standard entity. Adding a value widens what a doc reference can point at without a matching registry."
+    },
+    "lifecycleStates": {
+      "value": ["concept", "draft", "experimental", "active"],
+      "impl": "LIFECYCLE",
+      "description": "The allowed values for a standard entity's `status` (implementation-lifecycle) field. A status outside this set is a hard ERROR. Adding a value widens the lifecycle vocabulary a standard can claim."
+    },
+    "projectTiers": {
+      "value": ["core", "contextual", "exploratory"],
+      "impl": "PROJECT_TIERS",
+      "description": "The allowed values for a Project's `tier` field (the #portfolio-project-tiering enum). A tier outside this set — or a missing tier — is a hard ERROR. Adding a value widens the portfolio-tiering vocabulary."
+    },
+    "capPolyfillClasses": {
+      "value": ["polyfillable", "partial", "capability"],
+      "impl": "CAP_POLYFILL",
+      "description": "The allowed values for a Capability's `polyfill` class. A value outside this set is a hard ERROR. Adding a value widens what a capability may claim about its polyfill story."
+    },
+    "referenceRuntimeForms": {
+      "value": ["declarative", "wc-class", "html", "jsx", "functional"],
+      "impl": "REFERENCE_RUNTIME_FORMS",
+      "description": "The frozen reference-runtime `serve()` form catalog (#956), consulted only when `unfencedMandate`'s sibling flag `referenceRuntimeForms` (REFERENCE_RUNTIME_FORMS_ENFORCED) is true. A new WE-side form outside this set is a hard ERROR while enforced. Adding a value here — independent of the enforcement flag — unfreezes the ratified form set, the exact #956 escape the flag exists to close."
+    },
+    "locusNames": {
+      "value": ["webeverything", "frontierui", "plateau-app", "exercise-app"],
+      "impl": "LOCUS_NAMES",
+      "description": "The allowed values for a backlog item's `locus` field when `locusAuthored` is set — derived as the key set of the engine's LOCI routing table (repoPath/gateCommand/devServerProbe per locus, which are operational routing, not a gate boundary, so only the key set is governed here). A locus outside this set is a hard ERROR. Adding a value widens which repo a cross-locus item may claim without the routing table actually knowing that repo."
+    },
+    "tierStates": {
+      "value": ["native-ok", "polyfill-ok", "capability-hard"],
+      "impl": "TIER_STATES",
+      "description": "The allowed capability-adapter tier values for a `kind: native` (default) adapter. A tier outside this set is a hard ERROR. Adding a value widens the native substrate-state vocabulary."
+    },
+    "libraryTierStates": {
+      "value": ["supported", "partial", "unsupported"],
+      "impl": "LIBRARY_TIER_STATES",
+      "description": "The allowed capability-adapter tier values for a `kind: library` adapter — the coverage-state vocabulary, distinct from `tierStates`. A tier outside this set is a hard ERROR. Adding a value widens what a library adapter may claim about its coverage."
+    },
+    "maturityTriggerPattern": {
+      "value": "^(externalConsumers>=\\d+|realRuns>=\\d+|adoptionSignal:\\s*\\S.+)$",
+      "impl": "MATURITY_TRIGGER_RE",
+      "description": "The pattern a `parkedReason: maturityGated` item's `maturityTrigger` must match (#1620) — a typed counter or named external artifact, never a date or bare prose. A `maturityTrigger` that fails this is a hard ERROR. Loosening the pattern (e.g. accepting bare prose) re-opens the soft-deferred escape #1620 closed. Compared against the live `MATURITY_TRIGGER_RE.source`, not the RegExp object."
+    },
+    "pilotEvidenceNums": {
+      "value": ["2129"],
+      "impl": "PILOT_EVIDENCE_NUMS",
+      "description": "The backlog item ids that satisfy the #2089 forward-target-start-gate's evidence edge (docs/agent/platform-decisions.md#forward-target-start-gate) — a `polyglot-widening`-tagged item clears the gate with a `blockedBy` edge to one of these. A `polyglot-widening` item lacking this edge (and lacking a carve-out tag or its own maturityTrigger) is a hard ERROR. Adding an id here widens what counts as satisfying evidence without new adopter data."
+    },
+    "polyglotWideningTag": {
+      "value": "polyglot-widening",
+      "impl": "POLYGLOT_WIDENING_TAG",
+      "description": "The tag that opts a backlog item into the #2089 forward-target-start-gate (declared-over-auto-derived: the author asserts the item adds a new generation target/emit form). Renaming this constant without a matching item-tag migration would silently stop the gate from firing on every existing item still carrying the old tag string — a definition-of-green weakening by omission, not by value."
+    },
+    "polyglotCarveoutTags": {
+      "value": ["maintenance", "workbench-consume"],
+      "impl": "POLYGLOT_CARVEOUT_TAGS",
+      "description": "Tags that exempt a `polyglot-widening`-tagged item from the #2089 evidence-edge requirement — work that consumes existing emit forms and adds no new target/form. Adding a value here widens the carve-out, letting more items skip the evidence-edge gate."
+    },
+    "strandedHashGraceSeconds": {
+      "value": 180,
+      "impl": "STRANDED_HASH_GRACE_SECONDS",
+      "description": "The in-flight grace window (#2288/#2956) a non-numeric backlog-file id on main is given before `strandedHashesOnMain` treats it as a real strand (hard ERROR) rather than the drain's own JIT-numbering commit still in flight (WARNING). Raising it demotes a genuine stranded hash to advisory for longer — a hard failure becomes silently tolerable."
+    },
+    "pluginSharedCoreFiles": {
+      "value": ["plugs/core/Plug.ts", "plugs/core/HTMLRegistry.ts", "plugs/unplugged.ts"],
+      "impl": "PLUG_SHARED_CORE_FILES",
+      "description": "The plug-core files contractually required byte-identical across WE and FUI (#1304/#1350), consulted only when `plugDrift` (PLUG_DRIFT_ENFORCED) is true. Removing a file from this list stops checking its WE↔FUI parity while the flag itself stays enforced — a silent narrowing of what `plugDrift` actually covers."
+    },
+    "webeverythingPublishedScope": {
+      "value": "@webeverything/",
+      "impl": "WEBEVERYTHING_PUBLISHED_SCOPE",
+      "description": "The published-package scope `validateRenderersNotPublished` scans, consulted only when `renderersPublish` (RENDERERS_PUBLISH_ENFORCED) is true. Narrowing or renaming this prefix would silently stop scanning real `@webeverything/*` manifests for a renderer leak while the flag itself stays enforced."
+    },
+    "moduleResolutionLockedScope": {
+      "value": "@frontierui/",
+      "impl": "MODULE_RESOLUTION_LOCKED_SCOPE",
+      "description": "The importmap/alias scope `validateModuleResolutionLock` polices (#271/#274) — an entry under this prefix must resolve to the package's exports, never a raw source path; a hard ERROR when it doesn't. Narrowing this prefix exempts entries from the lock without touching the check itself."
+    },
+    "derivedArtifactDirs": {
+      "value": ["reports/", "src/_data/researchTopics/", "src/_includes/research-descriptions/"],
+      "impl": "DERIVED_ARTIFACT_DIRS",
+      "description": "The directories `validateUntrackedDerivedArtifacts` (#2180) hard-errors on when they hold untracked files (a local-gate-green/CI-red trap — a fresh clone has no untracked files). Removing a directory from this list lets untracked derived artifacts accumulate there with no warning until CI reds."
+    },
+    "playwrightContainerPinRequiredFiles": {
+      "value": [".github/workflows/ci.yml", ".github/workflows/update-visual-baselines.yml"],
+      "impl": "PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES",
+      "description": "The workflow files `validatePlaywrightContainerPin` (#2234) requires to carry an in-lockstep `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container pin, hard ERROR when missing/drifted. Dropping a file from this list stops verifying its pin, silently reopening the byte-reproducibility gap the pin exists to close."
+    },
+    "githookAllAllow": {
+      "value": "standards-allow --all:",
+      "impl": "GITHOOK_ALL_ALLOW",
+      "description": "The comment marker that suppresses `findGitHookAllFlags`'s hard ERROR on a git-hook invocation carrying `--all` (a machine-global-tree-creation footgun on an unattended hook). Widening or emptying this marker string would let more/all invocations silently escape the check via a trivially-satisfied comment."
+    },
+    "graduatedRefPattern": {
+      "value": "^([a-z][a-z]*):([A-Za-z0-9_-]+)$",
+      "impl": "GRADUATED_REF",
+      "description": "The `kind:slug` compact-reference pattern (#247) that opts a resolved item's `graduatedTo` value into resolution validation (unknown kind / unresolved slug — both hard ERROR). A value that fails to match is treated as free-form prose and left unvalidated by design, so NARROWING this pattern is the loosening direction here: it lets more `graduatedTo` values silently skip resolution checking. Compared against the live `GRADUATED_REF.source`, not the RegExp object."
+    },
+    "surfaceZonePrefixes": {
+      "value": ["src/"],
+      "impl": "SURFACE_ZONE_PREFIXES",
+      "description": "The path prefixes `classifySurfacePaths` considers in-zone; a path outside them is `neutral` and simply skipped, never reaching the unclassified hard ERROR. Narrowing this list exempts more of the tree from the site/standard classification (and its unclassified-path error) entirely — the companion scope of SITE_SURFACE_MATCHERS/STANDARD_SURFACE_MATCHERS, which this registry cannot itself declare (see THRESHOLD_KNOBS' doc comment: they're arrow-function arrays, not JSON-representable)."
     }
   }
 }
