@@ -18,8 +18,9 @@
  *     the plan and the core all key on;
  *   - the item's slug and repo-qualified `scope:` come from the canonical backlog loader (`we:src/_data/backlog.js`),
  *     the same source `dispatch-plan.mjs` enriches its queue rows from;
- *   - the brief is whichever of the three authored mandates the launch's KIND names — the delivery brief for
- *     a build, `prepare-scope-agent-brief.md` / `prepare-decision-agent-brief.md` for a prepare (#3165) —
+ *   - the brief is whichever of the FIVE authored mandates the launch's KIND names — the delivery brief for
+ *     a build, `prepare-scope-agent-brief.md` / `prepare-decision-agent-brief.md` for a prepare (#3165), and
+ *     `fix-agent-brief.md` / `fix-agent-ci-brief.md` for a fix / ci-heal repair (#3332) —
  *     read as text and filled by the declaration.
  *
  * THE SINK IS THE ONLY THING IN THIS REPO THAT STARTS AN AGENT. Read {@link createDispatchSinks} before
@@ -65,11 +66,14 @@ export const REPO_ROOT = resolve(HERE, '..', '..');
 export function tickCli(root = REPO_ROOT) {
   return join(root, 'scripts', 'conveyor', 'tick-core.mjs');
 }
-// THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165).
+// THE AGENT-BRIEF TEMPLATE the declaration fills, PER KIND (#3165 wired the first three, #3332 the last two).
 //
-// All three briefs were authored and only one was reachable: `briefPath` took no kind, so
-// `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md` (18 KB) sat unrouted while
-// the planner kept surfacing prepares nobody could dispatch. This map is the whole connection.
+// All five briefs were authored well before any of them but the delivery brief was reachable: `briefPath` took
+// no kind at all until #3165, so `prepare-scope-agent-brief.md` (15.7 KB) and `prepare-decision-agent-brief.md`
+// (18 KB) sat unrouted while the planner kept surfacing prepares nobody could dispatch — and even after #3165
+// added a kind argument, `fix-agent-brief.md` and `fix-agent-ci-brief.md` stayed unrouted for the SAME reason,
+// because #3165 was a three-kind card (`'build' | 'prepare' | 'prepare-decision'`) and never claimed the other
+// two. This map is the whole connection, now for all five.
 //
 // ONE FILE PER KIND, declared as data rather than as a string built from the kind: a computed name silently
 // resolves to a path that does not exist, and `readText` would then fail with `ENOENT` on a filename instead
@@ -78,6 +82,8 @@ const BRIEF_BY_KIND = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
+  fix: 'fix-agent-brief.md',
+  'ci-heal': 'fix-agent-ci-brief.md',
 });
 
 // UNKNOWN KIND THROWS; it does NOT fall back to the delivery brief. Handing a scope-prep agent the delivery
@@ -86,8 +92,8 @@ const BRIEF_BY_KIND = Object.freeze({
 // lane and a wrong PR.
 /**
  * @param {string} [root]
- * @param {'build'|'prepare'|'prepare-decision'} [kind] - defaults to `build`, so every pre-#3165 caller
- *   resolves the same path it always did.
+ * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
+ *   pre-#3165 caller resolves the same path it always did.
  * @returns {string}
  */
 export function briefPath(root = REPO_ROOT, kind = 'build') {
@@ -146,7 +152,10 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  *   {@link persistLastSeenLive}, which stamps `lastSeenLiveAt` onto every entry this read just confirmed
  *   alive. A seam, not decoration: it is the one WRITE on an otherwise read-only path, and a test that wants
  *   the read without touching a run store overrides it with the identity.
- * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string}}
+ * @param {(pr: string|number) => (string|null)} [o.laneRefForPr] - injectable `gh pr view --json headRefName`
+ *   reader (#3332). Defaults to {@link defaultLaneRefForPr}. Called ONLY for a `fix`/`ci-heal` launch that
+ *   carries a `pr` — see the call site below for why it is this lazy.
+ * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null)}}
  */
 export function readTick({
   num,
@@ -159,6 +168,7 @@ export function readTick({
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
+  laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -186,21 +196,29 @@ export function readTick({
     throw new Error(`dispatch-lane-io: could not read the conveyor tick — ${msg}`);
   }
   const decisions = tick && typeof tick.decisions === 'object' && tick.decisions ? tick.decisions : {};
-  const match = (rows) => (Array.isArray(rows) ? rows : []).find((r) => r && normNum(r.num) === key) || null;
+  // `pr` is an OPTIONAL extra filter — every existing call site (the launch-list scan below, `suppressed`)
+  // passes only `rows` and gets the original num-only match; `dispatchedGuard`'s fix/ci-heal branches are the
+  // only callers that pass it (see the comment above that selection for why).
+  const match = (rows, pr) => (Array.isArray(rows) ? rows : [])
+    .find((r) => r && normNum(r.num) === key && (pr == null || Number(r.pr) === Number(pr))) || null;
 
   const item = findItem(key, loadItems);
   const nextState = tick && typeof tick.nextState === 'object' ? tick.nextState : null;
   // THE SELECTION happens here, with the tick's own normalizer — see the declaration's header for why it is
-  // not in the pure half. THREE LISTS, not one (#3165): `planTick` plans builds AND both prepare kinds, and
-  // launching only the first is why `dispatch-lane --num=<an auto-preparing item>` did nothing at all while
-  // the operator's status line kept promising it would.
+  // not in the pure half. FIVE LISTS, not one (#3165 wired the first three; #3332 the last two): `planTick`
+  // plans builds, both prepare kinds, AND fix/CI-heal repairs, and launching only a subset is why
+  // `dispatch-lane --num=<an item planned for one of the unwired kinds>` did nothing at all while the
+  // operator's status line kept promising it would.
   //
   // FIRST MATCH WINS, and no real tick makes that a decision — an item held as unscoped never reaches
-  // `spawnBuilds`, and a decision is never an unshaped build, so the lists are disjoint by construction.
+  // `spawnBuilds`, a decision is never an unshaped build, and a fix/CI-heal repairs an existing PR a build
+  // already opened, so the lists are disjoint by construction.
   const LAUNCH_LISTS = [
     ['build', decisions.spawnBuilds],
     ['prepare', decisions.spawnPrepareScope],
     ['prepare-decision', decisions.spawnPrepareDecision],
+    ['fix', decisions.spawnFixes],
+    ['ci-heal', decisions.spawnCiHeals],
   ];
   let launch = null;
   let launchKind = 'build';
@@ -209,6 +227,38 @@ export function readTick({
     if (row) { launch = row; launchKind = kind; break; }
   }
 
+  // THIS launch's guard entry, picked out of the tick's guards with the same normalizer (#3332 extends the
+  // #3165 lookup from two guard lists to four). The core records one per planned spawn: `buildGuards` for a
+  // build, `prepareGuards` for either prepare kind (shared, so the match is keyed on `kind` too), and — new
+  // here — `fixGuards` / `ciHealGuards`, each its OWN flat list rather than sharing one the way the two
+  // prepare kinds do (`tick-core.mjs`'s `planFixSpawns`/`planCiHealSpawns` write `{ pr, num, lane, spawnedTick }`
+  // rows straight onto `nextState.fixGuards` / `nextState.ciHealGuards`).
+  //
+  // FIX/CI-HEAL ALSO FILTER ON `pr`, and build/prepare deliberately do not. An item dispatches at MOST ONE
+  // live build/prepare at a time, so `num` alone is never ambiguous there. But `fixGuards`/`ciHealGuards` are
+  // flat lists that CAN legitimately hold two entries for the same item `num` against two DIFFERENT PRs — a
+  // bounced item mid-build can leave a guard for an older PR sitting in the list while a newer PR gets its own
+  // fix/ci-heal dispatched. Matching on `num` alone would pick whichever entry happens to be first, which is
+  // not necessarily the one for `launch.pr` — the PR THIS dispatch is actually launching for. So these two
+  // branches pass `launch?.pr` as `match`'s second argument to pin the match to that PR as well.
+  const dispatchedGuard = launchKind === 'build'
+    ? match(nextState?.buildGuards)
+    : launchKind === 'fix'
+      ? match(nextState?.fixGuards, launch?.pr)
+      : launchKind === 'ci-heal'
+        ? match(nextState?.ciHealGuards, launch?.pr)
+        : (Array.isArray(nextState?.prepareGuards) ? nextState.prepareGuards : [])
+          .find((g) => g && normNum(g.num) === key && (g.kind || 'prepare') === launchKind) || null;
+
+  // THE PR's HEAD REF (`{{LANE_REF}}`), resolved ONLY when this launch is a `fix`/`ci-heal` AND actually carries
+  // a `pr` (#3332). LAZY for the same cost-avoidance reason {@link inFlightDispatchesFor}'s own docblock states
+  // for itself: a build/prepare dispatch — four launches out of five — pays no extra `gh pr view` subprocess for
+  // a lookup it will never use, and this read sits synchronously inside a waker pass that promises to stay
+  // fail-soft and fast per run.
+  const laneRef = (launchKind === 'fix' || launchKind === 'ci-heal') && launch?.pr != null
+    ? laneRefForPr(launch.pr)
+    : null;
+
   return {
     resolvedNum: key,
     launch,
@@ -216,19 +266,14 @@ export function readTick({
     // declaration — one answer, read three times, rather than three re-derivations that can disagree.
     launchKind,
     suppressed: match(decisions.suppressedBuilds),
-    // THIS launch's guard entry, picked out of the tick's guards with the same normalizer. The core records
-    // one per planned spawn, in `buildGuards` for a build and `prepareGuards` for either prepare kind; only
-    // this one describes work this operation actually starts. The prepare match is keyed on the KIND too,
-    // because `prepareGuards` holds both kinds in one list.
-    dispatchedGuard: launchKind === 'build'
-      ? match(nextState?.buildGuards)
-      : (Array.isArray(nextState?.prepareGuards) ? nextState.prepareGuards : [])
-        .find((g) => g && normNum(g.num) === key && (g.kind || 'prepare') === launchKind) || null,
+    dispatchedGuard,
     item,
     briefTemplate: String(readText(briefPath(root, launchKind))),
     nextState,
     statusLine: String(decisions.statusLine || ''),
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
+    // THE FIX/CI-HEAL LANE REF, or `null` for the three kinds that never need one — see above.
+    laneRef,
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
@@ -1077,6 +1122,48 @@ export function defaultListPrs({ exec = execFileSync, env = process.env } = {}) 
     killSignal: 'SIGKILL',
   });
   return JSON.parse(String(out || '[]'));
+}
+
+/**
+ * `gh pr view <pr> --json headRefName` — the ONE value a `fix`/`ci-heal` dispatch needs that no other launch
+ * kind does (#3332): the `{{LANE_REF}}` the fix briefs `--base=` off of to reconstitute the bounced/red PR's
+ * work in a fresh lane clone, rather than rebuilding it from scratch.
+ *
+ * SAME SHAPE AS {@link defaultListPrs} — bounded timeout, `stdio: ['ignore', 'pipe', 'pipe']`,
+ * `killSignal: 'SIGKILL'` — for the same reason: this call sits synchronously inside a dispatch read, and a
+ * wedged `gh` must not hang it forever.
+ *
+ * REUSES {@link prListTimeoutMs} RATHER THAN MINTING A DEDICATED CONSTANT. This is one more single-PR `gh`
+ * call over the network, the same class of cost `PR_LIST_TIMEOUT_MS`'s own docblock names ("a NETWORK read
+ * against GitHub rather than a local daemon") — a `pr view` of one PR is if anything CHEAPER than the bounded
+ * `pr list` page the existing constant already bounds, so a separate number would not be describing a
+ * different cost, only duplicating the same one under a second name and a second env var an operator would
+ * have to learn. If that stops being true — if this lookup turns out to need a materially different bound in
+ * practice — split it then, with the evidence that justified it; nothing here is guessing preemptively.
+ *
+ * @param {string|number} pr - the PR number.
+ * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
+ * @returns {string|null} the PR's `headRefName`, or `null` when the field is absent or blank.
+ */
+export function defaultLaneRefForPr(pr, { exec = execFileSync, env = process.env } = {}) {
+  // A THROW HERE IS DELIBERATE, not an oversight — the OBSERVER elsewhere in this file is fail-SOFT on a `gh`
+  // failure (a completed build still needing a person is the acceptable cost there), but this is not an
+  // observer: it runs BEFORE a dispatch, to resolve a value that dispatch cannot proceed without. Swallowing
+  // the failure here would not make the dispatch safer, it would only turn a loud, fixable "no LANE_REF" into
+  // a `fillBrief` refusal with a confusing cause once the `undefined` reaches it three calls later — and
+  // `fillBrief`'s own "no value for {{LANE_REF}}" refusal is exactly the right failure mode once this bubbles
+  // up unmodified. So this function does the one thing it can do honestly: ask, and let a failure be a
+  // failure.
+  const out = exec('gh', ['pr', 'view', String(pr), '--json', 'headRefName'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 1024 * 1024,
+    timeout: prListTimeoutMs(env),
+    killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(String(out || '{}'));
+  const ref = String(parsed?.headRefName || '').trim();
+  return ref || null;
 }
 
 /**

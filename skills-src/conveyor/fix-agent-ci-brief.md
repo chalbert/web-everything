@@ -29,7 +29,7 @@
 | `{{PR_NUM}}` | the red/BEHIND PR's number — e.g. `743` |
 | `{{LANE_REF}}` | the PR's head ref — `lane/{{ITEM_NUM}}-<slug>` (`gh pr view {{PR_NUM}} --json headRefName`) |
 | `{{LANE}}` | a FREE lane id the conveyor assigned this heal (a fresh clone; the heal is reconstituted from `{{LANE_REF}}`, not the original lease) |
-| `{{SESSION_SLUG}}` | a stable per-heal session slug, e.g. `ci-heal-{{ITEM_NUM}}` (ties `acquire`↔`release`) |
+| `{{SESSION_SLUG}}` | a stable per-heal session slug, e.g. `ci-heal-{{PR_NUM}}` (ties `acquire`↔`release`) |
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
 

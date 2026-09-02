@@ -31,6 +31,7 @@ import { createRegistry } from '../registry.mjs';
 import { OPERATIONS, resolveOperation } from '../run.mjs';
 import {
   BRIEF_PLACEHOLDERS,
+  BRIEF_REQUIRED_BY_KIND,
   BRIEF_TOKEN_RE,
   DEFAULT_EXPECTED_WITHIN_MINUTES,
   DISPATCH_EFFECT,
@@ -58,6 +59,7 @@ import {
   createDispatchSinks,
   DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
   REPO_ROOT,
+  defaultLaneRefForPr,
   forwardableBookkeeping,
   inFlightDispatchesFor,
   isPreSpawnRefusal,
@@ -550,14 +552,18 @@ describe('filling the delivery brief', () => {
     // The property asserted against the file on disk, one mutation at a time — this is the shape the round-1
     // regression test should have had. Its `toEqual` on `unknownTokens` passed with `{{SESSION_SLUG}}` typo'd
     // to `{{ SESSION_SLUG }}`, because the typo produced no unknown token at all.
+    //
+    // `BRIEF_REQUIRED_BY_KIND.build`, NOT the full `BRIEF_PLACEHOLDERS` (#3332 widened the latter to also cover
+    // `PR_NUM`/`LANE_REF`/`REASON`, none of which the DELIVERY brief this test reads ever carries) — this test
+    // is specifically about the build brief's own five, same as before #3332.
     const real = readFileSync(briefPath(), 'utf8');
-    for (const name of BRIEF_PLACEHOLDERS) {
+    for (const name of BRIEF_REQUIRED_BY_KIND.build) {
       expect(real, `the brief must actually use {{${name}}}`).toContain(`{{${name}}}`);
       const typod = real.replace(`{{${name}}}`, `{{ ${name} }}`);
       expect(() => fillBrief(typod, VALUES), `a typo'd {{${name}}} must not reach an agent`).toThrow(/MISSPELLED placeholder/);
     }
     // …including the spellings round 1's narrower scan could not see at all (round 2, G4).
-    for (const name of BRIEF_PLACEHOLDERS) {
+    for (const name of BRIEF_REQUIRED_BY_KIND.build) {
       for (const sep of [' ', '.']) {
         const mangled = real.replace(`{{${name}}}`, `{{${name.replace(/_/g, sep)}}}`);
         if (mangled === real) continue; // `LANE` / `SCOPE` have no underscore to mangle
@@ -1217,6 +1223,50 @@ describe('the tick reader', () => {
   it('refuses an id that normalizes to nothing', () => {
     expect(() => readTick({ num: '  ', ...bindings })).toThrow(/must be an item id/);
   });
+
+  // ── #3332 — the LANE REF lookup: lazy, argv-pinned, and NEVER shelled for build/prepare ────────────────────
+
+  it('#3332: `defaultLaneRefForPr` shells `gh pr view <pr> --json headRefName` — argv AND opts pinned', () => {
+    const calls = [];
+    const exec = (file, argv, opts) => { calls.push({ file, argv, opts }); return JSON.stringify({ headRefName: 'lane/2608-declare-dispatch' }); };
+    const ref = defaultLaneRefForPr(701, { exec, env: {} });
+    expect(ref).toBe('lane/2608-declare-dispatch');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('gh');
+    // THE WHOLE ARGV, one assertion — same discipline `defaultListPrs`'s own pinning test uses (a rename or a
+    // dropped flag reddens exactly here).
+    expect(calls[0].argv).toEqual(['pr', 'view', '701', '--json', 'headRefName']);
+    expect(calls[0].opts).toMatchObject({ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], killSignal: 'SIGKILL' });
+    expect(calls[0].opts.timeout).toBeGreaterThan(0);
+  });
+
+  it('#3332: an absent or blank `headRefName` reads as `null`, never as an empty string', () => {
+    expect(defaultLaneRefForPr(701, { exec: () => JSON.stringify({}), env: {} })).toBeNull();
+    expect(defaultLaneRefForPr(701, { exec: () => JSON.stringify({ headRefName: '   ' }), env: {} })).toBeNull();
+  });
+
+  it('#3332: a `gh`/JSON failure THROWS rather than being swallowed — a dispatch with no LANE_REF must not proceed silently', () => {
+    expect(() => defaultLaneRefForPr(701, { exec: () => { throw new Error('gh: not authenticated'); }, env: {} }))
+      .toThrow(/not authenticated/);
+    expect(() => defaultLaneRefForPr(701, { exec: () => 'not json', env: {} })).toThrow();
+  });
+
+  it('#3332: `readTick` calls the LANE REF reader ONLY for a fix/ci-heal launch that carries a `pr` — never for build or prepare', () => {
+    let calls = 0;
+    const laneRefForPr = (pr) => { calls += 1; return `lane/${pr}-x`; };
+
+    // A BUILD launch — no PR to look a ref up for, and no subprocess paid for one it will never use.
+    const buildTick = { decisions: { spawnBuilds: [{ num: 3037, lane: 8 }] }, nextState: { tick: 4 } };
+    const buildOut = readTick({ num: '3037', ...bindings, runNode: () => JSON.stringify(buildTick), laneRefForPr });
+    expect(calls).toBe(0);
+    expect(buildOut.laneRef).toBeNull();
+
+    // A FIX launch — looked up, and the row's OWN `pr` (not the item num) is what reaches the reader.
+    const fixTick = { decisions: { spawnFixes: [{ pr: 701, num: 3037, lane: 5 }] }, nextState: { tick: 4 } };
+    const fixOut = readTick({ num: '3037', ...bindings, runNode: () => JSON.stringify(fixTick), laneRefForPr });
+    expect(calls).toBe(1);
+    expect(fixOut.laneRef).toBe('lane/701-x');
+  });
 });
 
 
@@ -1382,10 +1432,10 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
     expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
       .toThrow(/unknown `launchKind`/);
-    // The three that ARE wired all resolve, and to three DISTINCT files — one map entry pointing at the wrong
-    // brief is the same failure with a quieter face.
+    // The five that ARE wired all resolve, and to five DISTINCT files (#3332 grew this from three to five) —
+    // one map entry pointing at the wrong brief is the same failure with a quieter face.
     const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
-    expect(new Set(paths).size).toBe(3);
+    expect(new Set(paths).size).toBe(5);
     for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
   });
 
@@ -1409,7 +1459,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(() => shapeDispatchRead(
       tickRead({ launchKind: 'build', item: { num: '3150', slug: 'x', specPath: SPEC_PATH, scope: [] } }),
       { num: '3150' },
-    )).toThrow(/never launches an unscoped item to build/);
+    )).toThrow(/never launches an item with no `scope:` for build, fix or CI-heal work/);
   });
 
   it('the whole plan is not dispatched — ONE call starts ONE agent, never the tick\'s other planned prepares', async () => {
@@ -1433,5 +1483,194 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and it reports WHICH agent was asked for, so a run record of a declined prepare is not mistakable for a
     // declined build.
     expect(run.verdict.launchKind).toBe('build');
+  });
+});
+
+
+// ── 9. #3332 — the planner's FIX and CI-HEAL lists reach the spawner too ───────────────────────────────────
+//
+// THE DEFECT THIS SECTION PINS, the sibling of #3165's own. `planTick` returns FIVE launch lists; #3165 wired
+// three (`'build' | 'prepare' | 'prepare-decision'`, stated explicitly at its own `:68`/`:131` and confirmed by
+// `grep -c 'spawnFixes\|spawnCiHeals\|ciHeal\|CI-heal'` over its card returning 0). An item the planner put in
+// `spawnFixes` or `spawnCiHeals` — the two kinds a `review:changes` bounce or a red/BEHIND PR need to ever get
+// auto-repaired — reached `briefPath` and THREW, because it took a kind `BRIEF_BY_KIND` did not carry. This
+// section proves both kinds now reach the spawner, filled with the tokens their own briefs (not the five the
+// first three kinds share) actually declare.
+//
+// EVERY CASE HERE GOES THROUGH THE REAL `readTick` AND THE REAL BRIEFS ON DISK, same discipline as #3165's own
+// block — only the spawner and the PR→ref lookup (`laneRefForPr`, which would otherwise shell `gh pr view`)
+// are stubbed.
+
+describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => {
+  /** A tick as the core returns one, with the asked item/PR in exactly ONE of the five launch lists. */
+  function tickWith(list, row) {
+    return {
+      decisions: {
+        spawnBuilds: [], spawnPrepareScope: [], spawnPrepareDecision: [], spawnFixes: [], spawnCiHeals: [],
+        suppressedBuilds: [], statusLine: 'conveyor · 1 fixing', notes: [],
+        [list]: [row],
+      },
+      // `fixGuards`/`ciHealGuards` are SEPARATE FLAT LISTS (#3332), unlike `prepareGuards` — neither needs a
+      // `kind` filter to disambiguate, so a SIBLING PR for the SAME item rides along here to prove the match
+      // picked the row for THIS pr and not merely the first one in the list.
+      nextState: {
+        tick: 6,
+        buildGuards: [],
+        prepareGuards: [],
+        // The DISPATCHED PR's own guard entry is listed SECOND, not first — so a match that (wrongly) picked
+        // whichever row came first in the array would grab the SIBLING PR's guard instead, and the assertion
+        // below on `run.findings.read.dispatchedGuard` would fail. That is what makes this fixture prove the
+        // `pr`-filtered match in `dispatch-lane-io.mjs`'s `dispatchedGuard` selection, rather than merely
+        // exercising a shape that would pass by luck of ordering.
+        fixGuards: [
+          { pr: 900, num: '2608', lane: 9, spawnedTick: 5 },
+          { pr: 701, num: '2608', lane: 5, spawnedTick: 5 },
+        ],
+        ciHealGuards: [
+          { pr: 950, num: '2638', lane: 10, spawnedTick: 5 },
+          { pr: 743, num: '2638', lane: 6, spawnedTick: 5 },
+        ],
+      },
+    };
+  }
+
+  /** A scoped item (already built once — its `scope:` frontmatter is exactly what a fix/ci-heal repairs). */
+  const SCOPED = { num: '2608', slug: 'fix-target-item', scope: ['we:scripts/operations/'] };
+  const CI_SCOPED = { num: '2638', slug: 'ci-heal-target-item', scope: ['we:scripts/operations/'] };
+  /** The fake `{{LANE_REF}}` `laneRefForPr` hands back, standing in for a real `gh pr view`. */
+  const FAKE_LANE_REF = 'lane/2608-declare-dispatch';
+
+  /**
+   * ONE WHOLE DISPATCH — the real `readTick`, the real declaration, the real sink, the real brief files, and a
+   * STUB SPAWNER, same shape as #3165's own `dispatchThrough`. The ONE addition: `laneRefForPr` is stubbed too,
+   * so a fix/ci-heal read never shells `gh pr view` in this suite.
+   */
+  async function dispatchThrough({ num, tick, items, laneRef = FAKE_LANE_REF }) {
+    const spawned = [];
+    const registry = createRegistry();
+    registry.register(dispatchLaneOperation({
+      readTick: (asked) => readTick({
+        ...asked,
+        runNode: () => JSON.stringify(tick),
+        readText: (path) => readFileSync(path, 'utf8'),
+        loadItems: () => items,
+        listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
+        listAgents: () => [],
+        laneRefForPr: () => laneRef,
+      }),
+    }));
+    const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
+    if (!run.effects.length) return { run, spawned };
+    const outcome = await applyPendingEffects(run, {
+      sinks: createDispatchSinks({
+        root: PRIMARY,
+        spawnAgent: (argv, opts) => { spawned.push({ argv, opts }); return ''; },
+        mintSessionId: () => 'sess-3332',
+        now: () => new Date(NOW),
+      }),
+      store: createMemoryRunStore(),
+    });
+    return { run: outcome.run, spawned };
+  }
+
+  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. */
+  function expectedPrompt(kind, values) {
+    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values, BRIEF_REQUIRED_BY_KIND[kind]).prompt;
+  }
+
+  // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnFixes` entry SPAWNS ONCE, with the fix-agent brief — filled and byte-exact, zero {{…}} residue', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '2608', tick: tickWith('spawnFixes', { pr: 701, num: '2608', lane: 5 }), items: [SCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'fix', lane: 5, sessionSlug: 'fix-701' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('fix', {
+      ITEM_NUM: '2608', PR_NUM: 701, LANE_REF: FAKE_LANE_REF, LANE: 5, SESSION_SLUG: 'fix-701', SCOPE: 'we:scripts/operations/',
+    }));
+    // NONE OF THE SIX REQUIRED TOKENS REMAIN — the exact failure #3332's card names: an unfilled token is
+    // reported, never fatal, so a fix agent dispatched before this landed would have received the literal
+    // string `{{PR_NUM}}`. (The brief's OWN prose still carries `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` —
+    // documentation, reported below, same as the delivery brief's #3165 test.)
+    for (const name of BRIEF_REQUIRED_BY_KIND.fix) expect(prompt).not.toContain(`{{${name}}}`);
+    expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
+    // criterion 5 (guard half) — picked out of a `fixGuards` list holding a SIBLING PR for the same item, not
+    // merely the first entry.
+    expect(run.findings.read.dispatchedGuard).toEqual({ pr: 701, num: '2608', lane: 5, spawnedTick: 5 });
+  });
+
+  // ── criterion 2 ──────────────────────────────────────────────────────────────────────────────────────────
+  it.each(['red-ci', 'behind'])('a `spawnCiHeals` entry (reason=%s) SPAWNS ONCE, with the CI-heal brief', async (reason) => {
+    const { run, spawned } = await dispatchThrough({
+      num: '2638', tick: tickWith('spawnCiHeals', { pr: 743, num: '2638', lane: 6, reason }), items: [CI_SCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'ci-heal', lane: 6, sessionSlug: 'ci-heal-743' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('ci-heal', {
+      ITEM_NUM: '2638', PR_NUM: 743, LANE_REF: FAKE_LANE_REF, LANE: 6, SESSION_SLUG: 'ci-heal-743',
+      SCOPE: 'we:scripts/operations/', REASON: reason,
+    }));
+    for (const name of BRIEF_REQUIRED_BY_KIND['ci-heal']) expect(prompt).not.toContain(`{{${name}}}`);
+    expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
+    expect(run.findings.read.dispatchedGuard).toEqual({ pr: 743, num: '2638', lane: 6, spawnedTick: 5 });
+  });
+
+  // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('the fix/ci-heal session slug is DISTINCT from the build slug for the same item num — it is keyed on the PR', () => {
+    expect(sessionSlugFor('3037', 'fix', 701)).toBe('fix-701');
+    expect(sessionSlugFor('3037', 'ci-heal', 743)).toBe('ci-heal-743');
+    expect(sessionSlugFor('3037', 'build')).toBe('conveyor-3037');
+    expect(sessionSlugFor('3037', 'fix', 701)).not.toBe(sessionSlugFor('3037', 'build'));
+    // …and it is keyed on the PR, not the item — two fix rounds for the SAME item that opened two DIFFERENT
+    // PRs get two DIFFERENT slugs, never a collision.
+    expect(sessionSlugFor('3037', 'fix', 701)).not.toBe(sessionSlugFor('3037', 'fix', 900));
+  });
+
+  // ── criterion 4 ──────────────────────────────────────────────────────────────────────────────────────────
+  it('`pr` (and `reason` for CI-heal) reach `run.effects[0].payload`', async () => {
+    const fix = await dispatchThrough({
+      num: '2608', tick: tickWith('spawnFixes', { pr: 701, num: '2608', lane: 5 }), items: [SCOPED],
+    });
+    expect(fix.run.effects[0].payload.pr).toBe(701);
+    expect(fix.run.effects[0].payload.reason).toBeNull();
+
+    const ciHeal = await dispatchThrough({
+      num: '2638', tick: tickWith('spawnCiHeals', { pr: 743, num: '2638', lane: 6, reason: 'red-ci' }), items: [CI_SCOPED],
+    });
+    expect(ciHeal.run.effects[0].payload.pr).toBe(743);
+    expect(ciHeal.run.effects[0].payload.reason).toBe('red-ci');
+
+    // …and a BUILD's payload still carries both as `null` — the field exists on every payload shape, not only
+    // the two new ones.
+    const build = await dispatchThrough({
+      num: '3037', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [{ num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] }],
+    });
+    expect(build.run.effects[0].payload.pr).toBeNull();
+    expect(build.run.effects[0].payload.reason).toBeNull();
+  });
+
+  it('an UNSCOPED item still refuses a fix dispatch — the refusal is not build-exclusive (#3332\'s open question, settled)', () => {
+    expect(() => shapeDispatchRead(
+      {
+        resolvedNum: '2608', launch: { pr: 701, num: '2608', lane: 5 }, launchKind: 'fix', suppressed: null,
+        item: { num: '2608', slug: 'x', specPath: 'backlog/2608-x.md', scope: [] },
+        briefTemplate: readFileSync(briefPath(REPO_ROOT, 'fix'), 'utf8'), nextState: {}, statusLine: '', notes: [],
+        droppedBookkeepingKeys: [], inFlightDispatches: { runs: [], unreadable: 0, livenessSource: 'not-needed' },
+        bookkeepingSource: 'file', observedAt: NOW, laneRef: FAKE_LANE_REF,
+      },
+      { num: '2608' },
+    )).toThrow(/never launches an item with no `scope:` for build, fix or CI-heal work/);
+  });
+
+  it('a num in NO list still says so, and now names all five', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '2608', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [SCOPED],
+    });
+    expect(spawned).toEqual([]);
+    expect(run.verdict.dispatching).toBe(false);
+    expect(run.verdict.reason).toMatch(/spawnFixes/);
+    expect(run.verdict.reason).toMatch(/spawnCiHeals/);
   });
 });

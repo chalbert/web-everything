@@ -3,12 +3,13 @@ bornAs: xj86df4
 kind: story
 size: 5
 parent: "3029"
-status: open
+status: active
 scaffoldedBy: "rule3118"
 dateScaffolded: "2026-08-26"
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs"]
 dateOpened: "2026-08-26"
 blockedBy: ["3165"]
+dateStarted: "2026-09-02"
 relatedTo: ["3118", "3165", "3096"]
 tags: [plateau-loop, delivery, operations, conveyor, dispatch]
 ---
@@ -82,6 +83,16 @@ A fix dispatch targets an existing PR whose lane and scope are already establish
 refusal may be correct, wrong, or need a per-kind branch for these two. Settle it against the fix brief's own
 `--scope` instructions before writing the guard.
 
+## Resolution
+
+**The refusal applies to `fix`/`ci-heal` exactly as it does to `build` — no per-kind exemption.** A fix/ci-heal
+dispatch repairs code an earlier BUILD already wrote inside the item's own declared `scope:` frontmatter; unlike
+a `prepare`, it is never dispatched BECAUSE the item lacks a scope, so there is no "unscoped item being
+repaired" case for the refusal to accommodate. Both fix briefs' own `--scope={{SCOPE}}` instruction already
+assumes a non-empty value, which the refusal is what guarantees. Implemented as one shared condition in
+`shapeDispatchRead` (`we:scripts/operations/dispatch-lane.mjs`) covering `build`, `fix` and `ci-heal` together,
+with the refusal's own message text widened so it no longer reads as build-exclusive.
+
 ## Done when
 
 1. **Executable** — `node --test we:scripts/operations/__tests__/dispatch-lane.test.mjs` covers a `fix` and a
@@ -90,6 +101,35 @@ refusal may be correct, wrong, or need a per-kind branch for these two. Settle i
    (plus `reason` for CI-heal) reaches the effect payload. All five of `tick-core`'s planned lists reach a
    launch path.
 2. The scope refusal question above is answered in this card's body before the guard is written, not after.
+
+## Progress
+
+- `we:scripts/operations/dispatch-lane.mjs`: `LAUNCH_KINDS` grew to five (`fix`, `ci-heal` added); `BRIEF_PLACEHOLDERS` is now the
+  full cross-kind set (8 names) and a new `BRIEF_REQUIRED_BY_KIND` map says which of those each kind actually
+  validates/substitutes; `fillBrief` takes a third `requiredNames` param (defaults to
+  `BRIEF_REQUIRED_BY_KIND.build` — the original five — so every pre-#3332 caller is byte-identical);
+  `sessionSlugFor` takes a third `pr` param and keys `fix`/`ci-heal` slugs on the PR (`fix-<pr>` /
+  `ci-heal-<pr>`), documented against the card's own reasoning above; `shapeDispatchRead` extends the scope
+  ternary and refusal to `fix`/`ci-heal` (see Resolution above), builds the `fillBrief` values per-kind, and
+  threads `pr`/`reason` onto the `read` finding; the `dispatch` effect payload now carries `pr`/`reason`.
+- `we:scripts/operations/dispatch-lane-io.mjs`: `BRIEF_BY_KIND` maps `fix`/`ci-heal` to the two existing brief files; `readTick`'s
+  `LAUNCH_LISTS` grew to five (adds `spawnFixes`/`spawnCiHeals`); its `dispatchedGuard` selection now covers
+  `fixGuards`/`ciHealGuards` (separate flat lists, no `kind` filter needed) alongside the existing
+  `buildGuards`/`prepareGuards`; added `laneRefForPr` (default `defaultLaneRefForPr`, a `gh pr view --json
+  headRefName` shell, argv-pinned) — called ONLY for a `fix`/`ci-heal` launch that carries a `pr`, feeding the
+  new `laneRef` field on `readTick`'s return.
+- Tests: `we:scripts/operations/__tests__/dispatch-lane.test.mjs` gained a `#3332` describe block mirroring `#3165`'s own (fix/ci-heal spawn
+  once with the right brief byte-exact, distinct session slug, `pr`/`reason` on the effect payload, the scope
+  refusal is not build-exclusive), extended the `LAUNCH_KINDS` 5-distinct-briefs assertion, and added
+  `defaultLaneRefForPr`/`laneRefForPr` argv-and-laziness coverage to the existing tick-reader block. Two
+  pre-existing tests were adjusted to the new (correct) shapes they now exercise: the delivery-brief mangling
+  test scopes its per-token loop to `BRIEF_REQUIRED_BY_KIND.build` instead of the now-wider
+  `BRIEF_PLACEHOLDERS`, and the build-refusal assertion matches the widened (not build-exclusive) message text.
+- Filed follow-up `#xm33exe` for the known, out-of-scope gap: `we:scripts/conveyor/tick-core.mjs#releaseSessionForNum`
+  has no `fix`/`ci-heal` branch, so a merge-time auto-release of a fix/ci-heal agent's OWN lane (were one ever
+  wired up) would use the wrong session slug. `blockedBy: ["3332"]`.
+- `node --test`-equivalent (`npx vitest run we:scripts/operations/__tests__/dispatch-lane.test.mjs`, this repo's
+  actual test runner for this file — it imports from `vitest`, not `node:test`) is green: 112/112.
 
 ## Lineage
 
