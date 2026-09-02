@@ -1118,3 +1118,72 @@ not touch who may clear `review:human` (unchanged: the human ceremony only, `#27
 statute unchanged), and it does not authorize `--answer=accept` on a `review:human` PR under any circumstance
 — the independent pass's job is to find and fix real defects, then hand the (now-vetted) diff onward, never
 to clear the label itself.
+
+## Working doctrine (2026-09-02, continued): the operator's in-conversation "I approve `<PR>`" naming a PR
+## IS the explicit instruction the clear-human ceremony already requires — not a new authorization path
+
+Four `review:human` PRs cleared tonight the same way — #1804, #1808, #1814, #1815 — and the operator asked
+this be written down as a durable pattern, not something a session merely happens to do consistently. Read
+plainly: **this states nothing new.** It is the existing sanctioned `--to=clear-human` ceremony
+(`we:scripts/review-set-label.mjs`, #2895) and this file's own existing doctrine above (the independent
+AI-review pass ahead of the ceremony, PR #1817); the only thing this section adds is naming, in one place,
+what already counts as the "explicit instruction" `we:.claude/skills/review/SKILL.md` demands before that
+ceremony may run at all — so a future session recognizes it on sight instead of re-deriving the process or
+second-guessing whether it's allowed.
+
+**The pattern, verified against the four PRs' own comment threads, not assumed from habit:**
+
+1. **A PR lands `review:human`.** The gate-self/statute conflict-of-interest tier — a diff that touches gate
+   machinery or `we:docs/agent/platform-decisions.md` itself — is never mechanically clearable, per the
+   standing [`#review-human-declarative-leash-only`](/docs/agent/platform-decisions.md#review-human-declarative-leash-only)
+   statute. All four PRs parked with the drain's `held — a review hold (review:human) stands` comment, citing
+   `blast-radius`/`gate-self` (#1804, #1814, #1815) or `blast-radius`/`statute` (#1808) reasons.
+2. **Where the PR postdates PR #1817 (merged 2026-09-02T11:04Z), it first gets the independent AI review
+   pass this file already mandates.** #1814 and #1815 — both cleared after #1817 landed — each carry a
+   dispatched, independent `review-pr` comment (fresh session id, not the authoring session; correctness +
+   security seats) landing on an explicit verdict (`accept`, 0 blocking findings on #1814; one CONFIRMED
+   finding found and fixed before the comment was posted on #1815) before either was handed to the operator.
+   #1804 and #1808 cleared *before* #1817 landed and predate that requirement — they show the ceremony below
+   on its own, not evidence that the independent pass is optional now.
+3. **The operator reviews it themselves and says, in conversation, "I approve `<PR>`"** — naming the PR
+   explicitly. All four threads quote this verbatim as the stated reason: `> I approve 1804`, `> I approve
+   1808`, `> I approve 1814`, `> I approve 1815`. This sentence is the whole of what authorizes the next
+   step — `we:.claude/skills/review/SKILL.md`'s own invariant is that the clear-human route may be run "ONLY
+   on an explicit in-conversation instruction from the operator naming that PR," with no other route and no
+   `--force`. Naming the PR is what makes an instruction usable here; "looks fine" or an approval of a batch
+   without naming the number does not qualify — do not stretch this pattern to cover that case without a
+   fresh explicit instruction.
+4. **The orchestrating session runs the sanctioned clearance, verbatim, no paraphrase:**
+   ```
+   node scripts/review-set-label.mjs <PR> --repo=<owner/repo> --to=clear-human \
+     --actor="Nicolas Gilbert (operator)" --reason="I approve <PR>" --body-file=/tmp/<pr>-clearance.md
+   ```
+   `--reason` carries the operator's own words verbatim (confirmed rendered as the `> I approve <PR>`
+   blockquote in all four threads) — never a summary of them. `--body-file` sits under `/tmp`, per the tool's
+   own path constraint (`we:scripts/review-set-label.mjs`'s `--body-file` root allowlist, #2897) — never
+   written elsewhere and never skipped. The note in that file, confirmed identical in shape across all four
+   PRs (only the change-type noun varies with the PR's own escalation reason — "gate-self" on #1804/#1814/
+   #1815, "statute-touching" on #1808, which read `blast-radius`/`statute`):
+   ```
+   **Human ceremony clearance** — the operator (Nicolas Gilbert) reviewed this gate-self change directly and
+   approved it in conversation. This is a human clearance, not an established-independent review.
+   ```
+   Everything else that lands on the PR — the `✅ review — review:human cleared via the sanctioned path`
+   header, the "What this record proves… does NOT prove…" caveat, the `reviewed-sha`/`reviewed-diff`/
+   `reviewed-contribution`/`cleared-human`/`cleared-by-actor` markers, and (when the clearing actor is
+   provably the PR's own author at the session level) the additional "🧑 Cleared by the HUMAN CEREMONY, not
+   by an established-independent agent" paragraph — is generated by `we:scripts/review-set-label.mjs` itself
+   from `--actor`/`--reason`/`--body-file`. Do not hand-write any of it into the body file; it duplicates
+   what the tool already emits and risks drifting from it.
+5. **This swaps `review:human` → `review:accepted`**, and the resident drain lands it from there. The
+   orchestrating session never runs `gh pr merge` itself — confirmed: none of the four threads carry a merge
+   action from the clearing session; the label swap is the entire mechanical footprint of this step.
+
+**This is NOT a new authorization path, and it does not loosen the human-only invariant.** `--to=clear-human`
+still refuses unconditionally unless the PR already carries `review:human`, still requires an explicit
+`--actor` and a quoted `--reason`, and `decideSetLabel`'s pure core still refuses `--answer=accept` on a
+`review:human` PR by construction (#2895/#2844) — nothing above changes any of that. What this section settles
+is narrower and purely evidentiary: the operator's own chat message, naming the PR, **is** the "explicit
+in-conversation instruction… naming that PR" the skill already requires before the ceremony may run — so a
+future session may act on "I approve `<PR>`" (or plainly equivalent phrasing that names the PR) on sight,
+without re-deriving whether that counts or re-justifying that the ceremony is allowed.
