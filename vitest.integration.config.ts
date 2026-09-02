@@ -17,7 +17,9 @@ import { weAlias } from './vitest.shared';
  * Three of these were originally pinned to a single serial `forks` process for a CORRECTNESS reason, not
  * just speed — each measured NOT just slow but actively flaky under CPU contention (a wall-clock comparison
  * blown, a timeout tripped): `gate-entrypoint-integration.test.mjs`, `wake-cli.test.mjs`,
- * `dispatch-spawn-live.test.mjs`. `stdout-flush.test.mjs` joins them for a DIFFERENT reason, found the hard
+ * `dispatch-spawn-live.test.mjs`. `lane-pool-reap-on-acquire.test.mjs` joined them later (#x01b2gj) for the
+ * IDENTICAL correctness reason — its own TTL-backdating cases flaked red under real host contention.
+ * `stdout-flush.test.mjs` joins them for a DIFFERENT reason, found the hard
  * way (measured on this branch): left on the default `threads` pool alongside the other ~18 git-fixture
  * files, its two tests that spawn a real full `check-standards.mjs` scan went from 48.4s/39.7s (alone, in
  * the old unit suite) to 83s/72s (contending with everyone else's git subprocess spawns here) — the exact
@@ -66,6 +68,14 @@ export default defineConfig({
       ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
       ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
       ['scripts/operations/__tests__/dispatch-spawn-live.test.mjs', 'forks'],
+      // #x01b2gj — a fifth join, for the identical CORRECTNESS reason as the four above: its TTL-backdating
+      // cases (the item-resolved AND pr-merged terminal axes) flaked red twice on 2026-08-30 under real
+      // concurrent host load, passing clean in isolation. It spawns real `lane-pool.mjs` children (each
+      // shelling real `git`/`gh` subprocesses) sharing the default `threads` pool with ~18 other
+      // subprocess-heavy files; under contention those children compete for CPU/fork slots and the reap
+      // decision's bounded `gh pr list` call (see the widened timeout in `scripts/lane-pool.mjs`) can miss
+      // its terminal signal before the test asserts on it. Isolating it here removes that contention.
+      ['scripts/__tests__/lane-pool-reap-on-acquire.test.mjs', 'forks'],
     ],
     poolOptions: {
       forks: {
