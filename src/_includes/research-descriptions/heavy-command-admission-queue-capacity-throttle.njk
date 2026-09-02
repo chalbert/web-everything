@@ -1,0 +1,133 @@
+<h3>The Question</h3>
+<p>
+    Backlog <a href="/backlog/3456-cap-concurrent-heavy-commands-across-dispatched-lanes-a-capa/">#3456</a>
+    asks how to cap the number of genuinely CPU/IO-heavy commands — <code>check:standards</code>,
+    <code>verify-lane</code>/<code>test:unit</code>, <code>npm ci</code>/<code>npm install</code>, a Playwright
+    visual-capture pass — that may run <em>at the same instant</em> across independently-dispatched lane
+    processes, as the mechanical dispatcher scales up parallel lane usage. Lane availability and CPU/heavy-
+    command capacity are two different resources; today only the first is throttled. Before naming a default
+    for each of the item's three ratifiable forks (plus two adjacent calls settled as "supported by
+    default," not ratified), this survey grounds the design in shipped admission-control prior art —
+    job schedulers, resource pools, and this repo's own existing cross-process locks.
+</p>
+
+<h3>Recommendation (feeding #3456's forks)</h3>
+<ol>
+    <li><strong>Fork 1 — an explicit, named list</strong> (not yet per-command-weighted — see Finding 2's
+        note below), mirroring Bazel's declared-cost resource pool rather than a uniform per-job slot or a
+        not-yet-buildable adaptive classifier.</li>
+    <li><strong>Fork 2 — gate at heavy-command-invocation time</strong>, mirroring GNU Make's jobserver: a
+        token is acquired immediately before a job runs, not at process start, keeping lane leasing and CPU
+        capacity genuinely decoupled.</li>
+    <li><strong>Fork 3 — a new, distinct, immediately-surfaced signal</strong>, mirroring GitHub Actions'
+        first-class queued/pending job state, not silence.</li>
+</ol>
+<p>
+    Two further calls are <strong>not</strong> numbered forks — they read like a fork at first, but the
+    item's own two-confusion screen dissolved each into "what v1 ships + real, separately-prioritized
+    future work," so this survey backs them as "Supported by default" grounding, not as a competing
+    recommendation a ratifier picks between:
+</p>
+<ul>
+    <li><strong>Heavy-command classification stays the explicit list (Fork 1) for v1</strong> — a
+        measured/adaptive classifier (GNU Parallel's <code>--load</code>) is real future work, not built
+        only because the measurement layer doesn't exist here yet.</li>
+    <li><strong>The admission cap is a fixed, machine-overridable number</strong>, mirroring Bazel's
+        measured-once host-fact default; real adaptive load-sampling needs a dedicated instantaneous-signal
+        layer this repo doesn't have yet — the same readiness gap as the classification point above, not a
+        merit call.</li>
+</ul>
+
+<h3>Finding 1 — GNU Make's jobserver: a cross-process counting semaphore, bound at job-start, not process-start</h3>
+<p>
+    GNU Make's <a href="https://www.gnu.org/software/make/manual/html_node/Job-Slots.html">jobserver
+    protocol</a> coordinates parallelism across recursive <code>make</code> invocations with no daemon: a pipe
+    is pre-loaded with one single-character token per available job slot, propagated to child processes via the
+    <code>MAKEFLAGS</code> environment variable (<code>--jobserver-auth=</code>). A client acquires a token —
+    reads one character from the pipe — immediately before starting a job, and releases it — writes one
+    character back — immediately after the job finishes. Crucially, every invoked <code>make</code> process
+    always has one implicit job slot reserved before it starts, so a caller can always make forward progress
+    without even contacting the jobserver.
+</p>
+<p>
+    <strong>Implication (Fork 2):</strong> the token exchange happens at <em>job</em>-start, not at
+    <em>process</em>-start — exactly the operator's own framing that lane availability and CPU capacity are
+    separate resources. A lane may always be acquired freely; only the heavy command itself should queue on the
+    capacity semaphore, right before it runs.
+</p>
+
+<h3>Finding 2 — Bazel: a declared-cost resource pool, not a blanket job-slot count</h3>
+<p>
+    Bazel's <code>--local_cpu_resources</code>/<code>--local_ram_resources</code>
+    (<a href="https://bazel.build/docs/user-manual">user manual</a>;
+    <a href="https://jmmv.dev/2019/12/bazel-local-resources.html">how Bazel tracks local resources</a>) define a
+    fixed local pool that defaults to a value measured once from the host (e.g. <code>HOST_CPUS-1</code>), not
+    continuously re-sampled at runtime. Each action <em>declares its own cost</em> (<code>cpu=2</code>,
+    <code>memory=HOST_RAM*.5</code>), and Bazel subtracts the cost from the tracker when a spawn starts and
+    returns it when the spawn finishes.
+</p>
+<p>
+    <strong>Implication (Fork 1, and the "supported by default" cap-value call):</strong> a named list is
+    the shipped, load-bearing pattern for Fork 1(a) — not a uniform cap applied to every command regardless
+    of cost (Fork 1(b)). (Fork 1's own text starts this list as an equal-cost <em>set</em>, not yet
+    per-command-weighted; declared weighting is real future refinement, mirroring the Bazel per-action-cost
+    shape but not yet built here.) And the admission cap itself is a fixed, host-measured-once number with a
+    configurable override — not something Bazel continuously re-samples against live load; this is the
+    "supported by default" cap-value grounding, not a ratifiable fork branch.
+</p>
+
+<h3>Finding 3 — GNU Parallel's <code>--load</code>: real adaptive throttling needs its own dedicated signal, not raw load average</h3>
+<p>
+    GNU Parallel's <a href="https://www.gnu.org/software/parallel/parallel_design.html">design docs</a> are
+    explicit that its <code>--load</code> flag does <strong>not</strong> use the OS load average — load average
+    rises too slowly to give a useful, instant read. Instead it polls <code>ps</code> for the count of threads
+    in a running or blocked state (<code>R</code>/<code>D</code>/<code>O</code>), and busy-waits with an
+    exponential backoff (capped at one second) between polls to avoid the poll itself burning CPU.
+</p>
+<p>
+    <strong>Implication (the "supported by default" cap-value call):</strong> real, shipped adaptive
+    throttling is not "swap a constant for <code>os.loadavg()</code>" — it is a dedicated, nontrivial
+    measurement-and-hysteresis layer that this repo does not have today (the same gap that excludes the
+    adaptive heavy-command-classification call adjacent to Fork 1). That is evidence adaptive load-sampling
+    is a real, deferred upgrade, not a reason to reject it in principle — and not a ratifiable fork branch
+    here.
+</p>
+
+<h3>Finding 4 — GitHub Actions concurrency groups: a queued job is a first-class visible state</h3>
+<p>
+    GitHub Actions' <a href="https://docs.github.com/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs">concurrency
+    groups</a> hold a job in a distinct, queryable <code>queued</code>/<code>pending</code> state rather than
+    leaving it silent while it waits for a group slot, and a
+    <a href="https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/">2026-05-07
+    change</a> made that queue's depth itself configurable (up to 100 pending runs).
+</p>
+<p>
+    <strong>Implication (Fork 3):</strong> the mainstream shape for "waiting on a concurrency gate" is a
+    dedicated, visible signal — not process-level-only observation a supervisor has to go find by hand.
+</p>
+
+<h3>Finding 5 — this repo already ships two single-holder cross-process locks; the eventual mechanism is their natural N=cap generalization</h3>
+<p>
+    Two independently-designed, already-shipped mechanisms establish the primitive shape a later admission-queue
+    build would generalize: <code>we:scripts/readiness/file-locks.mjs</code> (#1936, itself surveyed in
+    <a href="/research/agent-file-lock-coordination/">Agent File-Lock Coordination</a>) reserves a path via an
+    atomic lock directory, a heartbeat-TTL lease, and a same-machine PID-liveness fast-reclaim path layered on
+    top (PID reuse means liveness alone is never the primary check). <code>we:scripts/conveyor/infra-blocked.mjs</code>'s
+    <code>withInfraLock</code> takes an exclusive-create lock file with a stale-lock steal window and — its
+    sharpest design principle — a hard timeout that <strong>proceeds anyway</strong> rather than risk
+    deadlocking a tick.
+</p>
+<p>
+    <strong>Implication:</strong> both are <code>N=1</code> mutexes; nothing in this repo today generalizes one
+    to an <code>N=cap</code> counting semaphore. That confirms this survey's own confirmed-gap grep (#3456's own
+    text) at the mechanism level, and gives whichever fork's follow-on build item picks a mechanism a concrete
+    starting shape — cited here as grounding, never as this decision's own scope (the exact mechanism stays
+    explicitly out of #3456's ruling).
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision this survey feeds: <a href="/backlog/3456-cap-concurrent-heavy-commands-across-dispatched-lanes-a-capa/">#3456</a></li>
+    <li>Adjacent, already-surveyed research (per-path mutex, not capacity semaphore): <a href="/research/agent-file-lock-coordination/">Agent File-Lock Coordination</a></li>
+    <li>Related, already-resolved sibling decisions: <a href="/backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever/">#3427</a> (operation-catalog scope + telemetry), <a href="/backlog/3451-build-the-lightweight-call-visibility-signal-for-every-opera/">#3451</a> (its build item)</li>
+</ul>
