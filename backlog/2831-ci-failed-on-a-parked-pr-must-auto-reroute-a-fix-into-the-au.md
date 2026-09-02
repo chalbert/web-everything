@@ -6,6 +6,18 @@ parent: "2612"
 status: open
 dateOpened: "2026-08-02"
 tags: [conveyor, orchestrator-mechanization, drain, ci-lifecycle]
+scope:
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/conveyor/
+  - we:scripts/operations/dispatch-lane.mjs
+  - we:scripts/operations/dispatch-lane-io.mjs
+  - we:scripts/lane-pool.mjs
+  - we:scripts/pr-land.mjs
+  - we:scripts/readiness/conveyor-state.mjs
+  - we:skills-src/drain/
+  - we:skills-src/conveyor/
+  - we:scripts/__tests__/
+  - we:scripts/operations/__tests__/
 ---
 
 # ci:failed on a parked PR must auto-reroute a fix into the author lane
