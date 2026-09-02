@@ -177,6 +177,10 @@ Then start the headless runner (§2).
 **The main session does NOT run the tick.** It launches the singleton-locked headless runner as a background
 process, and from then on the runner drives every beat with no model context. Start it once:
 
+> **Operating it, not building it?** [`we:docs/agent/dispatcher-runbook.md`](../../docs/agent/dispatcher-runbook.md)
+> covers liveness checks, safe stops, closing out a stuck `--bg` agent, and the env vars a real dispatch needs —
+> this section is the interactive session's own operating script, not that reference.
+
 ```bash
 node skills-src/conveyor/runner.mjs --json   # run_in_background: true — the mechanical plane's whole lifetime
 ```
