@@ -3,8 +3,10 @@ bornAs: xq3j6xn
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateStarted: "2026-09-01"
+dateResolved: "2026-09-01"
 tags: []
 scope:
   - we:scripts/lib/gate-config.mjs

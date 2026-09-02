@@ -311,6 +311,82 @@ export const TRUST_CHAIN = [
       + '`spec`, the same reasoning that keeps review-runner-core.mjs/review-runner.mjs on `spec` (#2830)',
     homes: ['scripts/lib/review-independence.mjs'],
   },
+  // ── the MECHANICAL DISPATCH LOOP itself (WE #3401, under epic #3383) ──────────────────────────────────────
+  // The conveyor's own dispatch-loop machinery — the pure core that DECIDES which agent to spawn, the
+  // operation that actually STARTS a real delivery agent unattended, and the headless runner/supervisor that
+  // keep that loop alive — is exactly the class of process the resident drain daemon above is registered for:
+  // a change to any of them could spawn the wrong agent, dispatch to the wrong lane, or let the loop keep
+  // running past a guard it should have honoured, all with the operator's own gh/git credentials and no human
+  // in the loop. Before this entry, only `skills-src/conveyor/runner.mjs` escalated at all, and only via the
+  // generic `skills-src/` blast-radius pattern (#2909) — agent-clearable, not a portable trust-chain member;
+  // the other four files were unregistered entirely. ENGINE tier for all five, same reasoning as the drain
+  // daemon and converge-daemon entries above: none of them decides WHAT clears a review (that stays
+  // single-sourced in review-escalation.mjs / review-core.mjs / the review-policy contract) — they OBEY that
+  // verdict and decide only WHETHER/WHEN/WHICH LANE to dispatch, so a converged agent panel may still clear an
+  // edit to them, but registering the basename forces every such PR to escalate instead of silently
+  // self-clearing under a plain blast-radius score.
+  //
+  // ADJACENT TO #2937, RESOLVED INDEPENDENTLY (per this card's own Done-when #3). #2937 is the still-open
+  // decision on whether the agent-BEHAVIOUR *prose* rules (SKILL.md files, agent-memory-src docs — free-form
+  // text a reviewing agent CONSULTS) need a tier bump. This entry's subject is different in kind: executable
+  // CODE that DISPATCHES and SUPERVISES real agents, already the exact shape #2445/#2480 registered the drain
+  // daemon and #2572/#2830 registered the converge daemon for. That precedent settles the tier question on its
+  // own, with no dependency on how #2937's prose question resolves — so this does not fold into #2937 or wait
+  // on it; #2937 stays scoped to the prose surface it was opened for.
+  {
+    role: 'dispatch-tick-core',
+    file: 'tick-core.mjs',
+    tier: 'engine',
+    desc: 'the pure dispatch STATE MACHINE (planTick, WE #2699) — computes which agents to spawn, which lane '
+      + 'each is assigned, and the guard/watcher bookkeeping that prevents a double-dispatch. It decides the '
+      + 'mechanical WHAT-to-spawn but not what clears a review, so engine tier (WE #3401); a change here could '
+      + 'spawn the wrong agent, assign the wrong lane, or drop a guard that exists to prevent a double-dispatch',
+    homes: ['scripts/conveyor/tick-core.mjs'],
+  },
+  {
+    role: 'dispatch-operation',
+    file: 'dispatch-lane.mjs',
+    tier: 'engine',
+    desc: 'the declared operation that actually STARTS a real, unattended delivery agent against tick-core\'s '
+      + 'plan (WE #3037) — the one thing in this repo whose job is to spawn an LLM agent that builds and lands '
+      + 'code. It obeys the tick core\'s decision rather than making one of its own, so engine tier (WE #3401); '
+      + 'a change here could start the wrong agent, on the wrong lane, or skip a suppression the tick core intended',
+    homes: ['scripts/operations/dispatch-lane.mjs'],
+  },
+  {
+    role: 'dispatch-operation-io',
+    file: 'dispatch-lane-io.mjs',
+    tier: 'engine',
+    desc: 'the IO shell for dispatch-lane.mjs (WE #3401) — the sink that shells the real agent process and the '
+      + 'observer that tracks it once running. Same engine-tier reasoning as dispatch-lane.mjs itself: it '
+      + 'realizes the dispatch, it does not decide the leash',
+    homes: ['scripts/operations/dispatch-lane-io.mjs'],
+  },
+  {
+    role: 'dispatch-runner',
+    file: 'runner.mjs',
+    tier: 'engine',
+    desc: 'the singleton-locked headless runner (WE #2702) that steps tick-core every interval and calls '
+      + 'dispatch-lane for real, unattended, forever, with the operator\'s own gh/git credentials — the '
+      + 'process that makes the whole dispatch loop actually run. It only obeys the guards tick-core computes, '
+      + 'so engine tier (WE #3401), mirroring the drain daemon\'s own daemon.mjs entry above; registered because '
+      + 'until now it carried only the generic skills-src/ blast-radius pattern (#2909), agent-clearable but not '
+      + 'a portable trust-chain member. NB: generic basename — also matches an unrelated plateau-app IDE-bridge '
+      + 'test helper (packages/dev-browser/.../__host-tests__/runner.mjs); accepted over-escalation, the same '
+      + 'posture already taken for daemon.mjs/cli.mjs/lib.mjs above',
+    homes: ['skills-src/conveyor/runner.mjs'],
+  },
+  {
+    role: 'dispatch-supervisor',
+    file: 'supervisor.mjs',
+    tier: 'engine',
+    desc: 'the resident process that restarts the runner above on crash and backs off repeated idle-stops '
+      + '(WE #3401) — it keeps the dispatch loop ALIVE unattended, the same role daemon.mjs plays for the '
+      + 'drain. Engine tier for the same reason. Registered by basename AHEAD of its own landing to `main` (it '
+      + 'exists today only on origin/lane/mechanical-dispatcher) — the whole point of basename matching is '
+      + 'that the moment it merges, it is already gate-self, with nothing further to register',
+    homes: ['skills-src/conveyor/supervisor.mjs'],
+  },
   {
     role: 'roster-config',
     file: 'gate-config.mjs',
