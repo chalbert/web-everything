@@ -1041,8 +1041,14 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
     expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix' }, { isLocalRepo })).toEqual([3412]);
   });
 
-  it('no manifest, WE repo, headRef carries no number — falls back to the title\'s #NNN', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'some-feature-branch', title: 'Fix the drain (#2330)' }, { isLocalRepo })).toEqual([2330]);
+  it('no manifest, WE repo, headRef carries no number — falls back to an explicit "resolve #NNN" in the title', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'some-feature-branch', title: 'Fix the drain — resolves #2330' }, { isLocalRepo })).toEqual([2330]);
+  });
+
+  it('a bare #NNN CITATION in the title (not a delivery marker) is NOT credited — only an unrelated real bug this fix closes', () => {
+    // #3441 review finding: itemNumsFromPr's loose title regex matched ANY "#NNN", so a PR titled
+    // "WE #3412: resolve fix (root cause also affects #2330)" would wrongly resolve #2330 too.
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix (root cause also affects #2330)' }, { isLocalRepo })).toEqual([3412]);
   });
 
   it('no manifest, NON-WE repo — an impl half of a cross-locus couple must NEVER resolve on its own', () => {
@@ -1053,8 +1059,11 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
     expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo })).toEqual([]);
   });
 
-  it('a batch ref can name several ids at once', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/batch-2026-07-08-2245-2281', title: '' }, { isLocalRepo })).toEqual([2245, 2281]);
+  it('a batch ref credits ONLY its trailing segment — the batch\'s OTHER named items are still mid-flight, not delivered by this PR', () => {
+    // #3441 review finding: a batch slug (lane/batch-<date>-<id>-<id>-…-<id>) names every item planned
+    // into the batch upfront, before the earlier ones are even claimed — crediting a non-trailing segment
+    // would resolve a sibling item this PR never touched, mid-build, out from under its own lane.
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/batch-2026-07-08-2245-2281', title: '' }, { isLocalRepo })).toEqual([2281]);
   });
 
   it('null/undefined candidate → empty, never throws', () => {

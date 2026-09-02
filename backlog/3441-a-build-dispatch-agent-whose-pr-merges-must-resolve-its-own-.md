@@ -42,15 +42,29 @@ status, not the session's; a dispatch could in principle exit cleanly while stil
   `landedThisPass` at all. The gap was never "the dispatch doesn't resolve its own item at exit" (the brief's
   exit sequence never waits for the merge in the first place — waiting would contradict its own
   exit-without-merging guardrail); it was "the drain's already-built resolve-on-land only recognized couples."
-- **Fix:** `we:scripts/merge-ai-prs.mjs` — new pure `landedIdsForCandidate(c, { isLocalRepo })`, reusing the
-  already-single-sourced `itemNumsFromPr` branch/title extractor (`we:scripts/lib/open-pr-items.mjs`) to derive
-  an item id for a non-manifest WE-repo merge, restricted to the local repo so a cross-locus impl half never
-  self-resolves. Wired into the 3 `landedThisPass` call sites in the merge cascade. `planResolveOnLand` needed
-  no change — it was already generic over non-couple ids.
-- **Proof:** 9 new unit tests in `we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs` covering the manifest
-  path (unchanged), the plain single-locus path (the `#3412` shape, from both headRef and title), the
-  impl-half exemption, batch refs, and the empty/null edges. A live end-to-end proof needs an actual PR merge
-  through the resident drain, which this session cannot trigger.
+- **Fix:** `we:scripts/merge-ai-prs.mjs` — new pure `landedIdsForCandidate(c, { isLocalRepo })`, restricted
+  to the local WE repo so a cross-locus impl half never self-resolves. It derives the item id via a new,
+  deliberately STRICTER extractor, `deliveredItemNumsFromPr` (`we:scripts/lib/open-pr-items.mjs`) — NOT the
+  existing `itemNumsFromPr`, which 4 rounds of adversarial review found too loose for an auto-committed
+  resolve (it's fine for its own low-stakes readiness-ranking-exclusion caller, kept unchanged). The stricter
+  extractor: only credits the segment right after `lane/` (or the trailing segment of a true `batch-`-led
+  chain, or — new — the trailing segment of a verb-led id-last ref like `lane/build-3067` when the leading
+  segment isn't one, a real convention this repo's own maintenance tooling mints); excludes any `YYYY-MM-DD`
+  date span anywhere in the ref; requires an explicit `<id>:` / `resolve[sd]?:? #<id>` title marker, never a
+  bare `#NNN` citation; and carves out `isAnnotationPr` (reused directly from
+  `we:scripts/backlog-stranded-sweep.mjs`) so a scope-authoring/prepare-decision PR is never mistaken for a
+  build. Wired into the 3 `landedThisPass` call sites in the merge cascade. `planResolveOnLand` needed no
+  change — it was already generic over non-couple ids.
+- **Proof:** the adversarial self-review (step 6) ran 8 rounds — the first 7 each found a real,
+  historically-grounded false-positive/false-negative bug in the extractor, most severely `lane/3383-resolve-
+  3412` (a REAL ref from this very item's own parent epic #3383's git history, wrongly crediting the epic
+  instead of the actual delivered item) and its generalized shape (`<lead-id>-<allowlisted-verb>-<...>-<id>`
+  with arbitrary extra words). Round 8 came back clean (one theoretical, non-reachable case-sensitivity gap
+  found and fixed anyway at near-zero cost, since real branch slugs are always lowercased by this repo's own
+  `slugify()`). 39 unit tests in `we:scripts/lib/__tests__/open-pr-items.test.mjs` plus the existing
+  `we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs` coverage for `landedIdsForCandidate`,
+  hand-verified against 31+ real and constructed ref/title shapes across all 8 rounds. A live end-to-end proof
+  needs an actual PR merge through the resident drain, which this session cannot trigger.
 - **`we:skills-src/conveyor/delivery-agent-brief.md` / `we:scripts/backlog.mjs` (the predicted scope) were not
   touched** — the fix lives entirely on the drain side; nothing about the delivery agent's own exit sequence
   needed to change.

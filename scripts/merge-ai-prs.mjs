@@ -126,7 +126,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { itemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the single-sourced branch/title item extractor, reused (not re-implemented) for the non-manifest resolve-on-land path
+import { deliveredItemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
 // #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
@@ -1349,14 +1349,15 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
  * before (#2899 A5). A candidate with NO manifest is the delivery-agent-brief's DEFAULT path — a plain
  * single-locus WE PR (`lane/<NNN>-<slug>`, no `.lane-manifest.json`) — and until now it contributed NOTHING:
  * resolve-on-land only ever looked at manifest carriers, so an ordinary item's card stayed `active` forever
- * after its PR merged (the #3412 incident this item was filed against). Derive its id(s) the same way the
- * open-PR readiness exclusion already does — `itemNumsFromPr`, the single-sourced branch/title extractor
- * (`./lib/open-pr-items.mjs`) — but ONLY for a PR in the WE repo itself: a non-WE PR matching the identical
- * `lane/<NNN>-…` naming is an IMPL half of a cross-locus couple, and it must never resolve its item on its
- * own — only that couple's WE carrier does, and that one DOES carry a manifest and is already handled above.
- * A wrong/unmatched extraction is a safe no-op downstream: `resolveLandedItem` only acts on a real
- * `backlog/<id>-*.md` file, exactly like `itemNumsFromPr`'s other callers rely on (its own docstring: "the
- * caller intersects with the real backlog anyway"). Pure.
+ * after its PR merged (the #3412 incident this item was filed against). Derive its id(s) via
+ * `deliveredItemNumsFromPr` (`./lib/open-pr-items.mjs`) — but ONLY for a PR in the WE repo itself: a non-WE
+ * PR matching the identical `lane/<NNN>-…` naming is an IMPL half of a cross-locus couple, and it must never
+ * resolve its item on its own — only that couple's WE carrier does, and that one DOES carry a manifest and
+ * is already handled above. A wrong/unmatched extraction is a safe no-op downstream: `resolveLandedItem`
+ * only acts on a real `backlog/<id>-*.md` file. `deliveredItemNumsFromPr`'s own stricter matching rules
+ * already guard against the two ways a naive branch/title scan over-credits (batch refs crediting every
+ * sibling in the slug, bare `#NNN` citations) — see its docstring in `./lib/open-pr-items.mjs` for why it,
+ * not the looser `itemNumsFromPr`, is the right tool for an AUTO-COMMITTED resolve. Pure.
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string}} c
  * @param {{isLocalRepo?:function}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved (usually 0 or 1)
@@ -1365,7 +1366,7 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
-  return itemNumsFromPr(c.headRef, c.title).map(asItemId);
+  return deliveredItemNumsFromPr(c.headRef, c.title).map(asItemId);
 }
 
 /**
