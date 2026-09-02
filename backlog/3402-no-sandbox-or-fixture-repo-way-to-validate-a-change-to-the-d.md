@@ -2,14 +2,30 @@
 bornAs: xqbo107
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateResolved: "2026-09-01"
+codifiedIn: one-off
 preparedDate: "2026-09-01"
+ratifiedBy: "Nicolas Gilbert (operator)"
 tags: []
 relatedReport: reports/2026-09-01-conveyor-dispatcher-validation-substrate.md
 ---
 
 # No sandbox or fixture-repo way to validate a change to the dispatcher itself without running it against real backlog items and real PRs
+
+## Ruling (2026-09-01) — both forks' recommended defaults accepted, as presented
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-09-01** — Fork 1 = **(a) finish threading a fixture root +
+a fake-`gh`-on-`PATH` harness** and Fork 2 = **(a) chain the existing fake-sink pattern through the whole
+pipeline with `withFakeClaude()`, spawning zero real agents** — both accepted as presented, no alternative
+picked in either fork's place, no dissent raised. Both forks were already prepared with a `Skeptic:`
+`SURVIVES-WITH-AMENDMENT` verdict and a stated `high` confidence citing
+[`#skill-memory-replay-substrate`](docs/agent/platform-decisions.md#skill-memory-replay-substrate) (#2274) as
+the governing prior ruling, so this ratification is an **application** of that already-settled substrate choice
+to the two remaining un-fixtured dispatcher layers — not a new reusable rule, hence `codifiedIn: one-off`. Two
+follow-on build items are scaffolded under this decision (see *Follow-on builds* below), Fork 2's item
+`blockedBy` Fork 1's.
 
 #3383 own text names this risk directly ("even before any of its code has landed -- it is taking real actions against real PRs and real shared state") but no card addresses it. The epics own "still not done" list makes the gap concrete: the planned "live end-to-end test" is explicitly a scratch clone of the recovered branch plus "picking one specific low-stakes backlog item to actually dispatch" -- a real item, real PR, real shared state, chosen only for being low-stakes, not a synthetic fixture. we:skills-src/conveyor/runner.mjs and we:skills-src/conveyor/supervisor.mjs carry no dry-run/shadow/canary mode (grepped for dry-run, dryRun, canary, shadow mode -- none), and we:scripts/operations/dispatch-lane.mjs only guards against running FROM a lane checkout (assertNotALaneCheckout), not against dispatching AGAINST a non-production target repo/backlog. So every future change to the dispatcher machinery itself inherits the same choice: skip live validation, or validate against production. Checked the backlog for an existing sandbox/fixture-repo/staging-environment card scoped to the conveyor/dispatcher (grepped sandbox, "fixture repo", "scratch repo", "staging environment", "validate the dispatcher" across we:backlog/*.md and we:docs/agent/*.md) -- none found; the closest hits are all for unrelated subsystems (polyglot panel dry-run flags, workflow orchestrator dry-run, plateau-loop rewrite).
 
@@ -185,13 +201,15 @@ genuine, not cost-driven, fork.
   suite (#2274's own pattern) inside the standard test run, so that is the natural default absent a reason
   otherwise.
 
-## Follow-on builds (not yet scaffolded)
+## Follow-on builds (scaffolded at ratification)
 
-- Close the `--repo` thread gap + add a `--backlog-dir` override; ship `withFakeGh()`; add the fixture harness
-  test asserting `we:conveyor-state.mjs` → `we:dispatch-plan.mjs` → `we:tick-core.mjs` end to end (Fork 1) · build ·
+- [Finish the dispatcher fixture-root thread](/backlog/xediz51/) (Fork 1) — close the `--repo` thread gap + add a
+  `--backlog-dir` override; ship `withFakeGh()`; add the fixture harness test asserting
+  `we:conveyor-state.mjs` → `we:dispatch-plan.mjs` → `we:tick-core.mjs` end to end · build ·
   scope: `we:scripts/readiness/conveyor-state.mjs,we:scripts/readiness/dispatch-plan.mjs,we:scripts/backlog.mjs,we:scripts/conveyor/tick-core.mjs,we:scripts/conveyor/__tests__/`
-- Extend the fixture harness through `we:dispatch-lane.mjs`'s real argv-building/guard logic with only `spawnAgent`
-  faked, asserting the produced argv against the fixture (Fork 2) · build · blockedBy: the item above ·
+- [Extend the fixture harness through we:dispatch-lane.mjs](/backlog/xny5uon/) (Fork 2) — real argv-building/guard
+  logic with only `spawnAgent` faked via `withFakeClaude()`, asserting the produced argv against the fixture ·
+  build · `blockedBy` the item above ·
   scope: `we:scripts/operations/dispatch-lane.mjs,we:scripts/operations/dispatch-lane-io.mjs,we:scripts/operations/__tests__/`
 
 ### Review jury (provisional — pre-registered #2638)
