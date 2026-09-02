@@ -5,6 +5,11 @@ size: 3
 status: open
 dateOpened: "2026-08-06"
 tags: []
+scope:
+  - we:scripts/guard-bash.mjs
+  - we:scripts/__tests__/guard-bash.test.mjs
+  - we:scripts/mine-golden-corpus.mjs
+  - we:scripts/golden-corpus/
 ---
 
 # Widen the bash hygiene guard to deny enumerate-then-add pipelines by EFFECT
