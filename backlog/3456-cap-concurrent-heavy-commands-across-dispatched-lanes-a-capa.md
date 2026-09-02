@@ -80,6 +80,22 @@ anywhere that would stop all N of them from running `check:standards`/`verify-la
 simultaneously the moment their work happens to line up — which is exactly the shape #3383's own
 finding 4 already hit by accident with a small handful of lanes.
 
+## Evidence update (2026-09-02 night): the same contention also shows up in the drain daemon's own cadence
+
+Not just a lane's own `verify-lane`/`check:standards` run — the resident drain daemon's separate
+JIT-numbering follow-up commit stalled the same way, under the same kind of concurrent-merge load.
+`we:scripts/check-standards-rules.mjs` sets `STRANDED_HASH_GRACE_SECONDS = 180`, documented as "~2.5x
+the measured 7-73s drain numbering-commit lag" — the window `check:standards` tolerates between a PR
+merging (item still under its `bornAs` hash-id filename) and the drain's own commit renaming it to its
+permanent number. For one real case tonight, `we:backlog/xhxezum-...md` → `#3455`: the merge landed at
+`2026-09-02 14:27:02` (`9dc873eb`) and the drain's numbering commit landed at `2026-09-02 14:46:52`
+(`027ee219`) — a **19m50s** gap, **6.6x** past the documented 180s grace window, not a near-miss. This
+fell inside a burst of concurrent merges (#1835 at 14:30:43, #1837 at 14:41:52, #1838 at 14:50:50,
+#1839 at 14:53:29), and a dispatched agent (`prepare-3448`) hit a real `check:standards` gate-red off
+this stranded file mid-window before it self-resolved. Same underlying capacity problem this card
+already argues for, a second concrete data point — not a separate issue, and not something to fix here
+(the grace-window timing is exactly what this card's own ratification should decide).
+
 ## Why this is distinct from #3427 and #3451 — cited, not re-litigated
 
 Both are real, related, non-overlapping context, not something this decision re-opens:
