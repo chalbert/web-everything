@@ -117,6 +117,9 @@ import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTre
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime + (#3440) localRepoSlug keys that lease per-repo
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
+// xsbyo56 — the PARSE half of #2324's escalation-reason block, reused (not re-implemented) so the #2832
+// held-reconcile comment can name the SPECIFIC file(s) a park already scored, not just the hold label.
+import { parseEscalationReason } from './review-detail.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, isItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
@@ -1838,6 +1841,39 @@ export function buildDrainReasonComment(kind, reasonText, auditLine) {
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
 
+/**
+ * xsbyo56 — the #2832 "held" reconcile comment WITH the specific file(s) that forced the hold, not just the
+ * hold label. Pure.
+ *
+ * WHY THIS EXISTED AS A GAP. PR #1814 touched three files but only one — the statute file
+ * `docs/agent/platform-decisions.md` — is gate-self/sensitive; it correctly earned `review:human`, but the
+ * comment a human reads said only "held — a review hold (review:human) stands … Clear the review to release
+ * it." That names the LABEL, never the file, so a reviewer must already know the escalation rubric or read the
+ * whole diff to find the one file that matters.
+ *
+ * The file-level detail was never missing — `scoreEscalation` (`we:scripts/lib/review-escalation.mjs`) already
+ * names the specific file(s) per category (e.g. `statute (docs/agent/platform-decisions.md) — human review
+ * required`), and that reason list is appended to the PR body under the `## Escalation reason` marker at park
+ * time (`buildEscalationReasonBlock`). This just reads it back via the existing parser
+ * (`parseEscalationReason`, `we:scripts/review-detail.mjs`) instead of re-deriving anything — the SAME
+ * derivation the review flow already uses, per its own `we:.claude/skills/review/SKILL.md` doc.
+ *
+ * Falls back to today's bare wording when the body carries no escalation-reason block — a hand-labelled PR, or
+ * one parked before #2324 minted the block, still gets a comment; it just can't name a file that was never
+ * recorded.
+ * @param {{labels?:Array<string|{name?:string}>, body?:string, label?:string}} o
+ * @returns {string}
+ */
+export function buildHeldReviewHoldReason({ labels, body, label = 'ready-to-merge' } = {}) {
+  const holdLabels = (Array.isArray(labels) ? labels : [])
+    .map((l) => (typeof l === 'string' ? l : l?.name))
+    .filter((n) => isReviewHoldLabel(n));
+  const holdText = holdLabels.join(', ') || 'review';
+  const reasons = parseEscalationReason(body);
+  const detail = reasons.length ? ` Specifically: ${reasons.join('; ')}.` : '';
+  return `held — a review hold (${holdText}) stands, so the "${label}" go-ahead is withheld even though the required check is green (#2832).${detail} Clear the review to release it.`;
+}
+
 /** xnsk54v follow-up — the fixed reason text for the land-path audit record. Exported (and imported by the
  *  test) so the string lives in ONE place: the record and its assertion can't silently drift apart. */
 export const LAND_REASON = 'landing — recording the acted-on manifest escalation values before merge';
@@ -3113,7 +3149,10 @@ async function runCli() {
     // #999/xq985wu F3 — `--limit OPEN_PR_LIST_LIMIT` (raised off the old silent 100). This listing is the SOLE
     // cross-item ordering source on a full sweep, so a truncated page is a MERGE-SAFETY hazard.
     listOpenPrs: async (repo) => {
-      const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      // xsbyo56 — `body` added so the #2832 held-reconcile branch (below) can read back the PR's own
+      // `## Escalation reason` block (`buildHeldReviewHoldReason`/`parseEscalationReason`) and name the
+      // specific file(s) that forced a review:human/pending/changes hold, not just the label.
+      const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       return JSON.parse(stdout.trim() || '[]');
     },
     // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool), cached
@@ -3208,7 +3247,10 @@ async function runCli() {
         // stamp removes it from that set, so without this the PR would sit green and silent with nothing
         // explaining the wait. `postDrainReasonComment` dedupes on (kind, reasonText), so a `--watch` loop
         // re-reaching this branch every pass posts ONCE, not once per pass.
-        const heldReason = `held — a review hold (${(p.labels || []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((n) => isReviewHoldLabel(n)).join(', ') || 'review'}) stands, so the "${label}" go-ahead is withheld even though the required check is green (#2832). Clear the review to release it.`;
+        // xsbyo56 — names the SPECIFIC file(s) that forced the hold (read back from the PR body's #2324
+        // escalation-reason block), not just the label category (was `review:human` with no file attribution —
+        // see PR #1814, whose only sensitive file of three, `docs/agent/platform-decisions.md`, was never named).
+        const heldReason = buildHeldReviewHoldReason({ labels: p.labels, body: p.body, label });
         if (!DRY_RUN) postDrainReasonComment(repo, p.number, 'park', heldReason, null);
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(repo)}${p.number} green but HELD — "${label}" withheld (#2832)\n`);
       }
