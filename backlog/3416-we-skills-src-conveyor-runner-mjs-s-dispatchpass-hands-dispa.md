@@ -3,8 +3,9 @@ bornAs: xmjcqwz
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateResolved: "2026-09-02"
 tags: []
 scope:
   - we:skills-src/conveyor/
@@ -36,6 +37,25 @@ one; or (b) some condition specific to that session (not visible from a static r
 despite this logic. Not resolved — the exact commit that ran on 2026-08-29 was not preserved as a literal,
 diffable point in this branch's reconstructed history, so a real bisect against it is not possible with what
 is on disk.
+
+## Landed
+
+**`we:skills-src/conveyor/runner.mjs`** gained `bookkeepingForDispatch()`, called right before each item's
+own `dispatch-lane` call. Root cause: the runner's tick-core read computes both the dispatch decision and
+the updated guard bookkeeping in one pass, so the new guard entry for the item about to be dispatched was
+already present in `nextState` before `dispatch-lane` was ever invoked — `dispatch-lane`'s own independent
+tick-core re-plan then read that bookkeeping, saw the item's guard already "live," and suppressed the very
+spawn it was about to make as an already-in-flight duplicate. `bookkeepingForDispatch(nextState, item)`
+strips ONLY the target item's own guard entries (build/prepare) from the snapshot handed to that item's
+`dispatch-lane` call — every other item's guards stay intact.
+
+1. **Done — docblock explicitly tagged `#3416`** at the file header, `bookkeepingForDispatch` itself, and
+   its call site.
+2. `we:skills-src/conveyor/__tests__/runner.test.mjs` has a dedicated `describe('bookkeepingForDispatch
+   (#3416) — strips ONLY the target item\'s own guard, nothing else', ...)` block.
+3. Live-verified (see `#3383`'s own session history): a real tick against `#3412` with the fix in place
+   produced an actual `claude --bg` spawn (`conveyor-3412`) instead of `holdReason: "suppressed by the
+   in-flight build guard"`.
 
 ## Done when
 
