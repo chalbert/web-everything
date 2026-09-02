@@ -2,9 +2,11 @@
 bornAs: xfhficz
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-08-30"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
+graduatedTo: none
 tags: []
 scope:
   - we:docs/agent/
