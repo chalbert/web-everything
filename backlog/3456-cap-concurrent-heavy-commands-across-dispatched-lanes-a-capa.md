@@ -33,7 +33,11 @@ lanes may be running a heavy command at the same instant.
 Every dispatched delivery/prepare agent's brief (`we:skills-src/conveyor/delivery-agent-brief.md`,
 `we:skills-src/conveyor/prepare-scope-agent-brief.md`, `we:skills-src/conveyor/prepare-decision-agent-brief.md`,
 `we:skills-src/conveyor/fix-agent-brief.md`) routes through the same small set of genuinely expensive,
-CPU/IO-bound commands:
+CPU/IO-bound commands. This closed-brief shape is itself ratified doctrine, not incidental: per
+`we:backlog/3405-ratify-the-agents-never-run-commands-only-the-mechanical-lay.md`
+(`#dispatched-agent-never-runs-commands-directly`), a dispatched agent never invokes an arbitrary command —
+only the mechanical layer's own declared briefs/operations do — so the heavy-command surface really is this
+small, enumerable set, not an open-ended one a Fork 1(a) named list could never keep up with:
 
 - **`npm run check:standards`** — the deterministic gate every WE item must pass green before it may
   resolve (`we:skills-src/conveyor/delivery-agent-brief.md` step 5).
@@ -104,7 +108,11 @@ rule on `STRANDED_HASH_GRACE_SECONDS`'s value, and this card does not retune it.
 in that a working admission queue (whatever this card ratifies) should, as a side effect, shrink real
 concurrent-merge contention and so the drain's own numbering lag — not because this card sets the grace
 window. Retuning `STRANDED_HASH_GRACE_SECONDS` itself, if warranted, is separate follow-up work, out of
-scope here (see "What this decision does NOT settle").
+scope here (see "What this decision does NOT settle"). A third data point in the same family:
+`we:backlog/3411-lane-pool-reap-on-acquire-s-ttl-backdating-tests-flake-red-u.md` (resolved) is a
+TTL-backdating test suite that itself flaked red under real host contention — the identical
+"tests fail under concurrent load, not because the code is wrong" shape this card's own motivating evidence
+already establishes, from a third, independent angle.
 
 ## Why this is distinct from #3427 and #3451 — cited, not re-litigated
 
