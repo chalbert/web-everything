@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  PR_VIEW_FIELDS, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
+  PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
@@ -470,6 +470,97 @@ describe('the PR-view transport', () => {
  * file (review-pr correctness juror on #1466). `exec` is injected too, so this stays io-free: no `gh`, no
  * `git`, no network — the property the file header claims.
  */
+/**
+ * #3137 — THE CROSS-REPO REFUSAL. `readPr`'s net-diff git calls are rooted at `cwd`, so a `--repo=` target
+ * that is not this checkout's own origin cannot be resolved locally. Before this fix that fell through to
+ * `shapeReadFinding`'s `ref-unresolved` degrade path — an EMPTY diff, `degraded: true`, and no hard error
+ * anywhere in the run (reproduced live against plateau-app#139). This is the false-pass hazard itself: a
+ * judge handed nothing to find fault with reads as a clean, if slightly degraded, accept.
+ */
+describe('readPr refuses a cross-repo target rather than degrading to an empty diff (#3137)', () => {
+  const VIEW = {
+    number: 7, title: 'a title', url: 'https://example.invalid/7', body: 'a body',
+    labels: [], comments: [], files: [{ path: 'a.mjs', additions: 1, deletions: 0 }], headRefName: 'lane/x',
+  };
+
+  it('throws when `repo` does not match this checkout\'s origin', () => {
+    let gitCalls = 0;
+    const countingExec = () => { gitCalls += 1; return ''; };
+    expect(() => readPr({
+      pr: 139, repo: 'chalbert/plateau-app', exec: countingExec, cwd: '/somewhere',
+      originRepo: () => 'org/web-everything', readView: () => ({ ...VIEW, number: 139 }),
+    })).toThrow(/refusing to review chalbert\/plateau-app#139.*origin is org\/web-everything/s);
+    // Refuses BEFORE any net-diff git call — the mismatch never reaches `git`, exactly like the
+    // wrong-PR-number refusal a few lines up.
+    expect(gitCalls).toBe(0);
+  });
+
+  it('refuses BEFORE the `gh`/view transport is even called — no wasted round trip on a target it cannot use', () => {
+    let called = 0;
+    const readView = () => { called += 1; return VIEW; };
+    expect(() => readPr({
+      pr: 139, repo: 'chalbert/plateau-app', exec: () => '', originRepo: () => 'org/web-everything', readView,
+    })).toThrow();
+    expect(called).toBe(0);
+  });
+
+  it('treats an unresolvable origin (empty string) as a mismatch too, never as a silent pass', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: () => '', originRepo: () => '', readView: () => VIEW,
+    })).toThrow(/origin is \(unknown\)/);
+  });
+
+  it('proceeds normally when `repo` matches this checkout\'s origin', () => {
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: () => '', originRepo: () => 'o/n', readView: () => VIEW,
+    })).not.toThrow();
+  });
+
+  it('defaults `originRepo` to the real git-backed resolver, so production callers get the check for free', () => {
+    // No `originRepo` injected — this exercises the real `defaultOriginRepo` against a `cwd` that is not a
+    // git checkout at all, which resolves to '' and therefore never matches a real `repo`.
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: () => '', cwd: '/definitely-not-a-git-checkout-3137', readView: () => VIEW,
+    })).toThrow(/review-pr-io: refusing to review/);
+  });
+});
+
+/**
+ * #3137 — `createReviewPrReader` is the closure production wiring actually calls (`run.mjs`); it must thread
+ * the new `originRepo` override through to `readPr` rather than silently dropping it, which a mere line-count
+ * check on the pass-through cannot catch.
+ */
+describe('createReviewPrReader threads `originRepo` through to `readPr` (#3137)', () => {
+  const VIEW = {
+    number: 7, title: 't', url: 'https://example.invalid/7', body: '',
+    labels: [], comments: [], files: [], headRefName: 'lane/x',
+  };
+
+  it('refuses a cross-repo target using the injected `originRepo`, not just the default', () => {
+    const reader = createReviewPrReader({
+      exec: () => '', cwd: '/somewhere', originRepo: () => 'org/other-repo',
+    });
+    expect(() => reader({ pr: 7, repo: 'org/web-everything' })).toThrow(/refusing to review org\/web-everything#7/);
+  });
+
+  it('reads normally when the injected `originRepo` matches — proceeds past the refusal to the view transport', () => {
+    // Stage a view via WE_PR_VIEW_DIR (`readPr`'s default `readView` resolves `process.env` per call) so this
+    // stays io-free rather than reaching real `gh`. `createReviewPrReader` takes no `readView` of its own, so
+    // this is the only way to prove the reader gets PAST the mismatch check without a network call.
+    writeFileSync(join(root, prViewFileName('o/n', 7)), JSON.stringify(VIEW));
+    const before = process.env.WE_PR_VIEW_DIR;
+    process.env.WE_PR_VIEW_DIR = root;
+    try {
+      const reader = createReviewPrReader({ exec: () => '', originRepo: () => 'o/n' });
+      const out = reader({ pr: 7, repo: 'o/n' });
+      expect(out.headRefName).toBe('lane/x');
+    } finally {
+      if (before === undefined) delete process.env.WE_PR_VIEW_DIR;
+      else process.env.WE_PR_VIEW_DIR = before;
+    }
+  });
+});
+
 describe('readPr wires the injected view transport', () => {
   const VIEW = {
     number: 7, title: 'a title', url: 'https://example.invalid/7', body: 'a body',
@@ -478,16 +569,23 @@ describe('readPr wires the injected view transport', () => {
   };
   // Enough of a git for the net-diff helpers to resolve a basis and an empty diff without touching a repo.
   const execStub = () => '';
+  // #3137 — this checkout's origin, stubbed to match `repo: 'o/n'` in every call below, so these tests
+  // exercise the WIRING (readView, exec) rather than the repo-mismatch refusal, which has its own tests.
+  const originRepoStub = () => 'o/n';
 
   it('calls readView with the pr, repo and cwd it was given', () => {
     const seen = [];
-    readPr({ pr: 7, repo: 'o/n', exec: execStub, cwd: '/somewhere', readView: (o) => { seen.push(o); return VIEW; } });
+    readPr({
+      pr: 7, repo: 'o/n', exec: execStub, cwd: '/somewhere', originRepo: originRepoStub, readView: (o) => { seen.push(o); return VIEW; },
+    });
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ pr: 7, repo: 'o/n', cwd: '/somewhere' });
   });
 
   it('carries the transport-supplied view through into the read finding', () => {
-    const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
+    const out = readPr({
+      pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => VIEW,
+    });
     expect(out.headRefName).toBe('lane/x');
     expect(out.body).toBe('a body');
   });
@@ -505,7 +603,8 @@ describe('readPr wires the injected view transport', () => {
     process.env.CLAUDE_CODE_SESSION_ID = 'sess-under-test';
     try {
       const out = readPr({
-        pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, createdAt: '2026-08-20T00:00:00Z' }),
+        pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub,
+        readView: () => ({ ...VIEW, createdAt: '2026-08-20T00:00:00Z' }),
       });
       expect(out.createdAt).toBe('2026-08-20T00:00:00Z');
       // READ FROM THE ENVIRONMENT, never from argv or the view — the #2844 property this whole comparison
@@ -520,7 +619,9 @@ describe('readPr wires the injected view transport', () => {
   it('#3322 — a view with no `createdAt` degrades to "" rather than undefined, and never throws', () => {
     // A pre-fetched view staged by hand (`WE_PR_VIEW_DIR`) may simply omit it. `distinguishMissingAuthorStamp`
     // treats an unparseable date as NEVER_STAMPED, i.e. the pre-#3067 behaviour — no new false refusal.
-    const out = readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => VIEW });
+    const out = readPr({
+      pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => VIEW,
+    });
     expect(out.createdAt).toBe('');
   });
 
@@ -534,7 +635,8 @@ describe('readPr wires the injected view transport', () => {
 
   it('propagates a transport failure rather than reviewing an empty view', () => {
     expect(() => readPr({
-      pr: 7, repo: 'o/n', exec: execStub, readView: () => { throw new Error('no pre-fetched view at /x.json'); },
+      pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub,
+      readView: () => { throw new Error('no pre-fetched view at /x.json'); },
     })).toThrow(/no pre-fetched view/);
   });
 
@@ -547,14 +649,16 @@ describe('readPr wires the injected view transport', () => {
    */
   it('REFUSES a view whose number is not the PR that was asked for', () => {
     expect(() => readPr({
-      pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }),
+      pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => ({ ...VIEW, number: 999 }),
     })).toThrow(/refusing to review o\/n#7 .*has #999/);
   });
 
   it('names the file to re-stage, so the operator can act on the refusal', () => {
     let message = '';
     try {
-      readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number: 999 }) });
+      readPr({
+        pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => ({ ...VIEW, number: 999 }),
+      });
     } catch (e) { message = e.message; }
     expect(message).toContain(prViewFileName('o/n', 7));
     expect(message).toContain('WE_PR_VIEW_DIR');
@@ -562,15 +666,16 @@ describe('readPr wires the injected view transport', () => {
 
   it('refuses a view with NO number — absent is not better evidence than wrong', () => {
     const { number, ...noNumber } = VIEW;
-    expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => noNumber }))
-      .toThrow(/no `number` field at all/);
+    expect(() => readPr({
+      pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => noNumber,
+    })).toThrow(/no `number` field at all/);
   });
 
   it('refuses BEFORE the diff basis is resolved — the wrong PR never reaches git', () => {
     let gitCalls = 0;
     const countingExec = () => { gitCalls += 1; return ''; };
     expect(() => readPr({
-      pr: 7, repo: 'o/n', exec: countingExec, readView: () => ({ ...VIEW, number: 999 }),
+      pr: 7, repo: 'o/n', exec: countingExec, originRepo: originRepoStub, readView: () => ({ ...VIEW, number: 999 }),
     })).toThrow();
     expect(gitCalls).toBe(0);
   });
@@ -578,8 +683,9 @@ describe('readPr wires the injected view transport', () => {
   it('accepts a number that matches, however the transport spells it', () => {
     // `gh --json` yields a JSON number; a hand-staged file may carry the string. Both name the same PR.
     for (const number of [7, '7']) {
-      expect(() => readPr({ pr: 7, repo: 'o/n', exec: execStub, readView: () => ({ ...VIEW, number }) }))
-        .not.toThrow();
+      expect(() => readPr({
+        pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => ({ ...VIEW, number }),
+      })).not.toThrow();
     }
   });
 });
