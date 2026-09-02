@@ -2,8 +2,9 @@
 bornAs: xb2rz0g
 kind: task
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-01"
 tags: []
 scope:
   - we:scripts/operations/review-dispatch.mjs
@@ -31,3 +32,21 @@ wrong-for-the-wrong-reason verdict rather than an error.
 2. Decide and document where a dispatched review's own code SHOULD come from — the dispatching checkout at
    spawn time (today's actual behavior, now made loud instead of silent) or the lane it acquires (would need
    the agent to re-invoke itself from within the lane) — this card should record the choice, not just the gate.
+
+## Progress
+
+Added `assertMainNotStale` in `we:scripts/operations/review-dispatch.mjs`, wired into `dispatchReview` before
+the brief is read or the agent spawned. Refuses (throws) whenever `origin/main` is ahead of the dispatching
+checkout — behind, diverged, or not, no auto fast-forward (unlike the read-only ranker's `checkMainStaleness`
+use, this checkout may carry uncommitted work a caller does not expect mutated). A fetch failure (offline)
+stays fail-soft, matching `we:scripts/lib/main-staleness.mjs`'s own philosophy.
+
+**Decision (#2):** the dispatched review's code keeps coming from the dispatching checkout at spawn time —
+today's actual behavior — not the lane it later acquires. Re-invoking from inside the freshly-acquired lane
+would close the gap more completely but is a bigger structural change this item does not make; recorded as the
+explicit choice in `assertMainNotStale`'s own doc comment, per this item's #2.
+
+Tests: `we:scripts/operations/__tests__/review-dispatch.test.mjs` — `assertMainNotStale` unit coverage (fresh
+passes through, N-commits-behind refuses naming the count, a diverged checkout refuses the same way, offline
+is fail-soft) plus `dispatchReview` coverage proving the refusal fires before the brief is read or the agent
+spawned, and that a fresh checkout still dispatches.

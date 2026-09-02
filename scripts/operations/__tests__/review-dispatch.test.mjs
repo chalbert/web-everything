@@ -10,9 +10,13 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch, reviewSessionSlug,
-  REVIEW_BRIEF_PLACEHOLDERS,
+  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
+  reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
 } from '../review-dispatch.mjs';
+
+// A `checkStaleness` stub that never touches git — every `dispatchReview` test below injects one, so none of
+// them depend on real subprocess/network fail-soft behavior for a nonexistent `root`.
+const FRESH = () => ({ fresh: true, behind: 0 });
 
 const REAL_TEMPLATE_STUB = [
   '# brief for {{PR}} in {{REPO}}',
@@ -99,6 +103,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       readBrief: () => REAL_TEMPLATE_STUB,
       mintSessionId: () => '11111111-1111-4111-8111-111111111111',
       spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
     });
 
     expect(calls).toHaveLength(1);
@@ -124,6 +129,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       pr: 1, repo: 'o/r', root: '/some/path/.lanes/web-everything/lane-3',
       readBrief: () => REAL_TEMPLATE_STUB,
       spawnAgent: () => { throw new Error('must not be called'); },
+      checkStaleness: FRESH,
     })).toThrow(/lane/i);
   });
 
@@ -133,6 +139,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       pr: -1, repo: 'o/r', root: '/repo',
       readBrief: () => { readBriefCalls += 1; return REAL_TEMPLATE_STUB; },
       spawnAgent: () => { throw new Error('must not be called'); },
+      checkStaleness: FRESH,
     })).toThrow(/positive integer/);
     expect(readBriefCalls).toBe(0);
   });
@@ -150,6 +157,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       mintSessionId: () => '11111111-1111-4111-8111-111111111111',
       spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
       extraArgs: ['--permission-mode', 'plan'],
+      checkStaleness: FRESH,
     });
     expect(calls[0].argv).toEqual([
       '--bg',
@@ -160,5 +168,52 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
     ]);
+  });
+});
+
+// #3439 — a dispatched review spawns with its own `cwd`-relative import path, so a dispatching checkout N
+// commits behind origin/main silently runs pre-fix code with no error. These prove the refusal is real.
+describe('assertMainNotStale', () => {
+  it('passes through a fresh checkout untouched', () => {
+    expect(assertMainNotStale('/repo', FRESH)).toEqual({ fresh: true, behind: 0 });
+  });
+
+  it('refuses a checkout N commits behind origin/main, naming the count', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 12, ahead: 0, dirty: false, warning: 'stub' })))
+      .toThrow(/12 commit\(s\) behind origin\/main/);
+  });
+
+  it('refuses a DIVERGED checkout the same way — being behind at all is disqualifying, not just non-fast-forwardable', () => {
+    expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', behind: 3, ahead: 2, dirty: false, warning: 'stub' })))
+      .toThrow(/3 commit\(s\) behind/);
+  });
+
+  it('does not refuse when the staleness check is offline (fail-soft, matching main-staleness.mjs itself)', () => {
+    expect(assertMainNotStale('/repo', () => ({ offline: true }))).toEqual({ offline: true });
+  });
+});
+
+describe('dispatchReview — refuses to spawn from a stale checkout (#3439)', () => {
+  it('refuses before reading the brief or spawning, when behind origin/main', () => {
+    let readBriefCalls = 0;
+    expect(() => dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => { readBriefCalls += 1; return REAL_TEMPLATE_STUB; },
+      spawnAgent: () => { throw new Error('must not be called'); },
+      checkStaleness: () => ({ action: 'warn', behind: 9, ahead: 0, dirty: false, warning: 'stub' }),
+    })).toThrow(/9 commit\(s\) behind origin\/main/);
+    expect(readBriefCalls).toBe(0);
+  });
+
+  it('proceeds to spawn when the checkout is fresh', () => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB,
+      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      checkStaleness: FRESH,
+    });
+    expect(calls).toHaveLength(1);
   });
 });

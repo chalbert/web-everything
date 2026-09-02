@@ -79,6 +79,7 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+import { checkMainStaleness, gitRun } from '../lib/main-staleness.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 
@@ -164,6 +165,36 @@ export function fillReviewBrief(template, values = {}) {
 }
 
 /**
+ * ASSERT the dispatching checkout is not behind `origin/main` — #3439: a stale dispatching checkout spawns the
+ * review agent with THIS checkout's own stale `we:scripts/lib/review-loop-policy.mjs` on its `cwd`-relative
+ * import path, silently re-running pre-fix behavior with no error. THE CHOICE THIS RECORDS (item #3439's #2):
+ * the dispatched review's code keeps coming from the DISPATCHING checkout at spawn time — today's actual
+ * behavior — rather than the lane it later acquires (that would need the agent to re-invoke itself from
+ * inside its own freshly-acquired lane, a bigger change this item does not make). Made LOUD instead: refuse
+ * outright whenever `origin/main` is ahead, diverged or not — no auto fast-forward here (unlike `we:scripts/
+ * check-readiness.mjs`'s read-only ranker, this checkout may carry uncommitted work a caller does not expect
+ * mutated) — so a stale checkout never silently dispatches. A fetch failure (offline) is fail-soft, matching
+ * `we:scripts/lib/main-staleness.mjs`'s own philosophy: we cannot tell if it's stale, so we do not block on it.
+ *
+ * @param {string} root
+ * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
+ *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
+ */
+export function assertMainNotStale(root, checkStaleness = (r) => checkMainStaleness({
+  autoFf: false, run: (args) => gitRun(args, { cwd: r }),
+})) {
+  const st = checkStaleness(root);
+  if (st && st.action === 'warn') {
+    throw new Error(
+      `review-dispatch: the dispatching checkout is ${st.behind} commit(s) behind origin/main — refusing to `
+      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). Sync '
+      + '(git pull --ff-only) or dispatch from a fresh clone of origin/main and retry.',
+    );
+  }
+  return st;
+}
+
+/**
  * SHAPE one dispatch request. PURE — separated from the actual fill/spawn so a caller (and a test) can see
  * exactly what would be sent before anything is filled or spawned.
  *
@@ -197,6 +228,8 @@ export function planReviewDispatch({ pr, repo } = {}) {
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
+ * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
+ *   check (#3439) — see `assertMainNotStale`.
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
@@ -205,8 +238,13 @@ export function dispatchReview({
   mintSessionId = () => randomUUID(),
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
+  checkStaleness,
 } = {}) {
   assertNotALaneCheckout(root);
+  // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
+  // `checkStaleness` undefined here falls straight through to that function's own default — no need to
+  // duplicate it.
+  assertMainNotStale(root, checkStaleness);
   const planned = planReviewDispatch({ pr, repo });
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
     PR: planned.pr, REPO: planned.repo, SESSION_SLUG: planned.sessionSlug,
