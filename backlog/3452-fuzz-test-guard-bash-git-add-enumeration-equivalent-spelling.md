@@ -5,6 +5,8 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-02"
 tags: []
+scope:
+  - we:scripts/__tests__/
 ---
 
 # Fuzz-test guard-bash git-add-enumeration equivalent spellings
