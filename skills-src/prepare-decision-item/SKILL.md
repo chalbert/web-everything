@@ -253,7 +253,10 @@ land the `preparedDate` via the lane→PR; `resolve` is the *decision* turn's jo
    decision turn will trust). `prepare-stamp` is blocked from a primary cwd and allowed in the lane, so this
    splice lands via the one PR, never onto primary — do **not** hand-Edit `preparedDate`.
 2. **Gate:** `npm run check:standards` green (and the new `/research/` topic renders — confirm the
-   `researchTopics.json` entry + `.njk` write-up parsed). Confirm a `relatedReport` link exists.
+   `researchTopics.json` entry + `.njk` write-up parsed), and — for a decision item with `## Fork N`
+   sections — `npm run check:health` green too (catches a G4 false-prepared-fork tell before review
+   instead of after a bounce; the #3427 prep bounced review:changes on exactly this). Confirm a
+   `relatedReport` link exists.
 3. **Land the one PR, then release the hold.** Commit the item file + `/research/` topic in the lane and
    land it via `we:scripts/pr-land.mjs` (the standard transport). Once the PR is open/landing, drop the
    hold: `node scripts/backlog.mjs prepare-release <NNN>` — the item is `open` + prepared and claimable
