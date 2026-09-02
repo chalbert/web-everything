@@ -2,8 +2,9 @@
 bornAs: xc9xdhx
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateResolved: "2026-09-02"
 relatedTo: ["2453", "3403"]
 tags: [conveyor, lease, timing, flagged-by-review]
 scope:
@@ -39,6 +40,21 @@ running process, no crash or restart involved.
 `we:skills-src/conveyor/runner.mjs`'s `runLoop` (the tick loop), and `makeCliMechanicalPasses`'s
 ordering — the verify-dispatch pass runs synchronously inside the same `mechanicalPasses()` call the loop
 awaits before ever reaching `heartbeat()`.
+
+## Landed
+
+**`we:skills-src/conveyor/runner.mjs`** gained `MECHANICAL_PASS_HEARTBEAT_MS` (60s) and threads a
+`heartbeat` effect into `mechanicalPasses` (via `runQuietHeartbeating`, which runs the `#3105`
+verify-dispatch pass asynchronously and fires `heartbeat()` on a `setInterval` while it is still running)
+instead of only heartbeating the singleton lease after the whole tick returns — so a verify-dispatch pass
+that legitimately outlasts the lease TTL no longer lets it go stale mid-run.
+
+1. **Done — docblock explicitly tags the fix `#3404`** at the `MECHANICAL_PASS_HEARTBEAT_MS` constant, the
+   `runQuietHeartbeating` helper, and the `mechanicalPasses` JSDoc.
+2. `we:skills-src/conveyor/__tests__/runner.test.mjs` has `'#3404 — threads its OWN heartbeat effect into
+   mechanicalPasses, so a pass that outlasts the lease TTL can extend it mid-pass'`, asserting a fake slow
+   `mechanicalPasses` receives and can call the same `heartbeat` effect the loop itself uses.
+3. Mirrors `#2453`'s precedent (heartbeat threaded into the long-running effect, not just bracketing it).
 
 ## Done when
 

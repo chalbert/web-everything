@@ -3,8 +3,9 @@ bornAs: xqyyoje
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-31"
+dateResolved: "2026-09-02"
 tags: []
 scope:
   - we:scripts/operations/

@@ -2,8 +2,9 @@
 bornAs: xrvh17c
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-08-30"
+dateResolved: "2026-09-02"
 relatedTo: ["3397"]
 tags: [conveyor, supervisor, timing, flagged-by-review]
 scope:
@@ -37,6 +38,27 @@ conveyor is legitimately idle (i.e. potentially most of the time between operato
 collapse to the same zero-delay treatment) and `we:scripts/conveyor/tick-core.mjs`'s `assessIdleStop`
 (the operator-elapsed clock that makes a restart re-trip the SAME idle-stop immediately rather than
 needing its own fresh window).
+
+## Landed
+
+**`we:skills-src/conveyor/supervisor.mjs`** gained a separate idle-stop backoff curve
+(`DEFAULT_IDLE_BASE_BACKOFF_MS`/`DEFAULT_IDLE_MAX_BACKOFF_MS`, `idleBaseBackoffMs`/`idleMaxBackoffMs`),
+distinct from the existing crash-restart backoff. `classifyExit` now reads `stoppedReason` (parsed off
+`we:skills-src/conveyor/runner.mjs`'s own final `--json` line — `{event:'stopped', stoppedReason}` or
+`{event:'stood-down'}`) to tell a genuine idle-stop apart from a polite stand-down; `decideRestart` grows
+its own consecutive-idle-stop streak/backoff for the former while a stand-down still restarts promptly with
+zero delay — closing the busy-loop where a freshly-respawned runner re-tripped the same idle-stop
+immediately.
+
+1. **Done — docblocks explicitly tagged `#3406`** at the backoff constants, `classifyExit`, `decideRestart`,
+   and the log-entry `kind` field (`'idle-stop'` vs `'crash'`).
+2. `we:skills-src/conveyor/__tests__/supervisor.test.mjs` has substantial dedicated `#3406`-tagged coverage:
+   capturing `stoppedReason` off real child stdout for both `idle-stop` and `stand-down`, "a repeated
+   idle-stop grows its OWN streak/backoff", "Done-when 1: N consecutive clean exits..." proving a growing
+   delay instead of `sleeps` staying all-zero, and an idle-stop backoff's own `delayMs` climbing past the
+   crash ceiling.
+3. Stays disjoint from `#3397` (supervisor reload lifecycle) — this is a restart-cadence bug, not a
+   config-reload gap.
 
 ## Done when
 
