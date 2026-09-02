@@ -104,3 +104,19 @@ describe('parseJsonl', () => {
     expect(rows[0].kind).toBe('friction');
   });
 });
+
+describe('#3421 review fix — a blocking member propagates blocking:true + proposedFixes onto its cluster', () => {
+  it('a cluster with a blocking member carries blocking + the distinct proposedFix set', () => {
+    const hiccup = { ...e('friction', 'conveyor dispatch guard', 'Dispatch for #9 suppressed by the live in-flight guard (num) — tick did not proceed.'), blocking: true, proposedFix: 'confirm the guard is still legitimate', approvalPending: true };
+    const { clusters } = dedup([hiccup]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].blocking).toBe(true);
+    expect(clusters[0].proposedFixes).toEqual(['confirm the guard is still legitimate']);
+  });
+
+  it('an ordinary (non-blocking) cluster carries neither key — shape is unchanged', () => {
+    const { clusters } = dedup([e('friction', 'x', 'an ordinary friction entry')]);
+    expect(clusters[0]).not.toHaveProperty('blocking');
+    expect(clusters[0]).not.toHaveProperty('proposedFixes');
+  });
+});

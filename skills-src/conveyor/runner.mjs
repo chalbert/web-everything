@@ -175,12 +175,20 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
   };
 }
 
-/** Build the real `mechanicalPasses` effect: the two deterministic, no-LLM passes the SKILL runs each tick —
- *  the infra-blocked recovery pass (§4b) and the lease-reaper (§4c). Both are best-effort: a failure is
- *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole
- *  writer to `main`. */
-function makeCliMechanicalPasses({ scriptsDir, repo = null }) {
-  return async () => {
+/** Build the real `mechanicalPasses` effect: the deterministic, no-LLM passes the SKILL runs each tick —
+ *  the infra-blocked recovery pass (§4b), the lease-reaper (§4c), and (#3421) the blocking-hiccup sink. All
+ *  three are best-effort: a failure is swallowed (logged to stderr) and never gates the tick. Never a local
+ *  merge — the drain stays the sole writer to `main`.
+ *
+ *  THE HICCUP SINK is the ONLY one of the three that reads `out` (this tick's already-computed
+ *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
+ *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
+ *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
+ *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
+ *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
+ *  hiccup-sink.mjs `fileHiccup`. */
+function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
+  return async ({ out } = {}) => {
     const { execFileSync } = await import('node:child_process');
     const runQuiet = (relPath, extraArgs = []) => {
       try {
@@ -193,6 +201,19 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null }) {
     };
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
     runQuiet('conveyor/lease-reaper.mjs');
+    try {
+      // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
+      // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
+      // what every bundler's static import graph expects. runner.mjs lives in skills-src/conveyor/, these
+      // two in scripts/conveyor/ — the SAME relative hop TICK_CORE itself resolves via SCRIPTS_DIR above.
+      const { classifySuppressedBuilds } = await import('../../scripts/conveyor/hiccup-classify.mjs');
+      const { fileHiccups } = await import('../../scripts/conveyor/hiccup-sink.mjs');
+      const suppressed = out && out.decisions && out.decisions.suppressedBuilds;
+      const hiccups = classifySuppressedBuilds(suppressed);
+      if (hiccups.length) fileHiccups(hiccups, { session: hiccupSession });
+    } catch (e) {
+      process.stderr.write(`⚠ mechanical pass hiccup-sink failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    }
   };
 }
 
@@ -273,10 +294,11 @@ async function main(argv) {
   const intervalMs = finiteOr(flags['interval-ms'], DEFAULT_TICK_INTERVAL_MS);
   const maxTicks = flags.once ? 1 : finiteOr(flags['max-ticks'], Infinity);
 
+  const hiccupSession = typeof flags['hiccup-session'] === 'string' ? flags['hiccup-session'] : undefined;
   const buildEffects = () => ({
     tickOnce: makeCliTickOnce({ tickCorePath: TICK_CORE, repo }),
     emit: makeCliEmit({ json }),
-    mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo }),
+    mechanicalPasses: makeCliMechanicalPasses({ scriptsDir: SCRIPTS_DIR, repo, hiccupSession }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     intervalMs,
     maxTicks,

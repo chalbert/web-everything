@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { validateEntry, poolDir as machinePoolDir } from './learnings-drop.mjs';
 import { dedup, DEFAULT_THRESHOLD } from './learnings-dedup.mjs';
+import { approvalsPath, readApprovals, isApproved } from './hiccup-approve.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 export const ARCHIVE_DIR = 'harvested';
@@ -167,16 +168,40 @@ export function harvest(entries, { threshold = DEFAULT_THRESHOLD, minSessions = 
 }
 
 /**
- * harvestPool({ dir, threshold, minSessions, now }) → { candidates, stats, dir, files }.
- * The I/O wrapper: resolve → read → harvest. An absent/empty pool returns empty candidates and exit-0 — the
- * common, correct outcome (nothing observed since the last harvest is not a failure).
+ * partitionGated(entries, { approvals }) → { gated, eligible } (#3421, Done-when #3). A BLOCKING entry
+ * (`blocking:true`) stamped `approvalPending:true` by the mechanical sink (hiccup-sink.mjs) stays OUT of
+ * clustering/ranking entirely — held in `gated` — until an explicit human approval clears it
+ * (hiccup-approve.mjs). This is the "`/harvest` refuses to file+queue a blocking-bucket entry's fix until
+ * it is cleared" gate: gated entries never reach `harvest()`, so they can never surface as a candidate on
+ * this run. A non-blocking entry (no `blocking` field — the pre-existing shape) is always eligible.
+ */
+export function partitionGated(entries, { approvals = {} } = {}) {
+  const gated = [];
+  const eligible = [];
+  for (const e of Array.isArray(entries) ? entries : []) {
+    if (e && e.blocking === true && e.approvalPending === true && !isApproved({ session: e.session, ts: e.ts }, approvals)) {
+      gated.push(e);
+    } else {
+      eligible.push(e);
+    }
+  }
+  return { gated, eligible };
+}
+
+/**
+ * harvestPool({ dir, threshold, minSessions, now }) → { candidates, gated, stats, dir, files }.
+ * The I/O wrapper: resolve → read → GATE (#3421) → harvest. An absent/empty pool returns empty candidates
+ * and exit-0 — the common, correct outcome (nothing observed since the last harvest is not a failure).
+ * `gated` surfaces the blocking entries this run held back for approval — see partitionGated.
  */
 export function harvestPool({ dir, threshold, minSessions, now, env, root } = {}) {
   const poolDir = resolvePoolDir({ dir, env, root });
   const files = poolFiles(poolDir);
   const { entries, stats: readStats } = readPool(files);
-  const { candidates, stats } = harvest(entries, { threshold, minSessions, now });
-  return { candidates, stats: { ...readStats, ...stats }, dir: poolDir, files };
+  const approvals = readApprovals(approvalsPath({ dir: poolDir, env }));
+  const { gated, eligible } = partitionGated(entries, { approvals });
+  const { candidates, stats } = harvest(eligible, { threshold, minSessions, now });
+  return { candidates, gated, stats: { ...readStats, ...stats, gated: gated.length }, dir: poolDir, files };
 }
 
 /**
@@ -314,9 +339,17 @@ function main(argv) {
     console.log(`learnings pool empty (${result.dir}) — nothing to harvest.`);
   } else {
     const s = result.stats;
-    console.log(`harvested ${result.dir}: ${s.received} entries / ${s.files} session file(s) (${s.rejected} rejected, ${s.malformed} malformed) → ${result.candidates.length} candidate(s)${s.belowFloor ? `, ${s.belowFloor} below the ×${s.minSessions}-session floor` : ''}${s.ageDays != null ? `; oldest ${s.ageDays}d` : ''}.`);
+    console.log(`harvested ${result.dir}: ${s.received} entries / ${s.files} session file(s) (${s.rejected} rejected, ${s.malformed} malformed) → ${result.candidates.length} candidate(s)${s.belowFloor ? `, ${s.belowFloor} below the ×${s.minSessions}-session floor` : ''}${s.gated ? `, ${s.gated} gated (blocking, awaiting approval)` : ''}${s.ageDays != null ? `; oldest ${s.ageDays}d` : ''}.`);
     for (const c of result.candidates) {
       console.log(`  [${c.kind}] ${c.sessions} session(s) / ×${c.count}  ${c.area}\n     ${c.summary}\n     → ${c.suggestion}`);
+      // An APPROVED blocking hiccup carries its proposed fix(es) through clustering (#3421 review fix) —
+      // surface it here too, or the whole point of "propose a fix" is lost the moment approval clears it.
+      if (c.blocking && Array.isArray(c.proposedFixes)) {
+        for (const pf of c.proposedFixes) console.log(`     proposed fix: ${pf}`);
+      }
+    }
+    for (const g of result.gated) {
+      console.log(`  ⏸ GATED [${g.kind}] #${g.session}  ${g.area}\n     ${g.summary}\n     proposed fix: ${g.proposedFix}\n     → approve: node scripts/conveyor/hiccup-approve.mjs --session=${g.session} --ts=${g.ts}`);
     }
   }
   process.exit(0);

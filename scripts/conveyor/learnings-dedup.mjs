@@ -88,6 +88,12 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
     // Representative = longest summary (ties → first seen).
     const rep = c.members.reduce((best, m) =>
       (String(m.summary).length > String(best.summary).length ? m : best), c.members[0]);
+    // #3421 review fix — an APPROVED blocking hiccup re-enters this clustering path (learnings-harvest.mjs's
+    // partitionGated only holds back UNAPPROVED ones), but a bare {kind,area,summary,suggestion} shape drops
+    // its `proposedFix` on the floor: the candidate a human actually routes would be indistinguishable from
+    // an ordinary friction entry, defeating the whole point of "propose a fix". Surface it explicitly, ONLY
+    // when at least one member is a blocking hiccup — an ordinary cluster's shape is unchanged.
+    const blockingMembers = c.members.filter((m) => m.blocking === true);
     return {
       kind: rep.kind,
       area: rep.area,
@@ -101,6 +107,10 @@ export function dedup(entries, { threshold = DEFAULT_THRESHOLD } = {}) {
       // because "three different sessions hit this" is real recurrence evidence and "one session said it
       // three times" is not.
       sessions: [...new Set(c.members.map((m) => m.session).filter(Boolean))],
+      ...(blockingMembers.length ? {
+        blocking: true,
+        proposedFixes: [...new Set(blockingMembers.map((m) => m.proposedFix).filter(Boolean))],
+      } : {}),
       _first: c.first,
     };
   });

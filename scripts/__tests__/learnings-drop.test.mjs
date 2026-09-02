@@ -10,8 +10,8 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  KINDS, ALLOWED_KEYS, FIELD_CAPS, scrubReasons, isHighEntropyToken, validateEntry, appendEntry,
-  resolveDropboxPath, poolDir, normalizeTs,
+  KINDS, ALLOWED_KEYS, FIELD_CAPS, PROPOSED_FIX_CAP, scrubReasons, isHighEntropyToken, validateEntry, appendEntry,
+  resolveDropboxPath, poolDir, normalizeTs, OPTIONAL_HICCUP_KEYS,
 } from '../conveyor/learnings-drop.mjs';
 
 const good = {
@@ -96,8 +96,10 @@ describe('validateEntry — schema is the privacy boundary', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/disallowed field/i);
   });
-  it('exposes exactly the generalized-lesson keys', () => {
-    expect(ALLOWED_KEYS).toEqual(['kind', 'summary', 'area', 'suggestion']);
+  it('exposes exactly the generalized-lesson keys plus the #3421 optional hiccup keys', () => {
+    // blocking / proposedFix / approvalPending are OPTIONAL and hiccup-only (see the #3421 describe block
+    // below) — their presence in the allow-list does not widen what a non-blocking entry may carry.
+    expect(ALLOWED_KEYS).toEqual(['kind', 'summary', 'area', 'suggestion', 'blocking', 'proposedFix', 'approvalPending']);
   });
   it('rejects an unknown kind, a missing field, and a non-object', () => {
     expect(validateEntry({ ...good, kind: 'bug' }).ok).toBe(false);
@@ -219,7 +221,14 @@ describe('field length caps — structural leak-class kill (review fix A)', () =
     expect(validateEntry({ ...good, suggestion: 's '.repeat(FIELD_CAPS.suggestion) }).ok).toBe(false);
   });
   it('caps are summary 240 / area 60 / suggestion 400', () => {
+    // proposedFix's cap is DELIBERATELY not in FIELD_CAPS (see PROPOSED_FIX_CAP below) — a consumer that
+    // iterates FIELD_CAPS treats every key as a field REQUIRED on every entry (scripts/lib/review-loop-policy.mjs),
+    // and proposedFix is optional (blocking entries only).
     expect(FIELD_CAPS).toEqual({ summary: 240, area: 60, suggestion: 400 });
+  });
+  it('proposedFix has its own 400-char cap, kept OUT of FIELD_CAPS on purpose', () => {
+    expect(PROPOSED_FIX_CAP).toBe(400);
+    expect(FIELD_CAPS).not.toHaveProperty('proposedFix');
   });
 });
 
@@ -286,5 +295,72 @@ describe('the session slug is REQUIRED — a shared default file would collapse 
   });
   it('appendEntry surfaces the refusal rather than writing to a shared default', () => {
     expect(() => appendEntry(good, { env: {}, home: '/home/u' })).toThrow(/--session=<slug> is required/);
+  });
+});
+
+describe('validateEntry — the #3421 blocking/proposedFix/approvalPending fields (OPTIONAL, hiccup-only)', () => {
+  it('a non-blocking entry (no blocking field) is byte-identical to the pre-#3421 clean shape', () => {
+    // Pins the backward-compat guarantee: adding the hiccup fields must not add stray keys to every OTHER
+    // consumer's exact-shape compare (see the happy-path test above using the same `toEqual`).
+    const r = validateEntry(good);
+    expect(r.clean).toEqual({ ...good, ts: null });
+    expect(Object.keys(r.clean)).not.toContain('blocking');
+  });
+
+  it('accepts a well-formed blocking entry, stamping approvalPending:true even if omitted', () => {
+    const r = validateEntry({ ...good, blocking: true, proposedFix: 'confirm the guard is still legitimate' });
+    expect(r.ok).toBe(true);
+    expect(r.clean.blocking).toBe(true);
+    expect(r.clean.proposedFix).toBe('confirm the guard is still legitimate');
+    expect(r.clean.approvalPending).toBe(true);
+  });
+
+  it('rejects blocking:true with no proposedFix', () => {
+    const r = validateEntry({ ...good, blocking: true });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/proposedFix is required/);
+  });
+
+  it('rejects blocking:true with approvalPending explicitly false — a fresh hiccup is always pending', () => {
+    const r = validateEntry({ ...good, blocking: true, proposedFix: 'x', approvalPending: false });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/approvalPending must be true/);
+  });
+
+  it('rejects proposedFix or approvalPending on a non-blocking (or absent-blocking) entry', () => {
+    expect(validateEntry({ ...good, proposedFix: 'x' }).ok).toBe(false);
+    expect(validateEntry({ ...good, approvalPending: true }).ok).toBe(false);
+    expect(validateEntry({ ...good, blocking: false, proposedFix: 'x' }).ok).toBe(false);
+  });
+
+  it('rejects a non-boolean blocking value', () => {
+    expect(validateEntry({ ...good, blocking: 'yes' }).ok).toBe(false);
+  });
+
+  it('enforces the proposedFix length cap like every other text field', () => {
+    const r = validateEntry({ ...good, blocking: true, proposedFix: 'x'.repeat(401) });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/proposedFix: too long/);
+  });
+
+  it('ALLOWED_KEYS carries the three hiccup keys, and the disallowed-field error still names them', () => {
+    for (const k of OPTIONAL_HICCUP_KEYS) expect(ALLOWED_KEYS).toContain(k);
+    const r = validateEntry({ ...good, notAField: 1 });
+    expect(r.errors.join(' ')).toMatch(/disallowed field "notAField"/);
+  });
+
+  it('appendEntry round-trips a blocking entry end to end', () => {
+    const root = mkdtempSync(join(tmpdir(), 'learnings-drop-hiccup-'));
+    try {
+      const file = join(root, 'hiccup.jsonl');
+      const { record } = appendEntry(
+        { ...good, blocking: true, proposedFix: 'investigate the repeat suppression' },
+        { file, root },
+      );
+      expect(record.blocking).toBe(true);
+      expect(record.approvalPending).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
