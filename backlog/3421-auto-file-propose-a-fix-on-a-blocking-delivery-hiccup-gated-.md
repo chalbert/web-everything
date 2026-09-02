@@ -6,6 +6,11 @@ parent: "3422"
 status: open
 dateOpened: "2026-08-31"
 tags: []
+scope:
+  - we:scripts/conveyor/
+  - we:skills-src/conveyor/
+  - we:skills-src/capture-learning/
+  - we:skills-src/harvest-learnings/
 ---
 
 # Auto-file+propose a fix on a blocking delivery hiccup, gated by approval; non-blocking hiccups file straight through
