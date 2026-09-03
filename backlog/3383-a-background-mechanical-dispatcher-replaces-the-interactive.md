@@ -1487,3 +1487,9 @@ teach the drain to respect a PR's own "does not resolve" disclaimer.
 7. `PR #1853` (the whole-branch big-bang graduation PR) remains explicitly parked/not-wanted, per
    standing operator preference for incremental graduation over a single big merge — unchanged from
    before tonight.
+8. **Filed, not fixed, tonight**: `wev-scratch-dispatcher-4`'s own ad hoc sync loop (pid `24624`) fetches
+   `main` fine but silently aborts on every real merge conflict with no retry/escalation strategy,
+   independent of the `.git/config` refspec fix landed earlier — its checkout is 53 commits behind
+   `origin/main` as of this write-up (real symptom: that checkout's own `backlog/3436-*.md` still reads
+   `status: open` though `#3436` resolved on `main` via `PR #1883`). Filed as its own item, `relatedTo`
+   `#3464`/`#3466`; not fixed per standing instruction to file bugs, not fix them mid-flight.
