@@ -4,8 +4,9 @@ kind: story
 size: 5
 parent: "3383"
 relatedTo: ["3437", "2439", "2844"]
-status: open
+status: resolved
 dateOpened: "2026-09-02"
+dateResolved: "2026-09-03"
 tags: [conveyor, review-pr, resume, dispatch]
 scope:
   - we:scripts/operations/
