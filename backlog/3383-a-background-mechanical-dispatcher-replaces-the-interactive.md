@@ -59,7 +59,7 @@ touch unattended as to the code itself, from the first real run, not just at gra
 
 ## Standing doctrine — quick reference for a new session
 
-Seven rules accumulated while building and live-firing this epic's own machinery. Each paragraph
+Eight rules accumulated while building and live-firing this epic's own machinery. Each paragraph
 below is enough to act on without re-reading the full history; the full evidence and reasoning for
 each sits in the named section further down this same file — read that section before you need to
 defend or extend the rule, not before you can follow it day to day.
@@ -140,6 +140,18 @@ defend or extend the rule, not before you can follow it day to day.
    live twice before being trusted. (See "How to build it" above for the founding plan this restates;
    the close-out session update at the end of this file has the evidence for why the detour happened
    and what unblocks resuming it.)
+8. **NEW — a reproducible tool failure is not proof of a genuine external limitation.** Tonight's
+   `claude stop`/`claude rm` "No job matching" failures were diagnosed, repeatedly and at length, as
+   an external CLI/daemon limitation — for hours, across many sessions — until the operator explicitly
+   pushed back ("stop saying this, assume there is a way you haven't found") and directed
+   investigation found the real cause: every failing call passed the full session `sessionId` UUID
+   instead of the short 8-char `id` field `stop`/`rm` actually match on (works fine for
+   `--resume`/`attach`, just not `stop`/`rm`). A consistent, repeatable failure feels like proof of an
+   absent capability; it is not — check every field/parameter a working alternative uses differently
+   before writing off a capability as absent, especially one this epic depends on for cleanup. (Full
+   evidence: the 2026-09-02/03 session update below; the durable, repo-wide form of this lesson is
+   also captured as agent-memory note `question-a-concluded-external-limitation-before-accepting-it`,
+   `PR #1878`.)
 
 ## Why this card exists, not more work in the session that wrote it
 
@@ -1357,3 +1369,127 @@ expectation, both called out explicitly below.
    rule), `#3436` (a dispatched agent writes no structured completion record), `#3421` (the
    missing-operation confidence-call follow-on to `#3422`), and `#3411` (the `lane-pool-reap-on-
    acquire` TTL-backdating test flake) — all confirmed `status: open` tonight, none silently dropped.
+
+## Session update (2026-09-02/03, overnight session) — `#3457`/`#3456` ratified and built out end to
+## end, a real sweep of guard/reaper/lease bugs landed, and the night's biggest find: a wrong-field
+## bug mistaken for hours for an external limitation
+
+A long overnight session (2026-09-02 into 2026-09-03). Every PR and status claim below was re-checked
+live against the real repo (`gh pr view`, backlog frontmatter, `origin/lane/mechanical-dispatcher`'s
+own commit log) while writing this up, not transcribed from the handoff brief this write-up started
+from — that brief undercounted the night's actual output (five landed items it never mentioned, found
+by checking current status) and got a few things wrong, both corrected explicitly below.
+
+**Landed tonight:**
+
+- **Decisions `#3457` and `#3456` ratified and codified — `PR #1856`.** Both now
+  `we:docs/agent/platform-decisions.md` anchors (`#dispatch-status-ground-truth-check`,
+  `#heavy-command-admission-queue`). Their build follow-ons landed the same night: `#3460` (the
+  dispatch-side ground-truth check itself) via `PR #1877`, proven live against the real `#3435`
+  phantom-hold case before landing; `#3461` (the heavy-command admission-queue capacity semaphore)
+  via `PR #1880`. Both follow-on cards now read `status: resolved`.
+- **`#3332` resolved — `PR #1854`** (a card that read `active` even though its own fix, routing
+  `dispatch-lane`'s remaining `spawnFixes`/`spawnCiHeals` kinds, had already landed).
+- **`#3462` (manual `dispatch-lane` never checks `blockedBy`) filed AND built — `PR #1857` scaffolded
+  the card, `PR #1881` shipped the actual fix** (the manual `--num=<N>` path now refuses a
+  structurally-blocked item). **Correction to the handoff brief: it listed `#3462` as still
+  "filed, queued, not yet built" — the card reads `status: resolved` as of this write-up; the brief
+  was current as of the filing PR but stale by the time this session ended.**
+- **Two real merge-conflict reconciliations between `origin/lane/mechanical-dispatcher` and `main`'s
+  independently-evolved dispatch code, resolved by hand** — confirmed in the branch's own log as two
+  `Merge remote-tracking branch 'origin/main-fresh'` commits (`3c273363`, `f17f26e1`), each preserving
+  both `main`'s landed fixes and the branch's own unmerged prototype work. The recurring stale-checkout
+  symptom behind these was traced to `wev-scratch-dispatcher-4`'s own `.git/config`: its fetch refspec
+  had been narrowed to the prototype branch only, with no entry for `main` at all, so
+  `git fetch origin main` was silently a no-op for hours. Fixed permanently in that checkout's own git
+  config — a machine-local fix, not a repo commit, so there is no PR to cite for it.
+- **`#3464` (no reconciliation cadence for the diverged prototype branch) and `#3463` (decision: notify
+  the prior dispatch on an unresolvable sync conflict) filed — `PR #1858`.** Both traced every commit on
+  both sides of the conflict against its own item's declared `scope:` and found zero scope violations —
+  the branch sat 78 commits behind / 29 ahead of `main` as of filing, entirely because no mechanized
+  cadence exists, only sessions noticing drift by hand. Both still `status: open`.
+- **The `fixAttempts` miscounting bug (`#3454`) fixed — `PR #1868`.** A guard-refused fix-dispatch
+  attempt was counting toward the retry-exhaustion cap as if it were a real, failed attempt.
+- **The analogous durable-floor guard bug fixed on the prototype branch directly — no story, no PR**
+  (per this card's own standing-doctrine rule 4: a prototype-only bug skips the ceremony). Confirmed in
+  the branch log: `a833d4bf6`, "tick-core: durable build-guard floor (`#3403`) never expired,
+  permanently inflating building" — the guard was re-stamping its own age every tick, so its TTL
+  backstop could never fire.
+- **A `we:.claude/lane-ports.json` staleness gap found and FILED as `#3466` — `PR #1869`.**
+  **Correction to the handoff brief: it described this as "found and fixed" — `PR #1869` only files
+  the root-cause card (confirmed twice live: 5 stale entries on the operator's own tick-1 report, then
+  3 more on an independent re-check); no fix has landed, `#3466` is still `status: open`.**
+- **The lease-leak fix itself (`#3449`) — not just its prior-session filing — built and landed
+  tonight, `PR #1882`** (`we:scripts/lane-pool.mjs`'s `list --acquirable` now triggers the same
+  ghost-lease reap `acquire` already runs). Not mentioned in the handoff brief; found by checking
+  current status.
+- **`#3438`'s remaining scope (wire `reconcile-pass`'s `kind: 'fix'` into the runner's mechanical
+  passes) built and landed — `PR #1876`**, closing the last gap the 2026-09-02 close-out flagged as
+  its #3 priority ("the fix half of fix→review→land still has nothing executing it"). Not in the
+  handoff brief.
+- **`#3436` (a dispatched review/fix agent writes no structured completion record on exit) built and
+  landed — `PR #1883`.** Not in the handoff brief.
+- **`#3446` (fixture-harness extension) landed — `PR #1884`.** Not in the handoff brief.
+- **The session-reaper's ground-truth extension (`#3435`'s own follow-on) built and landed — `PR
+  #1873`**, catching a session whose registry `state` lies even when the target item is confirmed
+  resolved. Proven live against a real scratch clone of the branch: 17 of 22 non-terminal background
+  sessions surveyed were in this exact stuck-but-actually-done shape. **Correction to the handoff
+  brief: it cited "15 real additional reaps found" — the PR's own body says 17.**
+- **The night's biggest find: `claude stop`/`claude rm` had been failing almost universally all night
+  with "No job matching."** Diagnosed repeatedly, at length, as an external CLI/daemon limitation —
+  until the operator explicitly pushed back ("stop saying this, assume there is a way you haven't
+  found") and directed investigation found the real cause: every failing call was passing the full
+  session `sessionId` UUID instead of the short 8-char `id` field the CLI's `stop`/`rm` actually match
+  on (works fine for `--resume`/`attach`, just not `stop`/`rm`). Proven live and repeatably: a direct
+  before/after on one real session (`conveyor-2972` — full `sessionId` exits 1 "No job matching", `id`
+  immediately after exits 0 "stopped"), 17/17 clean stops against the ground-truth-confirmed set inside
+  the PR itself, and an independently-confirmed bulk clear of 151 done/failed background sessions using
+  the same fix, dropping the machine's total live session count 208→57 and its background done/failed
+  count to 0. Landed as `PR #1879`, fixing `we:scripts/conveyor/session-reaper.mjs`'s `stopSession`
+  call. **This was not an external limitation at all — a wrong-field bug the whole time**, and is now
+  this card's new standing-doctrine rule 8 above.
+- **`we:.claude/commands/wip.md` updated twice — `PR #1875`** (since-last-invocation scoping for Done,
+  steady-state-infra excluded from Doing).
+- **Three new agent-memory lessons saved** (not four — the handoff brief overcounted this):
+  `verify-session-liveness-before-archiving` (`PR #1860`), `keep-prototype-branch-synced-after-each-
+  merge` (`PR #1865`), `question-a-concluded-external-limitation-before-accepting-it` (`PR #1878`, the
+  durable form of the `claude stop`/`rm` finding above).
+
+**One finding worth the operator's own attention, not just a status note:** `#3443` (the item tracking
+`origin/lane/mechanical-dispatcher`'s own graduation to `main`) now reads `status: resolved`,
+`dateResolved: 2026-09-03` — but this looks like a premature auto-resolve, not genuine completion. The
+drain daemon's generic `resolve #3443 on land` fired the moment `PR #1866` merged (one small increment,
+`computeFreeSlots`'s dirty-lane exclusion), even though that PR's own body explicitly says "this PR does
+not resolve #3443, it lands one increment of it," and `#3443`'s own "Progress" section (last touched the
+same day) still names roughly 26 commits still ahead of `main`, most entangled with the held-back
+reconcile-pass tick-loop wiring — its own "Done when" criteria are plainly unmet. This reads as the
+drain's title-matching resolve-on-land mechanism firing on any `WE #3443: ...`-titled PR regardless of
+what the PR body says about partial scope; worth the operator's judgment on whether to reopen `#3443` or
+teach the drain to respect a PR's own "does not resolve" disclaimer.
+
+**What's still open, checked fresh, so nothing silently drops:**
+
+1. `#3464` (no reconciliation cadence for the diverged branch) and `#3466` (lane-ports staleness fix
+   itself) — both filed, queued, not yet built.
+2. `#3463` — decision, not yet ratified; needs the operator's own judgment call, same as `#3457`/
+   `#3456` were tonight.
+3. `#3398` (supervisor/runner has no out-of-band alerting) — still `status: open`, `blockedBy: ["3443"]`
+   per its own frontmatter, which the `#3443` finding above complicates: its blocker's card now reads
+   resolved while the real graduation work it names is not done.
+4. `#3441` (a build-dispatch agent's PR must resolve its own item) — `status: active`, in progress as
+   of this write-up, not yet landed.
+5. `#3443`'s own real graduation work is NOT done despite its card reading `resolved` — see the finding
+   above. Roughly 26 commits are still unique to `origin/lane/mechanical-dispatcher`, most entangled
+   with the still-held-back reconcile-pass tick-loop wiring.
+6. Whether the now-fixed, now-live mechanical session-reaper (`#3435` + its `#1873` ground-truth
+   extension) actually closes ghost sessions unattended on its own next real ticks was not yet observed
+   — only manually/PR-proven — as of this session's close.
+7. `PR #1853` (the whole-branch big-bang graduation PR) remains explicitly parked/not-wanted, per
+   standing operator preference for incremental graduation over a single big merge — unchanged from
+   before tonight.
+8. **Filed, not fixed, tonight**: `wev-scratch-dispatcher-4`'s own ad hoc sync loop (pid `24624`) fetches
+   `main` fine but silently aborts on every real merge conflict with no retry/escalation strategy,
+   independent of the `.git/config` refspec fix landed earlier — its checkout is 53 commits behind
+   `origin/main` as of this write-up (real symptom: that checkout's own `backlog/3436-*.md` still reads
+   `status: open` though `#3436` resolved on `main` via `PR #1883`). Filed as its own item, `relatedTo`
+   `#3464`/`#3466`; not fixed per standing instruction to file bugs, not fix them mid-flight.
