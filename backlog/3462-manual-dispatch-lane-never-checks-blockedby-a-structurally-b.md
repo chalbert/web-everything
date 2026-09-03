@@ -3,9 +3,10 @@ bornAs: xbjuq3i
 kind: task
 tier: pinned
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-02"
 dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 scope:
   - we:scripts/operations/dispatch-lane.mjs
   - we:scripts/operations/dispatch-lane-io.mjs
