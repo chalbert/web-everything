@@ -1,6 +1,7 @@
 ---
 bornAs: xl1x55d
 kind: task
+tier: pinned
 parent: "3457"
 status: open
 scope: ["we:scripts/operations/dispatch-lane.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/"]

@@ -1,6 +1,7 @@
 ---
 bornAs: xm1ft97
 kind: task
+tier: pinned
 parent: "3456"
 status: open
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/verify-lane.mjs", "we:scripts/conveyor/tick-core.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/operations/__tests__/"]

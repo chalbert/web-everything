@@ -1,6 +1,7 @@
 ---
 bornAs: xagqiz4
 kind: decision
+tier: pinned
 parent: "3383"
 status: open
 relatedTo: ["3398", "3421", "3422", "3449", "3457", "3464"]
