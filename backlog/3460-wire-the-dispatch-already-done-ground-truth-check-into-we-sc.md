@@ -3,9 +3,10 @@ bornAs: xl1x55d
 kind: task
 tier: pinned
 parent: "3457"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/"]
 dateOpened: "2026-09-02"
+dateResolved: "2026-09-03"
 tags: []
 ---
 
