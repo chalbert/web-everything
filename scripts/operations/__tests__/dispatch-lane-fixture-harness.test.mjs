@@ -15,22 +15,28 @@
  * (`scripts/operations/__tests__/helpers/fake-claude.mjs`) on `PATH` — never an injected `spawnAgent` — so the
  * argv the real `claude` CLI would see is asserted, not assumed.
  *
- * THE ONE SEAM STILL SIDESTEPPED, and why — the SAME technique #3445's own harness uses for its fix/CI-heal
- * assertions ("sidestepping the real lane pool entirely for that half of the chain"): `tick-core.mjs`'s CLI
- * internally shells `dispatch-plan.mjs`, which shells the REAL `lane-pool.mjs list --acquirable --json` — the
- * free-lane COUNT on the machine running this suite is real and can be zero, which would make the build launch
- * decision flaky. So this file calls `planTick` (`tick-core.mjs`'s own exported, pure core — the REAL function,
- * not a re-implementation) directly, fed the REAL `state` this fixture's `backlog.mjs` + `conveyor-state.mjs`
- * subprocesses produced, with a SYNTHETIC `plan.launch` (the one thing `dispatch-plan.mjs`'s lane-pool call
- * would otherwise supply). Everything past that point — `dispatch-lane-io.mjs#readTick`'s item lookup, its
- * run-store-backed in-flight guard, its already-done check, `dispatch-lane.mjs#shapeDispatchRead`, and
- * `dispatch-lane-io.mjs#createDispatchSinks` (`assertNotALaneCheckout`, `buildAgentArgv`, the real
- * `defaultSpawnAgent` through the fake `claude` on `PATH`) — runs for real, unstubbed.
+ * WHAT IS SIDESTEPPED, and why — stated precisely because "sidestepped" is easy to overstate. `tick-core.mjs`'s
+ * CLI shells `dispatch-plan.mjs`, which reads the session-local queue sidecar, re-enriches via
+ * `backlog.mjs build-queue`, runs its own already-done check, and only THEN calls its pure `dispatchPlan` with
+ * the REAL free-lane list from `lane-pool.mjs list --acquirable --json` — a count that is real on the machine
+ * running this suite and can be zero, which would make the launch decision flaky. This file does not run
+ * `dispatch-plan.mjs` at all: it calls `planTick` (`tick-core.mjs`'s own exported, pure core — the REAL
+ * function) directly, fed the REAL `state` this fixture's `backlog.mjs` + `conveyor-state.mjs` subprocesses
+ * produced, with a HAND-BUILT `plan.launch` row standing in for the whole of `dispatch-plan.mjs`'s decision
+ * (not merely its lane-pool call). So this harness proves `dispatch-lane(-io).mjs`'s argv-building and guard
+ * logic against an ASSUMED-correct launch row — it does not prove `dispatch-plan.mjs` would itself select this
+ * item; that half is #3445's own harness's job. Everything past the assumed launch row —
+ * `dispatch-lane-io.mjs#readTick`'s item lookup, its run-store-backed in-flight guard, its already-done check,
+ * `dispatch-lane.mjs#shapeDispatchRead`, and `dispatch-lane-io.mjs#createDispatchSinks`
+ * (`assertNotALaneCheckout`, `buildAgentArgv`, the real `defaultSpawnAgent` through the fake `claude` on
+ * `PATH`) — runs for real, unstubbed.
  *
- * ZERO REAL SESSIONS, ZERO REAL BACKLOG ITEMS OR PRs. `withFakeClaude()` costs no token and starts no model;
- * `withFakeGh()` answers every `gh` call from this repo's readiness/tick machinery; the run store lives in a
- * throwaway `mkdtemp` directory, never `.operations/runs/` in a real checkout; and the backlog corpus is the
- * synthetic one this file writes, never `backlog/`.
+ * ZERO REAL SESSIONS, ZERO REAL BACKLOG ITEMS OR PRs. `withFakeClaude()` costs no token and starts no model —
+ * and `fake.assertWins(env)` is asserted before the one real spawn in this file, so a bug in the env-merge
+ * chain fails loudly here rather than quietly reaching whatever `claude` the host has (mirrors
+ * `dispatch-spawn-live.test.mjs`'s own guard). `withFakeGh()` answers every `gh` call from this repo's
+ * readiness/tick machinery; the run store lives in a throwaway `mkdtemp` directory, never `.operations/runs/`
+ * in a real checkout; and the backlog corpus is the synthetic one this file writes, never `backlog/`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -43,7 +49,7 @@ import { withFakeGh } from '../../conveyor/__tests__/helpers/fake-gh.mjs';
 import { withFakeClaude } from './helpers/fake-claude.mjs';
 import { planTick } from '../../conveyor/tick-core.mjs';
 import {
-  readTick, REPO_ROOT, createDispatchSinks, defaultListAgents, defaultCheckAlreadyDone,
+  readTick, REPO_ROOT, createDispatchSinks, defaultListAgents,
   inFlightDispatchesFor, persistLastSeenLive,
 } from '../dispatch-lane-io.mjs';
 import { shapeDispatchRead, DISPATCH_EFFECT } from '../dispatch-lane.mjs';
@@ -136,7 +142,8 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
     ));
 
-    // SIDESTEPS THE REAL LANE POOL ONLY — see the file header. `planTick` itself is the REAL, exported core.
+    // `plan.launch` HAND-BUILT, standing in for the whole of `dispatch-plan.mjs`'s decision — see the file
+    // header's "WHAT IS SIDESTEPPED" section. `planTick` itself is the REAL, exported core.
     const out = planTick({
       state,
       plan: { launch: [{ num: NUM, lane: FAKE_LANE }], held: [] },
@@ -153,26 +160,12 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
-  /** One `readTick` call, every seam pointed at this fixture's fakes — never the real `gh`/`claude`/run store. */
-  function readFixtureTick({ runsDir, fakeExec, combinedEnv }) {
-    return readTick({
-      num: NUM,
-      root: REPO_ROOT, // the real checkout — so the brief filled below is the REAL delivery-agent-brief.md
-      exec: fakeExec,
-      runNode: () => JSON.stringify({ decisions, nextState }),
-      loadItems: () => [{ num: NUM, slug: 'ready-item', scope: ['we:scripts/fixture-thing.mjs'], openBlockers: [] }],
-      listInFlightDispatches: (key) => inFlightDispatchesFor(key, { store: createFileRunStore(runsDir) }),
-      listAgents: () => defaultListAgents({ exec: fakeExec, env: combinedEnv }),
-      recordLiveness: (stamped) => {
-        persistLastSeenLive(stamped, { store: createFileRunStore(runsDir), now: () => NOW });
-        return stamped;
-      },
-      checkAlreadyDone: (n) => defaultCheckAlreadyDone(n, { exec: fakeExec }),
-      now: () => NOW,
-    });
-  }
-
-  it('dispatches #9001 for real — the produced argv matches the fixture-derived brief', async () => {
+  /**
+   * One case's isolated fakes + `readTick` binding. Every seam is pointed at THIS case's fakes/temp dirs —
+   * never the real `gh`/`claude`/run store — and `cleanup()` tears them down. Callers MUST call `cleanup()` in
+   * a `finally`.
+   */
+  function setUpCase() {
     const caseRoot = mkdtempSync(join(tmpdir(), 'dispatch-lane-case-'));
     const runsDir = join(caseRoot, 'runs');
     mkdirSync(runsDir, { recursive: true });
@@ -186,8 +179,34 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
     };
     const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...combinedEnv, ...opts.env } });
 
+    return {
+      caseRoot, runsDir, fakeClaude, combinedEnv, fakeExec,
+      /** One `readTick` call against this case's fixtures. */
+      readFixtureTick: () => readTick({
+        num: NUM,
+        root: REPO_ROOT, // the real checkout — so the brief filled below is the REAL delivery-agent-brief.md
+        exec: fakeExec,
+        runNode: () => JSON.stringify({ decisions, nextState }),
+        loadItems: () => [{ num: NUM, slug: 'ready-item', scope: ['we:scripts/fixture-thing.mjs'], openBlockers: [] }],
+        listInFlightDispatches: (key) => inFlightDispatchesFor(key, { store: createFileRunStore(runsDir) }),
+        listAgents: () => defaultListAgents({ exec: fakeExec, env: combinedEnv }),
+        recordLiveness: (stamped) => {
+          persistLastSeenLive(stamped, { store: createFileRunStore(runsDir), now: () => NOW });
+          return stamped;
+        },
+        now: () => NOW,
+      }),
+      cleanup: () => {
+        fakeClaude.cleanup();
+        rmSync(caseRoot, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it('dispatches #9001 for real — the produced argv matches the fixture-derived brief', async () => {
+    const kase = setUpCase();
     try {
-      const raw = readFixtureTick({ runsDir, fakeExec, combinedEnv });
+      const raw = kase.readFixtureTick();
       const read = shapeDispatchRead(raw, { num: NUM, expectedWithinMinutes: 90 });
 
       expect(read.dispatching).toBe(true);
@@ -210,41 +229,33 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
         expectedWithinMinutes: read.expectedWithinMinutes, pr: read.pr, reason: read.reason,
       };
 
-      const happyRoot = join(caseRoot, 'primary-checkout'); // NOT lane-shaped — assertNotALaneCheckout must pass
+      const happyRoot = join(kase.caseRoot, 'primary-checkout'); // NOT lane-shaped — assertNotALaneCheckout must pass
       mkdirSync(happyRoot, { recursive: true });
-      const sinks = createDispatchSinks({ root: happyRoot, exec: fakeExec });
+      const sinks = createDispatchSinks({ root: happyRoot, exec: kase.fakeExec });
+
+      // THE FAKE MUST ACTUALLY WIN PATH before the one real spawn in this file — see `dispatch-spawn-live.test.mjs`'s
+      // own reasoning: without this, a bug anywhere in `combinedEnv`'s merge silently reaches whatever `claude`
+      // the host has, and for a `--bg` argv that is a real background agent on a machine with the real CLI installed.
+      kase.fakeClaude.assertWins(kase.combinedEnv);
       const result = await sinks[DISPATCH_EFFECT](payload);
 
       expect(isInFlightResult(result)).toBe(true);
       expect(result.handle).toBeTruthy();
 
-      const seen = fakeClaude.lastArgv();
+      const seen = kase.fakeClaude.lastArgv();
       expect(seen).toContain('--bg');
       expect(seen[seen.indexOf('--session-id') + 1]).toBe(result.handle);
       expect(seen[seen.indexOf('-n') + 1]).toBe(`conveyor-${NUM}`);
       expect(seen[seen.length - 1]).toBe(read.prompt);
     } finally {
-      fakeClaude.cleanup();
-      rmSync(caseRoot, { recursive: true, force: true });
+      kase.cleanup();
     }
   }, 60_000);
 
   it('assertNotALaneCheckout refuses the dispatch — zero claude sessions spawned', async () => {
-    const caseRoot = mkdtempSync(join(tmpdir(), 'dispatch-lane-case-'));
-    const runsDir = join(caseRoot, 'runs');
-    mkdirSync(runsDir, { recursive: true });
-    const fakeClaude = withFakeClaude();
-    const combinedEnv = {
-      ...process.env,
-      PATH: `${fakeDir(fakeClaude.env)}:${fakeDir(fakeGh.env)}:${process.env.PATH}`,
-      FAKE_CLAUDE_LOG: fakeClaude.env.FAKE_CLAUDE_LOG,
-      FAKE_GH_FIXTURE: fakeGh.env.FAKE_GH_FIXTURE,
-      FAKE_GH_LOG: fakeGh.env.FAKE_GH_LOG,
-    };
-    const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...combinedEnv, ...opts.env } });
-
+    const kase = setUpCase();
     try {
-      const raw = readFixtureTick({ runsDir, fakeExec, combinedEnv });
+      const raw = kase.readFixtureTick();
       const read = shapeDispatchRead(raw, { num: NUM, expectedWithinMinutes: 90 });
       expect(read.dispatching).toBe(true);
 
@@ -257,36 +268,23 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       // A root whose BASENAME is `lane-<digits>` — exactly the shape `we:scripts/lane-pool.mjs` creates and
       // `assertNotALaneCheckout` refuses (the agent's own first brief step: acquiring a SECOND lane from
       // inside one nests two checkouts).
-      const laneRoot = join(caseRoot, 'lane-42');
+      const laneRoot = join(kase.caseRoot, 'lane-42');
       mkdirSync(laneRoot, { recursive: true });
-      const sinks = createDispatchSinks({ root: laneRoot, exec: fakeExec });
+      const sinks = createDispatchSinks({ root: laneRoot, exec: kase.fakeExec });
 
       await expect(sinks[DISPATCH_EFFECT](payload)).rejects.toThrow(/lane checkout/);
       // NOTHING WAS SPAWNED — the guard fires before `buildAgentArgv`/`spawnAgent` ever runs.
-      expect(fakeClaude.lastArgv()).toBeNull();
+      expect(kase.fakeClaude.lastArgv()).toBeNull();
     } finally {
-      fakeClaude.cleanup();
-      rmSync(caseRoot, { recursive: true, force: true });
+      kase.cleanup();
     }
   }, 60_000);
 
   it('the double-dispatch guard holds while the prior dispatch is LIVE — no second agent for an occupied lane', async () => {
-    const caseRoot = mkdtempSync(join(tmpdir(), 'dispatch-lane-case-'));
-    const runsDir = join(caseRoot, 'runs');
-    mkdirSync(runsDir, { recursive: true });
-    const fakeClaude = withFakeClaude();
-    const combinedEnv = {
-      ...process.env,
-      PATH: `${fakeDir(fakeClaude.env)}:${fakeDir(fakeGh.env)}:${process.env.PATH}`,
-      FAKE_CLAUDE_LOG: fakeClaude.env.FAKE_CLAUDE_LOG,
-      FAKE_GH_FIXTURE: fakeGh.env.FAKE_GH_FIXTURE,
-      FAKE_GH_LOG: fakeGh.env.FAKE_GH_LOG,
-    };
-    const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...combinedEnv, ...opts.env } });
-
+    const kase = setUpCase();
     try {
       const handle = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-      const store = createFileRunStore(runsDir);
+      const store = createFileRunStore(kase.runsDir);
       store.write(inFlightRecord({
         id: 'prior-run', num: NUM, handle,
         startedAt: NOW.toISOString(),
@@ -294,41 +292,29 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       }));
       // The fake claude's OWN listing says this handle is still running — never a real session, never a
       // real spawn — so `dispatchStillHolds` takes its `live === true` branch, which holds AT ANY AGE.
-      seedFakeClaudeSession(fakeClaude, handle);
+      seedFakeClaudeSession(kase.fakeClaude, handle);
 
-      const raw = readFixtureTick({ runsDir, fakeExec, combinedEnv });
+      const raw = kase.readFixtureTick();
       const read = shapeDispatchRead(raw, { num: NUM, expectedWithinMinutes: 90 });
 
       expect(read.dispatching).toBe(false);
       expect(read.holdReason).toMatch(/already has a dispatch in flight/);
       expect(read.holdReason).toMatch(/STILL LISTED/);
       expect(read.prompt).toBeNull();
-      // NOTHING is spawned when the guard holds — proving the guard is actually load-bearing, not merely
-      // reported: `read.dispatching === false` alone would still pass if the sink ran anyway.
-      expect(fakeClaude.lastArgv()).toEqual(['agents', '--json']); // the ONE call: the guard's own listing read
+      // This test never calls `createDispatchSinks` at all, so "nothing spawned" holds by construction here —
+      // what this DOES prove is that `readTick`'s own claude usage was exactly the guard's one listing read
+      // (`agents --json`), i.e. the hold was decided from a REAL listing, not assumed.
+      expect(kase.fakeClaude.lastArgv()).toEqual(['agents', '--json']);
     } finally {
-      fakeClaude.cleanup();
-      rmSync(caseRoot, { recursive: true, force: true });
+      kase.cleanup();
     }
   }, 60_000);
 
   it('the guard (the "backoff") releases once a not-live hold ages past the listing grace window', async () => {
-    const caseRoot = mkdtempSync(join(tmpdir(), 'dispatch-lane-case-'));
-    const runsDir = join(caseRoot, 'runs');
-    mkdirSync(runsDir, { recursive: true });
-    const fakeClaude = withFakeClaude();
-    const combinedEnv = {
-      ...process.env,
-      PATH: `${fakeDir(fakeClaude.env)}:${fakeDir(fakeGh.env)}:${process.env.PATH}`,
-      FAKE_CLAUDE_LOG: fakeClaude.env.FAKE_CLAUDE_LOG,
-      FAKE_GH_FIXTURE: fakeGh.env.FAKE_GH_FIXTURE,
-      FAKE_GH_LOG: fakeGh.env.FAKE_GH_LOG,
-    };
-    const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...combinedEnv, ...opts.env } });
-
+    const kase = setUpCase();
     try {
       const handle = 'ffffffff-1111-2222-3333-444444444444';
-      const store = createFileRunStore(runsDir);
+      const store = createFileRunStore(kase.runsDir);
       // STARTED WELL PAST THE GUARD'S OWN LISTING-GRACE WINDOW (10 minutes, `DISPATCH_GUARD_LISTING_GRACE_MINUTES`)
       // — never confirmed alive, so `dispatchStillHolds` anchors on `startedAt`.
       store.write(inFlightRecord({
@@ -339,7 +325,7 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       // NO session seeded — the fake claude's real listing read comes back empty, so the guard's own liveness
       // check (not a stub) answers `live: false`: a listing was genuinely read and this handle is not in it.
 
-      const raw = readFixtureTick({ runsDir, fakeExec, combinedEnv });
+      const raw = kase.readFixtureTick();
       const read = shapeDispatchRead(raw, { num: NUM, expectedWithinMinutes: 90 });
 
       // THE HOLD RELEASED — the prior dispatch aged out, and a fresh one is cleared exactly as if none had
@@ -349,8 +335,7 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       // The aged-out record rides the verdict rather than vanishing — an operator can still see it.
       expect(read.agedOutRuns.map((r) => r.runId)).toEqual(['stale-run']);
     } finally {
-      fakeClaude.cleanup();
-      rmSync(caseRoot, { recursive: true, force: true });
+      kase.cleanup();
     }
   }, 60_000);
 });
