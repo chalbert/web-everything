@@ -21,6 +21,15 @@ every individual check lies in at least one direction, confirmed live across one
   not a real one.
 - A `claude stop` that reports SUCCESS is separately documented (per the #3435 card itself,
   citing filed upstream Claude Code issues #65925/#45250/#41461) as not proof of exit either.
+- `SendMessage` reporting a target as "not reachable" is not proof of exit either — it's the
+  same class of tool-side liveness check as the other two, not automatically more trustworthy
+  just because it failed differently. A verification pass in this same session concluded 4
+  sessions (`conveyor-3399`, `conveyor-3411b`, `prepare-decision-3457`, `prepare-3452`) were
+  "already gone, no action needed" purely because `SendMessage` couldn't reach them — without
+  independently re-confirming via the operator's own view (their UI showed several OTHER
+  sessions as connected when tool-side checks said otherwise, the exact catch that motivated
+  this whole note). Treat an unreachable `SendMessage` the same as a failed `claude stop`: a
+  hint, not a verdict.
 
 **The verification order that actually worked:**
 1. **Ground-truth the target item FIRST, independent of any liveness signal.** Check the item's
@@ -37,8 +46,11 @@ every individual check lies in at least one direction, confirmed live across one
    its own lane, because the fix-agent-brief (#2630 step 9) explicitly forbids a fix agent from
    releasing/merging/clearing review — that's the conveyor's own cleanup job, not a stuck session.
 4. Only archive once EITHER the session self-confirms nothing pending (and any lease is released
-   or correctly left per its own brief), OR it's genuinely unreachable via `SendMessage` AND the
-   target item is independently confirmed resolved via real PR history (both, not just one).
+   or correctly left per its own brief), OR the target item is independently confirmed resolved
+   via real PR history AND `SendMessage` came back unreachable — an unreachable `SendMessage` is
+   never sufficient by itself, it's the same weak signal as a failed `claude stop`, so require the
+   PR-history confirmation alongside it, plus the operator's own visual confirmation when
+   available (see the unreliable-both-ways bullet above).
 
 **Why:** operator, 2026-09-03: "please verify that would really cant see them, I see all of them
 as connected" — caught me about to treat several genuinely-live sessions as safe to archive based
