@@ -3,8 +3,9 @@ bornAs: xbjuq3i
 kind: task
 tier: pinned
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-02"
+dateStarted: "2026-09-03"
 scope:
   - we:scripts/operations/dispatch-lane.mjs
   - we:scripts/operations/dispatch-lane-io.mjs
@@ -112,3 +113,32 @@ design call belonging with dispatch/build machinery, per this epic's own "elevat
    readiness problem — never being read at all on the manual dispatch path. Same family (trust real ground
    truth over stale/absent bookkeeping, the same shape `#3449` names for lane leases), different resource;
    fixing one does not fix the other.
+
+## Progress
+
+**The override question (done-when #3) is decided: no override, ever — a hard, unconditional refusal.**
+
+`we:scripts/operations/dispatch-lane.mjs`'s `shapeDispatchRead` now refuses any dispatch (build, prepare,
+prepare-decision, fix or ci-heal alike) for an item whose `openBlockers` is non-empty, with no flag, env var
+or bookkeeping key that can force it through. The refusal is checked at the same priority tier as the
+`#3457`/`#3460` already-done ground-truth check — before the tick core's own `launch` decision is even
+consulted — because the live incident this item documents is exactly the core clearing a blocked item for
+`spawnBuilds` anyway; trusting the core's decision on this axis is the bug, not the fix.
+
+Reasoning for "no override" over "an explicit force flag": the manual `--num=<N>` path exists for a
+retry/backoff caller or an operator to force a SPECIFIC item through outside the ranked queue — but forcing a
+STRUCTURALLY blocked item (one whose prerequisite work is not done) is never a legitimate use of that
+override, unlike e.g. re-attempting an item the automatic sweep is merely rate-limiting. No real dispatch
+recorded to date has ever needed to bypass an open `blockedBy` edge on purpose (the #3398 incident this item
+documents was three UNWANTED dispatches, not a deliberate override), and adding a bypass flag before a real
+need for one is observed is exactly the kind of speculative surface `we:docs/agent/platform-decisions.md`
+warns against. If a real, legitimate need to force a blocked item through ever surfaces, it should be filed
+as its own scoped follow-on (it would need its own audit trail — who forced it and why — which is a bigger
+design question than this item's scope), not bolted on here as an untested escape hatch.
+
+`we:scripts/operations/dispatch-lane-io.mjs`'s `findItem` now threads `openBlockers` through from the
+canonical backlog loader (`we:src/_data/backlog.js`) — the same field `we:scripts/readiness/dispatch-plan.mjs`
+already reads for the automatic sweep's `hasOpenBlockers` hold — instead of narrowing it away. Regression
+coverage in `we:scripts/operations/__tests__/dispatch-lane.test.mjs` reproduces the #3398 shape (a fabricated
+item with `openBlockers: ['3443']`, no in-flight guard, a free lane, the core having cleared it anyway) and
+was confirmed to fail against the pre-fix source.

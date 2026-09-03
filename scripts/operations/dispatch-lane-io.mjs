@@ -587,7 +587,13 @@ export function defaultLoadItems(root) {
 }
 
 /** One item's spec path + repo-qualified scope, or null when the loader cannot see it. Exported (#3438) for the
- *  same reason as {@link defaultLoadItems} just above. */
+ *  same reason as {@link defaultLoadItems} just above.
+ *
+ *  CARRIES `openBlockers` THROUGH (#3462). The loader (`we:src/_data/backlog.js`) already computes it — the
+ *  same field `dispatch-plan.mjs` enriches its queue rows from for the automatic sweep's `hasOpenBlockers`
+ *  hold — but this function used to narrow the record down to `num`/`slug`/`specPath`/`scope` and drop it,
+ *  which is why the manual `--num=<N>` path had no `blockedBy` awareness at all: the data was computed, never
+ *  read here. See `shapeDispatchRead`'s blocked-item refusal, which is what actually reads this field. */
 export function findItem(key, loadItems) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
@@ -599,6 +605,8 @@ export function findItem(key, loadItems) {
     specPath: `backlog/${it.num}-${it.slug}.md`,
     // Already repo-qualified by the loader (`we:scripts/...`), which is the form the brief's `--scope` wants.
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
+    // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
+    openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
   };
 }
 
