@@ -2,9 +2,10 @@
 bornAs: x63kvwg
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-02"
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 tags: []
 scope:
   - we:scripts/__tests__/
