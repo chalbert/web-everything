@@ -65,6 +65,12 @@ import {
   isPreSpawnRefusal,
   readTick,
   stampLiveness,
+  // #3457/#3460 — the already-done ground-truth check.
+  ALREADY_DONE_JSON_FIELDS,
+  ALREADY_DONE_SEARCH_LIMIT,
+  defaultCheckAlreadyDone,
+  filterAlreadyDoneCandidates,
+  NON_IMPLEMENTING_REF_RE,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -1331,6 +1337,9 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
         loadItems: () => items,
         listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
         listAgents: () => [],
+        // #3457/#3460 — stubbed so this suite never shells the real `gh` (readTick calls it lazily whenever a
+        // launch clears, and every test here clears one).
+        checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
@@ -1557,6 +1566,8 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
         listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
         listAgents: () => [],
         laneRefForPr: () => laneRef,
+        // #3457/#3460 — same stub as the earlier `dispatchThrough` above, and for the same reason.
+        checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
@@ -1672,5 +1683,213 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     expect(run.verdict.dispatching).toBe(false);
     expect(run.verdict.reason).toMatch(/spawnFixes/);
     expect(run.verdict.reason).toMatch(/spawnCiHeals/);
+  });
+});
+
+// ── #3457/#3460 — the ALREADY-DONE ground-truth check, at both chokepoints ratified by #3457 ────────────────
+
+describe('filterAlreadyDoneCandidates — PURE: which gh pr list rows are real "already done" evidence', () => {
+  const merged = (title, headRefName, over = {}) => ({
+    number: 1, title, headRefName, url: `https://github.com/x/y/pull/${over.number ?? 1}`,
+    mergedAt: '2026-09-01T16:44:28Z', state: 'MERGED', ...over,
+  });
+
+  it('the REAL #3434 shape: a genuine implementation PR, title AND ref both name the item', () => {
+    // Reproduces the exact live evidence #3457's own card cites: `gh pr list --search "3434 in:title" --state
+    // merged` returning PR #1768, titled "…verdict (#3434)", ref `lane/3434-mechanical-accept`.
+    const prs = [merged('review-loop-policy: mechanical acceptance from a clean independent verdict (#3434)', 'lane/3434-mechanical-accept', { number: 1768 })];
+    const out = filterAlreadyDoneCandidates(prs, '3434');
+    expect(out).toHaveLength(1);
+    expect(out[0].number).toBe(1768);
+  });
+
+  it('the REAL #3433 shape too — same query, a different real merged PR', () => {
+    const prs = [merged('WE #3433: bake a Bash disallowedTools deny list into every dispatched review session', 'lane/3433-review-dispatch-disallowed-tools', { number: 1829 })];
+    expect(filterAlreadyDoneCandidates(prs, '3433')).toHaveLength(1);
+  });
+
+  it('EXCLUDES a prepare-scope authoring PR — the false positive this check\'s own authoring found live against #3435', () => {
+    // `gh pr list --search "3435 in:title" --state merged` (measured 2026-09-03) really does return this PR
+    // alongside the true implementation. Every scoped build item has one of these merged BEFORE its own build
+    // even starts, so counting it as "done" would refuse the very first real build attempt of nearly any item.
+    const scopePr = merged('WE #3435: author scope: for #3435', 'lane/3435-scope-3dfab284', { number: 1780 });
+    const realPr = merged('WE #3435: mechanically reap/stop finished `claude agents` background sessions', 'lane/3435-session-reaper', { number: 1861 });
+    const out = filterAlreadyDoneCandidates([scopePr, realPr], '3435');
+    expect(out.map((p) => p.number)).toEqual([1861]); // only the real implementation survives
+  });
+
+  it('EXCLUDES a prepare-decision authoring PR the same way', () => {
+    const prepPr = merged('WE #3457: author decision forks for #3457', 'lane/3457-prepare-3dfab284', { number: 9001 });
+    expect(filterAlreadyDoneCandidates([prepPr], '3457')).toEqual([]);
+  });
+
+  it('a WORD-BOUNDARY title match — item "343" must not match a PR title mentioning "3435"', () => {
+    const pr = merged('WE #3435: mechanically reap/stop finished sessions', 'lane/3435-session-reaper');
+    expect(filterAlreadyDoneCandidates([pr], '343')).toEqual([]);
+  });
+
+  it('excludes a non-merged row even if it slipped past the caller\'s own `--state merged` filter', () => {
+    const pr = merged('WE #3037: x', 'lane/3037-x', { state: 'OPEN' });
+    expect(filterAlreadyDoneCandidates([pr], '3037')).toEqual([]);
+  });
+
+  it('sorts MOST RECENTLY MERGED first', () => {
+    const older = merged('WE #3037: first', 'lane/3037-first', { number: 1, mergedAt: '2026-08-01T00:00:00Z' });
+    const newer = merged('WE #3037: second', 'lane/3037-second', { number: 2, mergedAt: '2026-08-02T00:00:00Z' });
+    expect(filterAlreadyDoneCandidates([older, newer], '3037').map((p) => p.number)).toEqual([2, 1]);
+  });
+
+  it('empty/malformed input never throws', () => {
+    expect(filterAlreadyDoneCandidates(null, '3037')).toEqual([]);
+    expect(filterAlreadyDoneCandidates([], '3037')).toEqual([]);
+    expect(filterAlreadyDoneCandidates([{}], '')).toEqual([]);
+    expect(filterAlreadyDoneCandidates([{}], 'not-a-number')).toEqual([]);
+  });
+
+  it('NON_IMPLEMENTING_REF_RE matches both authoring shapes and no others', () => {
+    expect(NON_IMPLEMENTING_REF_RE.test('lane/3435-scope-abcd')).toBe(true);
+    expect(NON_IMPLEMENTING_REF_RE.test('lane/3457-prepare-abcd')).toBe(true);
+    expect(NON_IMPLEMENTING_REF_RE.test('lane/3037-my-scoped-fix')).toBe(false); // "scoped" ≠ "scope-"
+    expect(NON_IMPLEMENTING_REF_RE.test('lane/3037b-slug')).toBe(false); // a real retry-tagged build ref
+  });
+});
+
+describe('defaultCheckAlreadyDone — the gh call itself: argv, timeout, and fail-soft', () => {
+  it('shells the exact ratified query shape: search "<NNN> in:title", state merged, bounded limit + json fields', () => {
+    let seenArgv = null;
+    let seenOpts = null;
+    const exec = (cmd, argv, opts) => { seenArgv = [cmd, ...argv]; seenOpts = opts; return '[]'; };
+    defaultCheckAlreadyDone('3435', { exec });
+    expect(seenArgv).toEqual([
+      'gh', 'pr', 'list', '--search', '3435 in:title', '--state', 'merged',
+      '--limit', String(ALREADY_DONE_SEARCH_LIMIT), '--json', ALREADY_DONE_JSON_FIELDS,
+    ]);
+    expect(seenOpts.timeout).toBeGreaterThan(0); // reuses prListTimeoutMs — never unbounded by accident
+    expect(seenOpts.killSignal).toBe('SIGKILL');
+  });
+
+  it('a real merged match returns done:true with the most-recent PR as evidence', () => {
+    const prs = [{ number: 1768, title: 'x (#3434)', headRefName: 'lane/3434-x', url: 'https://x/1768', mergedAt: '2026-09-01T00:00:00Z', state: 'MERGED' }];
+    const out = defaultCheckAlreadyDone('3434', { exec: () => JSON.stringify(prs) });
+    expect(out).toEqual({ done: true, pr: prs[0], checked: true });
+  });
+
+  it('no match → done:false, checked:true (a real read that found nothing)', () => {
+    const out = defaultCheckAlreadyDone('3434', { exec: () => '[]' });
+    expect(out).toEqual({ done: false, pr: null, checked: true });
+  });
+
+  it('FAIL-SOFT: a gh failure (auth, rate-limit, network) degrades to not-done, not a throw', () => {
+    const out = defaultCheckAlreadyDone('3434', { exec: () => { throw new Error('gh: command not found'); } });
+    expect(out).toEqual({ done: false, pr: null, checked: false });
+  });
+
+  it('unparseable output degrades the same way, never crashes the caller', () => {
+    expect(defaultCheckAlreadyDone('3434', { exec: () => 'not json' })).toEqual({ done: false, pr: null, checked: false });
+  });
+
+  it('a blank/missing num is refused cheaply — no gh call at all', () => {
+    let called = false;
+    expect(defaultCheckAlreadyDone('', { exec: () => { called = true; return '[]'; } }))
+      .toEqual({ done: false, pr: null, checked: false });
+    expect(called).toBe(false);
+  });
+});
+
+describe('readTick — the ground-truth check is LAZY: one gh call per dispatch ATTEMPT, never when nothing is cleared', () => {
+  const TICK = { decisions: { spawnBuilds: [{ num: 3037, lane: 8 }] }, nextState: { tick: 1 } };
+  const bindings = {
+    runNode: () => JSON.stringify(TICK),
+    readText: () => BRIEF,
+    loadItems: () => [{ num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] }],
+    listAgents: () => [],
+  };
+
+  it('calls checkAlreadyDone exactly once when a launch was cleared, and threads its verdict onto the read', () => {
+    let calls = 0;
+    const out = readTick({
+      num: '3037', ...bindings,
+      checkAlreadyDone: (n) => { calls += 1; expect(n).toBe('3037'); return { done: false, pr: null, checked: true }; },
+    });
+    expect(calls).toBe(1);
+    expect(out.alreadyDone).toEqual({ done: false, pr: null, checked: true });
+  });
+
+  it('never calls checkAlreadyDone when nothing was cleared for this item — no launch, no gh cost', () => {
+    let calls = 0;
+    const out = readTick({
+      num: '9999', ...bindings, runNode: () => JSON.stringify({ decisions: {}, nextState: {} }),
+      checkAlreadyDone: () => { calls += 1; return { done: true, pr: {} }; },
+    });
+    expect(out.launch).toBeNull();
+    expect(calls).toBe(0);
+    expect(out.alreadyDone).toEqual({ done: false, pr: null, checked: false });
+  });
+});
+
+describe('shapeDispatchRead — refuses a dispatch a real merged PR already shows done (#3457/#3460)', () => {
+  const alreadyDonePr = (over = {}) => ({
+    number: 1768, url: 'https://github.com/chalbert/web-everything/pull/1768',
+    title: 'review-loop-policy: mechanical acceptance from a clean independent verdict (#3434)',
+    mergedAt: '2026-09-01T16:44:28Z', ...over,
+  });
+
+  it('refuses the dispatch, names the merged PR URL in the reason, and reports alreadyDonePr', () => {
+    const pr = alreadyDonePr();
+    const v = shapeDispatchRead(tickRead({ alreadyDone: { done: true, pr, checked: true } }), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.lane).toBeNull();
+    expect(v.sessionSlug).toBeNull();
+    expect(v.prompt).toBeNull();
+    expect(v.alreadyDonePr).toEqual(pr);
+    expect(v.holdReason).toContain(pr.url);
+    expect(v.holdReason).toContain('already appears CLOSED');
+  });
+
+  it('reproduces the REAL #3434 shape end to end: a `prepare-decision` launch, refused on the actual evidence', () => {
+    // #3434 was `kind: decision`, `status: open` — the tick core would clear it for a `prepare-decision`
+    // dispatch, exactly like the read that follows. #3457's own motivating incident was TWO wasted dispatches
+    // against this exact shape; this pins that the guard now catches it.
+    const pr = alreadyDonePr();
+    const read = tickRead({
+      launchKind: 'prepare-decision',
+      launch: { num: '3434', lane: 8 },
+      dispatchedGuard: { num: '3434', lane: 8, spawnedTick: 0, kind: 'prepare-decision' },
+      resolvedNum: '3434',
+      item: { num: '3434', slug: 'review-loop-policy-decision', specPath: 'backlog/3434-review-loop-policy-decision.md', scope: ['we:docs/agent/'] },
+      alreadyDone: { done: true, pr, checked: true },
+    });
+    const v = shapeDispatchRead(read, { num: '3434' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('https://github.com/chalbert/web-everything/pull/1768');
+    expect(v.holdReason).toContain('prepare-decision');
+  });
+
+  it('reproduces the REAL #3433 shape — a plain `build` launch, refused the same way with its own PR', () => {
+    const pr = { number: 1829, url: 'https://github.com/chalbert/web-everything/pull/1829', title: 'WE #3433: bake a Bash disallowedTools deny list into every dispatched review session', mergedAt: '2026-09-02T16:31:19Z' };
+    const v = shapeDispatchRead(tickRead({ resolvedNum: '3433', alreadyDone: { done: true, pr, checked: true } }), { num: '3433' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('https://github.com/chalbert/web-everything/pull/1829');
+  });
+
+  it('an UNCHECKED or nothing-found verdict never blocks a real, legitimately-needed dispatch', () => {
+    expect(shapeDispatchRead(tickRead({ alreadyDone: { done: false, pr: null, checked: true } }), { num: '3037' }).dispatching).toBe(true);
+    expect(shapeDispatchRead(tickRead({ alreadyDone: { done: false, pr: null, checked: false } }), { num: '3037' }).dispatching).toBe(true);
+    expect(shapeDispatchRead(tickRead(), { num: '3037' }).dispatching).toBe(true); // no `alreadyDone` field at all — pre-#3460 fixtures unaffected
+  });
+
+  it('takes priority over "not cleared" but does not fire when nothing was cleared (raw.alreadyDone absent by construction)', () => {
+    // readTick only ever sets `alreadyDone.done` when a launch existed, so a fixture that claims `done: true`
+    // with `launch: null` is not a real shape readTick produces — but the pure function must still not crash
+    // or dispatch on it, since it stays defensive regardless of what a future caller hands it.
+    const v = shapeDispatchRead(tickRead({ launch: null, launchKind: 'build', suppressed: null, alreadyDone: { done: true, pr: alreadyDonePr(), checked: true } }), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('already appears CLOSED');
+  });
+
+  it('every other exit still reports `alreadyDonePr: null` — the field is on every finding, not just this branch', () => {
+    expect(shapeDispatchRead(tickRead(), { num: '3037' }).alreadyDonePr).toBeNull();
+    const held = tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()]) });
+    expect(shapeDispatchRead(held, { num: '3037' }).alreadyDonePr).toBeNull();
   });
 });

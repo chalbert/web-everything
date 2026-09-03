@@ -624,6 +624,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // real value only on the one branch that actually dispatches a `fix`/`ci-heal`.
     pr: null,
     reason: null,
+    // #3457/#3460 — the merged PR (if any) the ground-truth check found closing this item out already. `null`
+    // on every exit except the one new branch below that actually refuses on it.
+    alreadyDonePr: null,
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is
@@ -662,6 +665,41 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
         + 'Resolve or close out that run '
         + '(`node scripts/operations/wake.mjs --resolve=<runId> --key=<effectKey> --status=failed`) before dispatching '
         + 'again; starting a second agent would put two of them in one lane clone.',
+    };
+  }
+
+  // #3457/#3460 — THE ALREADY-DONE GROUND-TRUTH REFUSAL. Checked BEFORE `!launch` (though by construction it
+  // can only ever be set when `launch` was truthy — see `readTick`'s own lazy call) so this reads as its own
+  // priority tier rather than falling out of "not cleared" by accident. `raw.alreadyDone` was computed by the
+  // io shell (this file stays pure — no network here); a real merged PR closing this item out is a STRONGER
+  // and more authoritative signal than anything the tick core itself decided, because the core's whole
+  // `open`/`active` view of this item comes from the SAME stale `status:` frontmatter this check exists to
+  // stop trusting blind (#3434's own motivating incident: `status: open`, `kind: decision`, PR already merged
+  // hours earlier). HOLDS, never auto-resolves — see `filterAlreadyDoneCandidates`'s own docblock in
+  // `dispatch-lane-io.mjs` for why a false positive here must stay recoverable rather than silently correcting
+  // the backlog's own frontmatter.
+  const alreadyDone = raw.alreadyDone && typeof raw.alreadyDone === 'object' ? raw.alreadyDone : null;
+  if (alreadyDone && alreadyDone.done && alreadyDone.pr && typeof alreadyDone.pr === 'object') {
+    const { pr } = alreadyDone;
+    return {
+      ...base,
+      inFlightRuns: [],
+      agedOutRuns,
+      dispatching: false,
+      lane: null,
+      sessionSlug: null,
+      prompt: null,
+      briefUnknownTokens: [],
+      itemSpecPath: null,
+      scope: [],
+      dispatchedGuard: null,
+      alreadyDonePr: pr,
+      holdReason:
+        `#${resolvedNum} already appears CLOSED by a merged PR — ${pr.url ?? `PR #${pr.number}`} `
+        + `(${JSON.stringify(String(pr.title ?? ''))}, merged ${pr.mergedAt ?? 'unknown time'}) — refusing to `
+        + `dispatch a ${launchKind} agent for work a real PR history already shows done. If #${resolvedNum}'s `
+        + 'real status is genuinely still open, verify by hand (the ground-truth check can false-positive on a '
+        + 'PR that only touched this item\'s own card, not its implementation) before re-dispatching.',
     };
   }
 
