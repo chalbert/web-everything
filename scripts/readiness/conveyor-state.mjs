@@ -118,17 +118,32 @@ export function shapeQueue(buildQueue, clearedNums = null) {
  * Returns the numeric run (`2611`) or a JIT slug (`xe2fmix` — the drain's pre-number `x`+base36 id). A ref whose
  * first segment is a plain word (`lane/hotfix-2611`) does NOT return the word — it falls back to a trailing
  * `-<digits>` (→ `2611`), and a ref with no recognizable id at all returns null (never a silent wrong id).
+ *
+ * RETRY REFS carry an attempt-tag letter glued directly onto the id (`lane/3441b-...`, a "b" retry of #3441,
+ * mirroring `we:scripts/conveyor/lease-reaper.mjs`'s own `itemNumFromSession`/`laneRefItemNum` grammar for the
+ * exact same dispatcher retry-naming convention). Both branches below allow one optional trailing `[a-z]`
+ * before the delimiter so a retried PR still resolves to its base item instead of `null` — confirmed live
+ * against `gh pr view 1851` (`lane/3441b-resolve-on-land-extractor`), which returned `null` before this fix.
+ * The numeric branch is unambiguous (`\d+` is pure digits, so a trailing letter is always the tag). The
+ * JIT-slug branch is NOT fully unambiguous — `{5,7}` is itself variable-length, so a base slug shorter than
+ * the 7-char cap plus a 1-letter retry can total a length that also reads as a valid bare slug (the greedy
+ * quantifier absorbs it, same as a real 7-char slug with no retry at all); only a base slug already at the
+ * cap disambiguates correctly. Accepted, not fixed further: `laneRefItemNum` (the precedent this mirrors)
+ * carries the identical ambiguity unaddressed, and it is currently unreachable in practice —
+ * `itemNumFromSession`'s own grammar only ever retries a digit-identified session, never an `x`-hash one, so
+ * no JIT-slug item is actually retried today (`#xaa7r2n`).
  * @param {string|null|undefined} ref
  * @returns {string|null}
  */
 export function itemNumFromRef(ref) {
   if (!ref) return null;
   const s = String(ref);
-  // Normal lane ref: the first segment after `lane/` is the numeric item number …
-  let m = s.match(/lane\/(\d+)(?:-|$)/i);
+  // Normal lane ref: the first segment after `lane/` is the numeric item number, optionally retry-tagged …
+  let m = s.match(/lane\/(\d+)[a-z]?(?:-|$)/i);
   if (m) return m[1];
-  // … or a JIT slug (the drain's pre-number id: `x` + 5-7 base36 chars — anchored so a plain word never matches).
-  m = s.match(/lane\/(x[a-z0-9]{5,7})(?:-|$)/i);
+  // … or a JIT slug (the drain's pre-number id: `x` + 5-7 base36 chars — anchored so a plain word never matches),
+  // also optionally retry-tagged.
+  m = s.match(/lane\/(x[a-z0-9]{5,7})[a-z]?(?:-|$)/i);
   if (m) return m[1];
   // Fallback: a non-standard word-first ref (`lane/hotfix-2611`) → the TRAILING digits, not the leading word.
   m = s.match(/-(\d+)$/);
