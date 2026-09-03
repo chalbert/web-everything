@@ -31,6 +31,7 @@ import {
   routeWatcherExit,
   buildStatusLine,
   planTick,
+  HELD_NOTE_EXCLUDED_REASONS,
   DEFAULT_BUILD_TTL_TICKS,
   DEFAULT_PREPARE_TTL_TICKS,
   DEFAULT_FIX_RETRY_CAP,
@@ -794,6 +795,112 @@ describe('planTick — composes the tick and threads nextState', () => {
     ]));
     // A prepared decision is PRESENTED, never spawned.
     expect(out.decisions.spawnPrepareDecision).toEqual([]);
+  });
+
+  // ── Held-reason telemetry (the live gap fixed here): a tick that dispatches nothing must be able to say WHY,
+  //    from its OWN output — no separate manual `dispatch-plan.mjs --json` run required. ──────────────────────
+  describe('held-reason notes — plan.held surfaces as its own note (telemetry gap fix)', () => {
+    it('surfaces an "overlaps lane-<n>" held item as a note, verbatim reason + text', () => {
+      const out = planTick({
+        state: { queue: [{ num: 3460, buildQueued: true }], lanes: [], prs: [] },
+        plan: { launch: [], held: [{ num: 3460, reason: 'overlaps lane-17' }] },
+        bookkeeping: { tick: 0 },
+      });
+      expect(out.decisions.notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'held', num: 3460, reason: 'overlaps lane-17', text: '⏸ #3460 — overlaps lane-17' }),
+      ]));
+    });
+
+    it('surfaces a "cleared-but-not-ready" held item as a note', () => {
+      const out = planTick({
+        state: { queue: [], lanes: [], prs: [] },
+        plan: { launch: [], held: [{ num: 3443, reason: 'cleared-but-not-ready' }] },
+        bookkeeping: { tick: 0 },
+      });
+      expect(out.decisions.notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'held', num: 3443, reason: 'cleared-but-not-ready', text: '⏸ #3443 — cleared-but-not-ready' }),
+      ]));
+    });
+
+    it('surfaces BOTH shapes together — the live #3383 scenario: several overlaps + several cleared-but-not-ready', () => {
+      const held = [
+        { num: 3460, reason: 'overlaps lane-17' }, { num: 3461, reason: 'overlaps lane-17' },
+        { num: 3443, reason: 'cleared-but-not-ready' }, { num: 3451, reason: 'cleared-but-not-ready' },
+      ];
+      const out = planTick({
+        state: { queue: [], lanes: [], prs: [] },
+        plan: { launch: [], held },
+        bookkeeping: { tick: 0 },
+      });
+      const heldNotes = out.decisions.notes.filter((n) => n.kind === 'held');
+      expect(heldNotes).toHaveLength(4);
+      expect(heldNotes.map((n) => n.num)).toEqual([3460, 3461, 3443, 3451]);
+    });
+
+    it('surfaces a "no free lane" and a defense-in-depth "blocked" held item too', () => {
+      const out = planTick({
+        state: { queue: [], lanes: [], prs: [] },
+        plan: { launch: [], held: [{ num: 10, reason: 'no free lane' }, { num: 11, reason: 'blocked' }] },
+        bookkeeping: { tick: 0 },
+      });
+      expect(out.decisions.notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'held', num: 10, reason: 'no free lane' }),
+        expect.objectContaining({ kind: 'held', num: 11, reason: 'blocked' }),
+      ]));
+    });
+
+    it('does NOT double-report needs-slice / needs-decision / unshaped-no-scope — each already has its own note', () => {
+      const out = planTick({
+        state: {
+          queue: [], needsSlice: [{ num: 50, epicState: 'unsliced' }], decisions: [{ num: 60, prepared: true }],
+          unshaped: [], lanes: [], prs: [],
+        },
+        plan: {
+          launch: [],
+          held: [
+            { num: 50, reason: 'needs-slice' },
+            { num: 61, reason: 'needs-decision' },
+            { num: 70, reason: 'unshaped-no-scope' },
+          ],
+        },
+        bookkeeping: { tick: 0 },
+      });
+      // No 'held' note for any of the three excluded reasons — only their own dedicated note kind appears.
+      expect(out.decisions.notes.filter((n) => n.kind === 'held')).toHaveLength(0);
+      expect(out.decisions.notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'needs-slice', num: 50 }),
+        expect.objectContaining({ kind: 'decision-ready', num: 60 }),
+      ]));
+      // The exclusion set itself is exactly the three reasons that have their own note elsewhere.
+      expect(HELD_NOTE_EXCLUDED_REASONS).toEqual(['needs-slice', 'needs-decision', 'unshaped-no-scope']);
+    });
+
+    it('emits NO held notes when the queue is empty (plan.held absent or [])', () => {
+      const absent = planTick({
+        state: { queue: [], lanes: [], prs: [] },
+        plan: { launch: [] },
+        bookkeeping: { tick: 0 },
+      });
+      expect(absent.decisions.notes.filter((n) => n.kind === 'held')).toHaveLength(0);
+
+      const empty = planTick({
+        state: { queue: [], lanes: [], prs: [] },
+        plan: { launch: [], held: [] },
+        bookkeeping: { tick: 0 },
+      });
+      expect(empty.decisions.notes.filter((n) => n.kind === 'held')).toHaveLength(0);
+    });
+
+    it('emits NO held notes when everything is actually dispatching normally (a launch, nothing held)', () => {
+      const out = planTick({
+        state: { queue: [{ num: 10, buildQueued: true }], lanes: [], prs: [] },
+        plan: { launch: [{ num: 10, lane: 4 }], held: [] },
+        freeLanes: [4],
+        bookkeeping: { tick: 0 },
+      });
+      expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+      expect(out.decisions.notes.filter((n) => n.kind === 'held')).toHaveLength(0);
+    });
   });
 });
 
