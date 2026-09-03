@@ -114,9 +114,30 @@
  *   in-flight lanes, no open conveyor PRs) AND there has been no operator feedback for `idleWindowMs` (default
  *   15 min). It reads the operator-feedback clock (`now`, `lastOperatorTurn`) as injected inputs and deliberately
  *   IGNORES `state.idle.lastQueueAdd` (that field is the drain's queue, not the conveyor queue — SKILL §6).
+ *
+ * HELD-REASON NOTES (§7, telemetry-gap fix): the IO shell already shells `dispatch-plan.mjs` for `plan` (it needs
+ *   `plan.launch`) — its `plan.held` (every queued-and-cleared item's `{ num, reason }`, the SAME reasoning a
+ *   human previously had to run `dispatch-plan.mjs --json` BY HAND to see) was computed every tick but silently
+ *   dropped: `planTick` only ever read `plan.launch`. A tick could show real spare capacity and
+ *   `spawnBuilds: []` for many consecutive ticks — correct behavior (every held item really was scope-blocked or
+ *   not-ready) — with NOTHING in the tick's own output explaining why. This loop surfaces each held item as its
+ *   OWN note (mirroring the `needs-slice` / `decision-ready` / `lane-stalled` notes above: a continuous,
+ *   re-derived-every-tick fact about backlog state, not a one-shot event — the codebase's existing discipline for
+ *   "this is still true" signals, as opposed to the build/prepare/fix guards' one-shot TTL-retirement notes). It
+ *   SKIPS `needs-slice` / `needs-decision` / `unshaped-no-scope` — each of those held reasons already has its OWN
+ *   dedicated note above (from `state.needsSlice` / `state.decisions` / the prepare-spawn notes respectively) — so
+ *   no item is ever double-reported under two note kinds. What is left — `overlaps lane-<n>`, `no free lane`,
+ *   `cleared-but-not-ready`, and (defense-in-depth; unreachable via the production shell per dispatch-plan.mjs)
+ *   `blocked` — had NO other surface at all before this.
  */
 
 import { normNum } from './queue-store.mjs';
+
+/** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
+ *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
+ *  `state.decisions`, `unshaped-no-scope` from the prepare-spawn notes (`auto-preparing-scope` / `prepare-no-lane`).
+ *  The held-reason note loop below skips these so an item is never double-reported under two note kinds. */
+export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'unshaped-no-scope']);
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -887,6 +908,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   notes.push(...ciHealPlan.notes.map((n) => ({ kind: n.kind, num: n.num, pr: n.pr, text: n.text })));
   for (const e of Array.isArray(needsSlice) ? needsSlice : []) notes.push({ kind: 'needs-slice', num: e.num, epicState: e.epicState, text: `⚠ epic #${e.num} needs slicing (/slice ${e.num})` });
   for (const d of Array.isArray(decisions) ? decisions : []) if (d?.prepared === true) notes.push({ kind: 'decision-ready', num: d.num, text: `⚖ decision #${d.num} ready to ratify (/next decision)` });
+  // HELD — surface every OTHER held-plan reason (the telemetry-gap fix, see the file header): `overlaps lane-<n>`,
+  // `no free lane`, `cleared-but-not-ready`, and (defense-in-depth) `blocked`. `needs-slice` / `needs-decision` /
+  // `unshaped-no-scope` are skipped — they already have their own dedicated note above/below (see
+  // HELD_NOTE_EXCLUDED_REASONS) — so a held item is never reported under two note kinds. Mirrors dispatch-plan.mjs's
+  // own CLI text (`⏸ #<num> — <reason>`) so the tick's own output answers "why not" without a human separately
+  // running `dispatch-plan.mjs --json` by hand.
+  for (const h of Array.isArray(plan.held) ? plan.held : []) {
+    if (!h || h.num == null || HELD_NOTE_EXCLUDED_REASONS.includes(h.reason)) continue;
+    notes.push({ kind: 'held', num: h.num, reason: h.reason, text: `⏸ #${h.num} — ${h.reason}` });
+  }
   // HEALTH — the stall scan is LIVE now (#2616 populates the lane→num map on `acquire --item`), so `state.health`
   // flags a genuinely stalled lane instead of always reading `ok`. Surface each stalled lane as an actionable note
   // (the status line already shows the aggregate `⚠ lane-N` warn): the per-tick lease-reaper (SKILL §4c) reclaims
