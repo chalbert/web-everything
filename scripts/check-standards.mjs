@@ -69,6 +69,7 @@ import {
   findLockPointFiles, lockPointCandidatePaths,
   findTestOnlyExports,
   scanPublishSecrets,
+  scanHarnessScaffolding,
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
@@ -1206,6 +1207,30 @@ try {
   }
 } catch (e) {
   err(`publish-secret sweep failed: ${e.message}`);
+}
+
+// ── 6f-i-b. HARNESS-SCAFFOLDING leak sweep on the committed corpus (#3448) ─────────────────────────
+// PR #1803 committed a literal <system-reminder> block into a backlog item — copy-pasted from the
+// authoring agent's own context, not an external attack, undetected until human review. This re-walks
+// backlog/*.md and reports/*.md (the same corpus 6f already reads for locus prefixes) for the tells of
+// an agent accidentally pasting its own harness context into committed content. Pure detector lives in
+// scanHarnessScaffolding; the fs walk stays here, mirroring scanRepoLocusPrefixes / scanPublishSecrets.
+{
+  const docs = [];
+  for (const f of readdirSync(join(ROOT, 'backlog')).filter((n) => n.endsWith('.md')))
+    docs.push({ file: `backlog/${f}`, content: readFileSync(join(ROOT, 'backlog', f), 'utf8') });
+  for (const f of reportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
+  for (const { file, hits } of scanHarnessScaffolding(docs)) {
+    for (const hit of hits) {
+      err(
+        `${file}:${hit.line} carries a ${hit.label} outside a fenced code block (${JSON.stringify(hit.match)}) — ` +
+        `this looks like harness-scaffolding accidentally copy-pasted from an authoring agent's own context ` +
+        `into committed content (#3448, the PR #1803 leak). Remove it, or fence it in a code block if it is ` +
+        `genuinely documenting the pattern.`,
+        { kind: 'harness-scaffolding-leak', file },
+      );
+    }
+  }
 }
 
 // ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────

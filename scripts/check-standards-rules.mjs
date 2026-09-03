@@ -1882,6 +1882,65 @@ export function scanPublishSecrets(docs) {
   return findings;
 }
 
+// ── Harness-scaffolding leak sweep (#3448) ────────────────────────────────────────────────────────
+// PR #1803 committed a literal <system-reminder> block into a backlog item — copy-pasted from the
+// authoring agent's own context, not an external attack, undetected until human review. A real leak
+// always lands as its OWN block: the tag opens a fresh line, and a `Claude-Session:` header likewise
+// starts its own line — so those two markers are anchored at line-start (optional leading
+// whitespace, or a `>` blockquote prefix — a leak pasted into review discussion is often quoted) rather
+// than matched anywhere in the line. That is what lets this rule pass on backlog/report content that
+// merely *describes* the incident in prose (e.g. this very item's body mentions "<system-reminder>" and
+// "SendUserFile" mid-sentence, never at a line's start) while still catching a genuinely pasted block.
+// SCOPE NOTE: this is a "leaked BLOCK" detector, not a "leaked marker anywhere" detector — a marker
+// smashed into the middle of a sentence (not opening its own line) is intentionally out of scope, the
+// same tradeoff #1803's own shape (a genuine multi-line paste) makes safe. `SendUserFile`'s tell is
+// different — the harness phrases it as a natural-language instruction ("… send it with SendUserFile")
+// rather than a line-opening tag, so its marker matches that phrase anywhere in the line.
+const HARNESS_SCAFFOLDING_MARKERS = [
+  { label: '<system-reminder> tag', re: /^[\s>]*<\/?system-reminder\b[^>]*>/i },
+  { label: '<system> tag', re: /^[\s>]*<\/?system(?!-reminder)\b[^>]*>/i },
+  { label: 'Claude-Session: header', re: /^[\s>]*Claude-Session:/i },
+  { label: 'SendUserFile tool-invocation instruction', re: /\bwith\s+SendUserFile\b/i },
+];
+
+/**
+ * Find harness-scaffolding leak markers in a markdown body, outside fenced code blocks (mirrors the
+ * fence-toggle scan in findRawHtmlInMarkdown above — a marker fenced in a code block is a documented
+ * example of the pattern, not a leak). Returns `[{ line, label, match }]`.
+ */
+export function findHarnessScaffoldingMarkers(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null;
+  let fenceLen = 0;
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return; // inside a fence — a documented example, not a leak
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    for (const { label, re } of HARNESS_SCAFFOLDING_MARKERS) {
+      const m = line.match(re);
+      if (m) findings.push({ line: i + 1, label, match: m[0].trim() });
+    }
+  });
+  return findings;
+}
+
+/**
+ * Scan docs (`[{ file, content }]`) for harness-scaffolding leaks — the fs walk lives in
+ * check-standards.mjs, mirroring scanRepoLocusPrefixes / scanPublishSecrets directly above.
+ */
+export function scanHarnessScaffolding(docs) {
+  const findings = [];
+  for (const { file, content } of docs) {
+    const hits = findHarnessScaffoldingMarkers(content);
+    if (hits.length) findings.push({ file, hits });
+  }
+  return findings;
+}
+
 // ── Block contract↔impl drift conformance (#659 — the #606/#641 plugs analogue for blocks) ──
 // #641 ruled WE blocks are pure *protocols*; the impl lives in FUI (`implementedBy:
 // @frontierui/blocks/…`). Unlike the plug runtime, WE holds NO block-impl copy post-#641

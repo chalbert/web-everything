@@ -13,6 +13,7 @@ import {
   isExportsSafeTarget, validateModuleResolutionLock,
   flattenExportsTargets, validateRenderersNotPublished, validateReferenceRuntimeForms, REFERENCE_RUNTIME_FORMS,
   findRawHtmlInMarkdown, findBadBodyLinks,
+  findHarnessScaffoldingMarkers, scanHarnessScaffolding,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
   findBuriedForkSections, findNonBatchableMarkers,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
@@ -497,5 +498,66 @@ describe('validatePlugDualMode — #606 dual-mode plug conformance (#636)', () =
     ]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+  });
+});
+
+describe('findHarnessScaffoldingMarkers — leaked harness-scaffolding in backlog/report content (#3448)', () => {
+  it('flags a bare <system-reminder> block opening its own line', () => {
+    const f = findHarnessScaffoldingMarkers('Some digest.\n\n<system-reminder>\nleaked context\n</system-reminder>\n');
+    expect(f).toHaveLength(2);
+    expect(f[0]).toMatchObject({ line: 3, label: '<system-reminder> tag' });
+    expect(f[1]).toMatchObject({ line: 5, label: '<system-reminder> tag' });
+  });
+
+  it('does NOT flag the same marker fenced in a code block (documenting the pattern itself)', () => {
+    const body = 'Discussion.\n\n```\n<system-reminder>\nexample\n</system-reminder>\n```\n\nmore prose.';
+    expect(findHarnessScaffoldingMarkers(body)).toEqual([]);
+  });
+
+  it('does NOT flag a mid-sentence mention describing the incident (no false positive on prose)', () => {
+    const body = 'PR #1803 committed a literal <system-reminder> block by accident; the marker `Claude-Session:` and SendUserFile-style tool-invocation instructions were also involved.';
+    expect(findHarnessScaffoldingMarkers(body)).toEqual([]);
+  });
+
+  it('flags a <system> tag opening its own line, without colliding with <system-reminder>', () => {
+    expect(findHarnessScaffoldingMarkers('<system>\ninjected\n</system>').map((h) => h.label))
+      .toEqual(['<system> tag', '<system> tag']);
+    expect(findHarnessScaffoldingMarkers('<system-reminder>\nx\n</system-reminder>').map((h) => h.label))
+      .toEqual(['<system-reminder> tag', '<system-reminder> tag']);
+  });
+
+  it('flags a Claude-Session: header opening its own line', () => {
+    const f = findHarnessScaffoldingMarkers('Claude-Session: https://claude.ai/code/session_abc123');
+    expect(f).toEqual([{ line: 1, label: 'Claude-Session: header', match: 'Claude-Session:' }]);
+  });
+
+  it('flags a Claude-Session: header case-insensitively', () => {
+    const f = findHarnessScaffoldingMarkers('claude-session: https://claude.ai/code/session_abc123');
+    expect(f).toEqual([{ line: 1, label: 'Claude-Session: header', match: 'claude-session:' }]);
+  });
+
+  it('flags a leak quoted with a > blockquote prefix (a leak pasted into review discussion)', () => {
+    const f = findHarnessScaffoldingMarkers('> <system-reminder>\n> leaked\n> </system-reminder>');
+    expect(f.map((h) => h.label)).toEqual(['<system-reminder> tag', '<system-reminder> tag']);
+  });
+
+  it('flags a SendUserFile tool-invocation instruction phrase anywhere in the line', () => {
+    const f = findHarnessScaffoldingMarkers('To share it, send it with SendUserFile right away.');
+    expect(f).toEqual([{ line: 1, label: 'SendUserFile tool-invocation instruction', match: 'with SendUserFile' }]);
+  });
+
+  it('scanHarnessScaffolding aggregates per-file hits from a docs array', () => {
+    const findings = scanHarnessScaffolding([
+      { file: 'backlog/1-a.md', content: 'clean body, no markers here.' },
+      { file: 'backlog/2-b.md', content: '<system-reminder>\nleak\n</system-reminder>' },
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].file).toBe('backlog/2-b.md');
+    expect(findings[0].hits.length).toBeGreaterThan(0);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findHarnessScaffoldingMarkers('')).toEqual([]);
+    expect(findHarnessScaffoldingMarkers(undefined)).toEqual([]);
   });
 });
