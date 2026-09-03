@@ -19,6 +19,10 @@ import { weAlias } from './vitest.shared';
  * blown, a timeout tripped): `gate-entrypoint-integration.test.mjs`, `wake-cli.test.mjs`,
  * `dispatch-spawn-live.test.mjs`. `lane-pool-reap-on-acquire.test.mjs` joined them later (#x01b2gj) for the
  * IDENTICAL correctness reason — its own TTL-backdating cases flaked red under real host contention.
+ * `lane-pool-reap-on-list-acquirable.test.mjs` (#3449) joins them for the SAME reason pre-emptively: it drives
+ * the identical `reapDeadLeasesInPool` function through the identical real-subprocess TTL-backdating +
+ * item-resolved-axis pattern as its `-reap-on-acquire` sibling, so the same contention-induced `gh pr list`
+ * miss applies without needing to be independently observed first.
  * `stdout-flush.test.mjs` joins them for a DIFFERENT reason, found the hard
  * way (measured on this branch): left on the default `threads` pool alongside the other ~18 git-fixture
  * files, its two tests that spawn a real full `check-standards.mjs` scan went from 48.4s/39.7s (alone, in
@@ -51,6 +55,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-reap-on-acquire.test.mjs',
       'scripts/__tests__/lane-pool-siblings.test.mjs',
       'scripts/__tests__/lane-pool-acquirable.test.mjs',
+      'scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-refresh-guard.test.mjs',
       'scripts/__tests__/lane-pool-release-ownership.test.mjs',
       'scripts/__tests__/lane-pool-item-map.test.mjs',
@@ -76,6 +81,10 @@ export default defineConfig({
       // decision's bounded `gh pr list` call (see the widened timeout in `scripts/lane-pool.mjs`) can miss
       // its terminal signal before the test asserts on it. Isolating it here removes that contention.
       ['scripts/__tests__/lane-pool-reap-on-acquire.test.mjs', 'forks'],
+      // #3449 — a sixth join, pre-emptively, for the same reason: this file drives the identical
+      // `reapDeadLeasesInPool` function through the identical real-subprocess TTL-backdating +
+      // item-resolved-axis pattern as its sibling above, so the same contention risk applies by construction.
+      ['scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs', 'forks'],
     ],
     poolOptions: {
       forks: {

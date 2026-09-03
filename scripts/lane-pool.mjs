@@ -1412,6 +1412,12 @@ function cmdList(repo) {
   if (flags.acquirable) {
     const nowMs = Date.now();
     const ttlMs = ttlMsFromFlags();
+    // #3449 — run the SAME provably-dead-ghost reap `acquire` runs (`reapDeadLeasesInPool`, #2748) before
+    // filtering. Previously only a fresh `acquire` triggered it, so `dispatch-plan.mjs`'s read-only capacity
+    // check (`list --acquirable`) could under-report a pool saturated with ghost leases forever: nothing ever
+    // called `acquire` to clear them, because the low-capacity reading is exactly what makes nothing call it.
+    // `--no-reap` (tests) opts out identically to `acquire`'s own flag.
+    reapDeadLeasesInPool(repo, nowMs, ttlMs);
     lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs));
   }
   const paths = lanes.map((n) => laneDir(repo, n));

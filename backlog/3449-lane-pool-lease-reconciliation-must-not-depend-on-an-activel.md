@@ -2,10 +2,11 @@
 bornAs: xelgqmw
 kind: task
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/readiness/dispatch-plan.mjs"]
 relatedTo: ["3435", "3427", "2748", "2667", "2700"]
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-03"
 tags: [conveyor, lane-pool, lease, reconcile, liveness]
 ---
 
@@ -110,3 +111,20 @@ now.
    either card naturally generalizes into one shared "reconcile-without-a-live-session" primitive, that is a
    welcome outcome, not a requirement — do not block this card on `#3435` landing first, and do not fold
    `#3435`'s scope in here.
+
+## Progress
+
+- **Status:** resolving — fix landed, PR opened.
+- **Done:** picked the WE-repo-only fork of "Done when" #1 (bullet 2, `list --acquirable` self-triggers the
+  reap) over the `plateau:drain-daemon` fork — this card's scope is WE-only, and the drain-daemon fork would
+  have made it cross-locus for no added benefit (either bullet independently closes the deadlock).
+  `we:scripts/lane-pool.mjs`'s `cmdList` now calls the existing `reapDeadLeasesInPool` before filtering when
+  `--acquirable` is passed — the exact same call `cmdAcquire` already made, so `--no-reap` and the reserved-lane
+  exclusion (`classifyReap`) are inherited unchanged, not re-implemented.
+- **Test:** new `we:scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs` proves a TTL-stale,
+  item-resolved ghost lease is reclaimed by `list --acquirable` alone (no `acquire` call) — verified to fail
+  against the pre-fix code and pass post-fix. Also covers: an OPEN item's lease is untouched, a reserved lane
+  is never reaped, and `--no-reap` still opts out. Wired into both `we:vitest.config.ts`'s exclude list and
+  `we:vitest.integration.config.ts`'s include list (real `git`/child-process fixture, same tier as its siblings).
+- **Next:** none — `we:scripts/conveyor/lease-reaper.mjs` and `we:skills-src/conveyor/runner.mjs` needed no
+  change; the deadlock is closed by making the existing acquire-side reap also run on the read path.
