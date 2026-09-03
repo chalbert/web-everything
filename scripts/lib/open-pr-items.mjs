@@ -163,12 +163,30 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '') {
     if (leadMatch && !leadVerbCollision) {
       nums.add(leadMatch[1]);
     } else if (!leadMatch && trailingIsCleanId) {
-      const fullVerbPhrase = segs.slice(0, -1).join('-').toLowerCase();
-      if (ID_LAST_VERB_PHRASES.has(fullVerbPhrase)) nums.add(trailing);
+      // #3441 review round 1 (human) — a real, merged multi-id verb-led ref (`lane/reconcile-3147-3096-3239`,
+      // PR #1599) chains several sibling ids ahead of the one this PR actually delivers, the same shape
+      // `isBatchRef` already credits only-the-trailing-segment for. So the verb phrase need not consume EVERY
+      // segment before the trailing id — zero or more plain (non-date) numeric segments may sit between the
+      // verb and the trailing id and are treated as batch-chain siblings, not a second delivered id.
+      for (const phrase of ID_LAST_VERB_PHRASES) {
+        const words = phrase.split('-');
+        if (words.length >= segs.length) continue;
+        if (!words.every((w, j) => segs[j].toLowerCase() === w)) continue;
+        const middle = segs.slice(words.length, -1);
+        if (middle.every((s) => !dateSpanSegs.has(s) && /^\d{2,5}$/.test(s))) {
+          nums.add(trailing);
+          break;
+        }
+      }
     }
   }
   const t = String(title || '');
-  for (const m of t.matchAll(/(?:^|\s)#?(\d{2,5})\s*:/g)) nums.add(m[1]);
+  // #3441 review round 1 (human) — anchored to the SUBJECT position (start of title, optional "WE "
+  // prefix), not "any whitespace-preceded digits-colon": the prior unanchored form credited an
+  // unrelated mid-title "NNN:" (an HTTP code, a port, a rate limit — "cap at 500: avoid OOM") as a
+  // second delivered id, feeding the auto-committed resolve on main.
+  const leadTitleMatch = /^\s*(?:WE\s+)?#?(\d{2,5})\s*:/.exec(t);
+  if (leadTitleMatch) nums.add(leadTitleMatch[1]);
   // #3441 round 4 — "resolve: #NNN — subject" (colon right after "resolve", not before "#NNN") is a real,
   // repeated commit-title convention in this repo's history; the optional `:?` covers it alongside the
   // colon-less "resolve #NNN" shape already handled.

@@ -158,6 +158,21 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
   it('#3441 round 7 — a date-adjacent lead (no full YYYY-MM-DD span, so not date-excluded) colliding with an embedded verb+id is still caught', () => {
     expect(deliveredItemNumsFromPr('lane/2026-08-resolve-3412', '')).toEqual([]);
   });
+
+  it('PR #1851 review round 1 (human) — a mid-title "NNN:" that is NOT the leading subject marker is a citation, not a second delivery — the marker regex is anchored to the subject position', () => {
+    expect(deliveredItemNumsFromPr('lane/3441-fix-parser', 'WE #3441: cap batch size at 500: avoid OOM')).toEqual(['3441']);
+    expect(deliveredItemNumsFromPr('lane/3441-fix-parser', 'WE #3441: fix parser (design mirrors 2787: the config loader shape)')).toEqual(['3441']);
+  });
+
+  it('PR #1851 review round 1 (human) — an ordinary mundane "NNN:" title with no lane-id lead is never mistaken for a subject marker (HTTP codes, ports, rate limits)', () => {
+    expect(deliveredItemNumsFromPr('some-feature-branch', 'Handle HTTP 404: return friendly error page')).toEqual([]);
+    expect(deliveredItemNumsFromPr('some-feature-branch', 'Add rate limiting (max 100: requests per min)')).toEqual([]);
+  });
+
+  it('PR #1851 review round 1 (human) — a real multi-id verb-led ref (lane/reconcile-<id>-<id>-<id>, the actually-merged lane/reconcile-3147-3096-3239, PR #1599) credits ONLY the trailing/final item, the same as a batch chain', () => {
+    expect(deliveredItemNumsFromPr('lane/reconcile-3147-3096-3239', '')).toEqual(['3239']);
+    expect(deliveredItemNumsFromPr('lane/reconcile-2716', '')).toEqual(['2716']);
+  });
 });
 
 describe('extractItemNums', () => {
