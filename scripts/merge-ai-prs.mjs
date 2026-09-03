@@ -126,6 +126,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { deliveredItemNumsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
 // #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
@@ -1340,6 +1341,32 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
   v.base = manifestBaseForRepo(m, local ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(repo));
   v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
   return v;
+}
+
+/**
+ * #3441 — which item id(s) does a just-landed cascade candidate contribute to `landedThisPass`? A manifest
+ * carrier (a couple, or a solo PR that pre-authored its own manifest) contributes its own `.item` exactly as
+ * before (#2899 A5). A candidate with NO manifest is the delivery-agent-brief's DEFAULT path — a plain
+ * single-locus WE PR (`lane/<NNN>-<slug>`, no `.lane-manifest.json`) — and until now it contributed NOTHING:
+ * resolve-on-land only ever looked at manifest carriers, so an ordinary item's card stayed `active` forever
+ * after its PR merged (the #3412 incident this item was filed against). Derive its id(s) via
+ * `deliveredItemNumsFromPr` (`./lib/open-pr-items.mjs`) — but ONLY for a PR in the WE repo itself: a non-WE
+ * PR matching the identical `lane/<NNN>-…` naming is an IMPL half of a cross-locus couple, and it must never
+ * resolve its item on its own — only that couple's WE carrier does, and that one DOES carry a manifest and
+ * is already handled above. A wrong/unmatched extraction is a safe no-op downstream: `resolveLandedItem`
+ * only acts on a real `backlog/<id>-*.md` file. `deliveredItemNumsFromPr`'s own stricter matching rules
+ * already guard against the two ways a naive branch/title scan over-credits (batch refs crediting every
+ * sibling in the slug, bare `#NNN` citations) — see its docstring in `./lib/open-pr-items.mjs` for why it,
+ * not the looser `itemNumsFromPr`, is the right tool for an AUTO-COMMITTED resolve. Pure.
+ * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string}} c
+ * @param {{isLocalRepo?:function}} [o]
+ * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved (usually 0 or 1)
+ */
+export function landedIdsForCandidate(c, { isLocalRepo = () => false } = {}) {
+  if (!c) return [];
+  if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
+  if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
+  return deliveredItemNumsFromPr(c.headRef, c.title).map(asItemId);
 }
 
 /**
@@ -4281,7 +4308,7 @@ async function runCli() {
             // (item leaves the open set → dependents free) but do NOT add it to `merged`: the lander that actually
             // ran `gh pr merge` owns the post-land numbering / derived-regen / main-sync. Idempotent no-op.
             remaining = remaining.filter((x) => !sameCand(x, c));
-            if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+            for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
             progressed = true;
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
             continue;
@@ -4293,7 +4320,7 @@ async function runCli() {
           // it becomes ready next pass. Keyed on `hasManifest` (NOT an inherited impl PR) so a green impl PR of
           // an otherwise-broken couple never counts the couple "landed" — that alignment with `bornAs` is what
           // keeps the stowaway guard honest.
-          if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];
@@ -4305,7 +4332,7 @@ async function runCli() {
           // that is genuinely still open is a real fault below.
           if (isPrAlreadyMerged(c.repo, c.num)) {
             remaining = remaining.filter((x) => !sameCand(x, c));
-            if (c.hasManifest && c.item != null) landedThisPass.add(asItemId(c.item));
+            for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
             progressed = true;
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} merged by a concurrent lander during a contended write — idempotent no-op (#2683)\n`);
             continue;

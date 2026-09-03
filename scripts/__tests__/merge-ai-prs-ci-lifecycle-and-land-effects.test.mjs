@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs } from '../merge-ai-prs.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
@@ -1021,5 +1021,57 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     expect(args[args.indexOf('--method') + 1]).toBe('GET');
     expect(args).toContain('repos/chalbert/plateau-app/contents/.lane-manifest.json');
     expect(args).toEqual(expect.arrayContaining(['-f', 'ref=lane/x-2343']));
+  });
+});
+
+// #3441 — the resolve-on-land non-manifest path (#3412's incident: a single-locus WE PR merged and its
+// backlog item stayed `active` forever, because resolve-on-land only ever looked at manifest carriers).
+describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-locus WE PR, not just manifest couples)', () => {
+  const isLocalRepo = (repo) => repo == null || repo === 'web-everything';
+
+  it('manifest carrier — unchanged: contributes its own .item, ignoring headRef/title entirely', () => {
+    expect(landedIdsForCandidate({ hasManifest: true, item: 3457, repo: null, headRef: 'lane/xdecoy-nope' }, { isLocalRepo })).toEqual([3457]);
+  });
+
+  it('manifest carrier with no item → contributes nothing (unchanged)', () => {
+    expect(landedIdsForCandidate({ hasManifest: true, item: null }, { isLocalRepo })).toEqual([]);
+  });
+
+  it('no manifest, WE repo — derives the item from a plain lane/<NNN>-<slug> headRef (the #3412 shape)', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix' }, { isLocalRepo })).toEqual([3412]);
+  });
+
+  it('no manifest, WE repo, headRef carries no number — falls back to an explicit "resolve #NNN" in the title', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'some-feature-branch', title: 'Fix the drain — resolves #2330' }, { isLocalRepo })).toEqual([2330]);
+  });
+
+  it('a bare #NNN CITATION in the title (not a delivery marker) is NOT credited — only an unrelated real bug this fix closes', () => {
+    // #3441 review finding: itemNumsFromPr's loose title regex matched ANY "#NNN", so a PR titled
+    // "WE #3412: resolve fix (root cause also affects #2330)" would wrongly resolve #2330 too.
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix (root cause also affects #2330)' }, { isLocalRepo })).toEqual([3412]);
+  });
+
+  it('no manifest, NON-WE repo — an impl half of a cross-locus couple must NEVER resolve on its own', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: 'frontierui', headRef: 'lane/3412-resolve-fix', title: '' }, { isLocalRepo })).toEqual([]);
+  });
+
+  it('no manifest, WE repo, no extractable number — safe empty result', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo })).toEqual([]);
+  });
+
+  it('a batch ref credits ONLY its trailing segment — the batch\'s OTHER named items are still mid-flight, not delivered by this PR', () => {
+    // #3441 review finding: a batch slug (lane/batch-<date>-<id>-<id>-…-<id>) names every item planned
+    // into the batch upfront, before the earlier ones are even claimed — crediting a non-trailing segment
+    // would resolve a sibling item this PR never touched, mid-build, out from under its own lane.
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/batch-2026-07-08-2245-2281', title: '' }, { isLocalRepo })).toEqual([2281]);
+  });
+
+  it('null/undefined candidate → empty, never throws', () => {
+    expect(landedIdsForCandidate(null, { isLocalRepo })).toEqual([]);
+    expect(landedIdsForCandidate(undefined, { isLocalRepo })).toEqual([]);
+  });
+
+  it('defaults isLocalRepo to always-false when omitted — a non-manifest candidate resolves nothing by default', () => {
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' })).toEqual([]);
   });
 });
