@@ -78,6 +78,28 @@
  * second `claude agents --json` read (and a race) for a confirmation this repo already knows is unreliable —
  * it logs {@link stopSession}'s own `alreadyGone` distinction and moves on, exactly as best-effort as
  * `lease-reaper.mjs`'s own per-candidate try/catch.
+ *
+ * WHY `id`, NOT `sessionId` — the near-universal `claude stop` FAILURE `we:backlog/3435-*.md`'s "Found live"
+ * finding 3 recorded (all five sessions, including `conveyor-3421b`, came back "No job matching" on `claude
+ * stop <sessionId>`) was read at the time as a CLI/registry-staleness limitation, the same family as the
+ * success-side note just above. It is not that. It is a wrong-FIELD bug: this loop passed `session.sessionId`
+ * (the full listing-internal UUID `claude stop`/`claude rm` do not match on) where it should have passed
+ * `session.id` (the short form the CLI actually accepts). Verified live 2026-09-03: a fresh `claude agents
+ * --json --all` (208 rows) shows `id` present on all 204 `kind: 'background'` rows and absent on exactly the 4
+ * `kind: 'interactive'` ones (a human's own terminal/Remote-Control session — never a row this reaper's `kind
+ * !== 'background'` guard, above, would let reach the stop call in the first place). So within this reaper's
+ * own domain `id` is always present — never the "absent from half the listing" shape `dispatch-lane-io.mjs
+ * #listedSessionIds`'s own docblock measured (correctly, for the FULL mixed listing that function reads; that
+ * finding stands, it just does not extend to `kind: 'background'` rows, the only ones this file ever acts on).
+ * Direct proof the swap fixes the failure, same session: `claude stop <full sessionId>` on a real `done`
+ * session (`conveyor-2972`) exited 1 with "No job matching"; `claude stop <short id>` on the SAME session
+ * immediately after exited 0, "stopped". THIS DOES NOT MAKE `claude stop` UNIVERSALLY RELIABLE — a genuinely-
+ * already-exited background session can still legitimately answer "No job matching" even given the correct
+ * `id` (that is {@link stopSession}'s own documented `alreadyGone` case, expected and benign); today's failure
+ * was near-100% and traced to the wrong field, not to occasional legitimate staleness. `main()`'s stop loop
+ * below therefore reads `session.id` (never `session.sessionId`) for the actual handle, and treats a missing
+ * `id` on a reap candidate as a logged anomaly rather than a silent skip — it should never happen given the
+ * `kind !== 'background'` guard above, but "should never happen" is not the same as "cannot happen".
  */
 
 import { execFileSync } from 'node:child_process';
@@ -337,10 +359,21 @@ function main(argv) {
   let stopped = 0;
   let alreadyGone = 0;
   let failures = 0;
+  let anomalies = 0;
   const done = [];
   for (const { session, reason } of reap) {
-    const handle = normalizeHandle(session.sessionId);
-    if (!handle) continue; // no usable id — nothing this pass can act on
+    // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
+    // header's "WHY `id`, NOT `sessionId`" section. Every row here already passed `classifySessionReap`'s
+    // `kind !== 'background'` guard, and every `kind: 'background'` row measured (live and in the checked-in
+    // fixture) carries a real `id` — so a missing one here is a genuine anomaly, not an expected shape, and is
+    // logged + counted rather than silently skipped (a `continue` with no trace would hide exactly the case
+    // this guard exists to catch).
+    const handle = normalizeHandle(session.id);
+    if (!handle) {
+      log(`  ⚠ ${session.sessionId ?? session.name ?? 'unknown'}: reap candidate is missing \`id\` — should never happen for a \`kind: background\` row, skipping and flagging as an anomaly`);
+      anomalies++;
+      continue;
+    }
     if (dryRun) {
       log(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       continue;
@@ -350,7 +383,7 @@ function main(argv) {
       if (res.alreadyGone) alreadyGone++;
       else stopped++;
       log(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
-      done.push({ sessionId: handle, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
+      done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
     } catch (e) {
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
@@ -368,7 +401,10 @@ function main(argv) {
           stopped: dryRun ? 0 : stopped,
           alreadyGone: dryRun ? 0 : alreadyGone,
           failures: dryRun ? 0 : failures,
-          wouldStop: dryRun ? reap.map((r) => ({ sessionId: normalizeHandle(r.session.sessionId), name: r.session.name ?? null, reason: r.reason })) : undefined,
+          anomalies,
+          wouldStop: dryRun
+            ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
+            : undefined,
           collected: dryRun ? undefined : done,
           kept: keep.length,
         },
@@ -379,13 +415,14 @@ function main(argv) {
   } else {
     log(
       `session-reaper: ${sessions.length} session(s) listed · ` +
-        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}`} · ${keep.length} kept`,
+        `${dryRun ? `${reap.length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${keep.length} kept`,
     );
   }
-  // Non-zero exit only when a stop we ATTEMPTED actually failed — mirrors lease-reaper.mjs's own convention,
-  // so a cron/loop wrapper can tell a clean sweep from a partial one. `runQuiet` (the runner's own caller)
-  // swallows this either way — it is surfaced for anyone invoking the CLI directly.
-  process.exit(failures > 0 ? 1 : 0);
+  // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
+  // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop
+  // wrapper can tell a clean sweep from a partial one. `runQuiet` (the runner's own caller) swallows this
+  // either way — it is surfaced for anyone invoking the CLI directly.
+  process.exit(failures > 0 || anomalies > 0 ? 1 : 0);
 }
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
