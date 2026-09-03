@@ -904,6 +904,57 @@ describe('planTick — composes the tick and threads nextState', () => {
   });
 });
 
+describe('planTick — waiting-for-capacity notes (#3461 admission queue)', () => {
+  it('surfaces one note per waiting entry, resolving num off state.lanes by lane', () => {
+    const out = planTick({
+      state: { queue: [], lanes: [{ lane: 7, num: 55 }], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+      admission: { cap: 2, waiting: [{ owner: '/lanes/lane-7', lane: '7', requestedAt: '2026-09-03T00:00:00.000Z' }] },
+    });
+    const notes = out.decisions.notes.filter((n) => n.kind === 'waiting-for-capacity');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ kind: 'waiting-for-capacity', num: 55, lane: '7' });
+    expect(notes[0].text).toContain('#55');
+    expect(notes[0].text).toContain('cap 2');
+  });
+
+  it('falls back to a caller-supplied num when no lane→num mapping exists, and to the owner when there is no lane', () => {
+    const out = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+      admission: { cap: 1, waiting: [{ owner: 'checkout-owner-x', num: 88 }] },
+    });
+    const notes = out.decisions.notes.filter((n) => n.kind === 'waiting-for-capacity');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ num: 88, lane: null });
+    expect(notes[0].text).toContain('checkout-owner-x');
+  });
+
+  it('clears for free once the entry is gone — no bookkeeping persists a stale wait', () => {
+    const withWait = planTick({
+      state: { queue: [], lanes: [], prs: [] }, plan: { launch: [] }, freeLanes: [], bookkeeping: { tick: 0 },
+      admission: { cap: 1, waiting: [{ owner: 'x', num: 1 }] },
+    });
+    expect(withWait.decisions.notes.some((n) => n.kind === 'waiting-for-capacity')).toBe(true);
+    const cleared = planTick({
+      state: { queue: [], lanes: [], prs: [] }, plan: { launch: [] }, freeLanes: [], bookkeeping: withWait.nextState,
+      admission: { cap: 1, waiting: [] },
+    });
+    expect(cleared.decisions.notes.some((n) => n.kind === 'waiting-for-capacity')).toBe(false);
+  });
+
+  it('defaults to no notes when admission is omitted entirely (backward-compatible)', () => {
+    const out = planTick({
+      state: { queue: [], lanes: [], prs: [] }, plan: { launch: [] }, freeLanes: [], bookkeeping: { tick: 0 },
+    });
+    expect(out.decisions.notes.some((n) => n.kind === 'waiting-for-capacity')).toBe(false);
+  });
+});
+
 describe('buildStatusLine — the terse per-tick line (SKILL §5)', () => {
   it('counts building / preparing / fixing / queued / parked and the health verdict', () => {
     const line = buildStatusLine({
