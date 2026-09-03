@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createRegistry } from './registry.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
+import { createFileCallLogStore } from './call-log-store.mjs';
 import { createDefaultJudge, runOperationCli, buildCliSpec } from './cli-adapter.mjs';
 import { reviewPrOperation, REVIEW_PR_OP } from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
@@ -293,6 +294,10 @@ if (IS_CLI) {
     argv: rest,
     registry,
     store: createFileRunStore(),
+    // #3451 — the real, file-backed call-visibility signal. A compute-only operation (gate-health,
+    // suggest-next, verify, pr-status) settles in one `driveRun` sweep and never gets a run record; this
+    // is the ONLY trace a real CLI invocation of one of those leaves behind.
+    callLog: createFileCallLogStore(),
     sinks,
     // A TOOL-BEARING juror needs a lane of its OWN, and `assertLaneCwd` refuses the spawn without one. This
     // entry point still does not ACQUIRE that lane — it must not lease a resource whose release it cannot

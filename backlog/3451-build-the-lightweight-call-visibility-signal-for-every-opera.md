@@ -2,9 +2,10 @@
 bornAs: xadrqhr
 kind: task
 parent: "3427"
-status: open
+status: active
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/http-adapter.mjs", "we:scripts/operations/call-log.mjs", "we:scripts/operations/call-log-store.mjs", "we:scripts/operations/__tests__/"]
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-03"
 tags: [operations-engine, telemetry, observability]
 ---
 
@@ -68,6 +69,14 @@ could set to also persist a full run record despite completing in one `advance` 
 instead of) the lightweight signal every call gets unconditionally. Whether any operation actually needs this
 today, or it is recorded and left unused, is this item's call to make — #3427 requires only that the option be
 named and considered, not that it be built.
+
+## Progress
+
+- **Status:** built — we:scripts/operations/cli-adapter.mjs and we:scripts/operations/http-adapter.mjs both emit one call-log line per invocation now (compute-only and stateful alike); we:scripts/operations/call-log.mjs/we:scripts/operations/call-log-store.mjs shipped as a pure-core/io-shell pair mirroring we:scripts/operations/run-record.mjs/we:scripts/operations/run-store.mjs.
+- **Wiring:** the write is dependency-injected (a `callLog` handle, exactly like `store`) rather than hard-imported into either adapter — importing the file-backed store directly would have made every existing test that drives `runOperationCli`/`handleOperationRequest` (there are dozens) start touching real disk as an unannounced side effect. we:scripts/operations/run.mjs wires the real file-backed store (`createFileCallLogStore()`) for actual CLI use; a caller that omits `callLog` gets today's behaviour unchanged.
+- **Third option (per-declaration high-value-`compute` opt-in to full run-record persistence):** considered, deferred as unnecessary for now. None of the four shipped `compute`-only operations (gate-health, suggest-next, verify, pr-status) need resumability — they settle in one `advance` sweep by construction — and the lightweight call-log line already answers "was this called, and how did it go". Revisit if a future `compute`-only operation turns out to need a full replayable record.
+- **Notes:** verified end-to-end with a real CLI invocation (`suggest-next --scanOpenPrs=false`) — one line landed in `we:.operations/calls/<day>.jsonl` with a non-empty, bounded digest.
+- **Follow-up filed:** we:scripts/backlog.mjs's `claim` command and we:scripts/operations/review-loop-cli.mjs both call the engine's `driveRun` directly, bypassing both derived-caller adapters this item instruments — so those two call sites still leave no call-log trace. Out of this item's declared scope (its `scope:` frontmatter names only the two adapters + the new store pair), so scaffolded as a follow-up rather than folded in here.
 
 ## Done when
 

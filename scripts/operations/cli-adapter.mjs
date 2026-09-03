@@ -696,7 +696,7 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
  * @param {() => string} o.newRunId
  * @returns {Promise<{code: number, lines: string[], run: (object|null), stopped: string}>}
  */
-export async function runOperationCli({ declaration, argv, registry, store, sinks, judge, makeJudge, newRunId } = {}) {
+export async function runOperationCli({ declaration, argv, registry, store, sinks, judge, makeJudge, newRunId, callLog } = {}) {
   const spec = buildCliSpec(declaration);
   const parsed = parseOperationArgv(declaration, argv);
 
@@ -763,6 +763,19 @@ export async function runOperationCli({ declaration, argv, registry, store, sink
 
   // The command line genuinely is a person at a terminal.
   const outcome = await driveRun({ run, registry, store, sinks, judge: activeJudge, resume, attemptedBy: 'human' });
+  // #3451 — ONE call-log line per CLI invocation, once the drive actually settled (never on a pre-drive
+  // refusal like --help, a bad argv, or a stale --resume — those never reached `driveRun` at all).
+  // `callLog` is INJECTED, exactly like `store`: a caller that does not need it (most tests) passes
+  // nothing and this stays a no-op; `run.mjs` wires the real file-backed store for actual CLI use.
+  // BEST-EFFORT (review finding): a telemetry write must never crash a call that otherwise settled
+  // cleanly — a bad `verdict` shape or a disk fault here is not the caller's problem.
+  try {
+    callLog?.append({
+      operation: declaration.name,
+      callerKind: 'cli',
+      source: { stopped: outcome.stopped, error: outcome.error, pending: outcome.run.pending, verdict: outcome.run.verdict },
+    });
+  } catch { /* best-effort call-visibility signal; never fails the call it describes */ }
   return { ...renderOutcome({ outcome, json: parsed.control.json, declaration }), run: outcome.run, stopped: outcome.stopped };
 }
 
