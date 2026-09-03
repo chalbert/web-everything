@@ -2,8 +2,9 @@
 bornAs: xsldreq
 kind: task
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-03"
 tags: []
 relatedTo: ["3332"]
 scope:
@@ -109,3 +110,27 @@ real dispatch route), this card's own remaining job narrows to two steps, in ord
    or whether both are meant to cover different cases (in which case both need to actually fire) — don't leave
    two parallel, both-silently-inert mechanisms in place. Answer this against `#3332`'s landed behavior, not
    the pre-`#3332` state where `planFixSpawns` never fired at all.
+
+## Progress
+
+- 2026-09-03: **Answered #2 — genuinely different, not redundant.**
+  `we:scripts/conveyor/tick-core.mjs`'s `planFixSpawns` only ever considers a PR in `state.prs` whose `num` is
+  in `launchedNums` — i.e. one THIS conveyor process's own (session-ephemeral, STDIN-piped) bookkeeping
+  remembers launching. `we:scripts/conveyor/reconcile-pass.mjs` is keyed by PR number alone and reads live
+  `gh pr list` / `claude agents --json` fresh every pass, so it ALSO covers a bounced PR the current conveyor
+  process never launched (a restart lost the memory of, a sibling process launched, one opened by hand) — a
+  real, distinct population, not a duplicate. (b) applies.
+- 2026-09-03: **Wired (b).** New `we:scripts/conveyor/reconcile-fix-dispatch.mjs` — a one-shot pass mirroring
+  `we:scripts/operations/review-dispatch.mjs`'s own `dispatchReview` "plan → fill → mint → spawn" composition,
+  reusing `we:scripts/operations/dispatch-lane.mjs`'s real `fillBrief`/`BRIEF_REQUIRED_BY_KIND.fix`/
+  `sessionSlugFor` and `we:scripts/operations/dispatch-lane-io.mjs`'s
+  `buildAgentArgv`/`defaultSpawnAgent`/`findItem`/`defaultLoadItems` (the last two newly exported for this)
+  rather than a bespoke fill/dispatch path. Wired into `we:skills-src/conveyor/runner.mjs`'s mechanical passes
+  alongside infra-blocked/lease-reaper/session-reaper/hiccup-sink. Also closed a latent #3437-shaped
+  double-dispatch gap for fix agents specifically: `we:scripts/conveyor/reconcile-core.mjs`'s `bindAgents` now
+  matches a live `fix-<pr>`-named session by name (mirroring the existing `review-<pr>` name-bind), since a fix
+  agent's lane HEAD diverges from the PR's still-unpushed head sha the moment it makes its first commit — the
+  same blind spot #3437 fixed for review sessions, recurring here. Regression coverage:
+  `we:scripts/conveyor/__tests__/reconcile-core.test.mjs` (case 5c, the name-bind + the
+  double-dispatch-across-two-ticks proof) and a new `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`
+  (planning refusals, the free-lane read, the dispatch composition, and the whole pass).

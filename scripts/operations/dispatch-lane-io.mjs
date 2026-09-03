@@ -558,15 +558,20 @@ export function forwardableBookkeeping(text) {
 /**
  * The canonical backlog loader — the SAME one `dispatch-plan.mjs` enriches its queue rows from, so the scope
  * this operation puts in the brief is the scope the dispatcher arbitrated on.
+ *
+ * Exported (#3438) so a caller outside this file's own `readTick` — `we:scripts/conveyor/reconcile-fix-dispatch.mjs`,
+ * which resolves an item from a PR's head ref rather than from `planTick`'s own launch lists — reuses the SAME
+ * loader instead of a second copy that could drift from it.
  */
-function defaultLoadItems(root) {
+export function defaultLoadItems(root) {
   const require = createRequire(import.meta.url);
   const load = require(join(root, 'src', '_data', 'backlog.js'));
   return typeof load === 'function' ? load() : [];
 }
 
-/** One item's spec path + repo-qualified scope, or null when the loader cannot see it. */
-function findItem(key, loadItems) {
+/** One item's spec path + repo-qualified scope, or null when the loader cannot see it. Exported (#3438) for the
+ *  same reason as {@link defaultLoadItems} just above. */
+export function findItem(key, loadItems) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
   const it = (Array.isArray(items) ? items : []).find((x) => normNum(x?.num) === key);

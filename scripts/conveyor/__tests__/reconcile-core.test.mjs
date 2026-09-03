@@ -39,6 +39,7 @@ import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
 import { reviewSessionSlug } from '../review-session-slug.mjs';
+import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 
 // ── fixtures — measured shapes, 2026-08-26 ───────────────────────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-26T17:34:00Z');
@@ -441,6 +442,43 @@ describe('case 5b — refusal 4, name-based bind: a review session the cwd/oid r
       name: reviewSessionSlug(1563),
     }];
     expect(bindAgents(pr1563(), agents)).toHaveLength(1);
+  });
+});
+
+// ── CASE 5c — REFUSAL 4, NAME-BASED BIND FOR A FIX SESSION (#3438) ─────────────────────────────────────────────
+// Mirrors case 5b exactly, one dispatch kind over: a fix agent commits in its acquired lane before it pushes, so
+// its lane HEAD diverges from the still-unpushed `pr.headRefOid` right when it starts real work — the SAME
+// #3437 blind spot, recurring for `kind:'fix'` unless `bindAgents` also matches `fix-<pr>` by name.
+describe('case 5c — refusal 4, name-based bind: a fix session the cwd/oid rule cannot catch (#3438)', () => {
+  it('bindAgents matches a live fix session on NAME alone — cwd/oid deliberately NOT matching', () => {
+    const agents = [{
+      sessionId: 's-fix', cwd: '/lanes/lane-4', pid: 5150, pidAlive: true,
+      laneHeadOid: 'deadbeef'.repeat(5), // the fix agent's OWN post-commit lane HEAD, never the PR's headRefOid.
+      name: sessionSlugFor(1563, 'fix'),
+    }];
+    const bound = bindAgents(pr1563(), agents);
+    expect(bound).toHaveLength(1);
+    expect(bound[0].agent.sessionId).toBe('s-fix');
+    expect(bound[0].agent.laneHeadOid).not.toBe(bound[0].sha);
+  });
+
+  it('THE FIX: a bounced PR fed through planReconcile TWICE with a live fix session dispatches exactly ONCE', () => {
+    const round1 = planReconcile({ prs: [pr1563()], agents: [], durableCounts: {}, now: NOW });
+    expect(round1.dispatch).toHaveLength(1);
+    expect(round1.dispatch[0]).toMatchObject({ kind: 'fix', prNumber: 1563 });
+
+    const agents = [{
+      sessionId: 's-fix', cwd: '/lanes/lane-4', pid: 5150, pidAlive: true,
+      laneHeadOid: 'deadbeef'.repeat(5), name: sessionSlugFor(1563, 'fix'),
+    }];
+    const round2 = planReconcile({ prs: [pr1563()], agents, durableCounts: {}, now: NOW });
+    expect(round2.dispatch).toHaveLength(0);
+    expect(round2.refusals).toMatchObject([{ kind: 'live-process', prNumber: 1563, pid: 5150 }]);
+  });
+
+  it('a `fix-<pr>` session for a DIFFERENT PR does not bind — the slug is PR-specific, same as the review slug', () => {
+    const agents = [{ sessionId: 's-other', cwd: '/x', pid: 1, pidAlive: true, name: sessionSlugFor(9999, 'fix') }];
+    expect(bindAgents(pr1563(), agents)).toEqual([]);
   });
 });
 
