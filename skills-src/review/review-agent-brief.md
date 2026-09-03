@@ -45,6 +45,19 @@ Edit/Write/Bash-permitted and carries none of the sensitive-file shape.
 
 ## The arc — one command per step
 
+### 0. Report `started` — BEFORE anything else (#3436)
+
+The one durable trace that a review of **{{REPO}}#{{PR}}** was ever dispatched, written BEFORE step 1 can fail
+for any reason — a lane-pool outage, a crash, a refused effect. Without this, a session that dies here is
+indistinguishable from one that was never dispatched at all; `we:scripts/conveyor/review-status-tag.mjs`
+answers "is something working right now" but nothing else answers "did the one that just finished conclude
+anything" without `claude logs` archaeology (`we:backlog/3436-*.md`). A script, not a step you might skip under
+stress — same reasoning as `we:scripts/conveyor/stand-down.mjs`'s own durable marker.
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --kind=review --pr={{PR}} --status=started
+```
+
 ### 1. Acquire your own lane
 
 The tool-bearing juror `review-loop-cli.mjs` spawns REFUSES to run without a lane clone of its own — never the
@@ -54,8 +67,14 @@ primary checkout, never a lane someone else is working in.
 LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-loop --session={{SESSION_SLUG}} --adopt) && echo "$LANE"
 ```
 
-If this fails, the pool has no free lane right now — report that plainly (`blocked-on-infra`, no lane
-available) and exit. Do not retry in a loop.
+If this fails, the pool has no free lane right now — report the completion record and exit; do not retry in a
+loop:
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
+```
+
+Then report that plainly (`blocked-on-infra`, no lane available) and exit.
 
 ### 2. Run the review loop, once
 
@@ -86,7 +105,19 @@ either:
 
 Whatever it prints, that IS the outcome of your dispatch — read it, do not re-interpret it.
 
-### 3. Release your lane and exit
+### 3. Report `done` — the completion record (#3436)
+
+Update the SAME record step 0 started, so it now carries what step 2 actually concluded — `<outcome>` is
+`bounced` / `auto-cleared` / `parked` (whichever of the three step-2 branches you hit), `<verdict>` is the
+loop's own verdict word (`run.verdict.loop.outcome` in step 2's `--json` output: `converged` / `escalated` /
+`exhausted`), and `<run-id>` is `run.id` from that same output:
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done \
+  --outcome=<outcome> --verdict=<verdict> --runId=<run-id>
+```
+
+### 4. Release your lane and exit
 
 `$LANE` holds the lane's absolute PATH (that's what `acquire` printed to stdout in step 1), not a bare
 number — do not try to extract one from it. Release by session instead, which needs no lane number at all:
