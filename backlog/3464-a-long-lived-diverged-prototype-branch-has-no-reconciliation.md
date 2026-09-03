@@ -7,6 +7,10 @@ status: open
 relatedTo: ["3449", "3457", "3443", "3463"]
 dateOpened: "2026-09-03"
 tags: [conveyor, lane-pool, scope, reconciliation, mechanical-dispatcher]
+scope:
+  - we:scripts/conveyor/
+  - we:skills-src/conveyor/
+  - we:scripts/readiness/dispatch-plan.mjs
 ---
 
 # A long-lived diverged prototype branch has no reconciliation cadence against main's independently in-scope dispatched changes
