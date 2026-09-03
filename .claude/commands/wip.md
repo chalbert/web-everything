@@ -47,6 +47,15 @@ Rules:
   `ListAgents` call for live subagents — never invent or suggest new work.
 - Done rows: finished actions only (files changed, decisions made, commands run) — not
   intentions or discussion.
+- By default, scope `Done` to items finished SINCE the most recent prior `/wip` or
+  `/status` invocation visible earlier in this same conversation — find that invocation's
+  own output in the conversation history and only include rows for work finished after
+  it. No prior `/wip`/`/status` invocation in this conversation (first call): `Done`
+  covers the whole session, same as today, no change. The user's own invocation text
+  asking for the full history ("full", "whole session", "everything", "all of it", "/wip
+  full") overrides the scoping and covers the entire session instead. Nothing finished
+  since the last invocation is what triggers the empty placeholder under this scoping —
+  not "nothing ever happened this session."
 - Doing rows: things actually in progress right now. Fold agent/subagent status in here
   (same judgment `status.md` uses for its AGENTS section) — call `ListAgents` to
   enumerate subagents this session spawned, and give each running one its own Doing row;
@@ -54,7 +63,12 @@ Rules:
   reasonably take, or no sign of progress since launch — judge from context, don't guess
   a fixed time limit) and there's nothing left for the agent itself to do about it. An
   open PR awaiting review, merge, or CI is a Doing row unless it's actually stuck, in
-  which case it's `⚠ Needs you`.
+  which case it's `⚠ Needs you`. Steady-state, always-on infrastructure (a
+  continuously-running background process/daemon that's simply healthy and ticking, with
+  no specific end-point) is NOT a Doing row on its own — only genuinely active,
+  goal-directed work counts (a subagent on a specific task, a PR actually awaiting
+  review/merge/CI). If a steady-state process is doing something concrete and current,
+  report THAT specific activity, not the process's mere existence/health.
 - Next rows: only steps already planned/agreed in this session — not new suggestions or
   ideas you're generating now.
 - `Done`, `Doing`, and `Next` are always printed, in that order, even when empty — an
