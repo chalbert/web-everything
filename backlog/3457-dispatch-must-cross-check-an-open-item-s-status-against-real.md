@@ -35,7 +35,7 @@ already folded in.
 **Follow-on build scaffolded at ratification:**
 
 - [Wire the dispatch already-done ground-truth check into `we:scripts/operations/dispatch-lane.mjs` and
-  `we:scripts/readiness/dispatch-plan.mjs`](/backlog/xl1x55d-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
+  `we:scripts/readiness/dispatch-plan.mjs`](/backlog/3460-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
   (parent: this item) — names the exact `gh pr` query shape, the age/caching policy, and what happens to a
   flagged item as this build item's own call to make, per this card's own "What this decision does not
   settle."

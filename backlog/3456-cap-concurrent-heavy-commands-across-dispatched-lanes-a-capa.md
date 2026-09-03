@@ -44,7 +44,7 @@ beyond what each fork's own `Skeptic:` pass already folded in.
 
 - [Build the heavy-command admission queue: a capacity semaphore for check:standards, verify-lane, npm ci, and
   Playwright
-  visual-capture](/backlog/xm1ft97-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent:
+  visual-capture](/backlog/3461-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent:
   this item) — names the concrete throttle mechanism, cap value/override, `npm ci` resolution, and a real
   "fails pre-fix" regression test as this build item's own call to make, per this card's own "What this
   decision does NOT settle." Must land, or be concretely scheduled to land, before the dispatcher's parallel

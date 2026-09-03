@@ -3963,7 +3963,7 @@ same session that filed the fix. Two clauses:
 **Lineage:** ratified via #3457 (2026-09-02). The exact `gh pr` search query shape, the specific age
 threshold, and what happens to a flagged item (hold, auto-resolve, or surface) are left to the follow-on build
 item, [Wire the dispatch already-done ground-truth check into `we:scripts/operations/dispatch-lane.mjs` and
-`we:scripts/readiness/dispatch-plan.mjs`](/backlog/xl1x55d-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
+`we:scripts/readiness/dispatch-plan.mjs`](/backlog/3460-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
 (parent #3457). Full reasoning, prior-art survey and skeptic passes:
 [#3457](/backlog/3457-dispatch-must-cross-check-an-open-item-s-status-against-real/).
 
@@ -4010,7 +4010,7 @@ resources; today only the first is throttled. Four clauses:
 **Lineage:** ratified via #3456 (2026-09-02). The concrete throttle mechanism (semaphore shape, enforcement
 point, regression test) is left to the follow-on build item, [Build the heavy-command admission queue: a
 capacity semaphore for check:standards, verify-lane, npm ci, and Playwright
-visual-capture](/backlog/xm1ft97-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent
+visual-capture](/backlog/3461-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent
 #3456), which must land — or be concretely scheduled to land — before the dispatcher's parallel lane count
 increases further, per the operator's own sequencing ("we need the queue there first before merging" further
 parallelism). Composes with
