@@ -52,7 +52,7 @@ Ratified by #3456: build a capacity-aware admission queue distinct from lane lea
   shells `we:scripts/readiness/heavy-admission.mjs status --json`); each live waiting entry surfaces as its own
   `{ kind: 'waiting-for-capacity', num, lane, text }` note, resolving `num` off `state.lanes` by `lane` (mirrors
   the existing `lane-stalled` note's lane→item lookup). Clears for free — no bookkeeping persists a stale wait.
-- **Playwright visual-capture pass — deferred to a follow-on item, `#x0s20du`** (`blockedBy: ["3461"]`). It
+- **Playwright visual-capture pass — deferred to a follow-on item, `#3471`** (`blockedBy: ["3461"]`). It
   lives in `plateau-app`, outside this item's `we:`-only scope; the shared admission-queue module and its CLI
   are repo-agnostic and ready for that repo to shell/import.
 - **Residual risk, named per the ruling**: a fixed cap reduces but does not fully eliminate #3383's finding-4
