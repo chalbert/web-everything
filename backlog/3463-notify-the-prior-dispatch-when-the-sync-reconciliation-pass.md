@@ -1,8 +1,9 @@
 ---
+bornAs: xagqiz4
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3398", "3421", "3422", "3449", "3457", "xra0mqn"]
+relatedTo: ["3398", "3421", "3422", "3449", "3457", "3464"]
 dateOpened: "2026-09-03"
 tags: [conveyor, alerting, escalation, mechanical-dispatcher]
 ---
@@ -83,7 +84,7 @@ the kind of judgment call ratification should confirm, not something to pre-deci
 - Whether/how this generalizes to an ordinary PR-vs-`main` merge conflict outside the mechanical-dispatcher
   prototype specifically.
 - Mechanizing the sync/reconciliation loop into a real `we:scripts/conveyor/tick-core.mjs` pass at all —
-  a precondition for Fork 1(a)/(b), and plausibly its own build item (see `xra0mqn`, filed alongside this
+  a precondition for Fork 1(a)/(b), and plausibly its own build item (see `3464`, filed alongside this
   card, which covers the *cadence* half of that gap) rather than something this decision pre-builds.
 
 ## Done when
@@ -91,6 +92,6 @@ the kind of judgment call ratification should confirm, not something to pre-deci
 1. A ruling is recorded on Fork 1 (where the notification hooks in) and Fork 2 (who/what is notified and how
    attribution works).
 2. A follow-on build item is scaffolded under this card once ruled, naming the concrete mechanism and its
-   dependency on `xra0mqn` / `#3443` as applicable.
+   dependency on `3464` / `#3443` as applicable.
 3. This card `resolve`s once both forks are ruled — building the follow-on is separate work, not a
    precondition of this card's own resolution (mirroring `#3457`'s own convention).

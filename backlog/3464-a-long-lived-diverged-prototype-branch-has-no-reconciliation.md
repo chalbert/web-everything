@@ -1,8 +1,9 @@
 ---
+bornAs: xra0mqn
 kind: task
 parent: "3383"
 status: open
-relatedTo: ["3449", "3457", "3443", "xagqiz4"]
+relatedTo: ["3449", "3457", "3443", "3463"]
 dateOpened: "2026-09-03"
 tags: [conveyor, lane-pool, scope, reconciliation, mechanical-dispatcher]
 ---
@@ -107,7 +108,7 @@ equally-in-scope stream while it accumulated for days.
   filed independently because `#3443` names *what* to graduate, not *how the branch avoids drifting into
   unresolvable conflict while graduation is still in progress* — the two are complementary, not duplicates,
   and this item should not block on `#3443` completing.
-- **`xagqiz4`** (sibling card, filed alongside this one) covers the separate question of what happens
+- **`3463`** (sibling card, filed alongside this one) covers the separate question of what happens
   *when* an unresolvable conflict is hit — notification/escalation. This item is about there being no
   cadence that would let most conflicts be *caught and reconciled before* they became unresolvable in the
   first place.
@@ -124,4 +125,4 @@ equally-in-scope stream while it accumulated for days.
    state without a human running `git log`/`git rev-list` by hand.
 3. **Explicitly out of scope here**: resolving the actual live merge conflict currently blocking
    `wev-scratch-dispatcher-4` (separate, already in progress) and the notification/escalation design once a
-   conflict IS hit (that is `xagqiz4`'s concern, not this item's).
+   conflict IS hit (that is `3463`'s concern, not this item's).
