@@ -64,15 +64,24 @@
  *      PR is terminal. Keeping the counter off the entry is the whole point: a bounce → fix → re-arm → bounce
  *      AGAIN is a NEW `review:changes` with no live entry, so a counter on the entry would reset each cycle and
  *      the cap would never bind. {@link planFixSpawns} skips a PR with a live entry (in-flight test), stops at
- *      the retry cap (`fixRetryCap`, default 3 — surfaced for `/review`), else spawns + bumps the counter.
- *      {@link retireFixGuards} retires the ENTRY when the PR no longer carries `review:changes` (re-armed /
- *      terminal) or on TTL (`fixTtlTicks`, default 5) — NOT the counter, which {@link clearTerminalFixAttempts}
- *      drops only when the PR leaves the open set. Because `fixAttempts` is in-session process state, it does NOT
- *      survive a conveyor restart; the cap therefore also reads a DURABLE floor `prRearmCounts[pr]` derived from
- *      the PR's own re-arm comments (`countRearmComments` — one comment per completed auto-fix, #2643), and binds
- *      on `max(in-session, durable)`. The durable floor is the restart-surviving source of truth (no parallel
- *      state store, #2612 — the count IS PR state); the in-session tally is the overlay that additionally counts
- *      a fix agent that died before re-arming (which leaves no comment for the floor to see).
+ *      the retry cap (`fixRetryCap`, default 3 — surfaced for `/review`), else spawns and records a new,
+ *      UNCLAIMED entry — it does NOT bump the counter (#3454). The entry additionally tracks a sticky `claimed`
+ *      flag: {@link retireFixGuards} flips it true the tick its assigned lane is observed LEASED in `state.lanes`
+ *      (the same fact {@link retireBuildGuards} uses for the build guard's CLAIMED path) — that is the moment a
+ *      PLANNED candidate becomes a CONFIRMED real attempt (dispatch-lane.mjs got past its own in-flight guard and
+ *      actually started the agent), and only THEN does {@link planTick} bump `fixAttempts[pr]`, once, off
+ *      `retireFixGuards`'s `newlyClaimed` list. A dispatch `dispatch-lane.mjs` refuses pre-flight (a stale
+ *      `claude agents` liveness entry, say) never leases its lane, so it is never counted — its entry TTLs out
+ *      UNCLAIMED (`reason: 'ttl-unclaimed'`) and is retried for free, mirroring the build guard's own "never
+ *      claimed after N ticks" backstop. {@link retireFixGuards} retires the ENTRY when the PR no longer carries
+ *      `review:changes` (re-armed / terminal) or on TTL (`fixTtlTicks`, default 5, split `ttl` claimed vs.
+ *      `ttl-unclaimed`) — NOT the counter, which {@link clearTerminalFixAttempts} drops only when the PR leaves
+ *      the open set. Because `fixAttempts` is in-session process state, it does NOT survive a conveyor restart;
+ *      the cap therefore also reads a DURABLE floor `prRearmCounts[pr]` derived from the PR's own re-arm comments
+ *      (`countRearmComments` — one comment per completed auto-fix, #2643), and binds on `max(in-session,
+ *      durable)`. The durable floor is the restart-surviving source of truth (no parallel state store, #2612 —
+ *      the count IS PR state); the in-session tally is the overlay that additionally counts a CLAIMED fix agent
+ *      that died before re-arming (which leaves no comment for the floor to see).
  *
  *   3b. CI-HEAL GUARD (§3c-ci, #2666) — the SIBLING of the fix guard, SAME entry+counter+cap+TTL shape, but its
  *      trigger is a CI REGRESSION not a `review:changes` label: a conveyor PR that was GREEN AT OPEN
@@ -365,17 +374,31 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], prs = [], liv
  * PLAN the fix-agent spawns for `review:changes` bounces (SKILL §3c). For every OPEN `state.prs` row that this
  * conveyor launched (`num` ∈ `launchedNums`) and carries `review:changes`: skip if a live fix-guard ENTRY
  * already exists for the PR (the in-flight test); else if the PR has reached the retry cap surface it for
- * `/review` (no spawn); else spawn a fix agent on a free lane, record a new entry, and BUMP the attempt counter.
+ * `/review` (no spawn); else spawn a fix agent on a free lane and record a new, UNCLAIMED entry.
+ *
+ * DOES NOT BUMP THE ATTEMPT COUNTER (fixed #3454 — was the phantom-attempt bug: PR #1861 hit "auto-fix
+ * exhausted" after exactly TWO real spawns and zero commits, because the old code bumped `fixAttempts[pr]` the
+ * instant a spawn was PLANNED here, before `we:scripts/operations/dispatch-lane.mjs` ever ran. That downstream
+ * call is a SEPARATE step outside this pure core (this runner only surfaces `decisions.spawnFixes` — it "spawns
+ * no LLM agents itself", `we:skills-src/conveyor/runner.mjs`), and it owns its OWN in-flight guard (a stale
+ * `claude agents` liveness entry can make it refuse with `dispatching:false` before a lane is ever acquired).
+ * Refused-pre-flight ≠ a real attempt, but the old code could not tell the difference — it counted every
+ * SURFACED candidate, whether or not dispatch-lane ever got past its own guard. The counter now only bumps once
+ * a REAL attempt is CONFIRMED — {@link retireFixGuards}'s claim detection, the SAME `state.lanes`-leased fact
+ * {@link retireBuildGuards} already uses for the build guard's CLAIMED retirement. A dispatch refused pre-flight
+ * never leases its assigned lane, so its guard entry TTLs out UNCLAIMED (`reason: 'ttl-unclaimed'`) and is
+ * retried for free next tick — mirroring the build guard's own "never claimed after N ticks — re-dispatching"
+ * TTL backstop, which never burns anything either.
  *
  * The cap is checked against `max(in-session fixAttempts[pr], durable prRearmCounts[pr])` (#2643). The in-session
  * `fixAttempts` map does NOT survive a conveyor restart, so on a fresh conveyor it starts empty and the cap would
  * never bind — the very unbounded fix↔bounce loop the cap exists to prevent. `prRearmCounts` is the DURABLE floor
  * derived from the PR's own re-arm comments (`countRearmComments`, one per completed auto-fix): it restores the
  * count after a restart, and the in-session map stays as the within-session overlay that also counts a fix agent
- * that DIED before re-arming (which posts no comment, so the durable floor can't see it — that TTL-backstop case
- * still terminates at the human via the in-session tally). Because the bump seeds off the max, the in-session map
- * is re-primed from the durable floor on the first post-restart spawn. Pure — returns the spawns, new entries, the
- * bumped counter map, consumed lanes, and the surface notes; mutates no input.
+ * that DIED AFTER CLAIMING but before re-arming (which posts no comment, so the durable floor can't see it — that
+ * TTL-backstop case still terminates at the human via the in-session tally, bumped at claim time by the caller —
+ * see {@link retireFixGuards}'s `newlyClaimed`). Pure — returns the spawns, new (unclaimed) entries, the
+ * (unchanged, pass-through) counter map, consumed lanes, and the surface notes; mutates no input.
  *
  * @param {{ prs?:object[], launchedNums?:Array<*>, liveFixGuards?:object[], fixAttempts?:object, prRearmCounts?:object, retryCap?:number, availableLanes?:Array<*>, tick:number }} ctx
  * @returns {{ spawns:Array<{pr:number, num:*, lane:*}>, newGuards:Array<object>, fixAttempts:object, consumedLanes:Array<*>, notes:Array<object> }}
@@ -398,8 +421,8 @@ export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [],
     if (!pr) continue;
     if (guardedPrs.has(pr)) continue; // a fix agent for this PR is already live
     // The DURABLE re-arm-comment count is the restart-surviving floor; the in-session tally the within-session
-    // overlay (it alone catches a fix that died before posting a re-arm comment). The cap binds on whichever is
-    // higher, so a restart can never reset a PR that already burned its attempts (#2643).
+    // overlay (it alone catches a claimed fix that died before posting a re-arm comment). The cap binds on
+    // whichever is higher, so a restart can never reset a PR that already burned its attempts (#2643).
     const attempts = Math.max(Number(nextAttempts[pr]) || 0, Number(durable[pr]) || 0);
     if (attempts >= retryCap) {
       notes.push({ kind: 'fix-exhausted', num: p.num, pr, attempts, text: `PR #${pr} (#${p.num}) bounced ${attempts}× — auto-fix exhausted, run /review ${pr}` });
@@ -409,39 +432,61 @@ export function planFixSpawns({ prs = [], launchedNums = [], liveFixGuards = [],
     const lane = lanes.shift();
     consumedLanes.push(lane);
     guardedPrs.add(pr);
-    nextAttempts[pr] = attempts + 1;
+    // NO counter bump here (#3454) — this is only a PLANNED candidate; whether it becomes a real attempt is
+    // decided downstream by dispatch-lane.mjs, and confirmed back into fixAttempts via retireFixGuards' claim
+    // detection next tick. Bumping here counted phantom, guard-refused dispatches as real bounces.
     spawns.push({ pr, num: p.num, lane });
-    newGuards.push({ pr, num: p.num, lane, spawnedTick: tick });
+    newGuards.push({ pr, num: p.num, lane, spawnedTick: tick, claimed: false });
   }
   return { spawns, newGuards, fixAttempts: nextAttempts, consumedLanes, notes };
 }
 
 /**
- * RETIRE the in-flight fix-guard ENTRIES (SKILL §3c — the ENTRY only, never the attempt counter). An entry
- * retires when its PR no longer carries `review:changes` (re-armed to `review:pending`, or merged/closed —
- * reason `resolved`) or on TTL (`ttlTicks`, the fix agent died before re-pushing/re-arming — reason `ttl`,
- * still gated by the retry cap on the next spawn, so a repeatedly-dying fix still terminates at the human). Pure.
- * @param {Array<{pr:number, num:*, spawnedTick:number}>} fixGuards
- * @param {{ prs?:object[], tick:number, ttlTicks?:number }} ctx
- * @returns {{ live:Array<object>, retired:Array<{pr:number, num:*, reason:string, note?:boolean}> }}
+ * RETIRE the in-flight fix-guard ENTRIES (SKILL §3c — the ENTRY, plus — #3454 — report which entries just became
+ * a CONFIRMED real attempt). An entry tracks its own `claimed` flag (sticky, like the prepare guard's `sawPr`):
+ * UNCLAIMED until its assigned lane is observed LEASED in `state.lanes` — the SAME fact {@link retireBuildGuards}
+ * already uses for the build guard's CLAIMED retirement, i.e. dispatch-lane.mjs actually got past its own
+ * in-flight guard and started the agent. The moment a guard flips unclaimed → claimed, its `{pr, num}` is
+ * surfaced in `newlyClaimed` — the caller ({@link planTick}) bumps `fixAttempts[pr]` THERE, exactly once, only
+ * for a now-confirmed-real attempt (#3454 — was bumped speculatively at plan time in `planFixSpawns`, counting
+ * dispatches `dispatch-lane.mjs` refused pre-flight as real bounces).
+ *
+ * Entry retirement itself is UNCHANGED in shape, refined only on the TTL axis:
+ *   • RESOLVED — the PR no longer carries `review:changes` (re-armed to `review:pending`, or merged/closed).
+ *   • TTL, CLAIMED   — the fix agent genuinely started (lane was leased at some point) then went silent past
+ *     `ttlTicks` without re-arming. A REAL, if failed, attempt — already bumped at claim time, so it still
+ *     counts toward the retry cap on the next spawn (a repeatedly-dying fix still terminates at the human).
+ *   • TTL, UNCLAIMED — the lane was NEVER observed leased (dispatch-lane.mjs's own in-flight guard refused it,
+ *     or it died before ever acquiring) — no real attempt ever happened. Free re-dispatch next tick, same as
+ *     the build guard's own "never claimed after N ticks — re-dispatching" TTL backstop; nothing was bumped, so
+ *     nothing needs to be un-bumped.
+ * Pure.
+ * @param {Array<{pr:number, num:*, lane:*, spawnedTick:number, claimed?:boolean}>} fixGuards
+ * @param {{ prs?:object[], lanes?:object[], tick:number, ttlTicks?:number }} ctx
+ * @returns {{ live:Array<object>, retired:Array<{pr:number, num:*, reason:string, claimed:boolean, note?:boolean}>, newlyClaimed:Array<{pr:number, num:*}> }}
  */
-export function retireFixGuards(fixGuards, { prs = [], tick = 0, ttlTicks = DEFAULT_FIX_TTL_TICKS } = {}) {
+export function retireFixGuards(fixGuards, { prs = [], lanes = [], tick = 0, ttlTicks = DEFAULT_FIX_TTL_TICKS } = {}) {
   const byPr = new Map();
   for (const p of Array.isArray(prs) ? prs : []) if (p?.prNumber != null) byPr.set(Number(p.prNumber), p);
+  const leasedLanes = new Set((Array.isArray(lanes) ? lanes : []).map((l) => String(l?.lane)));
   const live = [];
   const retired = [];
+  const newlyClaimed = [];
   for (const g of Array.isArray(fixGuards) ? fixGuards : []) {
     if (!g || g.pr == null) continue;
+    const wasClaimed = g.claimed === true;
+    const claimed = wasClaimed || leasedLanes.has(String(g.lane));
+    if (claimed && !wasClaimed) newlyClaimed.push({ pr: Number(g.pr), num: g.num });
     const prRow = byPr.get(Number(g.pr));
     const stillChanges = prRow && isOpenPr(prRow) && hasReviewChanges(prRow);
-    if (!stillChanges) { retired.push({ pr: Number(g.pr), num: g.num, reason: 'resolved' }); continue; }
+    if (!stillChanges) { retired.push({ pr: Number(g.pr), num: g.num, reason: 'resolved', claimed }); continue; }
     if (tick - (g.spawnedTick ?? tick) >= ttlTicks) {
-      retired.push({ pr: Number(g.pr), num: g.num, reason: 'ttl', note: true });
+      retired.push({ pr: Number(g.pr), num: g.num, reason: claimed ? 'ttl' : 'ttl-unclaimed', note: true, claimed });
       continue;
     }
-    live.push(g);
+    live.push(claimed === wasClaimed ? g : { ...g, claimed });
   }
-  return { live, retired };
+  return { live, retired, newlyClaimed };
 }
 
 /**
@@ -754,8 +799,18 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
     unshaped, decisions, prs, tick, ttlTicks: cfg.prepareTtlTicks,
   });
-  const fix = retireFixGuards(bookkeeping.fixGuards, { prs, tick, ttlTicks: cfg.fixTtlTicks });
-  const fixAttempts = clearTerminalFixAttempts(bookkeeping.fixAttempts, prs);
+  const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, ttlTicks: cfg.fixTtlTicks });
+  // #3454 — bump fixAttempts HERE, once per guard, exactly when retireFixGuards confirms a REAL attempt (its
+  // assigned lane was observed leased) — never speculatively at plan time (that was the phantom-attempt bug).
+  // Re-primes off the durable re-arm-comment floor on the first post-restart claim, same as the old plan-time
+  // bump used to (#2643) — just moved to the moment the attempt is actually confirmed, not merely proposed.
+  let fixAttempts = clearTerminalFixAttempts(bookkeeping.fixAttempts, prs);
+  for (const c of fix.newlyClaimed) {
+    const pr = Number(c.pr);
+    const durableFloor = Number(prRearmCounts?.[pr]) || 0;
+    const current = Number(fixAttempts[pr]) || 0;
+    fixAttempts = { ...fixAttempts, [pr]: Math.max(current, durableFloor) + 1 };
+  }
   const ciHeal = retireCiHealGuards(bookkeeping.ciHealGuards, { prs, tick, ttlTicks: cfg.ciHealTtlTicks });
   const ciHealAttempts = clearTerminalCiHealAttempts(bookkeeping.ciHealAttempts, prs);
 
@@ -814,7 +869,17 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const notes = [];
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
-  for (const r of fix.retired) if (r.note) notes.push({ kind: 'fix-ttl', num: r.num, text: `⚠ fix for PR carrying #${r.num} stalled ${cfg.fixTtlTicks} ticks — re-dispatch allowed` });
+  // #3454 — an UNCLAIMED TTL (dispatch-lane.mjs's own in-flight guard refused it pre-flight, or it died before
+  // ever acquiring a lane) reads distinctly from a CLAIMED one (a real agent started, then went silent) — the
+  // former burned no retry budget and says so; the latter already counted toward the cap (see `newlyClaimed`).
+  for (const r of fix.retired) {
+    if (!r.note) continue;
+    if (r.reason === 'ttl-unclaimed') {
+      notes.push({ kind: 'fix-ttl-unclaimed', num: r.num, pr: r.pr, text: `⚠ fix dispatch for PR #${r.pr} (#${r.num}) never claimed a lane after ${cfg.fixTtlTicks} ticks — re-dispatching (no attempt counted)` });
+    } else {
+      notes.push({ kind: 'fix-ttl', num: r.num, text: `⚠ fix for PR carrying #${r.num} stalled ${cfg.fixTtlTicks} ticks — re-dispatch allowed` });
+    }
+  }
   for (const r of ciHeal.retired) if (r.note) notes.push({ kind: 'ci-heal-ttl', num: r.num, text: `⚠ CI-heal for PR carrying #${r.num} stalled ${cfg.ciHealTtlTicks} ticks — re-dispatch allowed` });
   if (prep.scopeSpawns.length) notes.push({ kind: 'auto-preparing-scope', nums: prep.scopeSpawns.map((s) => s.num), text: `⚠ ${prep.scopeSpawns.length} auto-preparing scope: ${prep.scopeSpawns.map((s) => `#${s.num}`).join(' ')}` });
   notes.push(...prep.notes.map((n) => ({ kind: n.kind, num: n.num, text: n.text })));

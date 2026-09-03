@@ -193,11 +193,14 @@ describe('planPrepareSpawns — union re-dispatch gate + lane exclusion (SKILL �
 describe('planFixSpawns — in-flight test + retry cap across bounce cycles (SKILL §3c)', () => {
   const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
 
-  it('spawns a fix for a conveyor-launched review:changes PR and bumps the attempt counter', () => {
+  it('spawns a fix for a conveyor-launched review:changes PR — records an UNCLAIMED entry, does NOT bump the counter (#3454)', () => {
+    // #3454: bumping here (before dispatch-lane.mjs ever runs) counted a PLANNED candidate as a real attempt,
+    // even when dispatch-lane's own in-flight guard went on to refuse it pre-flight. The counter now only bumps
+    // once retireFixGuards CONFIRMS the lane was actually leased (see the planTick-level tests below).
     const r = planFixSpawns({ prs: [changesPr(99, 40)], launchedNums: [40], availableLanes: [5], tick: 0 });
     expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5 }]);
-    expect(r.newGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0 }]);
-    expect(r.fixAttempts).toEqual({ 99: 1 });
+    expect(r.newGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }]);
+    expect(r.fixAttempts).toEqual({}); // unchanged — nothing bumped merely by being planned
   });
 
   it('does NOT fix a review:changes PR the conveyor did not launch', () => {
@@ -232,14 +235,16 @@ describe('planFixSpawns — in-flight test + retry cap across bounce cycles (SKI
     expect(r.notes[0]).toMatchObject({ kind: 'fix-exhausted', pr: 99, attempts: DEFAULT_FIX_RETRY_CAP });
   });
 
-  it('binds on max(in-session, durable) and re-seeds the in-session tally off the durable floor on the first spawn', () => {
-    // Post-restart: in-session 0, durable 2 → attempts=2 (< cap) → spawn, and the bumped tally re-seeds to 3.
+  it('a spawn below the max(in-session, durable) cap still spawns, but still does not bump (bump moved to claim-time)', () => {
+    // Post-restart: in-session 0, durable 2 → attempts=2 (< cap) → spawn. Re-seeding off the durable floor now
+    // happens at CLAIM time in planTick (see "planTick — fix-attempt counter bumps only on a CONFIRMED claim"
+    // below), not here — planFixSpawns only ever proposes a candidate.
     const r = planFixSpawns({
       prs: [changesPr(99, 40)], launchedNums: [40], fixAttempts: {}, prRearmCounts: { 99: 2 },
       availableLanes: [5], tick: 0,
     });
     expect(r.spawns).toEqual([{ pr: 99, num: 40, lane: 5 }]);
-    expect(r.fixAttempts[99]).toBe(3); // re-primed from the durable floor, not 1
+    expect(r.fixAttempts).toEqual({});
   });
 
   it('a died-before-rearm fix (no durable comment) still terminates via the in-session tally', () => {
@@ -270,11 +275,131 @@ describe('retireFixGuards + clearTerminalFixAttempts — entry vs. counter lifet
     expect(clearTerminalFixAttempts({ 99: 2 }, [])).toEqual({});
   });
 
-  it('retires the entry on TTL if the PR is still review:changes past the backstop (still cap-gated on re-dispatch)', () => {
-    const { retired } = retireFixGuards([{ pr: 99, num: 40, spawnedTick: 0 }], {
-      prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: ['review:changes'] }], tick: 5, ttlTicks: 5,
+  // ── #3454 — claim detection: a guard only becomes a REAL attempt once its lane is observed leased ──────────
+
+  it('a freshly-spawned (unclaimed) guard stays unclaimed while its lane is not yet leased — no newlyClaimed', () => {
+    const { live, newlyClaimed } = retireFixGuards([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: ['review:changes'] }], lanes: [], tick: 1,
     });
-    expect(retired[0]).toMatchObject({ pr: 99, reason: 'ttl', note: true });
+    expect(live).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }]);
+    expect(newlyClaimed).toEqual([]);
+  });
+
+  it('flips claimed true and reports newlyClaimed the tick state.lanes shows the guard\'s lane actually leased', () => {
+    const { live, newlyClaimed } = retireFixGuards([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: ['review:changes'] }],
+      lanes: [{ lane: 5, num: 40 }], // dispatch-lane.mjs got past its own guard and acquired lane 5
+      tick: 1,
+    });
+    expect(live).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: true }]);
+    expect(newlyClaimed).toEqual([{ pr: 99, num: 40 }]);
+  });
+
+  it('retires an UNCLAIMED guard on TTL as ttl-unclaimed — free re-dispatch, no attempt was ever counted (the #1861 shape)', () => {
+    // This is the exact phantom-attempt shape: dispatch-lane.mjs's in-flight guard refused the dispatch
+    // pre-flight (a stale `claude agents` liveness entry), so the lane it was assigned was never leased.
+    const { retired, newlyClaimed } = retireFixGuards([{ pr: 1861, num: 3435, lane: 17, spawnedTick: 0, claimed: false }], {
+      prs: [{ num: 3435, prNumber: 1861, state: 'OPEN', labels: ['review:changes'] }],
+      lanes: [], // never leased — the guard refused before ever acquiring
+      tick: 5, ttlTicks: 5,
+    });
+    expect(retired[0]).toMatchObject({ pr: 1861, reason: 'ttl-unclaimed', note: true, claimed: false });
+    expect(newlyClaimed).toEqual([]); // never became real — nothing to bump
+  });
+
+  it('retires a CLAIMED guard on TTL as ttl (a real agent started, then went silent) — still cap-gated on re-dispatch', () => {
+    // claimed:true simulates a guard whose lane was observed leased on an EARLIER tick (claimed is sticky, like
+    // the prepare guard's sawPr) — the agent genuinely started, so this TTL is a real, failed attempt.
+    const { retired } = retireFixGuards([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: true }], {
+      prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: ['review:changes'] }], lanes: [], tick: 5, ttlTicks: 5,
+    });
+    expect(retired[0]).toMatchObject({ pr: 99, reason: 'ttl', note: true, claimed: true });
+  });
+});
+
+// ── planTick — the fix-attempt counter bumps ONLY on a CONFIRMED claim, never on a merely-planned spawn ───────
+// (#3454 — the root cause of PR #1861's phantom "auto-fix exhausted": tick-core used to bump fixAttempts[pr]
+// the instant a fix was PLANNED (inside planFixSpawns), before we:scripts/operations/dispatch-lane.mjs — a
+// SEPARATE step outside this pure core — ever ran its OWN in-flight guard. A stale `claude agents` liveness
+// entry made that guard refuse with `dispatching:false` before a lane was ever acquired, so #1861 hit the
+// 3-attempt cap after exactly two PLANNED spawns and zero real dispatches, zero commits, zero second review
+// round. The fix: the counter now bumps only once a lane is CONFIRMED leased (the same fact the build guard's
+// CLAIMED retirement already uses), so a dispatch refused pre-flight costs nothing and is retried for free.
+describe('planTick — fix-attempt counter bumps only on a CONFIRMED claim (#3454)', () => {
+  const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
+
+  it('a fix spawn this tick does NOT bump fixAttempts — only a live, unclaimed guard is recorded', () => {
+    const out = planTick({
+      state: { queue: [], prs: [changesPr(99, 40)], lanes: [], needsSlice: [], decisions: [] },
+      plan: { launch: [] },
+      freeLanes: [5],
+      bookkeeping: { tick: 0, launchedNums: [40] },
+    });
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 5 }]);
+    expect(out.nextState.fixAttempts).toEqual({});
+    expect(out.nextState.fixGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }]);
+  });
+
+  it('bumps fixAttempts to 1 the tick state.lanes confirms the guard\'s lane was actually leased', () => {
+    // Tick 1 continues from the guard the previous test recorded — its lane (5) now shows leased.
+    const out = planTick({
+      state: { queue: [], prs: [changesPr(99, 40)], lanes: [{ lane: 5, num: 40 }], needsSlice: [], decisions: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 1, launchedNums: [40], fixGuards: [{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: false }], fixAttempts: {} },
+    });
+    expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
+    expect(out.nextState.fixGuards).toEqual([{ pr: 99, num: 40, lane: 5, spawnedTick: 0, claimed: true }]);
+  });
+
+  it('THE REGRESSION: 3 consecutive pre-flight-refused dispatches never trip fix-exhausted; a 4th, genuinely claimed, attempt does', () => {
+    // Simulates dispatch-lane.mjs's in-flight guard refusing three times in a row (a stale `claude agents`
+    // liveness entry — the exact PR #1861 shape): each cycle spawns a guard whose lane is NEVER observed
+    // leased in state.lanes, so it TTLs out unclaimed and is free-re-dispatched — fixAttempts must stay 0 and
+    // fix-exhausted must never fire, across all three cycles.
+    const prs = [changesPr(1861, 3435)];
+    let bookkeeping = { tick: 0, launchedNums: [3435] };
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      // Tick A: spawn (lane never leased downstream — the guard refusal).
+      const spawnTick = planTick({
+        state: { queue: [], prs, lanes: [], needsSlice: [], decisions: [] },
+        plan: { launch: [] },
+        freeLanes: [17],
+        bookkeeping,
+        config: { fixTtlTicks: 2 },
+      });
+      expect(spawnTick.decisions.notes.find((n) => n.kind === 'fix-exhausted')).toBeUndefined();
+      expect(spawnTick.nextState.fixAttempts).toEqual({});
+      // Tick B: TTL elapses with the lane STILL never leased (dispatch-lane.mjs never got past its guard) —
+      // the entry retires ttl-unclaimed, is re-dispatchable next tick, and burns nothing.
+      bookkeeping = { ...spawnTick.nextState, tick: spawnTick.nextState.tick + 2 };
+      const ttlTick = planTick({
+        state: { queue: [], prs, lanes: [], needsSlice: [], decisions: [] },
+        plan: { launch: [] },
+        freeLanes: [17],
+        bookkeeping,
+        config: { fixTtlTicks: 2 },
+      });
+      expect(ttlTick.decisions.notes.some((n) => n.kind === 'fix-ttl-unclaimed')).toBe(true);
+      expect(ttlTick.decisions.notes.find((n) => n.kind === 'fix-exhausted')).toBeUndefined();
+      expect(ttlTick.nextState.fixAttempts).toEqual({}); // still zero after 3 full refused cycles
+      bookkeeping = ttlTick.nextState;
+    }
+
+    // A 4th cycle where the dispatch genuinely succeeds (the lane IS leased) — NOW it counts.
+    const realSpawn = planTick({
+      state: { queue: [], prs, lanes: [], needsSlice: [], decisions: [] },
+      plan: { launch: [] },
+      freeLanes: [17],
+      bookkeeping,
+    });
+    const claimTick = planTick({
+      state: { queue: [], prs, lanes: [{ lane: 17, num: 3435 }], needsSlice: [], decisions: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { ...realSpawn.nextState, tick: realSpawn.nextState.tick + 1 },
+    });
+    expect(claimTick.nextState.fixAttempts).toEqual({ 1861: 1 }); // exactly one REAL attempt, not four
   });
 });
 
@@ -522,7 +647,10 @@ describe('planTick — composes the tick and threads nextState', () => {
     // Every consumed lane is distinct — 4 (build), 5 (prepare), 6 (fix).
     const lanes = [4, 5, 6];
     expect(new Set(lanes).size).toBe(3);
-    expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
+    // #3454 — a same-tick spawn is only PLANNED, not yet CONFIRMED (state.lanes has no lease for lane 6 yet on
+    // this same tick's read), so the counter does not bump here — see the dedicated "bumps only on a CONFIRMED
+    // claim" describe block below for the claim-time bump.
+    expect(out.nextState.fixAttempts).toEqual({});
   });
 
   it('composes a CI-heal spawn for a green-at-open PR gone red, on a lane no build/prepare/fix took (#2666)', () => {

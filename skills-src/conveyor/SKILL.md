@@ -527,11 +527,17 @@ it (both below). When neither suppresses:
   review** (`review:changes → review:pending` via `scripts/conveyor/rearm-review.mjs`) and exits. It **NEVER**
   self-clears the human review label — the human (or the drain's AI-review convergence pass) re-verdicts the
   re-armed PR.
-- **Record a fix-guard entry** `{ pr: prNumber, num, spawnedTick }` AND **bump the per-PR attempt counter**
-  (the within-session overlay — see the fix guard below; the entry and the counter are DISTINCT state, and the
-  counter's durable source of truth is the PR's re-arm comments, not this overlay). The spawned fix agent posts
-  the durable re-arm comment when it re-arms, which is what the count reads back after a restart. The PR stays
-  OPEN, so step 4 keeps a watcher on it — when the fix re-arms it to `review:pending`, that exit `2` routes to
+- **Record a fix-guard entry** `{ pr: prNumber, num, lane, spawnedTick, claimed: false }` — UNCLAIMED. **Do NOT
+  bump the per-PR attempt counter here** (#3454 — bumping the instant a spawn is merely PLANNED, before
+  `dispatch-lane.mjs`'s own in-flight guard has actually run, counted a dispatch that guard went on to refuse
+  pre-flight — e.g. a stale `claude agents` liveness entry — as a real bounce; PR #1861 hit "auto-fix exhausted"
+  after exactly two such phantom spawns and zero real dispatches). The counter bumps exactly once, LATER, the
+  tick the guard's lane is actually observed leased in `state.lanes` (the same CLAIMED fact the build guard's own
+  retirement already uses) — that is the mechanized core's job (`tick-core.mjs`'s `planTick`, off
+  `retireFixGuards`'s `newlyClaimed`), not a step you perform here. The within-session tally and the counter's
+  durable source of truth (the PR's own re-arm comments) are DISTINCT state — see the fix guard below. The spawned
+  fix agent posts the durable re-arm comment when it re-arms, which is what the count reads back after a restart.
+  The PR stays OPEN, so step 4 keeps a watcher on it — when the fix re-arms it to `review:pending`, that exit `2` routes to
   the `review:human`/`review:pending` branch (surface for `/review`), not back into auto-fix.
 
 **The fix guard — its own bookkeeping, and TWO separate pieces of state (do NOT copy the build/prepare guard's
@@ -571,10 +577,16 @@ Its rules — two suppressions and one cap:
 - **Retire the in-flight guard ENTRY (piece 1) two ways — NOT the attempt counter:** (1) **Re-armed / resolved**
   — a fresh `state.prs` read shows the PR no longer carries `review:changes` (it re-armed to `review:pending`, or
   merged/closed). Drop the ENTRY; **leave `fixAttempts[pr]` intact** (it only clears on PR-terminal). (2) **TTL
-  backstop** — if the PR is STILL `review:changes` after **N ticks (default 5)** of the spawn (the fix agent died
-  before re-pushing/re-arming), drop the ENTRY and allow a re-dispatch — still gated by the retry cap (the
-  counter did NOT reset), so a repeatedly-dying fix still terminates at the human. Clear `fixAttempts[pr]` only
-  when the PR reaches a terminal state (merged / closed).
+  backstop** — if the PR is STILL `review:changes` after **N ticks (default 5)** of the spawn, drop the ENTRY and
+  allow a re-dispatch, on TWO different footings depending on whether it was ever `claimed` (#3454): a guard whose
+  lane was NEVER observed leased in `state.lanes` — `dispatch-lane.mjs`'s own in-flight guard refused it
+  pre-flight, or it died before ever acquiring one — retires **`ttl-unclaimed`**: no real attempt ever happened,
+  so **nothing was bumped and nothing needs to be un-bumped**; it is simply retried for free next tick, mirroring
+  the build guard's own "never claimed after N ticks — re-dispatching" backstop. A guard whose lane WAS observed
+  leased at some point (the fix agent genuinely started, then went silent — died before re-pushing/re-arming)
+  retires **`ttl`**: a REAL, if failed, attempt — already bumped at claim time, so it is still gated by the retry
+  cap on re-dispatch (the counter did NOT reset), and a repeatedly-dying fix still terminates at the human. Clear
+  `fixAttempts[pr]` only when the PR reaches a terminal state (merged / closed).
 
 > **Red gate / red CI is NOT watcher-visible AT OPEN.** `pr-watch` reads only `state,mergedAt,labels`, so a
 > gate-red or born-red PR reads as `pending`. A build that is red AT OPEN surfaces via the **delivery / fix agent's
