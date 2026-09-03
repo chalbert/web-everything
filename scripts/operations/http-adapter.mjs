@@ -95,6 +95,15 @@ import { advanceWhileRunning, runStatus, startRun } from './engine.mjs';
 import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { coerceInputValue, driveRun, buildCliSpec, outcomePayload } from './cli-adapter.mjs';
 
+/**
+ * Append a call-log line without letting a telemetry failure crash a request that otherwise settled
+ * cleanly (#3451 review) — a bad `verdict` shape or a disk fault in the injected `callLog` is not the
+ * caller's problem. `callLog` is optional, exactly like `store`/`judge`: omitted, this is a no-op.
+ */
+function logCall(callLog, call) {
+  try { callLog?.append(call); } catch { /* best-effort call-visibility signal; never fails the request */ }
+}
+
 /** Where the operation surface is mounted by default. A host may mount it anywhere via `basePath`. */
 export const DEFAULT_BASE_PATH = '/operations';
 
@@ -384,7 +393,7 @@ function shapesFor(declaration, basePath) {
  */
 export async function handleOperationRequest(
   { method = 'GET', url = '/', body = undefined } = {},
-  { resolve, names, store, judge, newRunId, basePath = DEFAULT_BASE_PATH } = {},
+  { resolve, names, store, judge, newRunId, basePath = DEFAULT_BASE_PATH, callLog } = {},
 ) {
   if (typeof resolve !== 'function' || typeof names !== 'function' || typeof newRunId !== 'function') {
     throw new TypeError('operations: the HTTP adapter needs `resolve(name)`, `names()` and `newRunId(name)`');
@@ -454,8 +463,16 @@ export async function handleOperationRequest(
       // NOTE THE ARGUMENTS: a declaration, an input, an id and a registry. No store. No sinks. No judge.
       run = runReadOnly(declaration, { input: input.input, id: newRunId(declaration.name), registry });
     } catch (e) {
+      // #3451 — the compute-only branch had NO call-log line at all before this: `runReadOnly` writes no
+      // run record (see the file header), so a failure here left zero trace of the call ever happening.
+      logCall(callLog, { operation: declaration.name, callerKind: 'http', source: { stopped: 'error', error: e } });
       return fail(500, String(e?.message ?? e));
     }
+    logCall(callLog, {
+      operation: declaration.name,
+      callerKind: 'http',
+      source: { stopped: 'complete', error: null, pending: run.pending, verdict: run.verdict },
+    });
     return json(200, {
       ...outcomePayload({ run, stopped: 'complete', error: null, applied: [] }),
       status: 'complete',
@@ -489,7 +506,7 @@ export async function handleOperationRequest(
       } catch (e) {
         return fail(400, String(e?.message ?? e));
       }
-      return driveAndRespond({ run, registry, store, sinks, judge, resume: null, basePath, status: 201 });
+      return driveAndRespond({ run, registry, store, sinks, judge, resume: null, basePath, status: 201, callLog });
     }
 
     const runId = rest[1];
@@ -534,7 +551,7 @@ export async function handleOperationRequest(
         }
         resume = { step: run.pending.step, value: body.value };
       }
-      return driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status: 200 });
+      return driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status: 200, callLog });
     }
   }
 
@@ -560,15 +577,23 @@ function notPlanned(declaration, basePath, attempted, readOnly) {
  * `effect-in-flight` (#3073) joined that list because a DISPATCH is the epic's target operation, and 500-ing
  * on it would report the one thing the machinery exists to do as a server fault.
  */
-async function driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status }) {
+async function driveAndRespond({ run, registry, store, sinks, judge, resume, basePath, status, callLog }) {
   let outcome;
   try {
     // A NETWORK CLIENT, which this adapter cannot identify — it could be a person in a console or another
     // machine. `unknown` is excluded from both retry populations rather than padding either.
     outcome = await driveRun({ run, registry, store, sinks, judge, resume, attemptedBy: 'unknown' });
   } catch (e) {
+    // #3451 — one call-log line per request, on the run-record path too (the stateful start/advance
+    // routes both funnel through here), matching the read-only branch above.
+    logCall(callLog, { operation: run.op, callerKind: 'http', source: { stopped: 'error', error: e } });
     return fail(500, String(e?.message ?? e));
   }
+  logCall(callLog, {
+    operation: run.op,
+    callerKind: 'http',
+    source: { stopped: outcome.stopped, error: outcome.error, pending: outcome.run.pending, verdict: outcome.run.verdict },
+  });
   const settled = outcome.stopped === 'complete' || outcome.stopped === 'confirm' || outcome.stopped === 'effect-in-flight';
   return json(settled ? status : 500, {
     ...outcomePayload(outcome),
