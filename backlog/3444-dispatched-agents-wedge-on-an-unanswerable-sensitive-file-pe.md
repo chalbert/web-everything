@@ -2,9 +2,10 @@
 bornAs: x6vqcow
 kind: task
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 relatedTo: ["3149", "3435"]
 scope: ["we:skills-src/conveyor", "we:skills-src/review"]
 tags: [conveyor, dispatch, permissions]
