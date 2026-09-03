@@ -3928,6 +3928,99 @@ lens's profile; that grounding belongs to the omission seat under `#size-adds-re
 
 ---
 
+### Dispatch cross-checks real merged-PR history before treating an open item as needing work — enforced at both current spawn chokepoints, not one {#dispatch-status-ground-truth-check}
+
+**Ratified 2026-09-02** — per the operator's explicit in-conversation instruction to ratify this card,
+delegated to the driving session's own call (epic #3383's own standing kanban-style doctrine); both rulings
+below accepted as the prepared card's own bold defaults, no alternative picked, no amendment beyond what each
+fork's own `Skeptic:` pass already folded in (#3457).
+
+Motivated by a real, measured gap, not a hypothetical: `#3434`'s double-dispatch (two separate
+`prepare-decision` agents spawned against an item whose implementation had already merged hours earlier,
+discoverable with one `gh pr list --search` call) and `#3433` reproducing the identical shape live, within the
+same session that filed the fix. Two clauses:
+
+1. **Ruling 1 — WHERE the check runs: support-both, not a fork.** The manual operator path
+   (`we:scripts/operations/dispatch-lane.mjs`, the sole callee of `dispatch-lane --num=<N>`) and the automatic
+   per-tick sweep (`we:scripts/readiness/dispatch-plan.mjs`'s enrichment, read directly by
+   `we:skills-src/conveyor/SKILL.md`'s spawn steps) are two currently-independent chokepoints — neither
+   dispatch path routes through the other yet (that convergence is `#3096`'s own, still-open, follow-on).
+   Guarding only one leaves the other completely unguarded, which is the exact shape `#3434`'s double-dispatch
+   fell through (one of its two dispatches WAS the automatic sweep). **The check is implemented at BOTH**: (b)
+   `we:scripts/readiness/dispatch-plan.mjs`'s enrichment step, and (c) a guard inside
+   `we:scripts/operations/dispatch-lane.mjs` immediately before spawn. A cheap, optional, non-authoritative
+   nicety at (a) `we:scripts/conveyor/queue.mjs add`-time remains allowed but not required — it is
+   session-local and gates neither dispatch path on its own. **Contingent on the current architecture, not
+   permanent:** once `#3096` lands, a single guard at (c) would cover both paths and (b) could be retired as
+   redundant — whether/when to retire it is `#3096`'s own concern, not this ruling's.
+2. **Ruling 2 (Fork 2) — how the check stays cheap.** At (c), the `dispatch-lane.mjs` guard: check once,
+   immediately before spawn, never on a tick cadence — one `gh pr list --search` call per dispatch attempt. At
+   (b), `dispatch-plan.mjs`'s enrichment: age-gated — only items that have sat `open`/`active` past a minimum
+   age get enriched with the check, so a freshly-opened item never pays the cost while a long-stale one is
+   still caught within a bounded delay on the automatic path. Both avoid the rejected shape this fork exists
+   to rule out: a per-tick, per-item, unconditional `gh pr list` call.
+
+**Lineage:** ratified via #3457 (2026-09-02). The exact `gh pr` search query shape, the specific age
+threshold, and what happens to a flagged item (hold, auto-resolve, or surface) are left to the follow-on build
+item, [Wire the dispatch already-done ground-truth check into `we:scripts/operations/dispatch-lane.mjs` and
+`we:scripts/readiness/dispatch-plan.mjs`](/backlog/xl1x55d-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
+(parent #3457). Full reasoning, prior-art survey and skeptic passes:
+[#3457](/backlog/3457-dispatch-must-cross-check-an-open-item-s-status-against-real/).
+
+---
+
+### A capacity-aware admission queue caps concurrent heavy commands across dispatched lanes — distinct from lane leasing {#heavy-command-admission-queue}
+
+**Ratified 2026-09-02** — per the operator's explicit in-conversation instruction to ratify this card,
+delegated to the driving session's own call (epic #3383's own standing kanban-style doctrine); all three forks
+plus the two supported-by-default items accepted as the prepared card's own bold defaults, no alternative
+picked, no amendment beyond what each fork's own `Skeptic:` pass already folded in (#3456).
+
+Lane availability (`we:scripts/lane-pool.mjs`'s slot count) and CPU/heavy-command capacity are two different
+resources; today only the first is throttled. Four clauses:
+
+1. **What counts as "heavy" (Fork 1): an explicit named list, v1 equal-cost.** `check:standards`,
+   `verify-lane`/`test:unit`, `npm ci`/`npm install`, and the Playwright visual-capture pass — the same
+   closed, enumerable set every dispatched-agent brief already routes through, per
+   [#dispatched-agent-never-runs-commands-directly](#dispatched-agent-never-runs-commands-directly). v1 ships
+   as a plain named SET, not weighted. A blanket cap over every command is rejected on merit, not cost: it
+   would permanently serialize genuinely cheap `compute` calls (`gate-health`, `suggest-next`, `pr-status`)
+   alongside real heavy ones, a defect that holds even at zero build cost.
+2. **Where the cap applies (Fork 2): at heavy-command-invocation time, not at lane-acquire time.** A lane may
+   always be acquired freely; the heavy command itself queues on a capacity semaphore right before it runs —
+   an idle-but-leased lane is never itself the expensive thing. **Named wrinkle, not resolved by this
+   ruling:** `npm ci` already runs inside `we:scripts/lane-pool.mjs`'s `acquire` today (via `ensureDeps`)
+   unless the caller passes `--no-install`, and no dispatched-agent brief currently passes it. The follow-on
+   build resolves this concretely — either dispatched-agent acquire call sites gain `--no-install` and `npm
+   ci` becomes its own gated step, or the acquire-time exception is documented as a narrow, named one.
+3. **How "waiting for capacity" surfaces (Fork 3): a new, distinct signal in the runner's own tick JSON**, via
+   the existing `notes` array's `{ kind, ... }` pattern (`we:scripts/conveyor/tick-core.mjs`, e.g. `{ kind:
+   'waiting-for-capacity', num, text }`) — never folded into `#3451`'s call-visibility telemetry (a schema
+   mismatch: that signal is after-the-fact access-log telemetry, not a live, pollable status a caller can
+   check before deciding what to do next) and never silent.
+4. **Supported by default, not separately ratifiable.** Heavy-command classification stays the fixed named
+   list for v1 — no adaptive/measured classifier yet; real, separately-prioritized future work once real usage
+   shows the fixed list insufficient. The admission cap is a fixed number, env/config-overridable per machine,
+   sized **conservatively below measured host capacity** — not Bazel-style near-full-utilization, since a dev
+   workstation's baseline headroom is itself volatile from processes the queue never controls (other lanes'
+   dev servers, a concurrent review session). **Named residual risk, not overstated as solved:** a fixed cap
+   alone reduces but does not fully eliminate the contention failure mode #3383's own finding-4 already hit
+   live with only a handful of concurrent lanes — accepted for v1, not claimed closed.
+
+**Lineage:** ratified via #3456 (2026-09-02). The concrete throttle mechanism (semaphore shape, enforcement
+point, regression test) is left to the follow-on build item, [Build the heavy-command admission queue: a
+capacity semaphore for check:standards, verify-lane, npm ci, and Playwright
+visual-capture](/backlog/xm1ft97-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent
+#3456), which must land — or be concretely scheduled to land — before the dispatcher's parallel lane count
+increases further, per the operator's own sequencing ("we need the queue there first before merging" further
+parallelism). Composes with
+[#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) (#3427/#3451 — the
+call-visibility telemetry this ruling's Fork 3 deliberately does not reuse) and `#3449` (the closest sibling
+shape, for lane leases rather than heavy-command capacity). Full reasoning, prior-art survey and skeptic
+passes: [#3456](/backlog/3456-cap-concurrent-heavy-commands-across-dispatched-lanes-a-capa/).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from

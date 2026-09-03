@@ -2,15 +2,45 @@
 bornAs: xzkqdnz
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-02"
+dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 preparedDate: "2026-09-02"
+codifiedIn: "docs/agent/platform-decisions.md#dispatch-status-ground-truth-check"
 relatedTo: ["3435", "3449", "3434", "3433"]
 relatedReport: reports/2026-09-02-dispatch-status-ground-truth-check.md
 tags: [conveyor, dispatch, verification, ground-truth]
 ---
 
 # Dispatch must cross-check an open item's status against real merged-PR history before treating it as needing work
+
+## Ruling (2026-09-02)
+
+**Ratified 2026-09-02** — per the operator's explicit in-conversation instruction to ratify this card,
+delegated to the driving session's own call (epic #3383's own standing kanban-style doctrine); both rulings
+below accepted as presented, no alternative picked, no amendment beyond what each fork's own `Skeptic:` pass
+already folded in.
+
+- **Ruling 1 (WHERE the check runs): support-both, as stated.** Implement the check at BOTH (b)
+  `we:scripts/readiness/dispatch-plan.mjs`'s enrichment step (guards the automatic per-tick sweep) AND (c) a
+  guard inside `we:scripts/operations/dispatch-lane.mjs` immediately before spawn (guards the manual
+  `dispatch-lane --num=<N>` CLI path). (a) — a `we:scripts/conveyor/queue.mjs add`-time check — remains an
+  optional, non-authoritative nicety, not required.
+- **Fork 2 (how the check stays cheap): bold default as stated.** For (c), check once, immediately before
+  spawn, never on a tick cadence — one `gh pr list --search` call per dispatch attempt. For (b), age-gate:
+  only enrich-and-flag items that have sat `open`/`active` past a minimum age, so a freshly-opened item never
+  pays the cost while a long-stale one is still caught within a bounded delay.
+
+**Follow-on build scaffolded at ratification:**
+
+- [Wire the dispatch already-done ground-truth check into `we:scripts/operations/dispatch-lane.mjs` and
+  `we:scripts/readiness/dispatch-plan.mjs`](/backlog/xl1x55d-wire-the-dispatch-already-done-ground-truth-check-into-we-sc/)
+  (parent: this item) — names the exact `gh pr` query shape, the age/caching policy, and what happens to a
+  flagged item as this build item's own call to make, per this card's own "What this decision does not
+  settle."
+
+Codified in `we:docs/agent/platform-decisions.md#dispatch-status-ground-truth-check`.
 
 ## Grounding digest
 

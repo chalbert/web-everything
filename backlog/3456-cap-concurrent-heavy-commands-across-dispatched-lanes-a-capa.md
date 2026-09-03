@@ -2,15 +2,55 @@
 bornAs: xre3ri7
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-02"
+dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 preparedDate: "2026-09-02"
+codifiedIn: "docs/agent/platform-decisions.md#heavy-command-admission-queue"
 relatedTo: ["3427", "3451", "3449", "3411", "3405"]
 tags: [conveyor, capacity, concurrency, lane-pool, throttle, admission-queue]
 relatedReport: reports/2026-09-02-heavy-command-admission-queue.md
 ---
 
 # Cap concurrent heavy commands across dispatched lanes — a capacity-aware admission queue distinct from lane leasing
+
+## Ruling (2026-09-02)
+
+**Ratified 2026-09-02** — per the operator's explicit in-conversation instruction to ratify this card,
+delegated to the driving session's own call (epic #3383's own standing kanban-style doctrine); all three
+forks plus the two "Supported by default" items accepted as presented, no alternative picked, no amendment
+beyond what each fork's own `Skeptic:` pass already folded in.
+
+- **Fork 1 (what counts as "heavy"): (a) — the bold default.** An explicit named list (`check:standards`,
+  `verify-lane`/`test:unit`, `npm ci`/`npm install`, the Playwright visual-capture pass); v1 ships as an
+  equal-cost named SET, not weighted.
+- **Fork 2 (where the cap applies): (b) — the bold default.** At heavy-command-invocation time, not at
+  lane-acquire time. The card's own amendment carries forward unresolved by this ruling: `npm ci` already runs
+  inside `we:scripts/lane-pool.mjs`'s `acquire` today (via `ensureDeps`) unless `--no-install` is passed, and
+  no dispatched-agent brief currently passes it — the follow-on build must resolve this concretely (either
+  make acquire calls pass `--no-install` and gate `npm ci` as its own step, or document it as a narrow,
+  acquire-time exception).
+- **Fork 3 (how "waiting for capacity" surfaces): (a) — the bold default.** A new, distinct signal in the
+  runner's own tick JSON via the existing `notes` array `{ kind, ... }` pattern (e.g. `{ kind:
+  'waiting-for-capacity', num, text }`) — not folded into `#3451`'s telemetry (schema mismatch), not silent.
+- **Supported by default (not ratifiable forks, already settled):** heavy-command classification stays the
+  fixed named list for v1 (no adaptive/measured classifier yet); the admission cap is a fixed number,
+  env/config-overridable per machine, sized conservatively below measured host capacity (not Bazel-style
+  near-full-utilization) — a fixed cap alone will not fully eliminate the contention failure mode, an
+  accepted, named residual risk of v1, not something this ruling overstates as solved.
+
+**Follow-on build scaffolded at ratification:**
+
+- [Build the heavy-command admission queue: a capacity semaphore for check:standards, verify-lane, npm ci, and
+  Playwright
+  visual-capture](/backlog/xm1ft97-build-the-heavy-command-admission-queue-a-capacity-semaphore/) (parent:
+  this item) — names the concrete throttle mechanism, cap value/override, `npm ci` resolution, and a real
+  "fails pre-fix" regression test as this build item's own call to make, per this card's own "What this
+  decision does NOT settle." Must land, or be concretely scheduled to land, before the dispatcher's parallel
+  lane count increases further, per the operator's own sequencing.
+
+Codified in `we:docs/agent/platform-decisions.md#heavy-command-admission-queue`.
 
 ## The problem, in the operator's own words (2026-09-02)
 
