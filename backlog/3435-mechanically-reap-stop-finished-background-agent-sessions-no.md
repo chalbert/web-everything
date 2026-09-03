@@ -1,6 +1,7 @@
 ---
 bornAs: xjx2n2s
 kind: task
+tier: pinned
 parent: "3383"
 status: open
 dateOpened: "2026-09-01"
