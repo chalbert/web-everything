@@ -20,8 +20,9 @@
  *
  * SCOPE (#2702, NOT #2703): this builds the runner MECHANISM — the singleton lock + the loop that steps the
  *   core, carries bookkeeping, runs the deterministic no-LLM passes (infra-blocked recovery §4b, lease-reaper
- *   §4c, session-reaper §4d), and surfaces the tick. It does NOT retire the main-session serial loop (that is #2703, blocked on
- *   this) and does NOT wire headless LLM agent-spawning (the CLI agent-runner backend,
+ *   §4c, session-reaper §4d, the reconcile-fix dispatch pass #3438), and surfaces the tick. It does NOT retire
+ *   the main-session serial loop (that is #2703, blocked on this) and does NOT wire headless LLM agent-spawning
+ *   (the CLI agent-runner backend,
  *   [#agent-runner-cli-backend]) — both belong to the retirement slice. The guard SEMANTICS are PRESERVED
  *   verbatim: they live in the tick core; the runner alters none of them.
  *
@@ -178,11 +179,14 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
 /** Build the real `mechanicalPasses` effect: the deterministic, no-LLM passes the SKILL runs each tick —
  *  the infra-blocked recovery pass (§4b), the lease-reaper (§4c), the session-reaper (§4d, WE #3435 — stops
  *  a `claude agents` background session once ITS OWN process reports `done`/`failed`, a wholly separate
- *  resource from a lane lease), and (#3421) the blocking-hiccup sink. All four are best-effort: a failure is
- *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole
- *  writer to `main`.
+ *  resource from a lane lease), the reconcile-fix dispatch pass (#3438 — dispatches the fix agent
+ *  `we:scripts/conveyor/reconcile-pass.mjs` decides is owed for a bounced PR with nothing live working it, a
+ *  genuinely different population from `decisions.spawnFixes`'s own tick-core-launched-PRs-only scope; see that
+ *  file's own header for the full reasoning), and (#3421) the blocking-hiccup sink. All five are best-effort: a
+ *  failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the
+ *  sole writer to `main`.
  *
- *  THE HICCUP SINK is the ONLY one of the four that reads `out` (this tick's already-computed
+ *  THE HICCUP SINK is the ONLY one of the five that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
@@ -204,6 +208,7 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
+    runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is

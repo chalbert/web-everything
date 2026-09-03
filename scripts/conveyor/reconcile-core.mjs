@@ -107,6 +107,15 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
+// `sessionSlugFor` (not a NEW pure slug file, unlike `review-session-slug.mjs`) — `we:scripts/operations/
+// dispatch-lane.mjs` has NO `node:` import of its own (its whole static graph is `./registry.mjs` +
+// `./step-kinds.mjs`, per that file's own header), so it is exactly as safe for this PURE module to import as
+// `review-session-slug.mjs` already is. Reused rather than duplicated: `fix-<pr>` is ALREADY the session-slug
+// convention `dispatch-lane.mjs`'s own tick-core-driven fix dispatch fills `{{SESSION_SLUG}}` with (#3332), and
+// `we:scripts/conveyor/reconcile-fix-dispatch.mjs` (#3438) names its own spawned fix sessions with the same
+// function — a second definition of `fix-<pr>` here would be the exact drift risk `review-session-slug.mjs`'s
+// own file header was written to avoid for the review slug.
+import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the only two things this pass ever asks for. Frozen,
@@ -232,9 +241,10 @@ export function countFindings(comments) {
  * NOTHING on this path — two unknowns are not a match, and treating them as one would bind every session to
  * every PR.
  *
- * PATH 2 — session `name` === `review-<pr>`. THIS PATH EXISTS BECAUSE PATH 1 CANNOT EVER MATCH A REVIEW-DISPATCH
- * SESSION, first round or re-armed, working or not (#3437, confirmed live 2026-09-01: SEVEN independent
- * `review-1765` sessions spawned across ~15 minutes of ticks against one re-armed PR, because none ever bound).
+ * PATH 2 — session `name` === `review-<pr>` OR `fix-<pr>`. THIS PATH EXISTS BECAUSE PATH 1 CANNOT EVER MATCH A
+ * REVIEW-DISPATCH SESSION, first round or re-armed, working or not (#3437, confirmed live 2026-09-01: SEVEN
+ * independent `review-1765` sessions spawned across ~15 minutes of ticks against one re-armed PR, because none
+ * ever bound).
  * `we:scripts/operations/review-dispatch.mjs` spawns the review agent with `cwd: REPO_ROOT` — the PRIMARY
  * checkout, per that file's own docblock — and the review agent's own brief never `cd`s the agent's shell into
  * the lane it later acquires for itself (the lane is a flag to a subprocess, not the agent's own cwd). So
@@ -245,11 +255,20 @@ export function countFindings(comments) {
  * on every `claude agents --json` entry — unlike `pid`/`state`, `name` is on all 17 measured entries). Matching
  * on it needs no `headRefOid` at all, so it still binds when path 1's sha is blank.
  *
+ * THE SAME NAME-BASED GAP APPLIES TO A FIX DISPATCH (#3438), and for the identical reason: once a
+ * `we:scripts/conveyor/reconcile-fix-dispatch.mjs` fix agent has made its first commit in its acquired lane, its
+ * lane's `HEAD` has advanced past the PR's still-unpushed `headRefOid` — path 1 goes blind at exactly the moment
+ * the fix agent starts doing real work, which is the #3437 double-dispatch shape recurring one dispatch kind
+ * over. `fix-<pr>` (`we:scripts/operations/dispatch-lane.mjs#sessionSlugFor(pr, 'fix')`) is ALREADY the session
+ * name both `dispatch-lane.mjs`'s own tick-core-driven fix dispatch (#3332) and `reconcile-fix-dispatch.mjs`
+ * spawn a fix agent under, so matching it here needs no new naming scheme, only reading the one that already
+ * exists.
+ *
  * A NAME IS A WEAKER PROXY THAN A GIT SHA — NAMED DELIBERATELY. Nothing stops a `claude agents --json` entry
- * from carrying `name: "review-1234"` for a reason that has nothing to do with reviewing PR #1234 (a person's
- * own manually-named debug session, for instance); that entry would now bind and could suppress a real
- * dispatch. This repo does not treat `claude agents --json` as adversarial input — it reflects genuinely
- * running local processes, and forging an entry in it already requires local code execution — so the
+ * from carrying `name: "review-1234"` (or `"fix-1234"`) for a reason that has nothing to do with working PR
+ * #1234 (a person's own manually-named debug session, for instance); that entry would now bind and could
+ * suppress a real dispatch. This repo does not treat `claude agents --json` as adversarial input — it reflects
+ * genuinely running local processes, and forging an entry in it already requires local code execution — so the
  * trade is accepted rather than defended against here.
  *
  * Both paths' hits are unioned into one bound list, keyed by AGENT OBJECT IDENTITY in the `Map` below (so a
@@ -275,9 +294,12 @@ export function bindAgents(pr, agents) {
 
   const prNumber = Number(pr?.number);
   if (Number.isInteger(prNumber) && prNumber > 0) {
-    const slug = reviewSessionSlug(prNumber);
+    // #3438 — BOTH name-based slugs, unioned the same way path 1 and path 2 already are: a PR can legitimately
+    // have a live review agent OR a live fix agent bound to it by name, and this pass must refuse dispatching
+    // whichever kind is already running.
+    const slugs = [reviewSessionSlug(prNumber), sessionSlugFor(prNumber, 'fix')];
     for (const a of list) {
-      if (a && String(a.name ?? '') === slug) {
+      if (a && slugs.includes(String(a.name ?? ''))) {
         bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
       }
     }
