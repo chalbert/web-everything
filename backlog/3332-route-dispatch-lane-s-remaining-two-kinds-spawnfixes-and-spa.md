@@ -3,13 +3,14 @@ bornAs: xj86df4
 kind: story
 size: 5
 parent: "3029"
-status: active
+status: resolved
 scaffoldedBy: "rule3118"
 dateScaffolded: "2026-08-26"
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs"]
 dateOpened: "2026-08-26"
 blockedBy: ["3165"]
 dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 relatedTo: ["3118", "3165", "3096"]
 tags: [plateau-loop, delivery, operations, conveyor, dispatch]
 ---
@@ -130,6 +131,16 @@ with the refusal's own message text widened so it no longer reads as build-exclu
   wired up) would use the wrong session slug. `blockedBy: ["3332"]`.
 - `node --test`-equivalent (`npx vitest run we:scripts/operations/__tests__/dispatch-lane.test.mjs`, this repo's
   actual test runner for this file — it imports from `vitest`, not `node:test`) is green: 112/112.
+
+## Reconciliation note (2026-09-02)
+
+Landed as `PR #1844` ("WE #3332: route dispatch-lane's remaining two kinds — spawnFixes and spawnCiHeals"),
+merged `2026-09-02T21:12:37Z` — its diff and description match this card's own "Progress" section above
+line for line (`LAUNCH_KINDS` to five, `BRIEF_REQUIRED_BY_KIND`, `sessionSlugFor` keyed on `pr`, the
+scope refusal widened to `fix`/`ci-heal`, 112/112 tests). The card's own `status:` frontmatter had not been
+flipped to `resolved` despite the merge — the exact "merged but never reconciled" gap `#3383` documents
+recurring (see its card for prior examples: `#3403`, `#3404`, `#3406`, `#3416`, `#3418`, `#3439`, `#3434`,
+`#3433`). Resolved here as a straight reconciliation, not new work.
 
 ## Lineage
 
