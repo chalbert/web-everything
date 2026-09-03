@@ -2,10 +2,11 @@
 bornAs: xadrqhr
 kind: task
 parent: "3427"
-status: active
+status: resolved
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/http-adapter.mjs", "we:scripts/operations/call-log.mjs", "we:scripts/operations/call-log-store.mjs", "we:scripts/operations/__tests__/"]
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 tags: [operations-engine, telemetry, observability]
 ---
 
