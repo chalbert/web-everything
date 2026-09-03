@@ -78,3 +78,52 @@ signals but not sufficient ones in either direction — `working`/`blocked` can 
 that's actually done or actually fine, and a stop's own success report can lag a session that's actually
 gone. Ground-truth cross-checks (merged PR, item `status:`, lane lease, a follow-up listing) are load-bearing,
 not optional polish.
+
+## Found live 2026-09-03 — a third confirmation, same session
+
+Same overnight #3383 session as the two sections above, now past midnight into 2026-09-03. A dedicated
+verification pass checked `claude agents --json` against real GitHub PR history for every live/idle
+`conveyor-*`/`prepare-*` session at the time, purely to decide what was actually safe to reap. Result:
+finding 1's exact pattern recurred a third time, plus one further variant worth naming on its own.
+
+1. **Five more `working`/idle sessions confirmed stale against merged PRs — finding 1's exact shape,
+   recurring.** `prepare-decision-3456` (targeting #3456, resolved via PR #1856), `conveyor-3332b`
+   (targeting #3332, resolved via PR #1854), `conveyor-3452` (targeting #3452, resolved via PR #1855),
+   `conveyor-3421b` (targeting #3421, resolved via PR #1847), and `prepare-3448` (whose own scope-authoring
+   mandate — not #3448 itself, which stays open pending a build — was already covered by PR #1849) were all
+   still listed live/idle in `claude agents --json` well after their real work had landed. Each was messaged
+   directly rather than force-stopped, asking it to confirm and self-exit; two of the five (`conveyor-3452`,
+   `prepare-3448`) replied back within the same session confirming a clean exit with no lease held.
+
+2. **A related but distinct failure mode: the listing itself goes stale even with no stop command
+   involved.** Four more sessions in the same scan — `conveyor-3399` (→ #3399, PR #1835), `conveyor-3411b`
+   (→ #3411, PR #1837), `prepare-decision-3457` (→ #3457, PR #1856), `prepare-3452` (→ #3452, PR #1855) —
+   were also targeting already-merged items, but when the pass tried to message them directly, `SendMessage`
+   reported them not reachable at all: they had already exited on their own between the listing being read
+   and the message being sent. This is not finding 3's case above (a *stop command's own report* lagging
+   reality) — no stop was ever issued here. It's the *listing itself* (`claude agents --json`, unprompted)
+   staying stale even for sessions that turn out to already be fully gone, over a much tighter window than
+   finding 1's hours-long staleness, but the same underlying "the registry lags reality" shape. Worth the
+   builder confirming whether one added liveness probe (does a candidate still respond to a signal/message,
+   not just appear in the listing) would catch both this fast-window case and finding 1's longer-window one,
+   or whether the two need separate handling.
+
+3. **Operator-observed, not independently verified by this pass: a `claude stop` FAILURE-to-match is not
+   proof of exit either — the mirror image of finding 3 above.** After finding 1's five sessions were
+   messaged to confirm and self-exit, a follow-up `claude agents --json` read plus `claude stop <sessionId>`
+   on all five (including `conveyor-3421b`) came back "No job matching `<id>` — Run `claude agents` to list
+   running sessions" for every one, including entries the listing itself still showed `state: "working"` for
+   — read at the time as "these are fully gone, just stale-listed." The operator then corrected this
+   directly: several of the same named sessions, `conveyor-3421b` specifically, are — from their own
+   vantage point — genuinely still connected. So a `claude stop` failure-to-match is not reliable proof of
+   exit either; it is the reverse false read from finding 3's "success isn't proof of exit." This one is
+   the operator's own observation, not independently re-verified here beyond their word, and is recorded as
+   such deliberately. Net for the builder: neither a stop's success NOR its failure-to-match is ground truth
+   on its own, in either direction — both need the same independent cross-checks (merged PR, item `status:`,
+   lane lease) this card already establishes.
+
+This is the third time finding 1's exact pattern has shown up live in this same overnight session, and the
+third distinct way this card has now caught a stop/listing signal lying in some direction — strengthening
+this card's own "Done when" #2: it is the ground-truth cross-check against real state — not `claude agents
+--json`'s own `state` field, and not a stop command's own report either way — that has to decide what is
+safe to reap.
