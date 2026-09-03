@@ -71,6 +71,8 @@ import {
   defaultCheckAlreadyDone,
   filterAlreadyDoneCandidates,
   NON_IMPLEMENTING_REF_RE,
+  // #3462 — the manual dispatch path's `blockedBy` awareness.
+  findItem,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -1215,9 +1217,9 @@ describe('the tick reader', () => {
     expect(out.inFlightDispatches.livenessSource).toBe('claude-agents');
   });
 
-  it('resolves the item\'s spec path and repo-qualified scope from the canonical loader', () => {
+  it('resolves the item\'s spec path, repo-qualified scope and open blockers from the canonical loader', () => {
     expect(readTick({ num: '3037', ...bindings }).item).toEqual({
-      num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'],
+      num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: [],
     });
   });
 
@@ -1891,5 +1893,114 @@ describe('shapeDispatchRead — refuses a dispatch a real merged PR already show
     expect(shapeDispatchRead(tickRead(), { num: '3037' }).alreadyDonePr).toBeNull();
     const held = tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()]) });
     expect(shapeDispatchRead(held, { num: '3037' }).alreadyDonePr).toBeNull();
+  });
+});
+
+// ── #3462: the manual `--num=<N>` path now reads `blockedBy`/`openBlockers` too ────────────────────────────
+
+describe('findItem — carries `openBlockers` through, where it used to be dropped (#3462)', () => {
+  it('reads `openBlockers` off the loader record onto the shaped item', () => {
+    const it_ = findItem('3398', () => [
+      { num: '3398', slug: 'conveyor-supervisor-runner-residency', scope: ['we:scripts/conveyor/'], openBlockers: ['3443'] },
+    ]);
+    expect(it_.openBlockers).toEqual(['3443']);
+  });
+
+  it('defaults to `[]` when the loader record has no `openBlockers` at all (every edge resolved, or none named)', () => {
+    const it_ = findItem('3037', () => [
+      { num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] },
+    ]);
+    expect(it_.openBlockers).toEqual([]);
+  });
+});
+
+describe('shapeDispatchRead — refuses a dispatch for an item with an unresolved `blockedBy` edge (#3462)', () => {
+  // THE REAL #3398 SHAPE: the tick core cleared it for `spawnBuilds` anyway (three times, live, on
+  // 2026-09-02) while its own frontmatter carried `blockedBy: ["3443"]`, an item still `status: open`. A
+  // fabricated item here stands in for #3398 — no in-flight guard, a free lane, the core having (wrongly)
+  // cleared it — to prove the refusal fires on `openBlockers` alone, independent of the core's own decision.
+  const blockedRead = (over = {}) => tickRead({
+    item: { num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: ['3443'] },
+    ...over,
+  });
+
+  it('FAILS AGAINST PRE-FIX CODE: refuses the dispatch and names the open blocker in the reason', () => {
+    const v = shapeDispatchRead(blockedRead(), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.lane).toBeNull();
+    expect(v.sessionSlug).toBeNull();
+    expect(v.prompt).toBeNull();
+    expect(v.openBlockers).toEqual(['3443']);
+    expect(v.holdReason).toContain('blocked');
+    expect(v.holdReason).toContain('3443');
+  });
+
+  it('names every unresolved blocker when there is more than one', () => {
+    const v = shapeDispatchRead(blockedRead({
+      item: { num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: ['3443', '3444'] },
+    }), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('3443');
+    expect(v.holdReason).toContain('3444');
+  });
+
+  it('fires regardless of `launchKind` — a blocked `prepare-decision` is refused exactly like a blocked `build`', () => {
+    const v = shapeDispatchRead(blockedRead({ launchKind: 'prepare-decision' }), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('prepare-decision');
+  });
+
+  it('takes priority over "not cleared" — fires even when the core never cleared this item at all', () => {
+    // Not the shape `readTick` produces today (the core would have to independently agree the item is
+    // blocked), but the refusal must not depend on `launch` being truthy — the whole point is that it does not
+    // trust the core's decision on this axis.
+    const v = shapeDispatchRead(blockedRead({ launch: null, suppressed: null }), { num: '3037' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('blocked');
+  });
+
+  it('is a HARD, UNCONDITIONAL refusal — an unrecognized "force" key on the caller args changes nothing', () => {
+    // #3462's recorded decision (see the backlog item's `## Progress`): a manual dispatch may never force a
+    // blocked item through, and there is deliberately no flag to ask for one. `shapeDispatchRead`'s second
+    // argument is destructured for exactly `num`/`expectedWithinMinutes`, so a caller that hands it an
+    // override-shaped extra key is silently ignored rather than honoured.
+    const v = shapeDispatchRead(blockedRead(), { num: '3037', force: true, override: 'blockedBy' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('blocked');
+  });
+
+  it('an item with every `blockedBy` edge resolved (`openBlockers: []`) dispatches normally', () => {
+    expect(shapeDispatchRead(tickRead({
+      item: { num: '3037', slug: 'declare-dispatch', specPath: 'backlog/3037-declare-dispatch.md', scope: ['we:scripts/operations/'], openBlockers: [] },
+    }), { num: '3037' }).dispatching).toBe(true);
+  });
+
+  it('an item with no `openBlockers` field at all dispatches normally — pre-#3462 fixtures unaffected', () => {
+    expect(shapeDispatchRead(tickRead(), { num: '3037' }).dispatching).toBe(true);
+  });
+
+  it('every other exit still reports `openBlockers: []` — the field is on every finding, not just this branch', () => {
+    expect(shapeDispatchRead(tickRead(), { num: '3037' }).openBlockers).toEqual([]);
+    const held = tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()]) });
+    expect(shapeDispatchRead(held, { num: '3037' }).openBlockers).toEqual([]);
+  });
+});
+
+describe('readTick — `openBlockers` reaches the read end to end, from `loadItems` through to the refusal (#3462)', () => {
+  const TICK = { decisions: { spawnBuilds: [{ num: '3398', lane: 5 }] }, nextState: { tick: 1 } };
+  const bindings = {
+    runNode: () => JSON.stringify(TICK),
+    readText: () => BRIEF,
+    loadItems: () => [{ num: '3398', slug: 'conveyor-supervisor-runner-residency', scope: ['we:scripts/conveyor/'], openBlockers: ['3443'] }],
+    listAgents: () => [],
+    checkAlreadyDone: () => ({ done: false, pr: null, checked: true }),
+  };
+
+  it('threads `openBlockers` from the loader onto `item`, and `shapeDispatchRead` refuses on it', () => {
+    const out = readTick({ num: '3398', ...bindings });
+    expect(out.item.openBlockers).toEqual(['3443']);
+    const v = shapeDispatchRead(out, { num: '3398' });
+    expect(v.dispatching).toBe(false);
+    expect(v.holdReason).toContain('3443');
   });
 });

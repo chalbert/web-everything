@@ -627,6 +627,9 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // #3457/#3460 — the merged PR (if any) the ground-truth check found closing this item out already. `null`
     // on every exit except the one new branch below that actually refuses on it.
     alreadyDonePr: null,
+    // #3462 — the item's still-open `blockedBy` targets, or `[]` on every exit except the one branch below
+    // that actually refuses on them.
+    openBlockers: [],
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is
@@ -703,6 +706,41 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     };
   }
 
+  // #3462 — THE BLOCKED-ITEM REFUSAL. Checked BEFORE `!launch`, same priority tier as the already-done check
+  // just above and for the same reason: `we:scripts/readiness/dispatch-plan.mjs`'s `hasOpenBlockers` hold is
+  // only reachable through the automatic sweep, whose queue (`backlog.mjs build-queue`) already excludes any
+  // item with an unresolved `blockedBy` edge — so a blocked item never reaches `planTick`'s `spawnBuilds` via
+  // that path and `hasOpenBlockers` never actually fires there. This CLI's `--num=<N>` path does not go
+  // through that queue at all; it resolves the item directly and can hand `planTick` a `num` the automatic
+  // sweep would never have offered it. `openBlockers` (read here off `raw.item`, threaded through by
+  // `findItem` in `dispatch-lane-io.mjs`) is the SAME field the automatic path's hold is named for, read here
+  // for the first time on this path — mirroring the "already-done" ground-truth check's own shape, not the
+  // core's launch decision, which is why it is checked independent of `launch` (a live #3398-shaped bug: the
+  // core cleared it for `spawnBuilds` anyway, three times, with an open `blockedBy` the whole time).
+  const openBlockers = Array.isArray(raw.item?.openBlockers) ? raw.item.openBlockers.map(String).filter(Boolean) : [];
+  if (openBlockers.length) {
+    return {
+      ...base,
+      inFlightRuns: [],
+      agedOutRuns,
+      dispatching: false,
+      lane: null,
+      sessionSlug: null,
+      prompt: null,
+      briefUnknownTokens: [],
+      itemSpecPath: null,
+      scope: [],
+      dispatchedGuard: null,
+      openBlockers,
+      holdReason:
+        `#${resolvedNum} is blocked — open blocker(s) ${openBlockers.join(', ')} — refusing to dispatch a `
+        + `${launchKind} agent until every \`blockedBy\` edge resolves. This is a hard, unconditional refusal `
+        + '(#3462): there is no override flag for a manual dispatch to force a blocked item through — see '
+        + '`backlog/3462-manual-dispatch-lane-never-checks-blockedby-a-structurally-b.md` for the recorded '
+        + 'decision. Re-check the blocker(s), or dispatch a different item.',
+    };
+  }
+
   if (!launch) {
     return {
       ...base,
@@ -717,7 +755,8 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       scope: [],
       dispatchedGuard: null,
       // The core's own word for why, or the honest "it was not in this tick's launch set at all" — which is
-      // what a blocked, unscoped, lease-overlapped or not-cleared item looks like from here.
+      // what an unscoped, lease-overlapped or not-cleared item looks like from here (a blocked item is caught
+      // above, before this branch, with its own more specific reason).
       holdReason: suppressed
         ? `suppressed by the in-flight build guard (${suppressed.by === 'lane' ? `lane ${suppressed.lane} is held` : 'an agent is already in flight for this item'})`
         : 'the tick core did not clear this item for dispatch — it is not in `decisions.spawnBuilds`, '
