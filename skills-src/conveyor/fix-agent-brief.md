@@ -41,6 +41,18 @@ the human review label — the human (or the drain's AI-review convergence pass)
 
 ## The arc — one command per transition
 
+### 0. Report `started` — BEFORE anything else (#3436)
+
+The one durable trace that a repair of PR #{{PR_NUM}} was ever dispatched, written before step 1 can fail for
+any reason — a lane-pool outage, a crash, a refused effect. Without this a session that dies here is
+indistinguishable from one never dispatched at all — no `claude logs` archaeology needed to tell them apart
+(`we:backlog/3436-*.md`). A script, not a step to remember under stress — the same reasoning `stand-down.mjs`
+already applies to a fixer's own escalation marker.
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --kind=fix --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
+```
+
 ### 1. Reconstitute the bounced PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**
@@ -54,7 +66,11 @@ LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-fix
 
 - `--base={{LANE_REF}}` lands the clone on the pushed lane tip (via `checkout -B main <ref>`), so you **reuse
   the ~done work** — you are repairing a diff, not redoing the item. If `--base` fails to resolve (the ref was
-  deleted / the PR was force-closed), stop and report `#{{ITEM_NUM}} → fix not-applicable (lane ref gone)`.
+  deleted / the PR was force-closed), report the completion record (`--status=done --outcome=not-applicable`)
+  and stop and report `#{{ITEM_NUM}} → fix not-applicable (lane ref gone)`:
+  ```bash
+  node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+  ```
 - Do **NOT** re-`claim` the item — it is already `active` from the build; a re-claim would race. The repair is
   a diff on an existing PR, not a fresh item pickup.
 
@@ -74,6 +90,7 @@ judgment you cannot safely make, do **NOT** guess. **Record the stand-down on th
 ```bash
 node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=needs-judgment \
   --detail="<one line — what you could not decide>"
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-judgment
 ```
 
 A human handles it via `/finish`.
@@ -93,8 +110,13 @@ Make the smallest change that addresses the finding, in `$LANE`, on the lane's *
 Keep scope tight: the repair's files should stay within `{{SCOPE}}`. Do not fold in unrelated work, and do not
 weaken or delete a test to sidestep the finding. If `origin/main` advanced under the lane and a **conflict**
 blocks the gate, resolve it the `/finish` way (regenerate derived artifacts, take-main for coordination JSON) —
-or, if it is a genuine same-line code overlap you cannot safely resolve, stop and report `#{{ITEM_NUM}} → fix
-escalated (conflict with main)`.
+or, if it is a genuine same-line code overlap you cannot safely resolve, report the completion record and stop:
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+```
+
+Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
 
 ### 4. Run the gate GREEN (the item's own locus gate)
 
@@ -108,6 +130,7 @@ RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
 ```bash
 node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=gate-red \
   --detail="<one line — which check stayed red>"
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=gate-red
 ```
 
 Same reason as the exit in step 2 (#3296): without the durable marker the reconcile pass cannot tell your
@@ -145,7 +168,8 @@ The bounce is repaired and re-pushed; now hand it back. This is **the one label 
 a script, so you cannot route around the invariant:
 
 ```bash
-node scripts/conveyor/rearm-review.mjs {{PR_NUM}}
+node scripts/conveyor/rearm-review.mjs {{PR_NUM}} && \
+  node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=re-armed
 ```
 
 `rearm-review.mjs` swaps `review:changes → review:pending` (an independent re-review is owed) and posts a
@@ -153,7 +177,12 @@ durable re-arm comment. It **NEVER** emits `review:accepted` and **NEVER** remov
 bounce stays human-ceremony-only. So the strongest thing you can do is re-arm the review; the human (via
 `/review`) or the drain's AI-review convergence pass re-verdicts. **Do NOT** `gh pr edit --add-label
 review:accepted`, **do NOT** merge, **do NOT** run a drain. If the script refuses (the PR no longer carries
-`review:changes` — e.g. a human already re-touched it), stop and report it; do not force a label.
+`review:changes` — e.g. a human already re-touched it), report the completion record and stop and report it;
+do not force a label:
+
+```bash
+node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-rearm-refused
+```
 
 ### 8. Append a structured learnings entry to the session drop-box (#2614)
 

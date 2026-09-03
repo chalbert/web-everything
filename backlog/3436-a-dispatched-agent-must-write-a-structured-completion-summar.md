@@ -2,8 +2,10 @@
 bornAs: x7q7xvl
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 tags: []
 scope:
   - we:skills-src/review/
@@ -34,3 +36,13 @@ actually conclude" without archaeology.
    given PR/session with no `claude logs` call and no ANSI parsing anywhere in the read path.
 3. A real test proves the record is written even when the dispatched agent's own work fails partway (a crash,
    a refused effect) — the summary must not depend on the happy path to exist.
+
+## Progress
+- **Status:** built. `we:scripts/operations/completion-record.mjs` (pure core) plus `we:scripts/operations/completion-store.mjs`
+  (fs shell, mirrors `we:scripts/operations/run-store.mjs`) define the record and its `.operations/completions/<session>.json`
+  sidecar. `we:scripts/operations/completion-cli.mjs` is the `report`/`show` CLI. Both `we:skills-src/review/review-agent-brief.md`
+  and `we:skills-src/conveyor/fix-agent-brief.md` now report `status: started` as their first action and `status: done` at every
+  exit (success and every escalation), so a crash between the two still leaves a `started` record on disk. Tests:
+  `we:scripts/operations/__tests__/completion-record.test.mjs`, `we:scripts/operations/__tests__/completion-store.test.mjs`,
+  `we:scripts/operations/__tests__/completion-cli.test.mjs` (the last proves criterion 3 directly — a `started` report survives
+  a simulated crash with no `done` report ever made).
