@@ -2,11 +2,12 @@
 bornAs: xelgqmw
 kind: task
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/readiness/dispatch-plan.mjs"]
 relatedTo: ["3435", "3427", "2748", "2667", "2700"]
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 tags: [conveyor, lane-pool, lease, reconcile, liveness]
 ---
 
