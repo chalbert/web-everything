@@ -1,13 +1,25 @@
 /**
  * @file scripts/conveyor/__tests__/session-reaper.test.mjs
- * @description Unit proof of the conveyor SESSION REAPER's PURE core (WE #3435). Drives
- *   {@link classifySessionReap} / {@link sessionReapPlan} directly with fixtures shaped exactly as
- *   `claude agents --json` reports them (NO fs / exec / clock) — pins the Done-when #2 proof (a mixed
+ * @description Unit proof of the conveyor SESSION REAPER's PURE core (WE #3435, plus the ground-truth axis
+ *   found live 2026-09-03 on `conveyor-3451`). Drives {@link classifySessionReap} / {@link sessionTarget} /
+ *   {@link classifySessionReapWithGroundTruth} / {@link sessionReapPlan} directly with fixtures shaped exactly
+ *   as `claude agents --json` reports them (NO fs / exec / clock) — pins the Done-when #2 proof (a mixed
  *   working/blocked/done/failed/stopped listing only reaps `done`/`failed`, never a live or blocked one)
- *   plus the `kind !== 'background'` guard against ever touching an interactive session.
+ *   plus the `kind !== 'background'` guard against ever touching an interactive session, AND the new proof
+ *   that a `working`/`blocked` session is reaped once — and ONLY once — its own target is confirmed done.
  */
 import { describe, it, expect } from 'vitest';
-import { classifySessionReap, sessionReapPlan, TERMINAL_REAP_STATES, ALREADY_STOPPED_STATES } from '../session-reaper.mjs';
+import {
+  classifySessionReap,
+  classifySessionReapWithGroundTruth,
+  sessionTarget,
+  sessionReapPlan,
+  groundTruthForItem,
+  groundTruthForPr,
+  makeGroundTruthResolver,
+  TERMINAL_REAP_STATES,
+  ALREADY_STOPPED_STATES,
+} from '../session-reaper.mjs';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
 const interactive = (over = {}) => ({ pid: 111, cwd: '/repo', kind: 'interactive', startedAt: 1, sessionId: 'def67890-0000-0000-0000-000000000000', name: 'my terminal', ...over });
@@ -82,5 +94,206 @@ describe('sessionReapPlan — Done-when #2: a mixed listing only reaps the termi
 
   it('an empty listing reaps nothing', () => {
     expect(sessionReapPlan([])).toEqual({ reap: [], keep: [] });
+  });
+});
+
+describe('sessionTarget — the dispatcher-minted grammar a session name encodes', () => {
+  it('item-kind names (conveyor / prepare / prepare-decision), with a retry-attempt letter collapsed to the base', () => {
+    expect(sessionTarget('conveyor-3451')).toEqual({ kind: 'item', id: '3451' });
+    expect(sessionTarget('conveyor-3411b')).toEqual({ kind: 'item', id: '3411' });
+    expect(sessionTarget('prepare-3399')).toEqual({ kind: 'item', id: '3399' });
+    expect(sessionTarget('prepare-decision-3457')).toEqual({ kind: 'item', id: '3457' });
+  });
+  it('PR-kind names (review / fix / ci-heal) — a PR number, never an item number', () => {
+    expect(sessionTarget('review-1871')).toEqual({ kind: 'pr', id: '1871' });
+    expect(sessionTarget('fix-1852')).toEqual({ kind: 'pr', id: '1852' });
+    expect(sessionTarget('ci-heal-1852c')).toEqual({ kind: 'pr', id: '1852' });
+  });
+  it('an unrecognized name (a stray operator label, no grammar) yields null — never a guess', () => {
+    expect(sessionTarget('test-dontask')).toBeNull();
+    expect(sessionTarget('pr review resume')).toBeNull();
+    expect(sessionTarget('my terminal')).toBeNull();
+    expect(sessionTarget(null)).toBeNull();
+    expect(sessionTarget(undefined)).toBeNull();
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — the new axis found live on `conveyor-3451`', () => {
+  it('omitting the resolver is byte-identical to classifySessionReap (strictly additive)', () => {
+    for (const state of ['done', 'failed', 'working', 'blocked', 'stopped', undefined]) {
+      const session = bg({ state });
+      expect(classifySessionReapWithGroundTruth(session)).toEqual(classifySessionReap(session));
+      expect(classifySessionReapWithGroundTruth(session, null)).toEqual(classifySessionReap(session));
+    }
+  });
+  it('a `working`/`blocked` session is reaped once its target reads resolved — the conveyor-3451 shape', () => {
+    const resolved = () => ({ resolved: true, evidence: 'backlog#3451:resolved' });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'conveyor-3451' }), resolved)).toEqual({
+      reap: true,
+      reason: 'ground-truth-item:backlog#3451:resolved',
+    });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'prepare-decision-3457' }), resolved)).toEqual({
+      reap: true,
+      reason: 'ground-truth-item:backlog#3451:resolved',
+    });
+  });
+  it('a `working` PR-kind session is reaped once its PR reads merged', () => {
+    const merged = () => ({ resolved: true, evidence: 'pr#1862:merged' });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-1862' }), merged)).toEqual({
+      reap: true,
+      reason: 'ground-truth-pr:pr#1862:merged',
+    });
+  });
+  it('never reaps when the resolver says not resolved — the genuinely-still-open shape', () => {
+    const stillOpen = () => ({ resolved: false });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'conveyor-2786' }), stillOpen)).toEqual({
+      reap: false,
+      reason: 'not-terminal',
+    });
+  });
+  it('never reaps when the resolver answer is unknown (null) — an unreadable signal is never a green light', () => {
+    const unknown = () => null;
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'conveyor-3399' }), unknown)).toEqual({
+      reap: false,
+      reason: 'not-terminal',
+    });
+  });
+  it('never calls the resolver for a name matching no known grammar — never a guess', () => {
+    let called = false;
+    const spy = () => {
+      called = true;
+      return { resolved: true };
+    };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'test-dontask' }), spy)).toEqual({
+      reap: false,
+      reason: 'not-terminal',
+    });
+    expect(called).toBe(false);
+  });
+  it('never upgrades an already-terminal or already-stopped or interactive verdict, even if the resolver would say resolved', () => {
+    const alwaysResolved = () => ({ resolved: true });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'done', name: 'conveyor-1' }), alwaysResolved)).toEqual({ reap: true, reason: 'done' });
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'stopped', name: 'conveyor-1' }), alwaysResolved)).toEqual({ reap: false, reason: 'already-stopped' });
+    expect(classifySessionReapWithGroundTruth(interactive({ state: 'blocked', name: 'conveyor-1' }), alwaysResolved)).toEqual({ reap: false, reason: 'not-background' });
+  });
+});
+
+describe('sessionReapPlan with groundTruthFor — end to end over a mixed listing', () => {
+  it('reaps done/failed via the base axis AND working/blocked via ground truth, keeps everything else', () => {
+    const listing = [
+      bg({ sessionId: 'done-1', state: 'done', name: 'conveyor-1' }),
+      bg({ sessionId: 'blocked-resolved', state: 'blocked', name: 'conveyor-3451' }),
+      bg({ sessionId: 'working-resolved', state: 'working', name: 'prepare-3399' }),
+      bg({ sessionId: 'working-open', state: 'working', name: 'conveyor-2786' }),
+      bg({ sessionId: 'working-unnamed', state: 'working', name: 'test-dontask' }),
+    ];
+    const resolvedIds = new Set(['3451', '3399']);
+    const groundTruthFor = (target) => (target.kind === 'item' && resolvedIds.has(target.id) ? { resolved: true, evidence: `backlog#${target.id}` } : { resolved: false });
+
+    const { reap, keep } = sessionReapPlan(listing, { groundTruthFor });
+    expect(reap.map((r) => r.session.sessionId).sort()).toEqual(['blocked-resolved', 'done-1', 'working-resolved']);
+    expect(keep.map((r) => r.session.sessionId).sort()).toEqual(['working-open', 'working-unnamed']);
+  });
+
+  it('with no groundTruthFor at all, behaves exactly as the original state-only plan', () => {
+    const listing = [
+      bg({ sessionId: 'blocked-resolved', state: 'blocked', name: 'conveyor-3451' }),
+      bg({ sessionId: 'done-1', state: 'done', name: 'conveyor-1' }),
+    ];
+    const { reap, keep } = sessionReapPlan(listing);
+    expect(reap.map((r) => r.session.sessionId)).toEqual(['done-1']);
+    expect(keep.map((r) => r.session.sessionId)).toEqual(['blocked-resolved']);
+  });
+});
+
+describe('groundTruthForItem — the local, unbounded backlog-status IO helper', () => {
+  const fakeIo = (files) => ({
+    readdirSyncFn: () => Object.keys(files),
+    readFileSyncFn: (path) => {
+      const name = path.split('/').pop();
+      if (!(name in files)) throw new Error(`ENOENT: ${path}`);
+      return files[name];
+    },
+  });
+
+  it('resolved:true only when status is exactly `resolved`, matching by id prefix', () => {
+    const io = fakeIo({ '3451-build-the-thing.md': '---\nstatus: resolved\n---\n# T\n' });
+    expect(groundTruthForItem('3451', { backlogDir: '/backlog', ...io })).toEqual({ resolved: true, evidence: 'backlog#3451:resolved' });
+  });
+  it('resolved:false for any other status', () => {
+    const io = fakeIo({ '2786-close-the-gap.md': '---\nstatus: active\n---\n# T\n' });
+    expect(groundTruthForItem('2786', { backlogDir: '/backlog', ...io })).toEqual({ resolved: false });
+  });
+  it('resolved:false, never true, when no card matches the id at all — absence is never done', () => {
+    const io = fakeIo({ '9999-unrelated.md': '---\nstatus: resolved\n---\n' });
+    expect(groundTruthForItem('3451', { backlogDir: '/backlog', ...io })).toEqual({ resolved: false });
+  });
+  it('a numeric-prefix collision (id "3" vs file "345-...") never false-matches — the hyphen boundary holds', () => {
+    const io = fakeIo({ '345-something-else.md': '---\nstatus: resolved\n---\n' });
+    expect(groundTruthForItem('3', { backlogDir: '/backlog', ...io })).toEqual({ resolved: false });
+  });
+  it('returns null (unknown) when the backlog directory itself is unreadable', () => {
+    const io = { readdirSyncFn: () => { throw new Error('ENOENT'); }, readFileSyncFn: () => '' };
+    expect(groundTruthForItem('3451', { backlogDir: '/nope', ...io })).toBeNull();
+  });
+});
+
+describe('groundTruthForPr — the bounded, network gh pr view IO helper', () => {
+  it('resolved:true when gh reports a mergedAt timestamp', () => {
+    const exec = () => JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' });
+    expect(groundTruthForPr('1862', { exec })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+  });
+  it('resolved:true when state reads MERGED even without a mergedAt field', () => {
+    const exec = () => JSON.stringify({ state: 'MERGED' });
+    expect(groundTruthForPr('1862', { exec })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+  });
+  it('resolved:false for an open PR — the review-1871 shape', () => {
+    const exec = () => JSON.stringify({ state: 'OPEN', mergedAt: null });
+    expect(groundTruthForPr('1871', { exec })).toEqual({ resolved: false });
+  });
+  it('returns null (unknown) when gh itself fails — never reaps on an unreadable signal', () => {
+    const exec = () => { throw new Error('gh: command not found'); };
+    expect(groundTruthForPr('1862', { exec })).toBeNull();
+  });
+});
+
+describe('makeGroundTruthResolver — routing, caching, and the gh pr view call cap', () => {
+  it('routes item-kind to the local backlog read and pr-kind to gh, each exactly once per distinct target (caching)', () => {
+    let itemReads = 0;
+    let prCalls = 0;
+    const resolver = makeGroundTruthResolver({
+      backlogDir: '/backlog',
+      readdirSyncFn: () => { itemReads++; return ['3451-x.md']; },
+      readFileSyncFn: () => '---\nstatus: resolved\n---\n',
+      exec: () => { prCalls++; return JSON.stringify({ state: 'MERGED' }); },
+    });
+    expect(resolver({ kind: 'item', id: '3451' })).toEqual({ resolved: true, evidence: 'backlog#3451:resolved' });
+    expect(resolver({ kind: 'item', id: '3451' })).toEqual({ resolved: true, evidence: 'backlog#3451:resolved' });
+    expect(resolver({ kind: 'pr', id: '1862' })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+    expect(resolver({ kind: 'pr', id: '1862' })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+    expect(itemReads).toBe(1); // cached — the second identical lookup cost nothing
+    expect(prCalls).toBe(1); // cached — same
+  });
+
+  it('bounds gh pr view calls at maxPrViewCalls — a candidate past the cap reads null (unknown), not an unbounded burst', () => {
+    let prCalls = 0;
+    const resolver = makeGroundTruthResolver({
+      maxPrViewCalls: 1,
+      exec: () => { prCalls++; return JSON.stringify({ state: 'MERGED' }); },
+    });
+    expect(resolver({ kind: 'pr', id: '1' })).toEqual({ resolved: true, evidence: 'pr#1:merged' });
+    expect(resolver({ kind: 'pr', id: '2' })).toBeNull(); // past the cap — never called
+    expect(prCalls).toBe(1);
+  });
+
+  it('local item-kind lookups are never subject to the gh call cap', () => {
+    const resolver = makeGroundTruthResolver({
+      maxPrViewCalls: 0,
+      backlogDir: '/backlog',
+      readdirSyncFn: () => ['1-x.md', '2-y.md'],
+      readFileSyncFn: () => '---\nstatus: resolved\n---\n',
+    });
+    expect(resolver({ kind: 'item', id: '1' })).toEqual({ resolved: true, evidence: 'backlog#1:resolved' });
+    expect(resolver({ kind: 'item', id: '2' })).toEqual({ resolved: true, evidence: 'backlog#2:resolved' });
   });
 });
