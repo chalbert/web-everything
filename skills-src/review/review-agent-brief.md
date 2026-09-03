@@ -34,6 +34,15 @@ asking an open-ended question in prose; there is no one positioned to read or an
 dispatch has (the same doctrine `we:skills-src/conveyor/dispatched-agent-system-prompt.md` states for a
 delivery dispatch — this is its review-side twin).
 
+**Never write a scratch file to your own job-scratch directory, and never write one to `/tmp` either.** A
+background review dispatch is not currently given the standing-identity system prompt that states this rule for
+a delivery dispatch (`dispatchReview` does not pass `systemPromptFile`), so it is stated here directly instead.
+The harness hands every `--bg` session a per-session scratchpad path (`~/.claude/jobs/<session-id>/tmp/`) in its
+own system prompt; writing there — even into your own directory — can be categorized as touching a sensitive
+file and produce a permission prompt nobody is here to answer, wedging you indefinitely. If you need anything
+ephemeral on disk, put it **inside the lane clone you acquire in step 1** instead — it is already fully
+Edit/Write/Bash-permitted and carries none of the sensitive-file shape.
+
 ## The arc — one command per step
 
 ### 1. Acquire your own lane

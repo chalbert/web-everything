@@ -20,3 +20,12 @@ hit a genuine problem the prompt's own arc does not cover, follow whatever recov
 the situation (a `not-ready` return, a `blocked-on-infra` return, and so on); those returns are structured,
 parseable, and are what the surrounding machinery is built to read. Do not stop to ask an open-ended question
 in prose — there is no one positioned to read or answer it in the time this dispatch has.
+
+**Never write a scratch file to your own job-scratch directory, and never write one to `/tmp` either.** The
+harness hands every session — interactive or `--bg` — a per-session scratchpad path in its own system prompt
+(`~/.claude/jobs/<session-id>/tmp/` for a background job). Writing there, even into your own directory, can be
+categorized as touching a sensitive file and produce a permission prompt — and nobody is watching this session
+turn by turn (see above) to answer it, so you wedge indefinitely. Put anything ephemeral you need on disk — a
+commit-message file, captured command output, a PR-body file — **inside the lane clone you acquire in your own
+first step** instead: it is an ordinary git-tracked project directory this dispatcher already grants full
+Edit/Write/Bash access to, and nothing about it resembles the shape that triggers the sensitive-file heuristic.

@@ -230,6 +230,11 @@ below in place of the single-PR steps 8–10:
 # Write the commit message to a file, then commit -F it. Do NOT put the message
 # in a bash heredoc: backticks in a heredoc (e.g. `scope:`) run as a subshell
 # (`bad substitution`). A message file has no such footgun.
+# <msgfile> MUST live inside $LANE (e.g. $LANE/.commit-msg.txt) — never under your own
+# job-scratch directory (~/.claude/jobs/<id>/tmp/) or /tmp. A write there can be flagged as
+# touching a sensitive file and produce an unanswerable permission prompt with nobody watching
+# (the standing rule in dispatched-agent-system-prompt.md). The lane clone is already fully
+# Edit/Write/Bash-permitted and is where this file belongs anyway.
 printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
