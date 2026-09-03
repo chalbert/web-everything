@@ -48,6 +48,7 @@ import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-le
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { resolveDefaultGate } from './lib/verify-lane-gate.mjs';
+import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -201,15 +202,35 @@ if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.st
 }
 writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
 
-// 2. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).
+// 2. Admission: queue on the #3461 heavy-command capacity semaphore BEFORE running the gate — `check:standards`
+//    and `test:unit` (this GATE) are named members of the closed heavy-command set, so this is the invocation-time
+//    (never lane-acquire-time) chokepoint the semaphore gates. Fails OPEN on a queuing timeout (proceeds unslotted
+//    with a stderr warning) — the residual-risk tradeoff `heavy-admission.mjs`'s own header names.
+const ADMISSION_LOCK_ROOT = admissionLockRoot(REPO, process.env);
+const ADMISSION_CAP = resolveCap(process.env);
+const ADMISSION_TIMEOUT_MS = resolveTimeoutMs(process.env);
+const laneMatch = /lane-(\d+)/.exec(REPO);
+const admission = await acquireSlotBlocking({
+  lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO, timeoutMs: ADMISSION_TIMEOUT_MS,
+  lane: laneMatch ? laneMatch[1] : null,
+});
+if (admission.timedOut) {
+  process.stderr.write(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${ADMISSION_CAP}) — proceeding unslotted.\n`);
+} else if (admission.waitedMs > 0) {
+  process.stderr.write(`heavy-command admission: acquired slot-${admission.slot} after waiting ${admission.waitedMs}ms (cap=${ADMISSION_CAP}).\n`);
+}
+
+// 3. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).
 let exitCode = 0;
 try {
   execSync(GATE, { cwd: REPO, stdio: 'inherit' });
 } catch (e) {
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
+} finally {
+  if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
 }
 
-// 3. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
+// 4. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
 //    #2833 finding 1: two overlapping verify-lane runs share one clone's marker. The finish write must
 //    (a) stamp OUR sha (`headSha`, captured at start) — NOT re-read the on-disk marker's sha, or a slow run
 //        finishing at X copies a newer run's sha Y onto its green and publishes a false green for Y; and

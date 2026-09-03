@@ -795,12 +795,13 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   },
  *   signals?: { returnedBuildNums?:Array<*> },  // async events the shell folds in (Agent returns)
  *   prRearmCounts?: object,              // DURABLE per-PR re-arm-comment counts { [pr]: n } — the restart-surviving retry-cap floor (#2643); the IO shell derives it via `countRearmComments`
+ *   admission?: { cap?:number, waiting?:Array<{owner:string, lane?:*, num?:*, requestedAt?:string}> },  // #3461 — the heavy-command admission-queue `status` read; each `waiting` entry surfaces as a `waiting-for-capacity` note
  *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -942,6 +943,23 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     const count = Number.isFinite(c.count) ? c.count : (Array.isArray(c.members) ? c.members.length : 0);
     notes.push({ kind: 'degraded-infra', cause: c.cause, count, text: `⚠ outside dependency degraded — ${count} lane${count === 1 ? '' : 's'} waiting on ${c.cause} (auto-retrying)` });
   }
+  // WAITING-FOR-CAPACITY (#3461) — the heavy-command admission queue's live queue, ONE note per blocked owner.
+  // Distinct from #3451's after-the-fact call-visibility telemetry: this is a LIVE, pollable "still waiting"
+  // fact re-derived every tick from `admission.waiting` (never a bookkeeping entry), so it clears itself for
+  // free the moment the blocked caller wins a slot and removes its marker — the very next tick's read simply
+  // no longer includes it. `num` is resolved off `state.lanes` (the SAME lane→item map `lane-stalled` above
+  // reads) when the waiting entry only carries a `lane`; a caller-supplied `num` (e.g. a non-lane owner) wins
+  // when present.
+  for (const w of Array.isArray(admission.waiting) ? admission.waiting : []) {
+    if (!w) continue;
+    const laneEntry = w.lane != null ? (Array.isArray(lanes) ? lanes : []).find((l) => String(l?.lane) === String(w.lane)) : null;
+    const num = w.num ?? laneEntry?.num ?? null;
+    const where = w.lane != null ? `lane-${w.lane}` : String(w.owner || 'unknown');
+    notes.push({
+      kind: 'waiting-for-capacity', num, lane: w.lane ?? null,
+      text: `⏳ ${where}${num != null ? ` (#${num})` : ''} waiting for heavy-command capacity (cap ${admission.cap ?? '?'})`,
+    });
+  }
 
   const statusLine = buildStatusLine({
     queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
@@ -994,6 +1012,7 @@ async function main(argv) {
   const STATE_CLI = join(HERE, '..', 'readiness', 'conveyor-state.mjs');
   const PLAN_CLI = join(HERE, '..', 'readiness', 'dispatch-plan.mjs');
   const LANE_POOL_CLI = join(HERE, '..', 'lane-pool.mjs');
+  const ADMISSION_CLI = join(HERE, '..', 'readiness', 'heavy-admission.mjs');
 
   const flags = {};
   for (const a of argv) {
@@ -1089,7 +1108,18 @@ async function main(argv) {
     } catch { /* leave the floor unset — the in-session tally still guards the cap */ }
   }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, config, now: Date.now(), lastOperatorTurn });
+  // #3461 — the admission queue's live `status` read. Best-effort (`runJson` exits the whole tick on failure,
+  // which a still-forming `.admission` dir before the first heavy command ever ran must NOT trigger) — a read
+  // failure degrades to `{}` (no waiting entries surfaced), never kills the tick.
+  const admissionArgs = ['status', '--json'];
+  if (typeof flags.repo === 'string') { admissionArgs.push(`--repo=${flags.repo}`); }
+  let admission = {};
+  try {
+    const raw = execFileSync('node', [ADMISSION_CLI, ...admissionArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+    admission = JSON.parse(raw);
+  } catch { /* best-effort — see comment above */ }
+
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, config, now: Date.now(), lastOperatorTurn });
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }
