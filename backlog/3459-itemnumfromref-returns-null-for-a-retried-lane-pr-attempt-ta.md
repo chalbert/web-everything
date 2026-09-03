@@ -1,4 +1,5 @@
 ---
+bornAs: xaa7r2n
 kind: story
 size: 3
 parent: "3383"
@@ -94,7 +95,7 @@ it isn't silently rediscovered.
    before this item's fix lands, passes after.
 2. **Executable — no regression on the existing matrix.** Every existing `itemNumFromRef` test in the same
    file still passes unchanged: the plain numeric ref (`lane/2611-conveyor-state` → `'2611'`), the
-   no-slug numeric ref (`lane/2611` → `'2611'`), the JIT-slug ref (`lane/xe2fmix-slug` → `'xe2fmix'`), the
+   no-slug numeric ref (`lane/2611` → `'2611'`), the JIT-slug ref (`lane/2611-slug` → `'2611'`), the
    word-first fallback (`lane/hotfix-2611` → `'2611'`, NOT `'hotfix'`), and the null-returning cases
    (`lane/hotfix`, `lane/conveyor-work`, `main`, `null` — all → `null`).
 3. **Executable — a JIT-slug retry case**, even though no live example was observed tonight (JIT-slug items
