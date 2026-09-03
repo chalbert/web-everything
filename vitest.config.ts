@@ -150,6 +150,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-reap-on-acquire.test.mjs',
       'scripts/__tests__/lane-pool-siblings.test.mjs',
       'scripts/__tests__/lane-pool-acquirable.test.mjs',
+      'scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-refresh-guard.test.mjs',
       'scripts/__tests__/lane-pool-release-ownership.test.mjs',
       'scripts/__tests__/lane-pool-item-map.test.mjs',
