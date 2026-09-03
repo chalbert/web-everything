@@ -1167,7 +1167,16 @@ export function defaultLaneRefForPr(pr, { exec = execFileSync, env = process.env
 }
 
 /**
- * `claude agents --json` — active sessions only. See {@link createDispatchObservers} for why not `--all`.
+ * `claude agents --json` — active sessions only BY DEFAULT. See {@link createDispatchObservers} for why the
+ * observer (and every other caller that does not pass `all: true`) must never see `--all`: it also lists
+ * COMPLETED sessions, so a finished build would keep reading as `running` forever — the one mistake that makes
+ * an observer worse than none.
+ *
+ * `all: true` IS AN OPT-IN, not a second default. It exists for a caller with the opposite job to the
+ * observer's — one that must see COMPLETED sessions to do anything at all (`scripts/conveyor/session-reaper.mjs`,
+ * #3435 review: the reaper's whole purpose is to find and `claude stop` `done`/`failed` sessions, which the
+ * non-`--all` listing excludes entirely — so the plain default silently reaped nothing, ever). Every OTHER
+ * caller passes no `all`, so its argv is byte-identical to before this option existed.
  *
  * BOUNDED, because this call sits synchronously inside a waker pass that promises to be fail-soft per run: a
  * `claude` that blocks (a cold start that wants to ask something, a wedged daemon) would otherwise stall every
@@ -1177,12 +1186,14 @@ export function defaultLaneRefForPr(pr, { exec = execFileSync, env = process.env
  * ASSERTED, not merely asserted-about. This function was called by no test at all, so both of the emphatic
  * claims above it — no `--all`, and a timeout — could be inverted with the suite green (PR #1211 review, F5/F6).
  * `dispatch-lane-defaults.test.mjs` now pins the argv and the opts, and the wake CLI test proves the same argv
- * across a real process boundary.
+ * across a real process boundary. `session-reaper-cli.test.mjs` pins the OPT-IN side the same way (#3435).
  *
- * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
+ * @param {{exec?: Function, env?: object, all?: boolean}} [io] - injected ONLY so the argv and opts can be
+ *   asserted. `all` defaults to `false` — every existing caller keeps today's active-sessions-only behavior
+ *   unchanged; pass `all: true` ONLY from a caller whose job requires seeing completed sessions too.
  */
-export function defaultListAgents({ exec = execFileSync, env = process.env } = {}) {
-  const out = exec('claude', ['agents', '--json'], {
+export function defaultListAgents({ exec = execFileSync, env = process.env, all = false } = {}) {
+  const out = exec('claude', ['agents', '--json', ...(all ? ['--all'] : [])], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 8 * 1024 * 1024,

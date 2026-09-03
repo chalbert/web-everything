@@ -120,7 +120,14 @@ function main(argv) {
 
   let sessions;
   try {
-    sessions = defaultListAgents({ exec: execFileSync });
+    // `all: true` IS LOAD-BEARING (#3435 review finding): every OTHER caller of `defaultListAgents` (the
+    // dispatch observer, the dispatch guard's liveness check) deliberately omits `--all`, because for THEIR
+    // job a completed session must read as gone. This reaper's job is the opposite — it exists to find and
+    // `claude stop` exactly the `done`/`failed` sessions the plain listing excludes — so passing no `all` here
+    // made `sessionReapPlan` compute `reap: []` on every real invocation; `claude stop` was never called, and
+    // the clutter #3435 was filed to fix never actually got touched. See `defaultListAgents`'s own docblock
+    // (`we:scripts/operations/dispatch-lane-io.mjs`) for why the OTHER callers must not also flip this.
+    sessions = defaultListAgents({ exec: execFileSync, all: true });
   } catch (e) {
     // Best-effort like every other mechanical pass (Done-when #3): an unreadable listing means there is
     // nothing safe to act on this tick, not a hard failure — the next tick tries again.
