@@ -8,7 +8,11 @@
  *   with free lanes, for the /conveyor skill to auto-prepare its scope) — plus the precedence between them.
  */
 import { describe, it, expect } from 'vitest';
-import { dispatchPlan, selectClearedRows, clearedNotReady } from '../dispatch-plan.mjs';
+import {
+  dispatchPlan, selectClearedRows, clearedNotReady,
+  // #3457/#3460 — the age-gated already-done ground-truth enrichment (Fork 2(b)).
+  isStaleEnoughForGroundTruth, ALREADY_DONE_AGE_GATE_MS,
+} from '../dispatch-plan.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 
 describe('dispatchPlan — happy path: disjoint items fill free lanes in rank order', () => {
@@ -161,6 +165,99 @@ describe('dispatchPlan — blocked', () => {
       freeLanes: [2],
     });
     expect(plan.held).toEqual([{ num: 1, reason: 'blocked' }]);
+  });
+});
+
+describe('dispatchPlan — already-done ground truth (#3457/#3460) — HELD "already-done", ahead of every other branch', () => {
+  it('holds an item the enrichment already found a merged PR for, instead of launching it', () => {
+    const pr = { number: 1861, url: 'https://x/1861', title: 'WE #3435: mechanically reap/stop finished sessions', mergedAt: '2026-09-03T14:52:37Z' };
+    const plan = dispatchPlan({
+      queue: [{ num: 3435, scope: ['src/a/'], alreadyDonePr: pr }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 3435, reason: 'already-done' }]);
+  });
+
+  it('outranks "blocked" — a real merged PR is a stronger signal than a stale openBlockers read', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, openBlockers: ['9'], alreadyDonePr: { number: 1 } }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'already-done' }]);
+  });
+
+  it('outranks "needs-decision" — #3434\'s own motivating shape (kind: decision, wrongly still open)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 3434, kind: 'decision', alreadyDonePr: { number: 1768 } }],
+      leases: [],
+      freeLanes: [2],
+    });
+    expect(plan.held).toEqual([{ num: 3434, reason: 'already-done' }]);
+  });
+
+  it('outranks "unshaped-no-scope" and "overlaps lane-<n>" too', () => {
+    const noScope = dispatchPlan({ queue: [{ num: 1, alreadyDonePr: { number: 1 } }], leases: [], freeLanes: [2] });
+    expect(noScope.held).toEqual([{ num: 1, reason: 'already-done' }]);
+
+    const overlap = dispatchPlan({
+      queue: [{ num: 1, scope: ['src/shared/util.ts'], alreadyDonePr: { number: 1 } }],
+      leases: [{ lane: 9, scope: ['src/shared/'] }],
+      freeLanes: [2],
+    });
+    expect(overlap.held).toEqual([{ num: 1, reason: 'already-done' }]);
+  });
+
+  it('an item with no `alreadyDonePr` at all takes the normal path, unaffected', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1, scope: ['src/a/'] }], leases: [], freeLanes: [2] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+  });
+
+  it('HELD_REASONS lists the new token', async () => {
+    const { HELD_REASONS } = await import('../dispatch-plan.mjs');
+    expect(HELD_REASONS).toContain('already-done');
+  });
+});
+
+describe('isStaleEnoughForGroundTruth — PURE age gate for the #3457/#3460 enrichment call (Fork 2(b))', () => {
+  const NOW = Date.parse('2026-09-03T16:00:00.000Z');
+
+  it('a freshly-opened item (well under the threshold) is NOT stale enough — never spends the gh call', () => {
+    const openedTenMinutesAgo = new Date(NOW - 10 * 60 * 1000).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: openedTenMinutesAgo }, NOW)).toBe(false);
+  });
+
+  it('an item opened well past the threshold (default 2h) IS stale enough', () => {
+    const openedThreeHoursAgo = new Date(NOW - 3 * 60 * 60 * 1000).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: openedThreeHoursAgo }, NOW)).toBe(true);
+  });
+
+  it('sits exactly on the boundary correctly (strictly greater-than, not greater-or-equal)', () => {
+    const exactlyAtGate = new Date(NOW - ALREADY_DONE_AGE_GATE_MS).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: exactlyAtGate }, NOW)).toBe(false);
+    const oneMsPast = new Date(NOW - ALREADY_DONE_AGE_GATE_MS - 1).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: oneMsPast }, NOW)).toBe(true);
+  });
+
+  it('prefers dateStarted over dateOpened when both are present (an active item\'s real clock)', () => {
+    // Opened long ago but only just claimed — the more honest "how long has real work been outstanding" read
+    // is dateStarted, so this should NOT yet be stale.
+    const startedNow = new Date(NOW).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: '2020-01-01', dateStarted: startedNow }, NOW)).toBe(false);
+  });
+
+  it('an unparseable/absent date FAILS TOWARD CHECKING — never silently skipped', () => {
+    expect(isStaleEnoughForGroundTruth({}, NOW)).toBe(true);
+    expect(isStaleEnoughForGroundTruth(null, NOW)).toBe(true);
+    expect(isStaleEnoughForGroundTruth({ dateOpened: 'not a date' }, NOW)).toBe(true);
+  });
+
+  it('a custom age gate overrides the default', () => {
+    const openedOneHourAgo = new Date(NOW - 60 * 60 * 1000).toISOString();
+    expect(isStaleEnoughForGroundTruth({ dateOpened: openedOneHourAgo }, NOW, 30 * 60 * 1000)).toBe(true); // 30m gate
+    expect(isStaleEnoughForGroundTruth({ dateOpened: openedOneHourAgo }, NOW, 2 * 60 * 60 * 1000)).toBe(false); // 2h gate
   });
 });
 

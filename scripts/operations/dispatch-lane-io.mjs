@@ -155,7 +155,10 @@ export const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60 * 1000;
  * @param {(pr: string|number) => (string|null)} [o.laneRefForPr] - injectable `gh pr view --json headRefName`
  *   reader (#3332). Defaults to {@link defaultLaneRefForPr}. Called ONLY for a `fix`/`ci-heal` launch that
  *   carries a `pr` — see the call site below for why it is this lazy.
- * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null)}}
+ * @param {(num: string) => {done: boolean, pr: object|null, checked: boolean}} [o.checkAlreadyDone] -
+ *   injectable ALREADY-DONE ground-truth reader (#3457/#3460). Defaults to {@link defaultCheckAlreadyDone}.
+ *   Called ONLY when the core actually cleared this item for SOME launch — see the call site below for why.
+ * @returns {{launch: object|null, launchKind: 'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal', suppressed: object|null, resolvedNum: string, item: object|null, briefTemplate: string, nextState: object, statusLine: string, notes: object[], bookkeepingSource: string, observedAt: string, laneRef: (string|null), alreadyDone: {done: boolean, pr: object|null, checked: boolean}}}
  */
 export function readTick({
   num,
@@ -169,6 +172,7 @@ export function readTick({
   listAgents = () => defaultListAgents({ exec }),
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
+  checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
   now = () => new Date(),
 } = {}) {
   const key = normNum(num);
@@ -259,6 +263,17 @@ export function readTick({
     ? laneRefForPr(launch.pr)
     : null;
 
+  // #3457/#3460 — THE PRE-SPAWN GROUND-TRUTH CHECK, LAZY on the SAME reason `laneRef` above is: `launch` is
+  // null on most reads (nothing cleared, or an in-flight guard already holds the item), and spending a `gh pr
+  // list --search` call on a read that was never going to dispatch would violate the ratified cost discipline
+  // ("one `gh pr list --search` call per dispatch ATTEMPT, not per tick" — Fork 2's bold default). ONE call per
+  // `dispatch-lane --num=<N>` invocation THAT ACTUALLY HAS A LAUNCH TO CONSIDER is exactly that shape: every
+  // invocation of this CLI already IS one dispatch attempt (it is never called on a tick cadence — see this
+  // file's own header), so gating on `launch` alone (not also on `launchKind`) is deliberate: the motivating
+  // `#3434` incident was a WASTED `prepare-decision` dispatch, not a build, so every launch kind needs the
+  // check, not build/fix/ci-heal only.
+  const alreadyDone = launch ? checkAlreadyDone(key) : { done: false, pr: null, checked: false };
+
   return {
     resolvedNum: key,
     launch,
@@ -274,6 +289,8 @@ export function readTick({
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
     // THE FIX/CI-HEAL LANE REF, or `null` for the three kinds that never need one — see above.
     laneRef,
+    // #3457/#3460 — the ground-truth verdict, or the not-checked default when nothing was cleared for launch.
+    alreadyDone,
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
@@ -1122,6 +1139,137 @@ export function defaultListPrs({ exec = execFileSync, env = process.env } = {}) 
     killSignal: 'SIGKILL',
   });
   return JSON.parse(String(out || '[]'));
+}
+
+/**
+ * How many merged PRs the ALREADY-DONE ground-truth search (#3457/#3460) asks `gh` for. Deliberately far
+ * smaller than {@link PR_LIST_LIMIT} (400): that constant bounds a `--state all` DISCOVERY page meant to cover
+ * every open-or-recent PR in the repo, while this query is server-side SCOPED already (`--search "<NNN>
+ * in:title" --state merged`) and only ever needs to know "does at least one match exist, and if so the most
+ * recent" — {@link filterAlreadyDoneCandidates} sorts and returns the winner. #3457's own ratified sketch used
+ * `limit: 5`; kept as the literal here rather than re-derived, so a test can pin the argv exactly the way
+ * `dispatch-lane-defaults.test.mjs` already pins {@link PR_LIST_LIMIT}.
+ */
+export const ALREADY_DONE_SEARCH_LIMIT = 5;
+
+/** The `--json` fields the already-done search needs. `headRefName` is what {@link filterAlreadyDoneCandidates}
+ *  excludes prepare-scope/prepare-decision authoring PRs on; `title`/`url`/`mergedAt` are the evidence a refusal
+ *  quotes back at the operator (Done-when 1a/1b: "names the merged PR's URL"). */
+export const ALREADY_DONE_JSON_FIELDS = 'number,title,url,mergedAt,headRefName';
+
+/**
+ * The head-ref SHAPE that means "this merged PR only authored the item's `scope:` or prepared its DECISION —
+ * it never implemented the item" (#3457/#3460's own live false-positive check, run against this repo's real
+ * convention). Every prepare-scope dispatch mints `lane/{{ITEM_NUM}}-scope-<slug>`
+ * (`we:skills-src/conveyor/prepare-scope-agent-brief.md:159`) and every prepare-decision dispatch mints
+ * `lane/{{ITEM_NUM}}-prepare-<slug>` (`we:skills-src/conveyor/prepare-decision-agent-brief.md:176`) — a REAL
+ * build/fix/ci-heal PR's ref is always `lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug>` with NEITHER literal token
+ * (`we:skills-src/conveyor/delivery-agent-brief.md:250`).
+ *
+ * WHY THIS EXCLUSION IS NOT OPTIONAL, proven against live data while authoring this check: EVERY item that ever
+ * reaches a BUILD dispatch already has a MERGED prepare-scope PR behind it — `shapeDispatchRead` refuses to
+ * dispatch a build with no `scope:`, and `scope:` is authored by exactly that PR (see
+ * `we:scripts/readiness/dispatch-plan.mjs`'s auto-prepare doctrine). Searching `gh pr list --search "<NNN>
+ * in:title" --state merged` for `#3435` (measured 2026-09-03, `gh pr list --search "3435 in:title" --state
+ * merged`) returns FOUR merged PRs including `#1780` ("WE #3435: author scope: for #3435", ref
+ * `lane/3435-scope-3dfab284`) ALONGSIDE the real implementation `#1861` ("WE #3435: mechanically reap/stop
+ * finished `claude agents` background sessions", ref `lane/3435-session-reaper`). Counting `#1780` as "already
+ * done" would refuse the dispatch of literally every scoped build the moment its own scope-authoring PR lands —
+ * before the build has even started. Excluding the two authoring ref shapes is what keeps the check aimed at
+ * "was the ITEM implemented", not "was the item's card ever touched".
+ */
+export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
+
+/**
+ * PURE — which of a `gh pr list --search` page's rows are real evidence that `num` is ALREADY DONE, most
+ * recent merge first. Shared by both #3457/#3460 chokepoints ({@link readTick}'s pre-spawn guard here, and
+ * `we:scripts/readiness/dispatch-plan.mjs`'s enrichment shell) so the query shape and its false-positive
+ * exclusion are single-sourced rather than two readers independently reinventing (and inevitably disagreeing
+ * about) what counts.
+ *
+ * THREE FILTERS, each closing a real false-positive this function's own authoring turned up against live data:
+ *   1. `state === 'MERGED'` (belt-and-suspenders — the caller already asks `gh` for `--state merged`, but a
+ *      pure filter over what the caller actually got is cheaper to trust than the query string).
+ *   2. A WORD-BOUNDARY match on `title` — `in:title` search already scopes to the title field, but a bare
+ *      substring test would let item `343` match a PR titled "WE #3435: …"; the boundary keeps `343` from
+ *      matching inside `3435`.
+ *   3. {@link NON_IMPLEMENTING_REF_RE} — excludes prepare-scope/prepare-decision authoring PRs (see that
+ *      constant's own docblock for the live case this closes).
+ *
+ * WHAT THIS DOES **NOT** CLOSE, stated rather than silently residual: a PR that is neither prepare-scope nor
+ * prepare-decision but is ALSO not the item's real implementation — a backlog-only doc/evidence edit landed
+ * under the item's own `lane/<NUM>-<slug>` ref (e.g. `#1848`, "backlog/3435: add evidence section…", merged
+ * hours before the real `#1861` implementation) — still passes every filter here and would read as "done". Two
+ * things bound the blast radius of that residual: (a) both #3457/#3460 chokepoints only ever HOLD/REFUSE on a
+ * match, never auto-resolve the item (see `shapeDispatchRead`'s new branch and `dispatch-plan.mjs`'s
+ * `already-done` hold) — a false hold is recoverable (a human/agent looks, then dispatches by hand), where a
+ * false auto-resolve would not be; (b) narrowing further (e.g. requiring the PR's own diff to have flipped
+ * `status: resolved`) would cost a SECOND `gh` call per candidate, which the ratified cost discipline
+ * (`PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT`, Fork 2's "stays cheap and non-blocking") rules out for this item; a
+ * follow-up can tighten it later with real evidence that this residual bites in practice.
+ *
+ * @param {object[]|null|undefined} prs - a parsed `gh pr list --search … --json …` page.
+ * @param {string|number} num - the item id (already normalized by the caller).
+ * @returns {object[]} matching rows, most recently merged first.
+ */
+export function filterAlreadyDoneCandidates(prs, num) {
+  const key = String(num ?? '').trim();
+  if (!key || !/^\d+$/.test(key) || !Array.isArray(prs)) return [];
+  const boundary = new RegExp(`(^|[^0-9])${key}([^0-9]|$)`);
+  return prs
+    .filter((p) => p && typeof p === 'object')
+    .filter((p) => p.state === undefined || p.state === 'MERGED') // undefined: a caller that omitted `state`
+    .filter((p) => boundary.test(String(p?.title ?? '')))
+    .filter((p) => !NON_IMPLEMENTING_REF_RE.test(String(p?.headRefName ?? '')))
+    .sort((a, b) => (Date.parse(b?.mergedAt ?? '') || 0) - (Date.parse(a?.mergedAt ?? '') || 0));
+}
+
+/**
+ * THE ALREADY-DONE GROUND-TRUTH CHECK (#3457/#3460) — "does a real merged PR already close `num` out",
+ * independent of and un-trusting of the item's own `status:` frontmatter (the whole gap this item fixes: a
+ * merged PR that closes an item out is not guaranteed to have flipped that item's `status:` at the same time).
+ *
+ * QUERY SHAPE, chosen and reasoned about explicitly (left open by #3457's own ruling for this item to settle):
+ * `gh pr list --search "<NNN> in:title" --state merged` — scoped to the PR TITLE, not `gh pr list --search
+ * "<NNN>"` bare (full-text over title+body+comments). Measured live while authoring this check (2026-09-03):
+ * a bare-text search for `"1861"` matched THREE PRs that never mention `1861` in their own title at all — one
+ * (`#1864`) only because its BODY happens to say "open PR #1861 already in flight" while describing a
+ * DIFFERENT item (`#3435`) in passing. `in:title` alone already eliminates that class of false positive; this
+ * repo's own convention (`we:AGENTS.md`'s commit style, confirmed via `git log`) titles every implementing PR
+ * `WE #NNN: …` or `(#NNN)`, so title-scoping loses no real signal.
+ *
+ * FAIL-SOFT ON A `gh` FAILURE, matching {@link createDispatchObservers}'s own PR axis and the lease reaper's
+ * `fetchPrStates` ("any gh failure disables the axis"): a wedged/unauthenticated/rate-limited `gh` degrades this
+ * check to "nothing found" rather than blocking or crashing a dispatch read that has nothing to do with GitHub
+ * auth. `checked: false` on the result says the read itself failed (never asserted as "confirmed not done") —
+ * the same shape distinction {@link defaultCheckAlreadyDone}'s caller relies on.
+ *
+ * @param {string|number} num - the item id.
+ * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv/opts are assertable in a test.
+ * @returns {{done: boolean, pr: object|null, checked: boolean}}
+ */
+export function defaultCheckAlreadyDone(num, { exec = execFileSync, env = process.env } = {}) {
+  const key = String(num ?? '').trim();
+  if (!key) return { done: false, pr: null, checked: false };
+  let raw;
+  try {
+    raw = exec('gh', [
+      'pr', 'list', '--search', `${key} in:title`, '--state', 'merged',
+      '--limit', String(ALREADY_DONE_SEARCH_LIMIT), '--json', ALREADY_DONE_JSON_FIELDS,
+    ], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: prListTimeoutMs(env), // #3460 — reuses the existing `gh pr list` network bound, no new knob
+      killSignal: 'SIGKILL',
+    });
+  } catch {
+    return { done: false, pr: null, checked: false };
+  }
+  let prs;
+  try { prs = JSON.parse(String(raw ?? '[]')); } catch { return { done: false, pr: null, checked: false }; }
+  const matches = filterAlreadyDoneCandidates(prs, key);
+  return matches.length ? { done: true, pr: matches[0], checked: true } : { done: false, pr: null, checked: true };
 }
 
 /**

@@ -87,9 +87,18 @@ import { isGroupingKind } from '../check-standards-rules.mjs';
  *  prediction agent (which authors a build touch-set, meaningless for a decision). The dispatcher HOLDS every
  *  cleared decision `needs-decision` — a FIRST-CLASS outcome — so the /conveyor skill drives it per its prepared
  *  state (`state.decisions[].prepared`): UNPREPARED → spawn a prepare-decision agent; PREPARED → present its forks
- *  (artefact + the ruling surface) for ratification. The operator gloss is {@link NEEDS_DECISION_HINT}. */
+ *  (artefact + the ruling surface) for ratification. The operator gloss is {@link NEEDS_DECISION_HINT}.
+ *
+ *  `already-done` (#3457/#3460): a queued item the IO shell's AGE-GATED ground-truth enrichment found a real
+ *  merged PR already closing out (Fork 2(b) of #3457's ratified ruling). Checked FIRST, ahead of every other
+ *  branch — see {@link dispatchPlan}'s own step 0 for why a real PR-history signal outranks a stale `blocked` /
+ *  `needs-slice` / `needs-decision` / scope read, all of which are themselves derived from the same possibly-
+ *  stale `status:`/frontmatter this check exists to stop trusting blind. HOLDS, never auto-resolves — the shell
+ *  never mutates the item's frontmatter on this item's own say-so (see `filterAlreadyDoneCandidates`'s docblock
+ *  in `we:scripts/operations/dispatch-lane-io.mjs` for the false-positive residual this leaves recoverable). The
+ *  operator gloss is {@link ALREADY_DONE_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -109,6 +118,56 @@ export const NEEDS_SLICE_HINT = 'epic — /slice into buildable child stories';
  *  prepared/unprepared split that routes prepare-vs-present is carried in `state.decisions[].prepared`. */
 export const NEEDS_DECISION_HINT = 'decision — prepare its forks, then present for ratify';
 
+/** The operator-facing gloss for an `already-done` hold (#3457/#3460) — surfaced beside the token so a held
+ *  item always tells the operator WHAT to do: check the named merged PR, and if it really does close the item
+ *  out, `resolve` it (rather than re-dispatching); if the check false-positived (see
+ *  `we:scripts/operations/dispatch-lane-io.mjs#filterAlreadyDoneCandidates`), clear it back into the queue by
+ *  hand. Never auto-actioned — a human/agent call, not a mechanical one. */
+export const ALREADY_DONE_HINT = 'a merged PR already appears to close this out — verify, then resolve or re-clear';
+
+/**
+ * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
+ * checking whether a real merged PR already closes it out (#3457/#3460, Fork 2(b)'s age-gated enrichment).
+ *
+ * WHY A GATE AT ALL, restated from the ruling: an unconditional per-tick, per-item `gh pr list` call does not
+ * scale (Fork 2's rejected option (a)) and duplicates the rate-limit risk `we:scripts/operations/
+ * dispatch-lane-io.mjs`'s own `PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT` already designed around. A freshly-opened
+ * or freshly-claimed item cannot yet have a merged PR from BEFORE it existed, so checking it costs a real `gh`
+ * call for zero possible signal.
+ *
+ * 2 HOURS, chosen over the conveyor's own build estimate (`DEFAULT_EXPECTED_WITHIN_MINUTES = 90` in
+ * `we:scripts/operations/dispatch-lane.mjs`) plus a margin: an item younger than one full build cycle is
+ * vanishingly unlikely to already have independent completing work landed and unnoticed, while 2 hours still
+ * keeps the "bounded delay" Fork 2(b) promises well inside a single operator session. Env-overridable, same
+ * pattern as `PR_LIST_TIMEOUT_ENV` — a policy knob, not a magic number nothing can retune.
+ */
+export const ALREADY_DONE_AGE_GATE_MS = 2 * 60 * 60 * 1000;
+
+/** The env var that overrides {@link ALREADY_DONE_AGE_GATE_MS}. Unset or non-numeric → the default applies. */
+export const ALREADY_DONE_AGE_GATE_ENV = 'WE_DISPATCH_PLAN_ALREADY_DONE_AGE_MS';
+
+/**
+ * Is `item` OLD ENOUGH to be worth an already-done ground-truth `gh` call? PURE — the clock and the threshold
+ * both arrive as parameters, so this is directly unit-testable and the IO shell supplies the real ones.
+ *
+ * FAILS TOWARD CHECKING on an unparseable/absent date, not away from it: a `dateOpened`/`dateStarted` this
+ * function cannot read is a malformed or unusual item, not evidence the item is fresh, and the cost of one
+ * extra `gh` call for a rare malformed row is far smaller than the cost of a stale item that never gets
+ * checked because its own date was unreadable. Prefers `dateStarted` (when the item is `active`, that is the
+ * more honest "how long has real work been outstanding" clock) and falls back to `dateOpened`.
+ *
+ * @param {{dateOpened?: string|null, dateStarted?: string|null}} item
+ * @param {number} nowMs - `Date.now()`-shaped instant, injected so this stays clock-free.
+ * @param {number} [ageGateMs] - defaults to {@link ALREADY_DONE_AGE_GATE_MS}.
+ * @returns {boolean}
+ */
+export function isStaleEnoughForGroundTruth(item, nowMs, ageGateMs = ALREADY_DONE_AGE_GATE_MS) {
+  const at = Date.parse(String(item?.dateStarted || item?.dateOpened || ''));
+  if (Number.isNaN(at)) return true; // no usable date — cannot prove it is fresh, so do not skip it blind
+  const gate = Number(ageGateMs) >= 0 ? Number(ageGateMs) : ALREADY_DONE_AGE_GATE_MS;
+  return (Number(nowMs) || Date.now()) - at > gate;
+}
+
 /** True when an item's `openBlockers` signals it is not ready to build. Tolerant of either the loader's array
  *  shape (`item.openBlockers` = the still-open blocker nums) or a bare count. */
 function hasOpenBlockers(item) {
@@ -122,16 +181,20 @@ function hasOpenBlockers(item) {
  * The DETERMINISTIC dispatch plan — the pure keystone. Same (queue, leases, freeLanes) → same plan, always.
  *
  * @param {{
- *   queue: Array<{num:(string|number), kind?:string, scope?:string[], openBlockers?:(string[]|number)}>,
+ *   queue: Array<{num:(string|number), kind?:string, scope?:string[], openBlockers?:(string[]|number), alreadyDonePr?:(object|null)}>,
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
  *                   is held `needs-decision` — neither is ever built), its
- *                   predicted `scope` (repo-relative path prefixes, comparable to the leases' scopes) and its
- *                   `openBlockers`. The pure core does NOT re-order — the ordering engine
- *                   ({@link ../lib/build-queue.mjs orderQueueDetailed}) owns rank; this consumes that order.
+ *                   predicted `scope` (repo-relative path prefixes, comparable to the leases' scopes), its
+ *                   `openBlockers`, and its `alreadyDonePr` (#3457/#3460 — the AGE-GATED ground-truth
+ *                   enrichment's evidence, or `null`/absent when not checked or nothing found; see
+ *                   `we:scripts/operations/dispatch-lane-io.mjs#filterAlreadyDoneCandidates` for the query and
+ *                   `isStaleEnoughForGroundTruth` for the age gate). The pure core does NOT re-order — the
+ *                   ordering engine ({@link ../lib/build-queue.mjs orderQueueDetailed}) owns rank; this
+ *                   consumes that order.
  *   • `leases`    — the ACTIVE scope leases (running lanes): `{ lane, scope }`. `scope` is the lane's held
  *                   file-scope (predicted ∪ observed, from {@link ./scope-lease-collect.mjs}).
  *   • `freeLanes` — the free lane slots, as an array of lane IDS to assign (from `lane-pool list --acquirable`).
@@ -142,7 +205,7 @@ function hasOpenBlockers(item) {
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈
- *              "blocked" | "needs-slice" | "needs-decision" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
+ *              "already-done" | "blocked" | "needs-slice" | "needs-decision" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
  */
 export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
@@ -159,6 +222,20 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
   //    floor): it is held `unshaped-no-scope` for the /conveyor skill to prepare its scope upstream. ──
   for (const item of items) {
     const num = item.num;
+
+    // 0. GROUND TRUTH (#3457/#3460) — a real merged PR already closes this item out. Checked FIRST, ahead of
+    //    every other branch: `blocked`, `needs-slice`, `needs-decision` and the scope/overlap reads below are
+    //    ALL themselves derived from the same possibly-stale `status:`/frontmatter this check exists to stop
+    //    trusting blind (#3434's own motivating incident carried `kind: decision`, i.e. it would otherwise have
+    //    been held `needs-decision` — a real merged PR outranks that read too). `item.alreadyDonePr` is set by
+    //    the IO shell's AGE-GATED enrichment (Fork 2(b)); the pure core performs no `gh` call of its own and
+    //    simply trusts what it was handed, same as every other enrichment field on `item`. HOLDS, never
+    //    auto-resolves — see `ALREADY_DONE_HINT` and `we:scripts/operations/dispatch-lane-io.mjs`'s
+    //    `filterAlreadyDoneCandidates` docblock for why a false positive here must stay recoverable.
+    if (item.alreadyDonePr) {
+      held.push({ num, reason: 'already-done' });
+      continue;
+    }
 
     // 1. Structurally not ready — an open prerequisite gates the build regardless of scope / slots.
     //    NOTE: via the production build-queue shell this branch is UNREACHABLE — `backlog.mjs build-queue`
@@ -366,6 +443,38 @@ async function main(argv) {
     };
   });
 
+  // 1.5 ALREADY-DONE GROUND TRUTH (#3457/#3460, Fork 2(b)) — AGE-GATED enrichment: only items that have sat
+  //     `open`/`active` past `ALREADY_DONE_AGE_GATE_MS` spend a `gh pr list --search` call, so the common case
+  //     (a freshly-cleared or freshly-claimed item) never pays for a check that could not possibly find
+  //     anything yet. Reuses the SAME checker + query shape `we:scripts/operations/dispatch-lane.mjs`'s
+  //     pre-spawn guard uses (`defaultCheckAlreadyDone` in `we:scripts/operations/dispatch-lane-io.mjs`), so
+  //     the two #3457/#3460 chokepoints can never disagree about what "done" means. Covers BOTH populations
+  //     the sidecar can put an item in: a normal ready `queue` row, AND a `cleared-but-not-ready` id (#2613) —
+  //     the exact shape a RESOLVED item stuck in `.conveyor/queue.json` takes (`build-queue --json` hard-
+  //     filters to not-yet-resolved rows, so a resolved-but-still-cleared item never reaches `queue` at all;
+  //     see this file's own header and #3460's live acceptance case). Skipped entirely when `--no-ground-truth`
+  //     is passed (mirrors the sibling session-reaper fix's own rollback escape hatch) or `gh` cannot run.
+  // `notReady` id (normalized, string-keyed) → the merged PR the ground-truth pass found for it, when it did.
+  // Kept separate from `queue` rows because a `cleared-but-not-ready` id has no row of its own to carry a
+  // field on — it is appended to `plan.held` as a bare id further down, past `dispatchPlan` itself.
+  const alreadyDoneNotReady = new Map();
+  if (!flags['no-ground-truth']) {
+    const { defaultCheckAlreadyDone } = await import('../operations/dispatch-lane-io.mjs');
+    const nowMs = Date.now();
+    for (const row of queue) {
+      const it = byNum.get(String(row.num));
+      if (!isStaleEnoughForGroundTruth(it, nowMs)) continue;
+      const verdict = defaultCheckAlreadyDone(row.num, { exec: execFileSync });
+      if (verdict.done && verdict.pr) row.alreadyDonePr = verdict.pr;
+    }
+    for (const id of notReady) {
+      const it = byNum.get(String(id));
+      if (!isStaleEnoughForGroundTruth(it, nowMs)) continue;
+      const verdict = defaultCheckAlreadyDone(id, { exec: execFileSync });
+      if (verdict.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
+    }
+  }
+
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
   const picture = runJson('node', [SCOPE_COLLECT_CLI, '--json'], 'scope-lease-collect');
   const leases = (Array.isArray(picture?.leases) ? picture.leases : []).map((l) => ({
@@ -386,7 +495,14 @@ async function main(argv) {
 
   const plan = dispatchPlan({ queue, leases, freeLanes });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
-  for (const num of notReady) plan.held.push({ num, reason: 'cleared-but-not-ready' });
+  // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
+  // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
+  // merged PR, instead of the generic `cleared-but-not-ready` — turning "silently listed with no reason" into
+  // "here is the PR that already closed this out; remove the stale clear or verify by hand".
+  for (const num of notReady) {
+    const pr = alreadyDoneNotReady.get(String(num));
+    plan.held.push(pr ? { num, reason: 'already-done', alreadyDonePr: pr } : { num, reason: 'cleared-but-not-ready' });
+  }
 
   if (flags.json) {
     process.stdout.write(JSON.stringify(plan, null, 2) + '\n');
@@ -398,12 +514,13 @@ async function main(argv) {
     for (const l of plan.launch) log(`  ▶ #${l.num} → lane-${l.lane}`);
     for (const h of plan.held) {
       // Surface the operator gloss beside the short token so a held item always says WHAT to do — author scope
-      // for `unshaped-no-scope` (#2613), `/slice` for a held `needs-slice` epic (#2645), or prepare/present a
-      // held `needs-decision` (#2647).
+      // for `unshaped-no-scope` (#2613), `/slice` for a held `needs-slice` epic (#2645), prepare/present a
+      // held `needs-decision` (#2647), or check + resolve/re-clear an `already-done` hold (#3457/#3460).
       const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})`
         : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
-            : '';
+            : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
+              : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }
