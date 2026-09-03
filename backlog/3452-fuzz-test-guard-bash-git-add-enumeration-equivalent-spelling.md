@@ -2,8 +2,10 @@
 bornAs: x63kvwg
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-02"
+dateStarted: "2026-09-02"
+dateResolved: "2026-09-02"
 tags: []
 scope:
   - we:scripts/__tests__/
@@ -26,3 +28,11 @@ PR #1816 review of #2968 found we:scripts/guard-bash.mjs denies git add -A/./--a
    copy-pasted literal cases — so a NEXT equivalent spelling for an existing family is one line to add, not a
    new test.
 3. `npm run check:standards` stays green.
+
+## Progress
+
+Added `we:scripts/__tests__/guard-bash-fuzz.test.mjs`: a `FAMILIES` table (bare-dot, combined-short-flag,
+git-status enumeration source) each with a spellings array and a command builder, looped generatively against
+both `decide()` and `reason()` (the two direct families also exercise `reason()` standalone, ahead of any
+whole-command pipe analysis). All spellings from the item deny today; full guard-bash suite (200 existing +
+5 new) stays green.
