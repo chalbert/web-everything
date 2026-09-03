@@ -2,8 +2,9 @@
 bornAs: xjx2n2s
 kind: task
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-01"
+dateStarted: "2026-09-03"
 tags: []
 scope:
   - we:skills-src/conveyor/runner.mjs

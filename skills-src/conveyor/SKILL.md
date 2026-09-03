@@ -70,7 +70,7 @@ The runner and the scripts it (and the on-demand judgment surfaces) shell — do
 
 | Script | What it decides (deterministically) |
 |---|---|
-| `node skills-src/conveyor/runner.mjs` | **The singleton-locked HEADLESS RUNNER (#2702)** — the mechanical plane. The main session STARTS this (background); it then drives the whole per-tick cycle with **no model context**: it shells `tick-core` (bookkeeping in on STDIN, `{ decisions, nextState }` out), threads `nextState` forward UNCHANGED, runs the two deterministic passes (§4b/§4c), emits the status line, and **surfaces** the dispatch/watch decisions for the judgment layer to execute. Its singleton right is held by `runner-lock.mjs` (a machine-global TTL lease — a second launch that finds a LIVE runner stands down). It **never merges** and **never self-clears a human review**. |
+| `node skills-src/conveyor/runner.mjs` | **The singleton-locked HEADLESS RUNNER (#2702)** — the mechanical plane. The main session STARTS this (background); it then drives the whole per-tick cycle with **no model context**: it shells `tick-core` (bookkeeping in on STDIN, `{ decisions, nextState }` out), threads `nextState` forward UNCHANGED, runs the three deterministic passes (§4b/§4c/§4d), emits the status line, and **surfaces** the dispatch/watch decisions for the judgment layer to execute. Its singleton right is held by `runner-lock.mjs` (a machine-global TTL lease — a second launch that finds a LIVE runner stands down). It **never merges** and **never self-clears a human review**. |
 | `node scripts/readiness/conveyor-state.mjs --json` | **The whole tick picture in one read** — `{ queue, clearedNotReady, unshaped, needsSlice, decisions, lanes, freeSlots, prs, daemon, idle, health, infraBlocked }`. The runner's every tick STARTS here (via `tick-core`); the judgment layer reads it on demand (status board, `/review` context). |
 | `node scripts/conveyor/infra-blocked.mjs retry` | **The infra-blocked recovery pass (#2659)** — one idempotent resume pass: for each item whose lane ref was PUSHED but whose PR-open failed on an outside dependency (a GitHub outage), it correlates GitHub status, resume-opens the PR once infra recovers (via `pr-land` — never a local merge), backs off on failure, and surfaces at the attempt cap. |
 | `node scripts/readiness/dispatch-plan.mjs --json` | **The dispatcher** — `{ launch: [{num, lane}], held: [{num, reason}] }`. Which cleared items launch into which free lanes, and why the rest hold. |
@@ -346,6 +346,19 @@ only spawns and judges.
    protection lives in ONE place; the reaper never rm's a marker itself). Like the §4b pass, the tick is the loop
    clock — one round per tick, no internal busy-loop. It is best-effort: a stuck lane is logged and skipped, and
    its exit never gates the tick. A freed lane is picked up by the very next tick's `dispatch-plan`.
+
+4d. **The runner runs the session-reaper each tick — stops a `claude agents` background session once ITS OWN
+   process reports it is finished (#3435).** A `claude agents` session registration is a wholly separate resource
+   from a lane lease (§4c's own concern) — a finished review/fix/build dispatch stays LISTED (`claude agents
+   --json`) until something calls `claude stop <id>` on it, and nothing did that mechanically before this pass:
+   an operator had to run `claude stop <id>` by hand on every finished session, one at a time. So the runner runs
+   ONE reap pass per tick (`node scripts/conveyor/session-reaper.mjs`), reading the same `claude agents --json`
+   listing and calling `claude stop <id>` (via `dispatch-abort.mjs`'s existing `stopSession` wrapper — never a
+   raw `kill`) on every `kind: 'background'` row whose `state` is `done` or `failed`. This is deliberately
+   narrower than §4c's PR/TTL axes: it never touches a `working`/`blocked` row (still live, or merely not yet
+   started) and never an `interactive` row (the operator's own open terminal) — the guard against ever touching a
+   live session is structural, not inferred. Like §4b/§4c, one round per tick, best-effort (a stop failure is
+   logged and skipped, never gates the tick).
 
 5. **The runner emits `decisions.statusLine` and arms its OWN next tick.** The core builds the terse one-line
    status from the tick read + the live bookkeeping (counts of building / preparing / fixing / healing / queued /
