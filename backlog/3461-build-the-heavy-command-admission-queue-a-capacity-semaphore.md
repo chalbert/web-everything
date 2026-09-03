@@ -3,10 +3,11 @@ bornAs: xm1ft97
 kind: task
 tier: pinned
 parent: "3456"
-status: active
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/verify-lane.mjs", "we:scripts/conveyor/tick-core.mjs", "we:skills-src/conveyor/runner.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/operations/__tests__/"]
 dateOpened: "2026-09-02"
 dateStarted: "2026-09-03"
+dateResolved: "2026-09-03"
 tags: []
 ---
 
