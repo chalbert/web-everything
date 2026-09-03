@@ -3,10 +3,9 @@ bornAs: xo83x9i
 kind: story
 size: 3
 parent: "3383"
-status: resolved
+status: active
 dateOpened: "2026-09-01"
 dateStarted: "2026-09-03"
-dateResolved: "2026-09-03"
 tags: []
 scope:
   - we:scripts/conveyor/
