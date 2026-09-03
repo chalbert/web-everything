@@ -692,6 +692,50 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.decisions.spawnBuilds).toEqual([{ num: 78, lane: 4 }]);
   });
 
+  it('#3403 FOLLOW-UP — a durable guard entry keeps its ORIGINAL spawnedTick across ticks instead of being re-stamped with the current tick every time it is resynthesized', () => {
+    // #99's durable entry was first seen at tick 2 (as if carried forward from a prior planTick call via
+    // nextState.buildGuards, the same way a real runner threads bookkeeping tick to tick). This call is tick 5 —
+    // three ticks later, exactly the default build-guard TTL. Before the fix, this block re-stamped
+    // `spawnedTick: tick` (5) every time it (re)synthesized the entry, so its age could never be read as 3+ no
+    // matter how many real ticks had actually passed.
+    const out = planTick({
+      state: { queue: [{ num: 99, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, buildGuards: [{ num: '99', lane: null, spawnedTick: 2 }] },
+      liveAgentSessions: [{ name: 'conveyor-99', pid: 1 }],
+    });
+    expect(out.nextState.buildGuards).toEqual(expect.arrayContaining([
+      expect.objectContaining({ num: '99', lane: null, spawnedTick: 2 }),
+    ]));
+  });
+
+  it('#3403 FOLLOW-UP — a durable build-guard entry that never claims stops inflating "building"/decisions.counts once its age reaches the build guard TTL, even though liveAgentSessions keeps reporting the SAME stale session every tick (live bug, epic #3383: wev-scratch-dispatcher-4 showed "building" stuck at 11-15 for 270+ consecutive ticks against 2 genuinely leased lanes)', () => {
+    // #99's session (`conveyor-99`) is durable-live every tick — a `claude agents --json` staleness the fix
+    // guard's own #3454 fix already has to tolerate on dispatch-lane's pre-flight check — but #99 never actually
+    // claims: it stays in the cleared build queue and never shows a leased lane, tick after tick. That is
+    // indistinguishable, from tick-core's own read, from a session that exited without `claude agents --json`
+    // ever noticing.
+    const state = { queue: [{ num: 99, buildQueued: true }], lanes: [], prs: [] };
+    const liveAgentSessions = [{ name: 'conveyor-99', pid: 1 }];
+    let bookkeeping = { tick: 0 };
+    let out;
+    for (let i = 0; i < 5; i += 1) {
+      out = planTick({ state, plan: { launch: [] }, freeLanes: [], bookkeeping, liveAgentSessions });
+      bookkeeping = out.nextState;
+    }
+    // 5 ticks in (past the default 3-tick TTL), the durable floor no longer inflates the DISPLAYED tallies...
+    expect(out.decisions.counts.building).toBe(0);
+    expect(out.decisions.statusLine).toContain('0 building');
+    // ...but the double-dispatch protection #3403 exists for is UNCHANGED: a launch attempt for #99 is still
+    // suppressed — the durable guard is still carried in nextState.buildGuards, only excluded from the tally.
+    const relaunch = planTick({
+      state, plan: { launch: [{ num: 99, lane: 4 }] }, freeLanes: [4], bookkeeping, liveAgentSessions,
+    });
+    expect(relaunch.decisions.spawnBuilds).toEqual([]);
+    expect(relaunch.decisions.suppressedBuilds).toEqual([{ num: 99, lane: 4, by: 'num' }]);
+  });
+
   it('#3398 — decisions.counts carries the same structured tallies as decisions.statusLine, not re-derived by a caller', () => {
     const out = planTick({
       state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }], lanes: [], prs: [] },

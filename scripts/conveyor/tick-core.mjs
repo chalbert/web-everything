@@ -893,15 +893,50 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //     is still reporting, so a restart can never re-launch an already-spawned build just because its in-memory
   //     guard entry is gone. `lane: null` — the durable floor only knows the NUM is live, never re-derives which
   //     lane it landed on — so it suppresses by num only (filterLaunches' lane exclusion never fires on `null`).
+  //
+  //     STICKY `spawnedTick` (found live-firing the prototype, epic #3383). This block used to re-stamp
+  //     `spawnedTick: tick` — the CURRENT tick — every time a num was (re)synthesized here, so its age never
+  //     advanced: the moment `retireBuildGuards`' own TTL dropped a stale entry from `build.live`, this block
+  //     re-added the SAME num on the SAME tick with a freshly-reset spawnedTick, forever. `claude agents --json`
+  //     can keep listing a session well after it actually exited (the same staleness #3454's fix-guard already
+  //     has to tolerate on dispatch-lane's pre-flight check) — with no way for its age to ever reach `ttlTicks`,
+  //     that alone pinned a phantom entry in `buildGuardNums` permanently, for as long as the stale listing
+  //     persisted. Live evidence: a 09-03 restart of `wev-scratch-dispatcher-4` showed `building` stuck at
+  //     11-15 for 270+ consecutive ticks against 2 genuinely leased lanes. Reusing the PRIOR tick's own durable
+  //     entry for the same num (found in `bookkeeping.buildGuards`, marked by `lane == null`) keeps `spawnedTick`
+  //     pinned to when the num was FIRST seen durable-live, so its age finally grows tick over tick.
+  const priorDurableSpawnedTick = new Map(
+    (Array.isArray(bookkeeping.buildGuards) ? bookkeeping.buildGuards : [])
+      .filter((g) => g && g.lane == null && g.num != null)
+      .map((g) => [normNum(g.num), g.spawnedTick]),
+  );
   const durableOnly = durableBuildNums(liveAgentSessions)
     .filter((num) => !build.live.some((g) => normNum(g.num) === num));
-  const durableBuildGuards = durableOnly.map((num) => ({ num, lane: null, spawnedTick: tick }));
+  const durableBuildGuards = durableOnly.map((num) => ({
+    num,
+    lane: null,
+    spawnedTick: priorDurableSpawnedTick.has(num) ? priorDurableSpawnedTick.get(num) : tick,
+  }));
   const buildLive = [...build.live, ...durableBuildGuards];
 
   // 2. FILTER plan.launch through the live build guard (num OR lane), then record a guard per new build.
   const launched = filterLaunches(plan.launch, buildLive);
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, spawnedTick: tick }));
   const liveBuildGuards = [...buildLive, ...newBuildGuards];
+
+  // #3403 FOLLOW-UP — the STATUS LINE's "building" tally must not count a durable-floor entry (`lane: null`)
+  // that has sat unclaimed past the build guard's own TTL (`cfg.buildTtlTicks`, same constant `retireBuildGuards`
+  // already uses for a REAL in-session guard). `liveBuildGuards` itself, `nextState.buildGuards`, and the
+  // double-dispatch suppression in `filterLaunches` above are all left carrying the FULL, un-filtered set — the
+  // durable floor's actual protective job (never re-dispatch a genuinely still-running session, even one
+  // `claude agents --json` never stops listing) stays intact, erring safe exactly as #3403 intended. Only the
+  // DISPLAYED count changes: an aged-out synthetic entry that never converted to a real claim stops being
+  // reported as "building" — the same "only count once genuinely claimed, let the TTL backstop cover a guard
+  // that never gets claimed" shape #3454 already established for the fix guard, applied here to the ONE guard
+  // kind (the durable floor) whose synthesis previously had no TTL of its own to inherit.
+  const countableBuildGuards = liveBuildGuards.filter(
+    (g) => g.lane != null || tick - (Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick) < cfg.buildTtlTicks,
+  );
 
   // 3. The free lanes a prepare/fix may take = free lanes MINUS this tick's build launches MINUS every live
   //    guard's lane (build + prepare + fix) — mirror the build guard's lane exclusion so nothing races a lane.
@@ -1023,14 +1058,18 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     });
   }
 
+  // Both status computations read `countableBuildGuards` (see its own comment above), NOT the raw
+  // `liveBuildGuards` — the DISPLAYED "building" tally excludes an aged-out, never-claimed durable-floor entry;
+  // `nextState.buildGuards` below still carries the full `liveBuildGuards`, so the double-dispatch suppression
+  // itself is unaffected.
   const statusLine = buildStatusLine({
-    queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+    queue, lanes, prs, health, infraBlocked, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
   // #3398 — the numeric tallies behind the line above, structured (not re-parsed from `statusLine`'s text) so
   // the supervisor's out-of-band alerting can tell "queued > 0 yet nothing dispatched, tick after tick" apart
   // from a genuinely empty queue, over its own JSONL history.
   const counts = computeTickCounts({
-    queue, lanes, prs, health, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+    queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
 
   return {
