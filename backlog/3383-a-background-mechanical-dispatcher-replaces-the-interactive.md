@@ -1460,3 +1460,39 @@ goal, not a shortcut toward it.
 `Agent`-tool worker to get something moving" stop being the path of least resistance at all — closing it is
 the single highest-leverage way to make this failure mode structurally harder to repeat, not just documented
 against.
+
+## Working doctrine (2026-09-04, continued): rule 10 — the runner's normal operating mode is tracking `main`
+## directly; a long-lived divergent branch is a temporary build tool, not the default steady state
+
+Set the same night as rule 9 above, after a second, independent finding: `origin/lane/mechanical-dispatcher`
+itself — this epic's own prototype branch — had silently drifted 97 commits behind `origin/main`. The
+branch's own auto-sync loop (the mechanism meant to keep it current, per the `keep-prototype-branch-synced-
+after-each-merge` agent-memory lesson, `PR #1865`) had been failing without surfacing the failure. Recovering
+required a roughly 40-minute manual reconciliation — 15 real conflicts, resolved by hand — before delivery
+could resume from the branch at all. This is a real, costly instance of exactly the risk this epic's own
+founding "How to build it" section already named: a branch that never converges back to `main` accumulates
+exactly this kind of silent, compounding drift.
+
+**Two ways to respond, weighed explicitly with the operator, not assumed.**
+(a) Build more machinery to cope with permanent divergence as the steady state — a `reconcile-branch`
+operation doing mechanical fast-forward plus judgment-driven conflict resolution, invoked on some cadence.
+(b) Stop treating divergence as the steady state at all, and actively wind it down. The operator chose (b),
+citing this card's own "How to build it" section verbatim: the branch was always meant to be temporary —
+"once genuinely stable... split into small pieces and move to `main`... only once everything has transferred
+does the real system execute from `main` instead of the branch." Option (a) would have been building
+permanent scaffolding around a state this epic's own plan never intended to be permanent.
+
+**Direct evidence the wind-down pattern already works, from tonight's own delivery.** Every quick mechanical
+fix landed tonight — `#1894`, `#1895`, `#1902`, `#1903` — used the exact shape rule 10 generalizes: a fresh
+scratch lane cut off *current* `main`, iterated and tested live, landed as one small clean PR, then
+discarded. None of them needed a standing branch to get the fix in safely. Rule 10 states that this stops
+being an ad hoc pattern for one-off fixes and becomes the runner's own normal operating mode once the
+prototype branch itself has nothing left that only it holds.
+
+**The caveat that must not get lost, stated in the rule itself and restated here:** rule 10 describes the
+TARGET steady state, not tonight's actual configuration. `#3443` (the item tracking
+`origin/lane/mechanical-dispatcher`'s own graduation to `main`) is still open as of tonight, with real content
+still unique to the branch — so the runner still needs to run off the branch, freshly reconciled tonight, not
+off `main` directly. A future session should check `#3443`'s live status before reading today's
+branch-tracking as a violation of this rule: it isn't one, until graduation is done. Once `#3443` closes for
+real, switching the runner to track `main` directly is what rule 10 then requires, not merely permits.
