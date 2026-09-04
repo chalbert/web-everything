@@ -1,6 +1,6 @@
 ---
 name: verify-session-liveness-before-archiving
-description: Neither `claude agents --json`'s state field nor `claude stop`'s success/failure is reliable proof a background dispatcher session is alive or gone in either direction — ground-truth the target item, then ask the session itself via SendMessage before archiving.
+description: Neither `claude agents --json`'s state field nor a `claude stop` SUCCESS is reliable proof a background dispatcher session is alive or gone — ground-truth the target item, then ask the session itself via SendMessage before archiving. (A `claude stop`/`rm` FAILURE, "No job matching," was traced to a wrong-ID-field bug in the caller, since fixed — not a genuine CLI limitation; see the correction inline below.)
 metadata:
   type: feedback
 ---
@@ -13,14 +13,28 @@ every individual check lies in at least one direction, confirmed live across one
 **What's unreliable, both ways:**
 - `claude agents --json`'s `state` field can show `working`/`idle` for a session that finished
   hours ago (real PR already merged) — a false "still alive."
-- `claude stop <sessionId>` reporting "No job matching" is ALSO not proof the session is gone —
-  hit this directly: `claude stop` said "no job matching" for 4 sessions the operator could see
-  were genuinely still connected in their own UI. Re-confirmed via `SendMessage` to the same
-  session names: all 4 accepted the message successfully, and the tool's own result noted them
-  "connected via Remote Control." So a failed `claude stop` lookup is a false "already gone,"
-  not a real one.
-- A `claude stop` that reports SUCCESS is separately documented (per the #3435 card itself,
-  citing filed upstream Claude Code issues #65925/#45250/#41461) as not proof of exit either.
+- **CORRECTED 2026-09-04, same night this note was written:** this bullet originally claimed
+  `claude stop <sessionId>`/`claude rm <sessionId>` reporting "No job matching" was ALSO not
+  proof the session is gone, citing 4 sessions where `claude stop` said "no job matching" while
+  the operator could see them still connected. **That framing was wrong — it was falsified later
+  the same session.** The real, confirmed root cause: every failing call (this repo's own
+  `we:scripts/conveyor/session-reaper.mjs`, and this note's own manual `claude stop` calls) was
+  passing the full session `sessionId` (a UUID) to `stop`/`rm`, when those two specific
+  subcommands need the SHORT 8-char `id` field instead (`--resume`/`attach` accept the full
+  `sessionId` fine — it's specifically `stop`/`rm` that need the short form). Passing the short
+  `id` worked immediately and repeatably: 3 independent single-session tests, then a
+  151-session bulk clear, 151/151 successful. Fixed in `we:scripts/conveyor/session-reaper.mjs`
+  (PR #1879, merged), which now uses the short `id` and documents the correct field in its own
+  comments. So a failed `claude stop`/`rm` lookup was NOT a genuine CLI-reliability gap — it was
+  a caller-side bug, now fixed. **This correction is itself an instance of the exact lesson in
+  [[question-a-concluded-external-limitation-before-accepting-it]]: a note declaring an external
+  CLI limitation was itself wrong, and the mistake was caught and fixed later the same night it
+  was written.** See that note for the fuller record.
+- **Still separately true, and NOT affected by the correction above:** a `claude stop` that
+  reports SUCCESS is not proof of exit — documented per the #3435 card itself, citing filed
+  upstream Claude Code issues #65925/#45250/#41461. This is a different claim about a different
+  direction (success, not failure) and a different underlying cause (upstream CLI behavior, not
+  a wrong ID field); do not read the correction above as touching it.
 - `SendMessage` reporting a target as "not reachable" is not proof of exit either — it's the
   same class of tool-side liveness check as the other two, not automatically more trustworthy
   just because it failed differently. A verification pass in this same session concluded 4
