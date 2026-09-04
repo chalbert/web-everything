@@ -4021,6 +4021,41 @@ passes: [#3456](/backlog/3456-cap-concurrent-heavy-commands-across-dispatched-la
 
 ---
 
+### Automated transcript-based introspection at session close/reap runs detached, covers every session, and reuses the existing learnings pool with a reinstated privacy scrub {#automated-session-introspection}
+
+**Ratified 2026-09-04** — per the operator's explicit in-conversation instruction to ratify this card
+("I ratify 3475"); all three forks accepted as the prepared card's own bold defaults, no alternative picked, no
+amendment beyond what each fork's own `Skeptic:` pass already folded in. The toggle location and the
+trigger-per-session-kind question were already ruled (not forked) in the card itself and are not restated here.
+Single-tenant precursor to #2610's multi-tenant generalization. Three clauses:
+
+1. **Fork 1 — execution mode: detached, uniformly across all three trigger kinds.** The judge pass never blocks
+   its trigger point — forced outright for the `SessionEnd` hook (a 1.5s default timeout budget cannot fit a
+   Sonnet call), and matching the existing best-effort convention `session-reaper.mjs` already established for
+   the other two trigger kinds rather than inventing a second execution model. A lost introspection entry is a
+   strictly lower-stakes failure than a stalled dispatch tick, a slowed human turn, or a hung subagent.
+2. **Fork 2 — coverage: every terminal session, unconditionally.** Matches the operator's own explicit words
+   ("every background session is inspected… same for main session and subagent"). A cheap, mechanical
+   (non-LLM) pre-check that short-circuits a structurally-trivial judge call is a sanctioned build-time
+   efficiency, never a coverage exclusion.
+3. **Fork 3 — destination: the existing `#2614` pool/schema, with the wide `scrubReasons` detector (unwired
+   since `#3015`) reinstated for judge-authored entries specifically, plus one new optional `origin` field.**
+   Reuses the whole downstream `/harvest` pipeline rather than forking a second pool. Stated honestly as
+   *narrowing* the privacy gap an automated judge reading a raw transcript reopens, not closing it completely
+   — `scrubReasons` is field-local and has a 16-character entropy floor, both residual, both accepted for v1.
+
+**A settled requirement carried into the follow-on build, not left open:** the judge's rubric must scan for the
+raw-command/missing-operation pattern (`we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md`'s
+"would a UI button be able to do this?" test) and emit `kind: missing-convention` naming `#3029` when found.
+
+**Lineage:** ratified via `#3475` (2026-09-04). The `WE_INTROSPECTION_ENABLED` read helper's exact shape, the
+judge prompt/chunking strategy for an oversized transcript, and true OS-level detachment for the spawned judge
+process are left to the follow-on build item scaffolded under `#3475`. Full reasoning, prior-art survey and
+skeptic passes: [#3475](/backlog/3475-automated-transcript-based-introspection-at-session-close-re/), research
+topic [`automated-transcript-introspection-at-close-reap`](/research/automated-transcript-introspection-at-close-reap/).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
