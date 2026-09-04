@@ -197,6 +197,32 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  shape — this runner spawns no LLM agents (#2701 clause 3) and so never observes an agent's return; that
  *  classification is the judgment layer's own job (skills-src/conveyor/SKILL.md), via the same
  *  hiccup-sink.mjs `fileHiccup`. */
+
+/** Cap on {@link summarizeMechanicalPassError}'s output — generous for a real diagnostic, still bounded so one
+ *  runaway stack trace can't flood `runner.log`. */
+export const MECHANICAL_PASS_ERROR_LOG_CHARS = 800;
+
+/**
+ * The text `runQuiet` (below) logs for a failed mechanical pass — found live 2026-09-04 investigating a
+ * `session-reaper.mjs` failure: `execFileSync`'s thrown error's OWN `.message` already carries the child's full
+ * captured stderr, appended by Node itself after the leading `Command failed: <cmd>` line — but the previous
+ * `String(e.message || e).split('\n')[0]` kept ONLY that first line and threw away everything after it,
+ * discarding the real error on EVERY mechanical-pass failure this runner has ever logged, not just that one.
+ * The one line `runner.log` actually recorded that night — `⚠ mechanical pass conveyor/session-reaper.mjs
+ * failed (non-fatal): Command failed: node .../session-reaper.mjs` — carries zero information about WHY;
+ * reproducing the exact same truncation against a real `execFileSync` throw (a child that `console.error`s
+ * detail then exits 1) confirmed this is the whole gap, byte for byte. Collapses whitespace/newlines so a
+ * multi-line stderr still logs as ONE `runner.log` line (grep-able, matching the file's existing one-line-per-
+ * event convention), bounded to `maxChars` rather than left unbounded.
+ * @param {unknown} e
+ * @param {number} [maxChars]
+ * @returns {string}
+ */
+export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR_LOG_CHARS) {
+  const full = String((e && e.message) || e);
+  return full.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
 function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out } = {}) => {
     const { execFileSync } = await import('node:child_process');
@@ -206,7 +232,7 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
         if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
         execFileSync('node', args, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
       } catch (e) {
-        process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+        process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
       }
     };
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
