@@ -1,9 +1,10 @@
 ---
+bornAs: xmlh0rb
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["x7fkzn0", "x8tghnd"]
+blockedBy: ["3482", "3483"]
 scope: ["we:skills-src/conveyor/runner.mjs"]
 dateOpened: "2026-09-04"
 tags: []

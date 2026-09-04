@@ -75,30 +75,30 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
   hashes below; the drain assigns their `#NNN` at land):
 
   1. `we:scripts/lane-pool.mjs` hardening (fetch-race retry, flag validation) + `we:scripts/lib/lane-lease.mjs`
-     — **we:backlog/x4a2dkl-*** — standalone, unblocked, ready to build now.
+     — **we:backlog/3481-*** — standalone, unblocked, ready to build now.
   2. `we:scripts/verify-lane.mjs` request/check gate mode + `we:scripts/conveyor/verify-dispatch.mjs` (the
-     "wait primitive" fork of #3105's still-open footgun decision) — **we:backlog/xkvfq4a-*** — standalone,
+     "wait primitive" fork of #3105's still-open footgun decision) — **we:backlog/3484-*** — standalone,
      unblocked, ready to build now.
   3. `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/operations/dispatch-lane-io.mjs` hardening
      (attempt-tagging retries #3110, residual fix/ci-heal test coverage, `WE_DISPATCH_KIND` wiring) —
-     **we:backlog/xppl2eb-*** — `blockedBy: xkvfq4a` (slice 2 above; it stamps the env var slice 3 reads).
+     **we:backlog/3488-*** — `blockedBy: 3484` (slice 2 above; it stamps the env var slice 3 reads).
   4. Core reconcile-pass payload, split into 3 landing-ordered parts since it's the epic's largest, most
      entangled body of work: (a) `we:scripts/operations/route-pr-outcome.mjs` and
-     `we:scripts/operations/route-pr-outcome-io.mjs` (new) — **we:backlog/x7fkzn0-***, unblocked; (b)
-     `we:skills-src/conveyor/supervisor.mjs` (new standalone daemon) — **we:backlog/x8tghnd-***,
-     `blockedBy: x7fkzn0`; (c) the `we:skills-src/conveyor/runner.mjs` wiring that actually activates the
-     continuous reconcile-pass tick loop — **we:backlog/xmlh0rb-***, `blockedBy: x7fkzn0, x8tghnd` — this is
+     `we:scripts/operations/route-pr-outcome-io.mjs` (new) — **we:backlog/3482-***, unblocked; (b)
+     `we:skills-src/conveyor/supervisor.mjs` (new standalone daemon) — **we:backlog/3483-***,
+     `blockedBy: 3482`; (c) the `we:skills-src/conveyor/runner.mjs` wiring that actually activates the
+     continuous reconcile-pass tick loop — **we:backlog/3486-***, `blockedBy: 3482, 3483` — this is
      the piece Done-when #2 was gating, now unblocked by #3437, but it should still get the most scrutiny of
      any slice here and land last, validated with a single manual tick before any continuous loop runs against
      it (mirroring #3437's own Done-when #4 caution).
   5. `we:scripts/conveyor/tick-core.mjs` durable build-guard-floor fix + supervisor/runner crash-loop and
-     idle-with-queue alerting hardening (#3398/#3403/#3404/#3406/#3416) — **we:backlog/xc2ggrf-***,
-     `blockedBy: x8tghnd, xmlh0rb` (these are fixes layered on top of the new supervisor/runner machinery, not
+     idle-with-queue alerting hardening (#3398/#3403/#3404/#3406/#3416) — **we:backlog/3487-***,
+     `blockedBy: 3483, 3486` (these are fixes layered on top of the new supervisor/runner machinery, not
      separable from it in the branch's own commit history).
   6. Follow-up (not a graduation slice, a fresh child of slice 2): fold the gate's request/check modes into the
      declared `we:scripts/operations/verify.mjs` operation, per #3224 — already fully drafted, unlanded, on the
      branch as `we:backlog/xab3jh7-*`; re-filed here as a real numbered child rather than cherry-picked
-     verbatim — **we:backlog/xfs4w9z-***, `blockedBy: xkvfq4a`.
+     verbatim — **we:backlog/3485-***, `blockedBy: 3484`.
 
   Slices 1 and 2 above are queued into the live conveyor tonight (2026-09-04) — see their own cards. Slice 3
   and the three parts of slice 4/5 are filed but intentionally NOT queued yet: their `blockedBy` edges mean

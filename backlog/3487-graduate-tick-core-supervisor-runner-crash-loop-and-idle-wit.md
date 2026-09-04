@@ -1,9 +1,10 @@
 ---
+bornAs: xc2ggrf
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["x8tghnd", "xmlh0rb"]
+blockedBy: ["3483", "3486"]
 scope: ["we:scripts/conveyor/tick-core.mjs", "we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/supervisor.mjs"]
 dateOpened: "2026-09-04"
 tags: []

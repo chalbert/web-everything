@@ -1,9 +1,10 @@
 ---
+bornAs: xfs4w9z
 kind: story
 size: 2
-parent: "xkvfq4a"
+parent: "3484"
 status: open
-blockedBy: ["xkvfq4a"]
+blockedBy: ["3484"]
 scope: ["we:scripts/operations/verify.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-04"
 tags: []

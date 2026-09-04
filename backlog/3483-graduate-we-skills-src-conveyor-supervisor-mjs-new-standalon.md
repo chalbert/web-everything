@@ -1,9 +1,10 @@
 ---
+bornAs: x8tghnd
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["x7fkzn0"]
+blockedBy: ["3482"]
 scope: ["we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/com.we.conveyor-supervisor.plist.example"]
 dateOpened: "2026-09-04"
 tags: []

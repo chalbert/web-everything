@@ -1,9 +1,10 @@
 ---
+bornAs: xppl2eb
 kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["xkvfq4a"]
+blockedBy: ["3484"]
 scope: ["we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/explore-io.mjs"]
 dateOpened: "2026-09-04"
 tags: []
