@@ -1,11 +1,11 @@
 ---
 name: mechanical-delivery-doctrine
-description: The nine standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, and a mechanism-bug fix found during delivery still delegates the FIX to a subsession. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The ten standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, and the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
 
-Nine rules accumulated while building and live-firing `#3383`'s own machinery (the background
+Ten rules accumulated while building and live-firing `#3383`'s own machinery (the background
 mechanical dispatcher that replaces an interactive session as delivery supervisor). Each rule below
 is enough to act on without reading further — the full evidence and reasoning for each sits in the
 named section of `#3383`'s own card
@@ -107,6 +107,23 @@ history. If a rule itself changes, edit it here first, then note the change on t
    once the subsession's fix is proven (measured before/after, not asserted) and landed does the
    orchestrating session resume delivery. (Full evidence: `#3383`'s "Working doctrine (2026-09-04):
    rule 9" section.)
+10. **The runner's steady state is tracking `main` directly; a long-lived divergent branch is not the
+    default operating mode.** When a mechanical bug in the delivery machinery itself needs fixing:
+    (1) stop the runner (or otherwise take it off `main`), (2) cut a SHORT-LIVED branch/lane fresh off
+    current `main` for the fix, iterate and test it live there, (3) once the fix is confirmed working
+    and merged back to `main`, switch the runner back to tracking `main` directly. The fix branch is
+    disposable — it does not linger as a standing parallel tree. Set after tonight's own prototype
+    branch, `origin/lane/mechanical-dispatcher`, drifted 97 commits behind `main` behind a
+    silently-failing auto-sync loop, costing a ~40-minute manual reconciliation (15 real conflicts)
+    before delivery could resume at all — while the same quick-fix-via-fresh-scratch-lane pattern
+    (`#1894`/`#1895`/`#1902`/`#1903`, all tonight) landed repeatedly without ever needing a standing
+    branch. **Not yet fully in effect as of 2026-09-04**: `#3443` (the branch's own graduation to
+    `main`) is still open, with real content still unique to the branch, so the runner currently still
+    needs to run off `origin/lane/mechanical-dispatcher` (freshly reconciled tonight, not stale)
+    rather than `main` directly — this rule states the TARGET steady state once graduation completes,
+    not a claim about today's actual runner configuration; check `#3443`'s live status to know whether
+    this rule is fully active yet. (Full rationale: `#3383`'s "Working doctrine (2026-09-04,
+    continued): rule 10" section.)
 
 ## Not `/conveyor`, on purpose
 
