@@ -1,11 +1,11 @@
 ---
 name: mechanical-delivery-doctrine
-description: The ten standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, and the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The eleven standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state — and a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
 
-Ten rules accumulated while building and live-firing `#3383`'s own machinery (the background
+Eleven rules accumulated while building and live-firing `#3383`'s own machinery (the background
 mechanical dispatcher that replaces an interactive session as delivery supervisor). Each rule below
 is enough to act on without reading further — the full evidence and reasoning for each sits in the
 named section of `#3383`'s own card
@@ -131,6 +131,16 @@ history. If a rule itself changes, edit it here first, then note the change on t
     not a claim about today's actual runner configuration; check `#3443`'s live status to know whether
     this rule is fully active yet. (Full rationale: `#3383`'s "Working doctrine (2026-09-04,
     continued): rule 10" section.)
+11. **A one-off action that relieves a symptom is not a fix.** Landing counts only once the real root
+    cause is found — verified, not guessed — and a durable code fix that prevents recurrence is
+    landed — verified working, not assumed. This sharpens rule 1 rather than duplicating it: rule 1
+    already says "diagnose the root cause and apply the real fix on its own merits"; this rule names
+    the specific failure mode rule 1 leaves implicit — mistaking symptom relief for the fix itself.
+    Running a broken mechanical pass by hand once, even when it usefully clears a real backlog the
+    break caused, is not evidence the underlying failure is fixed, and must never be reported as if it
+    were. A one-off workaround is fine as an immediate mitigation, but only when named explicitly as
+    temporary, with the real fix still owed and tracked, not quietly dropped once the symptom is gone.
+    (Full rationale: `#3383`'s "Working doctrine (2026-09-04, continued): rule 11" section.)
 
 ## Not `/conveyor`, on purpose
 
