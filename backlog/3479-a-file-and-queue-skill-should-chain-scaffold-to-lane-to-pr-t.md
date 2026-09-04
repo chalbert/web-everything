@@ -1,9 +1,10 @@
 ---
+bornAs: x3c3ylx
 kind: story
 size: 2
 parent: "3383"
 status: open
-blockedBy: ["xyrnzpf"]
+blockedBy: ["3478"]
 dateOpened: "2026-09-04"
 tags: [conveyor, dispatch, delivery]
 ---
@@ -16,7 +17,7 @@ steps a session has to remember and chain by hand every time:
 1. Scaffold the card (`we:scripts/backlog.mjs scaffold` or the declared `scaffold` operation).
 2. Land it — a lane clone, commit, verify-lane, then `/pr`.
 3. Separately work out which checkout's `we:.conveyor/queue.json` sidecar the live conveyor runner is
-   actually reading, and queue the newly-landed item into it — the resolution gap `xyrnzpf` (this
+   actually reading, and queue the newly-landed item into it — the resolution gap `3478` (this
    filing's sibling story, same parent) proposes fixing with a queue-target-resolution operation.
 
 Each step is already scriptable/declared on its own, but nothing chains them, so a session has to
@@ -26,8 +27,8 @@ not a ruling) should wrap scaffold → lane → PR → queue-target-resolve-and-
 
 ## Depends on
 
-Blocked by `xyrnzpf` — this item's own step 3 needs that story's queue-target-resolution operation to
-exist before there is anything to chain to. Build `xyrnzpf` first; this item is the thin orchestration
+Blocked by `3478` — this item's own step 3 needs that story's queue-target-resolution operation to
+exist before there is anything to chain to. Build `3478` first; this item is the thin orchestration
 layer on top of it plus the existing scaffold/lane/PR machinery.
 
 ## Done when
