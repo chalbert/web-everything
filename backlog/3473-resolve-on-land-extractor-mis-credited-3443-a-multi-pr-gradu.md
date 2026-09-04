@@ -2,8 +2,9 @@
 bornAs: xy43dll
 kind: task
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-03"
+dateResolved: "2026-09-04"
 tags: []
 relatedTo: ["3441"]
 ---
