@@ -63,12 +63,19 @@ node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --k
 The tool-bearing juror `review-loop-cli.mjs` spawns REFUSES to run without a lane clone of its own — never the
 primary checkout, never a lane someone else is working in.
 
+**Pass `--wait-ms` (#x3jmao3).** A pool reading "no free lane" is often a MOMENTARY capacity flicker under
+real concurrent load, not genuine exhaustion — live-caught 2026-09-04, when a dispatched review's own
+acquire read the pool as fully held/dirty and gave up instantly, even though it had freed up again within
+minutes. `acquire --wait-ms=<N>` polls (no busy-wait) for up to `N` ms before failing, so this self-heals
+without anyone having to notice and manually retry. This is still bounded, not the open-ended retry loop
+this step's own next paragraph forbids — one call, one deadline.
+
 ```bash
-LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-loop --session={{SESSION_SLUG}} --adopt) && echo "$LANE"
+LANE=$(node scripts/lane-pool.mjs acquire --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=30000 --adopt) && echo "$LANE"
 ```
 
-If this fails, the pool has no free lane right now — report the completion record and exit; do not retry in a
-loop:
+If this still fails after that bounded wait, the pool genuinely has no free lane — report the completion
+record and exit; do not retry in a loop yourself on top of it:
 
 ```bash
 node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
