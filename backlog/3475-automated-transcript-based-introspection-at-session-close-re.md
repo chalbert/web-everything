@@ -2,11 +2,13 @@
 bornAs: xasi4n5
 kind: decision
 parent: "2610"
-status: open
+status: resolved
 scaffoldedBy: "prepare-decision-2610-introspection"
 dateScaffolded: "2026-09-03"
 dateOpened: "2026-09-03"
-dateStarted: "2026-09-03"
+dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
+codifiedIn: "docs/agent/platform-decisions.md#automated-session-introspection"
 preparedDate: "2026-09-03"
 relatedTo: ["2614", "3435", "3383"]
 relatedReport: reports/2026-09-03-automated-transcript-introspection-at-close-reap.md
@@ -14,6 +16,24 @@ tags: [introspection, learnings, conveyor, privacy, decision-prep]
 ---
 
 # Automated transcript-based introspection at session close/reap (single-tenant precursor to #2610)
+
+## Ruling (2026-09-04)
+
+**Ratified 2026-09-04** — per the operator's explicit in-conversation instruction to ratify this card ("I
+ratify 3475"), delegated to the driving session's own call (epic #3383's own standing kanban-style doctrine);
+all three forks accepted as presented, no alternative picked, no amendment beyond what each fork's own
+`Skeptic:` pass already folded in. The toggle-location and trigger-per-session-kind questions were already
+ruled (not forked) below and are unaffected.
+
+- **Fork 1 (execution mode): detached, as stated** — the judge pass runs fire-and-forget, forced for
+  `SessionEnd`'s 1.5s budget and matching the existing best-effort convention elsewhere.
+- **Fork 2 (automatic coverage): every terminal session, unconditionally, as stated** — a cheap mechanical
+  pre-check may skip a structurally-trivial call as a build-time efficiency, not a coverage exclusion.
+- **Fork 3 (output schema and destination): reuse the `#2614` pool with the reinstated `scrubReasons` scrub, as
+  stated** — narrows the privacy gap, does not close it; the residual (field-local, 16-char entropy floor) is
+  an accepted v1 risk.
+
+Codified: [#automated-session-introspection](/docs/agent/platform-decisions.md#automated-session-introspection).
 
 ## Digest
 
