@@ -1,0 +1,20 @@
+{
+  "id": "automated-transcript-introspection-at-close-reap",
+  "title": "Automated session-transcript introspection at close/reap — the three real trigger mechanisms and their platform constraints",
+  "summary": "Prior-art survey for decision xasi4n5 (prepared 2026-09-03, parent #2610): the operator asked for an opt-in mode where every session (background dispatch, main/interactive, Agent-tool subagent) gets an automated LLM judge pass over its own real transcript at close/reap, extracting learnings the way the existing #2614 self-report drop-box already does manually. THE CORRECTED PREMISE (verified against the real platform docs, not assumed) -- the originating brief claimed subagents have no existing close-hook. Two direct fetches of https://code.claude.com/docs/en/hooks (2026-09-03) confirm the harness already ships SubagentStop (fires in the parent session when an Agent-tool subagent finishes, carrying session_id/transcript_path/agent_id/agent_type) and SessionEnd (fires when any session terminates, carrying session_id/transcript_path/cwd) -- neither registered in this repo's own we:.claude/settings.json or the operator's global settings file today. The real gap is wiring an existing hook, not building new harness machinery. A LOAD-BEARING CONSTRAINT THE BRIEF NEVER NAMED -- SessionEnd hooks share a 1.5-second total timeout budget by default (raisable via a per-hook timeout field, capped at 60s), confirmed by a second targeted fetch quoting the exact defaults table -- making a synchronous judge call close to infeasible for the main-session trigger specifically, not merely a style preference. Also found: a SubagentStop hook that exits with code 2 blocks the subagent from stopping at all, a real footgun for whichever build item wires this. THE EXISTING BACKGROUND-SESSION MECHANISM -- we:scripts/conveyor/session-reaper.mjs (#3435) is real, already shipped, already wired into we:skills-src/conveyor/runner.mjs's mechanicalPasses; its own extensively-documented findings (background sessions frequently failing to self-terminate cleanly; a reported-successful claude stop not being proof of exit) independently justify an external, reaper-time transcript read over relying on that session's own internal SessionEnd hook. THE PRIVACY GAP AN AUTOMATED JUDGE OPENS THAT A SELF-REPORT NEVER COULD -- we:scripts/conveyor/learnings-drop.mjs's append-time content scrub was deliberately removed (#3015, ratified #2978 Fork 3) on the grounds that a human typing a short generalized sentence structurally cannot paste a secret; an LLM judge reading a raw transcript and paraphrasing from it does not carry that same structural guarantee. The wide scrubReasons detector (we:scripts/lib/secret-scrub.mjs) survives, exported and tested, kept alive specifically because #2610's tenant-ready schema needs its full width somewhere -- re-wiring it for the automated path narrows this gap substantially, though scrubReasons has its own documented blind spots (field-local scanning, a 16-character floor on its entropy check) that keep the fix from being a complete guarantee. THE MODEL/EFFORT-TIER ANSWER IS ALREADY RATIFIED DOCTRINE, NOT A LIVE CHOICE -- this repo's own model-routing (#1855) and effort-routing (#3106) statutes route a bounded extraction task feeding a later, more careful adjudication step (exactly /harvest's relationship to the pool today) to the Sonnet model rung at low effort, independent of this item's own forks. Full grounding, including two independent skeptic/fresh-context-screen passes that corrected a citation-scope over-reach and reclassified one entire section from a fork to a forced ruling, in we:reports/2026-09-03-automated-transcript-introspection-at-close-reap.md.",
+  "status": "open",
+  "dateOpened": "2026-09-03",
+  "lastReviewed": "2026-09-03",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "conveyor",
+    "introspection",
+    "learnings",
+    "privacy",
+    "hooks",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-09-03-automated-transcript-introspection-at-close-reap.md"
+}
