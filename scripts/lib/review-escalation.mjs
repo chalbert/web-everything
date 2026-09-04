@@ -13,7 +13,7 @@
  * — start loose, tighten from data; they live here so a change is one edit + a test, never scattered.
  */
 import { createHash } from 'node:crypto';
-import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, basenameOf } from './gate-config.mjs';
+import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivationPath, isEngineTierPath, basenameOf } from './gate-config.mjs';
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
 
@@ -331,7 +331,7 @@ export const isGateSelfPath = isPolicyCorePath;
  * the rubric's vocabulary; the roster and the classification live in gate-config.mjs.
  */
 export const isDeclarativeLeashPath = isPolicySpecPath;
-export { isPolicyDerivationPath, isPolicySpecPath };
+export { isPolicyDerivationPath, isPolicySpecPath, isEngineTierPath };
 
 /**
  * The advisory CARE-LEVEL an escalated PR carries (#2567, codified `#blast-radius-advisory-care-not-a-gate`,
@@ -1595,6 +1595,16 @@ export function acceptanceCoversHead({
  * timeout (x30jq9n) this override is the ONE relief valve for a parked `review:pending` PR whose review never
  * arrives — and without this split a blunt `!REVIEW_ESCALATION` gate either strands that PR forever OR (if
  * relaxed wholesale) lets an un-reviewed `review:human`/`review:changes` PR merge under the override — both wrong.
+ *
+ * SCOPE (honest, #2412) — like #2409's SHA-freshness gate, this NON-SCORING predicate does not know the PR's
+ * touched paths, so it CANNOT apply the engine-tier "auto-land also requires `redteam:accepted`" requirement
+ * `decideReviewGate` enforces on the label-scoped drain path: `hasReviewLabel(labels, REVIEW_LABELS.accepted)`
+ * clears an engine-tier PR here exactly as it would any other. This is a deliberately scoped residual, not an
+ * oversight — closing it needs the same per-candidate file-diff fetch the label-scoped drain pays for (via
+ * `scoreEscalation`'s `basisFiles`), which this bare/secondary path does not currently pay for at all, and
+ * bolting a cross-repo diff fetch onto a security-sensitive merge predicate without dedicated review of its own
+ * is a worse trade than documenting the gap plainly. Tracked as a residual on the `#2412` follow-up
+ * (`backlog/xp2rge9-…md`) rather than silently left to be rediscovered.
  * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{allowPending?: boolean}} [opts] - `allowPending: true` on the explicit `--no-review-escalation`
  *   operator override — refuse only `review:human`/`review:changes`, not `review:pending`.
@@ -2132,12 +2142,21 @@ export function decideDurableEscalationRecord({ changed, verified, liveBody, rea
  * review it was waiting for; observed: #396 merged mid-negotiation, stranding mandatory-lens fixes). A parked
  * PR rests parked until a verdict label arrives; a genuinely stuck park is the operator's call — a manual
  * `/drain` with `--no-review-escalation` (see `hasUnclearedReviewLabel`'s `allowPending`) — never an auto-land.
- * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array}} o
+ *
+ * `engineTier` (#2412 Gap 1's remaining layer 4) — does this PR's basis touch an ENGINE-tier trust-chain member
+ * (`isEngineTierPath`, `gate-config.mjs`: the lander, a resident daemon, the dispatch loop)? Those files are
+ * agent-reviewable (an ordinary `review:accepted` verdict is not refused), but they are also the machinery that
+ * LANDS every other PR unattended — so `review:accepted` ALONE is not enough to auto-land one: the INDEPENDENT
+ * hardened validator's sign-off (`redteam:accepted`, #2439) is ALSO required, stacking the two layers rather
+ * than trusting either alone (the recommendation's "defense in depth", `#2412`). Absent `redteam:accepted`, an
+ * otherwise-accepted engine-tier PR parks `review:pending` — agent-reviewable, not stuck, just awaiting the
+ * second, independent verdict. `engineTier:false` (every pre-#2412 caller) reproduces prior behaviour exactly.
+ * @param {{escalate:boolean, humanRequired?:boolean, labels?:Array, engineTier?:boolean}} o
  */
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
-  operatorClearance = null, headReadFailed = false,
+  operatorClearance = null, headReadFailed = false, engineTier = false,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -2239,6 +2258,31 @@ export function decideReviewGate({
         humanRequired: !!toHuman,
         revokesClearance,
         clearance: revokesClearance ? operatorClearance : null,
+      };
+    }
+    // #2412 layer 4 — an ENGINE-tier PR (the lander/daemon/dispatch-loop machinery, `isEngineTierPath`) is the
+    // exact surface that would go on to land every OTHER PR unattended, so `review:accepted` alone does not
+    // clear it: the independent hardened validator's `redteam:accepted` (#2439) must ALSO be present. This is
+    // an ADDITIONAL requirement stacked on top of the ordinary acceptance flow above (staleness / re-park /
+    // suppression are unchanged — checked first, same as before); it fires only once this accept is fresh.
+    // Absent `redteam:accepted`, park `review:pending` (agent-reviewable, not stuck) rather than merge — a
+    // fresh pass re-evaluates the moment the validator's label lands, exactly like any other pending park.
+    if (engineTier && !hasReviewLabel(labels, REVIEW_LABELS.redteamAccepted)) {
+      return {
+        action: 'park',
+        reason: 'review:accepted — reviewer accepted, but this PR touches ENGINE-tier trust-chain machinery '
+          + '(#2412): auto-land also requires the independent hardened validator (redteam:accepted), which has '
+          + 'not signed off yet; parking for its verdict',
+        applyLabel: REVIEW_LABELS.pending,
+        humanRequired: false,
+        // #2412 review-fix (adversarial round 1, finding 2) — a DISTINCT flag from `staleAcceptance`, for the
+        // SAME reason that one exists: `applyEscalationRelief`'s per-PR `--no-review-escalation` valve waives any
+        // verdict shaped `{action:'park', applyLabel:'pending', humanRequired:false}` with no further question,
+        // and this park is exactly that shape. Without a marker distinguishing "no reviewer yet" (waivable) from
+        // "reviewed, but the independent validator hasn't signed off" (NOT waivable — the whole point of the
+        // requirement), the operator's ordinary stuck-park relief valve silently defeats this gate on the first
+        // PR anyone runs it against. See `applyEscalationRelief`'s own check for this flag.
+        awaitingIndependentValidator: true,
       };
     }
     return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };

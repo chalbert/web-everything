@@ -189,6 +189,17 @@ describe('decideSetLabel — changes (a bounce lands nothing)', () => {
     // review:human is never in the removal set, even on the changes path.
     expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
   });
+
+  // #2412 review-fix — redteam:accepted carries no SHA marker of its own (unlike review:accepted), so a bounce
+  // is the one unambiguous "this diff needs fresh eyes" signal that can invalidate a prior independent-validator
+  // sign-off. Without this, an engine-tier PR bounced and re-fixed could re-accept on a stale redteam verdict
+  // that never saw the fix (#2412's own layer-4 requirement would then be satisfied by a label left over from
+  // BEFORE the bounce).
+  it('also strips a stale redteam:accepted (an independent validator sign-off predating the bounce)', () => {
+    const d = decideSetLabel({ to: 'changes', currentLabels: [{ name: REVIEW_LABELS.accepted }, { name: REVIEW_LABELS.redteamAccepted }] });
+    expect(d.allowed).toBe(true);
+    expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
+  });
 });
 
 describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRearm)', () => {
@@ -200,7 +211,7 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
     // #2832 — re-arm applies review:pending (a hold), so ready-to-merge is stripped in the same swap.
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
     expect(d.keepsHuman).toBe(false);
   });
 
@@ -209,7 +220,7 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
     expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
     expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
     expect(d.keepsHuman).toBe(true);
   });
@@ -218,6 +229,14 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(decideSetLabel({ to: 'rearm', currentLabels: pending }).allowed).toBe(false);
     expect(decideSetLabel({ to: 'rearm', currentLabels: human }).allowed).toBe(false);
     expect(decideSetLabel({ to: 'rearm', currentLabels: [] }).allowed).toBe(false);
+  });
+
+  // #2412 review-fix — same reasoning as the `changes` branch: a re-arm hands a repaired bounce back for a
+  // fresh, independent re-review, so a stale redteam:accepted from before the fix must not survive it either.
+  it('also strips a stale redteam:accepted', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: [...changes, { name: REVIEW_LABELS.redteamAccepted }] });
+    expect(d.allowed).toBe(true);
+    expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
   });
 });
 
@@ -2191,7 +2210,7 @@ describe('#3334 — the pure core refuses a reasonless bounce, and NOTHING else'
     const d = decide({ findingCount: 1, reason: '' });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.changes);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
   });
 
   it('ALLOWS a bounce carrying a stated reason over zero findings — the operator override the guard is FOR', () => {

@@ -222,7 +222,10 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       // #2832 — re-arm applies a review-hold (review:pending), so it must atomically strip ready-to-merge: a
       // held PR may never carry the go-ahead. `presentRemoveLabels` narrows this to the labels the PR actually
       // carries, so naming ready-to-merge here is a no-op when it is absent.
-      removeLabels: [REVIEW_LABELS.changes, READY_TO_MERGE_LABEL],
+      // #2412 review-fix — a re-arm hands a repaired bounce back for a fresh, independent re-review (the #2630
+      // invariant this function enforces); same reasoning as the `changes` branch below applies to any stale
+      // `redteam:accepted` the PR still carries from before the fix.
+      removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
       reason: isHuman
         ? 're-armed — review:changes→review:pending; review:human KEPT (gate-self stays human-ceremony-only)'
@@ -334,7 +337,13 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
     // #2832 — a bounce applies a review-hold (review:changes), so it must atomically strip ready-to-merge too
     // (alongside the stale pending/accepted): a held PR may never carry the go-ahead. `presentRemoveLabels`
     // narrows to what the PR actually carries, so listing ready-to-merge is a no-op when it is absent.
-    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL],
+    // #2412 review-fix (adversarial round 1, finding 3) — ALSO strips a stale `redteam:accepted`: that label
+    // carries no SHA/fingerprint of its own (unlike `review:accepted`'s `acceptanceCoversHead` apparatus — the
+    // independent validator's producer plumbing is #2896's still-open concern), so nothing else in the gate can
+    // tell a `redteam:accepted` that covers THIS diff from one left over from before a bounce sent it back for
+    // changes. A bounce is the one unambiguous "this diff is not good as-is" signal available today; leaving the
+    // old sign-off in place would let a re-accept after the fix ride on a validator verdict that never saw it.
+    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
     keepsHuman: isHuman,
     reason: 'changes — author lane fixes hot-context and re-pushes',
   };

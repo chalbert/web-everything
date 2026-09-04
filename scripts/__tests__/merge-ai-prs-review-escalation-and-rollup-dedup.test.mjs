@@ -91,6 +91,17 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       expect(stalePark.staleAcceptance).toBe(true);             // …but it is the #2409 outcome
       expect(applyEscalationRelief(stalePark, { relieved: true }).waive).toBe(false);
     });
+    it('#2412 review-fix — an ENGINE-tier park awaiting redteam:accepted is NEVER waived either', () => {
+      // review:accepted alone, on an engine-tier PR → decideReviewGate parks review:pending with
+      // awaitingIndependentValidator:true. Same applyLabel/humanRequired shape as an ordinary pending park —
+      // the relief valve must key on the flag, not the shape, or it silently defeats the whole requirement.
+      const engineTierPark = decideReviewGate({
+        escalate: true, humanRequired: false, labels: [{ name: REVIEW_LABELS.accepted }], engineTier: true,
+      });
+      expect(engineTierPark.applyLabel).toBe(REVIEW_LABELS.pending); // looks like a pending park…
+      expect(engineTierPark.awaitingIndependentValidator).toBe(true); // …but it is the #2412 outcome
+      expect(applyEscalationRelief(engineTierPark, { relieved: true }).waive).toBe(false);
+    });
   });
 
   describe('a scoped =<pr#> relieves ONE PR while the rest of the pass stays gated', () => {

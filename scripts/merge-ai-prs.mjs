@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -215,6 +215,14 @@ export function applyEscalationRelief(gate, { relieved = false } = {}) {
   // pending-relief valve must NEVER waive it, even though it carries review:pending — a fresh look is required.
   if (gate.staleAcceptance) {
     return { waive: false, reason: 'stale acceptance (#2409) — head advanced past the reviewed commit; not waivable by the pending-relief valve' };
+  }
+  // #2412 review-fix (adversarial round 1, finding 2) — an ENGINE-tier PR awaiting the independent hardened
+  // validator is NOT a "review never arrived" pending park either, for the same reason a stale acceptance
+  // isn't: this park's applyLabel/humanRequired shape is otherwise indistinguishable from an ordinary one, so
+  // without this check the operator's per-PR relief valve would waive the exact requirement #2412 exists to
+  // enforce on the first stuck-looking engine-tier PR anyone points it at.
+  if (gate.awaitingIndependentValidator) {
+    return { waive: false, reason: 'engine-tier PR awaiting the independent hardened validator (redteam:accepted, #2412) — not waivable by the pending-relief valve; the review is not "stuck", it is genuinely incomplete' };
   }
   if (gate.humanRequired || gate.applyLabel === REVIEW_LABELS.human) {
     return { waive: false, reason: 'review:human is human-only — never waivable by a per-PR relief valve (#2285)' };
@@ -4050,7 +4058,12 @@ async function runCli() {
         // this flag changes only the REASON and, for a re-hold that would revoke a clearance, the label write.
         liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed });
+      // #2412 layer 4 — this PR's basis (the SAME set `score` scored blast-radius/gate-self over, #3317) touches
+      // ENGINE-tier trust-chain machinery iff any basis file matches `isEngineTierPath`. Engine tier stays
+      // agent-reviewable (decideReviewGate does not force `humanRequired` for it), but it ALSO can't auto-land
+      // on `review:accepted` alone — see the gate's own docblock for why.
+      const engineTier = (score.basisFiles || []).some((f) => isEngineTierPath(f));
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to

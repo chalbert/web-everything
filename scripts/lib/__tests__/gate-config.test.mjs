@@ -19,8 +19,10 @@ import {
   TRUST_CHAIN,
   TRUST_CHAIN_BASENAMES,
   POLICY_CORE_BASENAMES,
+  ENGINE_BASENAMES,
   isTrustChainPath,
   isPolicyCorePath,
+  isEngineTierPath,
   POLICY_LEASH,
   POLICY_SPEC_BASENAMES,
   POLICY_DERIVATION_BASENAMES,
@@ -174,5 +176,31 @@ describe('TRUST_CHAIN — the declarative-leash / derivation-code split (#2771/#
       expect(isPolicySpecPath(p)).toBe(false);
       expect(isPolicyDerivationPath(p)).toBe(false);
     }
+  });
+});
+
+describe('ENGINE_BASENAMES / isEngineTierPath — #2412 layer 4\'s "is this the lander?" question', () => {
+  it('ENGINE_BASENAMES is derived from, and agrees with, every tier:\'engine\' TRUST_CHAIN entry', () => {
+    const derived = TRUST_CHAIN.filter((m) => m.tier === 'engine').map((m) => m.file);
+    expect(derived.length).toBeGreaterThan(0);
+    for (const file of derived) expect(ENGINE_BASENAMES.has(file)).toBe(true);
+    expect(ENGINE_BASENAMES.size).toBe(new Set(derived).size);
+  });
+  it('a known lander file is engine tier', () => {
+    expect(isEngineTierPath('scripts/merge-ai-prs.mjs')).toBe(true);
+    expect(isEngineTierPath('plateau-app/tools/drain-daemon/daemon.mjs')).toBe(true);
+  });
+  it('a known POLICY-tier file is NOT engine tier — the two sets are disjoint', () => {
+    for (const file of POLICY_CORE_BASENAMES) expect(ENGINE_BASENAMES.has(file)).toBe(false);
+    expect(isEngineTierPath('scripts/lib/review-escalation.mjs')).toBe(false);
+    expect(isEngineTierPath('scripts/lib/gate-config.mjs')).toBe(false);
+  });
+  it('an unregistered basename is not engine tier (the roster never invents membership)', () => {
+    for (const p of ['scripts/pr-land.mjs', 'demos/spa.html', 'docs/agent/platform-decisions.md']) {
+      expect(isEngineTierPath(p)).toBe(false);
+    }
+  });
+  it('the basename match TRAVELS across directories, like the rest of the trust chain', () => {
+    expect(isEngineTierPath('packages/plateau-loop/src/merge-ai-prs.mjs')).toBe(true);
   });
 });
