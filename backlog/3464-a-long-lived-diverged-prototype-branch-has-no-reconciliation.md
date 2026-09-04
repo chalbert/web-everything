@@ -3,10 +3,11 @@ bornAs: xra0mqn
 kind: task
 tier: pinned
 parent: "3383"
-status: active
+status: resolved
 relatedTo: ["3449", "3457", "3443", "3463"]
 dateOpened: "2026-09-03"
 dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
 tags: [conveyor, lane-pool, scope, reconciliation, mechanical-dispatcher]
 scope:
   - we:scripts/conveyor/
