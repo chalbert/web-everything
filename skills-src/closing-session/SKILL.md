@@ -96,6 +96,15 @@ Specifically, scan for:
   `suggestion` — the fix and its owner belong in the entry, so the harvest can file a real item without
   re-deriving them. Do **not** file it here and do **not** ask whether to; an observation you emitted is
   captured.
+- **A raw command standing in for a missing operation** — a hand-written shell loop, an inline script,
+  or a manual multi-step CLI sequence this session ran *because no declared operation*
+  (`we:scripts/operations/*.mjs`, reachable via `run.mjs <operation>`) *existed for that action*. Distinct
+  from the bullet above: that one is a gate/check the session couldn't run; this one is a delivery action
+  the session hand-rolled for lack of a vocabulary entry. **Emit it** as `kind: missing-convention` (or
+  `friction`) — `summary` names what was hand-rolled and why no operation covered it, `suggestion` names
+  `#3029` (Operation engine — declare a delivery operation once, generate every caller) as the likely home
+  a future `/harvest` pass should route it to. As with every §1 finding, the close only names the
+  candidate destination — it never files or routes there itself.
 - **Working-style preferences** the user expressed → emit as `kind: improvement`, `area: working style`.
   (Only a preference the user asks you to remember *right now* is written directly — that's an explicit
   instruction, not the close adjudicating.)
