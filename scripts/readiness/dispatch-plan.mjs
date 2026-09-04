@@ -59,6 +59,7 @@
 
 import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -505,7 +506,12 @@ async function main(argv) {
   }
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify(plan, null, 2) + '\n');
+    // Drain synchronously before exit — `process.stdout.write` is async to a pipe and the `process.exit(0)`
+    // below would drop the unflushed tail, truncating this JSON for an `execFileSync`/pipe consumer (exactly
+    // `tick-core.mjs`'s own `runJson`, which crossed this size for the first time in #3460's enrichment).
+    // `writeLineSync` is remedy (b) from `scripts/lib/write-all-sync.mjs` — keeps the exit, since it's shared
+    // with the non-JSON branch below.
+    writeLineSync(1, JSON.stringify(plan, null, 2));
   } else {
     log(
       `dispatch plan: ${plan.launch.length} launch · ${plan.held.length} held ` +
