@@ -1,8 +1,9 @@
 # Automated transcript-based introspection at session close/reap — prepare-session report
 
-**Session:** `prepare-decision-2610-introspection`, 2026-09-03. **Item prepared:**
-`we:backlog/xasi4n5-automated-transcript-based-introspection-at-session-close-re.md` (JIT id `xasi4n5`,
-`parent: "2610"`, `relatedTo: ["2614", "3435", "3383"]`).
+**Session:** `prepare-decision-2610-introspection`, 2026-09-03. **Item prepared:** "Automated
+transcript-based introspection at session close/reap" — a not-yet-landed, hash-keyed `kind: decision` item
+at prepare time (`parent: "2610"`, `relatedTo: ["2614", "3435", "3383"]`); see its own `relatedReport` link
+back to this file for its identity once landed with a real number.
 
 ## Brief
 
@@ -101,6 +102,21 @@ stamping:
 - **The fresh-context screen cleared every other section** (the toggle ruling, the trigger-mechanism ruling,
   execution mode, and output schema/privacy) as genuinely merit-real and externally observable, not
   prioritization or implementation detail in disguise.
+
+## Addendum (2026-09-04) — one more requirement folded in per the operator's own direction
+
+After the item was first prepared and while its PR was in flight, the operator directed (via the
+coordinator, verbatim): "make sure the next pass checks for that [missing operations], but do not run it
+again" — referring to this exact prepare session's own gap: it had not, until told, checked whether it
+itself ran any raw/hand-rolled command in place of a declared operation, the pattern
+`we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md` (PR #1888) and `closing-session`'s
+own updated §1 bullet (PR #1889) — both landed the same night, after this survey's own initial pass — now
+name explicitly. Rather than re-run introspection on this session (explicitly declined), the requirement was
+folded forward into the mechanism itself: the item's Grounding digest, Fork 3's bold default, and Done-when
+now all state that the future judge pass's rubric MUST include this exact check (emit `kind:
+missing-convention` naming `#3029`), citing both landed precedents so the eventual build mirrors them rather
+than re-deriving the pattern. This is a rubric requirement folded into the existing output-destination fork,
+not a new fork — the coordinator was explicit that it should not become one.
 
 ## Net shape at Definition of Ready
 

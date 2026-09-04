@@ -118,6 +118,18 @@ research topic [`automated-transcript-introspection-at-close-reap`](/research/au
   `/harvest` still owns that call). **This is a mechanical application of an already-ratified doctrine, not
   a live choice** — a fresh-context screen on the original draft flagged bundling it into the coverage fork
   as an implementation detail mis-layered as a decider-facing call; pulled out below.
+- **A concrete, already-ratified rubric requirement for the judge pass, folded in after this item's own
+  prepare session was itself found to have skipped exactly this check once, live, and the operator directed
+  the future mechanism not repeat the gap.** Two same-night precedents this repo just landed (PR #1888:
+  `we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md`; PR #1889: an update to
+  `we:skills-src/closing-session/SKILL.md` §1) both name the identical pattern: a session running a **raw,
+  hand-rolled command in place of a declared operation** (`we:scripts/operations/*.mjs`, reachable via
+  `we:run.mjs <operation>`) that should have existed for that action. The memory leaf's own test — **"would
+  a UI button be able to do this?"** — and `closing-session`'s own now-updated bullet — emit as `kind:
+  missing-convention` (or `friction`), `summary` naming what was hand-rolled and why no operation covered
+  it, `suggestion` naming `#3029` (Operation engine) as the likely home — are the exact shape the automated
+  judge's own rubric must mirror, not redesign from scratch. See Fork 3 and Done-when below for where this
+  becomes a concrete requirement rather than left-open prompt detail.
 
 ## Not a fork: where the toggle lives (governed by an existing statute + a genuine data-egress concern)
 
@@ -368,11 +380,13 @@ privacy requirements bind on whichever is chosen, so the choice is load-bearing,
   with its own validation branch, byte-identical shape for every caller that omits it). It lets `/harvest`
   weight or spot-check the two signal shapes differently later, without forcing that call now.
 - **(c) A wholly separate destination/schema for automated entries.** Real candidate, rejected as the
-  default: fragments `/harvest`'s single view of the pool (two places to dedup against, two schemas to keep
-  in sync), for a difference — provenance — that (b)'s one optional field already captures without a second
-  pipeline. `#2610`'s own "same pipeline shape" framing (`we:backlog/2610-*.md:14-16`, "capture → dedup →
-  red-team → … the multi-tenant generalization of the single-tenant drop-box sweep") argues for one pipeline
-  the multi-tenant version can later generalize wholesale, not two to reconcile.
+  default on a composability ground, not a cost one: a second destination gives `/harvest` two disjoint
+  pools to dedup against instead of one, which is a correctness risk (a real duplicate can survive
+  undetected across a pool boundary the dedup pass never crosses), for a distinction — provenance — that
+  (b)'s one optional field already captures within the single pool `/harvest` already iterates.
+  `#2610`'s own "same pipeline shape" framing (`we:backlog/2610-*.md:14-16`, "capture → dedup → red-team →
+  … the multi-tenant generalization of the single-tenant drop-box sweep") argues for one pipeline the
+  multi-tenant version can later generalize wholesale, not two to reconcile.
 
 **Bold default: (b).** Reuses the existing schema, pool, and downstream pipeline (minimal new surface,
 directly serves `#2610`'s own stated "shape the seams" purpose for this exact epic lineage); substantially
@@ -383,6 +397,14 @@ differentiation (`#2610`'s owner-review screen) will very plausibly want, at nea
 the build item, not this decision:** whether the residual gap (short/split secrets) needs a further,
 dedicated mitigation before this ships, or is an accepted residual risk consistent with what the
 publish-seam `scrubPublish` already accepts elsewhere in this repo.
+
+**Settled, not left open: the judge's rubric must also target the SAME `kind` values this schema already
+carries for the raw-command/missing-operation pattern.** Since destination (b) reuses `#2614`'s existing
+`kind` enum verbatim, the judge prompt naturally emits `kind: missing-convention` (or `friction`) for a
+hand-rolled command that stood in for a missing declared operation — mirroring
+`we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md`'s "would a UI button be able to
+do this?" test and `closing-session`'s own now-updated §1 bullet, not a new destination-shaped question.
+See the Grounding digest and Done-when for why this is a settled requirement, not open prompt detail.
 
 ```js
 // Fork 3(b) — the automated caller scrubs BEFORE calling the existing appendEntry, denying on any hit
@@ -434,7 +456,11 @@ Left to the follow-on build item(s), scaffolded under this card once it resolves
 
 - The exact judge prompt/output-shaping instructions, and the transcript bounding/chunking strategy for a
   session whose transcript exceeds a practical single-call context window (see Fork 2's forced-constraint
-  note).
+  note). **One piece of that rubric is NOT left open, though — see the settled requirement in the Grounding
+  digest and Fork 3's default below: the judge must scan for the raw-command/missing-operation pattern
+  `we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md` and `closing-session`'s own §1
+  already name, emitting `kind: missing-convention` pointing at `#3029` when found.** The rest of the
+  prompt's shape (tone, examples, chunking) is still build-item detail.
 - The exact `WE_INTROSPECTION_ENABLED` read helper's shape and where it lives (a tiny shared module vs. one
   read per call site), and proving true OS-level detachment for Fork 1(b)'s spawn.
 - De-duplication between `closing-session`'s own unchanged manual §1a emission and the new automatic
@@ -463,5 +489,13 @@ Left to the follow-on build item(s), scaffolded under this card once it resolves
    helper, the three trigger wire-ups (reaper insertion point, `SessionEnd` hook entry, `SubagentStop` hook
    entry — with the exit-code-2 and true-detachment constraints from Fork 1), the judge-pass script and its
    prompt/chunking shape, and the `origin`-field schema addition to `we:scripts/conveyor/learnings-drop.mjs`.
-3. This card `resolve`s once every fork is ruled — building the follow-on item is separate work tracked on
+3. **The scaffolded build item's own Done-when must require the judge's rubric to include the
+   raw-command/missing-operation scan** — mirroring, not redesigning,
+   `we:agent-memory-src/act-as-if-a-ui-were-the-one-filing-changing-items.md`'s "would a UI button be able
+   to do this?" test and `closing-session`'s own §1 bullet (PR #1889): flag a hand-rolled command that stood
+   in for a missing `we:scripts/operations/*.mjs` operation, emitted as `kind: missing-convention` (or
+   `friction`) naming `#3029` as the likely home. This is carried forward from this same prepare pass's own
+   introspection gap (found live, folded in per the operator's direction, not re-run) — a follow-on build
+   that ships without this specific check does not satisfy this card's own ruling.
+4. This card `resolve`s once every fork is ruled — building the follow-on item is separate work tracked on
    its own card, not a precondition of this card's own resolution (matching `#3457`'s convention).
