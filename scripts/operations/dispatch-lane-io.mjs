@@ -1205,7 +1205,7 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  * exclusion are single-sourced rather than two readers independently reinventing (and inevitably disagreeing
  * about) what counts.
  *
- * FIVE FILTERS, each closing a real false-positive this function's own authoring (or #3473's) turned up
+ * SIX FILTERS, each closing a real false-positive this function's own authoring (or #3473's) turned up
  * against live data:
  *   1. `state === 'MERGED'` (belt-and-suspenders — the caller already asks `gh` for `--state merged`, but a
  *      pure filter over what the caller actually got is cheaper to trust than the query string).
@@ -1223,8 +1223,11 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  *      SKILL.md` — its own PR body opens "No code behaviour changes — this is a backlog reconciliation plus
  *      one in-code comment repoint"), and PR #1613 (ref `lane/split-3096`, title "WE #3096: split along its
  *      two scope entries — skill rewiring vs liveness hardening") whose diff (`gh pr view 1613 --json files`)
- *      touches exactly 2 files, both `backlog/*.md` (body opens "No code changes — two backlog files"). Both
- *      previously read as "already done"; this filter excludes both.
+ *      touches exactly 2 files, both `backlog/*.md` (body opens "No code changes — two backlog files"). This
+ *      filter reliably excludes PR #1613 — but NOT PR #1599: `gh`'s own `files` field for that long-lived
+ *      branch is STALE (reports 17 files, 3 of them real `.mjs` changes that landed on `main` independently
+ *      while the branch sat open, vs. the 4-file all-markdown TRUE diff `git show` proves), so this
+ *      changed-file check alone cannot exclude it. Filter 6 below closes that gap.
  *   5. (#3473) "does not resolve #NNN" BODY DISCLAIMER, scoped to THIS `num` (unlike the sibling
  *      `deliveredItemNumsFromPr` in `we:scripts/lib/open-pr-items.mjs`, which must extract potentially-multiple
  *      candidate ids before it can scope the disclaimer, this function already knows the single id it is
@@ -1233,6 +1236,12 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  *      than a file-shape heuristic, for the case no file-shape check can catch (a real code PR that explicitly
  *      says it only lands a partial increment — see `deliveredItemNumsFromPr`'s guard 6 docblock for the
  *      `#3443`/PR #1866 case this mirrors).
+ *   6. (#3473, added during this item's own post-fix verification) "no code changes" BLANKET BODY DISCLAIMER
+ *      — closes the PR #1599 gap filter 4 leaves open: its stale `gh` `files` field defeats filter 4, but its
+ *      own body still opens with a blanket claim ("No code behaviour changes — this is a backlog
+ *      reconciliation plus one in-code comment repoint"), the same shape PR #1613's body uses ("No code
+ *      changes — two backlog files."). A body matching `/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i` excludes
+ *      the PR outright, independent of (and a backstop for) filter 4's changed-file check.
  * NOTE: {@link filterAlreadyDoneCandidates} is a SIBLING implementation of `deliveredItemNumsFromPr`
  * (`we:scripts/lib/open-pr-items.mjs`) — no shared code, no import between the two files — because this one
  * feeds a dispatch-time HOLD (recoverable false positive) while that one feeds an auto-committed `status:
@@ -1273,6 +1282,9 @@ export function filterAlreadyDoneCandidates(prs, num) {
     .filter((p) => !(Array.isArray(p?.files) && p.files.length > 0 && p.files.every((f) => /\.md$/i.test(String(f?.path ?? f)))))
     // #3473 guard 5 — the PR's own body explicitly disclaims resolving THIS id. A no-op when `body` is absent.
     .filter((p) => !disclaimerRe.test(String(p?.body ?? '')))
+    // #3473 guard 6 — a blanket "no code changes" disclaimer excludes the PR outright (backstop for guard 4
+    // when `files` is stale — see PR #1599 in this function's own docblock). A no-op when `body` is absent.
+    .filter((p) => !/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(String(p?.body ?? '')))
     .sort((a, b) => (Date.parse(b?.mergedAt ?? '') || 0) - (Date.parse(a?.mergedAt ?? '') || 0));
 }
 

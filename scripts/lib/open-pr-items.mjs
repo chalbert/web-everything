@@ -105,13 +105,25 @@ export function itemNumsFromPr(headRefName = '', title = '') {
  *      docblock's own asymmetry above (a false negative re-strands the item, recoverable by a human; a false
  *      positive silently corrupts an unrelated item on main) — a genuine future doc-only single-PR delivery
  *      item would need manual resolution instead of auto-credit, which is the correct trade.
- * Both guards are additive and fully backward compatible: the 3rd argument defaults to `{ body: '',
- * changedFiles: null }`, under which neither guard can ever fire, so every existing call site (and every
+ *   8. (added during this item's own post-fix verification, 2026-09-04) "no code changes" BLANKET BODY
+ *      DISCLAIMER — PR #1599 (`lane/reconcile-3147-3096-3239`, credited toward `#3096`) is a real false
+ *      positive guard 7 CANNOT catch: its true merge-commit diff is 4 files, all markdown, but `gh`'s own
+ *      `files` field for this long-lived branch is stale/inflated (reports 17 files, 3 of them real `.mjs`
+ *      changes that landed on `main` independently while the branch sat open — verified via `git show
+ *      90fe066f6 --stat` vs. the branch's real merge-base diff) — so guard 7's changed-file check, fed by that
+ *      same stale `gh` data, cannot exclude it either. Its own body, like PR #1613's ("No code changes — two
+ *      backlog files."), opens with a blanket claim rather than a per-id one: "No code behaviour changes —
+ *      this is a backlog reconciliation plus one in-code comment repoint." A PR body matching
+ *      `/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i` is excluded ENTIRELY (all ids, not just one) — unlike
+ *      guard 6 above, this disclaimer names no specific id to scope to, so it reads as "nothing in this PR was
+ *      implemented," period. Checked alongside guard 7, before any other computation.
+ * Guards 6-8 are additive and fully backward compatible: the 3rd argument defaults to `{ body: '',
+ * changedFiles: null }`, under which none of them can ever fire, so every existing call site (and every
  * pre-#3473 test) gets IDENTICAL output to before this change.
  * @param {string} headRefName
  * @param {string} title
  * @param {{body?: string, changedFiles?: (Array<string|{path?: string}>|null)}} [o] - #3473: `body` is the
- *   PR's own description text (guard 6); `changedFiles` is the PR's changed-file list, either plain path
+ *   PR's own description text (guards 6/8); `changedFiles` is the PR's changed-file list, either plain path
  *   strings or `{path}`-shaped rows as `gh pr view --json files` returns (guard 7). Both default to inert.
  * @returns {string[]} zero-padded item ids this PR's ref/title claims to DELIVER (not merely mention)
  */
@@ -121,6 +133,11 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '
   // delivery, whatever the ref/title reads as. Checked FIRST, before any other computation, so a housekeeping
   // PR short-circuits regardless of which other rule below would otherwise have credited it.
   if (Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every((f) => /\.md$/i.test(String(f?.path ?? f)))) {
+    return [];
+  }
+  // #3473 guard 8 — a blanket "no code changes" disclaimer in the PR's own body excludes it entirely,
+  // independent of (and a backstop for) guard 7's changed-file check, which a stale `gh` files list can defeat.
+  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(String(body || ''))) {
     return [];
   }
   if (isAnnotationPr({ headRefName: ref, title })) return []; // scope-authoring / prepare-decision — not a build

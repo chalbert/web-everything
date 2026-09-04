@@ -107,33 +107,34 @@ item's fix widens to cover BOTH call sites in one pass — `filterAlreadyDoneCan
 (an all-markdown-diff exclusion, and a "does not resolve #NNN" body-disclaimer exclusion scoped to the id being
 checked) as `deliveredItemNumsFromPr`, implemented separately since the two functions share no code.
 
-### Residual, found during direct post-fix verification (2026-09-04) — NOT fully closed for PR #1599
+### A third guard, added after direct post-fix verification turned up a `gh` data quirk (2026-09-04)
 
 Live re-check of `defaultCheckAlreadyDoneAsync('3096')` against the fixed code (`gh pr list --search "3096
-in:title" --state merged`, real data, verified 2026-09-04): the all-markdown-diff guard correctly excludes
-PR #1613 (`gh pr view 1613 --json files` really does return only 2 files, both `we:backlog/*.md`), but does
-**NOT** exclude PR #1599 — even though its TRUE merge diff is the 4-files-all-markdown shape cited above. The
-reason: `gh pr view 1599 --json files` / `gh pr list --search … --json files` report **17 files** for PR
+in:title" --state merged`, real data, verified 2026-09-04) first showed the all-markdown-diff guard correctly
+excluding PR #1613 (`gh pr view 1613 --json files` really does return only 2 files, both `we:backlog/*.md`),
+but NOT excluding PR #1599 — even though its TRUE merge diff is the 4-files-all-markdown shape cited above.
+Reason: `gh pr view 1599 --json files` / `gh pr list --search … --json files` report **17 files** for PR
 #1599, including three real `.mjs` files (`we:scripts/lib/jury-core.mjs`, `we:scripts/lib/jury-ledger.mjs`,
 `we:scripts/workflows/review-parked-prs.mjs`) with nonzero additions/deletions — while `git show 90fe066f6
 --stat` (the actual merge commit's first-parent diff) shows only the 4 files. Root cause (verified via `git
 merge-base 5a1d82b95 f0cadd290` then a diff-stat of that merge-base against `f0cadd290`, which reproduces the
 TRUE 4-file all-markdown diff): GitHub's own `files` field for a long-lived branch that accumulated unrelated
 commits (this one folded in three duplicate cards' worth of history) does not reliably match the real
-merge-commit diff — a GitHub API staleness/base-drift quirk, not a bug in this fix's guard logic.
+merge-commit diff — a GitHub API staleness/base-drift quirk, not a bug in this fix's guard logic. The
+all-markdown-diff guard alone left #3096 reading `done: true`, now attributed to PR #1599 instead of PR #1613.
 
-**Net effect**: post-fix, `defaultCheckAlreadyDoneAsync('3096')` still returns `done: true`, now attributed to
-PR #1599 (previously it was attributed to PR #1613, the more-recently-merged of the two, since the pre-fix
-sort picks the most-recent survivor). So this fix demonstrably narrows the false-positive set (removes #1613's
-contribution, and would remove #1599's too if `gh` reported its true diff) and fully closes the two
-`deliveredItemNumsFromPr` cases (#3443/PR #1866/PR #1886) that were this item's primary target, but does
-**not**, by itself, fully unblock #3096's live dispatch — that residual traces to GitHub's own data, not to
-this extractor. Deliberately NOT chased further here (a git-merge-commit-diff cross-check would need this
-operation to depend on local git history for an arbitrary already-merged PR, a materially bigger design change
-than the two reviewed guards, out of scope for this pass) — named as a residual rather than silently declared
-fixed. A human/agent hitting `#3096` still held as already-done should now know why, and that closing it needs
-either a follow-up guard that cross-checks the real merge-commit diff, or a manual dispatch bypassing the
-already-done hold.
+Rather than depend on local git history for an arbitrary already-merged PR (a materially bigger design change
+than the two reviewed guards), a THIRD, simpler guard closes this: PR #1599's own body — like PR #1613's —
+opens with a blanket disclaimer, not a per-id one ("No code behaviour changes — this is a backlog
+reconciliation plus one in-code comment repoint." vs. #1613's "No code changes — two backlog files."). A body
+matching `/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i` excludes the PR entirely (all ids, unlike the
+per-id-scoped "does not resolve #NNN" guard), independent of the `files` field's reliability. Added to both
+`deliveredItemNumsFromPr` (guard 8) and `filterAlreadyDoneCandidates` (guard 6).
+
+**Post-guard-8/6 re-verification (2026-09-04)**: `defaultCheckAlreadyDoneAsync('3096')` now returns
+`{ done: false, checked: true, pr: null }` against real `gh` data — #3096 no longer reads as already-done from
+either PR. Both false-positive vectors on #3096 (the all-markdown-diff-detectable PR #1613, and the
+`gh`-files-stale-but-body-disclaimed PR #1599) are closed.
 
 `#3096`'s and `#3353`'s own cards/status are NOT touched by this fix — they are cited here only as evidence.
 Once the fix lands, the dispatch-time already-done check naturally stops holding #3096 as already-done on its

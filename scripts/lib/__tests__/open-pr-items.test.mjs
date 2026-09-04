@@ -218,6 +218,48 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
       { changedFiles: ['backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md', 'backlog/3147-x.md', 'backlog/3239-x.md', 'skills-src/conveyor/SKILL.md'] },
     )).toEqual([]); // guard 7 (all-.md diff) suppresses both once the real changed-file shape is supplied
   });
+
+  it('#3473 guard 8 — PR #1599\'s REAL (stale) gh changedFiles list (17 files, 3 real .mjs) defeats guard 7, but the blanket "no code changes" body disclaimer (guard 8) still excludes it', () => {
+    // Live-verified 2026-09-04: `gh pr view 1599 --json files` returns 17 files including
+    // scripts/lib/jury-core.mjs, scripts/lib/jury-ledger.mjs, scripts/workflows/review-parked-prs.mjs — NOT
+    // all-.md — even though the PR's true merge-commit diff (`git show 90fe066f6 --stat`) is 4 files, all
+    // markdown. Guard 7 alone cannot exclude this PR from that real (stale) gh data; guard 8 (the PR's own
+    // "No code behaviour changes" opening line) does.
+    expect(deliveredItemNumsFromPr(
+      'lane/reconcile-3147-3096-3239',
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      {
+        body: 'No code behaviour changes — this is a backlog reconciliation plus one in-code comment repoint.',
+        changedFiles: [
+          'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md',
+          'backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md',
+          'backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md',
+          'backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md',
+          'docs/agent/platform-decisions.md',
+          'scripts/lib/jury-core.mjs',
+          'scripts/lib/jury-ledger.mjs',
+          'scripts/workflows/review-parked-prs.mjs',
+          'skills-src/conveyor/SKILL.md',
+        ],
+      },
+    )).toEqual([]);
+  });
+
+  it('#3473 guard 8 — PR #1613\'s real body ("No code changes — two backlog files.") also matches the blanket disclaimer', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/split-3096',
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      { body: 'Splits #3096 along its two scope: entries. No code changes — two backlog files.' },
+    )).toEqual([]);
+  });
+
+  it('#3473 guard 8 does not over-fire on a real delivery body that happens to mention "no code" in an unrelated sense', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3412-resolve-fix',
+      'WE #3412: resolve fix',
+      { body: 'This fix requires no code review sign-off beyond CI, and lands the feature end to end.' },
+    )).toEqual(['3412']);
+  });
 });
 
 describe('extractItemNums', () => {
