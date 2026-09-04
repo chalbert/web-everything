@@ -4056,6 +4056,59 @@ topic [`automated-transcript-introspection-at-close-reap`](/research/automated-t
 
 ---
 
+### Agent-run commands split by mutation — reads stay free and sandboxed, mutations route only through a strictly-typed, fail-closed operation catalog; a capability gap rides the existing learnings pool {#agent-mutations-through-typed-operations}
+
+**Ratified 2026-09-04** — per the operator's explicit in-conversation instruction to ratify this card
+("Ratified"); both forks accepted as the prepared card's own bolded recommended defaults, no alternative
+picked, no amendment beyond what each fork's own prepared reasoning already folded in. Grounded in a
+measurement of all 64,752 `Bash` calls across 4,485 local sessions
+([the sizing report](../../reports/2026-08-08-agent-command-surface-sizing.md)). Two clauses:
+
+1. **Fork 1 — how an agent session runs a mutating command: split by mutation.** Reads and inspection stay
+   free, broad, and sandboxed — the agent runs them itself (measured at 72.2% of call volume, with no
+   catastrophic failure mode). Anything that **mutates state outside the agent's own lane clone** — writes to
+   the primary checkout, `git push`, `gh`, network calls, installs, deploys — goes only through a named
+   operation, executed by the mechanical layer, failing **closed**: an operation with no covering declaration
+   is refused, not allowed by default. This buys the fail-closed property where it matters (measured at 6.7%
+   of call volume) without paying the coverage cost across the 72.2% that carries no comparable risk. A full
+   allow-list over everything, reads included, was considered and rejected — the coverage burden would land
+   almost entirely where the risk is not, which is where operation-catalog designs usually die; keeping the
+   status-quo deny-list over everything was also rejected — six review rounds on the command guard
+   demonstrated the failure is structural (an enumeration cannot be completed from inside the thing being
+   enumerated), not a matter of more effort.
+   **Sub-decision ratified with the fork: operation parameters are strictly typed.** An operation like
+   `run(script, args)` that passes strings through to a shell re-imports the entire enumeration problem
+   behind a friendlier name; `pr.merge(number: int)` does not. Typed parameters are the whole difference
+   between an allow-list and a rename, and this is ratified as part of the fork rather than left to each
+   operation's own implementation to decide.
+2. **Fork 2 — how an agent reports a capability gap: the existing learnings pool, no new channel.** Same
+   shape as the harvest pipeline: the session **emits** (what it was trying to do, what it would have run,
+   what it did instead) and never adjudicates in-session; a periodic pass dedups, ranks by recurrence, and
+   routes survivors to catalog additions. A dedicated gap channel was considered and rejected as a second
+   emit/dedup/route pipeline duplicating a seam that already works.
+
+**Sandboxing is not a substitute for either fork.** A sandbox bounds *damage*; the operation catalog bounds
+*authority*. A sandbox does not stop a force-push to `main` or a `gh pr merge` — legal actions performed with
+real credentials, and the ones that hurt here. Both are wanted; neither substitutes for the other.
+
+**What this ruling does not settle.** The `curl`/`net.fetch` host-allow-list question is an open sub-question,
+not ratified here — it needs its own survey of what agents actually fetch. Nor does this ruling build the
+enforcement mechanism: `we:scripts/guard-bash.mjs` stays a deny-list until its own follow-on flips it, and the
+typed-operation catalog itself is not yet closed for every mutating family the sizing report measured — both
+are named, scoped follow-on build items, deliberately not attempted in the same change as this statute edit.
+
+**Lineage:** ratified via `#3001` (2026-09-04). Full reasoning, prior-art survey and the sizing report:
+[#3001](/backlog/3001-should-agents-call-named-operations-instead-of-writing-shell/). Follow-on build:
+[close the operation-catalog gaps](/backlog/xgfob3u-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/),
+then [flip `we:scripts/guard-bash.mjs` to a fail-closed allow-list](/backlog/xtgier7-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/)
+(`blockedBy` the first). Composes with
+[#dispatched-agent-never-runs-commands-directly](#dispatched-agent-never-runs-commands-directly) (the
+narrower, already-ratified dispatched-agent case this fork generalizes) and
+[#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) (`#3029`, the
+engine the closing catalog builds onto).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from

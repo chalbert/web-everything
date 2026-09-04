@@ -2,8 +2,11 @@
 bornAs: xbzq6pc
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-08"
+dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
+codifiedIn: "docs/agent/platform-decisions.md#agent-mutations-through-typed-operations"
 preparedDate: "2026-08-08"
 tags: [guard, agent-surface, orchestrator-mechanization, security]
 relatedTo: ["2986", "2994", "2749", "2788", "2302"]
@@ -14,6 +17,39 @@ scope:
 ---
 
 # Should agents call named operations instead of writing shell?
+
+## Ruling (2026-09-04)
+
+**Ratified 2026-09-04** — per the operator's explicit in-conversation instruction to ratify this card
+("Ratified"), confirming both forks on the card's own bolded recommended defaults, no alternative picked, no
+amendment beyond what each fork's own prepared reasoning already folded in.
+
+- **Fork 1: (c) — split by mutation, the bold default.** Reads and inspection stay free, broad, and
+  sandboxed — the agent runs them itself. Anything that mutates state **outside the agent's own lane clone**
+  (writes to the primary checkout, `git push`, `gh`, network calls, installs, deploys) goes only through a
+  named operation with **strictly typed parameters**, executed by the mechanical layer, failing **closed**.
+  The sub-decision ratified with the fork: parameters are strictly typed — `run(script, args)` re-imports the
+  enumeration problem behind a friendlier name; `pr.merge(number: int)` does not.
+- **Fork 2: (a) — capability-gap notes ride the existing learnings pool, the bold default.** No new
+  dedicated gap channel. Same shape as the harvest pipeline: a session emits what it was trying to do, what
+  it would have run, and what it did instead; a periodic pass dedups, ranks by recurrence, and routes
+  survivors to catalog additions.
+
+**Follow-on build filed at ratification, deliberately NOT built in this same PR** — this ruling has real,
+non-trivial downstream implementation work (flipping `we:scripts/guard-bash.mjs` from a deny-list to a
+fail-closed allow-list is a structural security change that could break real agent workflows if rushed), so
+it is scoped as its own careful build rather than attempted alongside the statute edit:
+
+- [Close the gaps in the typed mutation-operation catalog (finish the report's 7-family, ~28-operation
+  catalog)](/backlog/xgfob3u-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/) (parent: this
+  item) — per the sizing report, roughly 83 raw implementations already exist across the 7 families; this
+  finishes and closes that existing catalog rather than building one from scratch.
+- [Flip `we:scripts/guard-bash.mjs` from a deny-list to a fail-closed allow-list for mutating
+  commands](/backlog/xtgier7-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/) (parent: this
+  item; `blockedBy` the catalog item above) — the actual enforcement flip, deliberately sequenced after the
+  catalog is solid so it does not fail-closed against commands nothing yet covers.
+
+Codified in `we:docs/agent/platform-decisions.md#agent-mutations-through-typed-operations`.
 
 Rule whether agent sessions keep writing free-form shell guarded by a deny-list, or call a typed,
 allow-listed **operation catalog** the mechanical layer executes — and how an agent reports a capability gap
