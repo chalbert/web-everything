@@ -110,6 +110,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
+import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -315,6 +316,56 @@ export function makeGroundTruthResolver({
   };
 }
 
+/**
+ * How many total attempts (1 initial + retries) the stop loop below makes for ONE candidate before counting it
+ * a real failure — found live 2026-09-04 (WE #3435/#3383 epic): a live tick's `runQuiet` (`we:skills-src/
+ * conveyor/runner.mjs`) logged exactly one mechanical-pass failure for this file over 190+ ticks of a live
+ * overnight run, and it turned out to be undiagnosable — see {@link STOP_RETRY_BACKOFF_MS} and the file header
+ * comment above {@link stopSession}'s import for why: `claude stop`'s own upstream flakiness ("claude stop's
+ * reported success is a hint, not a certainty", issues #65925/#45250/#41461) is a KNOWN, generally-transient
+ * class of failure this file already treats as benign for the "reported success but listing lags" direction —
+ * a genuine non-`No job matching` `claude stop` error (a momentary CLI-internal lock/timeout under this
+ * environment's own live concurrency — dozens of `claude` invocations across dispatch, review and mechanical
+ * passes racing the same session registry at once) is the SAME class, just the inverse direction (a real
+ * failure that is likely to clear on its own). Retrying beats leaving it to the next tick two ways: it usually
+ * recovers the stop immediately, and — because ONE candidate failure marks the WHOLE pass's own exit code
+ * failed below (`process.exit(failures > 0 || anomalies > 0 ? 1 : 0)`, kept intentional — see that comment) —
+ * it stops a single transient blip from making an otherwise-clean sweep read as a mystery crash to the runner.
+ * Concurrency was stress-tested live (25 concurrent `claude stop` + 10 concurrent `claude agents --json --all`
+ * calls at once, repeatedly) without reproducing a hard failure — so a short, bounded retry is expected to
+ * clear a real one; it is not chasing a reproduced deterministic bug because there isn't one to chase.
+ */
+export const STOP_RETRY_ATTEMPTS = 3;
+
+/** Backoff (ms) before retry attempt 2 and attempt 3 respectively (index 0 = wait before the 2nd attempt) —
+ *  short, since the live stress test above found no contention surviving even a fraction of a second; long
+ *  enough to clear a momentary CLI-internal lock without meaningfully delaying the tick. */
+export const STOP_RETRY_BACKOFF_MS = [300, 900];
+
+/**
+ * {@link stopSession}, retried up to {@link STOP_RETRY_ATTEMPTS} times with {@link STOP_RETRY_BACKOFF_MS}
+ * backoff between attempts, for a transient `claude stop` failure — see {@link STOP_RETRY_ATTEMPTS}'s own doc
+ * for why this exists and why it lives HERE (the IO shell's own retry policy) rather than inside
+ * {@link stopSession} itself (`dispatch-abort.mjs`'s other callers, e.g. `wake.mjs`'s interactive abort, want
+ * the FIRST failure surfaced immediately, not silently retried behind the operator's back). Never retries an
+ * `alreadyGone` answer — that is not a failure, `stopSession` already resolves it. Injectable `sleep` so a test
+ * proves the retry without a real wall-clock wait.
+ * @param {{handle:string, exec?:Function, sleep?:(ms:number)=>void, attempts?:number, backoffMs?:number[]}} o
+ * @returns {{stopped:true, alreadyGone:boolean, output:string}}
+ */
+export function stopSessionWithRetry({ handle, exec = execFileSync, sleep = sleepSyncMs, attempts = STOP_RETRY_ATTEMPTS, backoffMs = STOP_RETRY_BACKOFF_MS } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return stopSession({ handle, exec });
+    } catch (e) {
+      lastErr = e;
+      if (attempt < attempts) sleep(backoffMs[attempt - 1] ?? backoffMs[backoffMs.length - 1]);
+    }
+  }
+  throw lastErr;
+}
+
 const log = (m) => process.stderr.write(m + '\n');
 
 function parseFlags(argv) {
@@ -379,7 +430,9 @@ function main(argv) {
       continue;
     }
     try {
-      const res = stopSession({ handle, exec: execFileSync });
+      // Retried — see {@link stopSessionWithRetry}'s own doc for why: a `claude stop` failure found live
+      // 2026-09-04 was a transient CLI-internal hiccup, not a hard bug, and usually clears within a beat.
+      const res = stopSessionWithRetry({ handle, exec: execFileSync });
       if (res.alreadyGone) alreadyGone++;
       else stopped++;
       log(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
@@ -387,8 +440,9 @@ function main(argv) {
     } catch (e) {
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
-      // as per-candidate, not pass-fatal.
-      log(`  ⚠ ${handle}: stop failed (${String(e?.message || e).split('\n')[0]}) — left for the next tick`);
+      // as per-candidate, not pass-fatal. Reaches here only after `STOP_RETRY_ATTEMPTS` all failed, so this IS
+      // a real (not merely transient) failure — worth saying so, since the retry count is otherwise invisible.
+      log(`  ⚠ ${handle}: stop failed after ${STOP_RETRY_ATTEMPTS} attempts (${String(e?.message || e).split('\n')[0]}) — left for the next tick`);
       failures++;
     }
   }
