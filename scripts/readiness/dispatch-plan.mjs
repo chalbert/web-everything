@@ -97,9 +97,19 @@ import { writeLineSync } from '../lib/write-all-sync.mjs';
  *  stale `status:`/frontmatter this check exists to stop trusting blind. HOLDS, never auto-resolves — the shell
  *  never mutates the item's frontmatter on this item's own say-so (see `filterAlreadyDoneCandidates`'s docblock
  *  in `we:scripts/operations/dispatch-lane-io.mjs` for the false-positive residual this leaves recoverable). The
- *  operator gloss is {@link ALREADY_DONE_HINT}. */
+ *  operator gloss is {@link ALREADY_DONE_HINT}.
+ *
+ *  `branch-drift-blocked` (#3464): a queued item whose scope overlaps a long-lived dispatched-work branch's
+ *  (e.g. `lane/mechanical-dispatcher`) own unreconciled, blocked drift — `we:scripts/conveyor/branch-drift.mjs`'s
+ *  latest `check` verdict is `blocked` (a dry-run merge conflicts, or the branch sits past its reconciliation
+ *  ceiling) AND this item's scope overlaps the drifting branch's own live scope. This is the concrete guard
+ *  #3464's incident named: two independently-scoped, individually-correct dispatch streams (this pool's `main`
+ *  dispatch, and the branch's own out-of-band one) piling MORE changes onto the same hot files while nothing
+ *  reconciles them, until the eventual merge becomes unresolvable. HOLDS — it never auto-reconciles the branch;
+ *  it only pauses NEW same-scope dispatch until a fresh sweep clears it. The operator gloss is
+ *  {@link BRANCH_DRIFT_BLOCKED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -125,6 +135,12 @@ export const NEEDS_DECISION_HINT = 'decision — prepare its forks, then present
  *  `we:scripts/operations/dispatch-lane-io.mjs#filterAlreadyDoneCandidates`), clear it back into the queue by
  *  hand. Never auto-actioned — a human/agent call, not a mechanical one. */
 export const ALREADY_DONE_HINT = 'a merged PR already appears to close this out — verify, then resolve or re-clear';
+
+/** The operator-facing gloss for a `branch-drift-blocked` hold (#3464) — surfaced beside the token so a held
+ *  item always tells the operator WHAT to do: a long-lived dispatched-work branch's own reconciliation sweep
+ *  found a conflict/ceiling breach against the SAME scope this item wants to touch; reconcile the branch (or
+ *  wait for the next sweep to clear it), then re-dispatch. */
+export const BRANCH_DRIFT_BLOCKED_HINT = 'a dispatched-work branch is unreconciled over this scope — reconcile it, then re-dispatch';
 
 /**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
@@ -162,6 +178,17 @@ export const ALREADY_DONE_AGE_GATE_ENV = 'WE_DISPATCH_PLAN_ALREADY_DONE_AGE_MS';
  * @param {number} [ageGateMs] - defaults to {@link ALREADY_DONE_AGE_GATE_MS}.
  * @returns {boolean}
  */
+/** The default drift-watched branch + its own live scope (#3464) — the SAME repo-qualified form `scope:`
+ *  frontmatter and lease scopes already use, so it compares directly via `scopesOverlap`. Matches
+ *  `we:scripts/conveyor/branch-drift.mjs`'s own `DEFAULT_DRIFT_BRANCH`/`DEFAULT_DRIFT_TARGET` — kept as
+ *  separate constants (not imported) because the IO shell only needs the SCOPE the branch is presumed to carry
+ *  unreconciled changes in, not the branch-drift module's git-plumbing internals. Overridable via
+ *  `--drift-scope=<repo:path,...>` for a future second long-lived branch, or `--no-drift-check` to skip the
+ *  check entirely (mirrors `--no-ground-truth`). */
+export const DEFAULT_DRIFT_BRANCH = 'lane/mechanical-dispatcher';
+export const DEFAULT_DRIFT_TARGET = 'main';
+export const DEFAULT_DRIFT_SCOPE = Object.freeze(['we:scripts/conveyor/', 'we:skills-src/conveyor/']);
+
 export function isStaleEnoughForGroundTruth(item, nowMs, ageGateMs = ALREADY_DONE_AGE_GATE_MS) {
   const at = Date.parse(String(item?.dateStarted || item?.dateOpened || ''));
   if (Number.isNaN(at)) return true; // no usable date — cannot prove it is fresh, so do not skip it blind
@@ -185,6 +212,7 @@ function hasOpenBlockers(item) {
  *   queue: Array<{num:(string|number), kind?:string, scope?:string[], openBlockers?:(string[]|number), alreadyDonePr?:(object|null)}>,
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
+ *   driftBlockedScope?: string[]|null,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
@@ -202,18 +230,24 @@ function hasOpenBlockers(item) {
  *                   The "free lane-slot COUNT" the spec names is exactly `freeLanes.length`; the ids let a
  *                   launch carry the concrete `lane` it lands on. (Ids, not a bare count, because the plan's
  *                   `launch` must name a real lane — the same lane ids the "overlaps lane-<n>" holds reference.)
+ *   • `driftBlockedScope` — (#3464) the drifting scope of a long-lived dispatched-work branch currently
+ *                   `blocked` (a dry-run merge conflict, or past its reconciliation ceiling), or `null`/absent
+ *                   when no branch is currently blocked (the common case, and the fail-open default when the
+ *                   IO shell's drift check itself fails). A scoped item overlapping this holds
+ *                   `branch-drift-blocked`, checked ahead of the lease/rival overlap gates — see
+ *                   {@link BRANCH_DRIFT_BLOCKED_HINT}.
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
- *   `held`   — every other queued item with its single reason ∈
- *              "already-done" | "blocked" | "needs-slice" | "needs-decision" | "overlaps lane-<n>" | "no free lane" | "unshaped-no-scope".
+ *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
     .map((l) => ({ lane: l.lane ?? null, scope: normScope(l.scope) }));
   const free = [...(Array.isArray(freeLanes) ? freeLanes : [])]; // consumed front-to-back, rank order
+  const driftScope = normScope(driftBlockedScope); // [] when absent/null — scopesOverlap against [] is always false
 
   const launch = [];
   const held = [];
@@ -284,6 +318,16 @@ export function dispatchPlan({ queue, leases, freeLanes } = {}) {
     const scope = normScope(item.scope);
     if (scope.length === 0) {
       held.push({ num, reason: 'unshaped-no-scope' });
+      continue;
+    }
+
+    // 4.5. Overlaps a currently-BLOCKED long-lived dispatched-work branch's own drifting scope (#3464) — that
+    //    branch is carrying unreconciled changes over these paths; piling MORE independently-scoped work onto
+    //    them is exactly what turned #3464's own incident into an unresolvable conflict. Hold until a fresh
+    //    `branch-drift.mjs sweep` clears it. Checked before the lease/rival gates — same "blanket hold, not a
+    //    lane-scheduling concern" precedence as the checks above.
+    if (driftScope.length > 0 && scopesOverlap(scope, driftScope)) {
+      held.push({ num, reason: 'branch-drift-blocked' });
       continue;
     }
 
@@ -502,7 +546,27 @@ async function main(argv) {
     // list --acquirable` happens to order its output (removes the dependency on the pool's listing stability).
     .sort((a, b) => a - b);
 
-  const plan = dispatchPlan({ queue, leases, freeLanes });
+  // 3.5 BRANCH-DRIFT CEILING (#3464) — read the latest `branch-drift.mjs check` verdict for the watched
+  //     long-lived dispatched-work branch. FAIL-OPEN on any error (module missing, no report yet, git failure)
+  //     — an absent/unreadable drift signal must never itself hold dispatch; only an explicit `blocked` verdict
+  //     does. Skippable via `--no-drift-check` (mirrors `--no-ground-truth`).
+  let driftBlockedScope = null;
+  if (!flags['no-drift-check']) {
+    try {
+      const { execFileSync: execSync } = await import('node:child_process');
+      const DRIFT_CLI = join(HERE, '..', 'conveyor', 'branch-drift.mjs');
+      const branch = typeof flags['drift-branch'] === 'string' ? flags['drift-branch'] : DEFAULT_DRIFT_BRANCH;
+      const target = typeof flags['drift-target'] === 'string' ? flags['drift-target'] : DEFAULT_DRIFT_TARGET;
+      const scope = typeof flags['drift-scope'] === 'string' ? flags['drift-scope'].split(',').filter(Boolean) : [...DEFAULT_DRIFT_SCOPE];
+      const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const verdict = JSON.parse(out);
+      if (verdict?.status === 'blocked') driftBlockedScope = scope;
+    } catch (e) {
+      log(`  ⚠ branch-drift check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
+    }
+  }
+
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -534,7 +598,8 @@ async function main(argv) {
         : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
-              : '';
+              : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
+                : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }
