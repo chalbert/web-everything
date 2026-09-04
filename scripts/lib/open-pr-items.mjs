@@ -77,15 +77,52 @@ export function itemNumsFromPr(headRefName = '', title = '') {
  *      real false-positive class per `isAnnotationPr`'s own docstring: "30+ of the first 71 hits … were 
  *      'author scope: for #NNNN'"). Excluded via `isAnnotationPr`, reused directly (identical input shape) 
  *      rather than re-mirrored.
- *   5. (round 2) The delivery-agent-brief's own retry-letter ref shape 
- *      (`lane/<NNN><letter>-<slug>`, e.g. `lane/3441b-…` — #3110) still names item `<NNN>`; a segment may 
+ *   5. (round 2) The delivery-agent-brief's own retry-letter ref shape
+ *      (`lane/<NNN><letter>-<slug>`, e.g. `lane/3441b-…` — #3110) still names item `<NNN>`; a segment may
  *      carry one trailing lowercase letter and still count.
+ *
+ * #3473 — two FURTHER guards, each proven necessary by a real merged false positive that #3441's eight rounds
+ * never considered: a MULTI-PR/graduation-tracked item (`#3443`, "covers the whole ongoing effort, not one
+ * PR") whose own constituent PRs use this repo's ordinary `"WE #NNN: <subject>"` / `lane/<NNN>-<slug>`
+ * conventions like any single-PR leaf story does — so a real PR that only lands ONE increment (round-1's
+ * `leadTitleMatch`, or the ref-lead-segment rule) still sails through every #3441-era check unchanged. Rather
+ * than teach this extractor to know which items are multi-PR (a per-item marker would require editing #3443's
+ * own card, and more lexical title-parsing was already tried for 8 rounds) these two guards are DELIBERATELY
+ * generic, checking the PR itself rather than the target item:
+ *   6. "does not resolve #NNN" BODY DISCLAIMER — PR #1866 (`lane/3443-computefreeslots-excludes-dirty-lanes`,
+ *      `"WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes"`) is a REAL code PR
+ *      (touches `.mjs` files) whose own body says outright: "this PR does not resolve #3443, it lands one
+ *      increment of it." No file-shape heuristic can catch this one — the author's own words are the only
+ *      signal — so a PR body matching `/\bdoes\s+not\s+resolve\s+#?(\d{2,5})\b/i` for a given id excludes
+ *      exactly that id from the credited set (scoped to the disclaimed id only — an unrelated id in the same
+ *      title is still credited normally).
+ *   7. ALL-MARKDOWN DIFF — PR #1886 (`lane/3443-reopen-and-3441-gap-followup`,
+ *      `"backlog/3443: reopen (false auto-resolve) + file the extractor gap it exposed"`) is PURE backlog
+ *      housekeeping (its merge diff touches exactly two `backlog/*.md` files — reopening #3443's card and
+ *      filing this very item) yet is credited via the ref-lead-segment rule anyway. A PR whose ENTIRE
+ *      changed-file set is `.md` can never BE a real implementation, however its title/ref reads, so it is
+ *      excluded up front before any other rule runs. Intentionally conservative in the SAFE direction per this
+ *      docblock's own asymmetry above (a false negative re-strands the item, recoverable by a human; a false
+ *      positive silently corrupts an unrelated item on main) — a genuine future doc-only single-PR delivery
+ *      item would need manual resolution instead of auto-credit, which is the correct trade.
+ * Both guards are additive and fully backward compatible: the 3rd argument defaults to `{ body: '',
+ * changedFiles: null }`, under which neither guard can ever fire, so every existing call site (and every
+ * pre-#3473 test) gets IDENTICAL output to before this change.
  * @param {string} headRefName
  * @param {string} title
+ * @param {{body?: string, changedFiles?: (Array<string|{path?: string}>|null)}} [o] - #3473: `body` is the
+ *   PR's own description text (guard 6); `changedFiles` is the PR's changed-file list, either plain path
+ *   strings or `{path}`-shaped rows as `gh pr view --json files` returns (guard 7). Both default to inert.
  * @returns {string[]} zero-padded item ids this PR's ref/title claims to DELIVER (not merely mention)
  */
-export function deliveredItemNumsFromPr(headRefName = '', title = '') {
+export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '', changedFiles = null } = {}) {
   const ref = String(headRefName || '');
+  // #3473 guard 7 — an all-.md changed-file set is pure backlog/doc housekeeping and can never be a real
+  // delivery, whatever the ref/title reads as. Checked FIRST, before any other computation, so a housekeeping
+  // PR short-circuits regardless of which other rule below would otherwise have credited it.
+  if (Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every((f) => /\.md$/i.test(String(f?.path ?? f)))) {
+    return [];
+  }
   if (isAnnotationPr({ headRefName: ref, title })) return []; // scope-authoring / prepare-decision — not a build
   // Only a `lane/<slug>` ref is ever a delivery vehicle (matches itemNumsFromPr's own gate above) — a random
   // branch name with an embedded number (`release-2026`) must never be read as an id.
@@ -191,7 +228,12 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '') {
   // repeated commit-title convention in this repo's history; the optional `:?` covers it alongside the
   // colon-less "resolve #NNN" shape already handled.
   for (const m of t.matchAll(/\bresolve[sd]?:?\s+#(\d{2,5})\b/gi)) nums.add(m[1]);
-  return [...nums].map((n) => n.padStart(3, '0'));
+  // #3473 guard 6 — an explicit "does not resolve #NNN" disclaimer in the PR's own body excludes exactly that
+  // id from the credited set (PR #1866's shape) — a final filter, not an early return, so it never suppresses
+  // an unrelated id the same title/ref legitimately delivers.
+  const disclaimed = new Set();
+  for (const m of String(body || '').matchAll(/\bdoes\s+not\s+resolve\s+#?(\d{2,5})\b/gi)) disclaimed.add(m[1].padStart(3, '0'));
+  return [...nums].map((n) => n.padStart(3, '0')).filter((n) => !disclaimed.has(n));
 }
 
 export function extractItemNums(prs) {

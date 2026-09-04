@@ -1170,8 +1170,10 @@ export const ALREADY_DONE_SEARCH_LIMIT = 5;
 
 /** The `--json` fields the already-done search needs. `headRefName` is what {@link filterAlreadyDoneCandidates}
  *  excludes prepare-scope/prepare-decision authoring PRs on; `title`/`url`/`mergedAt` are the evidence a refusal
- *  quotes back at the operator (Done-when 1a/1b: "names the merged PR's URL"). */
-export const ALREADY_DONE_JSON_FIELDS = 'number,title,url,mergedAt,headRefName';
+ *  quotes back at the operator (Done-when 1a/1b: "names the merged PR's URL"). `body`/`files` (#3473) feed the
+ *  two ADDITIONAL guards below — a small, already-bounded page ({@link ALREADY_DONE_SEARCH_LIMIT} = 5), so no
+ *  meaningful cost increase. */
+export const ALREADY_DONE_JSON_FIELDS = 'number,title,url,mergedAt,headRefName,body,files';
 
 /**
  * The head-ref SHAPE that means "this merged PR only authored the item's `scope:` or prepared its DECISION —
@@ -1203,7 +1205,8 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  * exclusion are single-sourced rather than two readers independently reinventing (and inevitably disagreeing
  * about) what counts.
  *
- * THREE FILTERS, each closing a real false-positive this function's own authoring turned up against live data:
+ * FIVE FILTERS, each closing a real false-positive this function's own authoring (or #3473's) turned up
+ * against live data:
  *   1. `state === 'MERGED'` (belt-and-suspenders — the caller already asks `gh` for `--state merged`, but a
  *      pure filter over what the caller actually got is cheaper to trust than the query string).
  *   2. A WORD-BOUNDARY match on `title` — `in:title` search already scopes to the title field, but a bare
@@ -1211,6 +1214,31 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  *      matching inside `3435`.
  *   3. {@link NON_IMPLEMENTING_REF_RE} — excludes prepare-scope/prepare-decision authoring PRs (see that
  *      constant's own docblock for the live case this closes).
+ *   4. (#3473) ALL-MARKDOWN DIFF — a PR whose entire changed-file set is `.md` is pure backlog housekeeping,
+ *      never a real implementation, however its title reads. Live false positive: `#3096`'s dispatch-time
+ *      already-done hold was fed by TWO merged PRs that both title-boundary-match "3096" — PR #1599 (ref
+ *      `lane/reconcile-3147-3096-3239`, title "#3096: reconcile the three-way dispatch duplicate — #3096
+ *      survives, #3147 + #3239 collapse") whose real merge diff (`git show 90fe066f6 --stat`) touches exactly
+ *      4 files, ALL `.md` (3 `backlog/*.md` + a 1-line comment-marker repoint in `skills-src/conveyor/
+ *      SKILL.md` — its own PR body opens "No code behaviour changes — this is a backlog reconciliation plus
+ *      one in-code comment repoint"), and PR #1613 (ref `lane/split-3096`, title "WE #3096: split along its
+ *      two scope entries — skill rewiring vs liveness hardening") whose diff (`gh pr view 1613 --json files`)
+ *      touches exactly 2 files, both `backlog/*.md` (body opens "No code changes — two backlog files"). Both
+ *      previously read as "already done"; this filter excludes both.
+ *   5. (#3473) "does not resolve #NNN" BODY DISCLAIMER, scoped to THIS `num` (unlike the sibling
+ *      `deliveredItemNumsFromPr` in `we:scripts/lib/open-pr-items.mjs`, which must extract potentially-multiple
+ *      candidate ids before it can scope the disclaimer, this function already knows the single id it is
+ *      checking, so the regex is built with `num` inline). Targets the same false-positive CLASS as filter 4
+ *      (a PR that name-matches the item without actually implementing it) via the author's own words rather
+ *      than a file-shape heuristic, for the case no file-shape check can catch (a real code PR that explicitly
+ *      says it only lands a partial increment — see `deliveredItemNumsFromPr`'s guard 6 docblock for the
+ *      `#3443`/PR #1866 case this mirrors).
+ * NOTE: {@link filterAlreadyDoneCandidates} is a SIBLING implementation of `deliveredItemNumsFromPr`
+ * (`we:scripts/lib/open-pr-items.mjs`) — no shared code, no import between the two files — because this one
+ * feeds a dispatch-time HOLD (recoverable false positive) while that one feeds an auto-committed `status:
+ * resolved` RESOLVE (unrecoverable false positive); #3473 widened the fix to cover both call sites in one pass
+ * since the root cause is the same shape: crediting a PR as "done" from title/ref pattern alone, with no
+ * signal distinguishing a real implementation from backlog housekeeping.
  *
  * WHAT THIS DOES **NOT** CLOSE, stated rather than silently residual: a PR that is neither prepare-scope nor
  * prepare-decision but is ALSO not the item's real implementation — a backlog-only doc/evidence edit landed
@@ -1222,7 +1250,9 @@ export const NON_IMPLEMENTING_REF_RE = /^lane\/\d+[a-z]?-(scope|prepare)-/i;
  * false auto-resolve would not be; (b) narrowing further (e.g. requiring the PR's own diff to have flipped
  * `status: resolved`) would cost a SECOND `gh` call per candidate, which the ratified cost discipline
  * (`PR_LIST_TIMEOUT_MS`/`PR_LIST_LIMIT`, Fork 2's "stays cheap and non-blocking") rules out for this item; a
- * follow-up can tighten it later with real evidence that this residual bites in practice.
+ * follow-up can tighten it later with real evidence that this residual bites in practice. Filters 4/5 above
+ * narrow this further without a second `gh` call by riding along on `body`/`files`, now already fetched in the
+ * same page (`ALREADY_DONE_JSON_FIELDS`).
  *
  * @param {object[]|null|undefined} prs - a parsed `gh pr list --search … --json …` page.
  * @param {string|number} num - the item id (already normalized by the caller).
@@ -1232,11 +1262,17 @@ export function filterAlreadyDoneCandidates(prs, num) {
   const key = String(num ?? '').trim();
   if (!key || !/^\d+$/.test(key) || !Array.isArray(prs)) return [];
   const boundary = new RegExp(`(^|[^0-9])${key}([^0-9]|$)`);
+  const disclaimerRe = new RegExp(`\\bdoes\\s+not\\s+resolve\\s+#?${key}\\b`, 'i');
   return prs
     .filter((p) => p && typeof p === 'object')
     .filter((p) => p.state === undefined || p.state === 'MERGED') // undefined: a caller that omitted `state`
     .filter((p) => boundary.test(String(p?.title ?? '')))
     .filter((p) => !NON_IMPLEMENTING_REF_RE.test(String(p?.headRefName ?? '')))
+    // #3473 guard 4 — an all-.md changed-file set is pure backlog/doc housekeeping, never a real delivery.
+    // A no-op when `files` is absent from the row (existing fixtures that don't set it stay green).
+    .filter((p) => !(Array.isArray(p?.files) && p.files.length > 0 && p.files.every((f) => /\.md$/i.test(String(f?.path ?? f)))))
+    // #3473 guard 5 — the PR's own body explicitly disclaims resolving THIS id. A no-op when `body` is absent.
+    .filter((p) => !disclaimerRe.test(String(p?.body ?? '')))
     .sort((a, b) => (Date.parse(b?.mergedAt ?? '') || 0) - (Date.parse(a?.mergedAt ?? '') || 0));
 }
 
