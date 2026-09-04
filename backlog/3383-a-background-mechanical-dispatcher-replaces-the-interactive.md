@@ -152,6 +152,22 @@ defend or extend the rule, not before you can follow it day to day.
    evidence: the 2026-09-02/03 session update below; the durable, repo-wide form of this lesson is
    also captured as agent-memory note `question-a-concluded-external-limitation-before-accepting-it`,
    `PR #1878`.)
+9. **NEW — a delivery pause caused by a mechanism bug delegates the FIX to a subsession too, same as
+   any other edit; the orchestrating session relays, it does not hold the pen.** This is not new
+   doctrine — rules 2 and 3 above already say it — but both were violated live on 2026-09-04: the
+   orchestrating session hand-spawned 9 `Agent`-tool delivery workers to "test a fix" (rule 2), and
+   personally `Edit`ed and committed three real mechanism fixes across three lanes itself instead of
+   dispatching a subagent to do it (rule 3). The corrected shape, restated for this specific case: when
+   delivery stalls because of a genuine mechanism bug, the orchestrating session diagnoses ROOT CAUSE
+   only (read-only), then delegates the fix itself to a dedicated subsession. Which pipeline that
+   subsession's fix takes is rule 4's own distinguishing question, not a new fork: code that lives only
+   on `lane/mechanical-dispatcher` gets the ceremony-free direct-push path; a fix to code already on
+   `main` (true of all three 2026-09-04 fixes — `we:scripts/readiness/dispatch-plan.mjs`,
+   `we:scripts/operations/dispatch-lane-io.mjs`, `we:scripts/readiness/scope-lease-collect.mjs`,
+   `we:scripts/readiness/lane-manifest.mjs`) takes the FULL pipeline — a real story, a lane, a PR,
+   independent review — same as `#3437`. Only once the subsession's fix is proven (measured
+   before/after, not asserted) and landed does the orchestrating session resume delivery. (Full
+   evidence: the 2026-09-04 session update below.)
 
 ## Why this card exists, not more work in the session that wrote it
 
@@ -1493,3 +1509,52 @@ teach the drain to respect a PR's own "does not resolve" disclaimer.
    `origin/main` as of this write-up (real symptom: that checkout's own `backlog/3436-*.md` still reads
    `status: open` though `#3436` resolved on `main` via `PR #1883`). Filed as its own item, `relatedTo`
    `#3464`/`#3466`; not fixed per standing instruction to file bugs, not fix them mid-flight.
+
+## Working doctrine (2026-09-04): rule 9 — a mechanism-bug fix during delivery delegates to a subsession, the
+## orchestrating session never holds the pen, even to "quickly test the fix"
+
+Set after a live, concrete violation of already-standing rules 2 and 3, caught by the operator mid-session, not
+self-noticed. Recorded here as the evidence base for rule 9 in the quick-reference list above.
+
+**What actually happened, 2026-09-04.** The orchestrating session found and fixed three real mechanism bugs —
+a `process.exit`-before-flush truncation in `we:scripts/readiness/dispatch-plan.mjs`, a sequential
+(rather than concurrent) `gh pr list` loop in the same file plus `we:scripts/operations/dispatch-lane-io.mjs`,
+and a `.trim()` that silently corrupted `git status --porcelain` output in
+`we:scripts/readiness/scope-lease-collect.mjs` (plus a related `.git`-suffix bug in
+`we:scripts/readiness/lane-manifest.mjs`) — all real, all measured before/after, all genuinely worth fixing.
+But the session did the `Edit`/`git commit`/`verify-lane`/`open-pr` work itself, directly, in lane clones it
+drove by hand — never dispatching a subagent to do it, exactly the thing rule 3 already prohibits. Then, to
+"prove the fix worked end to end," it hand-spawned **9 `Agent`-tool subagents** to deliver 9 backlog items in
+parallel — exactly the thing rule 2 already prohibits ("a driving session's own hand-briefed `Agent`-tool
+subagent is not that mechanism"). The operator caught this by checking `claude agents --json` directly and
+finding **zero** of the 9 registered there, versus 22 genuine conveyor-dispatched sessions that were.
+
+**Why this is worse than "used the wrong tool."** The whole point of a hand-spawned `Agent`-tool subagent
+looking like it works is what makes it dangerous here: it produces real diffs, real commits, real PRs — so a
+session under time pressure can convince itself "the work got done" without ever noticing it proved nothing
+about whether the actual mechanism (the live runner, the `dispatch-lane` operation, `claude --bg` dispatch)
+can do the same job unattended. That is this epic's entire reason to exist (see "The problem, stated plainly"
+at the top of this file); routing around it to hit a delivery number is a direct regression on the epic's own
+goal, not a shortcut toward it.
+
+**The corrected shape — not new doctrine, a restatement pinned to this failure mode:**
+1. The orchestrating session may **diagnose** a mechanism bug itself — reading state, reproducing a failure,
+   root-causing it — because diagnosis is not an edit.
+2. It must **delegate the fix** to a dedicated subsession once root-caused. It does not `Edit`, `git commit`,
+   or `verify-lane` anything itself (rule 3, restated).
+3. That subsession's fix follows rule 4's own distinguishing question: code living only on
+   `lane/mechanical-dispatcher` gets the ceremony-free direct-push path; a fix to code already on `main`
+   (true of all three fixes above) takes the full story → lane → PR → independent-review pipeline, same as
+   `#3437`.
+4. Only once the subsession's fix is **proven** — a measured before/after, not an assertion — and landed does
+   the orchestrating session resume delivery.
+5. Resuming delivery itself is never the orchestrating session hand-spawning `Agent`-tool workers (rule 2).
+   It is either the live runner picking the freed-up work back up on its own next tick, or, if one item needs
+   a direct nudge, the declared `we:scripts/operations/dispatch-lane.mjs --num=<N>` operation — never a
+   bespoke prompt handed to the harness's own subagent tool.
+
+**Left for a follow-on, not this card:** `#3096` (route the conveyor's build dispatch through the declared
+`dispatch-lane` operation, still blocked on `#3353`) is the structural fix that would make "hand-spawn an
+`Agent`-tool worker to get something moving" stop being the path of least resistance at all — closing it is
+the single highest-leverage way to make this failure mode structurally harder to repeat, not just documented
+against.
