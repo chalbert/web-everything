@@ -460,20 +460,28 @@ async function main(argv) {
   // field on — it is appended to `plan.held` as a bare id further down, past `dispatchPlan` itself.
   const alreadyDoneNotReady = new Map();
   if (!flags['no-ground-truth']) {
-    const { defaultCheckAlreadyDone } = await import('../operations/dispatch-lane-io.mjs');
+    const { defaultCheckAlreadyDoneAsync } = await import('../operations/dispatch-lane-io.mjs');
     const nowMs = Date.now();
-    for (const row of queue) {
-      const it = byNum.get(String(row.num));
-      if (!isStaleEnoughForGroundTruth(it, nowMs)) continue;
-      const verdict = defaultCheckAlreadyDone(row.num, { exec: execFileSync });
+    const staleQueueRows = queue.filter((row) => isStaleEnoughForGroundTruth(byNum.get(String(row.num)), nowMs));
+    const staleNotReadyIds = notReady.filter((id) => isStaleEnoughForGroundTruth(byNum.get(String(id)), nowMs));
+    // CONCURRENT, not sequential (epic #3383, live incident 2026-09-04) — a plain `for` loop paid one `gh pr
+    // list` round-trip PER stale id, one at a time; with the queue at 69 entries (most past the 2h age gate)
+    // that pushed a single dispatch-plan tick past 60-140s, starving the conveyor runner's own ~120s tick
+    // budget. `defaultCheckAlreadyDoneAsync` uses `execFile` (non-blocking) instead of `execFileSync`, so
+    // every stale id's round-trip now runs in parallel. Same fail-soft contract, same query shape, same
+    // matcher — only the concurrency changed.
+    const [queueVerdicts, notReadyVerdicts] = await Promise.all([
+      Promise.all(staleQueueRows.map((row) => defaultCheckAlreadyDoneAsync(row.num))),
+      Promise.all(staleNotReadyIds.map((id) => defaultCheckAlreadyDoneAsync(id))),
+    ]);
+    staleQueueRows.forEach((row, i) => {
+      const verdict = queueVerdicts[i];
       if (verdict.done && verdict.pr) row.alreadyDonePr = verdict.pr;
-    }
-    for (const id of notReady) {
-      const it = byNum.get(String(id));
-      if (!isStaleEnoughForGroundTruth(it, nowMs)) continue;
-      const verdict = defaultCheckAlreadyDone(id, { exec: execFileSync });
+    });
+    staleNotReadyIds.forEach((id, i) => {
+      const verdict = notReadyVerdicts[i];
       if (verdict.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
-    }
+    });
   }
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
