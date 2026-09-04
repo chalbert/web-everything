@@ -29,6 +29,23 @@ Confirmed 2026-09-03: PR #1866 (WE #3443: readiness/computeFreeSlots excludes di
   `main`, as one small piece of the ongoing graduation tracked by #3443 — this PR does not resolve #3443, it
   lands one increment of it."* The PR author correctly understood #3443's multi-PR nature; the mechanical
   extractor did not.
+- **A second, independent instance was hit live filing THIS very item.** The PR that reopened #3443
+  (`status: resolved` → `active`) and filed this task — ref `lane/3443-reopen-and-3441-gap-followup`, title
+  `"backlog/3443: reopen (false auto-resolve) + file the extractor gap it exposed"` — merged (`97dd1693e`),
+  and the drain's resolve-on-land fired AGAIN one commit later (`63551c9ad`, same `"drain: resolve #3443 on
+  land (#2748)"` message), flipping #3443 straight back to `resolved` before this item's own filing had even
+  landed. This time the credit came from a DIFFERENT vector than #1866's: not `leadTitleMatch` (the title
+  starts with `"backlog/3443:"`, which the anchor regex does not match) but the REF's lead segment —
+  `deliveredItemNumsFromPr('lane/3443-reopen-and-3441-gap-followup', <that title>)` returns `['3443']` because
+  segment 0 after `lane/` is `3443`, the repo's own standard single-item ref convention
+  (`lane/<NNN>-<slug>`) that `#3441`'s own rounds 6/7 deliberately preserved as a valid delivery signal. Fixed
+  by re-editing #3443 back to `active` a second time and landing that fix through a THIRD PR whose ref/title
+  were deliberately crafted to carry no digit sequence at all (verified against `deliveredItemNumsFromPr`
+  before pushing) — the only way, short of a real fix, to land a change under #3443 without re-triggering
+  this bug. **This means essentially any PR authored the normal way under a multi-PR/graduation-tracked item —
+  via either of this repo's two standard conventions, a `"WE #NNN: <subject>"` title OR a `lane/<NNN>-<slug>`
+  ref — will trip this, not just PR #1866's specific shape.** The gap is systemic to any item like #3443, not
+  a narrow one-off.
 - `backlog/3443-*.md`'s own "Done when" #1 requires either `git rev-list --left-right --count
   origin/main...origin/lane/mechanical-dispatcher` reporting `0` on the lane-ahead side, or an explicit note
   naming deliberately-dropped/superseded commits. Neither is true: its own Progress section (dated
@@ -54,11 +71,13 @@ genuinely different gap in the same function, not a case the #3441 fix already c
 
 ## Done when
 
-1. **Executable** — a unit test in `we:scripts/lib/__tests__/open-pr-items.test.mjs` reproducing PR #1866's
-   exact ref/title (`lane/3443-computefreeslots-excludes-dirty-lanes`,
-   `"WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes"`) against
-   `deliveredItemNumsFromPr` asserts `[]` (or some other non-full-delivery signal), not `['3443']` — currently
-   fails (returns `['3443']`), must pass once fixed.
+1. **Executable** — two unit tests in `we:scripts/lib/__tests__/open-pr-items.test.mjs` reproducing (a) PR
+   #1866's exact ref/title (`lane/3443-computefreeslots-excludes-dirty-lanes`,
+   `"WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes"`, the title-anchor vector)
+   and (b) the reopen PR's ref/title (`lane/3443-reopen-and-3441-gap-followup`,
+   `"backlog/3443: reopen (false auto-resolve) + file the extractor gap it exposed"`, the ref-lead-segment
+   vector) against `deliveredItemNumsFromPr`, both asserting `[]` (or some other non-full-delivery signal),
+   not `['3443']` — both currently fail (return `['3443']`), both must pass once fixed.
 2. A stated mechanism for `deliveredItemNumsFromPr` (or its caller in
    `we:scripts/merge-ai-prs.mjs`/`landedIdsForCandidate`) to recognize a multi-PR/graduation-tracked target
    item — e.g. reading the target item's own frontmatter/body for a marker equivalent to "this item resolves
