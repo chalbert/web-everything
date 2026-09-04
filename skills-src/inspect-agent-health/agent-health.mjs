@@ -57,17 +57,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+
+// Hard ceilings — NOT just defaults. A caller-supplied override (--max-bytes/--lines/--field-max) is
+// floor-clamped for sanity but must never be able to defeat the "never the whole file" guarantee this
+// tool exists to provide; these caps hold even against an explicit oversized request (#1905 review
+// finding: unclamped overrides let `--max-bytes` alone reproduce the exact full-file-read failure this
+// tool is supposed to prevent).
+const HARD_MAX_BYTES = 8_000_000; // 8 MB absolute ceiling regardless of what is requested
+const HARD_MAX_LINES = 500;
+const HARD_MAX_FIELD = 20_000;
 
 function parseArgs(argv) {
   const opts = { lines: 15, maxBytes: 2_000_000, fieldMax: 400, json: false, session: null, project: null };
   const pos = [];
   for (const a of argv) {
     if (a === '--json') opts.json = true;
-    else if (a.startsWith('--lines=')) opts.lines = Math.max(1, Number(a.slice(8)) || 15);
-    else if (a.startsWith('--max-bytes=')) opts.maxBytes = Math.max(1024, Number(a.slice(12)) || 2_000_000);
-    else if (a.startsWith('--field-max=')) opts.fieldMax = Math.max(20, Number(a.slice(12)) || 400);
+    else if (a.startsWith('--lines=')) opts.lines = Math.min(HARD_MAX_LINES, Math.max(1, Number(a.slice(8)) || 15));
+    else if (a.startsWith('--max-bytes=')) opts.maxBytes = Math.min(HARD_MAX_BYTES, Math.max(1024, Number(a.slice(12)) || 2_000_000));
+    else if (a.startsWith('--field-max=')) opts.fieldMax = Math.min(HARD_MAX_FIELD, Math.max(20, Number(a.slice(12)) || 400));
     else if (a.startsWith('--session=')) opts.session = a.slice(10);
     else if (a.startsWith('--project=')) opts.project = a.slice(10);
     else if (a === '--help' || a === '-h') opts.help = true;
@@ -141,17 +151,22 @@ function tailLines(file, n, maxBytes) {
     const len = size - start;
     const buf = Buffer.alloc(len);
     if (len > 0) fs.readSync(fd, buf, 0, len, start);
-    let text = buf.toString('utf8');
+    const rawText = buf.toString('utf8'); // kept UNMODIFIED for the oversized-line fallback below
+    let text = rawText;
     if (start > 0) {
       // We started mid-file: the first "line" in this chunk is a partial line — drop it.
       const nl = text.indexOf('\n');
       text = nl === -1 ? '' : text.slice(nl + 1);
     }
     let lines = text.split('\n').filter((l) => l.trim());
-    if (!lines.length && buf.length) {
-      // The whole byte budget was consumed by a single oversized line with no newline in it — still
-      // surface SOMETHING (truncated) rather than silently reporting nothing.
-      lines = [text.trim()].filter(Boolean);
+    if (!lines.length && rawText.trim()) {
+      // Either a single oversized line with no newline anywhere in the window, or (when start>0) the
+      // whole window is one partial line with no newline before the cap — in both cases the
+      // partial-line-drop above can legitimately empty `text`. Fall back to the RAW (pre-drop) chunk so
+      // this still surfaces SOMETHING rather than silently reporting zero lines (#1905 review finding:
+      // the old fallback read from the already-emptied `text`, so it silently returned nothing in
+      // exactly the truncated-head case its own comment promised to handle).
+      lines = [rawText.trim()];
     }
     return { lines: lines.slice(-n), truncatedHead: start > 0, size };
   } finally {
@@ -181,10 +196,22 @@ function countLines(file) {
   }
 }
 
+// Strip ANSI/OSC/CSI terminal escape sequences and other C0 control bytes (keeping \n and \t) before
+// anything from a transcript is printed to a real terminal. #1905 review finding: transcript content
+// can echo untrusted text (e.g. a WebFetch body, or command output) verbatim; printing it unsanitized
+// lets a crafted transcript manipulate the viewing terminal (hidden/spoofed text, screen clears, or
+// worse on a vulnerable emulator) via escape sequences this tool would otherwise pass straight through.
+// eslint-disable-next-line no-control-regex
+const ESCAPE_OR_CONTROL_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+function stripControlSequences(s) {
+  return s.replace(ESCAPE_OR_CONTROL_RE, '');
+}
+
 // ── truncate any individual field before printing (per-field cap, independent of the line/byte caps) ─
 function truncate(str, max) {
-  const s = typeof str === 'string' ? str : JSON.stringify(str);
-  if (s == null) return '';
+  const raw = typeof str === 'string' ? str : JSON.stringify(str);
+  if (raw == null) return '';
+  const s = stripControlSequences(raw);
   return s.length > max ? `${s.slice(0, max)}… [+${s.length - max} chars truncated]` : s;
 }
 
@@ -248,33 +275,37 @@ function formatEntry(entry) {
 
 // ── the one detection this tool exists for: blocked on its own synchronous nested child ────────────
 function detectBlockedOnChild(entries) {
-  // Walk newest -> oldest. The signal: the LAST tool_use we see (of any name) has no matching
+  // The signal: the newest entry that contains AT LEAST ONE tool_use has some tool_use with no matching
   // tool_result anywhere in the read window. Within a bounded tail this is reliable regardless of N,
   // because a session blocked inside a tool call appends NOTHING to its own transcript until that call
-  // returns — so if it's truly still pending, the tool_use is unconditionally the newest entry.
-  const toolUses = new Map(); // id -> {name, input}
+  // returns — so if it's truly still pending, that tool_use is unconditionally in the newest entry.
+  //
+  // #1905 review finding: a single turn can carry MULTIPLE tool_use blocks (parallel tool calls issued
+  // together — e.g. a blocking Agent() call alongside an unrelated Read in the same turn). The previous
+  // version walked an entry's blocks in reverse and returned as soon as it met ANY resolved tool_use,
+  // so an earlier-in-the-array pending call in that same entry was never inspected. Fix: collect every
+  // tool_use in the newest tool_use-bearing entry and check ALL of them, not just the structurally-last
+  // one.
   const resultIds = new Set();
-  for (const e of entries) {
-    for (const b of e.blocks || []) {
-      if (b.kind === 'tool_use') toolUses.set(b.id, b);
-      if (b.kind === 'tool_result') resultIds.add(b.toolUseId);
-    }
-  }
-  // Find the most recent tool_use (by entry order) that has no result.
+  for (const e of entries) for (const b of e.blocks || []) if (b.kind === 'tool_result') resultIds.add(b.toolUseId);
+
   for (let i = entries.length - 1; i >= 0; i--) {
-    for (const b of (entries[i].blocks || []).slice().reverse()) {
-      if (b.kind === 'tool_use' && !resultIds.has(b.id)) {
-        const isNestedBlockingAgent = b.name === 'Agent' && b.rawInput && b.rawInput.run_in_background === false;
-        return {
-          pending: true,
-          toolName: b.name,
-          input: b.input,
-          isNestedBlockingAgent,
-          description: b.rawInput?.description || null,
-        };
-      }
-      if (b.kind === 'tool_use') return { pending: false }; // newest tool_use already has its result
-    }
+    const toolUses = (entries[i].blocks || []).filter((b) => b.kind === 'tool_use');
+    if (!toolUses.length) continue; // no tool_use in this entry — keep walking back to find one
+    const pending = toolUses.filter((b) => !resultIds.has(b.id));
+    if (!pending.length) return { pending: false }; // newest tool-bearing entry is fully resolved
+    // Prefer surfacing a blocking nested Agent() call if one of the pending calls is that shape — it's
+    // the headline case this tool exists for — otherwise report the first pending call found.
+    const nested = pending.find((b) => b.name === 'Agent' && b.rawInput && b.rawInput.run_in_background === false);
+    const chosen = nested || pending[0];
+    return {
+      pending: true,
+      toolName: chosen.name,
+      input: chosen.input,
+      isNestedBlockingAgent: !!nested,
+      description: chosen.rawInput?.description || null,
+      pendingCount: pending.length,
+    };
   }
   return { pending: false };
 }
@@ -343,4 +374,15 @@ function main() {
   console.log(verdictDetail);
 }
 
-main();
+// Run only when invoked directly (`node agent-health.mjs …`), not when imported by the unit tests in
+// __tests__/agent-health.test.mjs — matches the CLI-guard convention used elsewhere in this repo (e.g.
+// we:scripts/review-core-cli.mjs).
+const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (IS_CLI) main();
+
+export {
+  HARD_MAX_BYTES, HARD_MAX_LINES, HARD_MAX_FIELD,
+  parseArgs, idFromAny, resolveTranscript, tailLines, countLines,
+  stripControlSequences, truncate, flattenToolResultText, summarizeEntry, formatEntry,
+  detectBlockedOnChild, main,
+};
