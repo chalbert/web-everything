@@ -1298,6 +1298,20 @@ function cmdReleaseAllPools() {
     return n != null && Number(n) === wantItem;
   };
   const selectorLabel = session ? `session "${session}"` : `item #${wantItem}`;
+  // #3466 — same registry-must-mirror-reality contract `cmdRelease` was just fixed to keep: `--all-pools` does
+  // the identical mutating thing (`rmSync(LEASE_MARKER(dir))`) via a SEPARATE code path, and it is the one the
+  // drain's land-time cleanup (`lane-drain.mjs`'s `releaseItemLeases`) and pr-watch's merge-time auto-release
+  // (`pr-watch.mjs`'s `releaseSessionAcrossPools`) actually call — the dominant real-world release triggers, not
+  // just the reaper's reclaim. `referencePath` mirrors `resolveRepo()`'s own `--pool=`-only fallback
+  // (`resolve(flags.reference || flags.repo || process.cwd())`): a cross-pool sweep names no single pool's
+  // checkout, so — exactly like the reaper's `release --pool=<name>` calls with no `--reference=` — it inherits
+  // the CALLER's own cwd, which is always the primary checkout in real use (dispatch-lane.mjs / lane-drain.mjs /
+  // pr-watch.mjs all run there). The lane-ports registry itself already tracks items across every pool by
+  // `repo.name`, not by which checkout's `.claude/` directory happens to be writing it (`reverseLaneItemMap`'s
+  // own doc comment: lane numbers are one shared namespace across pools, "the acquire reset/unmap path keeps
+  // the registry 1:1 per lane in practice") — so one shared `referencePath` for the whole sweep matches how the
+  // registry is already read, not a new assumption.
+  const repoLike = { referencePath: resolve(process.cwd()) };
   const pools = existingPools();
   const perPool = [];
   let released = 0;
@@ -1320,7 +1334,10 @@ function cmdReleaseAllPools() {
       lanes.push(n);
       released++;
     }
-    if (lanes.length) perPool.push({ pool: name, lanes });
+    if (lanes.length) {
+      perPool.push({ pool: name, lanes });
+      unmapLanes(repoLike, lanes); // #3466 — drop this pool's released lanes from the shared item→lane registry
+    }
   }
   if (released === 0) log(`  no leases held by ${selectorLabel} in any pool (${pools.length} pool(s) scanned)`);
   if (flags.json) process.stdout.write(JSON.stringify({ session: session || null, item: wantItem, released, pools: perPool }, null, 2) + '\n');
@@ -1402,6 +1419,11 @@ function cmdRelease(repo) {
       continue;
     }
     rmSync(LEASE_MARKER(dir), { force: true });
+    // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
+    // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
+    // `release --force` reclaim, which delegates here) leaves the registry pointing at a lane that is free
+    // again, and conveyor-state.mjs's health-stall scan overcounts `building` forever.
+    unmapLanes(repo, [n]);
     log(`  released lane-${n} (was ${describeLease(lease)})`);
     released++;
   }

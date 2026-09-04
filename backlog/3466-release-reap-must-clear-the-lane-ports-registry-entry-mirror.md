@@ -3,8 +3,9 @@ bornAs: xx1on5q
 kind: task
 tier: pinned
 parent: "3383"
-status: open
+status: active
 dateOpened: "2026-09-03"
+dateStarted: "2026-09-04"
 tags: [conveyor, lane-pool, lane-ports, ground-truth, reap]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs"]
 relatedTo: ["3435", "3449", "3457"]
@@ -54,6 +55,38 @@ The stale registry makes the tick status line lie about real capacity, and — m
 Mirror the write: `cmdRelease` (`we:scripts/lane-pool.mjs:1292-1372`) should call `unmapLanes(repo, [n])` for each lane it actually releases (inside the `for (const n of targets)` loop, right alongside the existing `rmSync(LEASE_MARKER(dir))` at `we:scripts/lane-pool.mjs:1367`), the same way `cmdRemove`/`cmdRefresh`/the acquire-time ghost-reclaim already do. Because the reaper (`we:scripts/conveyor/lease-reaper.mjs`) reclaims by shelling out to `we:scripts/lane-pool.mjs release ... --force`, fixing `cmdRelease` alone should close the gap for both the manual-release and the reaper-reclaim path — worth confirming as part of the fix, not assuming.
 
 This is a forced-invariant bug fix (the acquire-time write already establishes the registry-must-mirror-reality contract; release/reap breaking that mirror is a defect, not a legitimate alternative design) — `kind: task`, not `kind: decision`, per this repo's own fork-existence test (no genuinely coherent alternative where a released/reaped lane keeps claiming to hold an item).
+
+## Progress
+
+Fixed: `cmdRelease` (`we:scripts/lane-pool.mjs`) now calls `unmapLanes(repo, [n])` for every lane it actually
+releases, right alongside the existing `rmSync(LEASE_MARKER(dir))` — mirroring `cmdRemove`/`cmdRefresh`/the
+acquire-time reset. Confirmed by re-reading the fixed code that the reaper's reclaim path (which shells out to
+`we:scripts/lane-pool.mjs release --pool=<name> --lane=<n> --force`, no `--reference=`) inherits the fix through
+the same `cmdRelease`, needing no separate change.
+
+**Round 2 (adversarial review caught a real gap):** `cmdReleaseAllPools` — the SEPARATE code path behind
+`release --all-pools --session=<slug>` / `--all-pools --item=<num>` — did the identical unfixed thing
+(`rmSync(LEASE_MARKER(dir))` with no `unmapLanes` call). This path, not the reaper's TTL reclaim, is the
+DOMINANT real-world release trigger: `we:scripts/lane-drain.mjs`'s land-time cleanup
+(`releaseItemLeases` → `--all-pools --item=<num>`) and `we:scripts/conveyor/pr-watch.mjs`'s merge-time
+auto-release (`releaseSessionAcrossPools` → `--all-pools --session=<slug>`) both go through it on every item
+landed / every PR merged. Fixed the same way: `unmapLanes({ referencePath: resolve(process.cwd()) }, lanes)`
+per pool, right after that pool's lanes are actually released — `referencePath` mirrors `resolveRepo()`'s own
+`--pool=`-only fallback (inherit the caller's cwd, always the primary checkout in real use), consistent with
+how the reaper's `release --pool=<name>` calls already resolve it.
+
+New test `we:scripts/__tests__/lane-pool-release-item-map.test.mjs` (registered in both
+`we:vitest.config.ts`'s exclude list and `we:vitest.integration.config.ts`'s include list, alongside its
+sibling `we:scripts/__tests__/lane-pool-item-map.test.mjs`) reproduces the exact bug shape and proves the fix
+for every release path: `release --lane=N`, `release --all`, the reaper's verbatim
+`release --pool=<name> --lane=<n> --force` (invoked with `cwd` set to the reference checkout, matching how the
+reaper's real `execFileSync` call inherits its own process cwd with no `--reference=` flag), and — round 2 —
+`release --all-pools --session=<slug>` and `release --all-pools --item=<num>` across two pools under one
+`POOL_ROOT` — all clear the registry entry; a release that fails ownership (no `--force`, foreign lease) leaves
+the registry untouched. Full regression pass on siblings `we:scripts/__tests__/lane-pool-cross-pool.test.mjs`,
+`we:scripts/__tests__/lane-pool-item-map.test.mjs`, `we:scripts/__tests__/lane-pool-release-ownership.test.mjs`,
+`we:scripts/__tests__/lane-pool-refresh-guard.test.mjs`: 53/53 green, no regressions from touching
+`cmdReleaseAllPools`.
 
 ## Done when
 
