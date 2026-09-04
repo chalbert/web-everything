@@ -1496,3 +1496,49 @@ still unique to the branch — so the runner still needs to run off the branch, 
 off `main` directly. A future session should check `#3443`'s live status before reading today's
 branch-tracking as a violation of this rule: it isn't one, until graduation is done. Once `#3443` closes for
 real, switching the runner to track `main` directly is what rule 10 then requires, not merely permits.
+
+## Working doctrine (2026-09-04, continued): rule 11 — a one-off symptom-relief action is never
+## reported as the fix; the real root cause and a durable fix are both owed, and both must be verified
+
+Set the same night as rules 9 and 10 above, after a third, independent incident — this one caught by the
+operator mid-report, not self-noticed, the same pattern that produced rule 9.
+
+**What actually happened, 2026-09-04.** `we:scripts/conveyor/session-reaper.mjs` (`#3435`, this epic) is
+supposed to run every tick via the live headless runner's `makeCliMechanicalPasses`
+(`we:skills-src/conveyor/runner.mjs`, `runQuiet('we:scripts/conveyor/session-reaper.mjs')`). Running it BY
+HAND directly reaped 120 of 163 listed `claude agents` sessions in one pass — a large backlog, evidence the
+scheduled tick invocation had been failing for a real stretch. The operator's own words, catching the framing
+before it shipped: "no fix are applied without find root cause and applying real fix" — a one-off reap that
+incidentally clears a backlog is not a fix for why the automated pass keeps failing, and reporting it as
+though it were would have been exactly the failure mode this rule now names.
+
+**The real root cause, found (not guessed).** `runner.log` held exactly ONE logged failure for this pass
+across a 190+-tick live overnight run: `"⚠ mechanical pass we:scripts/conveyor/session-reaper.mjs failed
+(non-fatal): Command failed: node .../we:scripts/conveyor/session-reaper.mjs"` — no further detail, because
+`runQuiet`'s own error handler truncated to `String(e.message || e).split('\n')[0]`, discarding every line
+after the first even though `execFileSync`'s thrown error already carries the child's full captured stderr
+appended to `.message` (Node's own behavior, reproduced directly to confirm). Tracing the code path:
+`we:scripts/conveyor/session-reaper.mjs`'s stop loop calls `stopSession`
+(`we:scripts/operations/dispatch-abort.mjs`) once per reap candidate; a `claude stop <id>` call that fails
+with anything other than `No job matching` (the already-documented, already-benign "already gone" case)
+throws, and that per-candidate failure trips the WHOLE pass's own `process.exit(1)` — by design, so a caller
+can tell a clean sweep from a partial one — which `runQuiet` then reports as a bare, undiagnosable "Command
+failed" with the real per-candidate error thrown away. `claude stop`'s own upstream flakiness is already a
+documented, known-transient condition in this file's own header (issues #65925/#45250/#41461); a live
+concurrency stress test (25 concurrent `claude stop` + 10 concurrent `claude agents --json --all` calls,
+repeated) never reproduced a hard failure, consistent with a rare, self-clearing hiccup rather than a
+deterministic bug — so the fix targets a real, evidenced failure class, not a guessed one.
+
+**The real, durable fix landed — not the by-hand reap.** Two changes, `we:scripts/conveyor/session-reaper.mjs`
+and `we:skills-src/conveyor/runner.mjs`, both with unit + real-CLI-subprocess test coverage:
+1. `stopSessionWithRetry` retries a failing `claude stop` candidate up to `STOP_RETRY_ATTEMPTS` (3) times with
+   a short backoff before counting it a real failure — recovering the transient case instead of letting one
+   candidate fail the whole pass's exit code.
+2. `runQuiet`'s new `summarizeMechanicalPassError` logs a bounded, newline-collapsed summary of the real error
+   instead of just the first line, so a future mechanical-pass failure is diagnosable from `runner.log` alone,
+   not just for this file — every mechanical pass this runner drives shares the same `runQuiet` helper.
+
+**Verified, not assumed.** A real (non-dry-run) `we:scripts/conveyor/session-reaper.mjs` run against the live
+`claude agents` listing reaped cleanly post-fix; the new tests prove the retry recovers within budget, still
+fails (bounded, not silently) once the budget is exhausted, never retries an already-`No job matching` answer,
+and that the error-summary no longer truncates a real multi-line failure to a bare "Command failed" line.
