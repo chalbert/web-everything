@@ -1,0 +1,57 @@
+# #2412 Layer 5 — a required status check that reads RED for as long as the PR carries an un-cleared review
+# hold (`review:pending` / `review:changes` / `review:human`, `we:scripts/lib/review-escalation.mjs`'s
+# `REVIEW_HOLD_LABELS`). This is an OUTER layer, not a replacement for the drain's own code-side gate
+# (`decideReviewGate`): the drain applies its own labels and IS the gate, so this check can't tell "an
+# independent validator accepted this" from "someone applied the label" — it exists to close the one hole the
+# code-side gate can't see, a MANUAL `gh pr merge` (or a click on GitHub's merge button) that bypasses the
+# drain entirely.
+#
+# WHY `labeled`/`unlabeled` ARE IN THE TRIGGER LIST, not just the default open/synchronize/reopened set: the
+# check's verdict must track the PR's label state even when no new commit lands — a park (label added) must
+# turn this check red WITHOUT a push, and a clearance (label removed) must turn it green again the same way.
+#
+# WHY THE EVENT PAYLOAD'S OWN LABEL LIST, not a fresh `gh pr view`: `github.event.pull_request.labels` already
+# carries the post-event label set for every trigger type used here (GitHub resolves it before dispatching the
+# event), so no extra API call — and no `pull-requests: read` permission — is needed. `contents: read` is
+# enough to check out the repo for the script.
+#
+# THE SCRIPT COMES FROM MAIN, NEVER FROM THE PR'S OWN REF — same rule, same reason, as
+# `apply-review-request.yml`'s own note on this: a `pull_request` trigger's default checkout resolves the PR's
+# merge ref, and this job's whole job is to hold a PR whose diff it has not vetted. Checking out the PR's own
+# `check-review-gate.mjs` (or the `REVIEW_HOLD_LABELS` it imports from `review-escalation.mjs`) would let a PR
+# neuter its own gate from within its own diff — e.g. emptying `REVIEW_HOLD_LABELS` so `reviewGateVerdict`
+# always reports clear. `ref: main` pins the CODE to a trusted tree; the LABELS still come from the untrusted
+# event payload, which is fine — they are read as DATA (`--labels-json=...`), never executed.
+#
+# BECOMING A REAL GATE IS A REPO-ADMIN ACTION, NOT A CODE CHANGE (same as `smoke` in ci.yml, see its own note
+# on the same point): this job's check name (`review-gate`) must be added to the branch-protection required
+# list before it can actually block a merge. Until then it runs and reports, same as any other check.
+name: Review gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Check for an un-cleared review hold
+        env:
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
+        run: node scripts/check-review-gate.mjs --labels-json="$LABELS_JSON"

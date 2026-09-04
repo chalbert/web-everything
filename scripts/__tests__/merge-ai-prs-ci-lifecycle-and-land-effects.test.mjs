@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate } from '../merge-ai-prs.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
@@ -949,6 +949,49 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
     // A CHANGED acted-on value posts a fresh, separately-timestamped land record (the tamper trail).
     const auditOther = 'manifest acted-on: dismissedFindings=3 crossRepo=true blockedBy=[]';
     expect(hasDrainReasonComment([{ body }], 'land', reason, auditOther)).toBe(false);
+  });
+
+  describe('#2412 Gap 2 — buildMergeTraceReason / the merge-trace comment kind (before-land traceability)', () => {
+    it('renders the head SHA and caller/session into the reason text', () => {
+      const reason = buildMergeTraceReason({ headSha: 'abc1234', caller: 'drain', sessionId: 'session-xyz' });
+      expect(reason).toContain('abc1234');
+      expect(reason).toContain('drain');
+      expect(reason).toContain('session-xyz');
+    });
+
+    it('degrades to `unknown` rather than omitting the fact when a value is missing', () => {
+      const reason = buildMergeTraceReason({ headSha: null, caller: 'drain', sessionId: null });
+      expect(reason).toContain('unknown');
+      // Still names the caller — only the genuinely-unknown facts fall back.
+      expect(reason).toContain('drain');
+    });
+
+    it('defaults caller to \'drain\' when omitted (the only caller the merge gate permits, #2290)', () => {
+      const reason = buildMergeTraceReason({ headSha: 'abc1234' });
+      expect(reason).toContain('drain');
+    });
+
+    it('buildDrainReasonComment renders a merge-trace comment under its own marker and heading', () => {
+      const reason = buildMergeTraceReason({ headSha: 'deadbee', caller: 'drain', sessionId: 'sess-1' });
+      const body = buildDrainReasonComment(MERGE_TRACE_KIND, reason);
+      expect(body.startsWith(drainReasonMarker(MERGE_TRACE_KIND))).toBe(true);
+      expect(body).toContain('Merge trace');
+      expect(body).toContain('deadbee');
+    });
+
+    it('the merge-trace marker never collides with park/skip/land/review-coverage markers', () => {
+      expect(drainReasonMarker(MERGE_TRACE_KIND)).not.toBe(drainReasonMarker('park'));
+      expect(drainReasonMarker(MERGE_TRACE_KIND)).not.toBe(drainReasonMarker('skip'));
+      expect(drainReasonMarker(MERGE_TRACE_KIND)).not.toBe(drainReasonMarker('land'));
+    });
+
+    it('dedupes on identical (sha, caller, session); a moved head SHA posts a fresh trace', () => {
+      const reasonA = buildMergeTraceReason({ headSha: 'sha-a', caller: 'drain', sessionId: 'sess-1' });
+      const bodyA = buildDrainReasonComment(MERGE_TRACE_KIND, reasonA);
+      expect(hasDrainReasonComment([{ body: bodyA }], MERGE_TRACE_KIND, reasonA)).toBe(true);
+      const reasonB = buildMergeTraceReason({ headSha: 'sha-b', caller: 'drain', sessionId: 'sess-1' });
+      expect(hasDrainReasonComment([{ body: bodyA }], MERGE_TRACE_KIND, reasonB)).toBe(false);
+    });
   });
 
   it('hasDrainReasonComment tolerates a missing/odd comments array', () => {
