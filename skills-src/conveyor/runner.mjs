@@ -182,7 +182,11 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  resource from a lane lease), the reconcile-fix dispatch pass (#3438 — dispatches the fix agent
  *  `we:scripts/conveyor/reconcile-pass.mjs` decides is owed for a bounced PR with nothing live working it, a
  *  genuinely different population from `decisions.spawnFixes`'s own tick-core-launched-PRs-only scope; see that
- *  file's own header for the full reasoning), and (#3421) the blocking-hiccup sink. All five are best-effort: a
+ *  file's own header for the full reasoning), the branch-drift sweep (#3464 — `we:scripts/conveyor/
+ *  branch-drift.mjs sweep`: reports the long-lived dispatched-work branch's live divergence/conflict state to
+ *  its durable git-note report, the SAME "piggyback on a pass this headless runner already ticks" shape #3449
+ *  used for lane-pool lease reconciliation, so drift is caught without a human or interactive session ever
+ *  noticing it by hand), and (#3421) the blocking-hiccup sink. All six are best-effort: a
  *  failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the
  *  sole writer to `main`.
  *
@@ -209,6 +213,10 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
     runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
+    // #3464 — sweeps its OWN default watched branch (`lane/mechanical-dispatcher` vs `main`), env/flag
+    // overridable. `runQuiet` still appends `--repo=<repo>` when this runner was given one — harmless, since
+    // `branch-drift.mjs`'s CLI parses and simply ignores any flag it doesn't itself read.
+    runQuiet('conveyor/branch-drift.mjs', ['sweep']);
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is

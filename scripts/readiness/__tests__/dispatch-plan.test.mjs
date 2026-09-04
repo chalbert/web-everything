@@ -80,6 +80,46 @@ describe('dispatchPlan — overlap with an ACTIVE lease → held "overlaps lane-
   });
 });
 
+describe('dispatchPlan — branch-drift ceiling (#3464): a currently-blocked dispatched-work branch holds overlapping items', () => {
+  it('holds an item whose scope overlaps the drifting branch\'s own blocked scope', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['we:scripts/conveyor/branch-drift.mjs'] }],
+      leases: [],
+      freeLanes: [2, 3],
+      driftBlockedScope: ['we:scripts/conveyor/'],
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'branch-drift-blocked' }]);
+  });
+
+  it('a disjoint item still launches while an overlapping sibling holds on the drift ceiling', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, scope: ['we:scripts/conveyor/'] }, // overlaps the drifting scope → held
+        { num: 2, scope: ['we:scripts/other/'] }, // disjoint → launches
+      ],
+      leases: [],
+      freeLanes: [4],
+      driftBlockedScope: ['we:scripts/conveyor/'],
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 4 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'branch-drift-blocked' }]);
+  });
+
+  it('no drift block (absent/null/empty) never holds anything on this axis', () => {
+    for (const driftBlockedScope of [undefined, null, []]) {
+      const plan = dispatchPlan({
+        queue: [{ num: 1, scope: ['we:scripts/conveyor/'] }],
+        leases: [],
+        freeLanes: [2],
+        driftBlockedScope,
+      });
+      expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+      expect(plan.held).toEqual([]);
+    }
+  });
+});
+
 describe('dispatchPlan — rival pair: two queued items overlap, neither running → higher rank launches', () => {
   it('launches the higher-ranked rival and holds the lower on the rival\'s lane', () => {
     const plan = dispatchPlan({
