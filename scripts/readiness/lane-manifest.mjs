@@ -165,12 +165,20 @@ export function orderedRepos(m) {
  * `owner/name` slug or `null` (the cwd repo); the manifest keys it by the SHORT name, with `web-everything`
  * carried as `we` (its `INTEGRATION_ORDER` key). Maps a slug (`chalbert/frontierui` → `frontierui`), a bare
  * short name (`web-everything` → `we`), and passes an already-canonical key through. `null`/empty → `null`.
+ *
+ * A trailing `.git` is stripped BEFORE the short-name comparison — a raw `git remote get-url origin` value
+ * (`git@github.com:chalbert/web-everything.git`) is a real live input to this function via
+ * `scope-lease-collect.mjs`'s `repoKeyForLane`, not just a clean `owner/name` slug; without the strip, the
+ * comparison never matches `'web-everything'`, and the WHOLE-URL-taken-as-slug case degrades to a raw
+ * `web-everything.git` key instead of `we` (live incident, 2026-09-04) — silently mismatching every OTHER
+ * repo-qualified path in the codebase, which all use the short `we:` form.
  * @param {string|null|undefined} slug
  * @returns {string|null}
  */
 export function repoKeyFromSlug(slug) {
   if (!slug || typeof slug !== 'string') return null;
-  const name = slug.includes('/') ? slug.split('/').pop() : slug;
+  const stripped = slug.replace(/\.git$/, '');
+  const name = stripped.includes('/') ? stripped.split('/').pop() : stripped;
   return name === 'web-everything' ? 'we' : name;
 }
 

@@ -340,10 +340,19 @@ function parseFlags(argv) {
   return flags;
 }
 
-/** Run a git command in `cwd`, returning trimmed stdout, or null on any failure (never throws). */
+/**
+ * Run a git command in `cwd`, returning its stdout with only TRAILING whitespace stripped, or null on any
+ * failure (never throws). `trimEnd`, never `trim` — a blanket `.trim()` ate the leading status-code space
+ * `git status --porcelain` puts on an unstaged-only line (`" M path"`, X=' ' Y='M'), which is significant
+ * fixed-column data, not incidental whitespace: {@link porcelainFiles} in `./claimScope.mjs` reads the
+ * status columns as `line.slice(3)`, so losing that one leading char shifted every field on the FIRST
+ * porcelain line by one column and silently chopped the first character off that file's path (`backlog/…`
+ * read as `acklog/…`) — corrupting the observed scope for every lane whose first uncommitted change was
+ * unstaged-only, and manufacturing false scope-lease breaches from it (live incident, 2026-09-04).
+ */
 function tryGit(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
   } catch {
     return null;
   }
