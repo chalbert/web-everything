@@ -44,12 +44,15 @@
 // answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum } from '../conveyor/lease-reaper.mjs';
@@ -1276,6 +1279,56 @@ export function defaultCheckAlreadyDone(num, { exec = execFileSync, env = proces
       timeout: prListTimeoutMs(env), // #3460 — reuses the existing `gh pr list` network bound, no new knob
       killSignal: 'SIGKILL',
     });
+  } catch {
+    return { done: false, pr: null, checked: false };
+  }
+  let prs;
+  try { prs = JSON.parse(String(raw ?? '[]')); } catch { return { done: false, pr: null, checked: false }; }
+  const matches = filterAlreadyDoneCandidates(prs, key);
+  return matches.length ? { done: true, pr: matches[0], checked: true } : { done: false, pr: null, checked: true };
+}
+
+/**
+ * THE CONCURRENT SIBLING OF {@link defaultCheckAlreadyDone} — same query shape, same matcher, but via
+ * `execFile` (promise-based) instead of `execFileSync`, so a caller checking MANY ids in one tick can run
+ * them concurrently instead of paying each `gh` round-trip serially.
+ *
+ * @test-only-export-ok: consumed only via `dispatch-plan.mjs`'s dynamic `await import(...)` (a lazy IO-shell
+ *   import, not a static one), which the test-only-export scan cannot trace.
+ *
+ * WHY THIS EXISTS (measured live, 2026-09-04): `dispatch-plan.mjs`'s already-done pass calls
+ * {@link defaultCheckAlreadyDone} once per age-gated stale item, in a plain `for` loop — with the queue at
+ * 69 entries, most past the 2h age gate, that is up to ~69 sequential `gh pr list` round-trips, observed to
+ * push one `dispatch-plan.mjs --json` run past 60s (and `tick-core.mjs`'s own wrapping call has no timeout
+ * at all — see its `runJson`). The conveyor runner ticks on a ~120s clock, so a single slow tick can eat the
+ * whole budget and the next tick's dispatch reads stale-by-then state. The check itself (one `gh` call per
+ * id) is unavoidable — there is no bulk "is any of these NNN already merged" query `gh pr list --search`
+ * supports — but nothing requires those calls to be SEQUENTIAL, and unlike `execFileSync`, `execFile` does
+ * not block the event loop, so many can be in flight at once.
+ *
+ * SAME fail-soft contract as the sync version: any `gh` failure (auth, rate-limit, timeout) resolves to
+ * `{ done: false, pr: null, checked: false }` rather than rejecting — a caller `Promise.all`-ing many of
+ * these must never have one bad id fail the whole batch.
+ *
+ * @param {string|number} num - the item id.
+ * @param {{execFileFn?: Function, env?: object}} [io] - `execFileFn` injected ONLY so the argv/opts are
+ *   assertable in a test; defaults to the promisified `node:child_process` `execFile`.
+ * @returns {Promise<{done: boolean, pr: object|null, checked: boolean}>}
+ */
+export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileAsync, env = process.env } = {}) {
+  const key = String(num ?? '').trim();
+  if (!key) return { done: false, pr: null, checked: false };
+  let raw;
+  try {
+    ({ stdout: raw } = await execFileFn('gh', [
+      'pr', 'list', '--search', `${key} in:title`, '--state', 'merged',
+      '--limit', String(ALREADY_DONE_SEARCH_LIMIT), '--json', ALREADY_DONE_JSON_FIELDS,
+    ], {
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: prListTimeoutMs(env), // #3460 — reuses the existing `gh pr list` network bound, no new knob
+      killSignal: 'SIGKILL',
+    }));
   } catch {
     return { done: false, pr: null, checked: false };
   }
