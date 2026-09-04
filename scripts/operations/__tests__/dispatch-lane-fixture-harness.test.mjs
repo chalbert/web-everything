@@ -177,7 +177,13 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       FAKE_GH_FIXTURE: fakeGh.env.FAKE_GH_FIXTURE,
       FAKE_GH_LOG: fakeGh.env.FAKE_GH_LOG,
     };
-    const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...combinedEnv, ...opts.env } });
+    // `combinedEnv` MUST WIN over any `env` the code under test supplies (e.g. `dispatch-lane-io.mjs`'s
+    // spawnAgent call spreads a FULL `process.env` snapshot to add `WE_DISPATCH_KIND`, #3105) — this fixture's
+    // whole point is a sandboxed PATH/FAKE_CLAUDE_LOG/FAKE_GH_* environment the real CLI never sees, and a
+    // caller-supplied full env snapshot must never be able to silently clobber that back to the real PATH.
+    // `opts.env` spread FIRST still lets a genuinely NEW key (like `WE_DISPATCH_KIND`) reach the child, since
+    // `combinedEnv` never sets it and a later spread only overrides keys it actually has.
+    const fakeExec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, env: { ...opts.env, ...combinedEnv } });
 
     return {
       caseRoot, runsDir, fakeClaude, combinedEnv, fakeExec,
@@ -244,7 +250,13 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
 
       const seen = kase.fakeClaude.lastArgv();
       expect(seen).toContain('--bg');
-      expect(seen[seen.indexOf('--session-id') + 1]).toBe(result.handle);
+      // #3331 — the CLI IGNORES `--session-id` on a `--bg` spawn and mints its own id; the flag is still sent
+      // (kept for forward-compat — `buildAgentArgv`'s own docblock) but its VALUE is never what `result.handle`
+      // ends up being. The handle comes from the CLI's own stdout confirmation line (`parseBackgroundedHandle`),
+      // never from the flag we asked for — so asserting equality between the two would assert the exact bug
+      // `#3331` fixed.
+      expect(seen[seen.indexOf('--session-id') + 1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(seen[seen.indexOf('--session-id') + 1]).not.toBe(result.handle);
       expect(seen[seen.indexOf('-n') + 1]).toBe(`conveyor-${NUM}`);
       expect(seen[seen.length - 1]).toBe(read.prompt);
     } finally {
