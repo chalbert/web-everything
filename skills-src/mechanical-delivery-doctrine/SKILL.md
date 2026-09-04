@@ -30,7 +30,14 @@ history. If a rule itself changes, edit it here first, then note the change on t
    `we:scripts/operations/review-dispatch.mjs`), using the SAME generic brief every item gets, filled
    only with the small closed set of placeholders those briefs declare. A driving session's own
    hand-briefed `Agent`-tool subagent is not that mechanism — using one to "get the work done" proves
-   nothing about whether the real dispatcher works. (Full rationale: `#3383`'s "Working doctrine
+   nothing about whether the real dispatcher works. This is not just process hygiene: the
+   review-reconcile pass and `conveyor/reconcile-fix-dispatch.mjs` (in `skills-src/conveyor/runner.mjs`'s
+   `makeCliMechanicalPasses`) scan **every open PR** each tick, not just backlog-tracked ones — so a PR
+   opened outside this pipeline is *visible* to the mechanical layer but not *actionable*: fix-dispatch
+   needs a real `#NNN` it can resolve from the PR to build a fix brief, and refuses "no-scope" without
+   one. Confirmed live 2026-09-04: a `review:changes` PR built via a hand-dispatched `Agent`-tool
+   subagent, with no filed item behind it, sat with no fix ever dispatched and its stale
+   `review-status:reviewing` label never cleared. (Full rationale: `#3383`'s "Working doctrine
    (2026-09-01, continued): a mechanically-dispatched item runs on the card + the generic brief,
    never a bespoke prompt" section.)
 3. **The orchestrating session never edits or commits directly.** The main/interactive session
