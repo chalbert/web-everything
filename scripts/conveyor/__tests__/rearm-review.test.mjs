@@ -19,7 +19,7 @@ describe('decideRearm — the pure re-arm swap (#2630)', () => {
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
     // #2832 — re-arm applies review:pending (a hold), so the swap also strips ready-to-merge (narrowed to
     // actually-present labels at the CLI via presentRemoveLabels).
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
     expect(d.keepsHuman).toBe(false);
   });
 
@@ -33,7 +33,7 @@ describe('decideRearm — the pure re-arm swap (#2630)', () => {
     const d = decideRearm({ currentLabels: lbl(REVIEW_LABELS.human, REVIEW_LABELS.changes) });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, READY_TO_MERGE_LABEL]); // review:human is NOT in the removals; #2832 strips ready-to-merge
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]); // review:human is NOT in the removals; #2832 strips ready-to-merge
     expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
     expect(d.keepsHuman).toBe(true);
   });

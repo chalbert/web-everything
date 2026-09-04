@@ -418,6 +418,13 @@ export const TRUST_CHAIN_BASENAMES = Object.freeze(new Set(TRUST_CHAIN.map((m) =
  *  answer "is this the policy tier?" for every caller that asks that question (e.g. test-selection's deny list). */
 export const POLICY_CORE_BASENAMES = Object.freeze(new Set(TRUST_CHAIN.filter((m) => m.tier === 'policy').map((m) => m.file)));
 
+/** The ENGINE-tier basenames — the lander / resident-daemon / dispatch-loop machinery that OBEYS the gate rather
+ *  than DEFINING it. Every one of these ESCALATES like any trust-chain member, and a converged agent panel may
+ *  clear it (agent-reviewable) — but #2412 additionally requires the INDEPENDENT hardened validator's sign-off
+ *  (`redteam:accepted`) before such a PR may actually auto-land: `isEngineTierPath` below is what
+ *  `decideReviewGate` (`review-escalation.mjs`) keys that requirement on. Frozen. */
+export const ENGINE_BASENAMES = Object.freeze(new Set(TRUST_CHAIN.filter((m) => m.tier === 'engine').map((m) => m.file)));
+
 /** The two halves of the policy tier (#2771/#2785). `spec` = the DECLARATIVE LEASH (human); `code` = the
  *  DERIVATION CODE that realizes it (independent committee). See the file header for the ratified split. */
 export const POLICY_LEASH = Object.freeze({ SPEC: 'spec', CODE: 'code' });
@@ -479,6 +486,16 @@ export function isTrustChainPath(path) {
  */
 export function isPolicyCorePath(path) {
   return POLICY_CORE_BASENAMES.has(basenameOf(path));
+}
+
+/**
+ * Does this repo-relative path edit an ENGINE-tier trust-chain member — the lander / resident daemon / dispatch
+ * loop machinery that OBEYS the review gate rather than DEFINING it? Pure. Basename-matched like the rest of the
+ * trust chain, so it follows a member across directories and repos. `decideReviewGate` (#2412) keys the
+ * "auto-land also requires the independent validator's `redteam:accepted`" enforcement on this predicate.
+ */
+export function isEngineTierPath(path) {
+  return ENGINE_BASENAMES.has(basenameOf(path));
 }
 
 /**
