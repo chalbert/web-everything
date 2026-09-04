@@ -1,9 +1,10 @@
 ---
+bornAs: xtgier7
 kind: story
 size: 5
 parent: "3001"
 status: open
-blockedBy: ["xgfob3u"]
+blockedBy: ["3490"]
 dateOpened: "2026-09-04"
 relatedTo: ["3001", "3002"]
 relatedReport: reports/2026-08-08-agent-command-surface-sizing.md
@@ -20,7 +21,7 @@ anything that mutates state **outside the agent's own lane clone** goes only thr
 failing **closed**). This is the actual enforcement flip: today `we:scripts/guard-bash.mjs` is a **deny-list**
 (an unlisted spelling is allowed by default); this item makes it an **allow-list** for the mutation class —
 an unlisted mutating command is **refused** by default, not merely flagged. **Deliberately `blockedBy`
-`#xgfob3u`** (closing the operation-catalog gaps) — flipping the guard closed before the catalog covers real,
+`#3490`** (closing the operation-catalog gaps) — flipping the guard closed before the catalog covers real,
 currently-used mutating commands (raw `git push`, `git add`/`commit`, file writes/deletes/moves outside the
 lane, `npm ci`, `curl`) would break live agent workflows on day one. This is a structural security change to
 a write-time gate every session goes through; it needs its own careful scoping pass, not a rushed build
@@ -28,7 +29,7 @@ alongside the ratification PR.
 
 ## What this item is NOT
 
-Not the operation catalog itself — that is `#xgfob3u`. Not a re-litigation of Fork 1's split-by-mutation
+Not the operation catalog itself — that is `#3490`. Not a re-litigation of Fork 1's split-by-mutation
 call, or Fork 2's capability-gap-via-learnings-pool call — both are ratified, cited at
 `we:docs/agent/platform-decisions.md#agent-mutations-through-typed-operations`. Not a decision to widen scope
 to the operator's own interactive session — that is the separate, still-open `#3188`.
@@ -56,7 +57,7 @@ to the operator's own interactive session — that is the separate, still-open `
 
 1. **Executable** — a new test suite in `we:scripts/__tests__/guard-bash.test.mjs` (or a sibling file) that
    fails before this item lands and passes after: (a) a mutating command covered by a typed operation from
-   `#xgfob3u`'s catalog is refused when run raw; (b) the same operation invoked through its typed path is
+   `#3490`'s catalog is refused when run raw; (b) the same operation invoked through its typed path is
    allowed; (c) every real command class the sizing report's false-deny sweep found (fd-dup pipe, a JS arrow
    function in a quoted arg, `sed -n`) is proven NOT refused, so the flip does not reintroduce those.
 2. **Observable** — running a raw, uncovered mutating command (e.g. `curl` against an arbitrary host, once

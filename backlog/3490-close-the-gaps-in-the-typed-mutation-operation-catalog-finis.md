@@ -1,4 +1,5 @@
 ---
+bornAs: xgfob3u
 kind: epic
 parent: "3001"
 status: open
@@ -17,7 +18,7 @@ implementations already exist** (18 slash commands + 65 `we:scripts/*.mjs`) — 
 existing catalog," not "build one from scratch." Scoped to the **mutating** half only; reads stay free per
 Fork 1. Coordinates with, not duplicates, `#3029`'s operation engine and `#3273`'s broader raw-call-site
 census — this epic is the subset of that surface the guard decision specifically needs typed before
-`#xtgier7` (the fail-closed guard flip, `blockedBy` this epic) can ship without breaking real workflows.
+`#3491` (the fail-closed guard flip, `blockedBy` this epic) can ship without breaking real workflows.
 
 ## Where the catalog actually stands today (checked against `we:scripts/operations/`, 2026-09-04)
 
@@ -47,7 +48,7 @@ shared registry/declared-homes files wired in a single follow-up slice per batch
 whole epic on one file). Each slice: a declaration with **strictly typed parameters** (`#3001`'s Fork 1
 sub-decision — no `run(script, args)` passthrough), an io module, tests, and a
 `we:scripts/operations/declared-homes.mjs` entry. Not required to close every one of the ~28 named operations
-before `#xtgier7` can start — see that item's own scope note on what "solid enough to flip" means; this
+before `#3491` can start — see that item's own scope note on what "solid enough to flip" means; this
 epic's job is to make that call possible, not to gate on literal 100% coverage of the tail (the report's own
 90/95/99% coverage curve argues against chasing the last 1%).
 
@@ -59,5 +60,5 @@ epic's job is to make that call possible, not to gate on literal 100% coverage o
    lifecycle; `lane.commit` for Committing; `lane.push` for Publishing), and the partially-covered families
    (`pr.*`, Build & verify, `net.fetch`, `proc.signal`) close their remaining named gaps.
 2. **Assertable** — the epic's closeout updates the table above against the real
-   `we:scripts/operations/` state at that point, so `#xtgier7` can cite a concrete, checked "solid enough"
+   `we:scripts/operations/` state at that point, so `#3491` can cite a concrete, checked "solid enough"
    rather than an assumption.

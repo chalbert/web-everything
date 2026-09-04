@@ -41,11 +41,11 @@ fail-closed allow-list is a structural security change that could break real age
 it is scoped as its own careful build rather than attempted alongside the statute edit:
 
 - [Close the gaps in the typed mutation-operation catalog (finish the report's 7-family, ~28-operation
-  catalog)](/backlog/xgfob3u-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/) (parent: this
+  catalog)](/backlog/3490-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/) (parent: this
   item) — per the sizing report, roughly 83 raw implementations already exist across the 7 families; this
   finishes and closes that existing catalog rather than building one from scratch.
 - [Flip `we:scripts/guard-bash.mjs` from a deny-list to a fail-closed allow-list for mutating
-  commands](/backlog/xtgier7-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/) (parent: this
+  commands](/backlog/3491-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/) (parent: this
   item; `blockedBy` the catalog item above) — the actual enforcement flip, deliberately sequenced after the
   catalog is solid so it does not fail-closed against commands nothing yet covers.
 

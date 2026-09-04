@@ -4099,8 +4099,8 @@ are named, scoped follow-on build items, deliberately not attempted in the same 
 
 **Lineage:** ratified via `#3001` (2026-09-04). Full reasoning, prior-art survey and the sizing report:
 [#3001](/backlog/3001-should-agents-call-named-operations-instead-of-writing-shell/). Follow-on build:
-[close the operation-catalog gaps](/backlog/xgfob3u-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/),
-then [flip `we:scripts/guard-bash.mjs` to a fail-closed allow-list](/backlog/xtgier7-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/)
+[close the operation-catalog gaps](/backlog/3490-close-the-gaps-in-the-typed-mutation-operation-catalog-finis/),
+then [flip `we:scripts/guard-bash.mjs` to a fail-closed allow-list](/backlog/3491-flip-we-scripts-guard-bash-mjs-from-a-deny-list-to-a-fail-cl/)
 (`blockedBy` the first). Composes with
 [#dispatched-agent-never-runs-commands-directly](#dispatched-agent-never-runs-commands-directly) (the
 narrower, already-ratified dispatched-agent case this fork generalizes) and
