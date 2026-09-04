@@ -1,0 +1,87 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  This survey's decision item (a not-yet-landed, hash-keyed item at prepare time — see this topic's own
+  <code>relatedReport</code> for its identity) asks: can this repo activate an
+  opt-in mode where every session — a background CLI dispatch, the main interactive session, and an
+  Agent-tool subagent — gets a fresh-context LLM judge pass over its own real transcript at close/reap,
+  extracting learnings automatically instead of relying on a session's own self-report? The item's own
+  originating brief named three trigger points and one existing self-report pipeline to ground against; this
+  survey checked each claim directly rather than trusting the brief.
+</p>
+
+<h2>Finding 1 — the brief's central premise about subagents was wrong</h2>
+<p>
+  The brief asserted subagents have "no existing close-hook at all today." Two direct fetches of
+  <code>https://code.claude.com/docs/en/hooks</code> (2026-09-03) show the harness already ships
+  <code>SubagentStop</code> (fires in the <em>parent</em> session when an Agent-tool subagent finishes,
+  carrying <code>session_id</code>, <code>transcript_path</code>, <code>agent_id</code>,
+  <code>agent_type</code>) and <code>SessionEnd</code> (fires when any session terminates, carrying
+  <code>session_id</code>, <code>transcript_path</code>, <code>cwd</code>). Reading both
+  <code>we:.claude/settings.json</code> in this repo and the operator's own global settings file confirms
+  neither hook is registered anywhere today. The real gap is <strong>wiring an existing, unused hook</strong>,
+  not building new harness machinery — a materially cheaper scope than the brief assumed.
+</p>
+
+<h2>Finding 2 — a load-bearing timeout constraint the brief never named</h2>
+<p>
+  <code>SessionEnd</code> hooks share a <strong>1.5-second total timeout budget by default</strong>
+  (raisable via a per-hook <code>timeout</code> field, capped at 60 seconds) — confirmed by a second,
+  independently targeted fetch quoting the exact defaults table. A synchronous Sonnet-tier judge call cannot
+  complete inside 1.5 seconds, which makes "run the judge pass synchronously" close to infeasible for the
+  main-session trigger specifically, not merely a style preference. Separately: a <code>SubagentStop</code>
+  hook that exits with code 2 <strong>blocks the subagent from stopping at all</strong> — a real footgun for
+  whichever build item wires this, since a failed judge dispatch on that exit path would hang the very
+  subagent it is trying to introspect.
+</p>
+
+<h2>Finding 3 — the existing background-session reaper is a real, verified precedent, not a card summary</h2>
+<p>
+  <code>we:scripts/conveyor/session-reaper.mjs</code> (<a href="/backlog/3435/">#3435</a>) is real, already
+  shipped, already wired into <code>we:skills-src/conveyor/runner.mjs</code>'s best-effort
+  <code>mechanicalPasses</code>. Its own extensively-documented findings — background sessions frequently
+  failing to self-terminate cleanly, a reported-successful <code>claude stop</code> not being proof of exit —
+  independently justify preferring an <em>external</em>, reaper-time transcript read over relying on that
+  same session's own internal <code>SessionEnd</code> hook for the background case specifically: the two
+  are not equally reliable, and the less reliable one is exactly the failure shape most likely to be the
+  session worth learning from.
+</p>
+
+<h2>Finding 4 — an automated judge opens a privacy gap a self-report never could</h2>
+<p>
+  <code>we:scripts/conveyor/learnings-drop.mjs</code>'s append-time content scrub was deliberately removed
+  (<a href="/backlog/3015/">#3015</a>, ratified #2978 Fork 3) on the grounds that a human typing a short
+  generalized sentence structurally cannot paste a secret. An LLM judge reading a raw transcript that
+  legitimately contains real code, paths, and potentially secrets, then paraphrasing from it, does not carry
+  that same structural guarantee. The wide <code>scrubReasons</code> detector
+  (<code>we:scripts/lib/secret-scrub.mjs</code>) survives — exported, tested, kept alive specifically because
+  <a href="/backlog/2610/">#2610</a>'s tenant-ready schema needs its full width somewhere. Re-wiring it for
+  the automated path narrows this gap substantially, though <code>scrubReasons</code> itself has documented
+  blind spots (field-local scanning; a 16-character floor on its entropy check) that keep the fix from being
+  a complete guarantee — read directly from the source rather than assumed clean.
+</p>
+
+<h2>Finding 5 — the model/effort-tier question is already-ratified doctrine, not a live choice</h2>
+<p>
+  This repo's own model-routing (#1855) and effort-routing (#3106) statutes route a bounded extraction task
+  whose output feeds a later, more careful adjudication step (exactly <code>/harvest</code>'s relationship
+  to the self-report pool today) to the Sonnet model rung at <code>low</code> effort — not Haiku (not a
+  one-line pointer check) and not Opus (writes no ruling into the backlog graph). This mechanically settles
+  one axis of the item's original "cost/model" fork without needing a fresh ratification.
+</p>
+
+<h2>The recommended defaults</h2>
+<p>
+  Two questions dissolve to existing statute/platform fact rather than a live either/or: where the toggle
+  lives (an env var, off by default — automated transcript reading is a data-egress event, not an ordinary
+  feature default) and which mechanism triggers which session kind (the reaper for background, the
+  platform's own <code>SessionEnd</code> for main, <code>SubagentStop</code> for subagents — architecturally
+  forced, not chosen). Three genuine forks remain: execution mode (detached/best-effort, forced outright for
+  <code>SessionEnd</code> by its 1.5s budget), automatic coverage (every terminal session, unconditionally —
+  the operator's own explicit bar), and output destination (the existing <a href="/backlog/2614/">#2614</a>
+  pool/schema, with the wide append-time scrub reinstated for judge-authored entries and one new optional
+  provenance field). Full reasoning, including two independent skeptic/fresh-context-screen passes that
+  corrected a citation-scope over-reach and reclassified one whole section from a fork to a forced ruling,
+  in <code>we:reports/2026-09-03-automated-transcript-introspection-at-close-reap.md</code>.
+</p>
+{% endraw %}
