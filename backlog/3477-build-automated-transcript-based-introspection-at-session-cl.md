@@ -1,4 +1,5 @@
 ---
+bornAs: xvdli7k
 kind: story
 size: 5
 parent: "3475"
