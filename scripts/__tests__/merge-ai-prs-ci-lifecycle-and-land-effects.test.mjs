@@ -1028,50 +1028,91 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
 // backlog item stayed `active` forever, because resolve-on-land only ever looked at manifest carriers).
 describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-locus WE PR, not just manifest couples)', () => {
   const isLocalRepo = (repo) => repo == null || repo === 'web-everything';
+  // #3473 — every existing case below stubs fetchGuardSignals to a deterministic no-op (neutral body/empty
+  // changedFiles) so these stay fast/offline and never spawn a real `gh` subprocess. Neutral signals can never
+  // trigger guards 6/7, so every expected output here is UNCHANGED from before #3473.
+  const noSignals = () => ({ body: '', changedFiles: null });
 
   it('manifest carrier — unchanged: contributes its own .item, ignoring headRef/title entirely', () => {
-    expect(landedIdsForCandidate({ hasManifest: true, item: 3457, repo: null, headRef: 'lane/xdecoy-nope' }, { isLocalRepo })).toEqual([3457]);
+    expect(landedIdsForCandidate({ hasManifest: true, item: 3457, repo: null, headRef: 'lane/xdecoy-nope' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([3457]);
   });
 
   it('manifest carrier with no item → contributes nothing (unchanged)', () => {
-    expect(landedIdsForCandidate({ hasManifest: true, item: null }, { isLocalRepo })).toEqual([]);
+    expect(landedIdsForCandidate({ hasManifest: true, item: null }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([]);
   });
 
   it('no manifest, WE repo — derives the item from a plain lane/<NNN>-<slug> headRef (the #3412 shape)', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix' }, { isLocalRepo })).toEqual([3412]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([3412]);
   });
 
   it('no manifest, WE repo, headRef carries no number — falls back to an explicit "resolve #NNN" in the title', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'some-feature-branch', title: 'Fix the drain — resolves #2330' }, { isLocalRepo })).toEqual([2330]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'some-feature-branch', title: 'Fix the drain — resolves #2330' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([2330]);
   });
 
   it('a bare #NNN CITATION in the title (not a delivery marker) is NOT credited — only an unrelated real bug this fix closes', () => {
     // #3441 review finding: itemNumsFromPr's loose title regex matched ANY "#NNN", so a PR titled
     // "WE #3412: resolve fix (root cause also affects #2330)" would wrongly resolve #2330 too.
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix (root cause also affects #2330)' }, { isLocalRepo })).toEqual([3412]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix (root cause also affects #2330)' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([3412]);
   });
 
   it('no manifest, NON-WE repo — an impl half of a cross-locus couple must NEVER resolve on its own', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: 'frontierui', headRef: 'lane/3412-resolve-fix', title: '' }, { isLocalRepo })).toEqual([]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: 'frontierui', headRef: 'lane/3412-resolve-fix', title: '' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([]);
   });
 
   it('no manifest, WE repo, no extractable number — safe empty result', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo })).toEqual([]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([]);
   });
 
   it('a batch ref credits ONLY its trailing segment — the batch\'s OTHER named items are still mid-flight, not delivered by this PR', () => {
     // #3441 review finding: a batch slug (lane/batch-<date>-<id>-<id>-…-<id>) names every item planned
     // into the batch upfront, before the earlier ones are even claimed — crediting a non-trailing segment
     // would resolve a sibling item this PR never touched, mid-build, out from under its own lane.
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/batch-2026-07-08-2245-2281', title: '' }, { isLocalRepo })).toEqual([2281]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/batch-2026-07-08-2245-2281', title: '' }, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([2281]);
   });
 
   it('null/undefined candidate → empty, never throws', () => {
-    expect(landedIdsForCandidate(null, { isLocalRepo })).toEqual([]);
-    expect(landedIdsForCandidate(undefined, { isLocalRepo })).toEqual([]);
+    expect(landedIdsForCandidate(null, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([]);
+    expect(landedIdsForCandidate(undefined, { isLocalRepo, fetchGuardSignals: noSignals })).toEqual([]);
   });
 
   it('defaults isLocalRepo to always-false when omitted — a non-manifest candidate resolves nothing by default', () => {
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' })).toEqual([]);
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' }, { fetchGuardSignals: noSignals })).toEqual([]);
+  });
+
+  it('#3473 — lazy-fetch is SKIPPED entirely when the ref/title-only base is empty: fetchGuardSignals is never called', () => {
+    let called = false;
+    const spy = () => { called = true; return { body: '', changedFiles: null }; };
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo, fetchGuardSignals: spy })).toEqual([]);
+    expect(called).toBe(false);
+  });
+
+  it('#3473 — PR #1866\'s exact shape end-to-end: the ref/title-only base would credit #3443, but the injected body\'s "does not resolve #3443" disclaimer strips it', () => {
+    const fetchGuardSignals = () => ({
+      body: 'Graduates origin/lane/mechanical-dispatcher onto main, as one small piece of the ongoing graduation tracked by #3443 — this PR does not resolve #3443, it lands one increment of it.',
+      changedFiles: ['scripts/readiness/lease-pool.mjs'],
+    });
+    expect(landedIdsForCandidate(
+      { hasManifest: false, item: null, repo: null, headRef: 'lane/3443-computefreeslots-excludes-dirty-lanes', title: 'WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes' },
+      { isLocalRepo, fetchGuardSignals },
+    )).toEqual([]);
+  });
+
+  it('#3473 — PR #1886\'s exact shape end-to-end: the ref-lead-segment base would credit #3443, but the injected all-.md changedFiles strips it', () => {
+    const fetchGuardSignals = () => ({
+      body: '',
+      changedFiles: ['backlog/3443-graduate-origin-lane-mechanical-dispatcher-to-main-in-small.md', 'backlog/3473-resolve-on-land-extractor-mis-credited-3443-a-multi-pr-gradu.md'],
+    });
+    expect(landedIdsForCandidate(
+      { hasManifest: false, item: null, repo: null, headRef: 'lane/3443-reopen-and-3441-gap-followup', title: 'backlog/3443: reopen (false auto-resolve) + file the extractor gap it exposed' },
+      { isLocalRepo, fetchGuardSignals },
+    )).toEqual([]);
+  });
+
+  it('#3473 — a genuine credit still lands when fetchGuardSignals returns neutral signals (guards don\'t over-fire on a real delivery)', () => {
+    const fetchGuardSignals = () => ({ body: 'This lands the feature end to end.', changedFiles: ['scripts/lib/open-pr-items.mjs'] });
+    expect(landedIdsForCandidate(
+      { hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: 'WE #3412: resolve fix' },
+      { isLocalRepo, fetchGuardSignals },
+    )).toEqual([3412]);
   });
 });

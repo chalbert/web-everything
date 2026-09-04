@@ -69,6 +69,77 @@ single-PR leaf stories, where "a WE PR titled `#NNN: <subject>`" and "the PR tha
 same fact; #3443 breaks that assumption by being a graduation-tracking story where they are not. This is a
 genuinely different gap in the same function, not a case the #3441 fix already covers.
 
+## A second, independent instance found and verified 2026-09-04 — the dispatch-time sibling checker
+
+While implementing this item's fix, a SECOND, INDEPENDENT occurrence of the identical bug class was found —
+not in `deliveredItemNumsFromPr` itself, but in a wholly separate function that shares no code with it:
+`we:scripts/operations/dispatch-lane-io.mjs`'s `filterAlreadyDoneCandidates(prs, num)` (consumed by
+`defaultCheckAlreadyDone`/`defaultCheckAlreadyDoneAsync`, which feed `we:scripts/readiness/dispatch-plan.mjs`'s
+dispatch-time "already-done" hold). It does a word-boundary title match for `NNN`, excluding only
+`NON_IMPLEMENTING_REF_RE` (prepare-scope/prepare-decision authoring refs) — it has no knowledge of, and does
+not import, `deliveredItemNumsFromPr`.
+
+This was caught LIVE, holding `#3096` (`we:backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md`)
+as `already-done`, even though `we:skills-src/conveyor/SKILL.md` still contains the exact hand-spawn-Agent prose
+#3096 exists to delete ("…and spawn it as ONE background `Agent`" — verified 2026-09-04; the line number has
+since shifted from 621 to 634 as unrelated edits landed above it, but the prose itself is unchanged and #3096's
+own gap is still open). Two merged PRs fed the false "already done" read:
+
+- PR #1599 (ref `lane/reconcile-3147-3096-3239`, title "#3096: reconcile the three-way dispatch duplicate —
+  #3096 survives, #3147 + #3239 collapse"). Its real merge diff (`git show 90fe066f6 --stat`, verified
+  2026-09-04) touches exactly 4 files, ALL `.md`: 3 `we:backlog/*.md` + a 1-line comment-marker repoint in
+  `we:skills-src/conveyor/SKILL.md`. Its own PR body opens: "No code behaviour changes — this is a backlog
+  reconciliation plus one in-code comment repoint."
+- PR #1613 (ref `lane/split-3096`, title "WE #3096: split along its two scope entries — skill rewiring vs
+  liveness hardening"). Its diff (`gh pr view 1613 --json files`, verified 2026-09-04) touches exactly 2 files,
+  both `we:backlog/*.md`. Its own body opens: "Splits #3096 along its two `scope:` entries. No code changes —
+  two backlog files."
+
+Both title-boundary-match "3096" and neither ref matches `NON_IMPLEMENTING_REF_RE`, so both were previously
+read as "already done" evidence for #3096.
+
+This is the SAME root-cause SHAPE as #3443/PR #1866/PR #1886 above — crediting a PR as "done" from title/ref
+pattern alone, with no signal distinguishing a real implementation from backlog housekeeping (filing,
+reconciling, splitting, reopening a card) — just hit at a DIFFERENT call site with DIFFERENT stakes (a
+dispatch-time HOLD, recoverable by a human/agent looking and dispatching by hand, vs. `deliveredItemNumsFromPr`'s
+auto-committed `status: resolved` RESOLVE, not recoverable the same way). Because the shape is identical, this
+item's fix widens to cover BOTH call sites in one pass — `filterAlreadyDoneCandidates` gets the same two guards
+(an all-markdown-diff exclusion, and a "does not resolve #NNN" body-disclaimer exclusion scoped to the id being
+checked) as `deliveredItemNumsFromPr`, implemented separately since the two functions share no code.
+
+### A third guard, added after direct post-fix verification turned up a `gh` data quirk (2026-09-04)
+
+Live re-check of `defaultCheckAlreadyDoneAsync('3096')` against the fixed code (`gh pr list --search "3096
+in:title" --state merged`, real data, verified 2026-09-04) first showed the all-markdown-diff guard correctly
+excluding PR #1613 (`gh pr view 1613 --json files` really does return only 2 files, both `we:backlog/*.md`),
+but NOT excluding PR #1599 — even though its TRUE merge diff is the 4-files-all-markdown shape cited above.
+Reason: `gh pr view 1599 --json files` / `gh pr list --search … --json files` report **17 files** for PR
+#1599, including three real `.mjs` files (`we:scripts/lib/jury-core.mjs`, `we:scripts/lib/jury-ledger.mjs`,
+`we:scripts/workflows/review-parked-prs.mjs`) with nonzero additions/deletions — while `git show 90fe066f6
+--stat` (the actual merge commit's first-parent diff) shows only the 4 files. Root cause (verified via `git
+merge-base 5a1d82b95 f0cadd290` then a diff-stat of that merge-base against `f0cadd290`, which reproduces the
+TRUE 4-file all-markdown diff): GitHub's own `files` field for a long-lived branch that accumulated unrelated
+commits (this one folded in three duplicate cards' worth of history) does not reliably match the real
+merge-commit diff — a GitHub API staleness/base-drift quirk, not a bug in this fix's guard logic. The
+all-markdown-diff guard alone left #3096 reading `done: true`, now attributed to PR #1599 instead of PR #1613.
+
+Rather than depend on local git history for an arbitrary already-merged PR (a materially bigger design change
+than the two reviewed guards), a THIRD, simpler guard closes this: PR #1599's own body — like PR #1613's —
+opens with a blanket disclaimer, not a per-id one ("No code behaviour changes — this is a backlog
+reconciliation plus one in-code comment repoint." vs. #1613's "No code changes — two backlog files."). A body
+matching `/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i` excludes the PR entirely (all ids, unlike the
+per-id-scoped "does not resolve #NNN" guard), independent of the `files` field's reliability. Added to both
+`deliveredItemNumsFromPr` (guard 8) and `filterAlreadyDoneCandidates` (guard 6).
+
+**Post-guard-8/6 re-verification (2026-09-04)**: `defaultCheckAlreadyDoneAsync('3096')` now returns
+`{ done: false, checked: true, pr: null }` against real `gh` data — #3096 no longer reads as already-done from
+either PR. Both false-positive vectors on #3096 (the all-markdown-diff-detectable PR #1613, and the
+`gh`-files-stale-but-body-disclaimed PR #1599) are closed.
+
+`#3096`'s and `#3353`'s own cards/status are NOT touched by this fix — they are cited here only as evidence.
+Once the fix lands, the dispatch-time already-done check naturally stops holding #3096 as already-done on its
+own (verified directly against the fixed code, not by editing #3096's card).
+
 ## Done when
 
 1. **Executable** — two unit tests in `we:scripts/lib/__tests__/open-pr-items.test.mjs` reproducing (a) PR

@@ -173,6 +173,93 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
     expect(deliveredItemNumsFromPr('lane/reconcile-3147-3096-3239', '')).toEqual(['3239']);
     expect(deliveredItemNumsFromPr('lane/reconcile-2716', '')).toEqual(['2716']);
   });
+
+  it('#3473 — a multi-PR/graduation-tracked item\'s title-anchor vector (PR #1866\'s exact ref/title) is NOT credited when the PR body discloses it does not resolve the item', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3443-computefreeslots-excludes-dirty-lanes',
+      'WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes',
+      { body: 'Graduates origin/lane/mechanical-dispatcher onto main, as one small piece of the ongoing graduation tracked by #3443 — this PR does not resolve #3443, it lands one increment of it.' },
+    )).toEqual([]);
+  });
+
+  it('#3473 — the ref-lead-segment vector (the reopen PR\'s exact ref/title) is NOT credited when the PR\'s changed files are all markdown (pure backlog housekeeping)', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3443-reopen-and-3441-gap-followup',
+      'backlog/3443: reopen (false auto-resolve) + file the extractor gap it exposed',
+      { changedFiles: ['backlog/3443-graduate-origin-lane-mechanical-dispatcher-to-main-in-small.md', 'backlog/3473-resolve-on-land-extractor-mis-credited-3443-a-multi-pr-gradu.md'] },
+    )).toEqual([]);
+  });
+
+  it('#3473 guard 7 regression proof — a real single-PR delivery whose changed-file list is NOT all-.md (a genuine code PR that happens to also touch one doc file) is still credited normally', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3412-resolve-fix',
+      'WE #3412: resolve fix',
+      { changedFiles: ['scripts/lib/open-pr-items.mjs', 'backlog/3412-resolve-fix.md'] },
+    )).toEqual(['3412']);
+  });
+
+  it('#3473 guard 6 is SCOPED to the specific disclaimed id — an unrelated #NNN mention plus a "does not resolve #MMM" disclaimer for a DIFFERENT id still credits NNN', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3412-resolve-fix',
+      'WE #3412: resolve fix (root cause also affects #2330)',
+      { body: 'this PR does not resolve #2330, that is tracked separately' },
+    )).toEqual(['3412']);
+  });
+
+  it('#3473 — PR #1599\'s exact ref/title/files reproduced directly against deliveredItemNumsFromPr: WITHOUT guard 7 this ref/title combination would wrongly credit BOTH #3096 (title-anchor) and #3239 (ref trailing-segment) — worse than the single false credit dispatch-lane-io\'s sibling checker hit live; guard 7\'s all-.md short-circuit (the real merge diff is 4 files, all .md/one comment-marker repoint — actually all .md per PR #1599\'s own body: "No code behaviour changes") suppresses both', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/reconcile-3147-3096-3239',
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      {},
+    )).toEqual(['3239', '3096']); // confirms the UNGUARDED read: both ids wrongly credited from ref+title alone (ref-derived id first, then title-derived)
+    expect(deliveredItemNumsFromPr(
+      'lane/reconcile-3147-3096-3239',
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      { changedFiles: ['backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md', 'backlog/3147-x.md', 'backlog/3239-x.md', 'skills-src/conveyor/SKILL.md'] },
+    )).toEqual([]); // guard 7 (all-.md diff) suppresses both once the real changed-file shape is supplied
+  });
+
+  it('#3473 guard 8 — PR #1599\'s REAL (stale) gh changedFiles list (17 files, 3 real .mjs) defeats guard 7, but the blanket "no code changes" body disclaimer (guard 8) still excludes it', () => {
+    // Live-verified 2026-09-04: `gh pr view 1599 --json files` returns 17 files including
+    // scripts/lib/jury-core.mjs, scripts/lib/jury-ledger.mjs, scripts/workflows/review-parked-prs.mjs — NOT
+    // all-.md — even though the PR's true merge-commit diff (`git show 90fe066f6 --stat`) is 4 files, all
+    // markdown. Guard 7 alone cannot exclude this PR from that real (stale) gh data; guard 8 (the PR's own
+    // "No code behaviour changes" opening line) does.
+    expect(deliveredItemNumsFromPr(
+      'lane/reconcile-3147-3096-3239',
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      {
+        body: 'No code behaviour changes — this is a backlog reconciliation plus one in-code comment repoint.',
+        changedFiles: [
+          'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md',
+          'backlog/3147-wire-the-conveyor-s-build-prepare-dispatch-onto-the-dispatch.md',
+          'backlog/3239-the-conveyor-tick-executes-spawnbuilds-by-hand-instead-of-th.md',
+          'backlog/3314-should-claim-accuracy-be-a-mandatory-lens.md',
+          'docs/agent/platform-decisions.md',
+          'scripts/lib/jury-core.mjs',
+          'scripts/lib/jury-ledger.mjs',
+          'scripts/workflows/review-parked-prs.mjs',
+          'skills-src/conveyor/SKILL.md',
+        ],
+      },
+    )).toEqual([]);
+  });
+
+  it('#3473 guard 8 — PR #1613\'s real body ("No code changes — two backlog files.") also matches the blanket disclaimer', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/split-3096',
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      { body: 'Splits #3096 along its two scope: entries. No code changes — two backlog files.' },
+    )).toEqual([]);
+  });
+
+  it('#3473 guard 8 does not over-fire on a real delivery body that happens to mention "no code" in an unrelated sense', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/3412-resolve-fix',
+      'WE #3412: resolve fix',
+      { body: 'This fix requires no code review sign-off beyond CI, and lands the feature end to end.' },
+    )).toEqual(['3412']);
+  });
 });
 
 describe('extractItemNums', () => {

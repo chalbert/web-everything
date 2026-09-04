@@ -1754,6 +1754,133 @@ describe('filterAlreadyDoneCandidates — PURE: which gh pr list rows are real "
     expect(NON_IMPLEMENTING_REF_RE.test('lane/3037-my-scoped-fix')).toBe(false); // "scoped" ≠ "scope-"
     expect(NON_IMPLEMENTING_REF_RE.test('lane/3037b-slug')).toBe(false); // a real retry-tagged build ref
   });
+
+  // #3473 — the real live false positive this check's own docblock now cites: #3096's dispatch-time
+  // already-done hold, fed by two merged PRs that both title-boundary-match "3096" but whose real diffs are
+  // pure backlog housekeeping (all-.md). Reproduces both exact shapes.
+  it('#3473 — EXCLUDES PR #1599\'s exact shape (all-.md diff, real body says "No code behaviour changes")', () => {
+    const pr = merged(
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      'lane/reconcile-3147-3096-3239',
+      {
+        number: 1599,
+        body: 'No code behaviour changes — this is a backlog reconciliation plus one in-code comment repoint.',
+        files: [
+          { path: 'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md' },
+          { path: 'backlog/3147-x.md' },
+          { path: 'backlog/3239-x.md' },
+          { path: 'skills-src/conveyor/SKILL.md' },
+        ],
+      },
+    );
+    expect(filterAlreadyDoneCandidates([pr], '3096')).toEqual([]);
+  });
+
+  it('#3473 — EXCLUDES PR #1613\'s exact shape (all-.md diff, real body says "No code changes — two backlog files")', () => {
+    const pr = merged(
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      'lane/split-3096',
+      {
+        number: 1613,
+        body: 'No code changes — two backlog files.',
+        files: [
+          { path: 'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md' },
+          { path: 'backlog/3096b-x.md' },
+        ],
+      },
+    );
+    expect(filterAlreadyDoneCandidates([pr], '3096')).toEqual([]);
+  });
+
+  it('#3473 guard 4 does NOT over-fire on a real implementation that happens to also touch a doc file', () => {
+    const pr = merged('WE #3096: route the conveyor\'s build dispatch through the declared dispatcher', 'lane/3096-route-dispatch', {
+      number: 2001,
+      files: [{ path: 'scripts/readiness/dispatch-plan.mjs' }, { path: 'backlog/3096-x.md' }],
+    });
+    expect(filterAlreadyDoneCandidates([pr], '3096')).toHaveLength(1);
+  });
+
+  it('#3473 guard 5 — a "does not resolve #NNN" body disclaimer excludes the PR, scoped to that exact id', () => {
+    const pr = merged('WE #3443: readiness/computeFreeSlots excludes dirty (orphaned) unleased lanes', 'lane/3443-computefreeslots-excludes-dirty-lanes', {
+      number: 1866,
+      body: 'Graduates origin/lane/mechanical-dispatcher onto main, as one small piece of the ongoing graduation tracked by #3443 — this PR does not resolve #3443, it lands one increment of it.',
+    });
+    expect(filterAlreadyDoneCandidates([pr], '3443')).toEqual([]);
+  });
+
+  it('#3473 guard 5 is scoped to THIS num — a disclaimer for a different id does not suppress a real match', () => {
+    const pr = merged('WE #3435: mechanically reap/stop finished sessions (this PR does not resolve #9999)', 'lane/3435-session-reaper', { number: 1861 });
+    expect(filterAlreadyDoneCandidates([pr], '3435')).toHaveLength(1);
+  });
+
+  it('#3473 — both new filters are no-ops when `files`/`body` are absent from the row (existing fixtures without them stay green)', () => {
+    const pr = merged('WE #3037: x', 'lane/3037-x');
+    expect(filterAlreadyDoneCandidates([pr], '3037')).toHaveLength(1);
+  });
+
+  it('#3473 guard 6 — PR #1599\'s REAL (stale) gh files list (17 files, 3 real .mjs, verified live 2026-09-04) defeats guard 4, but the blanket "no code changes" body disclaimer still excludes it', () => {
+    // `gh pr view 1599 --json files` genuinely returns 17 files including three real .mjs changes, even
+    // though the PR's TRUE merge-commit diff (`git show 90fe066f6 --stat`) is 4 files, all markdown — a
+    // GitHub files-API staleness quirk on this long-lived branch. Guard 4 (all-.md changed files) cannot
+    // exclude this PR from the real data; guard 6 (the PR's own "No code behaviour changes" opening line) does.
+    const pr = merged(
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      'lane/reconcile-3147-3096-3239',
+      {
+        number: 1599,
+        body: 'No code behaviour changes — this is a backlog reconciliation plus one in-code comment repoint.',
+        files: [
+          { path: 'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md' },
+          { path: 'backlog/3147-x.md' },
+          { path: 'backlog/3239-x.md' },
+          { path: 'docs/agent/platform-decisions.md' },
+          { path: 'scripts/lib/jury-core.mjs' },
+          { path: 'scripts/lib/jury-ledger.mjs' },
+          { path: 'scripts/workflows/review-parked-prs.mjs' },
+          { path: 'skills-src/conveyor/SKILL.md' },
+        ],
+      },
+    );
+    expect(filterAlreadyDoneCandidates([pr], '3096')).toEqual([]);
+  });
+
+  it('#3473 guard 6 — end-to-end proof: BOTH real #3096 PRs (#1599 via the blanket disclaimer, #1613 via the all-markdown files) are excluded together, leaving no already-done evidence', () => {
+    const pr1599 = merged(
+      '#3096: reconcile the three-way dispatch duplicate — #3096 survives, #3147 + #3239 collapse',
+      'lane/reconcile-3147-3096-3239',
+      {
+        number: 1599,
+        mergedAt: '2026-08-26T21:37:29Z',
+        body: 'No code behaviour changes — this is a backlog reconciliation plus one in-code comment repoint.',
+        files: [
+          { path: 'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md' },
+          { path: 'scripts/lib/jury-core.mjs' },
+        ],
+      },
+    );
+    const pr1613 = merged(
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      'lane/split-3096',
+      {
+        number: 1613,
+        mergedAt: '2026-08-26T23:55:38Z',
+        body: 'Splits #3096 along its two scope: entries. No code changes — two backlog files.',
+        files: [
+          { path: 'backlog/3096-route-the-conveyor-s-build-dispatch-through-the-declared-dis.md' },
+          { path: 'backlog/x3gvcun-x.md' },
+        ],
+      },
+    );
+    expect(filterAlreadyDoneCandidates([pr1599, pr1613], '3096')).toEqual([]);
+  });
+
+  it('#3473 guard 6 does not over-fire on a real delivery body that happens to mention "no code" in an unrelated sense', () => {
+    const pr = merged('WE #3435: mechanically reap/stop finished sessions', 'lane/3435-session-reaper', {
+      number: 1861,
+      body: 'This fix requires no code review sign-off beyond CI, and lands the feature end to end.',
+    });
+    expect(filterAlreadyDoneCandidates([pr], '3435')).toHaveLength(1);
+  });
 });
 
 describe('defaultCheckAlreadyDone — the gh call itself: argv, timeout, and fail-soft', () => {

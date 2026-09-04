@@ -1344,6 +1344,27 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
 }
 
 /**
+ * #3473 — fetches the two extra signals `deliveredItemNumsFromPr`'s guards 6/7 need (a PR's own body, and its
+ * changed-file list) via ONE `gh pr view --json body,files` call. Not called unconditionally — see
+ * `landedIdsForCandidate` below for the lazy-fetch-on-non-empty-base rationale. Fail-soft, matching every other
+ * `gh` read in this file: any failure (auth, rate-limit, network, unparseable JSON) degrades to `{body: '',
+ * changedFiles: null}` — both guards then no-op, so a `gh` hiccup degrades to the PRE-#3473 behaviour rather
+ * than blocking or crashing a land.
+ * @param {{num?:(number|string), repo?:(string|null)}} c
+ * @returns {{body:string, changedFiles:(string[]|null)}}
+ */
+export function defaultFetchLandGuardSignals(c) {
+  try {
+    const args = ['pr', 'view', String(c?.num), ...(c?.repo ? ['--repo', c.repo] : []), '--json', 'body,files'];
+    const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const data = JSON.parse(out || '{}');
+    return { body: data.body || '', changedFiles: Array.isArray(data.files) ? data.files.map((f) => f?.path).filter(Boolean) : null };
+  } catch {
+    return { body: '', changedFiles: null };
+  }
+}
+
+/**
  * #3441 — which item id(s) does a just-landed cascade candidate contribute to `landedThisPass`? A manifest
  * carrier (a couple, or a solo PR that pre-authored its own manifest) contributes its own `.item` exactly as
  * before (#2899 A5). A candidate with NO manifest is the delivery-agent-brief's DEFAULT path — a plain
@@ -1358,15 +1379,26 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
  * already guard against the two ways a naive branch/title scan over-credits (batch refs crediting every
  * sibling in the slug, bare `#NNN` citations) — see its docstring in `./lib/open-pr-items.mjs` for why it,
  * not the looser `itemNumsFromPr`, is the right tool for an AUTO-COMMITTED resolve. Pure.
- * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string}} c
- * @param {{isLocalRepo?:function}} [o]
+ *
+ * #3473 — TWO-PASS: first compute the ref/title-only `base` (identical to pre-#3473 behaviour, zero extra
+ * `gh` calls). Only when `base` is non-empty — i.e. this candidate would otherwise auto-resolve something —
+ * lazily fetch the candidate's body/changed-files (`fetchGuardSignals`, one `gh pr view` call) and re-run
+ * `deliveredItemNumsFromPr` WITH those signals, so guards 6/7 (the "does not resolve #NNN" disclaimer and the
+ * all-.md-diff housekeeping exclusion) can strip a false credit before it reaches `landedThisPass`. This keeps
+ * the extra `gh` round-trip off the overwhelming majority of candidates, which match nothing and must never
+ * pay for it — only a candidate already about to auto-resolve something pays the one extra call.
+ * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
+ * @param {{isLocalRepo?:function, fetchGuardSignals?:function}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved (usually 0 or 1)
  */
-export function landedIdsForCandidate(c, { isLocalRepo = () => false } = {}) {
+export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
-  return deliveredItemNumsFromPr(c.headRef, c.title).map(asItemId);
+  const base = deliveredItemNumsFromPr(c.headRef, c.title);
+  if (!base.length) return [];
+  const { body, changedFiles } = fetchGuardSignals(c) || {};
+  return deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles }).map(asItemId);
 }
 
 /**
