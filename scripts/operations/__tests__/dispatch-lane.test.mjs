@@ -446,11 +446,13 @@ describe('filling the delivery brief', () => {
     expect(prompt).toContain('--session=conveyor-3037');
     expect(prompt).toContain('--scope=we:a,we:b');
     expect(prompt).toContain('backlog/3037-x.md');
-    // Not one of the five remains; the two the template talks ABOUT are reported, never fatal.
+    // Not one of the five remains; the ones the template talks ABOUT (plus #3105's own
+    // {{ATTEMPT_TAG}}, substituted elsewhere by dispatch-lane-io.mjs, not by fillBrief) are
+    // reported, never fatal.
     for (const name of ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE']) {
       expect(prompt).not.toContain(`{{${name}}}`);
     }
-    expect(unknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
+    expect(unknownTokens).toEqual(['{{ATTEMPT_TAG}}', '{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
   });
 
   it('REPORTS an unknown token instead of refusing — the cost of a stray token is one confusing line', () => {

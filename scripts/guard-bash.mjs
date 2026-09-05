@@ -289,10 +289,12 @@ export function commitIdentityCommandReason(command) {
 // build subagent BACKGROUNDED its long verification and then yielded mid-run — the lane sat mid-flight, produced
 // nothing, and never errored, so nothing reclaimed it. The delivery brief only asks for this in PROSE; this hook
 // makes it structural. A command is a verification RUN when it actually invokes one of: `scripts/verify-lane.mjs`,
-// `check:standards`, or `test:unit` (via a package runner, or the bare `npm test` alias). Anchored to a runner /
-// the script path so a mere MENTION (grep/echo "check:standards") is not matched.
+// the declared `run.mjs verify` operation (#3105 — it shells the SAME synchronous suite run under the hood, so
+// backgrounding it carries the identical stall risk), `check:standards`, or `test:unit` (via a package runner,
+// or the bare `npm test` alias). Anchored to a runner / the script path so a mere MENTION (grep/echo
+// "check:standards") is not matched.
 const VERIFICATION_RUN =
-  /\bnode\s+\S*\bverify-lane\.mjs\b|\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:check:standards|test:unit)\b|\bnpm\s+(?:run\s+)?test\b/;
+  /\bnode\s+\S*\bverify-lane\.mjs\b|\bnode\s+\S*\brun\.mjs\s+verify\b|\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:check:standards|test:unit)\b|\bnpm\s+(?:run\s+)?test\b/;
 
 /** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit)? Pure. */
 export function isVerificationRun(command) { return VERIFICATION_RUN.test(String(command || '')); }
@@ -324,6 +326,29 @@ export function isBackgrounded(command, runInBackground = false) {
 export function backgroundedVerificationReason(command, runInBackground = false) {
   if (!isVerificationRun(command) || !isBackgrounded(command, runInBackground)) return null;
   return 'the verification set (verify-lane / check:standards / test:unit) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
+}
+
+/**
+ * #3105 — a MECHANICALLY DISPATCHED agent (build/fix/ci-heal, launched by `dispatch-lane` — marked via the
+ * `WE_DISPATCH_KIND` env var {@link ../operations/dispatch-lane-io.mjs} sets on the spawn) may never run the
+ * verification set directly AT ALL, foreground or background: the gate legitimately takes 150–350s, well past
+ * the agent tool's ~120s foreground window, so a directly-run gate is auto-backgrounded and the agent stalls
+ * with no error — the #2833 shape, just reached without ever typing `&`. `request` + poll `check` is the only
+ * sanctioned path (`scripts/verify-dispatch.mjs`, the runner's own process, runs the gate with no such
+ * ceiling). Scoped to a DISPATCHED agent only — the operator's own interactive session (no `WE_DISPATCH_KIND`)
+ * legitimately runs these commands directly, e.g. to hand-verify a fix before committing. No override: a
+ * dispatched agent has no legitimate reason to run the gate itself, ever.
+ */
+// `verify-lane.mjs request`/`check`/`reset` are fast, non-blocking marker reads/writes — the SANCTIONED path
+// this rule exists to steer a dispatched agent toward, not something to deny alongside the actual suite run.
+// Only the `check:standards`/`test:unit` alternatives (which have no such non-blocking mode at all) and a bare
+// `verify-lane.mjs` invocation (its DEFAULT mode runs the suites) are the ones this rule must catch.
+const SANCTIONED_VERIFY_LANE_QUERY = /\bnode\s+\S*\bverify-lane\.mjs\b\s+(?:request|check|reset)\b/;
+
+export function dispatchedAgentVerificationReason(command, dispatchKind) {
+  if (!dispatchKind || !isVerificationRun(command)) return null;
+  if (SANCTIONED_VERIFY_LANE_QUERY.test(String(command || ''))) return null;
+  return `a mechanically-dispatched ${dispatchKind} agent may not run the verification set (verify-lane / check:standards / test:unit) directly — the gate legitimately takes 150–350s, well past this tool's ~120s foreground window, so a direct run gets silently auto-backgrounded and the agent stalls with no error (#3105). Request it instead and poll for the result: \`node scripts/verify-lane.mjs request\` then \`node scripts/verify-lane.mjs check\` across your own turns — the runner's own process (unbound by this window) actually runs the gate. There is no override.`;
 }
 
 // #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that WRITES the shared PRIMARY
@@ -2154,6 +2179,11 @@ export function decide(command, ctx = {}) {
   // verification-set run before anything else.
   const bg = backgroundedVerificationReason(command, ctx.runInBackground);
   if (bg) return bg;
+  // #3105 — same whole-command timing as the check above: a dispatched agent's own gate call must be caught
+  // before the per-segment split, since the property being checked (is this a verification-set invocation at
+  // all) does not depend on which segment of a chained command it sits in.
+  const dispatched = dispatchedAgentVerificationReason(command, ctx.dispatchKind);
+  if (dispatched) return dispatched;
   // #1550 r3 — the identity override can also straddle segments (`export GIT_AUTHOR_EMAIL=… && git commit`),
   // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
   const ident = commitIdentityCommandReason(command);
@@ -2293,6 +2323,7 @@ if (IS_CLI) {
   let markedLeaseSlug = null;
   let contestedHolderSlug = null;
   let runInBackground = false;
+  let dispatchKind = null;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -2300,6 +2331,10 @@ if (IS_CLI) {
     // through (the harness detaches the process). Read it so a backgrounded verification run is denied even when
     // the command text carries no `&`.
     runInBackground = !!(ev.tool_input || {}).run_in_background;
+    // #3105 — `WE_DISPATCH_KIND` is stamped by `dispatch-lane-io.mjs` onto a mechanically-dispatched agent's
+    // `claude --bg` process env (inherited by every hook it runs, same channel `CLAUDE_CODE_SESSION_ID`
+    // already relies on below); unset for an interactive operator session, which is unaffected.
+    dispatchKind = process.env.WE_DISPATCH_KIND || null;
     // #2367 — the DURABLE session identity. Key on `CLAUDE_CODE_SESSION_ID` (env) FIRST — the SAME source
     // `lane-pool.mjs acquire` stamps into the lease's `ownerSession`, so my own lease can never read as foreign
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
@@ -2323,7 +2358,7 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground };
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed
