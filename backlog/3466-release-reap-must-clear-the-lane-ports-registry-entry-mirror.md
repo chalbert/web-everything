@@ -3,9 +3,10 @@ bornAs: xx1on5q
 kind: task
 tier: pinned
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-03"
 dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
 tags: [conveyor, lane-pool, lane-ports, ground-truth, reap]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs"]
 relatedTo: ["3435", "3449", "3457"]
