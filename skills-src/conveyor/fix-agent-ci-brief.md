@@ -96,6 +96,11 @@ gh run view <run-id> --log-failed --repo <owner/name> # the failing step's log (
   needs a design call — do **NOT** guess: stop and report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a
   CI break)`. The review gate (if any) still owes a human verdict; a human handles it via `/finish`.
 
+**If a genuine code repair is needed, build-brief discipline still applies** (statute:
+[we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+#2819): name the concrete failure shape rather than a narrow guess, and never describe the heal comment (step 7)
+as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it does not touch the review verdict.
+
 ### 4. Run the gate GREEN (the item's own locus gate)
 
 ```bash

@@ -24,26 +24,29 @@ const item = (num, over = {}) => ({
 /** A readBody that serves a per-id body from a map, defaulting to an empty (maximally-thin) body. */
 const bodyMapReader = (bodies) => (file) => bodies[file] ?? '';
 
-const THIN = ''; // no acceptance-criteria section, no file path → both gaps
-const FLESHED = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.';
+const THIN = ''; // no acceptance-criteria section, no file path, no edge cases, no integration test → 4 gaps
+const FLESHED = '## Acceptance criteria\n- It works.\n\n'
+  + 'Edge cases: rejects `__fixtures__` paths.\n\n'
+  + 'Add an integration test exercising the real route wiring.\n\n'
+  + 'Edits `scripts/foo.mjs`.';
 
 describe('candidate selection (#252) — deterministic, decided-but-thin only', () => {
-  it('selects an open issue/idea with a thin body and reports both gaps', () => {
+  it('selects an open issue/idea with a thin body and reports every gap', () => {
     const items = [item(10)];
     const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': THIN }));
     expect(cands.map((c) => c.num)).toEqual(['10']);
-    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'file-paths']);
+    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'file-paths', 'edge-cases', 'integration-tests']);
   });
 
-  it('skips a fleshed-out item (has acceptance criteria AND a concrete path)', () => {
+  it('skips a fleshed-out item (criteria, a path, edge cases, and an integration test all present)', () => {
     const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
     expect(cands).toEqual([]);
   });
 
-  it('reports only the missing gap when one of the two is present', () => {
-    const onlyPath = 'See `scripts/foo.mjs`.'; // has a path, no acceptance criteria
+  it('reports only the missing gaps when some of the four are present', () => {
+    const onlyPath = 'See `scripts/foo.mjs`.'; // has a path, nothing else
     const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': onlyPath }));
-    expect(cands[0].gaps).toEqual(['acceptance-criteria']);
+    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'edge-cases', 'integration-tests']);
   });
 
   it('never selects a decision item — a fork is a human call, not a gap to fill', () => {
@@ -55,6 +58,53 @@ describe('candidate selection (#252) — deterministic, decided-but-thin only', 
   it('never selects a non-open item (claimed/done/shelved are out of scope)', () => {
     const items = [item(10, { status: 'active' }), item(11, { status: 'resolved' })];
     expect(selectProposalCandidates(items, bodyMapReader({}))).toEqual([]);
+  });
+});
+
+describe('build-brief-discipline gap detectors (#2819) — edge cases, integration tests, overclaim title', () => {
+  it('flags edge-cases when the body never names one', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nAdd an integration test.\n\nEdits `scripts/foo.mjs`.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toContain('edge-cases');
+  });
+
+  it('does not flag edge-cases once the body names one', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdge cases: an empty input list is rejected.\n\n'
+      + 'Add an integration test.\n\nEdits `scripts/foo.mjs`.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body })) ?? [];
+    expect(c?.gaps ?? []).not.toContain('edge-cases');
+  });
+
+  it('flags integration-tests when the body only asks for a unit test', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdge cases: rejects empty input.\n\n'
+      + 'Covered by a unit test.\n\nEdits `scripts/foo.mjs`.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toContain('integration-tests');
+  });
+
+  it('does not flag integration-tests once the body requires a wiring/e2e test', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdge cases: rejects empty input.\n\n'
+      + 'Covered by a wiring test.\n\nEdits `scripts/foo.mjs`.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body })) ?? [];
+    expect(c?.gaps ?? []).not.toContain('integration-tests');
+  });
+
+  it('flags overclaim-title on a slice (has a parent) whose title claims full closure', () => {
+    const items = [item(10, { title: 'Closes the data-layer dodge', parent: '2527' })];
+    const [c] = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(c.gaps).toEqual(['overclaim-title']); // fleshed body → only the title-level gap fires
+  });
+
+  it('does not flag overclaim-title on a standalone item (no parent) with the same title', () => {
+    const items = [item(10, { title: 'Closes the data-layer dodge' })]; // no parent
+    const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(cands).toEqual([]); // fully fleshed, no parent → nothing to flag
+  });
+
+  it('does not flag overclaim-title on a slice whose title makes no closure claim', () => {
+    const items = [item(10, { title: 'Add a retry to the fetch helper', parent: '2527' })];
+    const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(cands).toEqual([]);
   });
 });
 
@@ -83,6 +133,19 @@ describe('propose — never applies, only drafts (#252)', () => {
     const c = { gaps: ['acceptance-criteria'], id: '10-slug', tags: [] };
     expect(referenceProposer.propose(c).rationale).toMatch(/scaffolding/i);
   });
+
+  it('drafts a note (never a criterion or path) for overclaim-title, and is not refused', async () => {
+    const registry = registerReferenceProposers();
+    const items = [item(10, { title: 'Closes the data-layer dodge', parent: '2527' })];
+    const [r] = await propose(items, { readBody: bodyMapReader({ 'backlog/10-slug.md': FLESHED }), registry });
+    expect(r.status).toBe('proposed');
+    expect(r.proposal.notes).toBeTruthy();
+    expect(r.proposal.criteria).toBeUndefined();
+    expect(r.proposal.paths).toBeUndefined();
+    const diff = renderProposalDiff(r);
+    expect(diff).toMatch(/<!-- Notes/);
+    expect(diff.split('\n').every((l) => l.startsWith('+') || l.startsWith('---'))).toBe(true);
+  });
 });
 
 describe('graceful degradation — no provider registered (#252)', () => {
@@ -93,7 +156,7 @@ describe('graceful degradation — no provider registered (#252)', () => {
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('no-provider');
     expect(results[0].proposal).toBeNull();
-    expect(results[0].candidate.gaps).toEqual(['acceptance-criteria', 'file-paths']); // gap still reported
+    expect(results[0].candidate.gaps).toEqual(['acceptance-criteria', 'file-paths', 'edge-cases', 'integration-tests']); // gaps still reported
     expect(renderProposalDiff(results[0])).toBe('');                                   // nothing to render
   });
 });
@@ -112,6 +175,13 @@ describe('provider failure is recorded, never thrown (#252)', () => {
     registry.register({ id: 'empty', handles: () => true, propose: () => ({ criteria: [], paths: [] }) });
     const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': THIN }), registry });
     expect(r.status).toBe('refused');
+  });
+
+  it('a provider that returns only notes is proposed, not refused — notes alone are a real draft', async () => {
+    const registry = new CustomProposerRegistry();
+    registry.register({ id: 'notes-only', handles: () => true, propose: () => ({ notes: ['review by hand'] }) });
+    const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': THIN }), registry });
+    expect(r.status).toBe('proposed');
   });
 });
 

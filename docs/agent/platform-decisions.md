@@ -4109,6 +4109,43 @@ engine the closing catalog builds onto).
 
 ---
 
+### A delegated build brief must name its edge cases, require an integration/wiring test, and never echo the item's own title as a completion claim {#build-brief-discipline}
+
+**Every backlog item that will be consumed as a delegated build brief — and every executing agent template
+that builds against one — carries three obligations.** Traced from the UI-Fidelity foundation PRs (#951/#952,
+both ACCEPT-WITH-NITS): where the spec said "reject fixture routes" without naming the fixture-path shapes, the
+build agent wrote a reasonable-but-narrow regex that missed one; where it said "unit-test both ways," the agent
+tested the function but never the gate wiring; and the slice title's own "closes the data-layer dodge" got
+echoed back as a completion claim the diff didn't actually back. None of the three is a sloppy build — each is
+a spec gap or a title reproduced verbatim, so the fix is a **discipline**, not a one-off correction:
+
+1. **Name the edge cases.** A spec that says "reject/handle X" must enumerate the concrete shapes of X — not
+   leave the executing agent to infer a narrow guess. An executing agent facing an unenumerated "reject X"
+   still names the concrete cases itself before writing the check, rather than the first pattern that comes to
+   mind.
+2. **Require an integration/wiring test, not only a unit test.** A spec (or a build) that tests the isolated
+   function but never the call path that actually wires it in has not demonstrated the feature works — only
+   that one piece of it does.
+3. **Never echo the item's own title/slice name as a completion claim.** "Closes X" in a title is a *label*,
+   not a verified fact; a commit/PR that repeats it as accomplished must have independently earned that claim
+   end-to-end, or say what it actually closed instead.
+
+**Enforcement is two-sided — an authoring-time gate plus a build-time habit, not one mechanism doing both
+jobs.** `scripts/readiness/proposer.mjs` carries the deterministic half: three gap detectors
+(`edge-cases`, `integration-tests`, `overclaim-title`) alongside its existing `acceptance-criteria`/`file-paths`
+pair, so a thin-or-overclaiming item is flagged before it is ever dispatched as a brief. The build-time half
+lives in the delegated-agent templates themselves (`we:skills-src/conveyor/delivery-agent-brief.md`,
+`fix-agent-brief.md`, `fix-agent-ci-brief.md`) as a standing instruction to the executing agent — a
+readiness-time gate cannot rewrite an already-thin upstream spec, so the agent applies the same three checks to
+its own interpretation regardless of what the spec handed it.
+
+**Lineage:** #2819. Fixes #2563 (advisory care-level / convergence); the build-lane-warm convergence half of
+that fix is the pre-existing `/converge` step already in `delivery-agent-brief.md` (#2971/#2969) — this
+statute closes the remaining root cause (the under-specified brief itself). Reflected in
+`we:scripts/readiness/proposer.mjs` and the three conveyor build-brief templates named above.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
