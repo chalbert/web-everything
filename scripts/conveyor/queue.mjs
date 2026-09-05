@@ -21,6 +21,12 @@
  * CURRENTLY shows: a sidecar entry can go stale across JIT-numbering — an item cleared as a `xHASH` won't match
  * once it lands as `#NNN` (and vice-versa) — so if a cleared id stops matching, `remove` it and re-`add` the
  * current id. (#2613 review, finding 3 — JIT-hash ↔ landed-number drift.)
+ *
+ * CAVEAT (#3478): this CLI resolves its sidecar by ITS OWN SCRIPT LOCATION (`resolveQueuePath`), not by
+ * wherever the LIVE conveyor runner is actually rooted — if the runner process is running from a DIFFERENT
+ * checkout than the one this CLI is invoked from, `add` still reports `✓ cleared`, but into a sidecar the
+ * runner never reads. {@link ./queue-work.mjs} is the runner-aware alternative: it resolves the live runner's
+ * checkout first (refusing rather than guessing when that's ambiguous) and writes there instead.
  */
 
 import { execFileSync } from 'node:child_process';

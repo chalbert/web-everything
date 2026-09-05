@@ -3,10 +3,11 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +79,18 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+
+Built `we:scripts/conveyor/queue-target.mjs` (the resolution core: reads the runner-singleton lock dir(s)
+under `~/.claude/conveyor-runner-locks/`, keeps only LIVE — non-stale — entries, requires exactly one, then
+shells `lsof -a -p <pid> -d cwd -Fn` to derive that process's real cwd) and `we:scripts/conveyor/queue-work.mjs`
+(the CLI: same `add`/`remove` surface as `we:scripts/conveyor/queue.mjs`, reusing
+`we:scripts/conveyor/queue-store.mjs`'s pure core unchanged, but writing into the RESOLVED checkout's
+`we:.conveyor/queue.json` instead of the script's own). Refuses — never guesses — on `no-live-runner`,
+`ambiguous-runner-lock` (>1 live lock), `no-pid-recorded`, and `runner-cwd-unresolvable`. Cross-referenced the
+caveat from `we:scripts/conveyor/queue.mjs`'s own doc header. Verified live against the actual running
+conveyor runner on this machine (correctly resolved to its real checkout, a different one than this lane
+clone). Left `we:scripts/conveyor/queue.mjs` itself unchanged (still the operator's cwd-relative CLI) per the
+item's own "implementation call" — `we:scripts/conveyor/queue-work.mjs` is the new, safer entry point rather
+than a replacement.
