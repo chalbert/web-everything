@@ -124,15 +124,31 @@ export function todayIso(now = new Date()) {
 const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...opts, cwd });
 
 /**
- * Commit the just-rewritten card. ONE commit, the card path only — never `git add -A` (this repo's own
- * git-hygiene rule; a review that accidentally swept up an unrelated dirty file would be its own defect
- * class). Returns the new commit's full SHA.
- * @param {{path: string, message: string, exec: Function, cwd: string}} o
+ * Commit an ALREADY-STAGED card. NO pathspec on the `commit` itself — deliberately, not an oversight: `git
+ * commit -- <path>` re-reads `<path>` from the WORKING TREE at commit time (pathspec-qualified commit
+ * bypasses the index), which would silently undo the whole point of #3230's post-stage verify — a writer
+ * racing the working tree between the verify read and this call would get ITS bytes committed even though
+ * the index (what was actually verified) held the good ones. A bare `git commit` has no such reopening: it
+ * commits exactly the index, which at this point holds only this run's own staged add (never `git add -A` —
+ * this repo's own git-hygiene rule; a review that accidentally swept up an unrelated dirty file would be its
+ * own defect class). Returns the new commit's full SHA.
+ * @param {{message: string, exec: Function, cwd: string}} o
  */
-function commitCard({ path, message, exec, cwd }) {
-  exec('git', ['add', '--', path], { cwd });
-  exec('git', ['commit', '-m', message, '--', path], { cwd, encoding: 'utf8' });
+function commitStagedCard({ message, exec, cwd }) {
+  exec('git', ['commit', '-m', message], { cwd, encoding: 'utf8' });
   return String(exec('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' })).trim();
+}
+
+/**
+ * Whether the rendered review section actually landed in `content` — the post-write read-back predicate
+ * card #3230 checks, extracted so a test can assert on it directly rather than only through the full
+ * `recordPrepVerdict` path.
+ * @param {string} content
+ * @param {string} section
+ * @returns {boolean}
+ */
+export function sectionRecorded(content, section) {
+  return typeof content === 'string' && typeof section === 'string' && section.length > 0 && content.includes(section);
 }
 
 /**
@@ -141,7 +157,19 @@ function commitCard({ path, message, exec, cwd }) {
  *
  * THE RACE GUARD (see file header). `expectedContentHash` is the hash `readPrep` captured; if the LIVE file's
  * hash has since moved, this makes NO write and returns `{recorded: false, aborted: true, reason}` — the
- * deterministic stand-in for the `confirm` step this operation deliberately does not have.
+ * deterministic stand-in for the `confirm` step this operation deliberately does not have. That guard is
+ * PRE-write — it cannot see a write that is issued but does not land.
+ *
+ * THE POST-WRITE VERIFY (#3230). After writing, this STAGES the card, then reads back the STAGED bytes
+ * (`readStagedContent`, default `git show :<path>` — the index, never the working tree) and checks the
+ * rendered section actually landed there. Verifying the index rather than the working tree means the bytes
+ * checked are exactly the bytes about to be committed — a second writer racing the working tree AFTER the
+ * stage cannot fool this check, AND (see `commitStagedCard`) the commit itself never re-reads the working
+ * tree either, so the bytes verified are the bytes that land. Absent ⇒ this returns `{recorded: false,
+ * verified: false, path}` — a determinate THIRD outcome, never a throw (a throw would be indistinguishable
+ * from a crash and get replayed as UNKNOWN) — and skips the commit and the `pr-land` shell entirely: nothing
+ * further happens on a write that did not land. Present ⇒ commit proceeds and the success return carries
+ * `verified: true`.
  *
  * LANDS OR PARKS (never both). A clean review (`isCleanPrepReview`) is committed and handed to
  * `we:scripts/pr-land.mjs --label-on-green` — the SAME transport every AI-edit path in this repo lands through
@@ -155,7 +183,7 @@ function commitCard({ path, message, exec, cwd }) {
  * @param {{item: string, repo: string, cwd?: string, confidence: string,
  *   risks?: Array<{risk: string, addressed: boolean, note?: string}>, corrections?: string[],
  *   fixApplied?: boolean, note?: string, actor?: string, expectedContentHash?: string|null,
- *   exec?: Function, runNode?: Function}} o
+ *   exec?: Function, runNode?: Function, readStagedContent?: (relPath: string) => string}} o
  * @returns {Promise<object>}
  */
 export async function recordPrepVerdict({
@@ -171,6 +199,7 @@ export async function recordPrepVerdict({
   expectedContentHash = null,
   exec = execFileIn(cwd),
   runNode = (argv, opts) => execFileSync(process.execPath, argv, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...opts }),
+  readStagedContent = (relPath) => exec('git', ['show', `:${relPath}`], { cwd, encoding: 'utf8' }),
 } = {}) {
   const path = resolveCardPath({ item, cwd });
   const raw = readFileSync(path, 'utf8');
@@ -195,6 +224,32 @@ export async function recordPrepVerdict({
   writeFileSync(path, updated, 'utf8');
 
   const relPath = path.startsWith(cwd) ? path.slice(cwd.length + 1) : path;
+
+  try {
+    exec('git', ['add', '--', relPath], { cwd });
+  } catch (e) {
+    throw notApplied(`review-prep-io: git add failed before any commit — ${String(e?.message ?? e)}`, { path });
+  }
+
+  // ── VERIFY THE STAGED WRITE (#3230) — the INDEX, not the working tree; see file header. ──────────────────
+  let stagedContent;
+  try {
+    stagedContent = String(readStagedContent(relPath));
+  } catch (e) {
+    throw notApplied(`review-prep-io: reading the staged content failed before any commit — ${String(e?.message ?? e)}`, { path });
+  }
+  if (!sectionRecorded(stagedContent, section)) {
+    return {
+      recorded: false,
+      verified: false,
+      path,
+      reason:
+        `review-prep-io: the staged content at ${path} does not contain the rendered review section — the `
+        + 'write did not land (a concurrent writer likely raced it after the read). No commit, no push: '
+        + 're-run the operation to retry.',
+    };
+  }
+
   const clean = isCleanPrepReview({ confidence, risks, fixApplied });
   const commitMessage = clean
     ? `review-prep: independent review of #${item} — confidence ${confidence}, no corrections owed`
@@ -202,7 +257,7 @@ export async function recordPrepVerdict({
 
   let sha;
   try {
-    sha = commitCard({ path: relPath, message: commitMessage, exec, cwd });
+    sha = commitStagedCard({ message: commitMessage, exec, cwd });
   } catch (e) {
     throw notApplied(`review-prep-io: git commit failed before any push — ${String(e?.message ?? e)}`, { path });
   }
@@ -247,6 +302,7 @@ export async function recordPrepVerdict({
 
   return {
     recorded: true,
+    verified: true,
     aborted: false,
     path,
     sha,
