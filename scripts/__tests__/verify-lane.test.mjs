@@ -90,6 +90,62 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
   });
 });
 
+describe('verify-lane request (#3105) — stamp the marker, run nothing, return immediately', () => {
+  function runRequest(gate) {
+    try {
+      const out = execFileSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
+    } catch (e) {
+      return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+    }
+  }
+
+  it('stamps a running marker for HEAD and exits 0 without running the gate', () => {
+    // A gate that would fail loudly if ever executed — proves `request` never runs it.
+    const { code, json } = runRequest('exit 7');
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested');
+    expect(json.sha).toBe(headSha());
+
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.status).toBe('running');
+    expect(onDisk.sha).toBe(headSha());
+    expect(onDisk.finishedAt).toBeNull();
+  });
+
+  it('`check` reads a requested marker exactly like an ordinary in-flight running one — no new vocabulary', () => {
+    runRequest('true');
+    let out;
+    try {
+      out = execFileSync('node', [VERIFY_LANE, 'check', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      out = String(e.stdout);
+    }
+    const { status, ok, reason } = JSON.parse(out.trim());
+    expect(status).toBe('running');
+    expect(ok).toBe(false);
+    expect(reason).toBe('verify-unfinished');
+  });
+
+  it('a plain `verify` run picks up the requested marker and carries it to a terminal green result', () => {
+    runRequest('true');
+    const after = runVerify('true');
+    expect(after.code).toBe(0);
+    expect(after.json.status).toBe('green');
+  });
+
+  it('refuses to clobber a foreign TERMINAL marker — the same start-write guard `verify` applies', () => {
+    writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'green', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 0 }) + '\n');
+    const { code, json } = runRequest('true');
+    expect(code).toBe(3);
+    expect(json.status).toBe('superseded');
+    // The foreign terminal record survives untouched.
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.sha).toBe(OTHER_SHA);
+    expect(onDisk.status).toBe('green');
+  });
+});
+
 describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a lease to protect', () => {
   const leaseFile = () => join(dir, '.git', '.lane-lease');
   function runReset(env = {}) {

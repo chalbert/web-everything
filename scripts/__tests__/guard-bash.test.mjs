@@ -11,7 +11,7 @@ import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
-  isVerificationRun, isBackgrounded, backgroundedVerificationReason,
+  isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
@@ -56,6 +56,45 @@ describe('guard-bash — backgrounded verification is denied (#2833 finding 3)',
     expect(decide('node scripts/verify-lane.mjs --gate="npm run test:unit" &')).toMatch(/never backgrounded/);
     expect(decide('npm run check:standards', { runInBackground: false })).toBeNull();
     expect(decide('npm run check:standards')).toBeNull();
+  });
+});
+
+describe('guard-bash — a dispatched agent may not run the gate directly, only request/check it (#3105)', () => {
+  it('dispatchedAgentVerificationReason fires for a dispatched agent, foreground or background alike', () => {
+    expect(dispatchedAgentVerificationReason('npm run check:standards', 'build')).toMatch(/mechanically-dispatched build agent/);
+    expect(dispatchedAgentVerificationReason('npm run test:unit', 'fix')).toMatch(/mechanically-dispatched fix agent/);
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs --gate=true', 'ci-heal')).toMatch(/mechanically-dispatched ci-heal agent/);
+  });
+  it('never fires for an interactive (non-dispatched) session — no WE_DISPATCH_KIND', () => {
+    expect(dispatchedAgentVerificationReason('npm run check:standards', null)).toBeNull();
+    expect(dispatchedAgentVerificationReason('npm run check:standards', undefined)).toBeNull();
+    expect(dispatchedAgentVerificationReason('npm run check:standards', '')).toBeNull();
+  });
+  it('never fires for a non-verification command, dispatched or not', () => {
+    expect(dispatchedAgentVerificationReason('npm run dev', 'build')).toBeNull();
+    expect(dispatchedAgentVerificationReason('git status', 'build')).toBeNull();
+  });
+  it('allows the sanctioned request/check/reset queries even for a dispatched agent — the whole point of #3105', () => {
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs request', 'build')).toBeNull();
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs check', 'build')).toBeNull();
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs check --require-verified', 'fix')).toBeNull();
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs reset', 'ci-heal')).toBeNull();
+  });
+  it('a bare (default-mode) verify-lane.mjs invocation still denies — only request/check/reset are exempt', () => {
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs', 'build')).toMatch(/#3105/);
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs --gate="npm run test:unit"', 'build')).toMatch(/#3105/);
+  });
+  it('the declared run.mjs verify operation is caught too — it shells the same synchronous suite run', () => {
+    expect(isVerificationRun('node scripts/operations/run.mjs verify --checkout="$PWD" --json')).toBe(true);
+    expect(dispatchedAgentVerificationReason('node scripts/operations/run.mjs verify --checkout="$PWD" --json', 'build')).toMatch(/#3105/);
+    expect(backgroundedVerificationReason('node scripts/operations/run.mjs verify --checkout="$PWD" &')).toMatch(/#2833 subagent stall/);
+  });
+  it('decide denies via the dispatchKind ctx and allows the identical command with no ctx (operator session)', () => {
+    expect(decide('npm run check:standards', { dispatchKind: 'build' })).toMatch(/mechanically-dispatched/);
+    expect(decide('npm run check:standards', {})).toBeNull();
+    expect(decide('npm run check:standards')).toBeNull();
+    // the sanctioned query still passes even under a dispatched ctx
+    expect(decide('node scripts/verify-lane.mjs check', { dispatchKind: 'build' })).toBeNull();
   });
 });
 
