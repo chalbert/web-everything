@@ -57,10 +57,14 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
 
-/** Provisioning metadata, mirrors `we:scripts/conveyor/review-status-tag.mjs`'s own `ensureLabel` call shape. */
+/** Provisioning metadata, mirrors `we:scripts/conveyor/review-status-tag.mjs`'s own `ensureLabel` call shape.
+ *  `description` MUST stay at or under GitHub's 100-char label-description cap — the original 163-char text
+ *  made every `gh label create` call fail `HTTP 422: description is too long`, confirmed live 2026-09-05
+ *  re-verifying the xoh8fkw repo-resolution fix against real PR #1932: the repo resolved correctly, then THIS
+ *  hit, so the label was still never actually applied. */
 export const CONFLICT_LABEL_META = Object.freeze({
   color: 'B60205', // same red as `review:human` — this is also a "something needs a human" signal
-  description: 'informative: this parked PR has drifted into a real merge conflict against main — needs a human/agent rebase or resolve before it can land (auto-managed, #xw0odtv)',
+  description: 'auto-managed: this review-parked PR has drifted into a real merge conflict — see #xw0odtv',
 });
 
 /** How many open PRs one `gh pr list` call reads per repo — generous relative to any repo's live parked count. */
@@ -155,6 +159,19 @@ export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) 
 export function watchParkedPrConflicts({ repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false } = {}) {
   const prs = listPrs({ repo });
   const results = [];
+  // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
+  // never pays for the extra `gh repo view` call). `defaultListParkedPrs` above works fine with a null `repo`
+  // (`gh pr list` derives it from cwd when `--repo` is omitted), but `review-label-provider.mjs`'s own
+  // `GH_ARGV.ensureLabel`/`setLabels`/`postComment` always splice `'--repo', repo` into their argv
+  // UNCONDITIONALLY — a null `repo` reaching them becomes a literal `"null"` argument once it hits `gh`.
+  // Confirmed live 2026-09-05 on PR #1932: `gh label create … --repo null …` failing
+  // `expected the "[HOST/]OWNER/REPO" format, got "null"` — this pass correctly detected the newly-conflicting
+  // PR every tick but had NEVER actually applied a label, because the runner's own default invocation
+  // (`runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep'])`) never passes `--repo` unless the runner
+  // itself was started with one. Mirrors `we:scripts/review-set-label.mjs`'s own `repoOptional` resolution —
+  // the provider's `currentRepo()` exists exactly for this ("fires only when `--repo` was omitted", its own
+  // docblock) and was simply never called here.
+  let resolvedRepo = repo;
   for (const pr of Array.isArray(prs) ? prs : []) {
     const isConflicting = isParkedConflictTarget(pr);
     const plan = planConflictLabelChange({ isConflicting, currentLabels: pr?.labels });
@@ -162,10 +179,11 @@ export function watchParkedPrConflicts({ repo = null, listPrs = defaultListParke
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
     if (dryRun) { results.push(entry); continue; }
     try {
-      if (plan.add) provider.ensureLabel(repo, CONFLICT_LABEL, CONFLICT_LABEL_META);
-      provider.setLabels(repo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
+      if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+      if (plan.add) provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
+      provider.setLabels(resolvedRepo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
       if (plan.newlyDetected) {
-        provider.postComment(repo, pr?.number, buildConflictComment(pr));
+        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr));
         entry.commented = true;
       }
     } catch (e) {
