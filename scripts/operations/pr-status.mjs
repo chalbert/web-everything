@@ -84,6 +84,23 @@ export const CHECK_STATES = Object.freeze(['green', 'red', 'pending', 'unchecked
 export const NON_BLOCKING_CONCLUSIONS = Object.freeze(['skipped', 'neutral']);
 
 /**
+ * Check names EXCLUDED from every CI-truth reduction in this file (and its siblings `we:scripts/progress-
+ * board.mjs`'s `ciFailed` and `we:scripts/readiness/conveyor-state.mjs`'s `ciRollup`, which mirror this same
+ * list) — checks whose job IS to report a review/merge-gate STATE, not the code's health. `review-gate`
+ * (`we:.github/workflows/review-gate.yml` + `we:scripts/check-review-gate.mjs`) is BY DESIGN red for as long
+ * as a PR carries an un-cleared review hold (`review:pending`/`review:changes`/`review:human`) — that is its
+ * whole job, a required check enforcing the gate at the branch-protection layer. Folding it into a wholesale
+ * "any check failed" scan creates a self-referential deadlock: the conveyor's own `classifyPr` needs CI to
+ * read clean to ever reach its `needs-review` branch, but `review-gate` cannot turn green until a review
+ * actually happens — so a review is never dispatched, discovered live 2026-09-05 holding all 10 open
+ * `review:pending` PRs in `ci-red` forever (`test`/`smoke`/`test-shard` all green, only `review-gate` red).
+ * See `x3hg6h2` for the full incident. `we:scripts/merge-ai-prs.mjs`'s `latestRequiredCheck` never had this
+ * bug — it checks ONE named required check (`test` by default), never a wholesale scan, so the real
+ * merge-landing gate was never affected; this list only matters to the wholesale "is anything red" readers.
+ */
+export const CI_TRUTH_EXCLUDED_CHECKS = Object.freeze(['review-gate']);
+
+/**
  * Conclusions that mean the check ran and did not succeed.
  *
  * `startup_failure` IS IN THE LIST and was missing from the first cut (PR #1521 juror). A check whose runner
@@ -115,7 +132,9 @@ export const FAILING_CONCLUSIONS = Object.freeze([
  * @returns {{state: string, why: string, counts: {total: number, succeeded: number, failed: number, running: number, nonBlocking: number, unreadable: number}}}
  */
 export function reduceCheckState(runs = []) {
-  const list = Array.isArray(runs) ? runs : [];
+  const list = (Array.isArray(runs) ? runs : []).filter(
+    (r) => !CI_TRUTH_EXCLUDED_CHECKS.includes(String(r?.name ?? '')),
+  );
   const counts = { total: list.length, succeeded: 0, failed: 0, running: 0, nonBlocking: 0, unreadable: 0 };
 
   if (!list.length) {

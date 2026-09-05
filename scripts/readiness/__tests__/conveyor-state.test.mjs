@@ -296,6 +296,21 @@ describe('ciRollup — statusCheckRollup → one CI token', () => {
       { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
     ])).toBe('pass');
   });
+
+  // x3hg6h2 — review-gate is BY DESIGN red for as long as a PR is un-reviewed (we:.github/workflows/
+  // review-gate.yml + we:scripts/check-review-gate.mjs); folding it into this rollup mislabels every
+  // un-reviewed PR `fail` and can misdirect tick-core.mjs's isRedCi/isCiHealTarget at a PR that isn't broken.
+  it('excludes review-gate — its own by-design pre-review failure does not read fail (x3hg6h2)', () => {
+    expect(ciRollup([
+      { status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'review-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ])).toBe('pass');
+    // A real failing check beside review-gate's expected failure still reads fail.
+    expect(ciRollup([
+      { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { name: 'review-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ])).toBe('fail');
+  });
 });
 
 describe('transcriptMentionsItem — ANCHORED item-id match (no #26-masks-#2611 false hit)', () => {
