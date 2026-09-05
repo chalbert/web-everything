@@ -3,9 +3,10 @@ bornAs: x4a2dkl
 kind: story
 size: 2
 parent: "3443"
-status: open
+status: active
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/lib/lane-lease.mjs"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-04"
 tags: []
 ---
 
@@ -17,3 +18,18 @@ origin/lane/mechanical-dispatcher carries two self-contained lane-pool fixes nev
 
 1. **Executable** — `git diff origin/main...origin/lane/mechanical-dispatcher -- we:scripts/lane-pool.mjs we:scripts/lib/lane-lease.mjs` reports no diff (content landed, whether by direct port or hand-reapplication), and the new tests (`we:scripts/lib/__tests__/lane-lease.test.mjs`, `we:scripts/__tests__/lane-pool-flag-validation.test.mjs`) exist on `main` and pass.
 2. Landed as its own small PR through the normal lane → `we:scripts/verify-lane.mjs` → `we:scripts/operations/run.mjs open-pr --mode=land` pipeline, never a direct push.
+
+## Progress
+
+- Ported `we:scripts/lane-pool.mjs`, `we:scripts/lib/lane-lease.mjs`, and `we:scripts/lib/__tests__/lane-lease.test.mjs`
+  byte-for-byte from `origin/lane/mechanical-dispatcher` (verified via diff — content matches exactly), and
+  added the new `we:scripts/__tests__/lane-pool-flag-validation.test.mjs`.
+- `npx vitest run` on both test files: 84/84 passing locally.
+- **One deliberate deviation from byte-for-byte**, found by adversarial self-review: `origin/lane/mechanical-dispatcher`'s
+  new `KNOWN_FLAGS` allowlist omits `wait-ms` — a flag that exists only on `main` (added independently of that
+  branch, so the two diverged around it). Landing the allowlist verbatim would hard-reject the already-shipped
+  `acquire --wait-ms=<N>` (used by `we:scripts/operations/review-dispatch.mjs` and documented in the review
+  agent brief) the moment this PR lands. Added `'wait-ms'` to `KNOWN_FLAGS` on top of the port; confirmed
+  `we:scripts/__tests__/lane-pool-acquire-wait-ms.test.mjs` (excluded from the fast default run) still passes.
+  This means `git diff origin/main...origin/lane/mechanical-dispatcher -- we:scripts/lane-pool.mjs` will show a
+  one-line residual diff post-land — intentional, fixing a real bug the source branch carried.
