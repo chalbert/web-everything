@@ -3,10 +3,11 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +79,20 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+- **Built:** `we:scripts/conveyor/runner-target.mjs` (pure `classifyRunnerEntries` + impure
+  `listRunnerLockEntries`/`resolvePidCwd` shells, composed as `resolveLiveRunnerCheckout`) resolves the
+  live runner-singleton lock, then that pid's real cwd via `lsof -a -p <pid> -d cwd -Fn`. Refuses
+  (`no-live-runner` / `ambiguous` / `pid-unknown` / `cwd-unresolvable`) rather than guessing.
+- `we:scripts/conveyor/queue-work.mjs` is the new runner-targeted sibling of `we:scripts/conveyor/queue.mjs`
+  (`add`/`remove`/`list`), writing through the same `we:scripts/conveyor/queue-store.mjs` core into the
+  RESOLVED checkout's `we:.conveyor/queue.json` and reporting `checkoutRoot`/`pid` back to the caller.
+  `we:scripts/conveyor/queue.mjs` itself is left as-is (its cwd/script-location resolution is still
+  correct for the common case of running from the runner's own checkout) — this item adds the
+  runner-targeted path alongside it, per the item's own "sits alongside... is an implementation call"
+  note.
+- Tests: `we:scripts/conveyor/__tests__/runner-target.test.mjs` (pure classification + a real temp-dir fs
+  shell) and `we:scripts/conveyor/__tests__/queue-work.test.mjs` (CLI-level, against a genuinely running
+  child process so `lsof` resolution is exercised for real, not mocked) cover all three done-when
+  scenarios (a)/(b)/(c) plus the no-recorded-pid and unresolvable-cwd edges.
