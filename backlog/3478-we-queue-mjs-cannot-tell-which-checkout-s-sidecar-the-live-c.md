@@ -3,10 +3,11 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +79,11 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+
+- **Status:** built — `we:scripts/conveyor/queue-work.mjs` (+ its pure core `we:scripts/conveyor/queue-work-core.mjs`) added; `add`/`remove`/`list` resolve the target checkout from the runner-singleton lock (`we:skills-src/conveyor/runner-lock.mjs`) rather than the caller's own cwd/script-location.
+- **Done:** reads every lock dir under the runner-lock root, classifies it `no-lock` / `stale` / `ambiguous` / `live` (pure, unit-tested), resolves the live entry's pid to a checkout via `lsof`, and either writes into that resolved checkout's `we:.conveyor/queue.json` (reporting which checkout in both human and `--json` output) or refuses with a named reason — never a silent unconditional success.
+- **Tests:** `we:scripts/conveyor/__tests__/queue-work-core.test.mjs` (pure classify/resolve decisions) + `we:scripts/conveyor/__tests__/queue-work.test.mjs` (real CLI subprocess against a temp lock root; the live case spawns a real child process and resolves its pid via real `lsof`+`ps`, mirroring how the incident itself was diagnosed).
+- **Convergence (`/converge`, care=elevated):** round 1's panel raised 5 carve-out findings (none blocking — every one `introduced:true, worseThanBase:false, parallelizable:true`), two naming an uncaptured PREVENTION guard, which the loop's `prevention-outstanding` gate correctly withheld a clean accept on until captured. Captured all five directly rather than filing carve-outs, since each was cheap in this same diff: added a pid-identity cross-check (`isRunnerProcess` — a fresh lease heartbeat proves someone held it recently, not that the pid right now is still that process; an OS can reuse a crashed runner's pid inside the lease window) with its own refusal reason (`pid-identity-mismatch`) and CLI+unit tests; added a `list`-verb refusal test (the shared guard is no longer `add`-only-tested); imported `DEFAULT_LEASE_MINUTES` into the core test's fixtures instead of a hardcoded "15 min" comment; reworded the docstring's `lsof` claim to state only what's actually tested. A FRESH `/converge` run over that revised diff raised 3 more carve-outs (same non-blocking pattern), 2 again naming a PREVENTION: tightened `isRunnerProcess`'s match from a bare filename substring to the fuller `we:skills-src/conveyor/runner.mjs` path (harder to collide with by accident); added a `looksLikeCheckout` marker check (`.git` at the resolved cwd) with its own refusal reason (`checkout-unverifiable`) so a resolved cwd is confirmed to actually be a checkout, not just any directory the pid happened to be launched from; added a `remove`-verb refusal test for symmetry with `add`/`list`. A THIRD fresh `/converge` run over that diff raised 5 more carve-out findings (same non-blocking pattern throughout every round: `introduced:true, worseThanBase:false, parallelizable:true`) — a TOCTOU gap between the three now-separate identity/cwd/checkout-marker syscalls, `isRunnerProcess` matching `ps` text rather than the pid's real executable path, the two-CLI (`we:queue.mjs`+`we:queue-work.mjs`) coexistence the item's own text already left open, a missing near-collision test for the tightened regex, and an incomplete docstring refusal-reason list. Fixed the cheap docstring gap directly; filed the other four as follow-up tasks (#x8k7syy, #xvlqe0k, #xhejrjt, #xog3ne4, each `relatedTo: ["3478"]`) rather than continuing an open-ended hardening spiral — every one of the three rounds' findings routed to `carve-out`, never `blocker`, and `/converge` is explicitly advisory (never gates PR-open); filing is the doctrine's own prescribed close for an uncaptured PREVENTION the loop itself cannot resolve. No further `/converge` round planned for this diff.
+- **Notes:** `we:scripts/conveyor/queue.mjs` is left as-is (still cwd/script-location-resolved, still the right tool once you already know you're in the correct checkout) — `we:scripts/conveyor/queue-work.mjs` is the new preferred entry point when that isn't certain. Whether `we:scripts/conveyor/queue.mjs` is ever retired in its favor is left open, per the item's own text.
