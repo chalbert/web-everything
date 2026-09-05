@@ -3,10 +3,12 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +80,21 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+
+- **Status:** built, gate pending.
+- **Done:** Added `we:scripts/conveyor/queue-work.mjs`, a new checkout-aware entry point alongside
+  `we:scripts/conveyor/queue.mjs` (left untouched). It reads the runner's singleton lease
+  (`we:skills-src/conveyor/runner-lock.mjs`) for the live runner's `pid`, resolves that `pid`'s real cwd
+  via `lsof -a -p <pid> -d cwd -Fn` (the exact recipe the incident confirmed, already relied on in
+  `we:scripts/pr-status.mjs`), and refuses rather than guesses when the lease is absent, stale (a crashed
+  runner), ambiguous (more lock entries than the one singleton key expects), or the pid's cwd can't be
+  resolved. On success it writes/reads the resolved checkout's `we:.conveyor/queue.json` via
+  `we:scripts/conveyor/queue-store.mjs`'s existing pure core and reports back which checkout it targeted.
+  `add`/`remove`/`list` all resolve the live checkout first — `list` too, since reading the wrong sidecar
+  is just as misleading as writing one.
+- **Tests:** `we:scripts/conveyor/__tests__/queue-work.test.mjs` — unit-covers absent/stale/ambiguous/
+  cwd-unresolved via a real temp lock root with an injected pid-to-cwd function, plus one true end-to-end
+  case that spawns a real dummy process rooted in a temp "checkout" and exercises the CLI's real `lsof`
+  call, proving `add` writes into the resolved checkout and not the caller's own cwd.
