@@ -140,3 +140,77 @@ covers what was left:
   against one that doesn't.
 - **Reconcile-with-#2403 row: unaffected.** That reconciliation is Layer 4's job (it is about which label
   `autoLand` keys on), so it moves with Layer 4 to the scaffolded follow-up.
+
+### Follow-up: #3493 (the scaffolded Layer 4) landed in a parallel lane, same night
+
+A second lane, forked before the resolution above landed, built the scaffolded Layer 4 anyway (PR #1920 /
+commit `65b9ebee2`) — resolving `#3493` (`decideReviewGate must require redteam:accepted before an engine-tier
+auto-land`) even though it stayed `blockedBy: ["2410"]`. Recorded here, on the umbrella story, because the
+work is Layer 4/8 of the SAME defense-in-depth stack and a reader of this file needs the full picture. Kept
+`#2412` itself `resolved` as above (its own scope was legitimately complete); `#3493` carries its own
+resolution once merged.
+
+- **Layer 4 (built)** — `we:scripts/lib/gate-config.mjs` gains `ENGINE_BASENAMES` + `isEngineTierPath` (mirrors
+  `isPolicyCorePath`, sourced from the existing `TRUST_CHAIN` `tier:'engine'` entries — no new roster data).
+  `decideReviewGate` (`we:scripts/lib/review-escalation.mjs`) takes a new `engineTier` param: when true, a bare
+  `review:accepted` no longer auto-lands — `redteam:accepted` must ALSO be present, else it parks
+  `review:pending` awaiting the independent validator. `we:scripts/merge-ai-prs.mjs`'s one call site computes
+  `engineTier` from `score.basisFiles` (the same #3317 basis blast-radius/gate-self already score over) and
+  passes it through. Non-engine-tier PRs are byte-identical to before (`engineTier` defaults `false`).
+- **Layer 8 / Gap 2 — already built on `main`, dropped from this lane at rebase.** This lane independently
+  reinvented the same universal `merge-trace` comment (its own `MERGE_TRACE_KIND`/`buildMergeTraceReason`,
+  different param names, same behavior) before discovering, at the #1920 rebase onto `main` on 2026-09-04,
+  that the paragraph directly above this one had *already shipped it* (`main`'s `buildMergeTraceReason({
+  headSha, caller, sessionId })`, plus a `fetchPrHeadSha` helper). The rebase kept `main`'s version verbatim
+  and discarded this lane's duplicate (both the implementation and its tests) rather than carrying two
+  competing definitions of the same export. Nothing to build; recorded here only so the duplication itself is
+  legible in history.
+- **Layer 5 — already built on `main`, `#xp2rge9` (filed by this lane) is a DUPLICATE, resolved as such.** This
+  lane filed `#xp2rge9` believing Layer 5 (the required-check backstop) was still open, unaware the paragraph
+  above had already built it (`we:scripts/check-review-gate.mjs` + `we:.github/workflows/review-gate.yml`,
+  reading `REVIEW_HOLD_LABELS`). No new code was needed for Layer 4 to be covered by it either: Layer 4's park
+  applies the ordinary `review:pending` label (alongside the new `awaitingIndependentValidator` flag), which is
+  already one of `REVIEW_HOLD_LABELS` — so an engine-tier PR stuck awaiting `redteam:accepted` already reads
+  red on the existing required check, with zero additional work. `#xp2rge9` closed as a duplicate at rebase;
+  see its own file for the resolution note.
+- Gap 1 (the statute/leash-forces-human half) was already resolved by #2425/x30jq9n before this lane started;
+  confirmed via the codebase's own `#2412` cross-references before building, so this lane's scope narrowed to
+  exactly the two items above.
+- **Open caveat, surfaced at rebase, not resolved here — left for review.** `main`'s own resolution of this
+  story (the paragraph above) deliberately scaffolded Layer 4 off as `blockedBy: ["2410"]` rather than building
+  it, because no code-level writer applies `redteam:accepted` to a live PR yet (`#2410` slice 2 — the automated
+  validator that would produce it — is still open; the only existing path is the hand-run `gh pr edit
+  --add-label redteam:accepted` prose in `we:skills-src/drain/SKILL.md`). This lane built the enforcement
+  anyway, without being aware of that explicit deferral (the two lanes forked in parallel before either landed).
+  Net effect until `#2410` slice 2 ships a writer: an engine-tier PR can no longer auto-land on a bare
+  `review:accepted` — it parks `review:pending`/`awaitingIndependentValidator` until a human/agent manually
+  applies `redteam:accepted` per that `we:skills-src/drain/SKILL.md` procedure. That fails CLOSED on the
+  highest-blast-radius surface (lander/daemon/dispatch-loop), which is arguably the correct interim posture
+  rather than a regression — but it is a real behavior change on every future engine-tier PR, not a no-op, so
+  it is called out here rather than silently decided by the rebase. Left for the independent review dispatched
+  on #1920 and the operator's own clearance to weigh, not resolved unilaterally in this merge.
+- **Adversarial review round 1 — 3 findings, 2 fixed in-lane, 1 documented + tracked.** An independent reviewer
+  found the layer-4 enforcement above, as first built, was reachable from THREE places, and only closed one:
+  1. *(fixed)* `applyEscalationRelief`'s per-PR `--no-review-escalation=<pr#>` relief valve waived the new
+     engine-tier park indistinguishably from an ordinary "no reviewer yet" `review:pending` park (same shape:
+     `park`/`pending`/`humanRequired:false`). Fixed by giving the engine-tier park its own
+     `awaitingIndependentValidator` flag and teaching the relief valve to refuse it, mirroring how `staleAcceptance`
+     already refuses the analogous #2409 case.
+  2. *(fixed, partially)* `redteam:accepted` carries no SHA-freshness marker (unlike `review:accepted`'s
+     `acceptanceCoversHead`), so a stale sign-off from an earlier head could still satisfy the requirement once a
+     fresh `review:accepted` was re-applied. Mitigated the concrete bounce-shaped path:
+     `we:scripts/review-set-label.mjs`'s `changes` and `rearm` targets now also strip `redteam:accepted` (a
+     bounce, or a re-arm after one, is the one unambiguous "needs fresh eyes" signal available today). The
+     no-bounce variant (a silent new commit + a later re-accept, no explicit bounce in between) is NOT closed —
+     it needs `redteam:accepted` to have its own SHA-marker producer, which is #2896's still-open scope. Tracked
+     as part of #xy5uey0.
+  3. *(documented, not fixed)* the bare `/merge` orphan-sweep path (no `--label`) never calls `decideReviewGate`
+     at all — it clears on `hasUnclearedReviewLabel`, a label-only predicate with no file-diff access, so an
+     engine-tier PR with only an ordinary `review:accepted` still clears there. This is the SAME class of residual
+     `hasUnclearedReviewLabel`'s own docblock already documents for #2409's SHA-freshness gate on this exact path
+     (a pre-existing, deliberately-scoped gap, not one this item introduced) — closing it needs a new per-candidate
+     file-diff fetch on a path that does not currently pay for one at all, which is a bigger, separately-reviewable
+     change than folding it in here. Documented in `hasUnclearedReviewLabel`'s docblock and tracked as the other
+     half of #xy5uey0.
+  Follow-up filed: **#xy5uey0** (both residuals above, the no-bounce staleness gap blocked in spirit on #2896's
+  CLI-target work, the bare-sweep gap independently actionable).

@@ -40,6 +40,7 @@ import {
   producerReviewLabel,
   hasUnclearedReviewLabel,
   isPolicySpecPath,
+  isEngineTierPath,
   acceptanceCoversHead,
   normalizeDiffFingerprint,
   normalizeContributionFingerprint,
@@ -671,6 +672,56 @@ describe('INVARIANT 12 — the declarative-leash split is fail-closed and its fl
       const entry = { role: 'hypothetical', file: 'hypothetical.mjs', tier: 'policy', leash: bad };
       const specSide = entry.tier === 'policy' && entry.leash !== POLICY_LEASH.CODE;
       expect(specSide, `leash ${JSON.stringify(bad)} must fall to the HUMAN half`).toBe(true);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 14 — an ENGINE-tier PR never auto-lands on `review:accepted` alone (#2412 layer 4). The lander /
+// resident-daemon / dispatch-loop machinery is the surface that goes on to land every OTHER PR unattended, so
+// stacking a SECOND, independent verdict (`redteam:accepted`, #2439) on top of the ordinary review is the whole
+// point — one compromised or rubber-stamped review must not be enough to clear the machinery that then trusts
+// itself for everything else. Proven over the full cross-product of inputs, exactly like INVARIANT 9 (whose
+// staleness check this composes with, unchanged): `engineTier` is an ADDITIONAL requirement, never a
+// substitute for it. A non-engine-tier PR (`engineTier:false`, every pre-#2412 caller) is UNCHANGED by this —
+// see the complementary "always merges" case below.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 14 — engine tier never auto-lands without redteam:accepted (#2412)', () => {
+  const cases = product(
+    [false, true], // escalate
+    [false, true], // humanRequired
+  );
+  it('every ENGINE_FILES member is classified isEngineTierPath — the roster the invariant below relies on', () => {
+    for (const f of ENGINE_FILES) expect(isEngineTierPath(f)).toBe(true);
+  });
+  it('engineTier:true + review:accepted, NO redteam:accepted ⇒ never merges, for every input arrangement', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired, labels: [REVIEW_LABELS.accepted], engineTier: true,
+        acceptedSha: 'abc1234', headSha: 'abc1234', // fresh accept — isolates the engine-tier check specifically
+      });
+      expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
+      expect(g.action).toBe('park');
+      expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+    }
+  });
+  it('engineTier:true + review:accepted + redteam:accepted ⇒ always merges (both verdicts stacked)', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired,
+        labels: [REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted],
+        engineTier: true, acceptedSha: 'abc1234', headSha: 'abc1234',
+      });
+      expect(g.action).toBe('merge');
+    }
+  });
+  it('engineTier:false (or omitted) ⇒ review:accepted alone still merges — this story adds no requirement off the engine tier', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired, labels: [REVIEW_LABELS.accepted],
+        acceptedSha: 'abc1234', headSha: 'abc1234',
+      });
+      expect(g.action).toBe('merge');
     }
   });
 });
