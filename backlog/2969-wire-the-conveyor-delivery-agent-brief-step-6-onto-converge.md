@@ -5,6 +5,8 @@ size: 2
 status: open
 dateOpened: "2026-08-06"
 tags: []
+scope:
+  - we:skills-src/conveyor/delivery-agent-brief.md
 ---
 
 # Wire the conveyor delivery-agent brief step 6 onto /converge

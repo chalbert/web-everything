@@ -49,6 +49,15 @@
  * decision (#3296, already landed); this file is what that decision calls, once something wires the two
  * together — which, per this item's own scope, is separate, later work.
  *
+ * A CALLER STILL HOLDING ITS OWN BUILD LANE FOR THE SAME PR SHOULD RELEASE IT FIRST (#x3jmao3, soft doctrine,
+ * not enforced here). Live-caught 2026-09-04: an ad hoc session dispatched a review for the PR it had just
+ * landed WITHOUT releasing the lane it built that PR in — the dispatched session's own `lane-pool.mjs acquire`
+ * (brief step 1) read the pool as fully held/dirty and gave up, because the caller's still-leased lane was one
+ * unit of that pressure. `lane-pool.mjs acquire --wait-ms=<N>` (the brief's step 1 now passes it) is the
+ * PRIMARY fix — it makes that acquire tolerant of a momentary full pool regardless of what any one caller
+ * does — but releasing an unrelated lane before dispatching a review still costs the caller nothing and
+ * removes one more unit of pool pressure at exactly the moment a fresh lane is needed.
+ *
  * IMPURE: reads the brief template off disk, mints a UUID, and spawns one `claude --bg` process — through
  * INJECTED handles (mirroring `we:scripts/operations/dispatch-abort.mjs` and `dispatch-lane-io.mjs`), so the
  * whole thing is testable with no real subprocess and no real session.

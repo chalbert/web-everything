@@ -23,7 +23,7 @@ this work (#2449/#2391)." That PID turned out to be `plateau:tools/drain-daemon/
 project's resident drain, running since Monday, holding a lease keyed only by hostname+pid, not by repo. It
 will never sweep `web-everything`'s own PRs (it doesn't operate on this repo at all), yet it correctly-per-its-
 own-contract refuses any OTHER drain invocation on the same machine, including one scoped to a different repo
-via `--this-repo`. Concretely: a stranded backlog item (`backlog/xb2rz0g-*.md`, now `#3439`) sat unnumbered on
+via `--this-repo`. Concretely: a stranded backlog item (`backlog/3439-*.md`, now `#3439`) sat unnumbered on
 `main` for the rest of this session because nothing was actually watching `web-everything` for it — the
 resident lease made it LOOK like a drain was covering the repo when it structurally could not.
 

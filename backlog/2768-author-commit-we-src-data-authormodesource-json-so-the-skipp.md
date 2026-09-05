@@ -5,6 +5,12 @@ size: 2
 status: open
 dateOpened: "2026-07-28"
 tags: [maas, authoring, testing]
+scope:
+  - we:src/_data/
+  - we:blocks/renderers/
+  - we:scripts/
+  - fui:tools/maas/
+  - fui:vitest.config.ts
 ---
 
 # Author + commit we:src/_data/authorModeSource.json so the skipped maas authoring tests run

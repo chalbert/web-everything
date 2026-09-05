@@ -239,11 +239,18 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  resource from a lane lease), the reconcile-fix dispatch pass (#3438 — dispatches the fix agent
  *  `we:scripts/conveyor/reconcile-pass.mjs` decides is owed for a bounced PR with nothing live working it, a
  *  genuinely different population from `decisions.spawnFixes`'s own tick-core-launched-PRs-only scope; see that
- *  file's own header for the full reasoning), the review-reconcile pass (epic #3383: reads
+ *  file's own header for the full reasoning), the branch-drift sweep (#3464 — `we:scripts/conveyor/
+ *  branch-drift.mjs sweep`: reports the long-lived dispatched-work branch's live divergence/conflict state to
+ *  its durable git-note report, the SAME "piggyback on a pass this headless runner already ticks" shape #3449
+ *  used for lane-pool lease reconciliation, so drift is caught without a human or interactive session ever
+ *  noticing it by hand), the parked-PR conflict watch (#xw0odtv — `we:scripts/conveyor/
+ *  parked-pr-conflict-watch.mjs sweep`: labels + one-time-comments any review-parked PR that has drifted into a
+ *  real merge conflict against `main`, catching exactly the axis branch-drift's single-branch watch and #2824's
+ *  BEHIND-only freshness gate both leave uncovered), the review-reconcile pass (epic #3383: reads
  *  `conveyor/reconcile-pass.mjs`'s own decision and dispatches `operations/review-dispatch.mjs` for every PR it
  *  names — the review step is now actually mechanized, not merely planned), the blocking-hiccup sink (#3421),
  *  and the verify-dispatch pass (#3105: picks up a `request`-stamped gate marker and runs it AS the runner's
- *  own process, unbound by an agent's 120s foreground window). All seven are best-effort: a failure is
+ *  own process, unbound by an agent's 120s foreground window). All nine are best-effort: a failure is
  *  swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer
  *  to `main`.
  *
@@ -274,6 +281,32 @@ const MECHANICAL_PASS_HEARTBEAT_MS = 60_000;
  *  lease's TTL if nothing heartbeats DURING it — a mid-pass heartbeat closes the exact stale-lease-mid-run
  *  window `#2453` already fixed for the plateau-app drain daemon's whole-process lease. The other passes are
  *  quick bookkeeping sweeps; wrapping them the same way would add an async spawn + timer for no real benefit. */
+
+/** Cap on {@link summarizeMechanicalPassError}'s output — generous for a real diagnostic, still bounded so one
+ *  runaway stack trace can't flood `runner.log`. */
+export const MECHANICAL_PASS_ERROR_LOG_CHARS = 800;
+
+/**
+ * The text `runQuiet` (below) logs for a failed mechanical pass — found live 2026-09-04 investigating a
+ * `session-reaper.mjs` failure: `execFileSync`'s thrown error's OWN `.message` already carries the child's full
+ * captured stderr, appended by Node itself after the leading `Command failed: <cmd>` line — but the previous
+ * `String(e.message || e).split('\n')[0]` kept ONLY that first line and threw away everything after it,
+ * discarding the real error on EVERY mechanical-pass failure this runner has ever logged, not just that one.
+ * The one line `runner.log` actually recorded that night — `⚠ mechanical pass conveyor/session-reaper.mjs
+ * failed (non-fatal): Command failed: node .../session-reaper.mjs` — carries zero information about WHY;
+ * reproducing the exact same truncation against a real `execFileSync` throw (a child that `console.error`s
+ * detail then exits 1) confirmed this is the whole gap, byte for byte. Collapses whitespace/newlines so a
+ * multi-line stderr still logs as ONE `runner.log` line (grep-able, matching the file's existing one-line-per-
+ * event convention), bounded to `maxChars` rather than left unbounded.
+ * @param {unknown} e
+ * @param {number} [maxChars]
+ * @returns {string}
+ */
+export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR_LOG_CHARS) {
+  const full = String((e && e.message) || e);
+  return full.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
 function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out, heartbeat = () => true } = {}) => {
     const { execFileSync } = await import('node:child_process');
@@ -283,13 +316,23 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
         if (typeof repo === 'string' && repo) args.push(`--repo=${repo}`);
         execFileSync('node', args, { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
       } catch (e) {
-        process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+        process.stderr.write(`⚠ mechanical pass ${relPath} failed (non-fatal): ${summarizeMechanicalPassError(e)}\n`);
       }
     };
     runQuiet('conveyor/infra-blocked.mjs', ['retry']);
     runQuiet('conveyor/lease-reaper.mjs');
     runQuiet('conveyor/session-reaper.mjs'); // §4d — WE #3435
     runQuiet('conveyor/reconcile-fix-dispatch.mjs'); // #3438
+    // #3464 — sweeps its OWN default watched branch (`lane/mechanical-dispatcher` vs `main`), env/flag
+    // overridable. `runQuiet` still appends `--repo=<repo>` when this runner was given one — harmless, since
+    // `branch-drift.mjs`'s CLI parses and simply ignores any flag it doesn't itself read.
+    runQuiet('conveyor/branch-drift.mjs', ['sweep']);
+    // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
+    // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
+    // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
+    // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
+    // population) — see that file's own header for the full gap this closes.
+    runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
     // Epic #3383 — MECHANIZE THE REVIEW STEP. `conveyor/reconcile-pass.mjs` (#3296, already landed) already
     // decides WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR,
     // a live `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own

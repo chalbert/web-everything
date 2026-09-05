@@ -1895,7 +1895,10 @@ export function buildDrainReasonComment(kind, reasonText, auditLine) {
     // heading, because it says the OPPOSITE of the other three: those record a decision the drain took, this
     // records a review that did NOT happen, or happened narrower than the default, on a PR that is landing.
       : kind === REVIEW_COVERAGE_KIND ? '⚠️ **Incomplete review — what was not examined**'
-        : '· **Skipped by the drain**';
+        // #2412 Gap 2 — the fifth kind: an unconditional before-land trace (head SHA + caller/session),
+        // posted for every landing PR regardless of manifest or review-coverage state.
+        : kind === MERGE_TRACE_KIND ? '📌 **Merge trace**'
+          : '· **Skipped by the drain**';
   const audit = auditLine ? `\n\n${auditLine}` : '';
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
@@ -1995,6 +1998,35 @@ export function hasDrainReasonComment(comments, kind, reasonText, auditLine) {
 
 /** The `drainReasonMarker` kind for the #3308 coverage notice. Its own marker ⇒ its own dedupe bucket. */
 export const REVIEW_COVERAGE_KIND = 'review-coverage';
+
+/**
+ * #2412 Gap 2 — the `drainReasonMarker` kind for the merge-time trace comment. Its own marker ⇒ its own
+ * dedupe bucket, independent of park/skip/land/review-coverage.
+ *
+ * WHY A FIFTH KIND, NOT AN EXTENSION OF 'land'. The 'land' comment (`LAND_REASON`, above) fires only for a
+ * MANIFEST-CARRYING PR (`c.hasManifest`) — it records the escalation-sensitive manifest values the drain
+ * acted on, which an orphan/impl PR has none of. That gating is correct for what 'land' records, but it
+ * means the plain, manifest-less merge path (`we:scripts/merge-ai-prs.mjs`'s `mergePr(...)` call, the
+ * majority of merges) posts nothing at all — a landed PR with no manifest and no review gap (#3308) leaves
+ * no trace of WHAT landed or WHO/WHAT merged it. `merge-trace` fires for EVERY landing candidate,
+ * unconditionally, right before the merge write — see the call site.
+ */
+export const MERGE_TRACE_KIND = 'merge-trace';
+
+/**
+ * #2412 Gap 2 — the before-land trace record: the exact head SHA about to land, plus the merging
+ * caller/session. Pure. `headSha`/`sessionId` render as `unknown` rather than being omitted when absent
+ * (a failed `gh` read, or a caller with no session id) — the record must exist even when a fact inside it
+ * could not be gathered, or a read failure would silently produce no trace at all instead of a degraded one.
+ * @param {{headSha?:(string|null), caller?:string, sessionId?:(string|null)}} o
+ * @returns {string}
+ */
+export function buildMergeTraceReason({ headSha = null, caller = 'drain', sessionId = null } = {}) {
+  const sha = typeof headSha === 'string' && headSha ? headSha : 'unknown';
+  const who = typeof caller === 'string' && caller ? caller : 'unknown';
+  const session = typeof sessionId === 'string' && sessionId ? sessionId : 'unknown';
+  return `landed head \`${sha}\` — merged by ${who} (session ${session})`;
+}
 
 /**
  * The four durable review-record headlines `buildVerdictComment` (`we:scripts/review-set-label.mjs`) can
@@ -3080,6 +3112,17 @@ async function runCli() {
     if (hasDrainReasonComment(comments, kind, reasonText, auditLine)) return false;
     try { execFileSync('gh', ['pr', 'comment', String(num), ...repoFlag(repo), '--body', buildDrainReasonComment(kind, reasonText, auditLine)], { stdio: ['ignore', 'ignore', 'pipe'] }); return true; }
     catch { return false; }
+  };
+
+  // #2412 Gap 2 — the PR's LIVE head SHA, read fresh right at the merge site (not reused from earlier in the
+  // pass) so the trace comment below names the EXACT commit landing. Best-effort, matching `fetchPrComments`:
+  // a `gh` miss yields `null`, which `buildMergeTraceReason` renders as `unknown` rather than failing the
+  // merge — this is provenance layered on top of the land, never a precondition for it.
+  const fetchPrHeadSha = (repo, num) => {
+    try {
+      const data = JSON.parse(execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'headRefOid'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
+      return typeof data.headRefOid === 'string' ? data.headRefOid : null;
+    } catch { return null; }
   };
 
   const fail = (reason, detail, code) => {
@@ -4291,8 +4334,9 @@ async function runCli() {
           // tampered PR seen intact at first sighting is already `skip` here; this stamp remains the durable
           // acted-on record for the honest manifest PRs that do land. (Residual: a manifest already weak at first
           // sighting, or a local baseline-cache loss racing a tamper, is NOT caught — see #2414's cache-loss doc.)
-          // #3308 — the PR's comments, read ONCE for both stamps below. The land stamp needs them for its
-          // dedupe; the coverage notice needs them to see which durable review records exist at all.
+          // #3308 / #2412 — the PR's comments, read ONCE for all three stamps below. The land stamp needs
+          // them for its dedupe; the coverage notice needs them to see which durable review records exist at
+          // all; the merge-trace stamp needs them for its own dedupe.
           const preread = fetchPrComments(c.repo, c.num);
           if (c.hasManifest) {
             const posted = postDrainReasonComment(c.repo, c.num, 'land', LAND_REASON, auditLineFor(c), preread.comments);
@@ -4320,6 +4364,17 @@ async function runCli() {
             }
           } else if (!AS_JSON) {
             process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} could not read PR comments — review coverage NOT assessed (unknown, not clean; #3308)\n`);
+          }
+          // #2412 Gap 2 — the before-land trace: the exact head SHA about to land, plus the merging
+          // caller/session, stamped on EVERY landing PR — manifest-carrying or not, review-gap or not. Read
+          // fresh (not reused from earlier in the pass) so the SHA names the commit actually about to merge.
+          // Best-effort and decision-preserving, same as the two stamps above: `postDrainReasonComment`
+          // swallows every `gh` error internally, so a failed read/post can neither block nor alter the merge.
+          {
+            const traceHeadSha = fetchPrHeadSha(c.repo, c.num);
+            const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
+            const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, traceReason, null, preread.comments);
+            if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${traceHeadSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
           }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior

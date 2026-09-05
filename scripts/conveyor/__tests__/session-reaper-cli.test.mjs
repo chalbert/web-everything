@@ -59,7 +59,25 @@ beforeEach(() => {
       'printf \'%s\\n\' "$*" >> "$STUB_ARGV_FILE"',
       'case "$1" in',
       '  agents) printf \'%s\' "$STUB_AGENTS" ;;',
-      '  stop) exit 0 ;;',
+      // `stop` optionally fails its first `STUB_STOP_FAIL_TIMES` invocations PER id (a per-id counter file
+      // under `STUB_STOP_COUNT_DIR`, default unset ⇒ 0 ⇒ succeeds immediately, byte-identical to the old
+      // unconditional `exit 0`) — proves `stopSessionWithRetry` (WE #3479, found live 2026-09-04) actually
+      // retries through the REAL CLI, not just against a fixture-injected fake `exec`.
+      '  stop)',
+      '    id="$2"',
+      '    cnt_file="$STUB_STOP_COUNT_DIR/stopcount-$id"',
+      // A shell BUILTIN (`read`), never an external `cat` — the stub's `PATH` deliberately holds nothing but
+      // itself (see the header above), so any external command here would silently break the same way `cat`
+      // first did (found running this stub for real, not guessed: "cat: command not found").
+      '    n=0',
+      '    if [ -f "$cnt_file" ]; then read n < "$cnt_file"; fi',
+      '    n=$((n + 1))',
+      '    echo "$n" > "$cnt_file"',
+      '    if [ "$n" -le "${STUB_STOP_FAIL_TIMES:-0}" ]; then',
+      '      echo "stub: transient claude-stop failure, attempt $n" >&2',
+      '      exit 7',
+      '    fi',
+      '    exit 0 ;;',
       'esac',
     ].join('\n') + '\n',
   );
@@ -101,6 +119,7 @@ function runReaperCli(args = [], { agents = '[]', env = {} } = {}) {
       STUB_AGENTS: agents,
       STUB_ARGV_FILE: argvFile,
       STUB_GH_ARGV_FILE: ghArgvFile,
+      STUB_STOP_COUNT_DIR: binDir,
       ...env,
     },
   });
@@ -167,6 +186,36 @@ describe('the session-reaper CLI lists via `claude agents --json --all` — the 
     expect(stderr).toMatch(/anomaly/);
     // Non-zero exit — an anomaly is surfaced, never swallowed.
     expect(status).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('the stop loop retries a transient `claude stop` failure — WE #3479, found live 2026-09-04', () => {
+  it('recovers within the retry budget: 2 transient failures then success ⇒ clean pass, 3 real `stop` calls', () => {
+    const agents = JSON.stringify([{ id: 'flaky01', sessionId: 'flaky-01-full-uuid', kind: 'background', state: 'done', name: 'conveyor-1' }]);
+    const out = runReaperCli(['--json'], { agents, env: { STUB_STOP_FAIL_TIMES: '2' } });
+    const report = JSON.parse(out);
+    // Recovered — counts as a real stop, no failure at all, despite two underlying `claude stop` errors.
+    expect(report.stopped).toBe(1);
+    expect(report.failures).toBe(0);
+    const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
+    expect(calls).toEqual(['agents --json --all', 'stop flaky01', 'stop flaky01', 'stop flaky01']);
+  }, EXEC_TIMEOUT_MS);
+
+  it('a failure that never clears is still a real failure after exhausting the retry budget — bounded, not silent', () => {
+    const agents = JSON.stringify([{ id: 'stuck01', sessionId: 'stuck-01-full-uuid', kind: 'background', state: 'done', name: 'conveyor-2' }]);
+    let stderr = '';
+    let status = 0;
+    try {
+      runReaperCli(['--json'], { agents, env: { STUB_STOP_FAIL_TIMES: '99' } });
+    } catch (e) {
+      stderr = String(e.stderr || '');
+      status = e.status;
+    }
+    expect(status).toBe(1);
+    expect(stderr).toMatch(/stop failed after 3 attempts/);
+    // Exactly 3 attempts — the retry budget bounds it, it never spins forever on a truly stuck candidate.
+    const calls = readFileSync(argvFile, 'utf8').trim().split('\n');
+    expect(calls).toEqual(['agents --json --all', 'stop stuck01', 'stop stuck01', 'stop stuck01']);
   }, EXEC_TIMEOUT_MS);
 });
 

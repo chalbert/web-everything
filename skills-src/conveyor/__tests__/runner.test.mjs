@@ -23,6 +23,7 @@ import {
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   bookkeepingForDispatch,
+  summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS,
 } from '../runner.mjs';
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
@@ -372,5 +373,41 @@ describe('driveConveyor — acquire → drive → ALWAYS release (no leaked sing
 
   it('requires a buildEffects factory', async () => {
     await expect(driveConveyor({ lockRoot: root, owner: 'A' })).rejects.toThrow(/buildEffects/);
+  });
+});
+
+// ── (4) summarizeMechanicalPassError — WE #3479, found live 2026-09-04 investigating a silent-looking
+//        session-reaper.mjs tick failure ────────────────────────────────────────────────────────────────────
+
+describe('summarizeMechanicalPassError — the real error, not just execFileSync\'s first "Command failed" line', () => {
+  it('keeps the child stderr Node appends to `.message`, not just the leading "Command failed: <cmd>" line', () => {
+    // Reproduces exactly what a real `execFileSync` throw looks like: Node appends the captured stderr to
+    // `.message` after the "Command failed: ..." line — this is the shape the OLD `.split(\'\\n\')[0]` threw
+    // away, live, for the one session-reaper.mjs failure this file's own commit is fixing.
+    const e = new Error(
+      'Command failed: node /Users/x/scripts/conveyor/session-reaper.mjs\n' +
+        '  ⚠ abcd1234: stop failed after 3 attempts (dispatch-abort: `claude stop abcd1234` failed: some transient CLI lock) — left for the next tick\n' +
+        'session-reaper: 40 session(s) listed · 12 stopped, 1 failed · 27 kept',
+    );
+    const summary = summarizeMechanicalPassError(e);
+    expect(summary).toContain('stop failed after 3 attempts');
+    expect(summary).toContain('transient CLI lock');
+    expect(summary).toContain('session-reaper: 40 session(s) listed');
+  });
+
+  it('collapses newlines so a multi-line error still logs as ONE line', () => {
+    const summary = summarizeMechanicalPassError(new Error('line one\nline two\nline three'));
+    expect(summary).not.toContain('\n');
+    expect(summary).toBe('line one line two line three');
+  });
+
+  it('is bounded — a runaway message never floods the log unbounded', () => {
+    const huge = new Error('x'.repeat(5000));
+    const summary = summarizeMechanicalPassError(huge);
+    expect(summary.length).toBeLessThanOrEqual(MECHANICAL_PASS_ERROR_LOG_CHARS);
+  });
+
+  it('falls back to String(e) for a non-Error thrown value', () => {
+    expect(summarizeMechanicalPassError('a plain string failure')).toBe('a plain string failure');
   });
 });

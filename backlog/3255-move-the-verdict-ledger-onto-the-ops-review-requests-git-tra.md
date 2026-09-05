@@ -6,6 +6,33 @@ parent: "3007"
 status: open
 dateOpened: "2026-08-21"
 tags: []
+scope:
+  - we:scripts/lib/verdict-ledger.mjs
+  - we:scripts/lib/__tests__/verdict-ledger.test.mjs
+  - we:scripts/lib/git-transport-branch.mjs
+  - we:scripts/lib/__tests__/git-transport-branch.test.mjs
+  - we:scripts/lib/review-label-provider.mjs
+  - we:scripts/operations/record-verdict-io.mjs
+  - we:scripts/operations/record-verdict.mjs
+  - we:scripts/operations/__tests__/record-verdict.test.mjs
+  - we:scripts/operations/__tests__/record-verdict-integration.test.mjs
+  - we:scripts/operations/effect-executor.mjs
+  - we:scripts/operations/__tests__/effect-executor.test.mjs
+  - we:scripts/operations/review-pr.mjs
+  - we:scripts/operations/__tests__/review-pr.test.mjs
+  - we:scripts/operations/review-pr-io.mjs
+  - we:scripts/operations/__tests__/review-pr-io.test.mjs
+  - we:scripts/review-set-label.mjs
+  - we:scripts/__tests__/review-set-label.test.mjs
+  - we:scripts/review-ledger-check.mjs
+  - we:scripts/__tests__/review-ledger-check.test.mjs
+  - we:scripts/pr-status.mjs
+  - we:scripts/__tests__/pr-status.test.mjs
+  - we:scripts/apply-review-request.mjs
+  - we:scripts/__tests__/apply-review-request.test.mjs
+  - we:.github/workflows/apply-review-request.yml
+  - we:backlog/
+scopeRationale: "The ledger write moves onto the ops/review-requests git transport (we:scripts/lib/git-transport-branch.mjs, we:scripts/operations/record-verdict-io.mjs's resolveTransportRoot pattern), which is a git push — we:.github/workflows/apply-review-request.yml currently declares contents:read only and may need contents:write for that push. Consumers/renderers of the ledger (we:scripts/review-set-label.mjs's durable-comment mirror, we:scripts/review-ledger-check.mjs, we:scripts/pr-status.mjs, we:scripts/operations/effect-executor.mjs, we:scripts/operations/review-pr.mjs, we:scripts/operations/review-pr-io.mjs, we:scripts/lib/review-label-provider.mjs) and their tests are included since the ledger's storage and read-back contract changes under them. we:backlog/ covers this item's own frontmatter plus the blockedBy retarget on #3007/#3215/#3216/#3217."
 ---
 
 # Move the verdict ledger onto the ops/review-requests git transport, as #3214 ruled

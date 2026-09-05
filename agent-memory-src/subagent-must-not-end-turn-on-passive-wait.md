@@ -35,3 +35,11 @@ subagents reason about backgrounding, not a one-off.
    checks in the foreground; do not end your turn on a passive wait; if you must background
    something, poll it yourself before ending your turn. Standing practice for any Agent-tool dispatch
    that involves a build/verify/land pipeline, not just this one instance.
+
+**Escalation, 2026-09-04 (#3383 cont'd):** landing this note alone did not fix the recurrence — it is
+pull-based (a fresh subagent has no reason to open `agent-memory-src/` unless told), and the SAME
+failure hit at least 3 more times on different subagents afterward. The load-bearing instruction (the
+"How to apply" bullets above, condensed) is now also **pinned directly in `we:CLAUDE.md`** — the one
+file confirmed to auto-load into every session and every Agent-tool subagent's context regardless of
+cwd (main checkout, lane clone, or VM). Keep the full story here; keep `CLAUDE.md` terse and pointing
+back to this file — don't let the two drift apart.

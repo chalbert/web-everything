@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
  *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
  *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease — in ANY pool under POOL_ROOT, per r2 — shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`. A STALE lease is never contested (r2): a dead holder has nothing to prove, so an expired lease releases without --force exactly as on main.
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
@@ -96,6 +96,10 @@ import {
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
 import { normScope } from './readiness/scope-lease.mjs';
 import { candidateLaunch } from './readiness/scope-lease-live.mjs';
+// #x3jmao3 — the SAME non-busy-wait spin-poll primitive `withNumberingLock` already uses to space its own
+// spin-acquire (`we:scripts/readiness/drain-lock.mjs`), reused rather than re-implemented, for `acquire`'s
+// own optional `--wait-ms` full-pool retry/backoff below. No cycle: drain-lock.mjs never imports lane-pool.
+import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // #2748 — REUSE the standalone reaper's PURE core so the "provably-dead lease" verdict is SINGLE-SOURCED with
 // `scripts/conveyor/lease-reaper.mjs` (the acquire-native backstop must agree with the periodic reaper, never
 // fork its logic). Importing lease-reaper is side-effect-free — its IO shell is gated on the main-module check —
@@ -418,7 +422,14 @@ function writePortRegistry(repo, entries) {
 }
 function unmapLanes(repo, lanes) {
   const entries = readPortRegistry(repo);
-  const dropped = Object.keys(entries).filter((num) => lanes.includes(entries[num].lane));
+  // #3466 round 2 — match by lane NUMBER **and** the entry's own `repo` field, never lane number alone: two
+  // different pools sharing a lane number (a pool's index space is per-pool, #1996) are NOT the same lane, and
+  // `registerItemsToLane` always stamps `repo: repo.name` on every entry it writes, so this is available on
+  // every entry an unmap can legitimately be asked to drop. Without this, an unmap scoped to one pool (a reset,
+  // a release, an acquire's pre-clear) could silently delete a DIFFERENT, still-live item's entry in another
+  // pool purely because both happen to reuse the same lane number — reproduced live via the acquire-time
+  // pre-clear path in lane-pool-release-item-map.test.mjs.
+  const dropped = Object.keys(entries).filter((num) => lanes.includes(entries[num].lane) && entries[num].repo === repo.name);
   if (dropped.length === 0) return;
   for (const num of dropped) delete entries[num];
   writePortRegistry(repo, entries);
@@ -533,6 +544,10 @@ const ttlMinutesFromFlags = () =>
     ? Number(flags['ttl-minutes'])
     : DEFAULT_LEASE_TTL_MINUTES;
 const ttlMsFromFlags = () => ttlMinutesFromFlags() * 60_000;
+// #x3jmao3 — the poll spacing for `acquire --wait-ms=<total>`'s bounded full-pool retry (see cmdAcquire's
+// auto-pick branch). Short enough that a several-second capacity flicker resolves within one or two polls;
+// long enough not to hammer the filesystem on a genuinely-exhausted pool for the whole wait window.
+const ACQUIRE_POLL_MS = 1000;
 // A lane holds a LIVE lease when a marker exists and hasn't outlived its TTL (owner presumed alive).
 function liveLease(dir, nowMs, ttlMs) {
   const lease = readLease(dir);
@@ -1106,12 +1121,30 @@ function cmdAcquire(repo) {
     chosen = n;
   } else {
     // Auto-pick: lowest acquirable, then atomically claim; on a lost race retry the next candidate.
+    //
+    // #x3jmao3 — a full pool used to hard-fail on the VERY FIRST reading, no matter how momentary: live-caught
+    // 2026-09-04 (PR #1908's independent review) when a background review session's own `acquire` read "42 all
+    // held/dirty" and gave up instantly, even though the pool freed up again within minutes under real
+    // concurrent load. `--wait-ms=<total>` is the OPT-IN fix: poll for up to that long (spaced by
+    // ACQUIRE_POLL_MS, no busy-wait) before failing, so a momentary capacity flicker self-heals. Omitted
+    // (the default) reproduces today's instant-fail exactly — no behavior change for any existing caller
+    // that doesn't ask for this. A pool with genuinely zero capacity for the whole window still fails with
+    // the IDENTICAL message, just after the bound elapses rather than on the first read.
+    const waitMs = flags['wait-ms'] !== undefined && Number.isFinite(Number(flags['wait-ms'])) ? Math.max(0, Number(flags['wait-ms'])) : 0;
+    const deadline = nowMs + waitMs;
     const excluded = new Set();
     while (chosen === null) {
       const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
-      const pick = chooseFreeLane(infos, nowMs, ttlMs);
-      if (pick === null) fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
-      const claimed = tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs);
+      const pick = chooseFreeLane(infos, Date.now(), ttlMs);
+      if (pick === null) {
+        if (Date.now() < deadline) {
+          sleepSyncMs(ACQUIRE_POLL_MS);
+          excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
+          continue;
+        }
+        fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
+      }
+      const claimed = tryClaimLane(laneDir(repo, pick), session, Date.now(), ttlMs);
       if (claimed) { chosen = pick; holderSlug = claimed; }
       else excluded.add(pick); // a concurrent acquire won this one — try the next
     }
@@ -1273,7 +1306,7 @@ function assertReleaseReservedScoped() {
 // by-session sweep needs no separate `(pool, lane)` ledger — the markers ARE that record. A blanket cross-pool
 // `--all` would nuke every session's leases everywhere, so `--all-pools` REQUIRES `--session` and refuses
 // `--all`. Reserved (permanent memory) leases are always skipped — a sweep never un-reserves.
-function cmdReleaseAllPools() {
+function cmdReleaseAllPools(repo) {
   const session = flags.session || process.env.LANE_SESSION || null;
   // #2748 — a by-ITEM selector generalizes the #2667 by-session sweep so the DRAIN can release an item's lease
   // across every pool at LAND WITHOUT knowing the exact session slug: it matches every lease whose session
@@ -1299,6 +1332,15 @@ function cmdReleaseAllPools() {
     return n != null && Number(n) === wantItem;
   };
   const selectorLabel = session ? `session "${session}"` : `item #${wantItem}`;
+  // #3466 — same registry-must-mirror-reality contract `cmdRelease` was just fixed to keep: `--all-pools` does
+  // the identical mutating thing (`rmSync(LEASE_MARKER(dir))`) via a SEPARATE code path, and it is the one the
+  // drain's land-time cleanup (`lane-drain.mjs`'s `releaseItemLeases`) and pr-watch's merge-time auto-release
+  // (`pr-watch.mjs`'s `releaseSessionAcrossPools`) actually call — the dominant real-world release triggers, not
+  // just the reaper's reclaim. `referencePath` REUSES `repo.referencePath` from `resolveRepo()` (already
+  // git-toplevel-normalized) rather than a raw `resolve(process.cwd())` — round-2 review caught that the raw
+  // form computes a WRONG registry path (and so silently no-ops) whenever the caller's cwd is a subdirectory
+  // of the checkout, exactly `pr-watch.mjs`'s `releaseSessionAcrossPools` call shape (no `cwd` override on its
+  // `execFileSync`, so it inherits whatever directory that process happens to be running from).
   const pools = existingPools();
   const perPool = [];
   let released = 0;
@@ -1321,7 +1363,14 @@ function cmdReleaseAllPools() {
       lanes.push(n);
       released++;
     }
-    if (lanes.length) perPool.push({ pool: name, lanes });
+    if (lanes.length) {
+      perPool.push({ pool: name, lanes });
+      // #3466 — drop THIS pool's released lanes from the shared item→lane registry. `name` (not `repo.name`)
+      // is the pool this iteration actually released from — round-2 review caught that `unmapLanes` matches
+      // by `repo` field as well as lane number (see its own comment), so passing the wrong pool name here
+      // would silently fail to clear this pool's own entries.
+      unmapLanes({ referencePath: repo.referencePath, name }, lanes);
+    }
   }
   if (released === 0) log(`  no leases held by ${selectorLabel} in any pool (${pools.length} pool(s) scanned)`);
   if (flags.json) process.stdout.write(JSON.stringify({ session: session || null, item: wantItem, released, pools: perPool }, null, 2) + '\n');
@@ -1329,7 +1378,7 @@ function cmdReleaseAllPools() {
 
 function cmdRelease(repo) {
   assertReleaseReservedScoped();
-  if (flags['all-pools']) return cmdReleaseAllPools(); // #2667 — cross-pool release-by-session
+  if (flags['all-pools']) return cmdReleaseAllPools(repo); // #2667 — cross-pool release-by-session
   const session = defaultSession();
   const force = !!flags.force;
   const nowMs = Date.now();
@@ -1403,6 +1452,11 @@ function cmdRelease(repo) {
       continue;
     }
     rmSync(LEASE_MARKER(dir), { force: true });
+    // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
+    // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
+    // `release --force` reclaim, which delegates here) leaves the registry pointing at a lane that is free
+    // again, and conveyor-state.mjs's health-stall scan overcounts `building` forever.
+    unmapLanes(repo, [n]);
     log(`  released lane-${n} (was ${describeLease(lease)})`);
     released++;
   }

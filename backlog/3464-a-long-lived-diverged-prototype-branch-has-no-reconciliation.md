@@ -3,9 +3,11 @@ bornAs: xra0mqn
 kind: task
 tier: pinned
 parent: "3383"
-status: open
+status: resolved
 relatedTo: ["3449", "3457", "3443", "3463"]
 dateOpened: "2026-09-03"
+dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
 tags: [conveyor, lane-pool, scope, reconciliation, mechanical-dispatcher]
 scope:
   - we:scripts/conveyor/
@@ -131,3 +133,29 @@ equally-in-scope stream while it accumulated for days.
 3. **Explicitly out of scope here**: resolving the actual live merge conflict currently blocking
    `wev-scratch-dispatcher-4` (separate, already in progress) and the notification/escalation design once a
    conflict IS hit (that is `3463`'s concern, not this item's).
+
+## Progress
+
+- **`we:scripts/conveyor/branch-drift.mjs`** (new) — the reconciliation cadence. A pure classifier
+  (ahead/behind/conflict → `ok`/`watch`/`blocked`, ceiling `DEFAULT_MAX_BEHIND=40`) plus an IO CLI (`sweep` /
+  `check` verbs) that computes ahead/behind (`git rev-list --left-right --count`) and a working-tree-free
+  dry-run merge conflict probe (`git merge-tree --write-tree`, the same plumbing `we:scripts/prune-landed-lanes.mjs`
+  already uses), and persists the report as a **git note** (`refs/notes/branch-drift`, pushed to `origin`) on
+  the branch's own tip — durable past any one scratch checkout's lifetime, and checkable from any fresh clone
+  via `check` (which fetches the note itself) with no PR and no new state store.
+- **`we:skills-src/conveyor/runner.mjs`** — wired the sweep verb into the headless runner's existing
+  best-effort mechanical-passes list (alongside the lease-reaper / session-reaper / reconcile-fix-dispatch),
+  the same "piggyback on a pass the runner already ticks every ~120s" shape `#3449` used for lane-pool lease
+  reconciliation — so drift is checked with no human or interactive session needed to notice it.
+- **`we:scripts/readiness/dispatch-plan.mjs`** — a new held reason `branch-drift-blocked`: when the watched
+  branch's latest check verdict is `blocked`, WE-pool items whose scope overlaps the branch's own live scope
+  (`we:scripts/conveyor/`, `we:skills-src/conveyor/` by default) are held rather than dispatched — the concrete
+  ceiling enforcement for the exact scope both sides of this item's own incident collided on. Fail-open on any
+  drift-check error (`--no-drift-check` also available).
+- **Regression coverage** (`we:scripts/conveyor/__tests__/branch-drift.test.mjs`): real throwaway git fixtures
+  (no network) proving (a) the commit-count ceiling trips even with zero content conflict (mirrors the real
+  78-behind incident), (b) two branches whose OWN commits each touch disjoint files — individually in-scope —
+  but that ALSO edit the same shared file on the same line, produce a real dry-run conflict, and (c) a
+  **second, independent fresh clone that never ran the sweep itself** reads the SAME `blocked` verdict back
+  purely from the pushed git note. Plus `we:scripts/readiness/__tests__/dispatch-plan.test.mjs` coverage for
+  the new `branch-drift-blocked` hold and its precedence.
