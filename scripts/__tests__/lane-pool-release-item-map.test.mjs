@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -174,5 +174,57 @@ describe('lane-pool release --all-pools clears the lane-ports registry across ev
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out).released).toBe(1);
     expect(readRegistry()).toEqual({});
+  });
+
+  // #3466 PR #1919 review round 2 (independent post-merge review) — `cmdReleaseAllPools` built its own
+  // `{ referencePath: resolve(process.cwd()) }` instead of reusing `resolveRepo()`'s already git-toplevel-
+  // normalized `repo.referencePath` (which `cmdRelease` already has in scope). `pr-watch.mjs`'s
+  // `releaseSessionAcrossPools` — the REAL merge-time auto-release caller — passes no `cwd` override to its
+  // `execFileSync` call at all, so it inherits whatever directory that Node process happens to be running
+  // from, which need not be the checkout's toplevel. Reproduced here by running the exact same
+  // `release --all-pools --item=<num>` shape with `cwd` set to a SUBDIRECTORY of `referenceDir` (never
+  // exercised by the sibling tests above, which always pass `cwd: referenceDir` — the toplevel).
+  it('--item sweep run with cwd in a SUBDIRECTORY of the reference checkout still clears the CANONICAL registry (no --reference/--origin flags, matching pr-watch.mjs\'s real no-cwd-override call shape)', () => {
+    expect(runPool(['provision', '--count=1', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-333', '--item=333', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(readRegistry()).toEqual({ 333: { lane: 1, repo: 'poolA' } });
+
+    const subDir = join(referenceDir, 'sub', 'dir');
+    mkdirSync(subDir, { recursive: true });
+    const r = runPool(['release', '--all-pools', '--item=333', '--json'], { LANE_POOL_ROOT: poolRoot }, { cwd: subDir });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(1);
+    // The bug: a raw `resolve(process.cwd())` computes the registry path under `<referenceDir>/sub/dir/.claude/
+    // lane-ports.json` — a file that never existed — so `unmapLanes` silently no-ops there while the CANONICAL
+    // registry at `<referenceDir>/.claude/lane-ports.json` (read by `readRegistry()`) stays stale.
+    expect(readRegistry()).toEqual({});
+  });
+});
+
+// #3466 PR #1919 review round 2 — `unmapLanes` matched registry entries purely by lane NUMBER, ignoring the
+// `repo` field each entry already stores. Reproduced via the PRE-EXISTING acquire-time pre-clear
+// (`unmapLanes(repo, [chosen])` in `cmdAcquire`, unrelated to this diff's new code but inherited by the fixed
+// `cmdRelease`/`cmdReleaseAllPools` too): two different pools that happen to reuse the same lane NUMBER for two
+// DIFFERENT items must never cross-clear each other's still-live registry entry.
+describe('lane-pool registry unmap does not cross-clear a DIFFERENT pool\'s entry sharing the same lane number (#3466)', () => {
+  const POOL = (name) => [`--origin=${originDir}`, `--reference=${referenceDir}`, `--name=${name}`, '--branch=main', '--no-install'];
+
+  it('acquiring lane-1 in poolB for a different item leaves poolA\'s lane-1 item untouched', () => {
+    expect(runPool(['provision', '--count=1', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['provision', '--count=1', ...POOL('poolB')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-111', '--item=111', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(readRegistry()).toEqual({ 111: { lane: 1, repo: 'poolA' } });
+
+    // poolB's lane-1 acquire for an UNRELATED item — its pre-clear `unmapLanes(repo, [1])` must filter on
+    // `repo` as well as lane number, or it silently wipes poolA's still-live item-111 entry purely because
+    // both pools happen to use lane number 1 — undercounting `building` and losing health-stall visibility
+    // for a genuinely live item.
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-222', '--item=222', ...POOL('poolB')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+
+    expect(readRegistry()).toEqual({
+      111: { lane: 1, repo: 'poolA' },
+      222: { lane: 1, repo: 'poolB' },
+    });
   });
 });
