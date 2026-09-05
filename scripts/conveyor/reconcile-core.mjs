@@ -511,3 +511,32 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
 
   return { dispatch, refusals, notes };
 }
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#selectStatusCandidates — PURE: which PRs deserve an informative
+ * `review-status:*` refresh (`we:scripts/conveyor/review-status-tag.mjs`) this tick, given this pass's own
+ * `dispatch`/`refusals` output.
+ *
+ * EVERY PR THIS PASS HAS AN OPINION ABOUT, EXCEPT `nothing-owed`. `nothing-owed` is the ONLY refusal kind that
+ * genuinely means "reviewed and queued, already landed, or a signal-free PR unrelated to this loop" — see
+ * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for `needs-human`, `ci-red`, and
+ * `conflicted` phases alike, which are real conveyor-dispatched PRs stuck on something this pass does not run
+ * (a human clear, a CI-heal, a rebase) — NOT unrelated PRs. Before this function existed,
+ * `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded `owed-elsewhere` wholesale on the mistaken
+ * premise that it "covers every unrelated human PR" — confirmed live 2026-09-05 on PR #1920: its `needs-human`
+ * refusal (kind `owed-elsewhere`) was excluded from every tick's refresh sweep, so its stale
+ * `review-status:reviewing` label — left over from a session that no longer exists in `claude agents --json`
+ * at all — was NEVER re-derived and cleared. `review-status-tag.mjs` is idempotent and name-keyed (matches
+ * `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a PR with nothing live simply clears any
+ * stale label — safe to call on every candidate this returns, including a genuinely-foreign PR that happens to
+ * reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst, never a wrong label).
+ * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
+ * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
+ * @returns {Array<{prNumber:number}>} reviewsOwed, plus every refusal except `nothing-owed`
+ */
+export function selectStatusCandidates(reviewsOwed, refusals) {
+  return [
+    ...(Array.isArray(reviewsOwed) ? reviewsOwed : []),
+    ...(Array.isArray(refusals) ? refusals : []).filter((r) => r && r.kind !== 'nothing-owed'),
+  ];
+}
