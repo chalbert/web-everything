@@ -1625,7 +1625,7 @@ function cmdUnmap(repo) {
 const KNOWN_FLAGS = new Set([
   'acquirable', 'adopt', 'all', 'all-pools', 'base', 'branch', 'count', 'force', 'item', 'json', 'lane',
   'name', 'no-install', 'no-reap', 'no-reset', 'origin', 'pool', 'purpose', 'reference', 'release-reserved',
-  'repo', 'reserve', 'scope', 'session', 'ttl-minutes',
+  'repo', 'reserve', 'scope', 'session', 'ttl-minutes', 'wait-ms',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────

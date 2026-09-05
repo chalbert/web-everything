@@ -84,7 +84,7 @@ describe('lane-pool unrecognized-flag guard (regression: acquire --help auto-pic
     expect(runPool(['status', '--json', ...common()], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
     expect(runPool(['path', '--lane=1', ...common()], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
 
-    const acq = runPool(['acquire', '--lane=1', '--purpose=t', '--session=t', '--scope=x:y', '--json', ...common()], { LANE_POOL_ROOT: poolRoot });
+    const acq = runPool(['acquire', '--lane=1', '--purpose=t', '--session=t', '--scope=x:y', '--wait-ms=0', '--json', ...common()], { LANE_POOL_ROOT: poolRoot });
     expect(acq.code).toBe(0);
 
     expect(runPool(['adopt', '--lane=1', '--json', ...common()], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
