@@ -6,6 +6,12 @@ parent: "2527"
 status: open
 dateOpened: "2026-08-01"
 tags: [plateau-loop, conveyor, review, convergence, daemon, quality, slice-uifg-adjacent]
+scope:
+  - we:skills-src/conveyor/
+  - we:scripts/readiness/proposer.mjs
+  - we:scripts/readiness/__tests__/proposer.test.mjs
+  - we:docs/agent/platform-decisions.md
+scopeRationale: "we:skills-src/conveyor/ stays directory-level because the build-brief-discipline requirement (name edge-cases, require integration tests, forbid overclaiming) applies to every delegated build brief template, not just we:skills-src/conveyor/delivery-agent-brief.md — plausibly also we:skills-src/conveyor/fix-agent-brief.md and we:skills-src/conveyor/fix-agent-ci-brief.md. we:scripts/readiness/proposer.mjs already implements the precedented shape for this class of check (hasAcceptanceCriteria/hasFilePaths spec-gap detectors), the natural place to add an edge-case/integration-test/overclaim detector as a deterministic gate. Dropped we:skills-src/drain/ and we:scripts/lib/: an adversarial review found no concrete edit target in either (the daemon's independent-clear+land shape is already documented as unchanged in we:skills-src/drain/SKILL.md, and the one plausible we:scripts/lib/ touch — we:scripts/lib/review-core.mjs's care-level depth table — belongs to sibling decision #2828's own child, not this item)."
 ---
 
 # Review-fix convergence runs in the warm build lane; daemon is the independent backstop
