@@ -3,11 +3,12 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
 dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
