@@ -3,11 +3,14 @@ bornAs: xwb8luf
 kind: story
 size: 2
 parent: "3029"
-status: open
+status: resolved
+graduatedTo: none
 relatedTo: ["3096", "3095", "3331", "3150"]
 scope: ["we:scripts/operations/explore-io.mjs", "we:scripts/operations/__tests__/explore.test.mjs"]
 scopeRationale: "File-level. One branch is added to the liveness axis of `createExploreObservers` in we:scripts/operations/explore-io.mjs, and the tests that redden for it land in the existing observer describe block of we:scripts/operations/__tests__/explore.test.mjs (there is no we:scripts/operations/__tests__/explore-io.test.mjs — the io shell is tested from we:scripts/operations/__tests__/explore.test.mjs). Nothing in we:scripts/operations/dispatch-lane-io.mjs, we:scripts/operations/dispatch-lane.mjs or we:scripts/operations/wake.mjs is touched: those three sites belong to the sibling card and this one deliberately lands AFTER them so it copies their shape rather than guessing a second one."
 dateOpened: "2026-08-26"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: [plateau-loop, delivery, operations, explore]
 ---
 
