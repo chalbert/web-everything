@@ -2,8 +2,10 @@
 bornAs: xmjiqhc
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-06"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: []
 scope:
   - we:skills-src/conveyor/delivery-agent-brief.md

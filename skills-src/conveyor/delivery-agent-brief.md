@@ -165,27 +165,32 @@ value a hand-rolled `check:standards | grep` cannot produce, and therefore the o
 raw command still works and is what the operation runs; use the operation so the answer is data rather than
 your reading of a terminal.
 
-### 6. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
+### 6. Review your own diff — drive the `/converge` loop BEFORE the PR (advisory, never gates PR-open)
 
 A green gate proves the **checks** pass; it does **not** prove the **diff is correct**. Before you open the
 PR, get the work reviewed — the gate is the deterministic core, this review is the judgment a script cannot
 do (per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
-Spawn **one adversarial code-review subagent** on your working diff and **AWAIT its completion — its final
-report (return value) IS the verdict.** The harness delivers a spawned subagent's final report to its spawner
-automatically, so you read that returned report directly; nothing can lose it in transit.
+Drive the **bounded** convergence loop — [skills-src/converge/SKILL.md](../converge/SKILL.md), shelling
+[we:scripts/converge-cli.mjs](../../scripts/converge-cli.mjs) — against your lane, instead of hand-running a
+review-and-fix loop: the CLI owns the round cap, the panel roster, the red-team, and the ledger, so none of that
+is your judgment call to make.
 
-- **Read-only, diff-focused.** It reviews *this lane's* diff — **correctness first**, plus the lens the change
-  earns: a **security** pass for anything touching untrusted input, secrets, auth, or file/network I/O; an
-  interface/compat pass for a contract change; and so on. It reports findings; it does not edit.
-- **The verdict rides the RETURN, never a name-addressed message.** Instruct the review subagent to put its
-  FULL verdict — converged / the findings list / any blockers — in its **final report/return**, NOT to
-  `SendMessage` it back to you by name. Do **not** rely on a name-addressed hand-back: a name can be
-  unreachable once an agent completes ("no agent named … reachable"), which stalls the converge-before-PR
-  handshake (#2624). Read the verdict off the returned final report.
-- **Address every finding to CONVERGENCE — don't rubber-stamp, don't silently drop.** Fix the real issues in
-  the lane. A finding you judge not-real is **dismissed with a one-line reason** (never dropped in silence).
-  Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
-  dismissed-with-reason findings). **Only then** proceed to the PR.
+- **Seed it against this lane.** `node scripts/converge-cli.mjs init --lane="$LANE" --state="$STATE" --care=<band>
+  --goal="<one sentence from the backlog item's lead paragraph>"`. Pass `--care=high` for anything touching a
+  trust boundary, a gate, a contract, or a shared derivation; `--care=elevated` (the default) otherwise. Care
+  derivation from the touch-set is #2954, not yet built — until it lands, state the band explicitly.
+- **Loop `init` → `step` per the SKILL's action table** (`read` / `panel` / `edit` / `red-team` / `invite`),
+  feeding back what happened each round, stamped with the `round` the CLI just printed, until the action is
+  `land` or `escalate`. Seat every `panel` and `red-team` juror through `judgePanel` (never the `Agent` tool) —
+  see *Seating a juror* in the SKILL; only the `edit` action stays a subagent.
+- **`land`** — a non-author panel accepted the final diff and an independent red-team failed to break it.
+  Proceed to the PR; report the verdict, the round count, and every dismissed finding with its stated reason
+  (the CLI prints `dismissed` on every action) in the PR body.
+- **`escalate` is ADVISORY — it never blocks opening the PR.** Note the printed escalation packet (reason,
+  round history, surviving findings) in the PR body. Whether that reason earns a **parked** PR is still the
+  judgment *Escalations* case 3/4 below describes: a `mandatory-lens-absent`, `round-cap`, or failed-red-team
+  reason names a real, unresolved finding — open parked `review:human` citing it. A `nothing-to-review` (the
+  read found no diff) needs no park.
 
 ### 7. Visual self-review — render the surface, READ the screenshot, diff it against the baseline (UI-locus items ONLY)
 
