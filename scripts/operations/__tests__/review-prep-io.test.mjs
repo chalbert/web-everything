@@ -15,7 +15,7 @@ import { join } from 'node:path';
 
 import {
   contentHashOf, createReviewPrepReader, createReviewPrepSinks, readPrep, recordPrepVerdict, resolveCardPath,
-  todayIso,
+  reviewSectionPresent, todayIso,
 } from '../review-prep-io.mjs';
 import { REVIEW_PREP_EFFECTS } from '../review-prep.mjs';
 import { notApplied } from '../effect-executor.mjs';
@@ -49,6 +49,16 @@ function writeCard(name, raw = CARD_RAW) {
   const path = join(root, 'backlog', name);
   writeFileSync(path, raw, 'utf8');
   return path;
+}
+
+/** A realistic `exec` stub: `git show :<relPath>` reads back whatever is CURRENTLY on disk — standing in for
+ *  a real index whose staged blob is exactly what `git add` last captured off the working tree. */
+function execReadingStagedFromDisk() {
+  return (cmd, args) => {
+    if (args[0] === 'show') return readFileSync(join(root, args[1].slice(1)), 'utf8');
+    if (args[0] === 'rev-parse') return 'deadbeefcafe\n';
+    return '';
+  };
 }
 
 describe('resolveCardPath', () => {
@@ -108,6 +118,14 @@ describe('contentHashOf', () => {
   });
 });
 
+describe('reviewSectionPresent', () => {
+  it('is true only when the exact section text is present', () => {
+    expect(reviewSectionPresent('before\n## Independent review — 2026-09-05\nafter', '## Independent review — 2026-09-05')).toBe(true);
+    expect(reviewSectionPresent('before\nafter', '## Independent review — 2026-09-05')).toBe(false);
+    expect(reviewSectionPresent(null, 'x')).toBe(false);
+  });
+});
+
 describe('todayIso', () => {
   it('formats YYYY-MM-DD from a fixed clock', () => {
     expect(todayIso(new Date(2026, 7, 14))).toBe('2026-08-14'); // month is 0-indexed
@@ -150,20 +168,24 @@ describe('recordPrepVerdict — the race guard', () => {
       fixApplied: false,
       note: 'the preparation holds up',
       expectedContentHash: contentHashOf(CARD_RAW),
-      exec: (cmd, args) => { calls.push([cmd, args]); return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''; },
+      exec: (cmd, args) => {
+        calls.push([cmd, args]);
+        return execReadingStagedFromDisk()(cmd, args);
+      },
       runNode: (argv) => { calls.push(['node', argv]); return JSON.stringify({ ok: true }); },
     });
-    expect(result).toMatchObject({ recorded: true, aborted: false, clean: true, disposition: 'landed' });
+    expect(result).toMatchObject({ recorded: true, aborted: false, verified: true, clean: true, disposition: 'landed' });
     const updated = readFileSync(path, 'utf8');
     expect(updated).toContain('## Independent review — ');
     expect(updated).toContain('Confidence: **High**');
     expect(updated).toContain('premise');
-    // git add / commit / rev-parse, then the pr-land shell.
+    // git add, then verify-the-index (`git show`), then commit / rev-parse, then the pr-land shell.
     expect(calls[0]).toEqual(['git', ['add', '--', 'backlog/9999-a-fake-card.md']]);
-    expect(calls[1][0]).toBe('git');
-    expect(calls[1][1][0]).toBe('commit');
-    expect(calls[2]).toEqual(['git', ['rev-parse', 'HEAD']]);
-    const landCall = calls[3];
+    expect(calls[1]).toEqual(['git', ['show', ':backlog/9999-a-fake-card.md']]);
+    expect(calls[2][0]).toBe('git');
+    expect(calls[2][1][0]).toBe('commit');
+    expect(calls[3]).toEqual(['git', ['rev-parse', 'HEAD']]);
+    const landCall = calls[4];
     expect(landCall[0]).toBe('node');
     expect(landCall[1]).toContain(`${join(root, 'scripts', 'pr-land.mjs')}`);
     expect(landCall[1]).toContain('--label-on-green');
@@ -181,13 +203,75 @@ describe('recordPrepVerdict — the race guard', () => {
   });
 });
 
+describe('recordPrepVerdict — the write-verify (post-write half of the race guard)', () => {
+  it('a concurrent writer stealing the index returns the third outcome, never a throw', async () => {
+    writeCard('9999-a-fake-card.md');
+    const calls = [];
+    const result = await recordPrepVerdict({
+      item: '9999',
+      repo: 'chalbert/web-everything',
+      cwd: root,
+      confidence: 'High',
+      risks: [{ risk: 'premise', addressed: true }],
+      expectedContentHash: contentHashOf(CARD_RAW),
+      // `git show` returns the card's PRE-write text — as if a second writer's `git add` won the race for
+      // the index slot between this run's `fs` write and its own `git add`.
+      exec: (cmd, args) => {
+        calls.push([cmd, args]);
+        if (args[0] === 'show') return CARD_RAW;
+        return '';
+      },
+      runNode: (argv) => { calls.push(['node', argv]); return '{}'; },
+    });
+    expect(result).toEqual({ recorded: false, verified: false, path: join(root, 'backlog', '9999-a-fake-card.md') });
+    const addCalls = calls.filter(([, args]) => args[0] === 'add');
+    const commitCalls = calls.filter(([, args]) => args[0] === 'commit');
+    const runNodeCalls = calls.filter(([cmd]) => cmd === 'node');
+    expect(addCalls).toHaveLength(1);
+    expect(commitCalls).toHaveLength(0);
+    expect(runNodeCalls).toHaveLength(0);
+  });
+
+  it('verifies against the STAGED content (git show), not a fresh working-tree read', async () => {
+    const path = writeCard('9999-a-fake-card.md');
+    let capturedAtAdd = null;
+    const result = await recordPrepVerdict({
+      item: '9999',
+      repo: 'chalbert/web-everything',
+      cwd: root,
+      confidence: 'High',
+      risks: [{ risk: 'premise', addressed: true }],
+      expectedContentHash: contentHashOf(CARD_RAW),
+      exec: (cmd, args) => {
+        if (args[0] === 'add') {
+          capturedAtAdd = readFileSync(path, 'utf8'); // what actually got staged
+          return '';
+        }
+        if (args[0] === 'show') {
+          // a second writer clobbers the WORKING TREE after our add — the index still holds what we
+          // staged. If verification re-read `fs` instead of the index, it would see this garbage.
+          writeFileSync(path, 'a racing writer clobbered the working tree after staging\n', 'utf8');
+          return capturedAtAdd;
+        }
+        if (args[0] === 'rev-parse') return 'deadbeefcafe\n';
+        return '';
+      },
+      runNode: () => '{}',
+    });
+    expect(result.verified).toBe(true);
+    expect(result.recorded).toBe(true);
+    // proof the verification did not re-read the (now-clobbered) working tree
+    expect(readFileSync(path, 'utf8')).not.toContain('## Independent review — ');
+  });
+});
+
 describe('recordPrepVerdict — land vs park', () => {
   const baseArgs = (overrides = {}) => ({
     item: '9999',
     repo: 'chalbert/web-everything',
     cwd: root,
     expectedContentHash: contentHashOf(CARD_RAW),
-    exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
+    exec: execReadingStagedFromDisk(),
     runNode: () => '{}',
     ...overrides,
   });
@@ -242,7 +326,7 @@ describe('recordPrepVerdict — land vs park', () => {
 });
 
 describe('recordPrepVerdict — failure classification', () => {
-  it('a git commit failure is `notApplied` — nothing pushed, safe to retry', async () => {
+  it('a git failure before any commit is `notApplied` — nothing pushed, safe to retry', async () => {
     writeCard('9999-a-fake-card.md');
     await expect(recordPrepVerdict({
       item: '9999', repo: 'chalbert/web-everything', cwd: root, confidence: 'High', risks: [],
@@ -257,7 +341,7 @@ describe('recordPrepVerdict — failure classification', () => {
     const err = await recordPrepVerdict({
       item: '9999', repo: 'chalbert/web-everything', cwd: root, confidence: 'High', risks: [],
       expectedContentHash: contentHashOf(CARD_RAW),
-      exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
+      exec: execReadingStagedFromDisk(),
       runNode: () => { throw new Error('gh: network unreachable'); },
     }).catch((e) => e);
     expect(err).toBeInstanceOf(Error);

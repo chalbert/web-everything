@@ -26,6 +26,14 @@
  * the operational equivalent of `review-pr`'s `abstain` answer — just reached deterministically instead of by
  * asking.
  *
+ * THE WRITE-VERIFY (the race guard's post-write half). The hash compare above closes the read→write window;
+ * it cannot see a write that is issued but does not land — a second writer racing between this run's `fs`
+ * write and its `git add` can leave the index holding someone else's bytes. So after staging, this reads back
+ * the STAGED content (`git show :<path>`), never a fresh `fs` read — the working tree can be mutated again
+ * after the add and a working-tree re-read would not catch it, but the staged bytes are exactly what `git
+ * commit` is about to record. Absent ⇒ `{ recorded: false, verified: false, path }`, no commit, no push, no
+ * `pr-land` — the same non-throwing shape as the pre-write guard, for the same reason.
+ *
  * IMPURE by construction: `fs`, `git`, `gh` (via `pr-land.mjs`).
  */
 
@@ -123,14 +131,30 @@ export function todayIso(now = new Date()) {
 
 const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...opts, cwd });
 
+/** Whether a rendered review section's text is present in some content — the ONE presence test both the
+ *  staged-content verification and its test use, so "what counts as landed" cannot drift between them. */
+export function reviewSectionPresent(content, section) {
+  return typeof content === 'string' && content.includes(section);
+}
+
 /**
- * Commit the just-rewritten card. ONE commit, the card path only — never `git add -A` (this repo's own
- * git-hygiene rule; a review that accidentally swept up an unrelated dirty file would be its own defect
- * class). Returns the new commit's full SHA.
+ * Stage the just-rewritten card and read back what actually landed in the INDEX — never a fresh `fs` read
+ * (see the file header's WRITE-VERIFY). Returns the staged content; does not commit.
+ * @param {{path: string, exec: Function, cwd: string}} o
+ * @returns {string}
+ */
+function stageCard({ path, exec, cwd }) {
+  exec('git', ['add', '--', path], { cwd });
+  return String(exec('git', ['show', `:${path}`], { cwd, encoding: 'utf8' }));
+}
+
+/**
+ * Commit the staged card. ONE commit, the card path only — never `git add -A` (this repo's own git-hygiene
+ * rule; a review that accidentally swept up an unrelated dirty file would be its own defect class). Returns
+ * the new commit's full SHA.
  * @param {{path: string, message: string, exec: Function, cwd: string}} o
  */
 function commitCard({ path, message, exec, cwd }) {
-  exec('git', ['add', '--', path], { cwd });
   exec('git', ['commit', '-m', message, '--', path], { cwd, encoding: 'utf8' });
   return String(exec('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' })).trim();
 }
@@ -200,6 +224,23 @@ export async function recordPrepVerdict({
     ? `review-prep: independent review of #${item} — confidence ${confidence}, no corrections owed`
     : `review-prep: independent review of #${item} — confidence ${confidence}, corrections recorded`;
 
+  let staged;
+  try {
+    staged = stageCard({ path: relPath, exec, cwd });
+  } catch (e) {
+    throw notApplied(
+      `review-prep-io: staging or reading the index failed before any commit — ${String(e?.message ?? e)}`,
+      { path },
+    );
+  }
+
+  if (!reviewSectionPresent(staged, section)) {
+    // The index does not hold what we just wrote — a second writer raced between our `fs` write and the
+    // `git add` above. No commit, no push, no pr-land: a determinate third outcome, not a throw (see the
+    // file header's WRITE-VERIFY).
+    return { recorded: false, verified: false, path };
+  }
+
   let sha;
   try {
     sha = commitCard({ path: relPath, message: commitMessage, exec, cwd });
@@ -248,6 +289,7 @@ export async function recordPrepVerdict({
   return {
     recorded: true,
     aborted: false,
+    verified: true,
     path,
     sha,
     ref,

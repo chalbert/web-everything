@@ -3,8 +3,11 @@ bornAs: x4kry5w
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
+graduatedTo: none
 preparedDate: "2026-08-25"
 relatedTo: ["3233"]
 tags: [operations, epic-3029, review-prep, preparation]
