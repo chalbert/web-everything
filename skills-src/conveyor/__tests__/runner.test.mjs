@@ -22,6 +22,7 @@ import {
 } from '../runner-lock.mjs';
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
+  bookkeepingForDispatch,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS,
 } from '../runner.mjs';
 
@@ -98,6 +99,50 @@ describe('carryForward — threads the core nextState UNCHANGED (never re-derive
   });
 });
 
+describe('bookkeepingForDispatch (#3416) — strips ONLY the target item\'s own guard, nothing else', () => {
+  it('removes the target item\'s own entry from every guard list', () => {
+    const nextState = {
+      tick: 2,
+      buildGuards: [{ num: '3412', lane: 1, spawnedTick: 0 }, { num: '99', lane: 5, spawnedTick: 0 }],
+      prepareGuards: [{ num: '3412', kind: 'prepare', lane: 1, spawnedTick: 0 }],
+      fixGuards: [{ num: '3412', lane: 2, spawnedTick: 0 }],
+      ciHealGuards: [{ num: '3412', lane: 3, spawnedTick: 0 }],
+      watched: [{ pr: 9 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    // THE REGRESSION THIS GUARDS: before the fix, dispatch-lane's own nested tick-core read would see this
+    // exact entry already live for the item it is about to dispatch, and refuse — "suppressed by the
+    // in-flight build guard" — against a guard the SAME tick just planned, never a real spawn.
+    expect(bookkeeping.buildGuards).toEqual([{ num: '99', lane: 5, spawnedTick: 0 }]);
+    expect(bookkeeping.prepareGuards).toEqual([]);
+    expect(bookkeeping.fixGuards).toEqual([]);
+    expect(bookkeeping.ciHealGuards).toEqual([]);
+  });
+  it('leaves every OTHER item\'s guard untouched — a genuinely in-flight item still suppresses', () => {
+    const nextState = {
+      buildGuards: [{ num: '10', lane: 1, spawnedTick: 0 }, { num: '20', lane: 2, spawnedTick: 0 }],
+    };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '10' });
+    expect(bookkeeping.buildGuards).toEqual([{ num: '20', lane: 2, spawnedTick: 0 }]);
+  });
+  it('normalizes the num the same way the guard lists themselves are normalized (string vs number)', () => {
+    const nextState = { buildGuards: [{ num: 3412, lane: 1, spawnedTick: 0 }] };
+    expect(bookkeepingForDispatch(nextState, { num: '3412' }).buildGuards).toEqual([]);
+  });
+  it('tolerates a missing guard list on either side — no throw, nothing invented', () => {
+    expect(bookkeepingForDispatch({ tick: 1 }, { num: '3412' })).toEqual({
+      tick: 1, buildGuards: undefined, prepareGuards: undefined, fixGuards: undefined, ciHealGuards: undefined,
+    });
+  });
+  it('leaves every other field on nextState (tick, watched, fixAttempts, …) exactly as it was', () => {
+    const nextState = { tick: 5, watched: [{ pr: 1 }], fixAttempts: { 7: 2 }, buildGuards: [{ num: '3412', lane: 1 }] };
+    const bookkeeping = bookkeepingForDispatch(nextState, { num: '3412' });
+    expect(bookkeeping.tick).toBe(5);
+    expect(bookkeeping.watched).toBe(nextState.watched);
+    expect(bookkeeping.fixAttempts).toBe(nextState.fixAttempts);
+  });
+});
+
 describe('shouldStop — the two mechanical stop conditions, both from the core', () => {
   it('stops on the core idle-stop', () => {
     expect(shouldStop({ decisions: { idleStop: true } }, { tick: 0, maxTicks: Infinity })).toEqual({ stop: true, reason: 'idle-stop' });
@@ -115,6 +160,7 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   it('projects status, notes, every dispatch kind, and watchers', () => {
     const out = { decisions: {
       statusLine: 'conveyor · 2 building',
+      counts: { building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' },
       notes: [{ kind: 'build-ttl', text: '⚠ re-dispatching' }],
       spawnBuilds: [{ num: 1, lane: 1 }], spawnPrepareScope: [{ num: 2, lane: 2 }],
       spawnPrepareDecision: [{ num: 3, lane: 3 }], spawnFixes: [{ pr: 9 }], spawnCiHeals: [{ pr: 10 }],
@@ -122,6 +168,8 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
     } };
     const s = tickSurface(out);
     expect(s.statusLine).toBe('conveyor · 2 building');
+    // #3398 — the structured tallies pass through verbatim, for the supervisor's alerting to read.
+    expect(s.counts).toEqual({ building: 2, preparing: 1, fixing: 1, healing: 1, queued: 3, parked: 0, verdict: 'ok' });
     expect(s.notes).toHaveLength(1);
     expect(s.dispatch).toEqual({
       builds: [{ num: 1, lane: 1 }], prepareScope: [{ num: 2, lane: 2 }],
@@ -131,7 +179,7 @@ describe('tickSurface — a faithful projection of the core decisions (drops not
   });
   it('is total on a bare tick output (all empties, never throws)', () => {
     const s = tickSurface({});
-    expect(s).toEqual({ statusLine: '', notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
+    expect(s).toEqual({ statusLine: '', counts: null, notes: [], dispatch: { builds: [], prepareScope: [], prepareDecision: [], fixes: [], ciHeals: [] }, armWatchers: [] });
   });
 });
 
@@ -200,8 +248,90 @@ describe('runLoop — the runner control flow over injected effects', () => {
     expect(res.stoppedReason).toBe('idle-stop');  // the throw was swallowed; the tick still completed
   });
 
+  it('#3404 — threads its OWN heartbeat effect into mechanicalPasses, so a pass that outlasts the lease TTL can extend it mid-pass', async () => {
+    // Fails today (before #3404): `mechanicalPasses` was called with no `heartbeat` in its ctx at all, so a
+    // real long-running pass (the #3105 verify-dispatch pass) had no way to heartbeat until AFTER it returned
+    // — exactly the stale-lease-mid-run window #2453 already fixed for the plateau-app drain daemon.
+    let calls = 0;
+    const res = await runLoop({
+      tickOnce: () => ({ decisions: { idleStop: true }, nextState: {} }),
+      // Simulate a slow pass (like `runQuietHeartbeating`'s real interval) calling the heartbeat it was HANDED
+      // several times while it "runs", not merely receiving one bracketing call from the loop itself.
+      mechanicalPasses: async ({ heartbeat }) => {
+        expect(typeof heartbeat).toBe('function');
+        heartbeat(); heartbeat(); heartbeat(); // 3 mid-pass heartbeats simulating 3 elapsed intervals
+      },
+      heartbeat: () => { calls++; return true; },
+      sleep: () => {},
+    });
+    // The mechanicalPasses fake called the SAME heartbeat effect the loop itself uses after the tick — so all
+    // calls land on the one counter; asserting 3+ (not exactly 1) is what pins "mid-pass", not just "bracketed".
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(res.stoppedReason).toBe('idle-stop');
+  });
+
   it('requires a tickOnce effect', async () => {
     await expect(runLoop({})).rejects.toThrow(/tickOnce/);
+  });
+});
+
+// ── (2b) dispatchPass (#3383) — the runner carries the DISPATCH PASS's nextState forward, not the raw tick's ─
+
+describe('runLoop — dispatchPass (#3383): carries the dispatch pass\'s nextState forward, fails soft', () => {
+  it('the NEXT tick sees the dispatch pass\'s nextState, not the raw tick\'s own', async () => {
+    // Tick 0's own raw nextState says `{ tick: 1, from: 'raw' }`; a fake dispatchPass (standing in for
+    // `dispatch-lane`'s nested tick-core read actually recording the new guard) returns a DIFFERENT one. The
+    // second `tickOnce` call must receive the dispatch pass's copy, per the file header's #3383 rationale.
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      dispatchPass: async () => ({ nextState: { tick: 1, from: 'dispatch-pass' } }),
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'dispatch-pass' });
+  });
+
+  it('the DEFAULT dispatchPass (omitted) is an identity pass-through — legacy behaviour is preserved', async () => {
+    // No override supplied: the next tick's payload must carry the SAME nextState the tick itself produced.
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'raw' });
+  });
+
+  it('a THROWING dispatchPass fails soft — the loop keeps going and falls back to the raw tick nextState', async () => {
+    const seenPayloads = [];
+    const res = await runLoop({
+      tickOnce: (payload) => {
+        seenPayloads.push(payload);
+        return seenPayloads.length === 1
+          ? { decisions: { idleStop: false }, nextState: { tick: 1, from: 'raw' } }
+          : { decisions: { idleStop: true }, nextState: { tick: 2, from: 'raw' } };
+      },
+      dispatchPass: async () => { throw new Error('dispatch-lane exploded'); },
+      sleep: () => {},
+      maxTicks: 2,
+    });
+    // The loop never crashed and completed both ticks; the second tick's payload falls back to tick 0's own
+    // raw nextState (the pre-throw default set before `dispatchPass` is awaited).
+    expect(res.ticks).toBe(2);
+    expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'raw' });
   });
 });
 

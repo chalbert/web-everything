@@ -40,7 +40,7 @@ import { observeRun } from './effect-observer.mjs';
 import { withStepFinish, withStepStart } from './run-record.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { resolveOperation } from './run.mjs';
-import { createDispatchObservers, defaultListAgents, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
+import { createDispatchObservers, defaultListAgents, isHandleListed, listedSessionIds, normalizeHandle } from './dispatch-lane-io.mjs';
 import { createExploreObservers } from './explore-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
@@ -380,7 +380,10 @@ export function assertHandleNotLive(entry, { listAgents } = {}) {
       + `agent MIGHT be alive. ${advice}`,
     );
   }
-  if (listed.has(handle)) {
+  // PREFIX match (#3331), not `listed.has(handle)` — `handle` is the short id {@link parseBackgroundedHandle}
+  // records at dispatch time, and `listed` above is full ids kept for the shape guard only. See
+  // {@link isHandleListed}.
+  if (isHandleListed(handle, sessions)) {
     throw new Error(
       `wake --resolve: session ${handle} is STILL LISTED by \`claude agents\` — the agent is ALIVE. ${advice}`,
     );

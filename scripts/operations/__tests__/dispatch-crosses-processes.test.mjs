@@ -31,6 +31,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OBSERVE_SCRIPT = resolve(HERE, '..', '__fixtures__', 'observe-dispatch.mjs');
 const RUN_ID = 'run-dispatch-xproc';
 const HANDLE = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+// #3331: `entry.handle` is the SHORT id the CLI's own `--bg` confirmation carries, a genuine prefix of the
+// full id. `HANDLE` stays the FULL id used in `FIXTURE_AGENTS` (realistic — what `claude agents --json`
+// actually reports); `SHORT_HANDLE` is what the sink now records and what dispatch-side assertions compare.
+const SHORT_HANDLE = HANDLE.split('-')[0];
+/** A fake `--bg` confirmation carrying `shortId`, shaped exactly like the real CLI's (#3331). */
+const bgStdout = (shortId, name = 'conveyor-3037') => `backgrounded · ${shortId} · ${name}\n`;
 
 const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
 /** A PRIMARY checkout — the sink refuses to dispatch from a lane clone, which is what the default resolves to here. */
@@ -63,7 +69,9 @@ async function dispatchAndPark({ startedAt = '2026-08-13T09:00:00.000Z' } = {}) 
 
   // The one thing stubbed on THIS side: `claude --bg` is not run. Everything else — the in-flight write, the
   // handle, the deadline — is the real executor and the real sink.
-  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => HANDLE, now: () => new Date('2026-08-13T09:00:00.000Z') });
+  const sinks = createDispatchSinks({
+    root: PRIMARY, spawnAgent: () => bgStdout(SHORT_HANDLE), mintSessionId: () => HANDLE, now: () => new Date('2026-08-13T09:00:00.000Z'),
+  });
   const outcome = await applyPendingEffects(run, { sinks, store });
   run = outcome.run;
   expect(run.effects[0].status).toBe('in-flight');
@@ -95,7 +103,7 @@ describe('a dispatch started here is found by a process that never saw it', () =
     const seen = observeInChild({ FIXTURE_AGENTS: JSON.stringify([{ sessionId: HANDLE, kind: 'background' }]) });
 
     // THE ACCEPTANCE CLAUSE: nothing but a run id crossed the boundary, and the handle came back.
-    expect(seen.handle).toBe(HANDLE);
+    expect(seen.handle).toBe(SHORT_HANDLE);
     expect(seen.lane).toBe(8);
     expect(seen.expectedBy).toBe('2026-08-13T10:30:00.000Z');
     // The brief the agent was dispatched with is on the record too, so a restart knows what it asked for.
@@ -103,7 +111,7 @@ describe('a dispatch started here is found by a process that never saw it', () =
     // The session is live, so the run stays exactly where it was.
     expect(seen.stillRunning).toEqual(['run-dispatch-xproc#2#0']);
     expect(seen.status).toBe('awaiting-effect');
-    expect(seen.effects).toEqual([{ key: 'run-dispatch-xproc#2#0', status: 'in-flight', handle: HANDLE }]);
+    expect(seen.effects).toEqual([{ key: 'run-dispatch-xproc#2#0', status: 'in-flight', handle: SHORT_HANDLE }]);
   });
 
   it('a handle no longer listed is reported for a person, and NOTHING is written', async () => {
@@ -114,7 +122,7 @@ describe('a dispatch started here is found by a process that never saw it', () =
     expect(seen.unresolved).toHaveLength(1);
     expect(seen.unresolved[0].error).toMatch(/liveness and not outcome/);
     // Still in-flight, still holding its handle: `unresolved` licenses no caller to retry or advance.
-    expect(seen.effects[0]).toMatchObject({ status: 'in-flight', handle: HANDLE });
+    expect(seen.effects[0]).toMatchObject({ status: 'in-flight', handle: SHORT_HANDLE });
     expect(seen.status).toBe('awaiting-effect');
   });
 
@@ -122,7 +130,7 @@ describe('a dispatch started here is found by a process that never saw it', () =
     await dispatchAndPark();
     observeInChild();
     const again = observeInChild();
-    expect(again.handle).toBe(HANDLE);
+    expect(again.handle).toBe(SHORT_HANDLE);
     expect(again.effects[0].status).toBe('in-flight');
     // The reason the previous pass recorded survives, which is the only durable trace of why it is stuck.
     expect(createFileRunStore(dir).read(RUN_ID).effects[0].observedError).toMatch(/liveness and not outcome/);
@@ -158,7 +166,7 @@ describe('a dispatch started here is found by a process that never saw it', () =
     });
     expect(seen.resolved).toEqual([]);
     expect(seen.unresolved[0].error).toMatch(/PREVIOUS attempt/);
-    expect(seen.effects[0]).toMatchObject({ status: 'in-flight', handle: HANDLE });
+    expect(seen.effects[0]).toMatchObject({ status: 'in-flight', handle: SHORT_HANDLE });
   });
 
   it('an outcome that DOES resolve it completes the run in that other process', async () => {

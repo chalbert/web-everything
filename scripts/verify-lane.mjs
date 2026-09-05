@@ -33,10 +33,19 @@
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
  *   node scripts/verify-lane.mjs check --require-verified   # exit non-zero unless HEAD has a fresh GREEN marker (the gate pr-land applies)
  *   node scripts/verify-lane.mjs reset                # clear a stale marker so `verify` can start (x4jcqm4) — refuses if a FOREIGN lease is live (own live lease is OK, #3378)
+ *   node scripts/verify-lane.mjs request              # #3105 — stamp the `running` marker and return immediately; does NOT run the gate.
+ *     The sanctioned call for an interactive agent session: the actual suite run is picked up and executed by
+ *     `scripts/conveyor/verify-dispatch.mjs` (a mechanical runner pass, unbound by the agent tool's foreground
+ *     window) on its next tick, which runs the SAME `verify` mode below to completion. An agent that called
+ *     `request` then polls `check` across its own turns — each `check` call is a fast marker read, never a
+ *     suite run, so no single call can ever exceed the foreground window, no matter how long the gate itself
+ *     takes. `request` reuses the exact START-write guard `verify` already applies (never clobbers a foreign
+ *     terminal marker) — it is that guard's own first half, factored out, not a new decision.
  *
- * Exit codes: 0 = green (marker recorded green) / `check` verdict ok / `reset` cleared or was a no-op; 2 = red
- * (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no marker written) /
- * `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
+ * Exit codes: 0 = green (marker recorded green) / `check` verdict ok / `reset` cleared or was a no-op / `request`
+ * accepted; 2 = red (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no
+ * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378) /
+ * `request` refused (would clobber a foreign terminal marker — same guard `verify` applies).
  */
 import { execSync } from 'node:child_process';
 import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
@@ -68,7 +77,8 @@ const AS_JSON = !!flags.json;
 // `--require-verified` OR `WE_REQUIRE_VERIFIED=1`, and the `WE_LAND_UNVERIFIED=1` break-glass. Previously `check`
 // read only `flags['require-verified']`, so the same env produced two different verdicts at the two call sites.
 const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
-const MODE = positionals[0] === 'check' ? 'check' : positionals[0] === 'reset' ? 'reset' : 'verify';
+const MODE = positionals[0] === 'check' ? 'check' : positionals[0] === 'reset' ? 'reset'
+  : positionals[0] === 'request' ? 'request' : 'verify';
 
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const tryGit = (args) => { try { return git(args); } catch { return null; } };
@@ -201,6 +211,19 @@ if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.st
   );
 }
 writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
+
+// #3105 — `request` stops HERE: the marker is stamped, nothing has run yet, and this call already returns
+// (`emit` calls `process.exit`). The actual suite run is picked up by `scripts/conveyor/verify-dispatch.mjs`
+// (a mechanical runner pass) on its next tick, which re-invokes THIS file's default `verify` mode — the exact
+// code below, unchanged — to completion. This is the only way an interactive agent session may ever bring this
+// gate's `running` marker into being: no new marker status, no new gate-decision branch — a `request`-stamped
+// marker is indistinguishable from (and handled identically to) an ordinary in-flight `running` one by every
+// existing reader (`check`, `pr-land`'s finish-guard, a stranded/abandoned re-run). Checked BEFORE admission
+// (below): a request never actually runs the gate itself, so it has no business queuing on the capacity
+// semaphore — that cost belongs to whichever `verify-dispatch.mjs` tick actually executes it.
+if (MODE === 'request') {
+  emit({ sha: headSha, status: 'requested', reason: 'requested', exitCode: null, detail: `verification requested for ${headSha.slice(0, 8)} (suites: ${GATE}) — poll \`node scripts/verify-lane.mjs check\` for the result.` }, 0);
+}
 
 // 2. Admission: queue on the #3461 heavy-command capacity semaphore BEFORE running the gate — `check:standards`
 //    and `test:unit` (this GATE) are named members of the closed heavy-command set, so this is the invocation-time

@@ -91,7 +91,7 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
 
 /**
  * EVERY PLACEHOLDER NAME this operation knows how to fill, across every kind it dispatches (#3165 named the
- * first five, #3332 the last three: `PR_NUM`, `LANE_REF`, `REASON`).
+ * first five, #3332 three more: `PR_NUM`, `LANE_REF`, `REASON`, and #3110 the last: `ATTEMPT_TAG`).
  *
  * KIND-AGNOSTIC ON PURPOSE. This is the set {@link canonicalPlaceholder} scans against to catch a MISSPELLING
  * of any known name, regardless of which kind is being filled right now — a `{{ pr_num }}` typo in the fix
@@ -105,8 +105,15 @@ export const DEFAULT_EXPECTED_WITHIN_MINUTES = 90;
  * together.
  */
 export const BRIEF_PLACEHOLDERS = Object.freeze([
-  'ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'PR_NUM', 'LANE_REF', 'REASON',
+  'ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'PR_NUM', 'LANE_REF', 'REASON', 'ATTEMPT_TAG',
 ]);
+
+/**
+ * {@link fillBrief}'s `optionalNames` argument for {@link BRIEF_PLACEHOLDERS} — names allowed to resolve to
+ * `''` without tripping the "no value" refusal (#3110). `ATTEMPT_TAG` is legitimately blank on a fresh build's
+ * first attempt — see {@link attemptTagFor}.
+ */
+export const OPTIONAL_BRIEF_PLACEHOLDERS = Object.freeze(['ATTEMPT_TAG']);
 
 /**
  * WHICH OF {@link BRIEF_PLACEHOLDERS} A GIVEN KIND'S FILL CALL ACTUALLY REQUIRES — and therefore the only
@@ -124,7 +131,10 @@ export const BRIEF_PLACEHOLDERS = Object.freeze([
  * exactly the tokens its own brief actually uses.
  */
 export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
-  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
+  // ATTEMPT_TAG (#3110) is BUILD-ONLY — only `delivery-agent-brief.md` folds it into the retry branch name;
+  // neither prepare brief nor either fix/ci-heal brief references it, so neither kind validates or substitutes
+  // it (an unlisted name is merely reported as unknown if a brief happens to carry it — see `fillBrief`).
+  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG'],
   prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
   fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
@@ -293,21 +303,56 @@ export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
  * inside the pure declaration. The agreement is asserted instead, against the core's OWN function, in
  * `we:scripts/operations/__tests__/dispatch-lane.test.mjs`.
  *
+ * ATTEMPT-TAGGED BUILD SLUGS (#3110): `attempt` rides the SAME trailing slot this file's own reap-side sibling
+ * already tolerated (`we:scripts/conveyor/lease-reaper.mjs`'s `conveyor-2500b` example) — `''` for a first
+ * attempt (so every pre-#3110 caller, which never passes it, is still byte-identical), `'b'`/`'c'`/… for a
+ * retry. It is folded into `id` only, never into a `fix`/`ci-heal` slug: those two are keyed on the PR (below),
+ * and a fresh `build` is the only kind that ever mints a new retry-attempt branch to begin with — see
+ * {@link attemptTagFor}.
+ *
  * @param {string|number} num
  * @param {'build'|'prepare'|'prepare-decision'|'fix'|'ci-heal'} [kind] - defaults to `build`, so every
  *   pre-#3165 caller is byte-identical.
  * @param {string|number|null} [pr] - the PR number, required in practice for `fix`/`ci-heal` (#3332). Falls
  *   back to `num` when absent so this function never throws — the refusal for a genuinely missing PR belongs
  *   to `fillBrief`'s "no value for {{PR_NUM}}" check, not here.
+ * @param {string} [attempt] - this dispatch's attempt tag (#3110; see {@link attemptTagFor}), `''` for a first
+ *   attempt. Only ever non-empty for `kind === 'build'`.
  * @returns {string}
  */
-export function sessionSlugFor(num, kind = 'build', pr = null) {
-  const id = String(num).trim();
+export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '') {
+  const id = `${String(num).trim()}${attempt}`;
   if (kind === 'prepare-decision') return `prepare-decision-${id}`;
   if (kind === 'prepare') return `prepare-${id}`;
   if (kind === 'fix') return `fix-${String(pr ?? num).trim()}`;
   if (kind === 'ci-heal') return `ci-heal-${String(pr ?? num).trim()}`;
   return `conveyor-${id}`;
+}
+
+/**
+ * #3110 — the retry letter for a fresh `build` dispatch's session slug AND branch name, from data
+ * {@link shapeDispatchRead} already has in hand at ZERO extra IO: `agedOutRuns` (this item's own not-yet-
+ * holding, still-in-flight-status run records — the ONLY prior-attempt signal available here). `''` for a
+ * first attempt keeps the branch/slug BYTE-IDENTICAL to every dispatch before this item, so the common,
+ * by-far-most-frequent single-attempt path never changes shape at all.
+ *
+ * SAFE FROM THE RACE THE COUNT MIGHT SUGGEST: this function only ever runs after the in-flight-dispatch guard
+ * above has ALREADY refused to proceed while any `holdingRuns` entry exists for this item, so no two dispatches
+ * for the same item are ever mid-flight when this count is taken — it is a count of already-settled history,
+ * not a number two concurrent callers could race to read differently.
+ *
+ * CAPPED at 'z' (25 prior attempts) rather than overflowing past a single lowercase letter. A 26th real retry
+ * of the same item is itself the actionable anomaly; collapsing it onto 'z' rather than crashing is the
+ * fail-safe direction (worst case, two very-late retries share a tag and fall back to the timing guard between
+ * them — still no worse than pre-#3110).
+ *
+ * @param {number} priorAttempts - `agedOutRuns.length` for this item.
+ * @returns {string}
+ */
+export function attemptTagFor(priorAttempts) {
+  const n = Number(priorAttempts);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return String.fromCharCode(97 + Math.min(Math.trunc(n), 25));
 }
 
 /**
@@ -318,14 +363,17 @@ export function sessionSlugFor(num, kind = 'build', pr = null) {
  * exactly `requiredNames` and nothing else — five tokens for a build/prepare/prepare-decision brief, six or
  * seven for a fix/ci-heal one (#3332; see {@link BRIEF_REQUIRED_BY_KIND}).
  *
- * ONE PASS, NOT FIVE. A sequential substitute-per-placeholder expands a token that appeared inside an EARLIER
- * value on a later iteration, which is both a wrong fill and one no leftover check can see afterwards. A single
- * regex pass reads each token exactly once, so a value is inert by construction.
+ * ONE PASS, NOT ONE PER PLACEHOLDER. A sequential substitute-per-placeholder expands a token that appeared
+ * inside an EARLIER value on a later iteration, which is both a wrong fill and one no leftover check can see
+ * afterwards. A single regex pass reads each token exactly once, so a value is inert by construction.
  *
- * WHAT IT REFUSES — a value that is missing, blank, or outside {@link BRIEF_VALUE_RE}. Both are holes an agent
- * cannot recover from: it acquires no lane, or it runs a brief carrying shell metacharacters.
+ * WHAT IT REFUSES — a value that is missing, blank, or outside {@link BRIEF_VALUE_RE} — UNLESS its name is in
+ * `optional` (#3110: `ATTEMPT_TAG`, legitimately `''` on a first attempt), which skips BOTH checks for that one
+ * name — an intentionally blank value is not a hole, so neither refusal applies to it. Every other placeholder
+ * is a hole an agent cannot recover from when missing/blank/unsafe: it acquires no lane, or it runs a brief
+ * carrying shell metacharacters.
  *
- * WHAT IT DOES **NOT** REFUSE — an UNKNOWN `{{TOKEN}}`, one that names none of the five. This is a correction of
+ * WHAT IT DOES **NOT** REFUSE — an UNKNOWN `{{TOKEN}}`, one that names none of the declared set. This is a correction of
  * the first cut, which threw on any leftover. The real brief's own prose carries two (`{{PLACEHOLDERS}}` and
  * `{{LIKE_THIS}}`, both inside code spans, both explaining the fill convention to a reader), so that check
  * refused EVERY dispatch of EVERY item — and no test caught it, because every test used a synthetic five-token
@@ -358,16 +406,21 @@ export function sessionSlugFor(num, kind = 'build', pr = null) {
  *   `BRIEF_REQUIRED_BY_KIND.build` IS the original five (`ITEM_NUM`, `ITEM_SPEC_PATH`, `LANE`, `SESSION_SLUG`,
  *   `SCOPE`, in the same order), so this default is what actually keeps every existing caller byte-identical.
  *   A real `fix`/`ci-heal` caller passes `BRIEF_REQUIRED_BY_KIND[launchKind]` explicitly.
+ * @param {readonly string[]} [optionalNames] - names in `requiredNames` allowed to resolve to `''` (#3110).
+ *   Defaults to {@link OPTIONAL_BRIEF_PLACEHOLDERS} so every pre-#3110 caller — anything that never passes a
+ *   value for `ATTEMPT_TAG` — is unaffected; only a `build` fill's `ATTEMPT_TAG` entry ever exercises this.
  * @returns {{prompt: string, unknownTokens: string[]}}
  */
-export function fillBrief(template, values = {}, requiredNames = BRIEF_REQUIRED_BY_KIND.build) {
+export function fillBrief(template, values = {}, requiredNames = BRIEF_REQUIRED_BY_KIND.build, optionalNames = OPTIONAL_BRIEF_PLACEHOLDERS) {
   const text = String(template ?? '');
   if (!text.trim()) {
     throw new Error('dispatch-lane: the delivery-agent brief template is empty — refusing to dispatch an agent with no instructions');
   }
   for (const name of requiredNames) {
     const value = values[name];
-    if (value === undefined || value === null || String(value).trim() === '') {
+    const blank = value === undefined || value === null || String(value).trim() === '';
+    if (blank && optionalNames.includes(name)) continue; // #3110 — an intentional blank, not a hole
+    if (blank) {
       throw new Error(`dispatch-lane: no value for the brief placeholder {{${name}}} — refusing to fill it with nothing`);
     }
     if (!BRIEF_VALUE_RE.test(String(value))) {
@@ -389,7 +442,9 @@ export function fillBrief(template, values = {}, requiredNames = BRIEF_REQUIRED_
     // `BRIEF_PLACEHOLDERS` set instead of `requiredNames` would still pass (`ITEM_SPEC_PATH` IS one of the
     // five/eight known names) and substitute the JavaScript string `"undefined"` into the brief the moment it
     // happened to contain `{{ITEM_SPEC_PATH}}` — silently, because nothing above validated it as missing.
-    if (whole === `{{${name}}}` && requiredNames.includes(name)) return String(values[name]);
+    // `?? ''` (#3110) covers the one required-but-OPTIONAL name (`ATTEMPT_TAG`): a validated intentional blank
+    // must still substitute as `''`, not the literal string `"undefined"`.
+    if (whole === `{{${name}}}` && requiredNames.includes(name)) return String(values[name] ?? '');
     const canonical = canonicalPlaceholder(name);
     if (canonical) { misspelled.add(`${whole} (meaning {{${canonical}}})`); return whole; }
     unknown.add(whole);
@@ -810,13 +865,19 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     );
   }
 
-  const sessionSlug = sessionSlugFor(resolvedNum, launchKind, launch.pr);
+  // #3110 — only a fresh `build` dispatch mints a retry-attempt letter; `fix`/`ci-heal` reconstitute onto the
+  // SAME existing PR/ref, never a new branch, so they have no retry-attribution problem `attemptTagFor` exists
+  // to solve. See `attemptTagFor`'s own docblock for why `agedOutRuns.length` is a safe, race-free count here.
+  const attempt = launchKind === 'build' ? attemptTagFor(agedOutRuns.length) : '';
+  const sessionSlug = sessionSlugFor(resolvedNum, launchKind, launch.pr, attempt);
   // THE VALUES THIS FILL ACTUALLY HAS, built per kind rather than as one flat object (#3332). A `fix`/`ci-heal`
   // dispatch has no `ITEM_SPEC_PATH` to give — it never reads the item's spec, it repairs an existing PR — and
   // passing `PR_NUM`/`LANE_REF` (and, for CI-heal, `REASON`) unconditionally to every kind would hand a build
   // fill a key `BRIEF_REQUIRED_BY_KIND.build` never asks for and `fillBrief` would never validate, which is
   // exactly the unvalidated-token hole `requiredNames` exists to close. So each kind gets only the keys its own
-  // brief actually references.
+  // brief actually references. `ATTEMPT_TAG` (#3110) is harmless to include for prepare/prepare-decision too —
+  // it is always `''` for those (see above), and `BRIEF_REQUIRED_BY_KIND` for those two kinds never lists it,
+  // so `fillBrief` neither requires nor substitutes it there even though it rides `values`.
   const values = repairsExistingPr
     ? {
       ITEM_NUM: resolvedNum,
@@ -833,6 +894,7 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       LANE: launch.lane,
       SESSION_SLUG: sessionSlug,
       SCOPE: scope.join(','),
+      ATTEMPT_TAG: attempt,
     };
   // FILLED HERE, not in the sink. The prompt is a pure function of the item and the core's assignment, so it
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what

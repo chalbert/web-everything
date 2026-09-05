@@ -13,6 +13,12 @@ tags: []
 
 # A background mechanical dispatcher replaces the interactive session as delivery supervisor
 
+> **STANDING GOAL FOR THIS EPIC (operator, 2026-08-29): improve the prototype and the machinery it
+> depends on — not deliver any particular backlog item.** Discard work on an item freely, without
+> ceremony, the moment it stops being the fastest path to a machinery finding. Do not treat landing a
+> PR as the point of a session on this card. See the 2026-08-29 session update below for what this
+> looked like in practice.
+
 ## The problem, stated plainly (2026-08-27/28, the operator's own words)
 
 "The big problem at the moment is that much of this is handled by a costly session that is getting
@@ -139,25 +145,360 @@ any future lane reset. lane-11 itself still holds the working copy and has an oc
 
 **What's still not done, in priority order:**
 
-1. **The live end-to-end test.** Nothing blocks it now — #3118 is ratified and all five pieces are
-   recovered and tested. Still needs: a setup decision (a scratch clone of the recovered branch,
-   named anything other than `lane-N` so `dispatch-lane`'s `assertNotALaneCheckout` guard doesn't
-   refuse it, rather than lane-11 itself or requiring `main` first) and picking one specific
-   low-stakes backlog item to actually dispatch. The existing `-live`-named tests
-   (`we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` etc.) only prove subprocess
-   plumbing against a fake `claude` stand-in on `PATH`, NOT the real CLI's behavior — the real-CLI
-   uncertainty #3118 flagged (whether `--bg` really discards `--session-id`, the exact
-   `backgrounded · <id> · <name>` stdout shape, whether resume-by-short-handle works) is still
-   genuinely unverified, and is exactly what this live test is for.
-2. **Landing lane-11's five pieces to `main`** via the normal small-PR path.
+1. ~~Decision #3118 ("where does agent-spawning live") was never ratified.~~ **Corrected 2026-08-29:
+   #3118 WAS ratified, 2026-08-26 — Fork 1 → (c), call `dispatch-lane`, never a second spawn
+   implementation.** This line, and the matching row on The Delivery Loop artifact's own dependency
+   table, were both stale — trust this correction over either.
+2. **Nothing has been fired end-to-end, live.** Every test this session deliberately avoided
+   triggering a real dispatch through the full chain (a real queued item → the runner above →
+   `dispatch-lane` → a real spawned agent → a real PR → `route-pr-outcome` → resolution) — this
+   card's own "Done when" #1 is therefore still open. `we:scripts/operations/dispatch-lane-io.mjs`'s
+   sink refuses to dispatch from a lane checkout (`assertNotALaneCheckout`), so a live test needs
+   the primary checkout (meaning lane-11's pieces land first) or an equivalent non-`lane-N` setup —
+   worth a decision of its own before attempting it.
 3. **The stray-run-record reaper for `dispatch-lane`** (disk hygiene for the runner's own bookkeeping
    over a long-running deployment) was designed but not built — low urgency.
 4. **"Done when" #2 (a notification path for a blocked/escalated case) is still open** — nothing
    built this session addresses it directly; the supervisor's JSONL log is observability, not a
-   notification.
+   notification. **Reproduced live, 2026-08-29** — see Session update below: a real dispatch got stuck
+   `blocked`/`waiting for input needed` with nobody able to answer it, exactly this gap.
 5. **Decision #3384's own recommended fix** — the `<!-- ci-heal-committed: -->` self-report marker
    on `we:scripts/conveyor/ci-heal-mark.mjs` — is still unbuilt. The decision itself is ratified AND
    resolved; only the code is outstanding. A separate, smaller thread from this epic.
+
+## Session update (2026-08-29) — first live dispatch attempted; two real machinery bugs found and fixed;
+## delivery itself still not proven end-to-end
+
+A fresh session picked this up per the operator's own framing: **the goal is improving the prototype and
+the machinery in general — not delivering any particular backlog item.** Work on a specific item is
+disposable and was discarded twice below when it stopped being the fastest path to a machinery finding.
+
+**Setup.** Cloned `origin/lane/mechanical-dispatcher-recovered` into a plain scratch directory
+(`~/workspace/scratch-dispatcher-live-test` — deliberately not matching `lane-\d+`, so
+`assertNotALaneCheckout` doesn't block it) and ran `npm install`. This is the non-`lane-N` setup item 2
+above already called for.
+
+**First real dispatch — genuinely worked, then hit a known, already-filed gap.** Queued `#2936` (a small,
+low-stakes, non-UI catalogue-staleness fix — deliberately picked over a UI story per the operator's own
+steer), ran `we:skills-src/conveyor/runner.mjs --once --json`. It called `dispatch-lane` for real, which
+spawned a real background `claude --bg` agent (`claude agents --json` confirmed a live session,
+`conveyor-2936`). The agent correctly acquired lane-40 (the brief's own first step, as designed), authored
+a genuinely correct fix — corrected the stale claim, added a regression test, AND found + fixed a *second*
+stale catalogue entry while sweeping as the card's own acceptance criteria asked — and committed it
+(`b6dad636`, local `main` inside lane-40; branch-naming happens at `open-pr` time, not before, so this is
+normal at this stage, not a bug). Then it hung: `blocked` / `waitingFor: "input needed"`, with nobody able
+to answer it, because the dispatch ran with no permission-mode flag set at all.
+
+**This is not a new defect — it is backlog `#3353`'s own documented precondition, which this session simply
+failed to apply before firing.** `#3353` (filed 2026-08-26, independent of this epic) already found SEVEN
+other `conveyor-*` sessions on this same host stalled on a permission prompt, one for 9.4 days, and states
+outright: *"`WE_DISPATCH_AGENT_ARGS` MUST set a non-prompting permission mode before the dispatch. Unset
+means no extra flags... an unset dispatch stalls at brief step 1's `$( … )` and never reaches
+`lane-pool acquire`."* This session's own stuck agent is an eighth live instance of exactly that. Recovery:
+killing the stuck agent's pid did NOT stop it — the CLI's own background-agent daemon silently respawned it
+under a new pid from its spare-process pool (a genuinely new, undocumented-here finding about that
+lifecycle, distinct from anything `WE_DISPATCH_AGENT_ARGS` governs). The correct close-out is bookkeeping,
+not process death: `node we:scripts/operations/wake.mjs --resolve=<runId> --key=<key> --status=failed
+--force` — documented in `#3353`'s own "live-run protocol," used here for real.
+
+**Redispatching `#2936` with the fix applied correctly held — the machinery is right, not broken.**
+Re-ran with `WE_DISPATCH_AGENT_ARGS='["--permission-mode","acceptEdits"]'` set. `we:scripts/readiness/dispatch-plan.mjs`
+held it `"overlaps lane-40"`, because lane-40 still holds the first agent's real, uncommitted-to-origin
+work — a genuine, correct collision guard, not a bug. Discarded `#2936` per the operator's framing and
+switched to a different, unclaimed, non-UI item (`#2976`, a small `we:scripts/check-standards-rules.mjs`
+bug) to keep testing the fix in isolation from that entanglement.
+
+**Second real bug found: `computeFreeSlots` (`we:scripts/readiness/conveyor-state.mjs`) disagreed with the
+actual dispatcher about lane availability.** The tick reported `31 free slots`;
+`we:scripts/readiness/dispatch-plan.mjs` held `#2976` for `"no free lane"` in the same breath. Root cause:
+`computeFreeSlots` only checked `leased !== true`, never `clean` — so a lane sitting DIRTY-but-unleased
+(orphaned residue from a crashed/killed session — this HOST had 17 of them) still counted as "free," while
+the real picker (`lane-pool list --acquirable`, what `we:scripts/readiness/dispatch-plan.mjs` actually
+dispatches against) correctly excludes dirty AND ahead-unpushed lanes via `isLaneAcquirable`. **Fixed**
+(`we:scripts/readiness/conveyor-state.mjs`, commit `d0c83a7b`) to also exclude `clean === false`, using the
+same `status --json` field already fetched — no new IO, no risk of reintroducing the known-expensive
+ahead-fan-out (`#2920`/`#2924`), which stays deliberately un-folded-in and is called out in the new doc
+comment. `freeSlots` is now a documented optimistic upper bound, not a promise;
+`we:scripts/readiness/dispatch-plan.mjs`'s own hold reason stays authoritative. 4 new tests, 89/89 green in
+the file, `check:standards` clean.
+
+**Third real bug found, and this one is a genuine crash: `we:scripts/lane-pool.mjs provision --acquirable`
+threw uncaught on a transient git ref-lock race.** Trying to provision fresh acquirable capacity (since
+this host turned out to have real, heavy ambient contention from several of the operator's OTHER concurrent
+sessions — of 41 lanes: 10 leased, 17 dirty, the remaining 14 clean ones ALL ahead — genuinely zero
+acquirable, an honest fact about this busy host, not a bug) crashed outright: `error: cannot lock ref
+'<ref>': is at X but expected Y` from `git fetch origin --prune`, because every lane clones `--reference`
+the same object store, so two lanes fetching at once can race the same `refs/remotes/origin/*` ref. **This
+exact fetch is the FIRST git command a dispatched delivery agent's own brief runs** (`lane-pool acquire`'s
+reset-to-origin step) — so on a busy host, an unlucky race could crash a dispatched agent before it ever
+reached its own first real step, a genuine reliability gap for a "session-free" pipeline meant to run
+unattended. **Fixed** (`we:scripts/lane-pool.mjs` + `we:scripts/lib/lane-lease.mjs`, commit `9bbb4ff3`):
+retries only this exact ref-lock signature (`isTransientRefLockError`, extracted as a PURE predicate into
+the already-tested `we:scripts/lib/lane-lease.mjs` — `we:scripts/lane-pool.mjs` itself runs its CLI at
+import and cannot be unit-imported) a few times with a short backoff; every other fetch failure still
+throws immediately, unretried. Re-ran `provision` live afterward: completed clean, no crash. 70 new/updated
+unit tests + the existing 34 lane-pool integration tests green, `check:standards` clean. Both fixes are
+commits on `origin/lane/mechanical-dispatcher-recovered` (`d0c83a7b`, `9bbb4ff3`), pushed and durable.
+
+**Delivery itself is still not proven end-to-end — this card's own "Done when" #1 remains open.** No PR
+was opened this session. `lane-40`'s `#2936` fix (`b6dad636`) was salvaged (cherry-picked, see below) rather
+than left orphaned or discarded — small, correct, cheap to keep. Getting a genuinely free lane on this host
+(for a next real attempt) needs either the ambient contention to clear, or `provision --count=N` with `N`
+large enough to grow past the busy range (expensive — a real clone + npm install per new lane).
+
+**Branch renamed — `-recovered` was a one-time incident label, not a name to keep.** `lane-11` never had a
+pushed named branch of its own (it sat on local `main` the whole time, tracked to `origin/main`) — so
+`lane/mechanical-dispatcher-recovered` was never a substitute for some "original" branch; it was the
+FIRST real branch this work ever had, created ad hoc during the lane-11 recovery. Keeping "recovered" as
+its permanent name reads as a standing incident flag long after the incident is over. **Renamed to
+`origin/lane/mechanical-dispatcher`** (same content plus the salvaged `#2936` cherry-pick, `3c3f7c7e`) —
+this is now the epic's branch of record; treat `-recovered` as superseded. `lane-40`'s lease was released
+(`we:scripts/lane-pool.mjs release --lane=40 --force`) now that its work is safely elsewhere. The old
+`-recovered` branch was left in place, not deleted, since deleting a pushed branch is exactly the kind of
+action to confirm with a person rather than do unprompted — safe to delete once nothing else references it.
+
+**For the next session, explicitly, so it does not have to be told twice:**
+- **The goal is improving the mechanical-dispatcher prototype and the machinery it depends on — not
+  landing any particular backlog item.** "The prototype" means the WHOLE machinery this epic touches
+  (`we:scripts/lane-pool.mjs`, `we:scripts/readiness/conveyor-state.mjs`,
+  `we:scripts/readiness/dispatch-plan.mjs`, `we:scripts/operations/dispatch-lane*.mjs`,
+  `we:skills-src/conveyor/*.mjs`, and anything else the runner's tick chain touches) — not one file.
+  Discard work on an item freely, without ceremony, whenever it stops being the fastest path to a
+  machinery finding. This is a standing instruction for this whole line of work, not a one-off for today.
+- **Sweep known bugs across this whole machinery and apply as many fixes as possible to this branch**
+  (not just the two this session happened to trip over live). Check the backlog for open items tagged
+  against `lane-pool`, `conveyor`, `dispatch`, `readiness`, footguns, etc. — e.g. `#2924` (lane-pool
+  acquire's TOCTOU on the destructive reset path, named but not fixed this session) and the
+  `xs6omfp`-born dirty-tree-guard-on-`--lane=N` item are two already-known candidates. Prioritize by
+  what could actually crash or corrupt a live dispatch, same bar as this session's two fixes.
+- **Rebase this branch onto current `origin/main` before continuing** — it forked before today's `main`
+  moved forward (e.g. this session's own work landed nothing to `main`, but other unrelated PRs have).
+  Confirm tests + `check:standards` stay green post-rebase before building further on top.
+- Always set `WE_DISPATCH_AGENT_ARGS` before dispatching anything for real — unset is a guaranteed hang now
+  that both known crash-class bugs (this session's fetch race, `#3353`'s permission-mode gap) are fixed;
+  the NEXT class of failure a live run finds will be a different one.
+- `claude agents --json`, not raw `ps aux`, is the correct way to check a dispatched agent's liveness — a
+  live `--bg` session's OS process does not reliably show a matching string in its own command line (the
+  CLI's bg-spare pool reuses generic worker processes).
+- Killing a stuck `--bg` agent's pid does not stop it — the CLI's own daemon respawns it from a spare pool.
+  The correct close-out for an abandoned in-flight dispatch is `we:scripts/operations/wake.mjs --resolve
+  ... --force` at the bookkeeping level, documented in `#3353`'s live-run protocol.
+
+## Session update (2026-08-29, third session) — rebased onto `main`, two more machinery bugs found+fixed
+
+Per the prior session's own handoff: rebased `lane/mechanical-dispatcher` onto current `origin/main`
+(resolved two doc-only conflicts in this very file by hand, merging both sides rather than dropping either),
+confirmed tests + `check:standards` stayed green, pushed. Then swept the backlog for open items tagged
+against this machinery and fixed the two it explicitly named as already-known candidates, same bar as the
+prior session's two live-fire fixes:
+
+1. **`#3390` fixed** (`we:scripts/lane-pool.mjs`, commit `7bbb83b2`) — `acquire --lane=N` was the only claim
+   path with no #2267 dirty/ahead check before its own destructive reset (auto-pick's `chooseFreeLane` never
+   selects a dirty/ahead candidate to begin with; `refreshLane` calls `laneDirtyOrAhead` explicitly). A
+   TTL-stale reclaim, or a lane simply released dirty, now REFUSES unless `--force` — this is the exact
+   incident that wiped lane-11's 4 built-and-tested files earlier in this epic. Surfaced a real test-fixture
+   gap in the process: an existing test in `we:scripts/__tests__/lane-pool-acquire-base.test.mjs` had pinned
+   the OLD "unconditionally discards, never refuses" behavior as the expected contract (it predates this fix,
+   from `#2419`) — split it into a without-`--force`/with-`--force` pair rather than silently breaking it.
+   Also found the banded-pool (`web-everything`) test in `we:scripts/__tests__/lane-pool-item-map.test.mjs`
+   was missing the `.gitignore` entry the real repo has for `.env.local` (the per-lane dev-port file
+   `writeLaneEnv` generates) — without it, the synthetic test repo saw its own generated file as an
+   untracked "dirty" change and false-tripped the new guard; the real repo is unaffected (`.env.local` is
+   genuinely gitignored there). 4 new tests.
+2. **`#2924` fixed** (`we:scripts/lane-pool.mjs`, commit `6f7a8aa9`) — `cmdAcquire` proved an ahead lane's
+   containment ONCE from a pick-time `ls-remote` snapshot, then ran the merge-base fan-out, the O_EXCL claim,
+   and `git fetch --prune` before the destructive reset, with no re-verification — a `lane/*` ref deleted or
+   force-pushed on origin inside that ~30s window meant acquire could wipe commits that, by reset time, exist
+   on no remote at all. Fixed by re-checking dirty/ahead + provably-pushed on the JUST-FETCHED local
+   remote-tracking refs (`localRemoteShas`, network-free — the fetch moments earlier already refreshed them)
+   immediately before the reset. Reproduced the exact race deterministically in a test via a `git` PATH shim
+   that lies on the pick-time `ls-remote` (simulating a snapshot taken a moment before a real ref deletion)
+   while the real `fetch --prune` moments later correctly sees the ref is gone. 2 new tests.
+
+Both verified: the full `we:scripts/__tests__/lane-pool*` family (131/131), the broader
+`we:scripts/readiness`/`we:scripts/operations`/`we:skills-src/conveyor` suites (2061/2064 — the 3 failures
+are the same pre-existing host-load-flaky live-subprocess tests as before, confirmed passing in isolation),
+`check:standards` 0 errors. Pushed to `origin/lane/mechanical-dispatcher`.
+
+**Also checked, found already done:** `#3107` ("wire `--adopt` into the dispatch surfaces") — the conveyor
+delivery brief (`we:skills-src/conveyor/delivery-agent-brief.md:42-51`) already passes `--adopt` on its
+self-acquire and even cites `#3107` in its own explanatory comment; `we:docs/agent/delivery-loop.md` already
+documents the two-actor dispatcher→worker `adopt` hand-off correctly, including the exact "driver must NOT
+self-adopt" warning the item worried about. `we:scripts/operations/dispatch-lane*.mjs` never call `acquire`
+themselves (the dispatched agent does, per its own brief), so there is no second wiring point the item
+imagined. Nothing left to build here except the item's own "Done when" #2 — a live-fire proof — which is the
+same open live-end-to-end gap already tracked elsewhere on this card. The backlog item's `status: open` is
+stale bookkeeping, not a real gap; worth a `/resolve` pass by whoever picks this up next.
+
+## Session update (2026-08-29, fourth session, lane-3) — `#3110` designed, validated, and built
+
+Continued straight on from the third session's own handoff. `#3110` (`classifyDispatchPr` can attribute a
+later retry's merged PR to an earlier, unrelated dispatch entry) needed a decided design per its own
+acceptance criteria — this was NOT picked unilaterally; the design was walked through with the operator first
+(the two options above, plus a THIRD found by re-reading the code: reuse the retry-suffix letter
+(`conveyor-2500b`) this file's own docs already named but never actually emitted, rather than either the
+run-store-coupling "approach 2" the code's own docblock deferred or a same-process "claim on first
+observation" alternative that only looks race-free because today's runner happens to tick one item at a
+time — an assumption this epic's own culture (see the `#2924` fix above) treats as fragile, not free).
+
+**Validated BEFORE writing code** (per the operator's own ask to reduce risk with preparation, not just pick
+and build): confirmed `we:scripts/operations/dispatch-lane.mjs`'s own in-flight-dispatch guard already
+refuses to dispatch a retry while an earlier one still holds, so the attempt count this fix needs is
+race-free by construction, not by luck; confirmed BOTH consumers that would need to tolerate a new letter
+(`laneRefItemNum`, `itemNumFromSession`) already silently discard one, today, for an unrelated historical
+reason — nothing to invent, a dormant convention to finally use.
+
+**Built** (`we:scripts/conveyor/lease-reaper.mjs`, `we:scripts/operations/dispatch-lane.mjs`,
+`we:scripts/operations/dispatch-lane-io.mjs`, `we:skills-src/conveyor/delivery-agent-brief.md`, commit
+`0fe266d7`): a fresh `build` dispatch now tags its session slug / branch name with `''` on a first attempt
+or a letter (`b`, `c`, …) on a retry; `classifyDispatchPr` requires an exact tag match (ANDed with, not
+replacing, the existing timing check) before attributing a PR to an entry, closing the bug in BOTH
+directions (an earlier entry can no longer claim a later retry's PR, or vice versa). Backward compatible by
+construction: nothing before this shipped ever emitted a letter, so every legacy entry/PR still carries the
+same empty tag and matches exactly as before.
+
+**A real design wrinkle surfaced and was fixed during implementation, not glossed over:** the first cut
+threaded the new `ATTEMPT_TAG` token through a separate raw-regex substitution pass ahead of `fillBrief`,
+which worked for the real dispatch path but was invisible to anything calling `fillBrief` directly (a test
+helper did, and broke) — a fragile, hidden second substitution mechanism. Fixed properly by widening
+`fillBrief` itself to accept one legitimately-blank OPTIONAL placeholder, so there is exactly ONE substitution
+path again, not two silently disagreeing ones.
+
+Verified: `we:scripts/operations/__tests__/dispatch-lane.test.mjs` (142/142, 20 new),
+`we:scripts/conveyor/__tests__/lease-reaper.test.mjs` (40/40, 7 new), the broader
+`we:scripts/conveyor`/`we:scripts/operations`/`we:skills-src/conveyor` suites (1777/1780 — the same 3
+pre-existing host-load-flaky live-subprocess tests as every prior session, confirmed unrelated),
+`check:standards` 0 errors, same warning count as before. Pushed to `origin/lane/mechanical-dispatcher`.
+
+**Process note, a second one:** the SAME cwd-drift this epic's third session already flagged (a lane
+directory does not reliably survive a background-task notification turn boundary) recurred repeatedly in
+this session too, despite knowing about it — including one case where an entire background test run silently
+executed against the PRIMARY checkout instead of the lane, wasting real wall-clock before being caught (via
+`head -1` on the very first line of output, not by any error). The mitigation from the third session
+(`cd <lane-dir> && <command>` embedded in the SAME invocation, never trusted to persist from a prior one) is
+necessary but was not sufficient on its own to prevent this from recurring — worth having the NEXT session
+verify the very first line of every background command's output confirms the intended directory, as a matter
+of habit, not just after something looks wrong.
+
+**Process note for whoever picks this up next:** this session lost time to a false assumption that a lane
+clone's directory, once `cd`'d into, stays the shell's working directory across separate tool calls — it
+does not reliably survive a background-task notification turn boundary, which silently reset it back to the
+primary checkout mid-session. Anything relying on relative paths after such a reset ran against the WRONG
+checkout without erroring. Caught it because a test failure didn't match its own code-reading explanation;
+re-verified everything with `cd <lane-dir> && <command>` embedded in every single invocation from then on.
+**Always embed the `cd` in the same command as the thing being verified — never assume a prior `cd` carried
+over — especially right after a background-task notification.**
+
+## Session update (2026-08-29/30) — #3105 built end-to-end; a machinery-wide sweep for the next session
+
+This session picked #3105 (the gate-timeout stall) as instructed, walked its fork in prose before building
+(operator call: neither shrink-the-gate nor CI-only — a dispatched agent must never run the gate ITSELF at
+all; it requests, the mechanical runner executes with no per-turn ceiling, the agent polls), then widened into
+a full sweep of every open machinery item, not just a bug hunt, per the operator's explicit ask.
+
+### Built and tested this session, on `origin/lane/mechanical-dispatcher` (commit `b09ff7a8` + this update)
+
+1. **`we:scripts/lane-pool.mjs` fails loud on an unrecognized flag or stray positional.** Found live: `acquire --help` (meant to print usage) was silently accepted as a plain no-`--lane` acquire and reset a live lane with no error. `KNOWN_FLAGS` allowlist + positional check, both fail loud. Tests: `we:scripts/__tests__/lane-pool-flag-validation.test.mjs` (new). Landed, pushed, verified against the full `lane-pool*` suite (135 tests) — the same incident class #2997/#3390/#2924 already guard against elsewhere; this is the arg-parsing arm.
+2. **`we:scripts/operator/dispatch.mjs` and `we:scripts/operator/converge.py` marked SUPERSEDED**, not deleted. Their `heal_ci`/`run_agent` prototype logic has a real, tested, WIRED successor: `we:scripts/conveyor/tick-core.mjs`'s `planCiHealSpawns` (retry cap + durable attempt counter + an explicit `ci-heal-exhausted` note pointing a human at `/review <pr>`) surfaces the decision, and `we:scripts/operations/dispatch-lane.mjs`'s `ci-heal` launch kind, driven by `we:skills-src/conveyor/runner.mjs`'s `dispatchPass`, actually spawns the fix agent. Verified nothing live imports either prototype file (repo-wide grep). This closes epic Done-when #3 ("subsumed or explicitly superseded, not left running in parallel") — it was neither running in parallel NOR marked; now it's marked.
+3. **#3105, the full mechanism:**
+   - `we:scripts/verify-lane.mjs` gained a `request` mode: stamps the exact same `running` marker `verify` already writes (same start-write guard, same vocabulary — `verifyGateDecision` needed ZERO changes) and returns immediately. No new marker status.
+   - `we:scripts/conveyor/verify-dispatch.mjs` (new): a mechanical runner pass — pure decision (`laneNeedsVerifyDispatch`) plus an IO shell that scans every lane pool for a `request`-stamped marker matching that lane's OWN current HEAD, and runs `we:scripts/verify-lane.mjs` itself, as the runner's own long-lived process. No 120s ceiling applies here — that ceiling is a property of the interactive tool's own foreground window, not of a subprocess the runner spawns from its own process.
+   - Wired into `we:skills-src/conveyor/runner.mjs`'s `makeCliMechanicalPasses` as a third pass, alongside infra-blocked recovery and the lease-reaper.
+   - `we:scripts/guard-bash.mjs`: a NEW rule, `dispatchedAgentVerificationReason`, denies a mechanically-dispatched agent from running the verification set directly (`verify-lane` default mode, the declared `we:scripts/operations/run.mjs verify` operation — widened `VERIFICATION_RUN` to catch it too since it shells the identical suite run, `check:standards`, `test:unit`) in ANY form, foreground or background — not just backgrounded, which is all the PRE-EXISTING #2833 rule caught. `request`/`check`/`reset` stay exempt (the sanctioned path). Gated on a NEW `WE_DISPATCH_KIND` env var `we:scripts/operations/dispatch-lane-io.mjs` now stamps onto every dispatched agent's `claude --bg` process env (`payload.launchKind`) — unset for an interactive operator session, which is completely unaffected. This is the operator's own explicit ask from earlier in this session: no raw command execution inside a dispatched session, only a request the machinery fulfills.
+   - `we:skills-src/conveyor/delivery-agent-brief.md` steps 5 and 8 rewritten to the request-then-poll pattern.
+   - Filed `#xab3jh7` ("Fold the gate's request/check modes into the declared verify operation") for the `@operation-home-ok` gap `check:standards`'s #3224 rule correctly caught: `request`/`check` bypass the declared `verify` operation today, marked not built — a deliberately small, prepared follow-up, not built now (the operator's own "prepare correctly, don't build ahead of need" instinct from this session).
+   - Tests: `we:scripts/__tests__/verify-lane.test.mjs` (new `request` describe block), `we:scripts/conveyor/__tests__/verify-dispatch.test.mjs` (new file, 9 tests), `we:scripts/__tests__/guard-bash.test.mjs` (new describe block, 7 tests), `we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs` (2 new tests pinning `WE_DISPATCH_KIND`). `check:standards` 0 errors. Full suite run pending at session end — confirm green before landing.
+
+**Not yet done for #3105:** an actual live dispatch through this path has not been run (same "genuinely unverified" caveat #3118 already named for `--bg`/session-handle behavior) — folding `request`/`check` into the declared operation (`#xab3jh7`) is deliberately deferred, not forgotten.
+
+### The broader sweep — every open item touching this machinery, not just a bug hunt
+
+Read digests for every open item under the `#2753`/`#3029`/`#2612` clusters plus every open `lane-pool`/`conveyor`/`dispatch`/`readiness`/`footgun`-tagged item repo-wide (~180 open items scanned by title/digest, not all read in full — flag anything below that needs a second look). Three buckets fell out:
+
+**1. Strong candidates to CLOSE, not build — current code already appears to satisfy them. Verify, then `we:scripts/backlog.mjs resolve`, don't rebuild:**
+- **#3332** ("`spawnFixes`/`spawnCiHeals` have no card — 3 of 5 dispatch kinds routed") — `we:skills-src/conveyor/runner.mjs`'s `makeCliDispatchPass` already builds `items` from ALL FIVE lists (`d.builds, d.prepareScope, d.prepareDecision, d.fixes, d.ciHeals`) and dispatches every one through `dispatch-lane`. Read against current code, not against whatever state existed when this was filed (2026-08-14, before this week's work).
+- **#3096** ("conveyor still dispatches via the harness `Agent` tool, not the declared operation") — `dispatchPass` shells `node we:scripts/operations/run.mjs dispatch-lane` via `execFileSync`, never the `Agent` tool. Also reads stale against the current `we:skills-src/conveyor/runner.mjs`.
+- **#3070** ("choose the waker") — leaning note only, never formally ruled, but **#3084 ("build the waker") already resolved** — the decision was evidently made in practice; close the loop on the card or record why the built shape differs from the leaning note.
+- **#3083** ("choose the retry policy") — its OWN body reads "RULED 2026-08-13 (operator, in session). The mechanism is settled" — a ruled decision sitting at `status: open`. Administrative resolve, not a re-decision.
+- **#3331** ("PROBE: does `claude --bg` honour `--session-id`?") — this epic's OWN earlier session-update text above calls it "(#3331, resolved)" after the session-identity fix; the card itself still reads `status: open`. Same bookkeeping gap.
+
+**2. Bookkeeping debt — code-landed on this branch, backlog status never flipped.** #3390 (`acquire` dirty-tree guard), #2924 (containment re-verify at destructive reset), #3110 (attempt-tag misattribution) are all committed on `lane/mechanical-dispatcher` per this week's own commits, all still `status: open`. Resolve these with `--graduated-to=<this branch's eventual PR>` once landed to `main` — not before, per this epic's own "code unreviewed, not code unrun" caveat: the fix is real and running, the CARD closes at land, same as any other item.
+
+**3. Confirmed still real — checked against current code, not stale.** In rough priority order:
+- **#3353** — "harden the 3 liveness readings, fire the FIRST live dispatch end to end." This is this epic's OWN "what's still not done #1" restated as its own card. #3105 landing removes one real blocker (the gate can no longer stall the agent); this is now the single highest-leverage next step — everything else is polish until something has actually been dispatched and landed for real.
+- **#2997** (status: ACTIVE, started 2026-08-14, not finished) — `Edit`/`Write` has NO lease check at all, only the Bash-side destructive-git-op guard does. This is the SAME risk family as this session's OWN live incident (an unscoped `acquire` wiped lane-11's uncommitted work) — the incident was survivable because the data happened to still be recoverable; a genuine Edit/Write collision would not offer that.
+- **#2955** — the doc-consistency item this session was told to do second, never reached (displaced by the #3105 decision + machinery sweep, per this session's own standing instruction to discard item work for a faster machinery finding). Still open, still small, still real.
+- **#3373** — branch protection doesn't structurally enforce the sole-writer/numbering invariant; script discipline only.
+- **#3107** — confirmed by grep: `--adopt` is NOT passed anywhere in `we:scripts/operations/dispatch-lane-io.mjs` or `we:scripts/operations/dispatch-lane.mjs`. A dispatched agent's lane is never marked occupied, so Gap 1's occupancy protection (#2997's own fix) is dormant for every conveyor dispatch.
+- **#3161** — `dispatch-lane` already computes a real "why nothing happened" reason internally; it just isn't surfaced in the bare non-dispatch JSON.
+- **#3149** — a dispatched agent that hits an uncovered permission prompt has no way to surface it; nobody is watching an unattended session for that shape of stall.
+- **#2824** — the freshness/staleness guard only covers conveyor-LAUNCHED PRs; a human-opened or otherwise-launched PR is uncovered.
+- **#2831** — checked `isCiHealTarget` (`we:scripts/conveyor/tick-core.mjs`): it DOES already heal a red-after-green-open PR regardless of park state, and a BEHIND+parked PR — so this may be PARTIALLY covered already. The gap that clearly remains is identical to #2824's: only `launchedNums` (conveyor-launched) PRs are ever considered. Re-scope or merge with #2824 rather than building it as originally filed.
+- **#3387** — `open-pr`'s `classifySubmit` doesn't recognize `pr-land`'s dry-run/enqueued outcomes, so a successful land can misreport as an error.
+- **#3388** — `verify-lane`'s `shellQuote` (used by this session's own `we:scripts/lib/verify-lane-gate.mjs` reads) has no adversarial shell-injection test. Touches a file this session's #3105 work sits directly beside.
+- **#xab3jh7** (filed this session) — fold `request`/`check` into the declared `verify` operation.
+
+**4. Not urgent, informational only.** #3392 (a lane-pool test flaking on wall-clock timing, not a logic regression — re-run passed 10/10), #3385 (nice-to-have: derive the delivery-loop flowchart from operations config instead of hand-maintaining one).
+
+### Two open DECISIONS worth ratifying before more building — higher leverage than any single card above
+
+- **#3049** ("the conveyor as a shippable product, not machinery") — **prepared** (`preparedDate: 2026-08-15`), captures exactly the framing this session's own mid-session conversation reached independently: a genuine settings surface, options a team could want, "capture only — nothing built, nothing ruled" per its own text. Ratifying this one way or the other changes how everything above should be prioritized and shaped (a seam now vs. building the surface for real) — this is the single highest-leverage open decision in the whole cluster.
+- **#2753** ("session-free conveyor — reduce the operator session to queue + expose-state") — **prepared** (`preparedDate: 2026-08-26`), the parent-shape umbrella `relatedTo` almost every card in this sweep (2677, 2445, 2527, 2626, 2636, 2464, 2703, 3029, 3070, 3096, 3102, 3118, 3165, 3296, 3323, 3331, 3332, 3353) — i.e. this sweep basically reconstructed #2753's own dependency graph from the open-item side. Worth reading in full before the next build session: it may already state the target shape and priority order more authoritatively than this sweep did from the outside.
+
+### Recommended order for the next session
+
+1. Read `#2753` and `#3049` in full; rule or explicitly defer #3049 (it reframes scope more than any code fix would).
+2. Quick verify-then-resolve pass on bucket 1 (#3332, #3096, #3070, #3083, #3331) — cheap, clears real noise from the board before adding more to it.
+3. `#3353` — the first real live dispatch end to end. This is the one thing that turns everything built across these two sessions from "tested in isolation" into "proven".
+4. `#2997` — finish the Edit/Write lease-check half; this session's own near-miss is a live argument for it.
+5. Everything else in bucket 3, ordered by how directly it touches the dispatch/verify path this session just built versus how far downstream (review/drain/product-shell) it sits.
+
+### The cross-session learnings pool held ~24 UNADJUDICATED machinery-relevant entries — never `/harvest`-ed
+
+Checked `~/.claude/conveyor/learnings/*.jsonl` (51 files total, spanning 2026-08-08 through today) for anything
+machinery-relevant, since a formal `/harvest` has evidently never run against this backlog. Not adjudicated
+here (that is `/harvest`'s job, not this write-up's) — the highest-confidence, most actionable ones, so the
+next session does not have to re-discover them from a cold pool:
+
+- **Independent, repeated confirmation that #3390 needs to land to `main` now.** Three separate close-sweeps
+  (2026-08-29, files `close-20260829-104521`, `close-20260829-134831`, `close-20260829-201817`) hit the exact
+  bug #3390 already fixes on this branch — `acquire` silently discards a lane's committed-but-unpushed work,
+  with no warning. One entry names it outright: *"Land the existing open guard (#3390, currently only on the
+  unmerged `lane/mechanical-dispatcher` branch) onto `main`."* This is independent field evidence the fix is
+  overdue, not just theoretically nice — raises #3390's priority above where the bookkeeping-debt bucket above
+  placed it.
+- **#3378 ("verify-lane has no sanctioned way to clear a genuinely stale marker") shows `status: resolved`,
+  but at least 8 pool entries — several dated TODAY (`close-20260829-120405`, `-121022`, `-134831`,
+  `-143949`, `-144914`, `-192917`, `-201817`, `note-20260829-131901`) — describe hitting exactly that
+  problem: `verify-lane reset` still refuses to clear a stale marker whenever ANY lease is live, even the
+  caller's OWN live lease.** Either the shipped fix does not cover this case, or it has not reached whatever
+  these sessions ran against. Re-verify #3378's actual fix against this specific case (own-live-lease, not
+  foreign-lease) before trusting the resolved status.
+- **`we:scripts/verify-lane.mjs` silently ignores an unrecognized `--checkout=` flag and falls back to
+  `process.cwd()`** (the real flag is `--repo=`) — pool file `close-20260829-134831`. This is the SAME
+  missing-flag-validation footgun this session already fixed in `we:scripts/lane-pool.mjs` (`KNOWN_FLAGS`),
+  in a sibling script this session also edited today for #3105. Cheap, high-confidence, same fix shape —
+  a strong candidate for the very next small build.
+- **A dispatch with `WE_DISPATCH_AGENT_ARGS` unset hangs an agent silently before it reaches its brief's
+  first step** — no PR, no signal, could sit for days (pool file `close-20260829-140007`). Directly on-theme
+  for this epic's whole "no silent failure" mandate.
+- **Orphaned `conveyor-*` background OS sessions found still alive 12 days after their last activity, with no
+  reaper for the process itself** — only the lane LEASE gets reaped (`we:scripts/conveyor/lease-reaper.mjs`),
+  never the OS-level session it was attached to (pool files `close-20260829-144249`, `close-20260829-145645`).
+- **Delivery agents dispatched against backlog items already marked resolved, silently redoing shipped work**
+  (pool file `close-20260829-155919`) — no validation at the `claude --bg` spawn point that the target item is
+  still open/ready.
+- **A `verify-lane` run under load can take 15–25 minutes and outlast a lane's lease TTL mid-run, so another
+  session reclaims the lane and orphans the in-progress commit** (pool file `close-20260829-162705`) — directly
+  relevant to THIS session's own new `we:scripts/conveyor/verify-dispatch.mjs` pass, which can now also run the
+  gate for a long time from the runner's side; worth checking whether the runner's own lease (if any) or the
+  dispatched agent's lane lease could suffer the identical race.
+
+None of the above have been filed as their own backlog items yet (verified: no open item title-matches any of
+these specifically, beyond #3390/#3378 already covering the first two). A formal `/harvest` pass — dedup
+across the full 51-file pool, red-team, route survivors to backlog/agent-memory — was deliberately NOT run
+this session (it lands via its own PR, out of scope for a session told not to build further); it is the
+natural first move for whoever picks this up next, before adding more to the board from scratch.
 
 ## Goal-vs-filed gap sweep (2026-08-30) — what the stated goal needs that nobody filed a card for
 

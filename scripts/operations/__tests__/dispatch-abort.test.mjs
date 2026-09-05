@@ -33,6 +33,12 @@ import { abortDispatch, stopSession, trustCheckout, requireTrustDir, STOP_EXEC_O
 const RUN_ID = 'run-dispatch-abort';
 const KEY = `${RUN_ID}#2#0`;
 const HANDLE = 'aaaaaaaa-1111-2222-3333-444444444444';
+// #3331 (mechanical-dispatcher branch, merged into this test post-rebase) — `createDispatchSinks` no longer
+// trusts `mintSessionId` as the handle; it reads the SHORT hex prefix back off the spawn's own `backgrounded
+// · <shortId> · <name>` stdout line (`parseBackgroundedHandle`). `parkOneDispatch`'s fixture below emits that
+// line so the parked entry's real `handle` is this prefix, not the full `HANDLE` constant — everything that
+// asserts what `abortDispatch`/`stopSession` were actually called with must match THIS, not `HANDLE`.
+const SHORT_HANDLE = HANDLE.slice(0, 8);
 const PRIMARY = '/primary/webeverything';
 const BRIEF = 'build #{{ITEM_NUM}} at {{ITEM_SPEC_PATH}} in lane {{LANE}} as {{SESSION_SLUG}} scoped {{SCOPE}}';
 
@@ -60,7 +66,11 @@ async function parkOneDispatch() {
   const store = createFileRunStore(dir);
   let run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: RUN_ID, input: { num: '3412' }, registry }), { registry });
   expect(runStatus(run, { registry })).toBe('awaiting-effect');
-  const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => HANDLE });
+  const sinks = createDispatchSinks({
+    root: PRIMARY,
+    spawnAgent: () => `backgrounded · ${SHORT_HANDLE} · conveyor-3412\n`,
+    mintSessionId: () => HANDLE,
+  });
   run = (await applyPendingEffects(run, { sinks, store })).run;
   expect(run.effects[0].status).toBe('in-flight');
   return { store };
@@ -164,11 +174,11 @@ describe('abortDispatch', () => {
     const line = abortDispatch({ runId: RUN_ID, key: KEY, store, listAgents, exec });
 
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith('claude', ['stop', HANDLE], expect.anything());
+    expect(exec).toHaveBeenCalledWith('claude', ['stop', SHORT_HANDLE], expect.anything());
     // The single-read invariant the removal of the pre-check exists to guarantee — enforced, not just
     // described in the comment above (the jury review of PR #1737 flagged that gap).
     expect(listAgents).toHaveBeenCalledTimes(1);
-    expect(line).toMatch(new RegExp(`stopped ${HANDLE}`));
+    expect(line).toMatch(new RegExp(`stopped ${SHORT_HANDLE}`));
     expect(line).toMatch(/closed out as `failed`/);
     expect(line).toMatch(/Lane 5 may still be leased/);
 

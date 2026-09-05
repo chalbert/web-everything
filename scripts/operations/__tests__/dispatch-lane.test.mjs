@@ -39,6 +39,8 @@ import {
   DISPATCH_LANE_OP,
   DISPATCH_LISTING_GRACE_MINUTES,
   LAUNCH_KINDS,
+  OPTIONAL_BRIEF_PLACEHOLDERS,
+  attemptTagFor,
   canonicalPlaceholder,
   dispatchLaneOperation,
   DISPATCH_GUARD_LISTING_GRACE_MINUTES,
@@ -62,7 +64,9 @@ import {
   defaultLaneRefForPr,
   forwardableBookkeeping,
   inFlightDispatchesFor,
+  isHandleListed,
   isPreSpawnRefusal,
+  parseBackgroundedHandle,
   readTick,
   stampLiveness,
   // #3457/#3460 — the already-done ground-truth check.
@@ -82,6 +86,14 @@ const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
  * in one, and the sink refuses to dispatch from a lane.
  */
 const PRIMARY = '/primary/webeverything';
+
+/**
+ * A fake `--bg` confirmation, shaped exactly the way the real CLI's is (#3331): `parseBackgroundedHandle`
+ * reads `shortId` off this, not off the minted `sessionId` a test injects via `mintSessionId` — the mint is
+ * pinned into the argv only, proven ignored by the real CLI. Tests that need a specific `handle` on the
+ * resulting entry pass their own `shortId` here rather than relying on what was minted.
+ */
+const bgStdout = (shortId, name = 'n') => `backgrounded · ${shortId} · ${name}\n`;
 
 /** A brief template with every placeholder the operation fills, and nothing else. */
 const BRIEF = [
@@ -640,14 +652,16 @@ describe('the declared effect is a dispatch', () => {
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
       root: PRIMARY,
-      spawnAgent: () => '',
+      spawnAgent: () => bgStdout('a1a1a1a1'),
       mintSessionId: () => '11111111-2222-3333-4444-555555555555',
       now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     const entry = outcome.run.effects[0];
     expect(entry.status).toBe('in-flight');
-    expect(entry.handle).toBe('11111111-2222-3333-4444-555555555555');
+    // #3331: the recorded handle is what the CLI's OWN confirmation carried, never the minted sessionId — the
+    // mint is proven ignored by a real `--bg` spawn.
+    expect(entry.handle).toBe('a1a1a1a1');
     expect(entry.expectedBy).toBe('2026-08-13T11:30:00.000Z'); // 90 minutes, the declared default
     expect(entry.startedAt).toBeTruthy();
     expect(outcome.inFlight).toEqual([entry.key]);
@@ -662,19 +676,21 @@ describe('the declared effect is a dispatch', () => {
     const { run } = runTo();
     const store = createMemoryRunStore();
     let spawns = 0;
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => { spawns += 1; return ''; }, mintSessionId: () => 'sess-a1' });
+    const sinks = createDispatchSinks({
+      root: PRIMARY, spawnAgent: () => { spawns += 1; return bgStdout('a2a2a2a2'); }, mintSessionId: () => 'sess-a1',
+    });
     const first = await applyPendingEffects(run, { sinks, store });
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(spawns).toBe(1);
     expect(second.inFlight).toEqual([first.run.effects[0].key]);
-    expect(second.run.effects[0].handle).toBe('sess-a1');
+    expect(second.run.effects[0].handle).toBe('a2a2a2a2');
   });
 
   it('honours a caller\'s own expectedWithinMinutes', async () => {
     const { run } = runTo(tickRead(), { num: '3037', expectedWithinMinutes: 15 });
     const store = createMemoryRunStore();
     const sinks = createDispatchSinks({
-      root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
+      root: PRIMARY, spawnAgent: () => bgStdout('b2b2b2b2'), mintSessionId: () => 'sess-b2', now: () => new Date('2026-08-13T10:00:00.000Z'),
     });
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].expectedBy).toBe('2026-08-13T10:15:00.000Z');
@@ -765,8 +781,17 @@ describe('what the sink actually runs', () => {
   });
 
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
-    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => bgStdout('d4d4d4d4'), mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
+  });
+
+  it('#3331: a spawn that returns 0 but prints no parseable confirmation is INDETERMINATE, same as a thrown spawn', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => 'not the shape we expect\n' });
+    const outcome = await applyPendingEffects(run, { sinks, store });
+    expect(outcome.run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
+    expect(inFlightEntries(outcome.run).unknown).toHaveLength(1);
   });
 });
 
@@ -1053,6 +1078,55 @@ describe('classifyDispatchPr — the PR axis\'s pure core', () => {
       expect(classifyDispatchPr({ num: '3095', startedAt: STARTED, prs: [ref(bad, { state: 'MERGED', mergedAt: '2026-08-13T10:30:00.000Z' })] }).verdict).toBe('pending');
     }
   });
+
+  // #3110 — the exact scenario the item was filed against: item 100 dispatched twice. Entry A (first attempt,
+  // tag `''`) starts at T1 and never produces its own PR. Entry B, a later retry (tag `'b'`), starts at
+  // T2 > T1 and its PR merges at T3 > T2 > T1. Before this fix, A's own classify call saw B's merged PR (same
+  // item number, merged after A's own startedAt) and wrongly resolved `merged` off it.
+  describe('the attempt-tag axis (#3110) — a later retry\'s PR must never resolve an earlier, unrelated entry', () => {
+    const T1 = '2026-08-13T10:00:00.000Z';
+    const T3 = '2026-08-13T11:00:00.000Z'; // > T2 > T1, whatever T2 (entry B's own start) actually was
+
+    it('entry A (attempt \'\') does NOT resolve merged off entry B\'s (attempt \'b\') later PR', () => {
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      // Old, tag-blind behaviour: this WOULD have been `merged` (T3 >= T1). #3110's fix excludes it outright —
+      // the PR structurally belongs to a different attempt, not merely "a PR that happens to be too recent".
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'pending', pr: null });
+    });
+
+    it('entry B (attempt \'b\') DOES resolve merged off its own PR', () => {
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('symmetric: an EARLIER attempt\'s PR must never resolve a LATER entry either (both directions closed)', () => {
+      // Entry A's own PR merges (correctly, for A) — entry B (the later retry) must not see it as its own.
+      const prs = [ref('lane/3095-a-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'pending', pr: null });
+    });
+
+    it('a candidate with NO resolvable tag (a legacy ref) is left to the timing filter alone', () => {
+      // Neither side ever carried a letter before #3110 shipped — must keep resolving exactly as before.
+      const prs = [ref('lane/3095-legacy-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('omitting `attempt` entirely degrades to today\'s tag-blind behaviour — the misattribution still happens', () => {
+      // Documents the residual: a caller that never threads `attempt` through gets no protection. This is the
+      // exact pre-#3110 shape, pinned so the default stays deliberate, not accidental.
+      const prs = [ref('lane/3095b-b-slug', { state: 'MERGED', mergedAt: T3 })];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs })).toMatchObject({ verdict: 'merged' });
+    });
+
+    it('two attempts\' OWN PRs both open at once — each entry resolves only its own', () => {
+      const prs = [
+        ref('lane/3095-a-slug', { number: 1 }),
+        ref('lane/3095b-b-slug', { number: 2 }),
+      ];
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: '' })).toMatchObject({ verdict: 'pending', pr: { number: 1 } });
+      expect(classifyDispatchPr({ num: '3095', startedAt: T1, prs, attempt: 'b' })).toMatchObject({ verdict: 'pending', pr: { number: 2 } });
+    });
+  });
 });
 
 // ── 7. the reader shells the tick core, and nothing else ────────────────────────────────────────────────────
@@ -1202,6 +1276,17 @@ describe('the tick reader', () => {
     const out = stampLiveness({ runs: [], unreadable: 0 }, { listAgents: () => { calls += 1; return []; } });
     expect(calls).toBe(0);
     expect(out.livenessSource).toBe('not-needed');
+  });
+
+  // ── #3331: the handle is now a SHORT id, and the comparison against a listing has to be a prefix ───────────
+
+  it('#3331: G1 matches a SHORT handle (what a real dispatch now records) against a FULL listed sessionId', () => {
+    const rows = [{ runId: 'a', handle: 'a1a1a1a1' }, { runId: 'b', handle: 'b2b2b2b2' }];
+    const out = stampLiveness(
+      { runs: rows, unreadable: 0 },
+      { listAgents: () => [{ sessionId: 'a1a1a1a1-2222-3333-4444-555555555555' }] },
+    );
+    expect(out.runs.map((r) => r.live)).toEqual([true, false]);
   });
 
   it('G1: the READ wires the liveness answer onto the rows the declaration ages against', () => {
@@ -1956,6 +2041,119 @@ describe('readTick — the ground-truth check is LAZY: one gh call per dispatch 
   });
 });
 
+describe('#3110 — attemptTagFor: the pure retry-letter mapping', () => {
+  it('zero prior attempts → no tag, the byte-identical-to-before case', () => {
+    expect(attemptTagFor(0)).toBe('');
+  });
+  it('one prior attempt (this dispatch is the SECOND) → \'b\', matching the documented `conveyor-2500b` precedent', () => {
+    expect(attemptTagFor(1)).toBe('b');
+  });
+  it('counts on up: 2 → \'c\', 3 → \'d\'', () => {
+    expect(attemptTagFor(2)).toBe('c');
+    expect(attemptTagFor(3)).toBe('d');
+  });
+  it('caps at \'z\' rather than overflowing past a single letter (a 26th+ retry is its own anomaly)', () => {
+    expect(attemptTagFor(25)).toBe('z');
+    expect(attemptTagFor(26)).toBe('z');
+    expect(attemptTagFor(1000)).toBe('z');
+  });
+  it('degenerate input (negative, NaN, non-numeric) fails to the safe no-tag default, never throws', () => {
+    expect(attemptTagFor(-1)).toBe('');
+    expect(attemptTagFor(NaN)).toBe('');
+    expect(attemptTagFor('not a number')).toBe('');
+    expect(attemptTagFor(undefined)).toBe('');
+  });
+});
+
+describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TAG), everything else unchanged', () => {
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x' };
+
+  it('ATTEMPT_TAG never supplied at all does not throw, even though it is now in the build required set', () => {
+    // BRIEF (the synthetic fixture above) never references {{ATTEMPT_TAG}} at all, so this only proves the
+    // per-name required-value check treats it as optional-and-absent rather than missing-and-fatal; the real
+    // substitution mechanics (does {{ATTEMPT_TAG}} actually resolve to '' / a letter) are proven separately
+    // below against the REAL brief file, which does reference it.
+    const { prompt, unknownTokens } = fillBrief(BRIEF, { ...VALUES }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(unknownTokens).toEqual([]);
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('a NON-optional name is still refused blank — the exemption is per-name, not global', () => {
+    expect(() => fillBrief(BRIEF, { ...VALUES, SESSION_SLUG: '' }, BRIEF_REQUIRED_BY_KIND.build))
+      .toThrow(/no value for the brief placeholder \{\{SESSION_SLUG\}\}/);
+  });
+
+  it('an explicit empty `optionalNames` list restores the old all-required behaviour for ATTEMPT_TAG too', () => {
+    expect(() => fillBrief(BRIEF, { ...VALUES }, BRIEF_REQUIRED_BY_KIND.build, []))
+      .toThrow(/no value for the brief placeholder \{\{ATTEMPT_TAG\}\}/);
+  });
+
+  it('OPTIONAL_BRIEF_PLACEHOLDERS names exactly ATTEMPT_TAG, and only the build kind carries it', () => {
+    expect(OPTIONAL_BRIEF_PLACEHOLDERS).toEqual(['ATTEMPT_TAG']);
+    expect(BRIEF_PLACEHOLDERS).toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.build).toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.prepare).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND['prepare-decision']).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND.fix).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND['ci-heal']).not.toContain('ATTEMPT_TAG');
+  });
+});
+
+describe('#3110 — a fresh build dispatch\'s attempt tag rides its session slug and branch instruction', () => {
+  it('a genuine first attempt (no prior in-flight record) is byte-identical to before — no letter at all', () => {
+    const v = shapeDispatchRead(tickRead(), { num: '3037' });
+    expect(v.sessionSlug).toBe('conveyor-3037');
+    expect(v.prompt).toContain('session: conveyor-3037');
+    expect(v.prompt).not.toContain('conveyor-3037b');
+  });
+
+  it('one prior AGED-OUT in-flight record for this item → the retry gets the \'b\' tag on its session slug', () => {
+    // The exact shape #3390-adjacent tests already use for "aged out, no longer holds, but still on disk":
+    // `dispatchStillHolds` sees it as gone (not `holdingRuns`), so the dispatch proceeds — but it is still one
+    // real prior attempt, which is exactly what `attemptTagFor` needs to count.
+    const gone = goneRun({ startedAt: isoPlus(NOW, -60) });
+    const v = shapeDispatchRead(tickRead({ inFlightDispatches: inFlightBlock([gone]) }), { num: '3037' });
+    expect(v.dispatching).toBe(true);
+    expect(v.sessionSlug).toBe('conveyor-3037b');
+    expect(v.prompt).toContain('session: conveyor-3037b');
+  });
+
+  // The synthetic `BRIEF` fixture above carries no branch-naming line at all (it is a 5-line stand-in, not the
+  // real markdown) — this proves the REAL template's `{{ATTEMPT_TAG}}` usage against the real file on disk,
+  // the same way "FILLS THE REAL BRIEF ON DISK" below proves the other five.
+  it('the REAL delivery-agent brief folds ATTEMPT_TAG into the branch name exactly where step 8 shows', () => {
+    const VALUES = {
+      ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: '8', SESSION_SLUG: 'conveyor-3037b', SCOPE: 'we:scripts/',
+    };
+    const firstAttempt = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: '' }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(firstAttempt.prompt).toContain('lane/3037-<slug>');
+    expect(firstAttempt.prompt).not.toContain('lane/3037b-<slug>');
+
+    const retry = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: 'b' }, BRIEF_REQUIRED_BY_KIND.build);
+    expect(retry.prompt).toContain('lane/3037b-<slug>');
+    expect(retry.prompt).not.toContain('lane/3037-<slug>'); // the unsuffixed form must not also appear
+  });
+
+  it('two prior aged-out records → \'c\'; a HOLDING (still-alive) record instead refuses the dispatch entirely', () => {
+    const twoGone = [goneRun({ runId: 'a', startedAt: isoPlus(NOW, -60) }), goneRun({ runId: 'b', startedAt: isoPlus(NOW, -50) })];
+    expect(shapeDispatchRead(tickRead({ inFlightDispatches: inFlightBlock(twoGone) }), { num: '3037' }).sessionSlug).toBe('conveyor-3037c');
+
+    const held = tickRead({ inFlightDispatches: inFlightBlock([inFlightRun()]) });
+    const refused = shapeDispatchRead(held, { num: '3037' });
+    expect(refused.dispatching).toBe(false); // never reaches attempt-tag computation at all
+  });
+
+  it('prepare/prepare-decision kinds never gain a letter — only a fresh build branch needs one', () => {
+    const prepareRead = tickRead({
+      launchKind: 'prepare',
+      launch: { num: '3037', lane: 8 },
+      dispatchedGuard: { num: '3037', lane: 8, spawnedTick: 0 },
+      inFlightDispatches: inFlightBlock([goneRun({ startedAt: isoPlus(NOW, -60) })]),
+    });
+    expect(shapeDispatchRead(prepareRead, { num: '3037' }).sessionSlug).toBe('prepare-3037');
+  });
+});
+
 describe('shapeDispatchRead — refuses a dispatch a real merged PR already shows done (#3457/#3460)', () => {
   const alreadyDonePr = (over = {}) => ({
     number: 1768, url: 'https://github.com/chalbert/web-everything/pull/1768',
@@ -2129,5 +2327,44 @@ describe('readTick — `openBlockers` reaches the read end to end, from `loadIte
     const v = shapeDispatchRead(out, { num: '3398' });
     expect(v.dispatching).toBe(false);
     expect(v.holdReason).toContain('3443');
+  });
+});
+
+describe('#3331 — parseBackgroundedHandle: the CLI ignores --session-id, so this is the ONLY handle source', () => {
+  it('reads the short id off a real `--bg` confirmation line', () => {
+    expect(parseBackgroundedHandle('backgrounded · 1ae0905c · probe-listing-lag-1787948603\n  claude agents             list sessions\n'))
+      .toBe('1ae0905c');
+  });
+
+  it('is case-insensitive on input, normalizes to lower case', () => {
+    expect(parseBackgroundedHandle('backgrounded · 1AE0905C · n\n')).toBe('1ae0905c');
+  });
+
+  it('returns null for stdout that does not carry the shape — never a best-effort guess', () => {
+    expect(parseBackgroundedHandle('')).toBeNull();
+    expect(parseBackgroundedHandle('ok\n')).toBeNull();
+    expect(parseBackgroundedHandle('some unrelated CLI output\n')).toBeNull();
+    expect(parseBackgroundedHandle(undefined)).toBeNull();
+  });
+});
+
+describe('#3331 — isHandleListed: prefix match, because a short handle is never equal to a full sessionId', () => {
+  it('matches a short handle against the full id it is a prefix of', () => {
+    expect(isHandleListed('1ae0905c', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(true);
+  });
+
+  it('still matches a full handle against itself — forward-compatible if a future CLI honours --session-id', () => {
+    expect(isHandleListed('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', [{ sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }])).toBe(true);
+  });
+
+  it('does not match a handle that is merely a SUBSTRING rather than a PREFIX', () => {
+    expect(isHandleListed('0905c314', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(false);
+  });
+
+  it('is case-insensitive and false on empty/missing input', () => {
+    expect(isHandleListed('1AE0905C', [{ sessionId: '1ae0905c-314c-4f73-a7c4-3973a9005e82' }])).toBe(true);
+    expect(isHandleListed('', [{ sessionId: 'anything' }])).toBe(false);
+    expect(isHandleListed(null, [{ sessionId: 'anything' }])).toBe(false);
+    expect(isHandleListed('x', null)).toBe(false);
   });
 });
