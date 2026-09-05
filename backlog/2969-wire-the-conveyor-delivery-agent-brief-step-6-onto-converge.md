@@ -2,8 +2,9 @@
 bornAs: xmjiqhc
 kind: story
 size: 2
-status: open
+status: active
 dateOpened: "2026-08-06"
+dateStarted: "2026-09-05"
 tags: []
 scope:
   - we:skills-src/conveyor/delivery-agent-brief.md
@@ -42,3 +43,13 @@ comes back clean". Every bound in that sentence is a model's judgment:
 - The brief's step-6 prose no longer restates any bound the core owns (per #51: the deterministic half belongs in
   the tested core, not in the brief).
 - Care band comes from #2954's derivation once that lands; until then step 6 passes an explicit `--care`.
+
+## Progress
+
+- Replaced step 6's prose loop with a driver for `we:scripts/converge-cli.mjs` (`init`/`step` against the lane's
+  absolute root, `--care` chosen explicitly, `we:skills-src/converge/SKILL.md`'s action table followed to
+  `land`/`escalate`).
+- Updated the two downstream cross-references (step 7's intro, *Escalations* case 3) so they name the
+  `/converge` run instead of the old "adversarial code review subagent" phrasing.
+- Step 6 stays advisory: `escalate` is folded into the PR body / `review:human` park path, never a `pr-land`
+  refusal.
