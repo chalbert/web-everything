@@ -427,6 +427,15 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     // deliberately asymmetric (purely behind, zero local-only commits) to catch it: a clone with NO commits of
     // its own, 2 commits behind origin/main, must report real behind=2/ahead=0, not the inverse, and must
     // still merge (this is the ordinary steady-state case, not a conflict).
+    //
+    // Construction note: push ALL commits to origin FIRST, clone the full result (matching the same
+    // proven-on-CI shape every other fixture in this file uses — clone only ever happens after every push it
+    // depends on), then rewind the CLONE's own HEAD locally with `reset --hard` to simulate "this checkout has
+    // fallen behind" — never a second push arriving after the clone already exists. An earlier version of this
+    // fixture cloned first and pushed the 2 commits afterward; that passed locally every time but reproduced
+    // the exact pre-fix symptom on CI (git 2.55.0) even after the rev-list computation itself was fixed twice,
+    // which points at that push-after-clone sequencing itself as the CI-flaky ingredient — removed here rather
+    // than chased further.
     const dir = join(root, 'asymmetric');
     const bare = join(dir, 'origin.git');
     const seed = join(dir, 'seed');
@@ -440,16 +449,8 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     writeFileSync(join(seed, 'shared.txt'), 'base\n');
     git(['add', 'shared.txt'], seed);
     git(['commit', '-q', '-m', 'seed'], seed);
+    const baseSha = git(['rev-parse', 'HEAD'], seed).trim();
     git(['branch', '-M', 'main'], seed);
-    git(['push', '-q', 'origin', 'main'], seed);
-
-    // Clone BEFORE main advances further — this clone's HEAD has zero commits of its own from here on
-    // (real ahead=0), while main gains 2 more commits AFTER the clone (real behind=2).
-    const clone = join(dir, 'clone');
-    git(['clone', '-q', bare, clone]);
-    git(['config', 'user.email', 'test@example.com'], clone);
-    git(['config', 'user.name', 'Test'], clone);
-
     writeFileSync(join(seed, 'm1.txt'), 'm1\n');
     git(['add', 'm1.txt'], seed);
     git(['commit', '-q', '-m', 'main: m1'], seed);
@@ -458,7 +459,31 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     git(['commit', '-q', '-m', 'main: m2'], seed);
     git(['push', '-q', 'origin', 'main'], seed);
 
+    // Clone the FULL history (HEAD = m2, matching origin exactly), then rewind the clone's own HEAD back to
+    // the base commit — purely local, origin is untouched and stays 2 commits ahead of this clone's HEAD.
+    const clone = join(dir, 'clone');
+    git(['clone', '-q', bare, clone]);
+    git(['config', 'user.email', 'test@example.com'], clone);
+    git(['config', 'user.name', 'Test'], clone);
+    git(['reset', '-q', '--hard', baseSha], clone);
+    expect(existsSync(join(clone, 'm1.txt'))).toBe(false); // confirms the rewind actually took
+
     const r = runOnce(clone, ['--base=main', '--ref-name=main-fresh']);
+    if (r.status !== 'synced' || r.behind !== 2) {
+      // DIAGNOSTIC safety net — if this still misbehaves on CI despite the restructure above, dump enough
+      // state to root-cause it for real rather than guessing a third time. Safe to delete once confirmed
+      // stable on CI.
+      const diag = (label, args, cwd2) => {
+        try { console.error(`DIAG ${label}:`, JSON.stringify(git(args, cwd2))); }
+        catch (e) { console.error(`DIAG ${label} FAILED:`, String(e && e.message || e)); }
+      };
+      console.error('DIAG runOnce result:', JSON.stringify(r));
+      diag('bare rev-parse main', ['rev-parse', 'main'], bare);
+      diag('clone rev-parse HEAD', ['rev-parse', 'HEAD'], clone);
+      diag('clone for-each-ref', ['for-each-ref'], clone);
+      diag('clone rev-parse origin/main-fresh', ['rev-parse', 'origin/main-fresh'], clone);
+      diag('clone git version', ['--version'], clone);
+    }
     expect(r).toMatchObject({ status: 'synced', behind: 2 });
     expect(existsSync(join(clone, 'm1.txt'))).toBe(true);
     expect(existsSync(join(clone, 'm2.txt'))).toBe(true);
