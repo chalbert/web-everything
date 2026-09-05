@@ -1,4 +1,5 @@
 ---
+bornAs: xlr11s0
 kind: task
 status: active
 scope: ["we:scripts/conveyor/tick-core.mjs"]
