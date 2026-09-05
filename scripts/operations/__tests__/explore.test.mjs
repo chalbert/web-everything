@@ -564,6 +564,24 @@ describe('the observer — the report axis first, liveness second, four honest w
     expect((await observe({})(older, ctx)).status).toBe('unresolved');
   });
 
+  // #3356 — a listing that PARSED but yielded no matchable id is a READ THAT FAILED, not "the panelist is
+  // gone". Mirrors `createDispatchObservers`' own guard (#3353) one axis over.
+  it('a non-empty unmatchable listing is UNREADABLE, not gone — even with a report already on disk', async () => {
+    const listAgents = () => [{ pid: 4242 }, { sessionId: '' }];
+    await expect(observe({ listAgents, readReport: () => '# p1\n\nI got two paragraphs in' })(entry(), ctx))
+      .rejects.toThrow(/not one carried a usable/);
+  });
+
+  it('the same unmatchable listing does not assert the session is gone when there is no report either', async () => {
+    const listAgents = () => [{ pid: 4242 }, { sessionId: '' }];
+    await expect(observe({ listAgents })(entry(), ctx)).rejects.toThrow(/not one carried a usable/);
+  });
+
+  it('a listing that echoes the id in another case still reads as `running` — normalized on both sides', async () => {
+    const answer = await observe({ listAgents: () => [{ sessionId: 'SESS-1' }] })(entry(), ctx);
+    expect(answer.status).toBe('running');
+  });
+
   it('completeness is the LAST line, so a panelist quoting its own instructions cannot resolve itself early', () => {
     expect(isReportComplete(report('p1'))).toBe(true);
     expect(isReportComplete(`I was told to end with ${REPORT_END_MARKER} and here is the rest`)).toBe(false);

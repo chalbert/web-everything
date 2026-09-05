@@ -779,6 +779,21 @@ export function isReportComplete(text) {
  * @param {Record<string, string|undefined>} [o.env]
  * @returns {Record<string, Function>} effect type → `async (entry, ctx) => {status, result?, error?}`.
  */
+
+/**
+ * THE COMPARABLE FORM of a handle or a listed `sessionId` — trim + lowercase, so a listing that differs from
+ * the minted handle only in case or incidental whitespace still matches on both sides. A file-local copy of
+ * `dispatch-lane-io.mjs`'s `normalizeHandle` rather than an import: this file already keeps its own
+ * `LISTING_GRACE_MS` literal instead of sharing the dispatch one (see its docstring), for the same reason —
+ * the two io shells are deliberately independent.
+ *
+ * @param {unknown} x
+ * @returns {string}
+ */
+export function normalizeHandle(x) {
+  return String(x ?? '').trim().toLowerCase();
+}
+
 export function createExploreObservers({
   exec = execFileSync,
   listAgents = () => defaultListAgents({ exec }),
@@ -819,7 +834,21 @@ export function createExploreObservers({
       if (!Array.isArray(sessions)) {
         throw new TypeError('explore-io: `claude agents --json` did not return an array');
       }
-      if (sessions.some((s) => s && String(s.sessionId) === handle)) return { status: 'running', result: null };
+      // PARSED FINE, YIELDED NOTHING MATCHABLE — the same refusal as not-an-array, and for the same reason
+      // `createDispatchObservers` raises here (#3353, PR #1211 round-3 review H1/H2): a listing with elements
+      // in it but no usable `sessionId` on any of them is a shape this reader does not understand. Sitting
+      // ABOVE the report tail below (not merely above the `unresolved` return) matters here specifically: with
+      // a report on disk, falling through would answer `resolved` with a TRUNCATED result on the strength of a
+      // listing that told us nothing — the exact failure this exists to stop.
+      const listedIds = new Set(sessions.map((s) => normalizeHandle(s?.sessionId)).filter(Boolean));
+      if (sessions.length && !listedIds.size) {
+        throw new TypeError(
+          'explore-io: `claude agents --json` returned '
+          + `${sessions.length} element(s) but not one carried a usable \`sessionId\` — the listing was read and `
+          + 'not understood, which is not evidence that any session ended',
+        );
+      }
+      if (listedIds.has(normalizeHandle(handle))) return { status: 'running', result: null };
 
       // NOT-YET-LISTED IS NOT GONE. `--bg` returns before the session is necessarily visible.
       const started = entry?.startedAt ? Date.parse(entry.startedAt) : NaN;
