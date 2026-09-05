@@ -239,7 +239,7 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
   return full.replace(/\s+/g, ' ').trim().slice(0, maxChars);
 }
 
-function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
+export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out } = {}) => {
     const { execFileSync } = await import('node:child_process');
     const runQuiet = (relPath, extraArgs = []) => {
@@ -281,60 +281,79 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
     // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
     // rest of the tick, or the tick itself).
+    let plan = null;
     try {
       const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
       if (typeof repo === 'string' && repo) reconcileArgs.push(`--repo=${repo}`);
       const reconcileOut = execFileSync('node', reconcileArgs, {
         encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
       });
-      const plan = JSON.parse(reconcileOut);
-      const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
-      // x5v8yy9 — every PR this pass has an OPINION about, informatively tagged, EXCLUDING only `nothing-owed`
-      // (reviewed/queued/landed, or a genuinely signal-free PR). `owed-elsewhere` is NOT excluded — it covers
-      // real conveyor PRs stuck `needs-human`/`ci-red`/`conflicted`, not just unrelated ones (see
-      // `selectStatusCandidates`'s own docblock for the PR #1920 staleness incident this fixes).
-      const statusCandidates = selectStatusCandidates(reviewsOwed, plan.refusals);
-      if (reviewsOwed.length || statusCandidates.length) {
-        // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
-        // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
-        // do, so the common empty-plan tick never pays for an extra `gh` call.
-        const repoSlug = typeof repo === 'string' && repo
-          ? repo
-          : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-          }).trim();
-        for (const d of reviewsOwed) {
-          try {
-            execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
-              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
-          } catch (e) {
-            process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      plan = JSON.parse(reconcileOut);
+    } catch (e) {
+      process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    }
+    // #x5v8yy9 review finding — kept as its OWN try/catch, separate from the `reconcile-pass.mjs` call above:
+    // this block's own failures (the `gh repo view` slug resolution, or a per-PR dispatch/tag call) used to
+    // share that call's catch and log as "mechanical pass conveyor/reconcile-pass.mjs failed" even though
+    // `reconcile-pass.mjs` itself had already succeeded — misattributing the failing step to an operator
+    // reading `runner.log`.
+    try {
+      if (plan) {
+        const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
+        // x5v8yy9 — every PR this pass has an OPINION about, informatively tagged, EXCLUDING only `nothing-owed`
+        // (reviewed/queued/landed, or a genuinely signal-free PR). `owed-elsewhere` is NOT excluded — it covers
+        // real conveyor PRs stuck `needs-human`/`ci-red`/`conflicted`, not just unrelated ones (see
+        // `selectStatusCandidates`'s own docblock for the PR #1920 staleness incident this fixes).
+        const statusCandidates = selectStatusCandidates(reviewsOwed, plan.refusals);
+        if (reviewsOwed.length || statusCandidates.length) {
+          // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
+          // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
+          // do, so the common empty-plan tick never pays for an extra `gh` call.
+          const repoSlug = typeof repo === 'string' && repo
+            ? repo
+            : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+              encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            }).trim();
+          for (const d of reviewsOwed) {
+            // #x5v8yy9 review finding — `dispatched` gates the round-tag call below. Before this fix,
+            // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
+            // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
+            // tick regardless of whether a review actually happened, misleading anyone reading the label.
+            let dispatched = false;
+            try {
+              execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+              dispatched = true;
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
+            if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
+            // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
+            // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
+            // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
+            // that. Best-effort: a failed tag write never blocks a review from actually being dispatched.
+            try {
+              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
           }
-          // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
-          // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
-          // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
-          // that. Best-effort: a failed tag write never blocks a review from actually being dispatched.
-          try {
-            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
-              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-          } catch (e) {
-            process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
-          }
-        }
-        // PURELY INFORMATIVE (`review-status-tag.mjs`) — "is a reviewer or a fixer actually working this PR
-        // right now, or is a live session stuck". Covers PRs NOT being freshly dispatched this tick too (an
-        // already-live session, or one that just finished and needs its stale label cleared).
-        for (const c of statusCandidates) {
-          try {
-            execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
-              { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-          } catch (e) {
-            process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+          // PURELY INFORMATIVE (`review-status-tag.mjs`) — "is a reviewer or a fixer actually working this PR
+          // right now, or is a live session stuck". Covers PRs NOT being freshly dispatched this tick too (an
+          // already-live session, or one that just finished and needs its stale label cleared).
+          for (const c of statusCandidates) {
+            try {
+              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
           }
         }
       }
     } catch (e) {
-      process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+      process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
     }
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
