@@ -4109,6 +4109,38 @@ engine the closing catalog builds onto).
 
 ---
 
+### Build-brief discipline: name edge-cases, require integration tests, forbid overclaiming — caught by a deterministic proposer gap, not a human re-read {#build-brief-discipline}
+
+**Every delegated build brief — the backlog item body a build lane implements to spec — must (1) name the
+edge-cases it wants handled or explicitly rejected, (2) require an integration/wiring test and not only a
+unit test, and (3) never claim to "close" something the slice does not close end-to-end.** This closed the
+root cause traced from the UI-Fidelity foundation PRs (#2805/#2802, PRs #951/#952, both ACCEPT-WITH-NITS): the build agents
+built faithfully to spec, but the spec itself under-specified the edge-cases to reject, asked for tests
+without naming which kind, and echoed a slice title as a scope claim it hadn't earned. The nits were the
+brief's gaps, reproduced faithfully — no amount of build-time care fixes a spec that never named the case.
+
+**Enforcement is the same deterministic, propose-and-verify gap detector already used for thin specs
+(#252), never a new human re-read pass.** `we:scripts/readiness/proposer.mjs`'s existing
+`selectProposalCandidates` already flags a decided-but-thin item on two structural proxies — missing
+acceptance criteria, missing a concrete file path — and drafts (never auto-applies) candidate fixes. This
+statute adds three more proxies to the same pure, quarantined engine: a body naming no edge-case is
+flagged `edge-cases`; a body naming no integration/wiring test is flagged `integration-tests`; a body that
+claims to "close" something without demonstrating it end-to-end is flagged `overclaim-scope`. Same
+precedent shape, same conservative bias (a missed real edge-case only means the human isn't nudged to add
+one; it never blocks a build), same never-splices-prose boundary.
+
+**Lineage:** #2819 (traced from #2805/#2802's ACCEPT-WITH-NITS foundation PRs). Reuses the spec-gap
+proposer #252 and its quarantine-from-`check:readiness` boundary. Reflected in the delivery-agent brief
+(`we:skills-src/conveyor/delivery-agent-brief.md`), which applies this same lens when scaffolding a
+leftover-work item rather than half-doing it. The fix-agent briefs
+(`we:skills-src/conveyor/fix-agent-brief.md`, `we:skills-src/conveyor/fix-agent-ci-brief.md`) carry no
+equivalent leftover-work-scaffolding instruction today, so there is nothing there yet to extend — a
+follow-on item owes this the moment either brief grows one. Composes with
+[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the gap detection is
+script-decidable; drafting a fix and accepting it stay human/model judgment).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
