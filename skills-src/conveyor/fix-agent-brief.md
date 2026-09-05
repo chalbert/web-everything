@@ -118,6 +118,13 @@ node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --s
 
 Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
 
+**Build-brief discipline applies to the repair too** (statute:
+[we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+#2819): if the reviewer's finding names a category ("reject X") without enumerating its shapes, name the
+concrete edge cases yourself rather than the first narrow guess; cover the repair with an integration/wiring
+test if the finding touches a call path, not only a unit test of the isolated piece; and never claim the repair
+"closes" or "fixes" the item in your commit unless it truly does end-to-end.
+
 ### 4. Run the gate GREEN (the item's own locus gate)
 
 ```bash

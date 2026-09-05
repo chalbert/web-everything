@@ -129,6 +129,14 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
   file is genuinely cohesive, mark it `// @cohesive: <reason>` to silence the soft-warn. `check:standards`
   only *warns* (never blocks) on the size+collision composite, so this never gates your land.
 
+- **Build-brief discipline — apply this even when the spec above is thin** (statute:
+  [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+  #2819). Where the spec says "reject/handle X" without naming X's concrete shapes, name the edge cases
+  yourself before writing the check — don't ship the first narrow guess. Cover the change with an
+  integration/wiring test that exercises the real call path, not only a unit test of the isolated function.
+  And never echo the item's own title or slice name back as a completion claim ("closes X") in a commit or
+  PR unless the diff truly closes it end-to-end — say what you actually closed instead.
+
 ### 5. Run the gate GREEN (in the item's own locus)
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate

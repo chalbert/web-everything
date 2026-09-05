@@ -64,6 +64,34 @@ function hasFilePaths(body) {
 }
 
 /**
+ * Does the body name at least one concrete edge case to handle/reject? Closes root cause 1 of #2819 —
+ * a spec that says "reject fixture routes" without naming the fixture-path shapes leaves the executing
+ * agent to infer a narrow guess (statute: platform-decisions.md#build-brief-discipline).
+ */
+function hasEdgeCases(body) {
+  return /\bedge cases?\b/i.test(body);
+}
+
+/**
+ * Does the body require an integration/wiring/end-to-end test, not only a unit test? A spec that tests
+ * the isolated function but never the call path that wires it in has not demonstrated the feature works.
+ */
+function hasIntegrationTestRequirement(body) {
+  return /\b(?:integration|wiring|end-to-end|e2e)\s+tests?\b/i.test(body);
+}
+
+/**
+ * Is this item's own title an overclaim risk? A title that claims full closure ("closes"/"fixes"/
+ * "resolves"/"solves") on a SLICE of a parent epic is exactly the "closes the data-layer dodge" case
+ * from #2819's diagnosis — a label an agent can echo back as an accomplished fact without having
+ * earned it end-to-end. Only fires on a slice (has a `parent`) — a standalone item's own title claiming
+ * its own closure is not a slice-vs-whole mismatch.
+ */
+function hasOverclaimRisk(title, it) {
+  return Boolean(it.parent) && /\b(?:closes|fixes|resolves|solves)\b/i.test(title ?? '');
+}
+
+/**
  * Select the decided-but-thin candidates a proposer should draft for. DETERMINISTIC — a pure function
  * of each loaded item and its body. Skips anything claimed/done/shelved, anything that isn't a
  * buildable issue/idea (so `decision`/`review` are left alone — acceptance criterion: never edits a
@@ -89,6 +117,9 @@ export function selectProposalCandidates(items, readBody) {
     const gaps = [];
     if (!hasAcceptanceCriteria(body)) gaps.push('acceptance-criteria');
     if (!hasFilePaths(body)) gaps.push('file-paths');
+    if (!hasEdgeCases(body)) gaps.push('edge-cases');
+    if (!hasIntegrationTestRequirement(body)) gaps.push('integration-tests');
+    if (hasOverclaimRisk(it.title, it)) gaps.push('overclaim-title');
     if (gaps.length === 0) continue; // already fleshed out — not thin
     out.push({
       num: it.num, id: it.id, title: it.title ?? it.id, summary: it.summary ?? '',
@@ -109,11 +140,15 @@ export function selectProposalCandidates(items, readBody) {
  * @property {string[]} tags
  * @property {string} file
  * @property {string} body
- * @property {string[]} gaps   Which of `acceptance-criteria` / `file-paths` are missing.
+ * @property {string[]} gaps   Which of `acceptance-criteria` / `file-paths` / `edge-cases` /
+ *   `integration-tests` / `overclaim-title` apply (statute: platform-decisions.md#build-brief-discipline).
  *
  * @typedef {Object} Proposal
- * @property {string[]} [criteria]  Candidate acceptance criteria (only when `acceptance-criteria` gap).
+ * @property {string[]} [criteria]  Candidate acceptance criteria (`acceptance-criteria`/`edge-cases`/
+ *   `integration-tests` gaps all draft into this same array — each is one more criterion to append).
  * @property {string[]} [paths]     Candidate likely repo file paths (only when `file-paths` gap).
+ * @property {string[]} [notes]     Advisory-only findings with no auto-draftable fix (`overclaim-title`) —
+ *   rendered as a comment for a human to resolve by hand, never spliced as a criterion or a path.
  * @property {string} [rationale]   One-line note on how the draft was derived (shown to the human).
  *
  * @typedef {Object} Proposer
@@ -168,19 +203,33 @@ export const referenceProposer = {
   handles: () => true,
   propose: (c) => {
     const proposal = { rationale: 'deterministic scaffolding (no model) — replace with a real draft before accepting' };
+    const criteria = [];
     if (c.gaps.includes('acceptance-criteria')) {
-      proposal.criteria = [
+      criteria.push(
         `Running the feature on a representative input produces the documented result.`,
         `The change is covered by a test that fails before and passes after.`,
         `\`npm run check:standards\` stays green.`,
-      ];
+      );
     }
+    if (c.gaps.includes('edge-cases')) {
+      criteria.push(`The concrete edge cases this change must handle or explicitly reject are named.`);
+    }
+    if (c.gaps.includes('integration-tests')) {
+      criteria.push(`An integration/wiring test exercises the real call path, not just an isolated unit.`);
+    }
+    if (criteria.length) proposal.criteria = criteria;
     if (c.gaps.includes('file-paths')) {
       const dir = c.tags.map((t) => TAG_DIR[t]).find(Boolean) ?? 'src';
       const tail = slugTail(c);
       proposal.paths = dir === 'scripts'
         ? [`scripts/${tail}.mjs`, `scripts/__tests__/${tail}.test.mjs`]
         : [`${dir}/${tail}.js`];
+    }
+    if (c.gaps.includes('overclaim-title')) {
+      proposal.notes = [
+        `Title claims full closure ("closes"/"fixes"/"resolves") but this item is a slice of a parent — ` +
+        `confirm the work truly closes it end-to-end, or soften the title language.`,
+      ];
     }
     return proposal;
   },
@@ -229,7 +278,7 @@ export async function propose(items, { readBody, registry }) {
       results.push({ candidate, proposal: null, status: 'error', providerId: provider.id, reason: e.message });
       continue;
     }
-    if (!proposal || (!proposal.criteria?.length && !proposal.paths?.length)) {
+    if (!proposal || (!proposal.criteria?.length && !proposal.paths?.length && !proposal.notes?.length)) {
       results.push({ candidate, proposal: null, status: 'refused', providerId: provider.id });
       continue;
     }
@@ -258,6 +307,11 @@ export function renderProposalDiff(result) {
     if (p.criteria?.length) lines.push('+');
     lines.push('+ <!-- Likely files (candidate — confirm before relying on these): -->');
     for (const path of p.paths) lines.push(`+ - \`${path}\``);
+  }
+  if (p.notes?.length) {
+    if (p.criteria?.length || p.paths?.length) lines.push('+');
+    lines.push('+ <!-- Notes (advisory — no draft to apply, resolve by hand): -->');
+    for (const note of p.notes) lines.push(`+ <!-- ${note} -->`);
   }
   return lines.join('\n');
 }

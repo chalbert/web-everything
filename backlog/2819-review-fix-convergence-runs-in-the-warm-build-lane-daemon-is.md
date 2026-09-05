@@ -3,8 +3,10 @@ bornAs: xmhvbvx
 kind: story
 size: 8
 parent: "2527"
-status: open
+status: resolved
 dateOpened: "2026-08-01"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: [plateau-loop, conveyor, review, convergence, daemon, quality, slice-uifg-adjacent]
 scope:
   - we:skills-src/conveyor/
@@ -68,3 +70,16 @@ convergence rounds this loop produces).
 A delegated build converges its own review fixes in the warm lane before the PR opens (lane released only when
 clean); the daemon performs only the independent clear + land; and a build brief that omits edge-cases,
 integration tests, or that overclaims scope is caught. `plateau-app` `npm test` + `we:` `check:standards` pass.
+
+## Progress
+- **Warm-lane convergence + daemon-as-independent-backstop:** already in place — `we:skills-src/conveyor/delivery-agent-brief.md`'s
+  step 6 drives the real `/converge` loop before PR-open (#2971/#2969), and `we:skills-src/drain/SKILL.md`
+  already documents the daemon's independent-clear + land shape as unchanged. Nothing to build there.
+- **Build-brief discipline (this item's remaining scope):** added a `#build-brief-discipline` statute to
+  `we:docs/agent/platform-decisions.md`; added three deterministic gap detectors (`edge-cases`,
+  `integration-tests`, `overclaim-title`) to `we:scripts/readiness/proposer.mjs` (+ tests in
+  `we:scripts/readiness/__tests__/proposer.test.mjs`), so a thin-or-overclaiming item is flagged before it is
+  ever dispatched as a brief; added a matching build-time discipline note to
+  `we:skills-src/conveyor/delivery-agent-brief.md`, `we:skills-src/conveyor/fix-agent-brief.md`, and
+  `we:skills-src/conveyor/fix-agent-ci-brief.md` so the executing agent applies the same three checks to its
+  own interpretation of an already-dispatched spec.
