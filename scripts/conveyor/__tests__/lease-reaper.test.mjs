@@ -2,8 +2,9 @@
  * @file scripts/conveyor/__tests__/lease-reaper.test.mjs
  * @description Unit proof of the conveyor LEASE REAPER's PURE core (WE #2667). Drives {@link classifyReap} /
  *   {@link reapPlan} / {@link itemNumFromSession} / {@link laneRefItemNum} directly with fixtures (NO fs / git /
- *   gh / clock) and pins every reap axis — PR-terminal (merged/closed), TTL-stale, the DORMANT pid axis — plus
- *   the reserved-lane never-reap invariant and the session↔head-ref item-number keys the cross-pool couple relies on.
+ *   gh / clock) and pins every reap axis — PR-terminal (merged/closed), session-gone (WE #3466/#2412, found live
+ *   2026-09-04/05), TTL-stale, the DORMANT pid axis — plus the reserved-lane never-reap invariant and the
+ *   session↔head-ref item-number keys the cross-pool couple relies on.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -13,6 +14,9 @@ import {
   laneRefItemNum,
   prStatesFromList,
   pidAliveForLease,
+  sessionStateByName,
+  sessionGoneForLease,
+  AGENT_GONE_STATES,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 
@@ -128,6 +132,24 @@ describe('classifyReap — PR-terminal axis (work done/abandoned → reclaim eve
   });
 });
 
+describe('classifyReap — session-gone axis (the real fix for the 2026-09-04/05 dead-session incident)', () => {
+  it('a FRESH lease whose session is confirmed gone → reap (session-gone), even pre-TTL', () => {
+    expect(classifyReap(fresh(), { nowMs: NOW, ttlMs: TTL_MS, sessionGone: true })).toEqual({ reap: true, reason: 'session-gone' });
+  });
+  it('a FRESH lease whose session is still alive (sessionGone=false) → keep', () => {
+    expect(classifyReap(fresh(), { nowMs: NOW, ttlMs: TTL_MS, sessionGone: false })).toEqual({ reap: false, reason: null });
+  });
+  it('sessionGone=null (unknown — no dispatcher-minted name, or the listing was unavailable) never reaps a fresh lease', () => {
+    expect(classifyReap(fresh(), { nowMs: NOW, ttlMs: TTL_MS, sessionGone: null })).toEqual({ reap: false, reason: null });
+  });
+  it('PR-terminal still wins over session-gone (a merged PR is the stronger, more specific signal)', () => {
+    expect(classifyReap(fresh(), { nowMs: NOW, ttlMs: TTL_MS, prState: 'merged', sessionGone: true })).toEqual({ reap: true, reason: 'pr-merged' });
+  });
+  it('session-gone wins over TTL-stale in the reported reason (both true → the more informative axis names it)', () => {
+    expect(classifyReap(stale(), { nowMs: NOW, ttlMs: TTL_MS, sessionGone: true })).toEqual({ reap: true, reason: 'session-gone' });
+  });
+});
+
 describe('classifyReap — TTL-stale axis (the zero-IO dead-agent backstop)', () => {
   it('a TTL-stale lease with no PR signal → reap (ttl-stale)', () => {
     expect(classifyReap(stale(), { nowMs: NOW, ttlMs: TTL_MS })).toEqual({ reap: true, reason: 'ttl-stale' });
@@ -162,6 +184,9 @@ describe('classifyReap — RESERVED (permanent memory) leases are NEVER reaped o
   });
   it('reserved + pid dead → keep', () => {
     expect(classifyReap(fresh({ reserved: true }), { nowMs: NOW, ttlMs: TTL_MS, pidAlive: false })).toEqual({ reap: false, reason: 'reserved' });
+  });
+  it('reserved + session-gone → keep (reserved short-circuits before the session-gone axis too)', () => {
+    expect(classifyReap(fresh({ reserved: true }), { nowMs: NOW, ttlMs: TTL_MS, sessionGone: true })).toEqual({ reap: false, reason: 'reserved' });
   });
 });
 
@@ -226,28 +251,102 @@ describe('pidAliveForLease — DORMANT under today\'s schema (no durable agentPi
   });
 });
 
+describe('sessionStateByName — claude agents --json --all listing → background-only name→state Map', () => {
+  it('maps background rows by name; a live conveyor build reads its own state', () => {
+    const m = sessionStateByName([
+      { kind: 'background', name: 'conveyor-3466', state: 'working' },
+      { kind: 'background', name: 'conveyor-2412', state: 'done' },
+    ]);
+    expect(m.get('conveyor-3466')).toBe('working');
+    expect(m.get('conveyor-2412')).toBe('done');
+  });
+  it('excludes interactive rows even if named the same as a dispatcher slug', () => {
+    const m = sessionStateByName([{ kind: 'interactive', name: 'conveyor-3466', state: 'working' }]);
+    expect(m.has('conveyor-3466')).toBe(false);
+  });
+  it('a row with no usable name is skipped; malformed/empty input → empty map', () => {
+    const m = sessionStateByName([{ kind: 'background', state: 'done' }, null, {}]);
+    expect(m.size).toBe(0);
+    expect(sessionStateByName([]).size).toBe(0);
+    expect(sessionStateByName(null).size).toBe(0);
+  });
+  it('AGENT_GONE_STATES is exactly done/failed/stopped — the vocabulary session-reaper.mjs already reaps on', () => {
+    expect([...AGENT_GONE_STATES].sort()).toEqual(['done', 'failed', 'stopped']);
+  });
+});
+
+describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent session confirmed gone?', () => {
+  it('the live 2026-09-04/05 incident shape: the session is ENTIRELY ABSENT from the listing → true (gone)', () => {
+    // conveyor-3466 (lane-38) and conveyor-2412/2412c (lane-40) died/disappeared entirely from `claude agents
+    // --json` — not merely `done`/`failed`, simply not listed at all, confirmed dead via `ps -p <pid>`.
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, states)).toBe(true);
+    expect(sessionGoneForLease({ session: 'conveyor-2412' }, states)).toBe(true);
+    // The retry variant is an EXACT, separate name — not collapsed — and is checked the same way.
+    expect(sessionGoneForLease({ session: 'conveyor-2412c' }, states)).toBe(true);
+  });
+  it('a session listed in a terminal state (done/failed/stopped) → true (gone)', () => {
+    const states = sessionStateByName([
+      { kind: 'background', name: 'conveyor-100', state: 'done' },
+      { kind: 'background', name: 'conveyor-101', state: 'failed' },
+      { kind: 'background', name: 'conveyor-102', state: 'stopped' },
+    ]);
+    expect(sessionGoneForLease({ session: 'conveyor-100' }, states)).toBe(true);
+    expect(sessionGoneForLease({ session: 'conveyor-101' }, states)).toBe(true);
+    expect(sessionGoneForLease({ session: 'conveyor-102' }, states)).toBe(true);
+  });
+  it('a session listed and still working/blocked → false (a slow build, not a dead one)', () => {
+    const states = sessionStateByName([
+      { kind: 'background', name: 'conveyor-200', state: 'working' },
+      { kind: 'background', name: 'conveyor-201', state: 'blocked' },
+    ]);
+    expect(sessionGoneForLease({ session: 'conveyor-200' }, states)).toBe(false);
+    expect(sessionGoneForLease({ session: 'conveyor-201' }, states)).toBe(false);
+  });
+  it('a session whose name matches no dispatcher grammar → null (never guess about a manual/interactive lane)', () => {
+    const states = sessionStateByName([]); // empty listing — would read "gone" for a dispatcher-minted name
+    expect(sessionGoneForLease({ session: 'Mac:24827' }, states)).toBe(null);
+    expect(sessionGoneForLease({ session: 'some-adhoc-session' }, states)).toBe(null);
+    expect(sessionGoneForLease({}, states)).toBe(null);
+    expect(sessionGoneForLease(null, states)).toBe(null);
+  });
+  it('sessionStates not a Map (listing unavailable this pass) → null (axis off), even for a dispatcher name', () => {
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, null)).toBe(null);
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, undefined)).toBe(null);
+  });
+});
+
 describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep', () => {
   const candidates = [
-    { pool: 'web-everything', lane: 3, dir: '/x/web-everything/lane-3', lease: fresh({ session: 'conveyor-2667' }) },   // fresh, PR open → keep
+    { pool: 'web-everything', lane: 3, dir: '/x/web-everything/lane-3', lease: fresh({ session: 'conveyor-2667' }) },   // fresh, PR open, session alive → keep
     { pool: 'web-everything', lane: 5, dir: '/x/web-everything/lane-5', lease: stale({ session: 'conveyor-2500' }) },   // TTL-stale → reap
     { pool: 'plateau-app', lane: 6, dir: '/x/plateau-app/lane-6', lease: fresh({ session: 'conveyor-2604' }) },         // fresh, PR merged → reap
     { pool: 'web-everything', lane: 7, dir: '/x/web-everything/lane-7', lease: fresh({ session: 'mem', reserved: true, acquiredAt: new Date(NOW - 10 * TTL_MS).toISOString() }) }, // reserved → keep
     { pool: 'web-everything', lane: 8, dir: '/x/web-everything/lane-8', lease: null },                                  // no lease → skipped
+    { pool: 'web-everything', lane: 38, dir: '/x/web-everything/lane-38', lease: fresh({ session: 'conveyor-3466' }) }, // fresh, but session confirmed gone → reap pre-TTL
   ];
   const prStates = new Map([['2667', 'open'], ['2604', 'merged']]);
-  const signalsFor = (c) => ({ prState: prStates.get(itemNumFromSession(c.lease?.session)) ?? null, pidAlive: null });
+  const sessionStates = sessionStateByName([{ kind: 'background', name: 'conveyor-2667', state: 'working' }]); // 3466/2604/2500 all absent
+  const signalsFor = (c) => ({
+    prState: prStates.get(itemNumFromSession(c.lease?.session)) ?? null,
+    sessionGone: sessionGoneForLease(c.lease, sessionStates),
+    pidAlive: null,
+  });
 
-  it('reaps the TTL-stale and PR-merged lanes; keeps the fresh-open and reserved; skips the lease-less', () => {
+  it('reaps the TTL-stale, PR-merged, and session-gone lanes; keeps the fresh-alive-open and reserved; skips the lease-less', () => {
     const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    // lane-5's session ('conveyor-2500') is ALSO absent from the listing, so session-gone fires (and is checked
+    // before TTL, per classifyReap's axis order) — the more informative real reason, not merely "old enough".
     expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`).sort()).toEqual([
       'plateau-app/lane-6:pr-merged',
-      'web-everything/lane-5:ttl-stale',
+      'web-everything/lane-38:session-gone',
+      'web-everything/lane-5:session-gone',
     ]);
-    // keep excludes the lease-less candidate (skipped entirely), includes fresh-open + reserved
+    // keep excludes the lease-less candidate (skipped entirely), includes fresh-alive-open + reserved
     expect(keep.map((c) => `${c.pool}/lane-${c.lane}`).sort()).toEqual(['web-everything/lane-3', 'web-everything/lane-7']);
   });
 
-  it('with no signalsFor, only the TTL axis fires (PR/pid unknown)', () => {
+  it('with no signalsFor, only the TTL axis fires (PR/session/pid unknown)', () => {
     const { reap } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS });
     expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-5:ttl-stale']);
   });

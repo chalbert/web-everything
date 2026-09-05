@@ -19,25 +19,44 @@
  * axis), or a merge whose main session was down when it landed (rides the PR-merged axis).
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors pr-watch.mjs / scope-lease-collect.mjs):
- *   • The PURE core ({@link classifyReap}, {@link reapPlan}, {@link itemNumFromSession}, {@link laneRefItemNum})
- *     has NO fs / git / gh / clock — every signal is passed IN. It is unit-tested directly against fixtures.
+ *   • The PURE core ({@link classifyReap}, {@link reapPlan}, {@link itemNumFromSession}, {@link laneRefItemNum},
+ *     {@link sessionStateByName}, {@link sessionGoneForLease}) has NO fs / git / gh / clock — every signal is
+ *     passed IN. It is unit-tested directly against fixtures.
  *   • The IO SHELL (the `main()` CLI, gated on the main-module check) owns POOL_ROOT enumeration, marker reads,
- *     an optional single `gh pr list`, and the actual reclamation — which it delegates to
- *     `lane-pool.mjs release --pool=<name> --lane=<n> --force` so the reserved-lane protection lives in ONE
- *     place (this reaper never rm's a marker directly, so it can never nuke a permanent memory lane).
+ *     an optional single `gh pr list`, an optional single `claude agents --json --all`, and the actual
+ *     reclamation — which it delegates to `lane-pool.mjs release --pool=<name> --lane=<n> --force` so the
+ *     reserved-lane protection lives in ONE place (this reaper never rm's a marker directly, so it can never
+ *     nuke a permanent memory lane).
  *
  * THE REAP AXES (a lease is reaped when it is NOT reserved AND any one holds):
  *   • pr-merged / pr-closed — the lease's item PR reached a terminal state (matched by head ref `lane/<num>-*`);
  *     the work is done/abandoned, so the lane is free even before TTL. Because a cross-locus couple's WE PR is
  *     WE-last, a merged WE PR (num N) means the whole couple is done — so matching by `num` reclaims the
  *     plateau-app-pool half too. (Best-effort: the gh axis degrades to OFF if gh is unavailable — TTL still bites.)
+ *   • session-gone — the lease's OWNING DELIVERY-AGENT SESSION is confirmed gone (WE #3466/#2412, found live
+ *     2026-09-04/05 — see {@link sessionGoneForLease}). A conveyor-dispatched build's session can die/disappear
+ *     entirely from `claude agents --json` (the underlying OS process itself confirmed dead via `ps -p <pid>`)
+ *     while the LANE LEASE it minted stays held: nothing on the TTL/PR axes reclaims it until the FULL 4-hour
+ *     `ttlMinutes` elapses, blocking real dispatch capacity the whole time (a live incident: ~12 items stuck on
+ *     "no free lane" for hours behind two leases whose sessions had already died). This axis closes that gap by
+ *     asking `claude agents --json --all` — the SAME listing `session-reaper.mjs` already reads — whether the
+ *     lease's own `session` name is still there; a name absent entirely, or present but in one of the states
+ *     `session-reaper.mjs` itself already treats as done (`done`/`failed`/`stopped`), reclaims the lane even
+ *     pre-TTL. Best-effort: the axis degrades to OFF if the listing is unavailable — TTL still bites.
  *   • ttl-stale — the lease outlived its TTL (`isLeaseStale`; AGE-based — there is no heartbeat, so a >TTL live
  *     build is reapable, exactly as `acquire` already treats a >TTL lease as reclaimable); the owner is presumed
- *     gone. This is the zero-IO backstop that reclaims a dead agent's lane with no PR and no network.
+ *     gone. This is the zero-IO backstop that reclaims a dead agent's lane with no PR, no network, and no
+ *     session-gone signal (e.g. the listing was unavailable, or the session name matches no dispatcher grammar).
  *   • pid-dead — the owning agent's process is gone. DORMANT under today's schema (see {@link pidAliveForLease}):
  *     the lease's recorded `pid` is the short-lived `lane-pool acquire` CLI, NOT the delivery agent (an LLM has
  *     no unix pid), so a literal check would reap LIVE leases — the axis returns `null` (unknown) and never
- *     fires alone. The pure branch is kept so a future durable `agentPid` field lights it up unchanged.
+ *     fires alone. The pure branch is kept so a future durable `agentPid` field lights it up unchanged. THIS IS
+ *     WHY session-gone (above), not a literal `lease.pid` liveness check, is the real fix for the 2026-09-04/05
+ *     incident: `lease.pid` is documented (`lane-lease.mjs`'s `leaseBody`) to be the short-lived acquire CLI on
+ *     EVERY lease, live ones included — checking it would reap a live build's lane on sight, not just a dead
+ *     one. The lease carries no durable, checkable agent pid at all; the delivery agent's OWN session identity
+ *     (its `session` name, matched against the real `claude agents` registry) is the trustworthy liveness signal
+ *     that actually exists today.
  * RESERVED (permanent memory, #2350) leases are NEVER reaped, on every axis.
  */
 
@@ -47,6 +66,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
+import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 
 // ── PURE CORE (no fs / git / gh / clock — every signal is injected) ───────────────────────────────────────────
 
@@ -114,15 +134,19 @@ export function laneRefItemNum(headRef) {
 
 /**
  * The DETERMINISTIC reap verdict for ONE lease — pure, same signals → same verdict. A lease is reaped when it
- * is not reserved AND any axis fires; the reason names the axis (PR-terminal wins, then TTL, then pid).
+ * is not reserved AND any axis fires; the reason names the axis (PR-terminal wins, then session-gone, then TTL,
+ * then pid).
  *
  * @param {object|null} lease  the parsed `.lane-lease` marker.
- * @param {{nowMs:number, ttlMs?:number, prState?:('merged'|'closed'|'open'|null), pidAlive?:(boolean|null)}} sig
+ * @param {{nowMs:number, ttlMs?:number, prState?:('merged'|'closed'|'open'|null), sessionGone?:(boolean|null), pidAlive?:(boolean|null)}} sig
  *   `prState` = the terminal state of the lease's item PR (null = unknown, don't reap on this axis);
+ *   `sessionGone` = whether the lease's owning delivery-agent SESSION is confirmed gone — absent from a fresh
+ *     `claude agents --json --all` listing, or present in a terminal state (null = unknown/no dispatcher-minted
+ *     session name to check → axis dormant for this lease, see {@link sessionGoneForLease});
  *   `pidAlive` = whether the owning agent process is alive (null = unknown/untrustworthy → axis dormant).
- * @returns {{reap:boolean, reason:('pr-merged'|'pr-closed'|'ttl-stale'|'pid-dead'|'reserved'|null)}}
+ * @returns {{reap:boolean, reason:('pr-merged'|'pr-closed'|'session-gone'|'ttl-stale'|'pid-dead'|'reserved'|null)}}
  */
-export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES * 60_000, prState = null, pidAlive = null } = {}) {
+export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES * 60_000, prState = null, sessionGone = null, pidAlive = null } = {}) {
   if (!lease || typeof lease !== 'object') return { reap: false, reason: null };
   // #2350 — a RESERVED (permanent) lane is the durable memory slot; it is off-limits to reclamation on EVERY
   // axis. Short-circuit BEFORE any other test so no signal can ever collect it.
@@ -130,7 +154,12 @@ export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES *
   // PR-terminal wins: the work is done (merged) or abandoned (closed), so the lane is free even pre-TTL.
   if (prState === 'merged') return { reap: true, reason: 'pr-merged' };
   if (prState === 'closed') return { reap: true, reason: 'pr-closed' };
-  // TTL-stale: the owner outlived its heartbeat — the zero-IO dead-agent backstop.
+  // session-gone: the delivery agent's OWN session is confirmed dead/absent — the real fix for the 2026-09-04/05
+  // incident (a session dies mid-build with no PR ever opened, so the PR axis above never fires). Checked BEFORE
+  // TTL so a confirmed-dead lease reclaims EARLY, not after the full 4-hour wait, and reports its true reason.
+  if (sessionGone === true) return { reap: true, reason: 'session-gone' };
+  // TTL-stale: the owner outlived its heartbeat — the zero-IO dead-agent backstop for everything the two axes
+  // above couldn't confirm (no PR yet, no readable session listing, or a non-dispatcher session name).
   if (isLeaseStale(lease, nowMs, ttlMs)) return { reap: true, reason: 'ttl-stale' };
   // pid-dead: only fires when the shell supplies a TRUSTWORTHY liveness (dormant today — see pidAliveForLease).
   if (pidAlive === false) return { reap: true, reason: 'pid-dead' };
@@ -163,10 +192,77 @@ export function prStatesFromList(prs) {
 }
 
 /**
+ * The `claude agents --json --all` states this reaper treats as "not doing any more work" for a lease's owning
+ * session — the SAME terminal vocabulary `session-reaper.mjs` (WE #3435) already measured live and reaps on:
+ * `TERMINAL_REAP_STATES` (`done`/`failed`) plus `ALREADY_STOPPED_STATES` (`stopped`). Kept as a local constant
+ * rather than importing `session-reaper.mjs`'s sets — this file has no other dependency on that module, and the
+ * three literal strings are the entire cross-file agreement; duplicating three string literals costs far less
+ * than a coupling between two independently-runnable mechanical passes.
+ */
+export const AGENT_GONE_STATES = new Set(['done', 'failed', 'stopped']);
+
+/**
+ * Reduce a `claude agents --json --all` listing → a Map of session `name` → its own `state`, background rows
+ * only. Pure (no exec) so the risky reduction is unit-tested directly, mirroring {@link prStatesFromList}'s
+ * split. `kind !== 'background'` rows (a human's own interactive terminal session) are excluded — mirrors
+ * `session-reaper.mjs`'s own absolute guard, and matters here because an interactive session's `name` is never
+ * dispatcher-minted but nothing stops it coincidentally colliding with one.
+ * @param {Array<{kind?:string, name?:string, state?:string}>} sessions
+ * @returns {Map<string,string|null>}
+ */
+export function sessionStateByName(sessions) {
+  const byName = new Map();
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    if (!s || typeof s !== 'object' || s.kind !== 'background') continue;
+    if (typeof s.name === 'string' && s.name) byName.set(s.name, s.state ?? null);
+  }
+  return byName;
+}
+
+/**
+ * Is the delivery agent a lease's own `session` names CONFIRMED gone? THE FIX for the 2026-09-04/05 incident
+ * (`conveyor-3466` on lane-38, `conveyor-2412`/`conveyor-2412c` on lane-40): both sessions died/disappeared
+ * ENTIRELY from `claude agents --json` — not merely reported `done`/`failed`, simply no longer listed at all,
+ * confirmed independently via `ps -p <pid>` on the underlying OS process — while their lane leases sat held for
+ * hours, because neither the PR axis (no PR was ever opened) nor the TTL axis (nowhere near its 4-hour mark) had
+ * anything to reclaim them with.
+ *
+ *   true  — `sessionStates` doesn't list this session at all, OR lists it in one of {@link AGENT_GONE_STATES}
+ *           (`done`/`failed`/`stopped`) — the same three states `session-reaper.mjs` already reaps on. Either
+ *           way the session is provably not going to do any more work.
+ *   false — the session IS listed and its state is none of those (`working`/`blocked`/undefined) — a slow
+ *           build, not a dead one.
+ *   null  — never guess: `lease.session` matches no dispatcher-minted grammar ({@link itemNumFromSession}), so
+ *           it was never spawned via `claude --bg` and would legitimately never appear in this listing (a
+ *           manually-acquired or interactive lane) — absence there proves nothing about it. Also null when
+ *           `sessionStates` itself isn't a Map (the listing was unavailable this pass — axis off, see
+ *           {@link fetchSessionStates}).
+ *
+ * WHY THIS IS SAFE EVEN ON A TRANSIENT LISTING MISS. A released-but-still-live lane is not immediately
+ * destroyed: `lane-pool.mjs release` only drops the marker (`lane-lease.mjs`'s own "a released lane is
+ * immediately re-issuable" note), and the NEXT `acquire` still refuses to reset a lane carrying real
+ * uncommitted/unpushed work (`isLaneAcquirable`'s `dirtyOrAhead` guard, #2267) regardless of lease state. The
+ * exposure this axis accepts — same as the existing PR-terminal axis already accepts for a possibly-stale `gh`
+ * read — is a narrow window right after a lane is acquired and before its first commit, mirroring this file's
+ * own precedent of reclaiming pre-TTL on an external signal rather than waiting out the full TTL on principle.
+ *
+ * @param {object|null} lease
+ * @param {Map<string,string|null>|null} sessionStates  from {@link sessionStateByName}; null = axis off.
+ * @returns {boolean|null}
+ */
+export function sessionGoneForLease(lease, sessionStates) {
+  const session = lease && typeof lease.session === 'string' ? lease.session : null;
+  if (!session || itemNumFromSession(session) === null) return null; // not a dispatcher-minted name — don't guess
+  if (!(sessionStates instanceof Map)) return null; // listing unavailable this pass — axis off
+  if (!sessionStates.has(session)) return true; // gone — not listed at all, even with --all
+  return AGENT_GONE_STATES.has(sessionStates.get(session));
+}
+
+/**
  * Build the reap plan over a flat list of `{ pool, lane, dir, lease }` candidates. Pure — the shell resolves
  * each lease's per-lease signals (via the injected `signalsFor`) and this maps {@link classifyReap} over them.
  * @param {Array<{pool:string, lane:number, dir:string, lease:object|null}>} candidates
- * @param {{nowMs:number, ttlMs?:number, signalsFor?:((c:object)=>{prState?:any, pidAlive?:any})|null}} opts
+ * @param {{nowMs:number, ttlMs?:number, signalsFor?:((c:object)=>{prState?:any, sessionGone?:any, pidAlive?:any})|null}} opts
  * @returns {{reap:Array, keep:Array}} `reap` = candidates to collect (each + `reason`); `keep` = the rest.
  */
 export function reapPlan(candidates, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES * 60_000, signalsFor = null } = {}) {
@@ -175,7 +271,13 @@ export function reapPlan(candidates, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES 
   for (const c of Array.isArray(candidates) ? candidates : []) {
     if (!c || !c.lease) continue; // no lease → nothing to reap
     const extra = typeof signalsFor === 'function' ? signalsFor(c) || {} : {};
-    const verdict = classifyReap(c.lease, { nowMs, ttlMs, prState: extra.prState ?? null, pidAlive: extra.pidAlive ?? null });
+    const verdict = classifyReap(c.lease, {
+      nowMs,
+      ttlMs,
+      prState: extra.prState ?? null,
+      sessionGone: extra.sessionGone ?? null,
+      pidAlive: extra.pidAlive ?? null,
+    });
     if (verdict.reap) reap.push({ ...c, reason: verdict.reason });
     else keep.push({ ...c, reason: verdict.reason });
   }
@@ -263,6 +365,28 @@ function fetchPrStates(flags) {
   return prStatesFromList(prs); // pure "open wins" reduction — see prStatesFromList
 }
 
+/**
+ * ONE `claude agents --json --all` read → the session-name→state Map {@link sessionGoneForLease} checks leases
+ * against — the real fix for the 2026-09-04/05 dead-session-stays-leased incident (see this file's header and
+ * {@link sessionGoneForLease}'s own doc). `--all` IS LOAD-BEARING, exactly as `session-reaper.mjs` documents for
+ * its own identical read: the plain (no-`--all`) listing drops a session the instant it stops running, which is
+ * precisely the `done`/`failed`/`stopped` shape this axis needs to see, not the shape it needs hidden.
+ * Best-effort: any failure (no `claude` on PATH, a hung/timed-out CLI, unparsable output) disables the axis for
+ * this run (returns null → every lease's `sessionGone` is unknown → TTL-stale still bites), matching
+ * {@link fetchPrStates}'s own degrade-on-failure convention.
+ */
+function fetchSessionStates(flags) {
+  if (flags['no-check-sessions']) return null;
+  let sessions;
+  try {
+    sessions = defaultListAgents({ exec: execFileSync, all: true });
+  } catch (e) {
+    log(`  ⚠ \`claude agents --json --all\` failed — session-gone reap axis OFF this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
+    return null;
+  }
+  return sessionStateByName(sessions); // pure background-only name→state reduction
+}
+
 /** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
 function releaseLane(pool, lane) {
   execFileSync('node', [LANE_POOL_CLI, 'release', `--pool=${pool}`, `--lane=${lane}`, '--force'], {
@@ -293,6 +417,7 @@ function main(argv) {
   const nowMs = Date.now();
 
   const prStates = fetchPrStates(flags); // null when the axis is off
+  const sessionStates = fetchSessionStates(flags); // null when the axis is off
 
   // Collect every held lease across the scanned pools into flat candidates.
   const candidates = [];
@@ -308,7 +433,7 @@ function main(argv) {
   const signalsFor = (c) => {
     const num = itemNumFromSession(c.lease?.session);
     const prState = prStates && num ? prStates.get(num) ?? null : null;
-    return { prState, pidAlive: pidAliveForLease(c.lease) };
+    return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates), pidAlive: pidAliveForLease(c.lease) };
   };
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
 
@@ -345,6 +470,7 @@ function main(argv) {
           collected: dryRun ? undefined : done,
           kept: keep.length,
           prAxis: prStates ? 'on' : 'off',
+          sessionAxis: sessionStates ? 'on' : 'off',
         },
         null,
         2,
@@ -353,7 +479,8 @@ function main(argv) {
   } else {
     log(
       `lease-reaper: ${candidates.length} held lease(s) · ` +
-        `${dryRun ? `${reap.length} would reap` : `${reaped} reaped${failures ? `, ${failures} failed` : ''}`} · ${keep.length} kept · PR-axis ${prStates ? 'on' : 'off'}`,
+        `${dryRun ? `${reap.length} would reap` : `${reaped} reaped${failures ? `, ${failures} failed` : ''}`} · ${keep.length} kept · ` +
+        `PR-axis ${prStates ? 'on' : 'off'} · session-axis ${sessionStates ? 'on' : 'off'}`,
     );
   }
   // Non-zero exit only when a release we attempted actually FAILED (a gh-axis-off run is a clean degrade, not a
