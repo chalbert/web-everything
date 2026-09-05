@@ -169,6 +169,15 @@ State plainly to the operator, once, at start:
 > exists (it feeds the `build-queue` view #2528/#2529 and the future product board), but it is a distinct,
 > shared artifact from this session's conveyor queue — whether the two should reconcile is the open decision
 > filed under #2612.
+>
+> **`queue.mjs` resolves the sidecar by ITS OWN script location — not by which checkout the live runner is
+> actually rooted in.** If you are at all unsure which checkout's runner is live (more than one checkout
+> exists on this host, or you can't recall which one you last started the runner from), use
+> `node scripts/conveyor/queue-work.mjs add|remove|list <NNN>` instead: it resolves the runner-singleton
+> lease's own `pid` to its real `cwd` and REFUSES rather than silently clearing an item into a sidecar the
+> runner never reads (#3478). **Known gap:** the resolution trusts the lease's `pid` alone — a pid reused by
+> an unrelated process inside the lease's freshness window can still resolve to the wrong `cwd` with no
+> refusal; tracked separately as backlog `xy5td0e`.
 
 Then start the headless runner (§2).
 
