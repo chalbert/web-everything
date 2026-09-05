@@ -41,6 +41,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
 import { collapseRollupToLatestPerName } from '../merge-ai-prs.mjs';
+import { CI_TRUTH_EXCLUDED_CHECKS } from '../operations/pr-status.mjs';
 // #2659 — the infra-blocked state: a delivery/prepare agent that PUSHED its lane ref but failed PR-open on an
 // outside dependency lands here (not a stall / gate-red). `deriveInfraByNum` is PURE (no fs/clock — it takes the
 // raw store + injected `now`), safe for the pure core; the IO shell reads the sidecar via `readInfraStore`.
@@ -180,11 +181,18 @@ export function reverseLaneItemMap(reg) {
  * `we:scripts/merge-ai-prs.mjs`), same rule `latestRequiredCheck` uses. This distils ALL checks into one token
  * rather than picking one out, so without the per-name collapse a superseded `CANCELLED` entry beside a later
  * `SUCCESS` for the same name still wins the `anyFail` fold even though the check that finished is green.
+ *
+ * EXCLUDES `CI_TRUTH_EXCLUDED_CHECKS` (`we:scripts/operations/pr-status.mjs`, currently just `review-gate`)
+ * BEFORE folding — that check is BY DESIGN red for as long as a PR carries an un-cleared review hold, so
+ * counting it here mislabels every un-reviewed PR `ci: 'fail'` and, via `isRedCi`/`isCiHealTarget`
+ * (`we:scripts/conveyor/tick-core.mjs`), can misdirect the CI-heal loop at a PR whose only "failure" is
+ * "nobody has reviewed it yet". See that constant's docblock for the full incident.
  * @param {Array<object>|null|undefined} statusCheckRollup
  * @returns {'pass'|'fail'|'pending'|'none'}
  */
 export function ciRollup(statusCheckRollup) {
-  const roll = collapseRollupToLatestPerName(statusCheckRollup);
+  const roll = collapseRollupToLatestPerName(statusCheckRollup)
+    .filter((c) => !CI_TRUTH_EXCLUDED_CHECKS.includes(String(c?.name ?? c?.context ?? '')));
   if (roll.length === 0) return 'none';
   const RED = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
   const DONE_OK = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
