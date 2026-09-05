@@ -5,6 +5,12 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-03"
 tags: []
+scope:
+  - we:scripts/operations/review-dispatch.mjs
+  - we:scripts/operations/__tests__/
+  - we:scripts/lib/main-staleness.mjs
+  - we:scripts/lib/__tests__/
+  - we:scripts/conveyor/reconcile-fix-dispatch.mjs
 ---
 
 # review-dispatch's staleness guard should auto-sync a clean fast-forward instead of refusing
