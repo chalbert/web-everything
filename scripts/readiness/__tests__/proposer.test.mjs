@@ -8,6 +8,11 @@
  *   - proposes for a thin-but-decided item and WRITES NOTHING (returns a diff string, no fs);
  *   - never edits a `decision`/`review` item and never auto-applies prose;
  *   - with no provider registered, degrades gracefully — reports the gap, exits clean.
+ *
+ * Also covers the build-brief-discipline extension (#2819,
+ * docs/agent/platform-decisions.md#build-brief-discipline): three more gap proxies — no named
+ * edge-case, no integration/wiring test, an unearned "closes X" claim — on the same deterministic,
+ * propose-and-verify engine.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -24,26 +29,29 @@ const item = (num, over = {}) => ({
 /** A readBody that serves a per-id body from a map, defaulting to an empty (maximally-thin) body. */
 const bodyMapReader = (bodies) => (file) => bodies[file] ?? '';
 
-const THIN = ''; // no acceptance-criteria section, no file path → both gaps
-const FLESHED = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.';
+const THIN = ''; // no acceptance-criteria section, no file path, no edge-case, no integration test → 4 gaps
+// Fleshed out on ALL five build-brief-discipline axes: criteria, path, edge-case, integration test, no overclaim.
+const FLESHED = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.'
+  + '\n\n## Edge cases\n- Rejects empty input.\n\nCovered by an integration test that wires the real caller.';
+// Fleshed on edge-cases/integration-tests but missing acceptance-criteria/file-paths — isolates those two.
+const NO_CRITERIA_NO_PATH = 'Handles the reject-empty-input edge case.\n\nCovered by a wiring test.';
 
 describe('candidate selection (#252) — deterministic, decided-but-thin only', () => {
-  it('selects an open issue/idea with a thin body and reports both gaps', () => {
+  it('selects an open issue/idea with a thin body and reports every gap', () => {
     const items = [item(10)];
     const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': THIN }));
     expect(cands.map((c) => c.num)).toEqual(['10']);
-    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'file-paths']);
+    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'file-paths', 'edge-cases', 'integration-tests']);
   });
 
-  it('skips a fleshed-out item (has acceptance criteria AND a concrete path)', () => {
+  it('skips a fleshed-out item (criteria, path, edge-case, integration test, no overclaim)', () => {
     const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
     expect(cands).toEqual([]);
   });
 
-  it('reports only the missing gap when one of the two is present', () => {
-    const onlyPath = 'See `scripts/foo.mjs`.'; // has a path, no acceptance criteria
-    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': onlyPath }));
-    expect(cands[0].gaps).toEqual(['acceptance-criteria']);
+  it('reports only the missing gaps when edge-cases/integration-tests are already named', () => {
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': NO_CRITERIA_NO_PATH }));
+    expect(cands[0].gaps).toEqual(['acceptance-criteria', 'file-paths']);
   });
 
   it('never selects a decision item — a fork is a human call, not a gap to fill', () => {
@@ -73,10 +81,11 @@ describe('propose — never applies, only drafts (#252)', () => {
 
   it('drafts only the missing gap (path present → no criteria proposed)', async () => {
     const registry = registerReferenceProposers();
-    const onlyPath = 'See `scripts/foo.mjs`.';
-    const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': onlyPath }), registry });
+    // path + edge-case + integration test present; acceptance-criteria is the one gap left.
+    const onlyMissingCriteria = 'See `scripts/foo.mjs`. Handles the empty-input edge case. Covered by a wiring test.';
+    const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': onlyMissingCriteria }), registry });
     expect(r.proposal.criteria).toBeTruthy();   // the missing one (acceptance-criteria) is drafted
-    expect(r.proposal.paths).toBeUndefined();   // the satisfied one is left alone
+    expect(r.proposal.paths).toBeUndefined();   // the satisfied one (file-paths) is left alone
   });
 
   it('reference proposer marks its output as scaffolding, not authoritative', () => {
@@ -93,7 +102,7 @@ describe('graceful degradation — no provider registered (#252)', () => {
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('no-provider');
     expect(results[0].proposal).toBeNull();
-    expect(results[0].candidate.gaps).toEqual(['acceptance-criteria', 'file-paths']); // gap still reported
+    expect(results[0].candidate.gaps).toEqual(['acceptance-criteria', 'file-paths', 'edge-cases', 'integration-tests']); // gaps still reported
     expect(renderProposalDiff(results[0])).toBe('');                                   // nothing to render
   });
 });
@@ -112,6 +121,118 @@ describe('provider failure is recorded, never thrown (#252)', () => {
     registry.register({ id: 'empty', handles: () => true, propose: () => ({ criteria: [], paths: [] }) });
     const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': THIN }), registry });
     expect(r.status).toBe('refused');
+  });
+});
+
+describe('build-brief discipline (#2819) — edge-cases / integration-tests / overclaim-scope', () => {
+  it('flags a missing edge-cases mention', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\nCovered by an integration test.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['edge-cases']);
+  });
+
+  it('recognizes the hyphenated "edge-case(s)" spelling too, not only whitespace-separated', () => {
+    // Regression: an earlier regex only tolerated whitespace between the words and missed the
+    // hyphenated form this very statute's own prose uses throughout.
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\nHandles the empty-input edge-case.\n\nCovered by an integration test.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c).toBeUndefined();
+  });
+
+  it('a negated "no edge cases" disclaimer does not satisfy the check — it is still a gap', () => {
+    // Regression for a red-team catch: a bare keyword-presence check is satisfied by its own denial.
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\nNo edge cases apply here.\n\nCovered by an integration test.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['edge-cases']);
+  });
+
+  it('a negated "no integration test needed" disclaimer does not satisfy the check — it is still a gap', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\n## Edge cases\n- Rejects empty input.\n\nNo integration test needed for this.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['integration-tests']);
+  });
+
+  it('flags a missing integration/wiring test (a unit-test mention alone does not satisfy it)', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\n## Edge cases\n- Rejects empty input.\n\nCovered by a unit test.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['integration-tests']);
+  });
+
+  it('accepts "end-to-end test" as a synonym for integration/wiring — the phrase overclaim-scope nudges toward', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\n## Edge cases\n- Rejects empty input.\n\nCovered by an end-to-end test.';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+
+  it('flags overclaim-scope when the body claims to "close" something with no end-to-end demonstration', () => {
+    const body = '## Acceptance criteria\n- It works.\n\nEdits `scripts/foo.mjs`.\n\n## Edge cases\n- Rejects empty input.'
+      + '\n\nCovered by an integration test.\n\nThis closes the data-layer dodge.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['overclaim-scope']);
+  });
+
+  it('an ordinary `## Relation` cross-reference ("Fixes [#N]") never contains the word "closes" at all', () => {
+    // Documents the shape, not a distinct exclusion: overclaimsScope only ever matches "closes", so a
+    // "Fixes [#N]" relation line was never going to trip it — there is no "Fixes"-vs-"closes" special case.
+    const body = FLESHED + '\n\n## Relation\nFixes [#2563].';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]); // every axis fleshed, and no "closes" token anywhere in the body
+  });
+
+  it('does not flag overclaim-scope when the claim is backed by "end-to-end"', () => {
+    const body = FLESHED + '\n\nThis closes the gap end-to-end.';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+
+  it('does not flag the bare verb "close" — only third-person "closes" reads as a scope claim', () => {
+    // Regression for a red-team catch: "close attention", "close to done" are ordinary English, not a
+    // scope-completion claim, and must not spuriously nudge overclaim-scope.
+    const body = FLESHED + '\n\nWe pay close attention to this and are close to done.';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+
+  it('does not flag the "closes over" JS-closure idiom as a scope claim', () => {
+    const body = FLESHED + '\n\nThe callback closes over the loop variable, so each iteration captures its own copy.';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+
+  it('does not flag a GitHub-style "closes #123" / "closes [#123]" issue auto-link as a scope claim', () => {
+    // Regression for a red-team catch: this is a mechanical cross-reference (GitHub's own auto-close
+    // convention), not a prose claim that the slice closes something end-to-end.
+    const body = FLESHED + '\n\ncloses #123\n\ncloses [#456]';
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+
+  it('an unrelated "end-to-end" mention in a DIFFERENT paragraph does not back an unearned "closes" claim', () => {
+    // Regression for the co-occurrence gap a converge-loop juror caught: the check must not pass just
+    // because "end-to-end" appears SOMEWHERE in the body — it must back the specific claim's paragraph.
+    const body = FLESHED + '\n\nCovered by an end-to-end smoke test of the CLI wrapper.'
+      + '\n\nThis closes the data-layer dodge.';
+    const [c] = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(c.gaps).toEqual(['overclaim-scope']);
+  });
+
+  it('reference proposer drafts an edge-case bullet, an integration-test nudge, and an overclaim warning', () => {
+    const c = { gaps: ['edge-cases', 'integration-tests', 'overclaim-scope'], id: '10-slug', tags: [] };
+    const p = referenceProposer.propose(c);
+    expect(p.edgeCases).toBeTruthy();
+    expect(p.integrationNote).toMatch(/integration|wiring/i);
+    expect(p.overclaimWarning).toMatch(/end-to-end/i);
+  });
+
+  it('renders the new gaps as additional diff blocks, still `+`-prefixed only', async () => {
+    const registry = registerReferenceProposers();
+    const body = 'This closes the data-layer dodge.'; // every axis thin, plus an unearned "closes" claim
+    const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': body }), registry });
+    const diff = renderProposalDiff(r);
+    expect(diff).toContain('## Edge cases');
+    expect(diff).toContain('Integration-test note');
+    expect(diff).toContain('Overclaim check');
+    expect(diff.split('\n').every((l) => l.startsWith('+') || l.startsWith('---'))).toBe(true);
   });
 });
 

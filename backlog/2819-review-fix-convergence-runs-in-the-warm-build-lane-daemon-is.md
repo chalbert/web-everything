@@ -3,8 +3,9 @@ bornAs: xmhvbvx
 kind: story
 size: 8
 parent: "2527"
-status: open
+status: active
 dateOpened: "2026-08-01"
+dateStarted: "2026-09-05"
 tags: [plateau-loop, conveyor, review, convergence, daemon, quality, slice-uifg-adjacent]
 scope:
   - we:skills-src/conveyor/
@@ -62,7 +63,8 @@ minimal on leaf edits. Mirrors the escalation rubric so effort tracks risk.
 ## Relation
 Fixes [#2563] (advisory care-level / convergence). Reuses the convergence loop [#2437], the independence rule
 [#2439], and build-time self-review [#2672]. Complements the per-step transparency item (surfacing the
-convergence rounds this loop produces).
+convergence rounds this loop produces). The build-brief-discipline half codifies as
+[we:docs/agent/platform-decisions.md#build-brief-discipline](../docs/agent/platform-decisions.md#build-brief-discipline).
 
 ## Acceptance
 A delegated build converges its own review fixes in the warm lane before the PR opens (lane released only when
