@@ -269,6 +269,10 @@ describe('recordPrepVerdict — real git, no mocked `exec`: the actual commit ca
   // (real `git show :<path>`) — so a regression back to a pathspec-qualified `commitStagedCard` reddens this.
   it('a working-tree clobber AFTER staging does not leak into the real commit', async () => {
     execFileSync('git', ['init', '-q'], { cwd: root });
+    // LOCAL identity, scoped to this throwaway temp repo only — CI runners carry no ambient git identity,
+    // so relying on one (as an earlier version of this test did) fails there while passing locally.
+    execFileSync('git', ['config', 'user.email', 'review-prep-io-test@example.com'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'review-prep-io test'], { cwd: root });
     const path = writeCard('9999-a-fake-card.md');
     execFileSync('git', ['add', '-A'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'init'], { cwd: root });
