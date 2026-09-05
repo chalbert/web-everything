@@ -252,6 +252,14 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
     // population) — see that file's own header for the full gap this closes.
     runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
+    // #xs19sz9 — sweeps every OPEN PR for TWO OR MORE PRs delivering the SAME backlog item number (reusing
+    // `we:scripts/lib/open-pr-items.mjs#deliveredItemNumsFromPr`, the readiness ranker's own "which item does
+    // this PR deliver" extractor) and posts a `review:changes` finding on each one via
+    // `we:scripts/conveyor/reconcile-finding.mjs` — never picking a keeper (that needs a real diff read, proven
+    // by the 2026-09-05 incident this pass was born from). Dedup: a PR already carrying `review:changes` is
+    // skipped (the label's own presence is the durable marker, same idea as the conflict-watch line above,
+    // reusing an existing label instead of minting a new one). See that file's own header for the full design.
+    runQuiet('conveyor/duplicate-pr-watch.mjs', ['sweep']);
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
