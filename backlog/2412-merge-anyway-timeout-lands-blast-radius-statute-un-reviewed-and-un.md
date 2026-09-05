@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 8
-status: active
+status: resolved
 relatedTo: ["2410", "2409", "2406", "2403", "2313", "2307", "2281", "2262", "2171", "2398", "2285"]
 dateOpened: "2026-07-10"
 dateStarted: "2026-09-04"
+dateResolved: "2026-09-04"
 tags: [gate, review, drain, merge-anyway, traceability]
 scope:
   - we:scripts/lib/review-escalation.mjs
