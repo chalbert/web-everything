@@ -165,31 +165,45 @@ value a hand-rolled `check:standards | grep` cannot produce, and therefore the o
 raw command still works and is what the operation runs; use the operation so the answer is data rather than
 your reading of a terminal.
 
-### 6. Review your own diff — spawn an adversarial code-review subagent (converge BEFORE the PR)
+### 6. Converge your diff — run `/converge` against the lane clone (BEFORE the PR)
 
 A green gate proves the **checks** pass; it does **not** prove the **diff is correct**. Before you open the
-PR, get the work reviewed — the gate is the deterministic core, this review is the judgment a script cannot
-do (per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
-Spawn **one adversarial code-review subagent** on your working diff and **AWAIT its completion — its final
-report (return value) IS the verdict.** The harness delivers a spawned subagent's final report to its spawner
-automatically, so you read that returned report directly; nothing can lose it in transit.
+PR, run the REAL bounded editor↔reviewer convergence loop — panel judges → editor revises → red-team ratifies
+→ panel re-judges, capped by rounds — via the [`/converge`](../converge/SKILL.md) skill (#2971/#2969). The
+loop's control flow, panel composition, round cap and ledger all live in the tested core
+(`we:scripts/lib/converge-core.mjs` / `we:scripts/lib/jury-core.mjs`); this step **drives** that core, it never
+re-derives any bound the core already owns (per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)).
 
-- **Read-only, diff-focused.** It reviews *this lane's* diff — **correctness first**, plus the lens the change
-  earns: a **security** pass for anything touching untrusted input, secrets, auth, or file/network I/O; an
-  interface/compat pass for a contract change; and so on. It reports findings; it does not edit.
-- **The verdict rides the RETURN, never a name-addressed message.** Instruct the review subagent to put its
-  FULL verdict — converged / the findings list / any blockers — in its **final report/return**, NOT to
-  `SendMessage` it back to you by name. Do **not** rely on a name-addressed hand-back: a name can be
-  unreachable once an agent completes ("no agent named … reachable"), which stalls the converge-before-PR
-  handshake (#2624). Read the verdict off the returned final report.
-- **Address every finding to CONVERGENCE — don't rubber-stamp, don't silently drop.** Fix the real issues in
-  the lane. A finding you judge not-real is **dismissed with a one-line reason** (never dropped in silence).
-  Re-run the review after any nontrivial fix, until a pass comes back clean (or with only
-  dismissed-with-reason findings). **Only then** proceed to the PR.
+Invoke `/converge` (or drive `we:scripts/converge-cli.mjs` directly, per its `SKILL.md`) against **this lane's
+absolute root** — never the primary checkout:
+
+```bash
+STATE=<somewhere inside $LANE, e.g. $LANE/.converge-state.json>   # keep this path for the whole run
+node scripts/converge-cli.mjs init --lane="$LANE" --state="$STATE" --care=elevated \
+  --goal="<one sentence from #2969's lead paragraph — what this lane's work is trying to do>"
+```
+
+- **Pick `--care` deliberately.** #2954 (deriving it from the touch-set) is not yet landed, so **you** choose
+  the band explicitly — never omit it. `elevated` (the default) is right for ordinary work; step up to `high`
+  for anything touching a trust boundary, a gate, a contract, or a shared derivation.
+- **Loop `init`/`step` to `land` or `escalate`, exactly as `SKILL.md`'s action table directs** — seat every
+  `panel`/`red-team` juror through `judgePanel` (never the `Agent` tool, #3145), spawn the one `edit` subagent
+  a `step` calls for, and stamp every observation with the printed `round`. Do not hand-run a round cap, a
+  panel size, or a ledger yourself — that is exactly the un-bounded prose loop this step replaces.
+- **`land`** — a non-author panel accepted the final diff and an independent red-team failed to break it;
+  proceed to the PR.
+- **This step stays ADVISORY — an `escalate` never blocks PR-open.** Blocking would gate every drain lane,
+  doc-only lane, and the lane shipping this very change (the reason #2971 dropped its `pr-land` refusal).
+  `escalate` is **terminal for this run** — the core already spent its round budget resolving what it could
+  before landing on it, so do not hand-invoke another `init`/`step` cycle hoping for a different answer. On
+  `escalate`, carry the printed escalation packet's reason into the PR: if it names a taste/product/policy call
+  a reviewer can't resolve, open the PR parked `review:human` naming that call (*Escalations* #3/#4 below);
+  otherwise treat it like any other step-6 finding — fix it and re-run `/converge` as a fresh run over the
+  revised diff.
 
 ### 7. Visual self-review — render the surface, READ the screenshot, diff it against the baseline (UI-locus items ONLY)
 
-Step 6 proves the **diff** is correct; it does **not** prove the **rendered surface looks right**. Code-correct-but-visually-off is exactly how the console-board cluster (#2587 / #2588 / #2604 / #2660) shipped — a large visual delta from its design mock that no code review caught. So **for a UI-locus item** — one that renders a surface a human looks at (a `plateau-app` or `frontierui` page / board / panel / console) — add a **visual** self-review AFTER the code review of step 6 and BEFORE the PR, enforcing the SAME converge-before-PR discipline the code review does. **A non-UI item — a script, a doc, a standard definition, a skill/brief edit — has no rendered surface; it SKIPS this step and goes straight to step 8.**
+Step 6 proves the **diff** is correct; it does **not** prove the **rendered surface looks right**. Code-correct-but-visually-off is exactly how the console-board cluster (#2587 / #2588 / #2604 / #2660) shipped — a large visual delta from its design mock that no code review caught. So **for a UI-locus item** — one that renders a surface a human looks at (a `plateau-app` or `frontierui` page / board / panel / console) — add a **visual** self-review AFTER the `/converge` run of step 6 and BEFORE the PR, enforcing the SAME converge-before-PR discipline. **A non-UI item — a script, a doc, a standard definition, a skill/brief edit — has no rendered surface; it SKIPS this step and goes straight to step 8.**
 
 1. **Render + screenshot the built surface.** Capture the surface against the running dev server with the #2670
    Playwright harness (`plateau-app:tests/visual/capture.mjs`; regenerate a baseline set with
@@ -424,7 +438,7 @@ know well, that is not a good reason — let the committee's already-elevated ri
      lands unreviewed. So park it: re-run `open-pr` on the SAME `--ref` with `--mode=park --parkLabel=review:human` (park mode
      skips the check-wait, so it labels a red PR immediately), **then confirm the label actually landed** (see
      the note below the list). Report the failing check and stop.
-3. **A review finding that turns on human judgment** — the step-6 adversarial code review (or the step-7 visual
+3. **A review finding that turns on human judgment** — the step-6 `/converge` run (or the step-7 visual
    self-review, for a UI item) surfaced an issue that is a **taste, product, or policy call**, not a code
    question — the review process itself has no way to resolve it. This is NOT "I'm not sure the code is
    right" or "the reviewer found something I couldn't fully verify" — that is a review question: keep
