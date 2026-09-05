@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -174,5 +174,44 @@ describe('lane-pool release --all-pools clears the lane-ports registry across ev
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out).released).toBe(1);
     expect(readRegistry()).toEqual({});
+  });
+
+  // #3466 review round 3 (finding 1) — cmdReleaseAllPools used to build its own repoLike from raw
+  // `resolve(process.cwd())` instead of reusing the git-toplevel-normalized `repo.referencePath` that
+  // `resolveRepo()` already produced. That silently no-ops the registry write whenever the CALLER's cwd is a
+  // subdirectory of the checkout — exactly the shape `pr-watch.mjs`'s `releaseSessionAcrossPools` hits, since it
+  // passes no `cwd` override to `execFileSync` at all and just inherits whatever directory that process happens
+  // to run from.
+  it('--item sweep clears the registry even when invoked from a SUBDIRECTORY of the checkout', () => {
+    expect(runPool(['provision', '--count=1', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-3466', '--item=3466', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(readRegistry()).toEqual({ 3466: { lane: 1, repo: 'poolA' } });
+
+    const subdir = join(referenceDir, 'scripts');
+    mkdirSync(subdir, { recursive: true });
+    const r = runPool(['release', '--all-pools', '--item=3466', '--json'], { LANE_POOL_ROOT: poolRoot }, { cwd: subdir });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(1);
+    expect(readRegistry()).toEqual({}); // registry lives at referenceDir's toplevel, not the subdirectory
+  });
+
+  // #3466 review round 3 (finding 2) — unmapLanes matched registry entries by lane number ALONE, ignoring the
+  // `repo` field each entry carries. So releasing lane-1 in one pool could delete a DIFFERENT, still-live item's
+  // entry in another pool that happens to reuse the same lane number.
+  it('releasing a lane in one pool does not clobber a different pool\'s entry sharing the same lane number', () => {
+    expect(runPool(['provision', '--count=1', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['provision', '--count=1', ...POOL('poolB')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-111', '--item=111', ...POOL('poolA')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-222', '--item=222', ...POOL('poolB')], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(readRegistry()).toEqual({
+      111: { lane: 1, repo: 'poolA' },
+      222: { lane: 1, repo: 'poolB' },
+    });
+
+    const r = runPool(['release', '--all-pools', '--item=222', '--json'], { LANE_POOL_ROOT: poolRoot }, { cwd: referenceDir });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(1);
+    // #222's poolB entry is gone; #111's poolA entry — same lane number, different pool — survives untouched.
+    expect(readRegistry()).toEqual({ 111: { lane: 1, repo: 'poolA' } });
   });
 });
