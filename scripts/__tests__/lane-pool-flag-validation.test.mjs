@@ -87,7 +87,7 @@ describe('lane-pool unrecognized-flag guard (regression: acquire --help auto-pic
     const acq = runPool(['acquire', '--lane=1', '--purpose=t', '--session=t', '--scope=x:y', '--json', ...common()], { LANE_POOL_ROOT: poolRoot });
     expect(acq.code).toBe(0);
 
-    expect(runPool(['adopt', '--lane=1', '--json', ...common()], { LANE_POOL_ROOT: poolRoot }).code).toBe(0);
+    expect(runPool(['adopt', '--lane=1', '--json', ...common()], { LANE_POOL_ROOT: poolRoot, CLAUDE_CODE_SESSION_ID: 'flagtest-session' }).code).toBe(0);
     // `map`/`unmap` need a pool name with a registered dev-server port band (unrelated to flag validation) —
     // just confirm their OWN `--item`/`--lane` flags aren't rejected as unrecognized.
     expect(runPool(['map', '--lane=1', '--item=1', ...common()], { LANE_POOL_ROOT: poolRoot }).err).not.toMatch(/unrecognized flag/);

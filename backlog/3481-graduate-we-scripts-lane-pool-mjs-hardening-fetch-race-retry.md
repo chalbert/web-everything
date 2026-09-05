@@ -33,3 +33,10 @@ origin/lane/mechanical-dispatcher carries two self-contained lane-pool fixes nev
   `we:scripts/__tests__/lane-pool-acquire-wait-ms.test.mjs` (excluded from the fast default run) still passes.
   This means `git diff origin/main...origin/lane/mechanical-dispatcher -- we:scripts/lane-pool.mjs` will show a
   one-line residual diff post-land — intentional, fixing a real bug the source branch carried.
+- **Second deviation, found by CI (PR #1929's `test-shard (2)` went red):** the ported
+  `we:scripts/__tests__/lane-pool-flag-validation.test.mjs`'s `adopt` case never set
+  `CLAUDE_CODE_SESSION_ID` in its spawned-process env, so it silently relied on the ambient
+  environment having one set — true in an interactive agent session, false on a clean CI runner,
+  where `cmdAdopt` fails loud without it. Passed 84/84 locally for that reason alone. Fixed by
+  passing an explicit `CLAUDE_CODE_SESSION_ID` for that one `adopt` call; confirmed the fix holds
+  with the var explicitly unset locally (`env -u CLAUDE_CODE_SESSION_ID npx vitest run ...`).
