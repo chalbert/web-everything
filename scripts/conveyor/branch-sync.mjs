@@ -53,7 +53,6 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { backoffMs, retryDecision } from './infra-blocked.mjs';
-import { parseLeftRightCount } from './branch-drift.mjs';
 
 // ── TUNING (exported so a caller/test can override) ────────────────────────────────────────────────────────
 
@@ -223,13 +222,17 @@ export function runSyncOnce({
     return { status: 'offline' };
   }
 
-  // 2. is there anything to merge at all? `parseLeftRightCount` (imported from branch-drift.mjs) reads
-  //    `<left-only>\t<right-only>` as `{behind, ahead}` for a `<target>...<branch>` invocation — the LEFT side
-  //    must be the target (`origin/<refName>`) and the RIGHT side this checkout's own `HEAD`, or the two
-  //    numbers come back swapped (found in review: a purely-behind, non-diverged checkout was misreported as
-  //    `ahead`, tripped the `behind === 0` freshness gate below, and never merged at all).
-  const cmp = git(['rev-list', '--left-right', '--count', `origin/${refName}...HEAD`], cwd);
-  const { behind, ahead } = cmp.ok ? parseLeftRightCount(cmp.stdout) : { behind: 0, ahead: 0 };
+  // 2. is there anything to merge at all? TWO separate, UNAMBIGUOUS double-dot counts rather than one
+  //    `--left-right` call: `A..B` always means "commits reachable from B, not from A", with no left/right
+  //    sidedness to get backwards. (Review found the single-call `--left-right` form's behind/ahead swapped
+  //    for an asymmetric, purely-behind checkout — the swap tripped the `behind === 0` freshness gate below
+  //    and the checkout never merged at all. A same-side re-order of that call reproduced correctly here but
+  //    still misbehaved in CI, so this drops `--left-right` sidedness from the picture entirely rather than
+  //    re-guessing which side is which a second time.)
+  const behindRun = git(['rev-list', '--count', `HEAD..origin/${refName}`], cwd);
+  const aheadRun = git(['rev-list', '--count', `origin/${refName}..HEAD`], cwd);
+  const behind = behindRun.ok ? Number(behindRun.stdout.trim()) || 0 : 0;
+  const ahead = aheadRun.ok ? Number(aheadRun.stdout.trim()) || 0 : 0;
   if (behind === 0) {
     // Up to date. Clear any stale conflict/escalation state — whatever drift it tracked is resolved (by this
     // loop's own earlier merge, or by HEAD advancing some other way).

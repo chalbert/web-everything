@@ -83,6 +83,16 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
   beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'we-branch-sync-unit-')); });
   afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
+  /** branch-sync.mjs's step 2 now issues TWO separate `rev-list --count <range>` calls (unambiguous double-dot
+   *  ranges, no `--left-right` sidedness) rather than one combined call — this answers each by inspecting
+   *  which side `HEAD` is on, so a fake behind/ahead pair stays correct regardless of call order. */
+  function fakeRevListCount(args, { behind, ahead }) {
+    const range = args[2];
+    if (range === `HEAD..origin/main-fresh`) return { ok: true, stdout: `${behind}\n`, stderr: '' };
+    if (range === `origin/main-fresh..HEAD`) return { ok: true, stdout: `${ahead}\n`, stderr: '' };
+    throw new Error(`unexpected rev-list range in this fake: ${range}`);
+  }
+
   /** A scripted git effect: always reports 5 commits behind / 0 ahead, and a merge-tree conflict whose text is
    *  swappable mid-test (to exercise a signature CHANGE). Records every call. */
   function makeFakeGit({ conflictText = 'CONFLICT (content): Merge conflict in shared.txt' } = {}) {
@@ -92,7 +102,7 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
       calls.push(args);
       const cmd = args[0];
       if (cmd === 'fetch') return { ok: true, stdout: '', stderr: '' };
-      if (cmd === 'rev-list') return { ok: true, stdout: '5\t0\n', stderr: '' };
+      if (cmd === 'rev-list') return fakeRevListCount(args, { behind: 5, ahead: 0 });
       if (cmd === 'merge-tree') return { ok: false, stdout: text, stderr: '' };
       if (cmd === 'merge' && args.includes('--abort')) return { ok: true, stdout: '', stderr: '' };
       throw new Error(`unexpected git call in this fake: ${args.join(' ')}`);
@@ -179,7 +189,7 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
     expect(notifies).toHaveLength(3);
 
     // Now the upstream conflict resolves (behind:0 from here on) — the loop must auto-clear, not stay "stuck".
-    const resolvedGit = (args) => (args[0] === 'fetch' ? { ok: true, stdout: '', stderr: '' } : args[0] === 'rev-list' ? { ok: true, stdout: '0\t0\n', stderr: '' } : (() => { throw new Error('unexpected'); })());
+    const resolvedGit = (args) => (args[0] === 'fetch' ? { ok: true, stdout: '', stderr: '' } : args[0] === 'rev-list' ? fakeRevListCount(args, { behind: 0, ahead: 0 }) : (() => { throw new Error('unexpected'); })());
     r = runSyncOnce({ ...common, git: resolvedGit, now: 1200 });
     expect(r).toMatchObject({ status: 'fresh' });
     expect(existsSync(statePath)).toBe(false);
@@ -195,7 +205,7 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
     const raceGit = (args) => {
       calls.push(args[0]);
       if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' };
-      if (args[0] === 'rev-list') return { ok: true, stdout: '3\t0\n', stderr: '' };
+      if (args[0] === 'rev-list') return fakeRevListCount(args, { behind: 3, ahead: 0 });
       if (args[0] === 'merge-tree') return { ok: true, stdout: 'sometreeoid\n', stderr: '' }; // probe: clean
       if (args[0] === 'merge' && args.includes('--abort')) return { ok: true, stdout: '', stderr: '' };
       if (args[0] === 'merge') return { ok: false, stdout: '', stderr: 'fatal: Not possible to fast-forward, aborting.' }; // real merge: fails anyway
