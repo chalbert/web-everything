@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   CONFLICT_LABEL,
+  CONFLICT_LABEL_META,
   isParkedConflictTarget,
   planConflictLabelChange,
   buildConflictComment,
@@ -217,5 +218,43 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.error === 'boom')).toBe(true);
+  });
+
+  // xoh8fkw — live 2026-09-05: `repo` reaches `ensureLabel`/`setLabels`/`postComment` as a bare `null` when the
+  // caller (the runner's default `runQuiet(..., ['sweep'])` invocation, with no `--repo`) never supplies one,
+  // and `review-label-provider.mjs`'s own `GH_ARGV` builders splice `--repo, repo` unconditionally — so every
+  // write failed `gh … got "null"` while the pass kept reporting a correct detection. `provider.currentRepo()`
+  // must be consulted and its result used for every write when `repo` is omitted.
+  it('resolves an omitted repo via provider.currentRepo() and uses it for every write (xoh8fkw)', () => {
+    const provider = fakeProvider();
+    provider.currentRepo = () => 'resolved/repo';
+    const listPrs = () => [{ number: 1932, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] }];
+    const results = watchParkedPrConflicts({ repo: null, listPrs, provider }); // no --repo given
+    expect(results).toEqual([{ num: 1932, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true }]);
+    expect(provider.calls).toEqual([
+      ['ensureLabel', 'resolved/repo', CONFLICT_LABEL],
+      ['setLabels', 'resolved/repo', 1932, { add: CONFLICT_LABEL, remove: [] }],
+      ['postComment', 'resolved/repo', 1932],
+    ]);
+  });
+
+  it('CONFLICT_LABEL_META.description stays within GitHub\'s 100-char label-description cap (xoh8fkw)', () => {
+    // The original 163-char text made every `gh label create` call fail `HTTP 422: description is too long`,
+    // confirmed live 2026-09-05 — this is a hard external limit, not a style preference.
+    expect(CONFLICT_LABEL_META.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it('never calls currentRepo() when repo was already supplied, or when nothing needs a write', () => {
+    let currentRepoCalls = 0;
+    const provider = fakeProvider();
+    provider.currentRepo = () => { currentRepoCalls += 1; return 'should-not-be-used'; };
+    // Case 1: repo supplied — currentRepo must stay unconsulted.
+    const listPrsA = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] }];
+    watchParkedPrConflicts({ repo: 'o/n', listPrs: listPrsA, provider });
+    expect(currentRepoCalls).toBe(0);
+    // Case 2: repo omitted, but nothing to write (already labelled) — no gh repo view call either.
+    const listPrsB = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }] }];
+    watchParkedPrConflicts({ repo: null, listPrs: listPrsB, provider });
+    expect(currentRepoCalls).toBe(0);
   });
 });
