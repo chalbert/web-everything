@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 8
-status: open
+status: active
 relatedTo: ["2410", "2409", "2406", "2403", "2313", "2307", "2281", "2262", "2171", "2398", "2285"]
 dateOpened: "2026-07-10"
+dateStarted: "2026-09-04"
 tags: [gate, review, drain, merge-anyway, traceability]
 scope:
   - we:scripts/lib/review-escalation.mjs
@@ -102,3 +103,39 @@ Siblings: #2409 (reviewed-commit-set ≠ head hole), #2410 (the convergence loop
 verdict this gate would require), #2313 (the park/skip comment infra Gap 2 extends to the merge path), #2281
 (deterministic PR-lifecycle label function). Ships with an invariant tripwire like the rest of the gate
 (#2406). Note: the gate files are gate-self → this build lands human-reviewed, not via the timeout it fixes.
+
+## Progress
+
+Re-surveyed against `main` before building (2026-09-04): Gap 1 was already delivered by #2425 (the
+merge-anyway timeout is removed entirely — `we:scripts/lib/review-escalation.mjs`'s `decideReviewGate` names
+"resolving #2412 Gap 1" in its own doc comment), and part of Gap 2 by #3308 (the review-coverage announcement,
+narrower than this item's ask — it fires only on a detected coverage gap, not on every landing PR). This build
+covers what was left:
+
+- **Gap 2, completed.** Every landing candidate — manifest-carrying or not — now gets a `merge-trace` drain
+  comment, posted right before the merge write, naming the exact live head SHA about to land and the merging
+  caller/session (`we:scripts/merge-ai-prs.mjs`'s `buildMergeTraceReason`/`MERGE_TRACE_KIND`, a fifth
+  `drainReasonMarker` kind alongside park/skip/land/review-coverage). Closes the silent plain-`mergePr(...)`
+  path Gap 2 named.
+- **Layer 5, built.** `we:scripts/check-review-gate.mjs` (+ `we:.github/workflows/review-gate.yml`) — a
+  required status check that reads red for as long as a review hold
+  (`review:pending`/`review:changes`/`review:human`) sits on the PR, closing the manual-`gh pr merge`-bypass
+  hole a code-side gate can't see. Adding its check name to the branch-protection required list is a
+  repo-admin action, not a code change (same as `smoke` in `we:.github/workflows/ci.yml` — see that job's own
+  note).
+- **Layer 4, scaffolded off, NOT built here — genuinely blocked.**
+  `we:scripts/lib/review-escalation.mjs`'s own `REVIEW_LABELS.redteamAccepted` comment already names "requiring
+  it before an engine-tier auto-land" as #2412's concern. But no CODE-LEVEL / daemon-reachable writer applies
+  `redteam:accepted` to a live PR yet: `we:scripts/converge-cli.mjs`'s pre-PR `/converge` tool runs the
+  validator judging (`buildValidatorMandate`) but never calls `combineValidatedVerdict` and never writes any
+  label (by design — `/converge` is advisory only); the only place the actual `gh pr edit --add-label
+  redteam:accepted` procedure exists today is as hand-run prose in `we:skills-src/drain/SKILL.md`, for a
+  human/agent to type during an interactive escalated-PR drain session — no `.mjs` script anywhere calls it, so
+  the fully-automated resident daemon and the deterministic `we:scripts/merge-ai-prs.mjs` sweep have zero code
+  path touching it. That gap is #2410 slice 2, still open. Requiring the label in `decideReviewGate` before
+  #2410 ships a code-level writer would strand every future blast-radius/engine-tier auto-land that goes
+  through the automated/daemon path — a regression, not a tightening. Scaffolded as a new item,
+  `blockedBy: ["2410"]`, so the enforcement lands once its producer exists rather than being built prematurely
+  against one that doesn't.
+- **Reconcile-with-#2403 row: unaffected.** That reconciliation is Layer 4's job (it is about which label
+  `autoLand` keys on), so it moves with Layer 4 to the scaffolded follow-up.
