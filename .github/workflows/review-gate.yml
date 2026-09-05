@@ -26,6 +26,18 @@
 # BECOMING A REAL GATE IS A REPO-ADMIN ACTION, NOT A CODE CHANGE (same as `smoke` in ci.yml, see its own note
 # on the same point): this job's check name (`review-gate`) must be added to the branch-protection required
 # list before it can actually block a merge. Until then it runs and reports, same as any other check.
+#
+# BOOTSTRAP: `ref: main` above means this VERY PR — the one that first adds `scripts/check-review-gate.mjs`
+# and this workflow — sees neither file on `main` yet (they don't land until this PR merges). The same is
+# true of any other PR still open at that exact moment. Failing hard on the missing module would make this
+# check permanently red for the PR that introduces it, with no way to ever turn green — caught live as PR
+# #1911's own `review-gate` failing 6 times with `Cannot find module '.../scripts/check-review-gate.mjs'`.
+# The step below checks for the script's existence AFTER checking out `main` and reports clear (exit 0,
+# not held) when it is missing, rather than crashing. This does not reopen the hole `ref: main` closes:
+# the check still never reads the SCRIPT from the PR's own ref, only tests for the file's absence on the
+# trusted tree — a PR cannot fake presence-on-main from within its own diff. Once this PR lands, the file
+# exists on `main` permanently (removing it would be its own reviewed diff), so this branch becomes dead
+# code from then on — a permanent defensive no-op, not a standing loophole.
 name: Review gate
 
 on:
@@ -54,4 +66,9 @@ jobs:
       - name: Check for an un-cleared review hold
         env:
           LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
-        run: node scripts/check-review-gate.mjs --labels-json="$LABELS_JSON"
+        run: |
+          if [ ! -f scripts/check-review-gate.mjs ]; then
+            echo "scripts/check-review-gate.mjs not present on main yet — review gate not bootstrapped; reporting clear (see the BOOTSTRAP note above)."
+            exit 0
+          fi
+          node scripts/check-review-gate.mjs --labels-json="$LABELS_JSON"
