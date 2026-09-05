@@ -11,7 +11,7 @@
  *     UNCHANGED (the thin-shell invariant: it never re-derives a guard), surfaces every tick's decisions,
  *     stops on the core's idle-stop and on the tick budget, and stops when its singleton lease is lost.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,8 +22,17 @@ import {
 } from '../runner-lock.mjs';
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
-  summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS,
+  summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
 } from '../runner.mjs';
+
+// Hoisted mock — `makeCliMechanicalPasses` dynamically `import('node:child_process')`s `execFileSync`
+// (§below, x5v8yy9 review finding), so the module itself must be mocked rather than the binding. Keeps every
+// other real export (via `importOriginal`) — several modules this test file pulls in transitively (e.g.
+// `scripts/lib/output-mix.mjs`) import `node:child_process` themselves and need its real shape.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, execFileSync: vi.fn() };
+});
 
 const T0 = Date.parse('2026-07-27T12:00:00.000Z');
 const MIN = 60_000;
@@ -279,5 +288,79 @@ describe('summarizeMechanicalPassError — the real error, not just execFileSync
 
   it('falls back to String(e) for a non-Error thrown value', () => {
     expect(summarizeMechanicalPassError('a plain string failure')).toBe('a plain string failure');
+  });
+});
+
+// ── (5) makeCliMechanicalPasses' review-reconcile block — x5v8yy9 review finding, 2026-09-05: before this
+//        fix, `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
+//        attempt itself threw and no session was ever spawned — so a PR's `review-round:<N>` label kept
+//        advancing every tick regardless of whether a review actually happened ─────────────────────────────
+
+describe('makeCliMechanicalPasses — the review-reconcile dispatch block never advances review-round on a failed dispatch', () => {
+  /** Route each mocked `execFileSync` call by which script it invokes, recording every call along the way. */
+  function makeExecFileSyncRouter({ plan, dispatchThrows = false }) {
+    const calls = [];
+    return {
+      calls,
+      execFileSync: vi.fn((cmd, args) => {
+        calls.push([cmd, ...args]);
+        const joined = args.join(' ');
+        if (joined.includes('reconcile-pass.mjs')) return JSON.stringify(plan);
+        if (cmd === 'gh' && args.includes('repo') && args.includes('view')) return 'owner/repo';
+        if (joined.includes('review-dispatch.mjs')) {
+          if (dispatchThrows) throw new Error('review-dispatch.mjs: assertMainNotStale tripped');
+          return '';
+        }
+        return ''; // every other best-effort pass (infra-blocked, lease-reaper, review-round-tag, review-status-tag, ...)
+      }),
+    };
+  }
+
+  it('SKIPS review-round-tag.mjs for a PR whose review-dispatch.mjs call threw', async () => {
+    const { execFileSync, calls } = makeExecFileSyncRouter({
+      dispatchThrows: true,
+      plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    await mechanicalPasses({ out: {} });
+
+    const dispatchCalls = calls.filter((c) => c.join(' ').includes('review-dispatch.mjs'));
+    const roundTagCalls = calls.filter((c) => c.join(' ').includes('review-round-tag.mjs'));
+    expect(dispatchCalls).toHaveLength(1); // the dispatch WAS attempted
+    expect(roundTagCalls).toHaveLength(0); // but the round label must NOT advance — nothing was spawned
+  });
+
+  it('DOES run review-round-tag.mjs when the dispatch actually succeeds', async () => {
+    const { execFileSync, calls } = makeExecFileSyncRouter({
+      dispatchThrows: false,
+      plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 2 }], refusals: [] },
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    await mechanicalPasses({ out: {} });
+
+    const roundTagCalls = calls.filter((c) => c.join(' ').includes('review-round-tag.mjs'));
+    expect(roundTagCalls).toHaveLength(1);
+    expect(roundTagCalls[0]).toEqual(expect.arrayContaining(['99', '--repo=owner/repo', '--round=3']));
+  });
+
+  it('still runs the informative review-status-tag.mjs sweep even when the dispatch above it failed', async () => {
+    const { execFileSync, calls } = makeExecFileSyncRouter({
+      dispatchThrows: true,
+      plan: { dispatch: [{ kind: 'review', prNumber: 99, attempts: 0 }], refusals: [] },
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    await mechanicalPasses({ out: {} });
+
+    const statusTagCalls = calls.filter((c) => c.join(' ').includes('review-status-tag.mjs'));
+    expect(statusTagCalls).toHaveLength(1); // reviewsOwed still feeds selectStatusCandidates regardless
   });
 });

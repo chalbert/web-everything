@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates,
 } from '../reconcile-core.mjs';
 import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
@@ -531,5 +531,31 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
     expect(defaultReadPrs({ exec: () => '' })).toEqual([]);
     expect(planReconcile({ prs: [], agents: [], durableCounts: {}, now: NOW }))
       .toEqual({ dispatch: [], refusals: [], notes: [] });
+  });
+});
+
+describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
+  it('includes an owed-elsewhere refusal (e.g. needs-human) — it is a real conveyor PR, not an unrelated one', () => {
+    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'needs-human' }];
+    expect(selectStatusCandidates([], refusals)).toEqual(refusals);
+  });
+
+  it('excludes ONLY nothing-owed', () => {
+    const refusals = [
+      { prNumber: 1, kind: 'nothing-owed', phase: 'queued' },
+      { prNumber: 2, kind: 'owed-elsewhere', phase: 'ci-red' },
+      { prNumber: 3, kind: 'cap-exhausted' },
+    ];
+    expect(selectStatusCandidates([], refusals).map((r) => r.prNumber)).toEqual([2, 3]);
+  });
+
+  it('includes every reviewsOwed entry regardless of refusals', () => {
+    const reviewsOwed = [{ prNumber: 42, kind: 'review' }];
+    expect(selectStatusCandidates(reviewsOwed, [])).toEqual(reviewsOwed);
+  });
+
+  it('tolerates non-array input', () => {
+    expect(selectStatusCandidates(null, null)).toEqual([]);
+    expect(selectStatusCandidates(undefined, undefined)).toEqual([]);
   });
 });

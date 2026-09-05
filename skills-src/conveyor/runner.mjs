@@ -42,6 +42,7 @@ import {
   RUNNER_LOCK_ROOT, runnerOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 
 /** The runner's tick interval — matches the SKILL's chained-sleep heartbeat (§2.5): ~120 s, just under the
  *  5-min prompt-cache window so a main-session loop's ticks stay cheap. The headless runner spends no model
@@ -189,11 +190,23 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  noticing it by hand), the parked-PR conflict watch (#xw0odtv — `we:scripts/conveyor/
  *  parked-pr-conflict-watch.mjs sweep`: labels + one-time-comments any review-parked PR that has drifted into a
  *  real merge conflict against `main`, catching exactly the axis branch-drift's single-branch watch and #2824's
- *  BEHIND-only freshness gate both leave uncovered), and (#3421) the blocking-hiccup sink. All seven are
- *  best-effort: a failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the
- *  drain stays the sole writer to `main`.
+ *  BEHIND-only freshness gate both leave uncovered), the review-reconcile pass (epic #3383, x5v8yy9 — reads
+ *  `conveyor/reconcile-pass.mjs`'s own decision and dispatches `operations/review-dispatch.mjs` for every PR it
+ *  names, plus the purely-informative `review-round-tag.mjs`/`review-status-tag.mjs` labels — the review step
+ *  is now actually mechanized, not merely planned; see {@link selectStatusCandidates} for which PRs the status
+ *  refresh covers), and (#3421) the blocking-hiccup sink. All eight are best-effort: a failure is swallowed
+ *  (logged to stderr) and never gates the tick. Never a local merge — the drain stays the sole writer to
+ *  `main`.
  *
- *  THE HICCUP SINK is the ONLY one of the five that reads `out` (this tick's already-computed
+ *  THE REVIEW-RECONCILE PASS needs no session-ephemeral bookkeeping of its own, unlike the tick's own
+ *  build/prepare/fix/ci-heal guards: `reconcile-pass.mjs` reads real ground truth (findings on the PR, a live
+ *  `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so it can just be re-run every
+ *  tick, safely — the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are. Double-dispatch is already
+ *  guarded UPSTREAM, not here: `reconcile-core.mjs`'s own liveness read binds a live session to a PR and
+ *  refuses (`live-process`) BEFORE the `review` dispatch decision is ever reached, so a review already in
+ *  flight for a PR simply does not appear in next tick's plan.
+ *
+ *  THE HICCUP SINK is the ONLY one of the eight that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
  *  auto-file-a-fix story, filing a gated `blocking` learnings entry the moment a live guard holds a
  *  dispatch, rather than waiting for a human `/note`. It files NOTHING for the #3412 free-form-response
@@ -226,7 +239,7 @@ export function summarizeMechanicalPassError(e, maxChars = MECHANICAL_PASS_ERROR
   return full.replace(/\s+/g, ' ').trim().slice(0, maxChars);
 }
 
-function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
+export function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}) {
   return async ({ out } = {}) => {
     const { execFileSync } = await import('node:child_process');
     const runQuiet = (relPath, extraArgs = []) => {
@@ -252,6 +265,96 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
     // population) — see that file's own header for the full gap this closes.
     runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
+    // Epic #3383 — MECHANIZE THE REVIEW STEP (x5v8yy9). `conveyor/reconcile-pass.mjs` (#3296) already decides
+    // WHEN an open PR is owed an independent review — it reads real ground truth (findings on the PR, a live
+    // `claude agents` session bound to it via cwd/HEAD sha) every time it runs, so unlike the tick's own
+    // build/prepare/fix/ci-heal guards it needs NO session-ephemeral bookkeeping of its own; it can just be
+    // re-run every tick, safely, the same way `infra-blocked.mjs`/`lease-reaper.mjs` already are.
+    // `operations/review-dispatch.mjs` (#3279) existed and worked standalone, but nothing called it
+    // automatically — this closes that gap.
+    //
+    // DOUBLE-DISPATCH IS ALREADY GUARDED, UPSTREAM, NOT HERE. `reconcile-core.mjs`'s own liveness read binds a
+    // live session to a PR (cwd → HEAD sha) and refuses (`live-process`) BEFORE the `review` dispatch decision
+    // is ever reached — so a review already in flight for a PR simply does not appear in next tick's plan.
+    //
+    // SEQUENTIAL, mirroring `makeCliDispatchPass`'s own reasoning even though nothing here shares guard state:
+    // firing N `claude --bg` review spawns at once has no benefit and this keeps one bad dispatch's blast
+    // radius the same as every other pass here (best-effort — a single PR's dispatch failure never stops the
+    // rest of the tick, or the tick itself).
+    let plan = null;
+    try {
+      const reconcileArgs = [join(scriptsDir, 'conveyor', 'reconcile-pass.mjs'), '--json'];
+      if (typeof repo === 'string' && repo) reconcileArgs.push(`--repo=${repo}`);
+      const reconcileOut = execFileSync('node', reconcileArgs, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+      });
+      plan = JSON.parse(reconcileOut);
+    } catch (e) {
+      process.stderr.write(`⚠ mechanical pass conveyor/reconcile-pass.mjs failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    }
+    // #x5v8yy9 review finding — kept as its OWN try/catch, separate from the `reconcile-pass.mjs` call above:
+    // this block's own failures (the `gh repo view` slug resolution, or a per-PR dispatch/tag call) used to
+    // share that call's catch and log as "mechanical pass conveyor/reconcile-pass.mjs failed" even though
+    // `reconcile-pass.mjs` itself had already succeeded — misattributing the failing step to an operator
+    // reading `runner.log`.
+    try {
+      if (plan) {
+        const reviewsOwed = (Array.isArray(plan.dispatch) ? plan.dispatch : []).filter((d) => d && d.kind === 'review');
+        // x5v8yy9 — every PR this pass has an OPINION about, informatively tagged, EXCLUDING only `nothing-owed`
+        // (reviewed/queued/landed, or a genuinely signal-free PR). `owed-elsewhere` is NOT excluded — it covers
+        // real conveyor PRs stuck `needs-human`/`ci-red`/`conflicted`, not just unrelated ones (see
+        // `selectStatusCandidates`'s own docblock for the PR #1920 staleness incident this fixes).
+        const statusCandidates = selectStatusCandidates(reviewsOwed, plan.refusals);
+        if (reviewsOwed.length || statusCandidates.length) {
+          // `review-dispatch.mjs` / the tag scripts REQUIRE a real `owner/repo` slug (unlike `reconcile-pass.mjs`,
+          // which lets `gh` resolve it from cwd) — resolve it once, lazily, only when there is actually work to
+          // do, so the common empty-plan tick never pays for an extra `gh` call.
+          const repoSlug = typeof repo === 'string' && repo
+            ? repo
+            : execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+              encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            }).trim();
+          for (const d of reviewsOwed) {
+            // #x5v8yy9 review finding — `dispatched` gates the round-tag call below. Before this fix,
+            // `review-round-tag.mjs` ran unconditionally after `review-dispatch.mjs`, even when the dispatch
+            // attempt itself threw and no session was ever spawned — so `review-round:<N>` kept advancing every
+            // tick regardless of whether a review actually happened, misleading anyone reading the label.
+            let dispatched = false;
+            try {
+              execFileSync('node', [join(scriptsDir, 'operations', 'review-dispatch.mjs'), `--pr=${d.prNumber}`, `--repo=${repoSlug}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+              dispatched = true;
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-dispatch --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
+            if (!dispatched) continue; // no session was spawned — never advance the round label for this PR
+            // PURELY INFORMATIVE (`review-round-tag.mjs`) — a `review-round:<N>` label so a human scanning the
+            // PR list can see how many rounds a PR has been through with no click-through. `d.attempts` is
+            // `reconcile-pass.mjs`'s own durable re-arm count for THIS PR — the round about to run is one past
+            // that. Best-effort: a failed tag write never blocks a review from actually being dispatched.
+            try {
+              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-round-tag.mjs'), String(d.prNumber), `--repo=${repoSlug}`, `--round=${(d.attempts ?? 0) + 1}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-round-tag --pr=${d.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
+          }
+          // PURELY INFORMATIVE (`review-status-tag.mjs`) — "is a reviewer or a fixer actually working this PR
+          // right now, or is a live session stuck". Covers PRs NOT being freshly dispatched this tick too (an
+          // already-live session, or one that just finished and needs its stale label cleared).
+          for (const c of statusCandidates) {
+            try {
+              execFileSync('node', [join(scriptsDir, 'conveyor', 'review-status-tag.mjs'), String(c.prNumber), `--repo=${repoSlug}`],
+                { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+            } catch (e) {
+              process.stderr.write(`⚠ mechanical pass review-status-tag --pr=${c.prNumber} failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`⚠ mechanical pass review-reconcile dispatch failed (non-fatal): ${String(e.message || e).split('\n')[0]}\n`);
+    }
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
