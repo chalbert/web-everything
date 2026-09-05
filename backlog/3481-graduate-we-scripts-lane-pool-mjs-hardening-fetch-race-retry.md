@@ -3,9 +3,10 @@ bornAs: x4a2dkl
 kind: story
 size: 2
 parent: "3443"
-status: open
+status: active
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/lib/lane-lease.mjs"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
 tags: []
 ---
 
