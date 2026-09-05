@@ -154,6 +154,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-refresh-guard.test.mjs',
       'scripts/__tests__/lane-pool-release-ownership.test.mjs',
       'scripts/__tests__/lane-pool-item-map.test.mjs',
+      'scripts/__tests__/lane-pool-release-item-map.test.mjs',
       'scripts/__tests__/lane-pool-ahead-provably-pushed-single-spawn.test.mjs',
       'scripts/__tests__/lane-pool-acquire-stale-origin.test.mjs',
       // #x3jmao3 — real throwaway origin + a genuine background OS process sleeping across the poll

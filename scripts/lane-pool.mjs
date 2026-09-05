@@ -395,7 +395,14 @@ function writePortRegistry(repo, entries) {
 }
 function unmapLanes(repo, lanes) {
   const entries = readPortRegistry(repo);
-  const dropped = Object.keys(entries).filter((num) => lanes.includes(entries[num].lane));
+  // #3466 round 2 — match by lane NUMBER **and** the entry's own `repo` field, never lane number alone: two
+  // different pools sharing a lane number (a pool's index space is per-pool, #1996) are NOT the same lane, and
+  // `registerItemsToLane` always stamps `repo: repo.name` on every entry it writes, so this is available on
+  // every entry an unmap can legitimately be asked to drop. Without this, an unmap scoped to one pool (a reset,
+  // a release, an acquire's pre-clear) could silently delete a DIFFERENT, still-live item's entry in another
+  // pool purely because both happen to reuse the same lane number — reproduced live via the acquire-time
+  // pre-clear path in lane-pool-release-item-map.test.mjs.
+  const dropped = Object.keys(entries).filter((num) => lanes.includes(entries[num].lane) && entries[num].repo === repo.name);
   if (dropped.length === 0) return;
   for (const num of dropped) delete entries[num];
   writePortRegistry(repo, entries);
@@ -1272,7 +1279,7 @@ function assertReleaseReservedScoped() {
 // by-session sweep needs no separate `(pool, lane)` ledger — the markers ARE that record. A blanket cross-pool
 // `--all` would nuke every session's leases everywhere, so `--all-pools` REQUIRES `--session` and refuses
 // `--all`. Reserved (permanent memory) leases are always skipped — a sweep never un-reserves.
-function cmdReleaseAllPools() {
+function cmdReleaseAllPools(repo) {
   const session = flags.session || process.env.LANE_SESSION || null;
   // #2748 — a by-ITEM selector generalizes the #2667 by-session sweep so the DRAIN can release an item's lease
   // across every pool at LAND WITHOUT knowing the exact session slug: it matches every lease whose session
@@ -1298,6 +1305,15 @@ function cmdReleaseAllPools() {
     return n != null && Number(n) === wantItem;
   };
   const selectorLabel = session ? `session "${session}"` : `item #${wantItem}`;
+  // #3466 — same registry-must-mirror-reality contract `cmdRelease` was just fixed to keep: `--all-pools` does
+  // the identical mutating thing (`rmSync(LEASE_MARKER(dir))`) via a SEPARATE code path, and it is the one the
+  // drain's land-time cleanup (`lane-drain.mjs`'s `releaseItemLeases`) and pr-watch's merge-time auto-release
+  // (`pr-watch.mjs`'s `releaseSessionAcrossPools`) actually call — the dominant real-world release triggers, not
+  // just the reaper's reclaim. `referencePath` REUSES `repo.referencePath` from `resolveRepo()` (already
+  // git-toplevel-normalized) rather than a raw `resolve(process.cwd())` — round-2 review caught that the raw
+  // form computes a WRONG registry path (and so silently no-ops) whenever the caller's cwd is a subdirectory
+  // of the checkout, exactly `pr-watch.mjs`'s `releaseSessionAcrossPools` call shape (no `cwd` override on its
+  // `execFileSync`, so it inherits whatever directory that process happens to be running from).
   const pools = existingPools();
   const perPool = [];
   let released = 0;
@@ -1320,7 +1336,14 @@ function cmdReleaseAllPools() {
       lanes.push(n);
       released++;
     }
-    if (lanes.length) perPool.push({ pool: name, lanes });
+    if (lanes.length) {
+      perPool.push({ pool: name, lanes });
+      // #3466 — drop THIS pool's released lanes from the shared item→lane registry. `name` (not `repo.name`)
+      // is the pool this iteration actually released from — round-2 review caught that `unmapLanes` matches
+      // by `repo` field as well as lane number (see its own comment), so passing the wrong pool name here
+      // would silently fail to clear this pool's own entries.
+      unmapLanes({ referencePath: repo.referencePath, name }, lanes);
+    }
   }
   if (released === 0) log(`  no leases held by ${selectorLabel} in any pool (${pools.length} pool(s) scanned)`);
   if (flags.json) process.stdout.write(JSON.stringify({ session: session || null, item: wantItem, released, pools: perPool }, null, 2) + '\n');
@@ -1328,7 +1351,7 @@ function cmdReleaseAllPools() {
 
 function cmdRelease(repo) {
   assertReleaseReservedScoped();
-  if (flags['all-pools']) return cmdReleaseAllPools(); // #2667 — cross-pool release-by-session
+  if (flags['all-pools']) return cmdReleaseAllPools(repo); // #2667 — cross-pool release-by-session
   const session = defaultSession();
   const force = !!flags.force;
   const nowMs = Date.now();
@@ -1402,6 +1425,11 @@ function cmdRelease(repo) {
       continue;
     }
     rmSync(LEASE_MARKER(dir), { force: true });
+    // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
+    // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
+    // `release --force` reclaim, which delegates here) leaves the registry pointing at a lane that is free
+    // again, and conveyor-state.mjs's health-stall scan overcounts `building` forever.
+    unmapLanes(repo, [n]);
     log(`  released lane-${n} (was ${describeLease(lease)})`);
     released++;
   }
