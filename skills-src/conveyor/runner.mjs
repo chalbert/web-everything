@@ -186,9 +186,12 @@ function makeCliTickOnce({ tickCorePath, repo = null }) {
  *  branch-drift.mjs sweep`: reports the long-lived dispatched-work branch's live divergence/conflict state to
  *  its durable git-note report, the SAME "piggyback on a pass this headless runner already ticks" shape #3449
  *  used for lane-pool lease reconciliation, so drift is caught without a human or interactive session ever
- *  noticing it by hand), and (#3421) the blocking-hiccup sink. All six are best-effort: a
- *  failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the drain stays the
- *  sole writer to `main`.
+ *  noticing it by hand), the parked-PR conflict watch (#xw0odtv — `we:scripts/conveyor/
+ *  parked-pr-conflict-watch.mjs sweep`: labels + one-time-comments any review-parked PR that has drifted into a
+ *  real merge conflict against `main`, catching exactly the axis branch-drift's single-branch watch and #2824's
+ *  BEHIND-only freshness gate both leave uncovered), and (#3421) the blocking-hiccup sink. All seven are
+ *  best-effort: a failure is swallowed (logged to stderr) and never gates the tick. Never a local merge — the
+ *  drain stays the sole writer to `main`.
  *
  *  THE HICCUP SINK is the ONLY one of the five that reads `out` (this tick's already-computed
  *  `decisions.suppressedBuilds` — the #3416 guard-suppression shape): it is the mechanical half of #3421's
@@ -243,6 +246,12 @@ function makeCliMechanicalPasses({ scriptsDir, repo = null, hiccupSession } = {}
     // overridable. `runQuiet` still appends `--repo=<repo>` when this runner was given one — harmless, since
     // `branch-drift.mjs`'s CLI parses and simply ignores any flag it doesn't itself read.
     runQuiet('conveyor/branch-drift.mjs', ['sweep']);
+    // #xw0odtv — sweeps every OPEN PR for a review-parked (review:human/pending/uncleared-changes) hold that
+    // has drifted into a REAL merge conflict (mergeable === CONFLICTING) against main, applying an informative
+    // `merge-status:conflicting` label + a one-time comment (self-clearing once the conflict resolves). Distinct
+    // from #2824 (BEHIND-only, not yet built) and from branch-drift.mjs (one named branch, not the open-PR
+    // population) — see that file's own header for the full gap this closes.
+    runQuiet('conveyor/parked-pr-conflict-watch.mjs', ['sweep']);
     try {
       // Literal relative specifiers (not scriptsDir-joined) — a computed dynamic-import argument trips
       // Vite/Rollup's SSR import analysis (used to transform this file under vitest); a string literal is
