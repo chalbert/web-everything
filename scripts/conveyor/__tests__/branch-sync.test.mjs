@@ -186,6 +186,42 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
     expect(existsSync(alertPath)).toBe(false);
   });
 
+  it('the RACE path (merge-tree probe reports clean, the real merge then fails) still escalates — review finding, #3472', () => {
+    // Before the fix, this path computed `conflictSignature('')` unconditionally (always null), so
+    // `decideEscalation` was a permanent no-op for it: the attempt cap was still reached every tick, but
+    // nothing was ever written to the alert file / notified / logged — repeating silently exactly like the
+    // original incident, just for this one narrower trigger. Prove escalation now actually fires here too.
+    const calls = [];
+    const raceGit = (args) => {
+      calls.push(args[0]);
+      if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' };
+      if (args[0] === 'rev-list') return { ok: true, stdout: '3\t0\n', stderr: '' };
+      if (args[0] === 'merge-tree') return { ok: true, stdout: 'sometreeoid\n', stderr: '' }; // probe: clean
+      if (args[0] === 'merge' && args.includes('--abort')) return { ok: true, stdout: '', stderr: '' };
+      if (args[0] === 'merge') return { ok: false, stdout: '', stderr: 'fatal: Not possible to fast-forward, aborting.' }; // real merge: fails anyway
+      throw new Error(`unexpected git call in the race fake: ${args.join(' ')}`);
+    };
+    const notifies = [];
+    const statePath = join(dir, 'race-state.json');
+    const alertPath = join(dir, 'race-alert.json');
+    const common = {
+      cwd: dir, git: raceGit, statePath, alertPath, logPath: join(dir, 'race.log'), appendLog: () => {},
+      notify: (e) => notifies.push(e), maxAttempts: 2, backoff: { baseMs: 10, factor: 2, capMs: 100 },
+    };
+
+    let r = runSyncOnce({ ...common, now: 1000 }); // attempt 1
+    expect(r).toMatchObject({ status: 'conflict', attempt: 1 });
+    r = runSyncOnce({ ...common, now: 1011 }); // attempt 2 == maxAttempts
+    expect(r).toMatchObject({ status: 'conflict', attempt: 2 });
+    r = runSyncOnce({ ...common, now: 1032 }); // capped → escalate
+    expect(r).toMatchObject({ status: 'escalated', alerted: true });
+    expect(notifies).toHaveLength(1); // proves decideEscalation actually fired — the bug made this permanently 0
+    expect(existsSync(alertPath)).toBe(true);
+    expect(JSON.parse(readFileSync(alertPath, 'utf8')).signature).toMatch(/^[0-9a-f]{12}$/);
+    // Every failed real-merge attempt was followed by an abort — the working tree was never left mid-merge.
+    expect(calls.filter((c) => c === 'merge').length).toBeGreaterThan(0);
+  });
+
   it('offline (fetch fails) is a soft no-op, never a conflict/attempt', () => {
     const offlineGit = (args) => (args[0] === 'fetch' ? { ok: false, stdout: '', stderr: 'could not resolve host' } : (() => { throw new Error('should not reach past fetch'); })());
     const r = runSyncOnce({ cwd: dir, git: offlineGit, now: 1000, statePath: join(dir, 't5-state.json'), alertPath: join(dir, 't5-alert.json'), logPath: join(dir, 't5.log'), appendLog: () => {} });
@@ -372,5 +408,49 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
 
     const r = runOnce(clone, ['--base=main', '--ref-name=main-fresh']);
     expect(r).toMatchObject({ status: 'fresh', behind: 0 });
+  });
+
+  it('ASYMMETRIC behind/ahead (real behind=2, real ahead=0) reports the correct numbers and still merges — review finding, #3472', () => {
+    // Before the fix, the rev-list args were reversed (`HEAD...origin/<ref>` instead of `origin/<ref>...HEAD`),
+    // which swaps `behind`/`ahead` for any NON-symmetric case. Every other fixture in this file happens to be
+    // symmetric (0/0 or 1/1), which is exactly why that bug shipped with all-green tests — this fixture is
+    // deliberately asymmetric (purely behind, zero local-only commits) to catch it: a clone with NO commits of
+    // its own, 2 commits behind origin/main, must report real behind=2/ahead=0, not the inverse, and must
+    // still merge (this is the ordinary steady-state case, not a conflict).
+    const dir = join(root, 'asymmetric');
+    const bare = join(dir, 'origin.git');
+    const seed = join(dir, 'seed');
+    mkdirSync(bare, { recursive: true });
+    git(['init', '-q', '--bare'], bare);
+    mkdirSync(seed, { recursive: true });
+    git(['init', '-q'], seed);
+    git(['config', 'user.email', 'test@example.com'], seed);
+    git(['config', 'user.name', 'Test'], seed);
+    git(['remote', 'add', 'origin', bare], seed);
+    writeFileSync(join(seed, 'shared.txt'), 'base\n');
+    git(['add', 'shared.txt'], seed);
+    git(['commit', '-q', '-m', 'seed'], seed);
+    git(['branch', '-M', 'main'], seed);
+    git(['push', '-q', 'origin', 'main'], seed);
+
+    // Clone BEFORE main advances further — this clone's HEAD has zero commits of its own from here on
+    // (real ahead=0), while main gains 2 more commits AFTER the clone (real behind=2).
+    const clone = join(dir, 'clone');
+    git(['clone', '-q', bare, clone]);
+    git(['config', 'user.email', 'test@example.com'], clone);
+    git(['config', 'user.name', 'Test'], clone);
+
+    writeFileSync(join(seed, 'm1.txt'), 'm1\n');
+    git(['add', 'm1.txt'], seed);
+    git(['commit', '-q', '-m', 'main: m1'], seed);
+    writeFileSync(join(seed, 'm2.txt'), 'm2\n');
+    git(['add', 'm2.txt'], seed);
+    git(['commit', '-q', '-m', 'main: m2'], seed);
+    git(['push', '-q', 'origin', 'main'], seed);
+
+    const r = runOnce(clone, ['--base=main', '--ref-name=main-fresh']);
+    expect(r).toMatchObject({ status: 'synced', behind: 2 });
+    expect(existsSync(join(clone, 'm1.txt'))).toBe(true);
+    expect(existsSync(join(clone, 'm2.txt'))).toBe(true);
   });
 });

@@ -223,8 +223,12 @@ export function runSyncOnce({
     return { status: 'offline' };
   }
 
-  // 2. is there anything to merge at all?
-  const cmp = git(['rev-list', '--left-right', '--count', `HEAD...origin/${refName}`], cwd);
+  // 2. is there anything to merge at all? `parseLeftRightCount` (imported from branch-drift.mjs) reads
+  //    `<left-only>\t<right-only>` as `{behind, ahead}` for a `<target>...<branch>` invocation — the LEFT side
+  //    must be the target (`origin/<refName>`) and the RIGHT side this checkout's own `HEAD`, or the two
+  //    numbers come back swapped (found in review: a purely-behind, non-diverged checkout was misreported as
+  //    `ahead`, tripped the `behind === 0` freshness gate below, and never merged at all).
+  const cmp = git(['rev-list', '--left-right', '--count', `origin/${refName}...HEAD`], cwd);
   const { behind, ahead } = cmp.ok ? parseLeftRightCount(cmp.stdout) : { behind: 0, ahead: 0 };
   if (behind === 0) {
     // Up to date. Clear any stale conflict/escalation state — whatever drift it tracked is resolved (by this
@@ -238,7 +242,14 @@ export function runSyncOnce({
   }
 
   // 3. pre-flight, WORKING-TREE-FREE conflict probe. Only a CLEAN result ever touches the working tree.
+  //    `conflictText` is set on EITHER path that falls through to conflict handling below, so escalation
+  //    always has a real signature to dedup/re-nag on — a bare `probe.ok` check here previously left the RACE
+  //    path (below) with an always-null signature, which made `decideEscalation` a permanent no-op for that
+  //    narrower trigger (found in review): the attempt cap would still be reached every tick, but nothing
+  //    would ever be written to the alert file / notified / logged as a banner — silently repeating exactly
+  //    like the incident this file exists to fix, just for this one specific failure mode.
   const probe = git(['merge-tree', '--write-tree', 'HEAD', `origin/${refName}`], cwd);
+  let conflictText = null;
   if (probe.ok) {
     const merge = git(['merge', `origin/${refName}`, '--no-edit', '--quiet'], cwd);
     if (merge.ok) {
@@ -251,12 +262,15 @@ export function runSyncOnce({
     // two calls). Abort defensively (this is the ONE path that can leave a MERGE_HEAD behind) and fall through
     // to the conflict handling below so the incident is tracked/retried like any other conflict.
     git(['merge', '--abort'], cwd);
+    conflictText = merge.stderr || merge.stdout || 'merge-tree probe reported clean but the real merge failed';
     log(`${iso(now)} sync: dry-run probe reported clean but the real merge failed (${firstLine(merge.stderr)}) — treating as a conflict this tick`);
+  } else {
+    conflictText = probe.stdout || probe.stderr;
   }
 
   // 4. conflict path — bounded retry, then escalate. The working tree was never touched (unless the race above
   //    fired, which already aborted cleanly).
-  const signature = conflictSignature(probe.ok ? '' : (probe.stdout || probe.stderr));
+  const signature = conflictSignature(conflictText);
   let store = loadJson(paths.state);
 
   if (!store || typeof store !== 'object' || !Number.isFinite(Number(store.attempt))) {
