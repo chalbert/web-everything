@@ -211,10 +211,13 @@ export function runSyncOnce({
   const log = (line) => appendLog(paths.log, line);
   const backoffCfg = { baseMs: DEFAULT_BASE_MS, factor: DEFAULT_FACTOR, capMs: DEFAULT_CAP_MS, ...backoff };
 
-  // 1. fetch — best-effort. An explicit destination refspec (never a bare source) so the subsequent
-  //    `origin/<refName>` reads are reliable regardless of the checkout's own fetch-refspec config (the SAME
-  //    reasoning `branch-drift.mjs`'s own `computeDrift` gives for its destination refspecs).
-  const fetched = git(['fetch', 'origin', `${base}:refs/remotes/origin/${refName}`, '--quiet'], cwd);
+  // 1. fetch — best-effort. An explicit, FORCE-prefixed destination refspec (never a bare source, never a
+  //    plain non-force update) — the SAME shape `branch-drift.mjs`'s own `computeDrift` uses, for the same
+  //    reason: reliable regardless of the checkout's own fetch-refspec config, and never rejected because the
+  //    local tracking ref this loop owns (`refs/remotes/origin/<refName>`) is treated as needing a fast-
+  //    forward check against ITS OWN prior value (this ref is scratch bookkeeping this loop fully owns, not a
+  //    real branch anyone else advances by hand).
+  const fetched = git(['fetch', 'origin', '--quiet', `+${base}:refs/remotes/origin/${refName}`], cwd);
   if (!fetched.ok) {
     log(`${iso(now)} sync: fetch failed (offline or network issue) — skipping this tick: ${firstLine(fetched.stderr)}`);
     return { status: 'offline' };

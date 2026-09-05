@@ -243,6 +243,10 @@ function buildConflictFixture(name) {
 
   const clone = join(dir, 'clone');
   git(['clone', '-q', bare, clone]);
+  // The CLI's own real `git merge` (once a clean tick lands) creates a commit — it needs an identity too,
+  // and a clone does NOT inherit one from its source.
+  git(['config', 'user.email', 'test@example.com'], clone);
+  git(['config', 'user.name', 'Test'], clone);
   git(['checkout', '-q', 'feature'], clone);
   return { dir, bare, seed, clone };
 }
@@ -285,12 +289,15 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     expect(r4.alerted).toBe(false);
     clean();
 
-    // Resolve it upstream: main's shared.txt now matches feature's — a real, human-plausible resolution (e.g.
-    // main reverted the colliding edit). Pushed from the untouched `seed` checkout.
+    // Resolve it upstream: main REVERTS its own colliding edit back to the shared base content — a real,
+    // human-plausible resolution — so only feature's side still touches shared.txt relative to the merge
+    // base. That is a trivial, version-independent non-conflict (one side changed, the other reverted to
+    // match base), unlike relying on both sides converging to identical content. Pushed from the untouched
+    // `seed` checkout.
     git(['checkout', '-q', 'main'], seed);
-    writeFileSync(join(seed, 'shared.txt'), 'branch-version\n');
+    writeFileSync(join(seed, 'shared.txt'), 'base\n');
     git(['add', 'shared.txt'], seed);
-    git(['commit', '-q', '-m', 'main: resolve the shared.txt collision'], seed);
+    git(['commit', '-q', '-m', 'main: revert the shared.txt collision'], seed);
     git(['push', '-q', 'origin', 'main'], seed);
 
     const r5 = runOnce(clone, extra); // now a clean merge is possible again
@@ -310,6 +317,8 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     git(['init', '-q', '--bare'], bare);
     mkdirSync(seed, { recursive: true });
     git(['init', '-q'], seed);
+    git(['config', 'user.email', 'test@example.com'], seed);
+    git(['config', 'user.name', 'Test'], seed);
     git(['remote', 'add', 'origin', bare], seed);
     writeFileSync(join(seed, 'shared.txt'), 'base\n');
     git(['add', 'shared.txt'], seed);
@@ -329,6 +338,8 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
 
     const clone = join(dir, 'clone');
     git(['clone', '-q', bare, clone]);
+    git(['config', 'user.email', 'test@example.com'], clone);
+    git(['config', 'user.name', 'Test'], clone);
     git(['checkout', '-q', 'feature'], clone);
 
     const r = runOnce(clone, ['--base=main', '--ref-name=main-fresh']);
@@ -346,6 +357,8 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     git(['init', '-q', '--bare'], bare);
     mkdirSync(seed, { recursive: true });
     git(['init', '-q'], seed);
+    git(['config', 'user.email', 'test@example.com'], seed);
+    git(['config', 'user.name', 'Test'], seed);
     git(['remote', 'add', 'origin', bare], seed);
     writeFileSync(join(seed, 'shared.txt'), 'base\n');
     git(['add', 'shared.txt'], seed);
@@ -354,6 +367,8 @@ describe('branch-sync.mjs CLI — real fixture repo, real merge-tree, real merge
     git(['push', '-q', 'origin', 'main'], seed);
     const clone = join(dir, 'clone');
     git(['clone', '-q', bare, clone]);
+    git(['config', 'user.email', 'test@example.com'], clone);
+    git(['config', 'user.name', 'Test'], clone);
 
     const r = runOnce(clone, ['--base=main', '--ref-name=main-fresh']);
     expect(r).toMatchObject({ status: 'fresh', behind: 0 });
