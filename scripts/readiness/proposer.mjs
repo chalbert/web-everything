@@ -4,7 +4,9 @@
  *
  * The non-deterministic *assist* that was deliberately carved OUT of the deterministic readiness
  * fixer (#250): for an `open` issue/idea that is decided-but-thin (no acceptance criteria, no
- * concrete file paths), draft candidate criteria / likely paths for a human to accept. It is the
+ * concrete file paths — and, per the build-brief-discipline extension #2819, no named edge-cases,
+ * no integration/wiring test, or an unearned "closes X" claim), draft candidate fixes for a human to
+ * accept. It is the
  * readiness analogue of the conformance auto-fix `model` fixer (#196) — AI is a swappable provider
  * behind a stable contract (`CustomProposerRegistry`, mirroring `CustomFixerRegistry` in
  * `scripts/autofix/engine.mjs`), not architecture.
@@ -64,6 +66,82 @@ function hasFilePaths(body) {
 }
 
 /**
+ * Build-brief discipline (#2819 — docs/agent/platform-decisions.md#build-brief-discipline): a delegated
+ * build brief must name its edge-cases, require an integration/wiring test, and never overclaim scope.
+ * Same conservative-proxy shape as the two checks above — a false "has X" only means skipping a
+ * proposal, never a wrong edit.
+ */
+
+// How many characters back from a candidate match `hasAffirmativeMention` looks for a directly-adjacent
+// negation word. Deliberately short and adjacent-only (a hedge with an intervening word, e.g. "not
+// really an edge case", is accepted imprecision — see the residual-imprecision note below): this
+// silences the common disclaiming pattern ("No edge cases apply") without trying to parse general
+// negation scope, which is out of reach for a keyword-proxy check that only ever nudges a human.
+const NEGATION_LOOKBACK_CHARS = 20;
+
+/**
+ * True if `re` matches `body` at least once WITHOUT being immediately preceded by a negation ("no",
+ * "not", "none", "never", "n/a") — so "No edge cases apply" or "No integration test needed" don't
+ * satisfy a check whose entire point is that the thing is actually named/required, not disclaimed away.
+ */
+function hasAffirmativeMention(body, re) {
+  const flags = re.flags.includes('g') ? re.flags : re.flags + 'g';
+  const global = new RegExp(re.source, flags);
+  let m;
+  while ((m = global.exec(body))) {
+    const before = body.slice(Math.max(0, m.index - NEGATION_LOOKBACK_CHARS), m.index);
+    if (!/\b(?:no|not|none|never|n\/a)\b\s*$/i.test(before)) return true;
+    if (global.lastIndex === m.index) global.lastIndex += 1; // guard against a zero-width match stalling
+  }
+  return false;
+}
+
+// Residual, accepted imprecision (converge-loop red-team, #2819): a hedge with an intervening word
+// ("not really an edge case") isn't caught by the adjacent-only negation window above, and
+// `overclaimsScope` below only recognizes third-person "closes" (a differently-conjugated overclaim,
+// e.g. "we close the gap", slips through). Both are the same conservative-proxy tradeoff as
+// `hasFilePaths`'s own doc comment: a keyword proxy that only ever nudges a human toward a real gap,
+// never blocks or auto-applies, so a missed real case costs a skipped nudge — never a wrong edit.
+
+/**
+ * Does the body name at least one edge-case to handle or explicitly reject? A bare mention (the third
+ * alternative in an earlier draft) already subsumes a heading or bold-label form, so there is only one
+ * real check — kept as one regex rather than three so the redundancy can't drift. Tolerates a hyphen
+ * between the words ("edge-case(s)"), the form this statute's own prose uses throughout.
+ */
+function hasEdgeCases(body) {
+  return hasAffirmativeMention(body, /\bedge[\s-]*cases?\b/i);
+}
+
+/**
+ * Does the body require an integration/wiring test, not only a unit test? Also accepts "end-to-end" as
+ * a synonym — the exact phrase this file's own `overclaimsScope` nudges authors toward using.
+ */
+function hasIntegrationTests(body) {
+  return hasAffirmativeMention(body, /\b(?:integration|wiring|end-to-end)[\s-]tests?\b/i);
+}
+
+/**
+ * Does the body claim to "close" something without demonstrating THAT claim closes it end-to-end? Keys
+ * on the third-person "closes" — the root-cause example was a slice title echoed as "closes the
+ * data-layer dodge" — never the bare verb "close" (too easy to false-positive on "close attention",
+ * "we're close to done") and never "fixes [#N]" (the ordinary `## Relation` cross-reference). Also
+ * excludes the "closes over" JS-closure idiom and a GitHub-style "closes #123" / "closes [#123]"
+ * issue auto-link (a mechanical cross-reference, not a prose scope claim) — both common false
+ * positives in code-adjacent prose. Checked PER PARAGRAPH (blank-line-delimited) rather than over the
+ * whole body, so an unrelated "end-to-end" mention elsewhere in a long item can't silently back a claim
+ * it never addresses.
+ *
+ * Residual, accepted imprecision: "the loop closes when X" (a state description, not a scope claim)
+ * still matches — same conservative-proxy tradeoff as `hasFilePaths` above, and cheap here because this
+ * check only ever nudges a human; it never blocks or auto-applies.
+ */
+function overclaimsScope(body) {
+  return body.split(/\n\s*\n/).some((para) =>
+    /\bcloses\b(?!\s+over\b)(?!\s*:?\s*\[?#\d)/i.test(para) && !/\bend-to-end\b/i.test(para));
+}
+
+/**
  * Select the decided-but-thin candidates a proposer should draft for. DETERMINISTIC — a pure function
  * of each loaded item and its body. Skips anything claimed/done/shelved, anything that isn't a
  * buildable issue/idea (so `decision`/`review` are left alone — acceptance criterion: never edits a
@@ -89,6 +167,9 @@ export function selectProposalCandidates(items, readBody) {
     const gaps = [];
     if (!hasAcceptanceCriteria(body)) gaps.push('acceptance-criteria');
     if (!hasFilePaths(body)) gaps.push('file-paths');
+    if (!hasEdgeCases(body)) gaps.push('edge-cases');
+    if (!hasIntegrationTests(body)) gaps.push('integration-tests');
+    if (overclaimsScope(body)) gaps.push('overclaim-scope');
     if (gaps.length === 0) continue; // already fleshed out — not thin
     out.push({
       num: it.num, id: it.id, title: it.title ?? it.id, summary: it.summary ?? '',
@@ -109,11 +190,15 @@ export function selectProposalCandidates(items, readBody) {
  * @property {string[]} tags
  * @property {string} file
  * @property {string} body
- * @property {string[]} gaps   Which of `acceptance-criteria` / `file-paths` are missing.
+ * @property {string[]} gaps   Which of `acceptance-criteria` / `file-paths` / `edge-cases` /
+ *   `integration-tests` / `overclaim-scope` apply (#2819 build-brief discipline).
  *
  * @typedef {Object} Proposal
- * @property {string[]} [criteria]  Candidate acceptance criteria (only when `acceptance-criteria` gap).
- * @property {string[]} [paths]     Candidate likely repo file paths (only when `file-paths` gap).
+ * @property {string[]} [criteria]    Candidate acceptance criteria (only when `acceptance-criteria` gap).
+ * @property {string[]} [paths]       Candidate likely repo file paths (only when `file-paths` gap).
+ * @property {string[]} [edgeCases]   Candidate edge-cases to name (only when `edge-cases` gap).
+ * @property {string} [integrationNote]   A wiring/integration-test nudge (only when `integration-tests` gap).
+ * @property {string} [overclaimWarning]  A soften-the-claim nudge (only when `overclaim-scope` gap).
  * @property {string} [rationale]   One-line note on how the draft was derived (shown to the human).
  *
  * @typedef {Object} Proposer
@@ -182,6 +267,19 @@ export const referenceProposer = {
         ? [`scripts/${tail}.mjs`, `scripts/__tests__/${tail}.test.mjs`]
         : [`${dir}/${tail}.js`];
     }
+    if (c.gaps.includes('edge-cases')) {
+      proposal.edgeCases = [
+        `Name at least one input this change must reject or handle specially.`,
+      ];
+    }
+    if (c.gaps.includes('integration-tests')) {
+      proposal.integrationNote =
+        'Add a wiring/integration test that exercises this through its real caller, not only a unit test of the function in isolation.';
+    }
+    if (c.gaps.includes('overclaim-scope')) {
+      proposal.overclaimWarning =
+        'This item claims to "close" something — confirm the slice closes it end-to-end, or soften the claim to describe only what this slice does.';
+    }
     return proposal;
   },
 };
@@ -229,7 +327,11 @@ export async function propose(items, { readBody, registry }) {
       results.push({ candidate, proposal: null, status: 'error', providerId: provider.id, reason: e.message });
       continue;
     }
-    if (!proposal || (!proposal.criteria?.length && !proposal.paths?.length)) {
+    const hasDraft = proposal && (
+      proposal.criteria?.length || proposal.paths?.length || proposal.edgeCases?.length
+      || proposal.integrationNote || proposal.overclaimWarning
+    );
+    if (!hasDraft) {
       results.push({ candidate, proposal: null, status: 'refused', providerId: provider.id });
       continue;
     }
@@ -250,14 +352,31 @@ export function renderProposalDiff(result) {
   if (result.status !== 'proposed' || !result.proposal) return '';
   const { candidate: c, proposal: p } = result;
   const lines = [`--- ${c.file}  (proposal — NOT written; accept by hand)`];
+  // Blank `+`-line separator before every block after the first — factored out so four call sites (was
+  // one) can't drift on the `lines.length > 1` boilerplate.
+  const startBlock = () => { if (lines.length > 1) lines.push('+'); };
+
   if (p.criteria?.length) {
     lines.push('+ ## Acceptance criteria', '+');
     for (const crit of p.criteria) lines.push(`+ - ${crit}`);
   }
   if (p.paths?.length) {
-    if (p.criteria?.length) lines.push('+');
+    startBlock();
     lines.push('+ <!-- Likely files (candidate — confirm before relying on these): -->');
     for (const path of p.paths) lines.push(`+ - \`${path}\``);
+  }
+  if (p.edgeCases?.length) {
+    startBlock();
+    lines.push('+ ## Edge cases', '+');
+    for (const ec of p.edgeCases) lines.push(`+ - ${ec}`);
+  }
+  if (p.integrationNote) {
+    startBlock();
+    lines.push('+ <!-- Integration-test note (candidate — confirm before relying on this): -->', `+ - ${p.integrationNote}`);
+  }
+  if (p.overclaimWarning) {
+    startBlock();
+    lines.push('+ <!-- Overclaim check (candidate — confirm before relying on this): -->', `+ - ${p.overclaimWarning}`);
   }
   return lines.join('\n');
 }
