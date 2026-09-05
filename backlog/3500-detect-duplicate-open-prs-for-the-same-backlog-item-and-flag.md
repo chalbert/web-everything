@@ -1,4 +1,5 @@
 ---
+bornAs: xs19sz9
 kind: story
 size: 3
 status: resolved
