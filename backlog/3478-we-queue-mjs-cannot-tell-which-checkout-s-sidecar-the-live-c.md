@@ -3,10 +3,12 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
+dateResolved: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +80,28 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+
+Built `we:scripts/conveyor/runner-checkout.mjs` (pure `resolveRunnerPid` decision + thin IO:
+`liveLockEntries` reads every entry under the runner-lock root, `pidCwd` shells
+`lsof -p <pid> -a -d cwd -Fn`) and a new CLI, `we:scripts/conveyor/queue-work.mjs`, that resolves the live
+runner's actual checkout before writing and REFUSES (`no-live-runner` / `ambiguous` / `cwd-unresolvable`)
+rather than silently clearing into the wrong sidecar. `we:scripts/conveyor/queue.mjs` is left unchanged
+(still script-location resolution) — `we:scripts/conveyor/queue-work.mjs` sits alongside it as the
+preferred entry when the caller isn't sure which checkout's runner is live; `we:skills-src/conveyor/SKILL.md`
+now points to it for that case. Covered by `we:scripts/conveyor/__tests__/runner-checkout.test.mjs` (pure
+decision cases + a real-`lsof`-against-a-real-child-process end-to-end case) and
+`we:scripts/conveyor/__tests__/queue-work.test.mjs` (CLI roundtrip against a real spawned "runner" process,
+plus the no-live-runner, ambiguous, and cwd-unresolvable refusals) — all three "Done when" executable cases
+(a/b/c) are exercised.
+
+Converged via `/converge` (elevated care, 1 round to accept + a passing red-team). Two findings from the
+first pass are filed rather than fixed here: the resolution's reliance on a bare pid (not process identity)
+is a real but narrow, out-of-scope race — filed as backlog `xy5td0e`, `relatedTo` this item, with its own
+executable "Done when"; `we:skills-src/conveyor/SKILL.md`'s new guidance now caveats it inline. A
+`simplicity` finding (a second CLI duplicating `we:scripts/conveyor/queue.mjs`'s add/remove/list surface) is
+a deliberate, item-sanctioned tradeoff — the item's own "fix shape" left "sits alongside vs. replaces" as an
+implementation call, and replacing `we:scripts/conveyor/queue.mjs` outright would have expanded this item's
+blast radius onto every existing caller of the script-location resolution — so it stands as documented, not
+fixed.
