@@ -364,3 +364,44 @@ describe('makeCliMechanicalPasses — the review-reconcile dispatch block never 
     expect(statusTagCalls).toHaveLength(1); // reviewsOwed still feeds selectStatusCandidates regardless
   });
 });
+
+// ── (6) makeCliMechanicalPasses' OWN "does it still invoke every mechanical pass" proof — xb4fjir, filed as
+//        the OWED prevention on the #1949 review finding (2026-09-05): before this test, deleting any single
+//        `runQuiet('conveyor/<pass>.mjs', …)` line reddened nothing here — this file only ever mocked
+//        `execFileSync` generically and asserted individual passes' own behavior, never the SET the function
+//        invokes each tick. A future refactor/reorder/accidental deletion could silently drop a mechanical
+//        pass (e.g. `duplicate-pr-watch.mjs`, `parked-pr-conflict-watch.mjs`) with nothing here noticing —
+//        exactly the failure class #xs19sz9's own duplicate-PR watch exists to catch, made invisible again by
+//        its own wiring silently regressing. ─────────────────────────────────────────────────────────────
+
+describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes, in order, every tick', () => {
+  it('a plain tick (no reconcile findings) runs exactly this ordered script list, with --repo threaded through', async () => {
+    const calls = [];
+    const execFileSync = vi.fn((cmd, args) => {
+      calls.push([cmd, ...args]);
+      const joined = args.join(' ');
+      if (joined.includes('reconcile-pass.mjs')) return JSON.stringify({ dispatch: [], refusals: [] });
+      return ''; // every other best-effort pass — this test only cares WHICH scripts run, not their own output
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+
+    const mechanicalPasses = makeCliMechanicalPasses({ scriptsDir: '/scripts', repo: 'owner/repo' });
+    await mechanicalPasses({ out: {} });
+
+    // The exact relative script path (or literal flag) each call carries, in the order `execFileSync` saw them
+    // — mutating this list is the mechanical check: delete/reorder/rename a `runQuiet(...)` line above and this
+    // assertion goes red, which is the whole point (a `grep` for the added line, this PR's own backlog card
+    // cited as its only prior check, catches none of that).
+    expect(calls.map((c) => c.join(' '))).toEqual([
+      'node /scripts/conveyor/infra-blocked.mjs retry --repo=owner/repo',
+      'node /scripts/conveyor/lease-reaper.mjs --repo=owner/repo',
+      'node /scripts/conveyor/session-reaper.mjs --repo=owner/repo',
+      'node /scripts/conveyor/reconcile-fix-dispatch.mjs --repo=owner/repo',
+      'node /scripts/conveyor/branch-drift.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=owner/repo',
+      'node /scripts/conveyor/reconcile-pass.mjs --json --repo=owner/repo',
+      'node /scripts/conveyor/duplicate-pr-watch.mjs sweep --repo=owner/repo',
+    ]);
+  });
+});
