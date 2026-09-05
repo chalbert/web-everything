@@ -4,7 +4,11 @@
  *   {@link reapPlan} / {@link itemNumFromSession} / {@link laneRefItemNum} directly with fixtures (NO fs / git /
  *   gh / clock) and pins every reap axis — PR-terminal (merged/closed), session-gone (WE #3466/#2412, found live
  *   2026-09-04/05), TTL-stale, the DORMANT pid axis — plus the reserved-lane never-reap invariant and the
- *   session↔head-ref item-number keys the cross-pool couple relies on.
+ *   session↔head-ref item-number keys the cross-pool couple relies on. Also pins the two independent-review
+ *   findings on PR #1921 that hardened session-gone before it landed: the listing-visibility GRACE WINDOW (a
+ *   lease acquired moments ago must never be reaped just because its session isn't listed yet — #3283's
+ *   failure shape, reintroduced) and the ALL-EMPTY-LISTING degrade (zero background rows must read as "axis
+ *   off", never "everyone's gone").
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -15,17 +19,22 @@ import {
   prStatesFromList,
   pidAliveForLease,
   sessionStateByName,
+  sessionStatesForReap,
   sessionGoneForLease,
   AGENT_GONE_STATES,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
+import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
 
 const NOW = Date.parse('2026-07-26T12:00:00Z');
 const TTL_MS = DEFAULT_LEASE_TTL_MINUTES * 60_000;
-// A fresh lease acquired 1 minute ago (well within TTL) — not stale.
+const GRACE_MS = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000;
+// A fresh lease acquired 1 minute ago (well within TTL, and well within the listing-visibility grace window) — not stale.
 const fresh = (over = {}) => ({ session: 'conveyor-2667', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: 'Mac', pid: 111, ...over });
-// A lease acquired long past its TTL.
+// A lease acquired long past its TTL (and long past the grace window).
 const stale = (over = {}) => ({ session: 'conveyor-2500', acquiredAt: new Date(NOW - (DEFAULT_LEASE_TTL_MINUTES + 60) * 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: 'Mac', pid: 222, ...over });
+// A lease past the listing-visibility grace window but nowhere near TTL — the shape session-gone exists for.
+const agedPastGrace = (over = {}) => ({ session: 'conveyor-3466', acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: 'Mac', pid: 333, ...over });
 
 describe('itemNumFromSession — the couple key encoded in a lease session', () => {
   it('conveyor-/fix-/prepare- sessions → the trailing item number', () => {
@@ -275,25 +284,82 @@ describe('sessionStateByName — claude agents --json --all listing → backgrou
   });
 });
 
-describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent session confirmed gone?', () => {
-  it('the live 2026-09-04/05 incident shape: the session is ENTIRELY ABSENT from the listing → true (gone)', () => {
-    // conveyor-3466 (lane-38) and conveyor-2412/2412c (lane-40) died/disappeared entirely from `claude agents
-    // --json` — not merely `done`/`failed`, simply not listed at all, confirmed dead via `ps -p <pid>`.
-    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
-    expect(sessionGoneForLease({ session: 'conveyor-3466' }, states)).toBe(true);
-    expect(sessionGoneForLease({ session: 'conveyor-2412' }, states)).toBe(true);
-    // The retry variant is an EXACT, separate name — not collapsed — and is checked the same way.
-    expect(sessionGoneForLease({ session: 'conveyor-2412c' }, states)).toBe(true);
+describe('sessionStatesForReap — #1921 review fix: an ALL-EMPTY listing degrades to axis-off, not "everyone gone"', () => {
+  it('some background rows present → the same Map sessionStateByName would build', () => {
+    const sessions = [{ kind: 'background', name: 'conveyor-9999', state: 'working' }];
+    expect(sessionStatesForReap(sessions)).toEqual(sessionStateByName(sessions));
   });
-  it('a session listed in a terminal state (done/failed/stopped) → true (gone)', () => {
+  it('ZERO background rows (empty array, all-interactive, or malformed) → null, never an empty Map', () => {
+    // A `claude agents --json --all` call that parses but yields nothing usable is indistinguishable from a
+    // bad/incomplete read — treating it as "confirmed nobody is dispatched" would read every dispatcher-named
+    // lease's session as gone and mass-reap the fleet on one bad read (the exact review finding on #1921).
+    expect(sessionStatesForReap([])).toBe(null);
+    expect(sessionStatesForReap([{ kind: 'interactive', name: 'conveyor-1', state: 'working' }])).toBe(null);
+    expect(sessionStatesForReap(null)).toBe(null);
+    expect(sessionStatesForReap(undefined)).toBe(null);
+  });
+});
+
+describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent session confirmed gone?', () => {
+  it('the live 2026-09-04/05 incident shape: session ABSENT + past the listing-visibility grace window → true (gone)', () => {
+    // conveyor-3466 (lane-38) and conveyor-2412/2412c (lane-40) died/disappeared entirely from `claude agents
+    // --json` — not merely `done`/`failed`, simply not listed at all, confirmed dead via `ps -p <pid>`. Both
+    // leases had been held far longer than the listing could plausibly still be "not yet caught up".
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const agedLease = (session) => ({ session, acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString() });
+    expect(sessionGoneForLease(agedLease('conveyor-3466'), states, { nowMs: NOW })).toBe(true);
+    expect(sessionGoneForLease(agedLease('conveyor-2412'), states, { nowMs: NOW })).toBe(true);
+    // The retry variant is an EXACT, separate name — not collapsed — and is checked the same way.
+    expect(sessionGoneForLease(agedLease('conveyor-2412c'), states, { nowMs: NOW })).toBe(true);
+  });
+
+  // ── #1921 independent review, security/concurrency-race finding (CONFIRMED) — the grace window ─────────────
+
+  it('session ABSENT but the lease is STILL INSIDE the grace window → null (too young to judge, NOT gone)', () => {
+    // A lease acquired seconds/minutes ago whose delivery agent has not yet had time to appear in `claude
+    // agents --json --all` (dispatch-lane.mjs's own measured listing-visibility lag) must never be reaped just
+    // because it isn't listed YET — that force-releases a live lane before its agent has committed anything,
+    // reintroducing #3283 ("the lease reaper reclaims a lane seconds after it is acquired") through this axis.
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    expect(sessionGoneForLease(fresh({ session: 'conveyor-3466' }), states, { nowMs: NOW })).toBe(null);
+    // Just under the boundary is still too young.
+    const almostGrace = { session: 'conveyor-3466', acquiredAt: new Date(NOW - (GRACE_MS - 1000)).toISOString() };
+    expect(sessionGoneForLease(almostGrace, states, { nowMs: NOW })).toBe(null);
+  });
+  it('session ABSENT, exactly at / just past the grace boundary → true (gone)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const atGrace = { session: 'conveyor-3466', acquiredAt: new Date(NOW - GRACE_MS).toISOString() };
+    expect(sessionGoneForLease(atGrace, states, { nowMs: NOW })).toBe(true);
+  });
+  it('session ABSENT + no nowMs supplied → null (never guess at an unknown age), even past what would be the grace window', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    expect(sessionGoneForLease(agedPastGrace(), states)).toBe(null);
+  });
+  it('session ABSENT + unparsable/missing acquiredAt → null (never guess at an unknown age)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, states, { nowMs: NOW })).toBe(null);
+    expect(sessionGoneForLease({ session: 'conveyor-3466', acquiredAt: 'not-a-date' }, states, { nowMs: NOW })).toBe(null);
+  });
+  it('a custom graceMs is honored (forward-compat knob, not asserted elsewhere)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const lease = { session: 'conveyor-3466', acquiredAt: new Date(NOW - 60_000).toISOString() }; // 1 min old
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, graceMs: 30_000 })).toBe(true); // past a 30s grace
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, graceMs: 5 * 60_000 })).toBe(null); // inside a 5min grace
+  });
+
+  it('a session listed in a terminal state (done/failed/stopped) → true (gone), NO grace check needed', () => {
+    // A positive, directly-observed row — not an inference from silence — so even a lease acquired seconds ago
+    // reaps immediately once its own session reports a terminal state.
     const states = sessionStateByName([
       { kind: 'background', name: 'conveyor-100', state: 'done' },
       { kind: 'background', name: 'conveyor-101', state: 'failed' },
       { kind: 'background', name: 'conveyor-102', state: 'stopped' },
     ]);
+    expect(sessionGoneForLease(fresh({ session: 'conveyor-100' }), states, { nowMs: NOW })).toBe(true);
+    expect(sessionGoneForLease(fresh({ session: 'conveyor-101' }), states, { nowMs: NOW })).toBe(true);
+    expect(sessionGoneForLease(fresh({ session: 'conveyor-102' }), states, { nowMs: NOW })).toBe(true);
+    // Even with no nowMs at all — the terminal-state branch never needs an age.
     expect(sessionGoneForLease({ session: 'conveyor-100' }, states)).toBe(true);
-    expect(sessionGoneForLease({ session: 'conveyor-101' }, states)).toBe(true);
-    expect(sessionGoneForLease({ session: 'conveyor-102' }, states)).toBe(true);
   });
   it('a session listed and still working/blocked → false (a slow build, not a dead one)', () => {
     const states = sessionStateByName([
@@ -304,46 +370,50 @@ describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent se
     expect(sessionGoneForLease({ session: 'conveyor-201' }, states)).toBe(false);
   });
   it('a session whose name matches no dispatcher grammar → null (never guess about a manual/interactive lane)', () => {
-    const states = sessionStateByName([]); // empty listing — would read "gone" for a dispatcher-minted name
-    expect(sessionGoneForLease({ session: 'Mac:24827' }, states)).toBe(null);
-    expect(sessionGoneForLease({ session: 'some-adhoc-session' }, states)).toBe(null);
-    expect(sessionGoneForLease({}, states)).toBe(null);
-    expect(sessionGoneForLease(null, states)).toBe(null);
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'Mac:24827' }, states, { nowMs: NOW })).toBe(null);
+    expect(sessionGoneForLease({ session: 'some-adhoc-session' }, states, { nowMs: NOW })).toBe(null);
+    expect(sessionGoneForLease({}, states, { nowMs: NOW })).toBe(null);
+    expect(sessionGoneForLease(null, states, { nowMs: NOW })).toBe(null);
   });
-  it('sessionStates not a Map (listing unavailable this pass) → null (axis off), even for a dispatcher name', () => {
-    expect(sessionGoneForLease({ session: 'conveyor-3466' }, null)).toBe(null);
-    expect(sessionGoneForLease({ session: 'conveyor-3466' }, undefined)).toBe(null);
+  it('sessionStates not a Map (listing unavailable/all-empty this pass) → null (axis off), even for a dispatcher name', () => {
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, null, { nowMs: NOW })).toBe(null);
+    expect(sessionGoneForLease({ session: 'conveyor-3466' }, undefined, { nowMs: NOW })).toBe(null);
   });
 });
 
 describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep', () => {
   const candidates = [
     { pool: 'web-everything', lane: 3, dir: '/x/web-everything/lane-3', lease: fresh({ session: 'conveyor-2667' }) },   // fresh, PR open, session alive → keep
-    { pool: 'web-everything', lane: 5, dir: '/x/web-everything/lane-5', lease: stale({ session: 'conveyor-2500' }) },   // TTL-stale → reap
+    { pool: 'web-everything', lane: 5, dir: '/x/web-everything/lane-5', lease: stale({ session: 'conveyor-2500' }) },   // TTL-stale (and past grace, absent) → reap
     { pool: 'plateau-app', lane: 6, dir: '/x/plateau-app/lane-6', lease: fresh({ session: 'conveyor-2604' }) },         // fresh, PR merged → reap
     { pool: 'web-everything', lane: 7, dir: '/x/web-everything/lane-7', lease: fresh({ session: 'mem', reserved: true, acquiredAt: new Date(NOW - 10 * TTL_MS).toISOString() }) }, // reserved → keep
     { pool: 'web-everything', lane: 8, dir: '/x/web-everything/lane-8', lease: null },                                  // no lease → skipped
-    { pool: 'web-everything', lane: 38, dir: '/x/web-everything/lane-38', lease: fresh({ session: 'conveyor-3466' }) }, // fresh, but session confirmed gone → reap pre-TTL
+    { pool: 'web-everything', lane: 38, dir: '/x/web-everything/lane-38', lease: agedPastGrace() },                     // past grace, session confirmed gone → reap pre-TTL
+    { pool: 'web-everything', lane: 40, dir: '/x/web-everything/lane-40', lease: fresh({ session: 'conveyor-2412' }) }, // JUST acquired, session absent but still inside grace → keep (the #1921 finding this pins)
   ];
   const prStates = new Map([['2667', 'open'], ['2604', 'merged']]);
-  const sessionStates = sessionStateByName([{ kind: 'background', name: 'conveyor-2667', state: 'working' }]); // 3466/2604/2500 all absent
+  const sessionStates = sessionStateByName([{ kind: 'background', name: 'conveyor-2667', state: 'working' }]); // 3466/2604/2500/2412 all absent
   const signalsFor = (c) => ({
     prState: prStates.get(itemNumFromSession(c.lease?.session)) ?? null,
-    sessionGone: sessionGoneForLease(c.lease, sessionStates),
+    sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs: NOW }),
     pidAlive: null,
   });
 
-  it('reaps the TTL-stale, PR-merged, and session-gone lanes; keeps the fresh-alive-open and reserved; skips the lease-less', () => {
+  it('reaps the TTL-stale, PR-merged, and session-gone lanes; keeps the fresh-alive-open, reserved, and just-acquired; skips the lease-less', () => {
     const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
-    // lane-5's session ('conveyor-2500') is ALSO absent from the listing, so session-gone fires (and is checked
-    // before TTL, per classifyReap's axis order) — the more informative real reason, not merely "old enough".
+    // lane-5's session ('conveyor-2500') is ALSO absent from the listing AND long past the grace window, so
+    // session-gone fires (checked before TTL, per classifyReap's axis order) — the more informative real
+    // reason, not merely "old enough". lane-40 is absent too but only 1 minute old — inside grace — so it is
+    // NOT reaped on this axis (and its TTL is nowhere close either): the #1921 finding this candidate exists
+    // to pin.
     expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`).sort()).toEqual([
       'plateau-app/lane-6:pr-merged',
       'web-everything/lane-38:session-gone',
       'web-everything/lane-5:session-gone',
     ]);
-    // keep excludes the lease-less candidate (skipped entirely), includes fresh-alive-open + reserved
-    expect(keep.map((c) => `${c.pool}/lane-${c.lane}`).sort()).toEqual(['web-everything/lane-3', 'web-everything/lane-7']);
+    // keep excludes the lease-less candidate (skipped entirely), includes fresh-alive-open + reserved + just-acquired
+    expect(keep.map((c) => `${c.pool}/lane-${c.lane}`).sort()).toEqual(['web-everything/lane-3', 'web-everything/lane-40', 'web-everything/lane-7']);
   });
 
   it('with no signalsFor, only the TTL axis fires (PR/session/pid unknown)', () => {

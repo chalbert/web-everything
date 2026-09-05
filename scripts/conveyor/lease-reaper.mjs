@@ -20,8 +20,10 @@
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors pr-watch.mjs / scope-lease-collect.mjs):
  *   • The PURE core ({@link classifyReap}, {@link reapPlan}, {@link itemNumFromSession}, {@link laneRefItemNum},
- *     {@link sessionStateByName}, {@link sessionGoneForLease}) has NO fs / git / gh / clock — every signal is
- *     passed IN. It is unit-tested directly against fixtures.
+ *     {@link sessionStateByName}, {@link sessionStatesForReap}, {@link sessionGoneForLease}) has NO fs / git /
+ *     gh / clock — every signal is passed IN (the one exception, `sessionGoneForLease`'s own `nowMs`, is a
+ *     clock READING handed in by the caller, never read from the wall clock itself). It is unit-tested directly
+ *     against fixtures.
  *   • The IO SHELL (the `main()` CLI, gated on the main-module check) owns POOL_ROOT enumeration, marker reads,
  *     an optional single `gh pr list`, an optional single `claude agents --json --all`, and the actual
  *     reclamation — which it delegates to `lane-pool.mjs release --pool=<name> --lane=<n> --force` so the
@@ -40,9 +42,15 @@
  *     `ttlMinutes` elapses, blocking real dispatch capacity the whole time (a live incident: ~12 items stuck on
  *     "no free lane" for hours behind two leases whose sessions had already died). This axis closes that gap by
  *     asking `claude agents --json --all` — the SAME listing `session-reaper.mjs` already reads — whether the
- *     lease's own `session` name is still there; a name absent entirely, or present but in one of the states
- *     `session-reaper.mjs` itself already treats as done (`done`/`failed`/`stopped`), reclaims the lane even
- *     pre-TTL. Best-effort: the axis degrades to OFF if the listing is unavailable — TTL still bites.
+ *     lease's own `session` name is still there; a name absent entirely AND past the {@link
+ *     DISPATCH_GUARD_LISTING_GRACE_MINUTES} listing-visibility grace window, or present but in one of the
+ *     states `session-reaper.mjs` itself already treats as done (`done`/`failed`/`stopped`), reclaims the lane
+ *     even pre-TTL. Best-effort: the axis degrades to OFF if the listing is unavailable OR came back with zero
+ *     background rows (indistinguishable from a bad read — see {@link sessionStatesForReap}) — TTL still bites.
+ *     Independent review of PR #1921 caught two real gaps in the first cut, both closed here (not merely
+ *     acknowledged): an all-empty listing would have read as "everyone's gone" fleet-wide, and a lease acquired
+ *     moments ago (whose session had not yet had time to appear in the listing) would have been reaped mid-start
+ *     — the exact #3283 "reclaims a lane seconds after it is acquired" failure, reintroduced through this axis.
  *   • ttl-stale — the lease outlived its TTL (`isLeaseStale`; AGE-based — there is no heartbeat, so a >TTL live
  *     build is reapable, exactly as `acquire` already treats a >TTL lease as reclaimable); the owner is presumed
  *     gone. This is the zero-IO backstop that reclaims a dead agent's lane with no PR, no network, and no
@@ -67,6 +75,7 @@ import { dirname, join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
 
 // ── PURE CORE (no fs / git / gh / clock — every signal is injected) ───────────────────────────────────────────
 
@@ -220,6 +229,27 @@ export function sessionStateByName(sessions) {
 }
 
 /**
+ * {@link sessionStateByName}, DEGRADED to axis-off (`null`) when the reduction yields ZERO background rows.
+ * Independent-review finding on PR #1921 (correctness, PLAUSIBLE, filed as prevention): a `claude agents --json
+ * --all` call that exits 0 with a valid-but-empty/incomplete JSON array — never observed live, but the exact
+ * class of unverified-CLI-surface risk backlog #3353 already raised for other `claude agents` readers — would
+ * otherwise make {@link sessionGoneForLease} read EVERY dispatcher-named lease's session as "not listed, so
+ * gone", mass-reaping the whole fleet in one pass on a single bad read — the very failure mode the operator's
+ * manual force-release was mitigating, now automated. An all-empty read is indistinguishable from that glitch
+ * (there is no third state a `claude` CLI could return to say "this really is legitimately zero"), so it is
+ * treated exactly like a thrown/unparsable listing: the axis degrades OFF for this pass and TTL-stale still
+ * bites. The one real cost is a rare degraded tick when truly nothing is currently dispatched — a confirmed-dead
+ * lease from that tick simply waits for the very next tick (once anything else is dispatched and the listing is
+ * non-empty again) or its TTL, never longer.
+ * @param {Array<{kind?:string, name?:string, state?:string}>} sessions
+ * @returns {Map<string,string|null>|null}
+ */
+export function sessionStatesForReap(sessions) {
+  const byName = sessionStateByName(sessions);
+  return byName.size === 0 ? null : byName;
+}
+
+/**
  * Is the delivery agent a lease's own `session` names CONFIRMED gone? THE FIX for the 2026-09-04/05 incident
  * (`conveyor-3466` on lane-38, `conveyor-2412`/`conveyor-2412c` on lane-40): both sessions died/disappeared
  * ENTIRELY from `claude agents --json` — not merely reported `done`/`failed`, simply no longer listed at all,
@@ -227,34 +257,63 @@ export function sessionStateByName(sessions) {
  * hours, because neither the PR axis (no PR was ever opened) nor the TTL axis (nowhere near its 4-hour mark) had
  * anything to reclaim them with.
  *
- *   true  — `sessionStates` doesn't list this session at all, OR lists it in one of {@link AGENT_GONE_STATES}
- *           (`done`/`failed`/`stopped`) — the same three states `session-reaper.mjs` already reaps on. Either
- *           way the session is provably not going to do any more work.
+ *   true  — `sessionStates` doesn't list this session at all AND the lease is past the {@link
+ *           DISPATCH_GUARD_LISTING_GRACE_MINUTES} grace window (see below), OR the session IS listed in one of
+ *           {@link AGENT_GONE_STATES} (`done`/`failed`/`stopped`) — the same three states `session-reaper.mjs`
+ *           already reaps on. Either way the session is provably not going to do any more work.
  *   false — the session IS listed and its state is none of those (`working`/`blocked`/undefined) — a slow
  *           build, not a dead one.
  *   null  — never guess: `lease.session` matches no dispatcher-minted grammar ({@link itemNumFromSession}), so
  *           it was never spawned via `claude --bg` and would legitimately never appear in this listing (a
  *           manually-acquired or interactive lane) — absence there proves nothing about it. Also null when
- *           `sessionStates` itself isn't a Map (the listing was unavailable this pass — axis off, see
- *           {@link fetchSessionStates}).
+ *           `sessionStates` itself isn't a Map (the listing was unavailable/all-empty this pass — axis off, see
+ *           {@link fetchSessionStates} / {@link sessionStatesForReap}), OR when the lease is absent from the
+ *           listing but still inside its grace window and so too young to judge (see below) — a slow-to-list
+ *           session is left `null`, not asserted alive, since nothing here actually confirms that either.
  *
- * WHY THIS IS SAFE EVEN ON A TRANSIENT LISTING MISS. A released-but-still-live lane is not immediately
- * destroyed: `lane-pool.mjs release` only drops the marker (`lane-lease.mjs`'s own "a released lane is
- * immediately re-issuable" note), and the NEXT `acquire` still refuses to reset a lane carrying real
- * uncommitted/unpushed work (`isLaneAcquirable`'s `dirtyOrAhead` guard, #2267) regardless of lease state. The
- * exposure this axis accepts — same as the existing PR-terminal axis already accepts for a possibly-stale `gh`
- * read — is a narrow window right after a lane is acquired and before its first commit, mirroring this file's
- * own precedent of reclaiming pre-TTL on an external signal rather than waiting out the full TTL on principle.
+ * THE GRACE WINDOW — independent-review finding on PR #1921 (security/concurrency-race, CONFIRMED). `claude
+ * --bg` returns before its session is necessarily visible in `claude agents --json --all`
+ * (`dispatch-lane.mjs`'s own `DISPATCH_LISTING_GRACE_MINUTES`/`DISPATCH_GUARD_LISTING_GRACE_MINUTES` measure
+ * this exact lag), and a delivery agent's OWN first act is acquiring its lane (this lease). So a lease acquired
+ * moments ago can legitimately have a session that simply is not listed YET — not a dead one. Reaping on that
+ * absence force-releases a live lane before its agent has committed anything, and the very next `acquire` can
+ * hand the SAME lane to a second agent while the first is still writing to it: two agents racing one working
+ * tree, the exact #3283 failure ("the lease reaper reclaims a lane seconds after it is acquired") reintroduced
+ * through this new axis. This reuses {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES} (10 minutes) rather than the
+ * observer's smaller `DISPATCH_LISTING_GRACE_MINUTES` (2 minutes) DELIBERATELY: that constant's own docblock
+ * picks its window by the COST of being wrong, and a wrong guard answer here is the identical failure shape
+ * (releases a lane a live agent still holds) the guard constant was calibrated for — not the observer's cheap
+ * "reports unresolved, writes nothing" mistake. The grace check applies ONLY to the absence branch: a session
+ * that IS listed with a terminal state is a direct, positive observation, not an inference from silence, so it
+ * needs no age check.
+ *
+ * WHY A LISTED TERMINAL STATE OR AN AGED-OUT ABSENCE IS STILL SAFE EVEN ON A TRANSIENT MISS. A released-but-
+ * still-live lane is not immediately destroyed: `lane-pool.mjs release` only drops the marker (`lane-lease.mjs`'s
+ * own "a released lane is immediately re-issuable" note), and the NEXT `acquire` still refuses to reset a lane
+ * carrying real uncommitted/unpushed work (`isLaneAcquirable`'s `dirtyOrAhead` guard, #2267) regardless of lease
+ * state. Past the grace window that residual exposure is the same one the existing PR-terminal axis already
+ * accepts for a possibly-stale `gh` read — a narrow pre-first-commit window, mirroring this file's own
+ * precedent of reclaiming pre-TTL on an external signal rather than waiting out the full TTL on principle.
  *
  * @param {object|null} lease
- * @param {Map<string,string|null>|null} sessionStates  from {@link sessionStateByName}; null = axis off.
+ * @param {Map<string,string|null>|null} sessionStates  from {@link sessionStatesForReap}; null = axis off.
+ * @param {{nowMs?:number, graceMs?:number}} [o]  `nowMs` = the clock reading to age the lease against (no
+ *   default — omitting it makes the absence branch always `null`, never guessing at an unknown age); `graceMs`
+ *   defaults to {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES}.
  * @returns {boolean|null}
  */
-export function sessionGoneForLease(lease, sessionStates) {
+export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000 } = {}) {
   const session = lease && typeof lease.session === 'string' ? lease.session : null;
   if (!session || itemNumFromSession(session) === null) return null; // not a dispatcher-minted name — don't guess
-  if (!(sessionStates instanceof Map)) return null; // listing unavailable this pass — axis off
-  if (!sessionStates.has(session)) return true; // gone — not listed at all, even with --all
+  if (!(sessionStates instanceof Map)) return null; // listing unavailable/all-empty this pass — axis off
+  if (!sessionStates.has(session)) {
+    // Absence alone is ambiguous until the lease has outlived the listing's own visibility lag.
+    if (typeof nowMs !== 'number') return null; // can't judge age — never guess
+    const acquiredAtMs = Date.parse(lease?.acquiredAt);
+    if (Number.isNaN(acquiredAtMs)) return null; // no readable acquire time — never guess
+    if (nowMs - acquiredAtMs < graceMs) return null; // too young — not yet listed is not the same as gone
+    return true; // aged past the grace window and still never listed — gone
+  }
   return AGENT_GONE_STATES.has(sessionStates.get(session));
 }
 
@@ -373,7 +432,9 @@ function fetchPrStates(flags) {
  * precisely the `done`/`failed`/`stopped` shape this axis needs to see, not the shape it needs hidden.
  * Best-effort: any failure (no `claude` on PATH, a hung/timed-out CLI, unparsable output) disables the axis for
  * this run (returns null → every lease's `sessionGone` is unknown → TTL-stale still bites), matching
- * {@link fetchPrStates}'s own degrade-on-failure convention.
+ * {@link fetchPrStates}'s own degrade-on-failure convention. Routes through {@link sessionStatesForReap}, NOT
+ * {@link sessionStateByName} directly, so a listing that PARSED but yielded zero background rows (a review
+ * finding on #1921 — indistinguishable from a bad read) degrades the axis off too, not just a hard throw.
  */
 function fetchSessionStates(flags) {
   if (flags['no-check-sessions']) return null;
@@ -384,7 +445,9 @@ function fetchSessionStates(flags) {
     log(`  ⚠ \`claude agents --json --all\` failed — session-gone reap axis OFF this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
   }
-  return sessionStateByName(sessions); // pure background-only name→state reduction
+  const states = sessionStatesForReap(sessions);
+  if (!states) log('  ⚠ `claude agents --json --all` listed zero background session(s) — session-gone reap axis OFF this run (indistinguishable from a bad read; TTL-stale still applies)');
+  return states;
 }
 
 /** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
@@ -433,7 +496,7 @@ function main(argv) {
   const signalsFor = (c) => {
     const num = itemNumFromSession(c.lease?.session);
     const prState = prStates && num ? prStates.get(num) ?? null : null;
-    return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates), pidAlive: pidAliveForLease(c.lease) };
+    return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs }), pidAlive: pidAliveForLease(c.lease) };
   };
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
 
