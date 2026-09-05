@@ -2,10 +2,11 @@
 bornAs: xbgsxr3
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/", "we:skills-src/conveyor/"]
 relatedTo: ["3464", "3466"]
 dateOpened: "2026-09-03"
+dateResolved: "2026-09-04"
 tags: [conveyor, mechanical-dispatcher, sync, reconciliation]
 ---
 
