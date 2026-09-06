@@ -26,7 +26,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assembleReviewDetail } from '../review-detail.mjs';
@@ -387,10 +387,26 @@ export function resolveSubjectCheckout({
   let candidates = [];
   // A broken/absent sibling table must not turn a refusal into a crash — the guard is the one that speaks.
   try { candidates = siblings(cwd) || []; } catch { candidates = []; }
+
+  // POOL-LOCAL BEFORE PRIMARY (#2123). `siblingsFor` probes the primary's parent FIRST, so from a lane it
+  // answers `/home/user/frontierui` — the SHARED primary checkout — while the pool's own isolated clone sits
+  // right beside the lane being driven from. Reading a review's diff out of a checkout another agent may be
+  // mid-work in is the exact thing lane isolation exists to prevent, and it is the wrong default here even
+  // though this operation only reads: the primary's refs move under it. So each sibling is probed at its
+  // POOL-LOCAL path first (same directory name, resolved beside `cwd`), falling back to whatever the table
+  // chose. Off a lane the two collapse to the same path and nothing changes.
+  const poolDir = dirname(cwd);
   for (const sibling of candidates) {
-    if (!sibling?.present || !sibling.path) continue;
-    probed.push(sibling.path);
-    if (originRepo(sibling.path) === repo) return { path: sibling.path, probed };
+    if (!sibling?.path) continue;
+    const poolLocal = join(poolDir, basename(sibling.path));
+    for (const candidate of poolLocal === sibling.path ? [sibling.path] : [poolLocal, sibling.path]) {
+      // `present` gates only the TABLE's path — a pool-local clone the table never looked at is probed on its
+      // own merit, and `originRepo` answers '' for a path that is not a repo, so a miss is free.
+      if (candidate === sibling.path && !sibling.present) continue;
+      if (probed.includes(candidate)) continue;
+      probed.push(candidate);
+      if (originRepo(candidate) === repo) return { path: candidate, probed };
+    }
   }
   return { path: null, probed };
 }

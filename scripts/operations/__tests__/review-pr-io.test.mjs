@@ -741,6 +741,50 @@ describe('the subject checkout is DERIVED from the constellation siblings (#xgmz
     expect(got.probed).toEqual(['/pool/lane-1', '/pool/frontierui', '/pool/plateau-app']);
   });
 
+  it('prefers the POOL-LOCAL clone over the shared primary (#2123)', () => {
+    // What the real table answers from a lane: the PRIMARY checkout, because `siblingsFor` probes the
+    // primary's parent first. Both clones exist and both have the right origin — the isolated one must win.
+    const bothExist = (cwd) => ({
+      '/pool/lane-1': 'chalbert/web-everything',
+      '/home/user/frontierui': 'chalbert/frontierui',
+      '/pool/frontierui': 'chalbert/frontierui',
+    })[cwd] ?? '';
+    const primaryFirst = () => ([{ name: 'frontierui', path: '/home/user/frontierui', present: true }]);
+
+    const got = resolveSubjectCheckout({
+      repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo: bothExist, siblings: primaryFirst,
+    });
+    expect(got.path).toBe('/pool/frontierui');
+    // And it tried the pool-local path BEFORE the primary, which is the ordering being pinned.
+    expect(got.probed.indexOf('/pool/frontierui')).toBeLessThan(
+      got.probed.indexOf('/home/user/frontierui') === -1 ? Infinity : got.probed.indexOf('/home/user/frontierui'),
+    );
+  });
+
+  it('falls back to the table path when no pool-local clone exists', () => {
+    const onlyPrimary = (cwd) => (cwd === '/home/user/plateau-app' ? 'chalbert/plateau-app' : '');
+    const table = () => ([{ name: 'plateau-app', path: '/home/user/plateau-app', present: true }]);
+    expect(resolveSubjectCheckout({
+      repo: 'chalbert/plateau-app', cwd: '/pool/lane-1', originRepo: onlyPrimary, siblings: table,
+    }).path).toBe('/home/user/plateau-app');
+  });
+
+  it('covers EVERY constellation member, not just frontierui', () => {
+    const pool = (cwd) => ({
+      '/pool/lane-1': 'chalbert/web-everything',
+      '/pool/frontierui': 'chalbert/frontierui',
+      '/pool/plateau-app': 'chalbert/plateau-app',
+    })[cwd] ?? '';
+    const table = () => ([
+      { name: 'frontierui', path: '/pool/frontierui', present: true },
+      { name: 'plateau-app', path: '/pool/plateau-app', present: true },
+    ]);
+    const at = (repo) => resolveSubjectCheckout({ repo, cwd: '/pool/lane-1', originRepo: pool, siblings: table }).path;
+    expect(at('chalbert/web-everything')).toBe('/pool/lane-1');
+    expect(at('chalbert/frontierui')).toBe('/pool/frontierui');
+    expect(at('chalbert/plateau-app')).toBe('/pool/plateau-app');
+  });
+
   it('survives a throwing sibling table — the GUARD speaks, not a crash', () => {
     const exploding = () => { throw new Error('no constellation table here'); };
     const got = resolveSubjectCheckout({ repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo, siblings: exploding });

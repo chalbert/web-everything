@@ -15,28 +15,30 @@ id. `we:docs/agent/backlog-workflow.md` says a hash-prefixed file is in-flight a
 so a landed hash-keyed card contradicts a documented invariant — its short ref and URL stay provisional
 forever. The drain's JIT numbering (#2288) runs off the couple manifest, and a hand-opened PR carries none.
 
-## WITHDRAWN — the premise was false (2026-09-06)
+## WITHDRAWN as a duplicate of #2319 — but the STATED CAUSE was wrong (2026-09-06)
 
-**JIT numbering does run for a hand-opened PR. It just runs in a LATER drain pass, not synchronously with
-the merge**, and this item was filed from a snapshot taken in that window.
+Two corrections, in the order I got them wrong.
 
-The proof is this card itself. It was filed as `x1l3exg` and is now `#3503`; the item it was filed *about*
-was `xlv5507` and is now `#3502` — and the drain rewrote the reference in this very body from the hash to the
-number, exactly as `we:docs/agent/backlog-workflow.md` describes. The landing commit says so outright:
+**First: the numbering usually does run, and I filed from a snapshot inside the window where it had not yet.**
+This card was `x1l3exg` and is now `#3503`; its subject was `xlv5507` and is now `#3502`; the drain rewrote
+the reference in this very body. The landing commit says so: `drain: JIT-number x1l3exg→#3503, x45zcv4→#3504,
+… at land (#2288)`. So "a hand-opened PR is never numbered" is false.
 
-> `drain: JIT-number x1l3exg→#3503, x45zcv4→#3504, … at land (#2288)`
+**Second — and this is where my first correction over-swung: a stranded hash is a REAL failure, already
+tracked, and already gated.** `check:standards` errors on it in as many words:
 
-So there is no invariant violation to gate. A hash-keyed file on `main` is not a landed item that missed its
-number — it is an item observed between its merge and the numbering pass. The stated cause ("JIT numbering
-runs off the couple manifest, and a hand-opened PR carries none") is simply wrong: the numbering pass keys on
-the landed files, not the manifest.
+> Backlog file … is on main with a NON-NUMERIC leading id — a land route bypassed JIT numbering (#2288) and
+> stranded a hash (#2319). Number it: `node we:scripts/backlog.mjs number-stranded`
 
-Resolved as withdrawn rather than deleted, so the reasoning is on the record and the next reader does not
-re-file it from the same misleading snapshot.
+It fired on `xgmzd0y` the moment that item landed. The repair works — running it numbers the file — but it
+is a **main-side** repair: run from a branch it strands the tree between two other rules (the hash is still
+on `origin/main`, and the fresh `NNN` reads as hand-picked, #2548), so the operator or the drain runs it on
+`main`. So the phenomenon this card describes exists; what this card got wrong was its cause ("JIT numbering
+runs off the couple manifest") and its premise that nothing catches it.
 
-**What stays true, and is filed elsewhere:** the *ordering* and *graduation* gaps a hand-opened PR really
-does expose are `#3502` (a card-resolve can land before the impl it names) and `#xgmzd0y` (review-pr cannot
-judge a sibling repo). Neither depends on this item's false premise.
+Withdrawn as a **duplicate of #2319**, which owns the class with a working repair, rather than as a
+non-issue. The honest summary: a land route can strand a hash, the gate catches it, and the fix is one
+command — none of which needed a new item.
 
 ## Original acceptance criteria (superseded)
 
