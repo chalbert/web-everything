@@ -3,10 +3,13 @@ bornAs: x10eju0
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 scope:
   - we:scripts/merge-ai-prs.mjs
 dateOpened: "2026-08-26"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 ---
 

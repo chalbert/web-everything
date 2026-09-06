@@ -2,8 +2,11 @@
 bornAs: xrghphg
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-08-14"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: [agent-memory, citation, backlog, gate, dead-link]
 scope:
   - we:scripts/lane-drain.mjs

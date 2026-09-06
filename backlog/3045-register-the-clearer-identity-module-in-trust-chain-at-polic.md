@@ -2,8 +2,11 @@
 bornAs: x1hptjt
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-08-09"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 scope:
   - we:scripts/lib/gate-config.mjs
   - we:scripts/lib/__tests__/gate-config.test.mjs
