@@ -405,7 +405,7 @@ export function forkLeansOnUnruled(body, blocked, isOpenDecision, ranges, normId
   for (const r of ranges(body)) {
     const head = body.slice(r.start, r.end).match(/^#{1,6}\s+(.*)$/m)?.[1] || '';
     if (!/^fork\b/i.test(head.trim())) continue;
-    for (const m of body.slice(r.start, r.end).matchAll(/#(\d{3,4})\b/g)) {
+    for (const m of body.slice(r.start, r.end).matchAll(/#(\d+)\b/g)) {
       const ref = normId(m[1]);
       if (blocked.has(ref)) continue;
       if (isOpenDecision(ref)) leans.add(ref);
