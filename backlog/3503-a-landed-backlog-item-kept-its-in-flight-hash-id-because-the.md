@@ -20,8 +20,8 @@ forever. The drain's JIT numbering (#2288) runs off the couple manifest, and a h
 Two corrections, in the order I got them wrong.
 
 **First: the numbering usually does run, and I filed from a snapshot inside the window where it had not yet.**
-This card was `x1l3exg` and is now `#3503`; its subject was `xlv5507` and is now `#3502`; the drain rewrote
-the reference in this very body. The landing commit says so: `drain: JIT-number x1l3exg→#3503, x45zcv4→#3504,
+This card was `3503` and is now `#3503`; its subject was `3502` and is now `#3502`; the drain rewrote
+the reference in this very body. The landing commit says so: `drain: JIT-number 3503→#3503, 3504→#3504,
 … at land (#2288)`. So "a hand-opened PR is never numbered" is false.
 
 **Second — and this is where my first correction over-swung: a stranded hash is a REAL failure, already
@@ -30,7 +30,7 @@ tracked, and already gated.** `check:standards` errors on it in as many words:
 > Backlog file … is on main with a NON-NUMERIC leading id — a land route bypassed JIT numbering (#2288) and
 > stranded a hash (#2319). Number it: `node we:scripts/backlog.mjs number-stranded`
 
-It fired on `xgmzd0y` the moment that item landed. The repair works — running it numbers the file — but it
+It fired on `3512` the moment that item landed. The repair works — running it numbers the file — but it
 is a **main-side** repair: run from a branch it strands the tree between two other rules (the hash is still
 on `origin/main`, and the fresh `NNN` reads as hand-picked, #2548), so the operator or the drain runs it on
 `main`. So the phenomenon this card describes exists; what this card got wrong was its cause ("JIT numbering
