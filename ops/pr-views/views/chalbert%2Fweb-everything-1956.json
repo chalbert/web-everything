@@ -47,6 +47,12 @@
       "changeType": "ADDED"
     },
     {
+      "path": "scripts/lib/pr-view-transport.mjs",
+      "additions": 42,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
       "path": "scripts/operations/__tests__/review-pr-io.test.mjs",
       "additions": 124,
       "deletions": 0,
@@ -54,19 +60,31 @@
     },
     {
       "path": "scripts/operations/review-pr-io.mjs",
-      "additions": 84,
-      "deletions": 8,
+      "additions": 90,
+      "deletions": 40,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/produce-pr-view.mjs",
+      "additions": 3,
+      "deletions": 2,
       "changeType": "MODIFIED"
     }
   ],
   "headRefName": "claude/card-progress-decoupled-0uyq2y",
-  "headRefOid": "42596c425530691a2042562fed86c61f2b5c0379",
+  "headRefOid": "a6a3492527b65bbfe9be0b84574ebcac0f2ad00d",
   "labels": [
     {
       "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
       "name": "review:pending",
       "description": "the drain parked this PR — an independent review is owed before merge",
       "color": "fbca04"
+    },
+    {
+      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
+      "name": "checking",
+      "description": "Required checks are still running — CI truth not yet known (#2281)",
+      "color": "BFD4F2"
     }
   ],
   "number": 1956,
