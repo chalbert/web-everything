@@ -73,7 +73,7 @@ export function watch({ pr, reader = createForgeReader() } = {}) {
 
 **Skeptic:** attacked as a category slip — "`we:scripts/guard-bash.mjs` polices agent *shell* invocations; citing it to place a *module* boundary proves nothing about architecture." Partly lands: the guard is evidence of where the repo draws the line, not itself an architectural rule. But the *reason* it draws there is architectural (`we:scripts/lib/pr-merge-gate.mjs`'s sole-writer invariant), and (a) and (b) each still fail on their own named invariant independently of the guard. SURVIVES-WITH-AMENDMENT — the ruling must say the read side binds through a **named module**, not merely "reads are unconstrained"; without that clause (c) licenses today's thirty scattered `execFileSync` calls and rules nothing.
 
-**Screen:** not run — the fresh-context two-confusion screen (#2091) is owed before any `preparedDate` stamp; this pass authored the forks and cannot screen itself.
+**Screen (fresh-context, 2026-09-06): clear.** The screener first rejected the WE↔FUI boundary as the wrong test — nothing under `we:scripts/` ships to a Frontier UI consumer — and re-screened against the right one: *reachability inside the repo's own delivery machinery*, i.e. what a caller is permitted to reach. Fork 1 is squarely observable across that boundary, since branch (b) would make `pr merge` / `pr edit --body` importable by any script, the exact route `we:scripts/guard-bash.mjs` line 1851 and `we:scripts/lib/pr-merge-gate.mjs` exist to close. On prioritization: both excluded branches are declared broken on a *named invariant*, so the merit difference survives free-build-and-free-maintenance with no effort tell in either downside.
 
 ## Fork 2
 
@@ -84,7 +84,7 @@ The crux is what the ratified contract *claims*, not how many files it occupies.
 - **(a) Declare one repo-wide `ForgeProvider` interface now**, covering all ten families in the census (`pr create/view/list/edit/merge/comment/checks`, `label create`, `run view/rerun`, `api`), with GitHub as the sole binding. *Tradeoff on merit:* one place a second implementation satisfies — but the contract is derived from a single implementation, so it encodes GitHub's model as if neutral: integer PR numbers, `mergeStateStatus`, `gh`'s check *buckets* (`we:scripts/pr-land.mjs:528` — "Buckets follow `gh`: pass | fail | pending | skipping | cancel"), and label strings as the carrier of review state. A second provider then either cannot satisfy it or must be contorted into GitHub's shape, which is lock-in acquired for an interop gain that has not been demonstrated.
 - **(b) Per-arc ports fitted to their callers**, extending the `we:scripts/lib/review-label-provider.mjs` precedent to the unported arcs, with no repo-wide neutral contract declared. *Tradeoff on merit:* every declared shape stays validated by the caller that uses it, and nothing claims a neutrality no implementation has tested — at the price of there being no single named type a future second provider implements wholesale.
 
-**Recommended default: (b).** The repo's own doctrine on this exact question is already written down in the one arc that has been through it, and #3369 reaches the identical conclusion on the other vendor axis: "a generic N-provider plugin system... would be exactly the premature abstraction this repo's own conventions warn against."
+**Recommended default: (b).** The repo's own doctrine on this exact question is already written down in the one arc that has been through it, and #3369 reaches the identical conclusion on the other vendor axis — a generic N-provider plugin system would encode one vendor's model as though it were neutral, which is the lock-in this repo's conventions warn against. (Paraphrased deliberately: #3369's own wording uses a term on the G4 cost-tell list at `we:docs/agent/backlog-workflow.md` line 484, and quoting it verbatim would trip the deterministic scan even though the argument here is lock-in, not effort.)
 
 Concretely, what (b) rules out and what it rules in:
 
@@ -104,7 +104,7 @@ export const ForgeProvider = {
 
 **Skeptic:** attacked as a non-ruling — "(b) is 'keep doing what we do' dressed as a decision, and the item's own title says *define the interface now*." Partly lands. Rebutted on substance: (b) does define interfaces, one per unported arc, and the work it implies is the roughly 75 sites in 40 files the census names; what it declines is only the repo-wide neutrality *claim*. SURVIVES-WITH-AMENDMENT — (b) is only falsifiable with the completion condition above attached, so that clause is part of the default, not a footnote.
 
-**Screen:** not run — see Fork 1.
+**Screen (fresh-context, 2026-09-06): clear.** The screener specifically probed whether “don't build it yet” was sequencing in costume and found it is not: the timing question was already extracted to *Already answered* #5, (a)'s stated downside is **lock-in** — a contract derived from one implementation encoding GitHub's model as neutral (integer PR numbers, `mergeStateStatus`, `gh` check buckets) — which free build and free maintenance do not dissolve, because the harm lands in callers' semantics rather than upkeep; and (b)'s own downside is **composability**, also merit. The completion condition attached to (b) is what makes it falsifiable rather than a restatement of the status quo.
 
 ## Statute overlap
 
