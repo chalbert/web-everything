@@ -248,6 +248,50 @@ MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", 
 #1777 (**relocation granularity** — relocate deps-satisfiable-now, defer not-yet-FUI deps as `blockedBy`
 slices, never reach back into WE; see [relocation granularity](#relocation-granularity)).
 
+### Backlog tracking: one record of truth with locus-filtered views now, distributed per-repo as the destination {#backlog-tracking-locus-now-distributed-next}
+
+**Ratified 2026-09-06 by the operator (Nicolas Gilbert) (#3129).** Where a constellation repo's backlog *lives*
+is a different question from where its *code* lives ([#constellation-placement](#constellation-placement)
+governs the latter and does not reach this). Two rulings, and the second is the load-bearing one:
+
+- **Now — one record of truth, per-repo views are filtered, not separate.** Web Everything's `backlog/*.md` is
+  the single tracker. A per-repo surface is a **locus-filtered virtual view** (`item.locus === slug`) over it —
+  no second `backlog/` directory, no second numbering authority, no migration. Cross-repo landing keeps the
+  already-proven #500 shape: the build lands in the target repo's own PR, and a thin mechanical "WE resolve"
+  step flips the tracking record. This is the interim, and it is what runs today.
+- **Destination — fully distributed, each repo owning its own backlog.** Not a rejected alternative and not a
+  "someday": the declared end state. The ground is **product shape, not our own convenience**. A single central
+  tracker every repo routes through assumes one org owns everything and never hands a repo over; for a customer
+  with **dozens of repos whose ownership moves between owners**, that assumption fails — a repo changing hands
+  either strands its history in a tracker the new owner cannot see, or forces a migration. A repo and its
+  backlog are the same artifact and must move together. **Scale is the consumer**: the earlier "no evidenced
+  need for repo autonomy" reading measured our own three-repo constellation, which is the wrong population for
+  a product built to manage enterprise front-end platforms.
+- **Therefore an item id always carries its locus, and that moves FIRST.** A bare `#NNN` is an implicit `we:`
+  today — true by convention, never by construction. Locus-qualified ids (`we:#3423`, `fui:#118`) are the
+  correct shape and are adopted **always**, not only once distribution lands: the ambiguity already exists, and
+  making it explicit now converts a single all-at-once migration on the day distribution ships into an
+  incremental, reversible one. The additive half — *accept and resolve* an explicit locus while a bare `#NNN`
+  keeps meaning `we:` — comes first and alone; minting new ids with a locus, and migrating the corpus, are
+  separate later slices. The `LOCI` registry (`we:scripts/check-standards-rules.mjs`) stays the single locus
+  vocabulary; a second list is the drift class #1473 had to rewire. An id locus (`we:#3423`) and a **code-path**
+  locus prefix (`we:scripts/x.mjs`) share a spelling and are different things — whatever parses one must not
+  silently accept the other.
+
+**Ordering is deliberate and is part of the ruling:** the destination is **not deferred and not parked**. Its
+first slice is an ordinary ready item to take when there is capacity — not urgent, and not conditional on
+#2456's evidence gate, whose ground this ruling narrows.
+
+**Lineage:** ratified by #3129 (operator, 2026-09-06), carved out of #2475 during its build-readiness prep.
+Confirms rather than overrides #2472's own premise ("each repo holds its own `backlog/*.md`") — the epic was
+right about the end state and imprecise about the timing. Composes with #500 (the shipped cross-repo
+landing/gate registry, which supplies the interim's landing half) and is **new turf**: the prep's statute pass
+found no existing anchor governing backlog-*data* placement, so this one mints rather than extends —
+[#constellation-placement](#constellation-placement) (code implementation),
+[#repo-drain-check-contract](#repo-drain-check-contract) (the drain's CI boundary) and
+[#pool-siblings-real-built-clones](#pool-siblings-real-built-clones) (lane checkouts) govern disjoint turf by a
+different test. First slice: `#xnn9wtv`.
+
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
 **WE never imports or renders FUI block code.** FUI owns the implementation *and* its rendered

@@ -3,7 +3,6 @@ kind: story
 size: 3
 status: open
 parent: "3029"
-scope: ["we:scripts/lib/gate-config.mjs", "we:scripts/check-standards-rules.mjs"]
 dateOpened: "2026-09-06"
 tags: [operations, conveyor, github, branch-protection, sole-writer, config]
 crossRef: { url: /backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p/, label: "the ruling this implements" }
@@ -43,6 +42,15 @@ language is worth nothing against.
    not a code change. That refusal carries a named test.
 3. **This story does not turn it on**, and nothing here flips `enforce_admins`. Doing so today would either
    no-op or block the human's own ratified direct-`main` path, and would regress #2152 — see the ruling.
+
+## No `scope:` is declared, deliberately
+
+There is no existing file that owns the enforcement rung — that absence *is* item 1. An earlier draft of this
+card scoped it to `we:scripts/lib/gate-config.mjs` on the strength of the name; that file is the **auto-review
+trust-chain roster** (#2448/#2445), it is gate-self, and editing it forces `review:human`. It has nothing to do
+with branch protection. A wrong `scope:` is not inert — it is machine-read for lane-collision detection by
+exact path, so it would both send a builder to the wrong file and manufacture false contention with any lane
+genuinely editing that roster. Declaring the home is part of the build; pick it when you build it.
 
 ## The prerequisite is a human setup step, and it is not in scope
 
