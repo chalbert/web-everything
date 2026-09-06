@@ -1,0 +1,118 @@
+{
+  "body": "Follow-up to #1957. Two things, both consequences of that PR rather than new work.\n\n## 1. The carve-out the #1957 review raised\n\nThe G8 gate shipped matching fork citations with `/#(\\d{3,4})\\b/g` — a bound fitted to the id shape of every open decision at the time. `norm` strips leading zeros, so `we:backlog/039-*.md` has id `39`, and **98 items** carry a 1–2 digit normalized id the bound could never see. A fork leaning on one of them read as clear.\n\nWidened to `/#(\\d+)\\b/g`.\n\n**Measured, not assumed:** the live G8 count is **9 before, 9 after** across 3,496 items — no currently-open decision has a short id, so this is inert on today's corpus and correct going forward. No false positives appeared either.\n\nTwo tests pin **both** ends of the range, because the defect was a bound nobody was watching:\n\n- a 1–2 digit id (`#39`) — the case that was blind;\n- a 4-digit id (`#3512`) — so widening the low end can't silently drop the high end.\n\n**Mutation-verified, both directions:** restoring `\\d{3,4}` reddens the 1–2 digit test; `\\d{1,3}` reddens the 4-digit test. Neither assertion is decorative.\n\nThe juror's disposition on this finding was `carve-out` (`introduced: true`, `worseThanBase: false`, `parallelizable: true`), which is why it lands here as its own diff rather than as a late push onto the reviewed head of #1957.\n\n## 2. Nine stranded hashes, numbered\n\n#1957 was opened through the credential-less fallback rather than `pr-land`, so the drain's JIT numbering (#2288) never ran and nine cards landed on `main` still carrying their hash ids. `npm run check:standards` was **red on `main`** as a result — nine `#2319` stranded-hash errors.\n\n`node we:scripts/backlog.mjs number-stranded` healed it:\n\n| was | now |\n| --- | --- |\n| `x2xrboe` | **#3513** |\n| `x5c8zep` | **#3514** |\n| `x6z6z2j` | **#3515** |\n| `xarvjgf` | **#3516** |\n| `xayr3dc` | **#3517** |\n| `xblcmkc` | **#3518** |\n| `xbwup67` | **#3519** |\n| `xjktyol` | **#3520** |\n| `xzdzg3j` | **#3521** |\n\nEach keeps a `bornAs:` lineage stamp, and the cross-references were rewritten with the rename (`#3519`'s `crossRef` now points at `/backlog/3513-…/`, not the dead hash path). Verified by grep: the only surviving hash mentions are the `bornAs:` stamps themselves.\n\n## 3. Filed, not fixed: `xs10j09`\n\n`G1` and `D2` carry the **same defect class, worse**. Both walk citations with `\\d{1,3}\\b`:\n\n```js\n// we:scripts/audit-backlog-health.mjs lines 129–130\nconst PROSE_PREREQ = /\\b(gated on|blocked on|…)\\s+#?(\\d{1,3})\\b/gi;   // G1\nconst ANY_REF      = /(?:#|\\/backlog\\/)(\\d{1,3})\\b/g;                 // D2, and two other walks\n```\n\n`\\d{1,3}\\b` cannot match `#2209` **at all** — the engine takes `220`, finds no word boundary before `9`, backtracks to `22` and `2`, fails each time, and reports no match. It misses; it does not truncate. The board runs to **#3521**, so the bound is blind to the majority of the corpus. Consistent with what the counts show: **D2 = 1** across 3,496 items reads as a clean board and is instead a gate that stopped seeing.\n\nConfirmed by running both literals against a case table, not by reading the patterns:\n\n| citation | `ANY_REF` (G1/D2) | G8 after this PR |\n| --- | --- | --- |\n| `#39` | `39` | `39` |\n| `#607` | `607` | `607` |\n| `#2209` | *(nothing)* | `2209` |\n| `#3512` | *(nothing)* | `3512` |\n\nBoth regexes are live — `ANY_REF` at lines 336, 365, 522; `PROSE_PREREQ` at line 425 — so this is not a dead definition. **Filed rather than fixed here** because it is pre-existing, sits in gates this diff does not touch, and widening it changes what G1 and D2 report board-wide. That is a measurement change owed its own before/after count, not a rider on this one. `xs10j09` carries the evidence and the trap: unlike G8, these will **not** be inert when widened.\n\n## Verification\n\n- `npx vitest run` — **409 files, 10,766 passed / 7 skipped, 0 failed** (the two new G8 cases are the delta).\n- `we:scripts/__tests__/audit-backlog-health.test.mjs` — 12/12.\n- `npm run check:standards` with `WE_SKIP_HAND_NUMBERED_GATE=1` (the sanctioned renumbering path the gate's own message names, #2548) — the 9 hand-numbered errors clear. The 9 remaining *\"is on main with a NON-NUMERIC leading id\"* errors are the transitional state by construction: those files are still on `origin/main` until this PR lands, which is what clears them.\n- `node we:scripts/check-backlog-item.mjs xs10j09` — clean.\n\n## Known limit\n\nSame as #1957: no `gh` credential on this host, so the PR was opened through the API rather than `pr-land`. The **decision** still came from the operation — `scoreEscalation` returns `escalate: true`, `humanRequired: false` (blast-radius on the two `scripts/` files) → `producerReviewLabel` = **`review:pending`**, applied by hand at open. The `authored-by-actor` stamp is absent and no independence guard runs at open (#3267). This PR is the second instance of that cost; the first one's is what section 2 cleans up.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM)_",
+  "comments": [],
+  "createdAt": "2026-09-06T18:52:46Z",
+  "files": [
+    {
+      "path": "backlog/2201-mid-region-marker-else-decision-card.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3006-move-agent-work-onto-the-claude-code-cli-and-optimise-what-i.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3123-name-the-tier-above-feature-rollup-basis-points-vs-outcome-m.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3513-what-may-economize-an-agent-review-depth-only-or-also-stren.md",
+      "additions": 2,
+      "deletions": 1,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3514-reuse-one-session-id-across-repeat-and-report-reads-per-write.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3515-skip-a-re-review-when-the-net-diff-is-unchanged.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3516-rollup-levels-are-an-open-set-dimension-not-a-fixed-enum.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3517-ship-the-rollup-level-preset-flavors.md",
+      "additions": 2,
+      "deletions": 1,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3518-the-replacement-dispatcher-must-preserve-prompt-cache-corre.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3519-give-effort-the-operator-control-flag-treatment-model-has.md",
+      "additions": 3,
+      "deletions": 2,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3520-region-mid-marker-splits-the-body-into-named-programs.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/3521-surface-cache-hit-rate-from-the-usage-already-in-run-records.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "RENAMED"
+    },
+    {
+      "path": "backlog/xs10j09-g1-and-d2-cannot-see-a-four-digit-backlog-id-at-all.md",
+      "additions": 64,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "scripts/__tests__/audit-backlog-health.test.mjs",
+      "additions": 14,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/audit-backlog-health.mjs",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "claude/token-optimization-research-tx4ntm",
+  "headRefOid": "f0627091b59d500c76252198203f33b60addc3f8",
+  "labels": [
+    {
+      "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
+      "name": "review:pending",
+      "description": "the drain parked this PR — an independent review is owed before merge",
+      "color": "fbca04"
+    },
+    {
+      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
+      "name": "checking",
+      "description": "Required checks are still running — CI truth not yet known (#2281)",
+      "color": "BFD4F2"
+    }
+  ],
+  "number": 1958,
+  "state": "OPEN",
+  "title": "G8 sees a backlog id of any length, and the 9 stranded hashes get their numbers",
+  "url": "https://github.com/chalbert/web-everything/pull/1958",
+  "repo": "chalbert/web-everything"
+}
