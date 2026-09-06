@@ -5,6 +5,7 @@ size: 13
 status: open
 dateOpened: "2026-08-08"
 tags: [conveyor, cost, review, orchestration]
+relatedReport: reports/2026-09-06-backlog-split-analysis.md
 ---
 
 # Move agent work onto the Claude Code CLI and optimise what it costs
