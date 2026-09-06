@@ -2052,3 +2052,44 @@ describe('truncated operation --json — the enforcement path', () => {
     expect(decide('node scripts/operations/run.mjs verify | tail -20')).toBeFalsy();
   });
 });
+
+// #1961 review r3 — the truncating-`--json` predicate, scoped to ONE PIPELINE. The juror confirmed a false
+// positive across a statement separator; verifying it turned up two more defects in the same regex, so all
+// three are pinned here. Mutating `isTruncatedOperationJson` back to a whole-string `[^|]*` regex reddens
+// this block, and dropping the `node` anchor reddens the mention case on its own.
+describe('truncated operation --json — pipeline scoping, not string scanning', () => {
+  it('DENIES the payload-eating pipe, including through an intermediate stage', () => {
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs review-pr --pr=1 --json | tail -40')).toBe(true);
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify --json | head -20')).toBe(true);
+    // The FALSE NEGATIVE the first cut shipped: an intervening `|` broke its `[^|]*` run, so the guard walked
+    // straight past the exact corruption it exists to stop.
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify --json | jq . | tail -5')).toBe(true);
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify --json | jq . | LC_ALL=C tail -5')).toBe(true);
+  });
+
+  it('ALLOWS a safe redirect followed by an unrelated pipe in a LATER statement', () => {
+    // The juror's finding: the JSON is already on disk and the `tail` belongs to a different command. A
+    // separator ends the pipeline; only `|` continues it.
+    for (const sep of [';', '&&', '||', '\n']) {
+      const cmd = `node scripts/operations/run.mjs verify --json > /tmp/run.json ${sep} git log | tail -5`;
+      expect(isTruncatedOperationJson(cmd), `separator ${JSON.stringify(sep)}`).toBe(false);
+    }
+  });
+
+  it('ALLOWS a MENTION — anchored on the runner, so prose about a command is not the command', () => {
+    // The first cut had no `node` anchor while the PR body claimed it did; this is that claim, made true.
+    expect(isTruncatedOperationJson('echo "run.mjs verify --json" | tail -5')).toBe(false);
+    expect(isTruncatedOperationJson('grep -n "run.mjs .* --json" docs/*.md | head -5')).toBe(false);
+  });
+
+  it('ALLOWS the two shapes that were never the defect', () => {
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify | tail -20')).toBe(false); // no --json
+    expect(isTruncatedOperationJson('cat notes.txt | tail -5')).toBe(false);                           // not an operation
+    expect(isTruncatedOperationJson('')).toBe(false);
+  });
+
+  it('still reaches decide() — the enforcement point, not just the predicate', () => {
+    expect(String(decide('node scripts/operations/run.mjs review-pr --pr=1 --json | tail -40'))).toMatch(/corrupts the VALUE/);
+    expect(decide('node scripts/operations/run.mjs verify --json > /tmp/run.json; git log | tail -5')).toBeFalsy();
+  });
+});

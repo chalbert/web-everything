@@ -330,11 +330,41 @@ export function isVerificationRun(command) {
 // The fix is free and already built: DROP `--json` and the default render prints exactly the compact
 // verdict (run id, stop reason, verdict, spend, the pending ask, the owning skill). Keep `--json` only to
 // PARSE, and redirect it to a file.
-const OPERATION_JSON_TRUNCATED =
-  /\brun\.mjs\b[^|]*--json\b[^|]*\|\s*(?:head|tail)\b/;
+// THE PRODUCER HALF, anchored on the RUNNER exactly as `VERIFICATION_RUN` is (`node <path>run.mjs`), so a
+// MENTION is not a run. The first cut omitted that anchor while the PR body claimed it had it, and
+// `echo "run.mjs verify --json" | tail -5` — prose ABOUT a command — was denied as if it were the command.
+const OPERATION_JSON_PRODUCER = /\bnode\s+\S*\brun\.mjs\b[\s\S]*--json\b/;
+/** THE CONSUMER HALF: a segment whose command word is `head`/`tail`, past any leading `VAR=…` assignments. */
+const TRUNCATING_CONSUMER = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:head|tail)\b/;
 
-/** Is this an operation `--json` piped into head/tail — corrupting the payload rather than trimming a view? Pure. */
-export function isTruncatedOperationJson(command) { return OPERATION_JSON_TRUNCATED.test(String(command || '')); }
+/**
+ * Is an operation's `--json` piped into head/tail — corrupting the payload rather than trimming a view? Pure.
+ *
+ * PIPELINE-SCOPED, via `parseSegments`' `pipedFrom`, and that is the correctness of it rather than a tidiness
+ * (#1961 review r3, CONFIRMED against the running code). The first cut approximated "the same pipeline" as a
+ * whole-string regex with `[^|]*` runs, which is wrong in BOTH directions:
+ *   • FALSE POSITIVE across a statement separator — `run.mjs verify --json > /tmp/r.json; git log | tail -5`
+ *     was denied. The payload is already safely redirected to a file and the `tail` belongs to an unrelated
+ *     statement; `[^|]*` excludes other PIPES but says nothing about `;` / `&&` / `||`.
+ *   • FALSE NEGATIVE through a longer pipeline — `run.mjs verify --json | jq . | tail -5` was ALLOWED, because
+ *     the intervening `|` broke the `[^|]*` run. That is the exact corruption this guard exists to stop,
+ *     walking straight through it.
+ * `pipedFrom[i]` is true only for a real data pipe from the previous segment, so a run of consecutive true
+ * values IS one pipeline and a false value starts a new one. Walk it once, carrying whether the pipeline in
+ * hand is currently transporting an operation's JSON.
+ */
+export function isTruncatedOperationJson(command) {
+  // Heredoc bodies are DATA, not commands — same treatment `unparseableReason` gives them, so a payload that
+  // happens to quote this shape is not read as an invocation of it.
+  const { segments, pipedFrom } = parseSegments(heredocScan(String(command || '')).text);
+  let carryingJson = false;
+  for (let i = 0; i < segments.length; i++) {
+    if (!pipedFrom[i]) carryingJson = false;                                    // a new pipeline starts here
+    else if (carryingJson && TRUNCATING_CONSUMER.test(segments[i])) return true; // …and it eats the payload
+    if (OPERATION_JSON_PRODUCER.test(segments[i])) carryingJson = true;
+  }
+  return false;
+}
 
 /**
  * Is `command` being BACKGROUNDED? Pure. Two channels the #2833 stall can arrive through:
@@ -2215,8 +2245,9 @@ export function decide(command, ctx = {}) {
   // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
   const ident = commitIdentityCommandReason(command);
   if (ident) return ident;
-  // 2026-09-06 — also whole-command: the truncating pipe spans the producer and the consumer, so the
-  // per-segment loop below would see each half alone and match neither.
+  // 2026-09-06 — dispatched at WHOLE-COMMAND level because the truncating pipe spans the producer and the
+  // consumer, which the per-segment loop below would see separately and match neither. The predicate itself
+  // does its own pipeline-scoped segmentation (#1961 review r3) rather than reading the string as one blob.
   const trunc = truncatedOperationJsonReason(command);
   if (trunc) return trunc;
   // #2968 — the pipe/xargs, while-read, and `-exec` enumerate-then-`git add` sink shapes all need more than
