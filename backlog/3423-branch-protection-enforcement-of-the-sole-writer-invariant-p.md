@@ -67,7 +67,7 @@ the *record* reads, not what is safe to do now.
 GitHub App installation or machine-user PAT wired into its `gh` auth, separate from the human's), or a second
 human writer joins the repo. Neither holds today.
 
-Build carved: **#xmheyaw** — make the enforcement rung a declared knob, with Rung 2 as its off-by-default
+Build carved: **#3532** — make the enforcement rung a declared knob, with Rung 2 as its off-by-default
 flavor. Item 1 of that story is the part with value today (a dimension that is declared and reconciled against
 the real branch-protection state, so the repo cannot drift off its own ratified rung silently); item 2 is the
 option itself, built from the ruleset call already written out below.

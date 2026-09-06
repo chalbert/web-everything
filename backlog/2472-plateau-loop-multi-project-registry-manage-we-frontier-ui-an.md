@@ -27,7 +27,7 @@ each repo holds its own `backlog/*.md` rather than everything living in Web Ever
 > tracker, because a repo and its backlog are the same artifact and must move together. What changes is the
 > **interim**: until then a per-repo surface is a **locus-filtered virtual view** over WE's single tracker (no
 > second `backlog/`, no second numbering authority), and the id scheme moves first — an item id always carries
-> its locus, additive half carved as [#xnn9wtv](/backlog/xnn9wtv-a-backlog-id-always-carries-its-locus-bare-nnn-keeps-meaning/).
+> its locus, additive half carved as [#3533](/backlog/3533-a-backlog-id-always-carries-its-locus-bare-nnn-keeps-meaning/).
 >
 > **One thing left to the operator, flagged rather than taken:** this epic is `priority: low` and deferred
 > behind #2456's evidence gate. #3129 narrowed that deferral's ground — the "no evidenced need for repo
