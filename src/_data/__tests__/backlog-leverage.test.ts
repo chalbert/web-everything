@@ -2,11 +2,25 @@
 // point of this file: prove that however the backlog grows, the reverse-dependency edges and the
 // leverage scores the Prioritisation tab ranks by stay internally consistent and deterministic.
 // See src/_data/backlog.js (the `dependentsByNum` / leverage pass) + backlog/254-*.md.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { freezeBacklogCorpus, withFrozenBacklogDir } from './frozen-backlog';
 
 const require = createRequire(import.meta.url);
-const loadBacklog = require('../backlog.js');
+
+// #3531 — load from a FROZEN copy of the corpus, never the live `we:backlog/` directory. The determinism
+// test below reads the corpus twice, seconds apart; `we:backlog/` is a working directory that scaffold,
+// resolve and the drain write to, so against the live one those two reads are racing other processes and
+// the failure surfaces as "the derivation is non-deterministic" when the derivation is fine and the INPUT
+// moved. Freezing keeps the real 3500-card corpus as the subject and makes it immutable for this file.
+const corpus = freezeBacklogCorpus(join(dirname(fileURLToPath(import.meta.url)), '../../../backlog'));
+afterAll(() => corpus.dispose());
+
+// The override only has to survive the `require` — `BACKLOG_DIR` is resolved once at module load — and is
+// restored immediately after, so this file leaves no `process.env` residue for the next file in the worker.
+const loadBacklog = withFrozenBacklogDir(corpus.dir, () => require('../backlog.js'));
 
 const items = loadBacklog();
 const byNum = new Map<string, any>(items.map((i: any) => [i.num, i]));
@@ -69,6 +83,8 @@ describe('backlog unblock-leverage — derivation invariants', () => {
     }
   });
 
+  // The corpus is frozen for this file (see the header), so this compares two runs of the DERIVATION over
+  // one fixed input — which is the claim. Before #3531 it also, silently, compared two different inputs.
   it('is deterministic — a second load produces identical leverage fields', () => {
     const again = loadBacklog();
     const pick = (arr: any[]) => arr.map((i: any) =>
