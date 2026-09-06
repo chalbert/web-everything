@@ -5,6 +5,7 @@ parent: "3029"
 status: open
 dateOpened: "2026-08-27"
 tags: [operations, conveyor, dispatch, multi-provider, cost, resilience]
+relatedReport: reports/2026-09-06-backlog-consolidation-analysis.md
 ---
 
 # Decouple agent dispatch from the Claude CLI — introduce a multi-provider abstraction
