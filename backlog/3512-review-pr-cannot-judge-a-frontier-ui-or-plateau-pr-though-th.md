@@ -1,4 +1,5 @@
 ---
+bornAs: xgmzd0y
 kind: story
 size: 5
 status: open
@@ -33,7 +34,7 @@ no way to form.
 The gate is asymmetric in the dangerous direction. `we:scripts/review-set-label.mjs` takes
 `--repo=<owner/name>` and will stamp `review:accepted` on a FUI PR today; `review-pr` cannot form the verdict
 being stamped. So the only reachable path to clearing a parked FUI PR is one that records a judgement no
-tooling produced — which is exactly the `no-recorded-review` shape the drain stamps and `#xzw59we`/`#x45zcv4`
+tooling produced — which is exactly the `no-recorded-review` shape the drain stamps and `#3511`/`#3504`
 were filed about.
 
 The impl half of every cross-repo couple lives in FUI, so this is not an edge: it is the review path for the
