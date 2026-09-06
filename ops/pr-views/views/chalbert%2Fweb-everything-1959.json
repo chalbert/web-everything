@@ -1,0 +1,638 @@
+{
+  "body": "## What this is\n\nA staleness audit of the open backlog, the reopens it turned up, and the root-cause fix for why cards rot.\n\nScope was set by the operator: audit every open item **except** the #2445 delivery-machinery tree (224 items, excluded as the actively-churning area).\n\n## Method\n\n20 parallel reading agents verified each card's claims against live source in `web-everything`, `frontierui` and `plateau-app` — not against plausibility. Every `ALREADY-DONE` verdict then went through a second, **adversarial** pass whose job was to break the claim: extract the card's `## Done when` clauses verbatim, find the artifact for each, run the cited tests, and hunt for the clause that *isn't* satisfied.\n\nThat second pass rejected **7 of 32** done-claims (22%). Without it, seven cards would have closed over undelivered work.\n\n## Results\n\n| Verdict | Count |\n|---|---:|\n| OK | 176 |\n| STALE-INFO | 209 |\n| ALREADY-DONE claimed | 32 → **25 confirmed**, 7 rejected |\n| DEAD-REFS | 12 |\n| STALE-PREMISE | 6 |\n| SUPERSEDED | 2 |\n\nA second sweep covered all **2,734 resolved** cards, testing whether each `graduatedTo` names a path that exists. 100 were dead — but only **one** was a false resolve; 93 were relocation debris from three known moves, 4 renames, 2 delivered-then-deleted.\n\n## Backlog changes\n\n- **25 resolved**, every one through the declared `resolve` operation (see below).\n- **5 reopened**: #2756 (resolved over a Rust SSR subtree that does not exist — `frontierui` has zero `.rs` files and no such branch), #1010 and #1161 (acceptance clauses with no artifact anywhere after the WE-is-contract-only migration deleted them), and their umbrellas #1002 and #1038, which `check:standards` correctly refused as \"a resolved epic with 1 open child slice\".\n- **97 `graduatedTo` paths corrected** to live artifacts.\n- **#2096 re-prepped** (#1935 stale-prep rule) — its three defaults had *shipped* before ratification, so its greenfield premise was false. No ruling made; that stays the operator's.\n- **8 follow-ups filed.**\n\n## The root-cause fix\n\nThe four rot classes are one defect: **the citation gate resolves a reference's *container*, never its *content* — and only in one of the three repos.**\n\n`findDanglingLoci` (gate 5, #2821) asks two questions of `we:path:NNN`: does the file exist, and is `NNN <= EOF`. That is a bounds check. A file that *grows* therefore keeps every stale citation green — `docs/agent/platform-decisions.md` reached 4,138 lines, so cites written when it was ~600 are still \"in range\" and point at unrelated content. The largest rot class in the corpus produced zero gate signal.\n\nAdded to `scripts/lib/citation-check.mjs` + `scripts/check-standards.mjs`:\n\n- **`splitRepoRef` / `makeRepoResolver`** — cross-repo resolution, **detect-or-skip and fail-closed**: an absent sibling reports `no-repo` and is named as *skipped*, never counted present.\n- **Gate 5b `findDanglingSymbolAnchors`** — resolves `we:path#symbol`, the drift-immune form gate 5's own error message recommends and which had **no validator at all**. Word-boundary matched, so `foo` cannot satisfy a file holding only `fooBar`.\n- **Gate 5c `findDanglingGraduatedTargets`** — a resolved item's `graduatedTo` target must exist. **Verified by reproduction:** restoring #2756's original frontmatter makes the gate fire; reverting clears it.\n\nWired **outside** the Rust-port branch on purpose: `runWeScan('citation-check')` is verified byte-identical to the four existing gates, so folding a fifth into that path would mean it silently does not run whenever the port is active — the very hole being closed.\n\n### Deliberately not built\n\n**Gate 5d (`scope:` path existence) was implemented and removed — the invariant is unsound.** A greenfield item legitimately scopes files it is about to *create*; #2756's own `scopeRationale` says so. Enforced as written it fired on #3483, #3484, #3487 and #3323, all correct cards. The sound discriminator is existed-then-deleted vs never-existed, which needs full history the shallow clones lack. Re-scoped on its card rather than shipped as a noisy heuristic.\n\n## Skill/operation wiring (#3224)\n\n`DECLARED_HOMES` went from **5 of 17** operations to **7**. The scan can only fire for operations in that map, so the map's contents are the gate's reach — and `resolve` (15 raw calls) and `scaffold` (45, the most-invoked) were both unwatched. Both are non-delegating, unlike the `claim` negative control.\n\n**Both report clean**, and that is the honest result: the scanned skills already instruct `run.mjs`, and the remaining raw mentions are prose contrasts, which the scan correctly ignores (`HOME_MENTION` matches an invocation, not a bare reference). This buys regression coverage, not a backlog of findings.\n\n## Corrections made to this work's own method\n\nRecorded in the report's Part 4 rather than quietly fixed:\n\n1. The 25 resolves originally went through **raw `backlog.mjs resolve` calls** — the exact bypass `operations/resolve.mjs` exists to end, skipping four guards. Fixed by **replay, not assertion**: all 25 reverted to `active` and re-run through the operation with **no `--force` anywhere**, since a refusal was the signal wanted. All 25 passed, byte-identical — so the resolves were sound and only the route was wrong.\n2. Two cards were left resolved that are **not really done** (#1010, #1161), reopened as above.\n3. `resolve.mjs`'s header claimed a skill \"still instructs the raw command\"; it does not — the skills were rewired and the justification was not. Corrected.\n\n## Verification\n\n- `npm run check:standards` — **0 errors** (warnings unchanged from baseline).\n- Full suite — **90 files, 3,601 tests** green.\n- `run.mjs verify` — **\"verified green for ef74eb85\"**, no blocking findings.\n\n## Transport note\n\nThis PR was planned by `run.mjs open-pr` (`--ref=lane/audit-open-stories --mode=park --parkLabel=review:human --sha=ef74eb85 --require-verified`), which refused to submit because this host has no `gh` credential and instructed submitting the planned argv through a channel that has one. Only the transport differs from the operation's plan. The `review:human` park label still needs applying.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WZz4BXVdMwn7MzztGBJb92\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WZz4BXVdMwn7MzztGBJb92)_",
+  "comments": [
+    {
+      "id": "IC_kwDORBt1-c8AAAABS36MhA",
+      "author": {
+        "login": "chalbert"
+      },
+      "authorAssociation": "OWNER",
+      "body": "<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold (review:human) stands, so the \"ready-to-merge\" go-ahead is withheld even though the required check is green (#2832). Clear the review to release it.",
+      "createdAt": "2026-09-06T19:19:40Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/chalbert/web-everything/pull/1959#issuecomment-5561552004",
+      "viewerDidAuthor": false
+    }
+  ],
+  "createdAt": "2026-09-06T19:12:32Z",
+  "files": [
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-01.md",
+      "additions": 210,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-02.md",
+      "additions": 168,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-03.md",
+      "additions": 391,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-04.md",
+      "additions": 247,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-05.md",
+      "additions": 308,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-06.md",
+      "additions": 212,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-07.md",
+      "additions": 296,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-08.md",
+      "additions": 325,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-09.md",
+      "additions": 249,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-10.md",
+      "additions": 111,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-11.md",
+      "additions": 253,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-12.md",
+      "additions": 102,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-13.md",
+      "additions": 205,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-14.md",
+      "additions": 164,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-15.md",
+      "additions": 433,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-16.md",
+      "additions": 367,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-17.md",
+      "additions": 456,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-18.md",
+      "additions": 313,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-19.md",
+      "additions": 331,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/batch-20.md",
+      "additions": 722,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/setA.md",
+      "additions": 359,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "audits/2026-09-06-open-story-staleness/setB.md",
+      "additions": 274,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/1001-implement-web-portals-logical-tree-polyfill-portal-directive.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1002-plugs-test-coverage-spec-conformance-integration-stress-audi.md",
+      "additions": 12,
+      "deletions": 2,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1003-implement-web-analytics-customtracker-contract-reference-ada.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1010-webvalidation-plug-to-the-coverage-bar-both-mirrors-unit-ded.md",
+      "additions": 18,
+      "deletions": 3,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1011-patch-interaction-stress-harness-node-statics-third-party-do.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1035-review-design-claude-skill-screenshot-a-page-return-a-struct.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1038-webdocs-spec-surface-completeness-doc-manifest-cases-specs-w.md",
+      "additions": 10,
+      "deletions": 2,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1055-webintl-provider-intl-runtime-in-fui.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1071-webprocess-provider-artefact-contract-runtime-in-fui.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1078-webpolicy-engine-dmn-engine-plus-proof-of-compliance-runtime.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1088-webregistries-completion-global-patching-api-remaining-regis.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1089-webstates-completion-change-tracking-storage-protocols-recon.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1090-webvalidation-completion-l1-observable-surface-commitment-po.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1091-webcontexts-completion-claim-query-protocol-strict-flexible-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1095-webbehaviors-completion-whendefined-naming-convention-hyphen.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1096-webexpressions-completion-excludedelements-cloak-removal-upg.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1098-webdirectives-completion-customcomment-subsystem-multi-templ.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1100-webregistries-plugged-mode-global-patching-api-applypatches-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1101-customelementregistry-whendefined-real-promise.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1102-customelementregistry-getstandinelement-extraction-define-du.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1105-webstates-change-tracking-contract-types-changerecord-native.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1106-webstates-storage-contract-types-storagepersistence.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1107-webstates-customchangestrategyregistry-per-scope-selection.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1108-webstates-customstoragestrategyregistry-indexeddb-to-localst.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1109-webstates-unplugged-conformance-tests-for-both-protocols.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1111-webvalidation-validation-control-stable-id-event-surface.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1115-webcontexts-claim-negotiation-hook-on-customcontext.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1117-webcontexts-strict-vs-flexible-lookup-modes-consulting-claim.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1120-webbehaviors-hyphen-in-name-validation-on-define-definelazy.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1123-webexpressions-excludedelements-on-parser-registry-skip.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1124-webexpressions-cloak-removal-after-upgrade.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1125-webexpressions-observer-upgrades-addednodes-dynamic-insertio.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1126-webexpressions-explicit-api-trigger-parity-detached-self-rep.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1127-webtheme-high-contrast-scheme-regression-test.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1128-webtheme-accent-scheme-css-golden-snapshot-regression-test.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1130-webdirectives-customcomment-base-class-extends-native-commen.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1131-webdirectives-customcommentregistry-extends-core-htmlregistr.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1132-webdirectives-default-customcommentparser-customcommentparse.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1150-web-portals-portal-directive-portal-outlet-deferred-target-r.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1151-web-portals-ssr-contract-conformance-vectors-logical-positio.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1161-manifest-spec-completion-cem-derivation-hardening-forward-co.md",
+      "additions": 15,
+      "deletions": 3,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1167-autonomous-exploratory-ui-testing-tool-fui-owned-engine-that.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1168-explorer-engine-core-playwright-driver-crawljax-style-state-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1169-layer-1-generic-invariants-oracle-bus-for-the-autonomous-ui-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1170-explore-harness-autonomous-stress-test-of-the-fui-component-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1171-explore-harness-autonomous-sweep-verifying-the-we-docs-websi.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1172-gate-mode-agent-invoked-pre-close-gate-on-ui-work-items.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1174-customtemplatedirective-children-constructor-option-is-a-no-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1176-layer-2-conformance-vector-oracle-layer-3-advisory-llm-judge.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1202-dev-server-vite-config-cold-start-broken-since-449-no-gate-c.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1219-explorer-cli-npm-script-run-the-autonomous-stress-test-gate-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1220-stress-test-claude-code-skill-ask-claude-in-natural-language.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1221-tier2vlmjudgemodel-wire-the-on-device-tier-2-vlm-as-the-expl.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1232-explorer-in-page-dom-walk-crashes-on-getattribute-of-null-on.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1236-render-the-we-pitch-deck-1209-content-on-the-fui-deck-compon.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1239-landing-marketing-page-public-first-screen.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1241-pricing-page-reads-open-core-rulings.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1242-supporting-public-pages-legal-public-404.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1252-webtheme-load-palette-from-external-source-palette-source-in.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1295-webstates-build-the-client-storage-schema-versioning-facet-p.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1314-webtheme-scheme-paired-accent-role-light-dark-primary-flip.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1315-webtheme-calc-derived-radius-scale-from-a-base-radius-token.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1316-webtheme-intent-focus-ring-role-ring-color-offset.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1317-surface-intent-neutral-surface-roles-border-muted-muted-fore.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1356-fui-host-pagination-renderer-demo-swap-we-page-to-701-iframe.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1359-developer-technical-pitch-deck-render-the-1213-outline-on-th.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1360-design-system-enterprise-adopter-pitch-deck-render-the-1214-.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1412-explorer-no-broken-layout-oracle-distinguish-real-horizontal.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1413-relax-shared-plug-contract-drop-downgrade-requirement-downgr.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1418-explorer-active-gesture-probing-scroll-page-scroll-container.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1421-explorer-self-regression-suite-a-gallery-of-deliberately-bro.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1422-explorer-crashes-on-full-page-navigation-multi-page-sites-ex.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1424-strategic-vision-pitch-deck-render-the-1212-outline-on-the-p.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1453-convert-button-to-we-button-custom-element-transient-a.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1458-webtheme-shared-tone-token-palette-tone-meta-contract-statut.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/1465-explorer-gesture-time-oracles-observe-during-scroll-drag-wir.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "lane/audit-open-stories",
+  "headRefOid": "ef74eb8520f375253b9c65b763957b9eb656979f",
+  "labels": [
+    {
+      "id": "LA_kwDORBt1-c8AAAACqL1KIg",
+      "name": "review:human",
+      "description": "conflict-of-interest: gate-self edit, a human must review",
+      "color": "B60205"
+    }
+  ],
+  "number": 1959,
+  "state": "OPEN",
+  "title": "audit: open-story staleness pass, the reopens it found, and the root-cause gate fix",
+  "url": "https://github.com/chalbert/web-everything/pull/1959",
+  "repo": "chalbert/web-everything"
+}
