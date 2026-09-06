@@ -2698,6 +2698,37 @@ bullet).** The isolate-by-default + human-writes-`main` posture tightens in thre
   so only the human's exemption is removed — nearly free. Deferred until the second-writer need is real (a lone
   trusted writer has no one to race, so forcing them to PR buys friction with no safety).
 
+
+**Amendment — the rung is a configurable dimension whose current value is Rung 1; Rung 2 is OFF, not rejected
+(#3423, ratified 2026-09-06 by the operator).** #3373 found that nothing at GitHub's own layer enforces the
+sole-writer invariant JIT numbering depends on — it holds entirely by script discipline. Ruling: **that
+discipline is the accepted enforcement layer**, and what "accepted" names is a real layered control, not a
+promise — `assertMayMerge` (`we:scripts/lib/pr-merge-gate.mjs`) is the sole `gh pr merge` chokepoint and throws
+for any caller that is not the drain unless `WE_MERGE_BREAK_GLASS=1`, which logs loudly on every use;
+`withNumberingLock` / `withLandWriteLock` (`we:scripts/readiness/drain-lock.mjs`) share a key so a merge write
+and the numbering step stay mutually exclusive; and `duplicateBornAs` / `strandedHashesOnMain`
+(`we:scripts/check-standards-rules.mjs`) are a build-time catch net that surfaces the artifact an out-of-band
+write leaves behind — a duplicate or un-numbered hash — even if the live gate were skipped.
+
+**Read the ladder as a dimension, not a verdict.** Rung 2 is **not turned on**; it was not weighed and lost.
+The operator's framing at ratification, which is the ratified one: enforcement level is a **configurable
+dimension** with a safe default, per [#config-extends-platform-default](#config-extends-platform-default) —
+Rung 2 is a selectable flavor blocked on a *prerequisite*, not on merit. The mechanism genuinely exists
+(Repository Rulesets carry a `bypass_actors` list and are available on GitHub Free for **public personal**
+repos, which this repo is — the older "personal repos cannot do this" reading was too broad, and refers to the
+org-only classic `restrictions` field). What is missing is the **actor**: this repo has exactly one
+collaborator, and the drain's merges ride that same human credential, so there is nothing to name that is not
+the human.
+
+**What stays refused today, so the amendment is not a back door.** Flipping `enforce_admins` now either no-ops
+(an admin acting outside the disciplined scripts is still an admin, allow-listed or not) or blocks the human's
+own direct-`main` path that the Rung 1 / Rung 3 design depends on — and it would regress **#2152** (resolved
+2026-07-02), which set `enforce_admins: false` deliberately to keep the `--fallback-git` and
+`WE_MERGE_BREAK_GLASS` paths working. **Revisit trigger:** a distinct bot GitHub principal is minted for the
+drain (Rung 2's own stated prerequisite — an App installation or machine-user PAT wired into its `gh` auth), or
+a second human writer joins (Rung 3). Neither holds today. The declared-rung knob and the drift check that
+keeps the declaration honest are build **#xmheyaw**.
+
 **Lineage:** #1996 (ratified 2026-06-30; report `we:reports/2026-06-30-pr-flow-rollout-mechanism.md`; research
 topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1+4). Implements
 [#1985 Rung 2](#non-destructive-closeout-prflow); builds on the #1933 clone model + #1995 push-retry; composes
