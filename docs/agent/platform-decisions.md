@@ -4184,6 +4184,84 @@ engine the closing catalog builds onto).
 
 ---
 
+### A parked PR's real merge conflict is resolved by dispatching an agent through the existing bounce+fix pipeline — never a bespoke script, never a second dispatcher {#parked-pr-conflict-dispatched-not-scripted}
+
+**Ratified 2026-09-06** — per the operator's explicit instruction to ratify this card ("ratified"); all four
+forks accepted as the prepared card's own bolded recommended defaults, no alternative picked, no amendment
+beyond what each fork's own prepared reasoning (a skeptic pass and an independent two-confusion screen, both
+already folded into the card) already settled. `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (`#3494`)
+already detects a parked PR drifting into a real `CONFLICTING` state and refused to auto-resolve it — correctly,
+for a deterministic script with no way to choose which side of an overlapping hunk wins. Dispatching a real
+*agent* at the same conflict is a different, lower-risk shape: the result still lands through the identical
+independent-review gate `#3494` itself protects. Four clauses:
+
+1. **Fork 1 — dispatch prefers resuming the PR's original builder session, through the ONE declared spawn
+   implementation, gated on a build-time probe.** An opt-in `resumeSessionId` branch lives INSIDE the existing
+   `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` (never a second spawn path — per
+   [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation)). The
+   session id is read from the PR's own `authored-by-actor` body stamp and looked up in
+   `claude agents --json --all`; if found, the dispatcher attempts `claude --bg --resume <id>` and compares the
+   id the CLI actually resumes under against the id requested — a mismatch means the CLI silently forked a copy,
+   which is `claude stop`-ped and the dispatch falls back to fresh. **This fork's build owed a real probe, not an
+   assumption**, given `#3331`'s own open, adjacent finding that `--bg` discards a request-side `--session-id`.
+   The probe ran live (CLI 2.1.263, 2026-09-06) and found: `claude --bg --resume <id>` genuinely continues the
+   named session with NEW work injected into the SAME context (a second prompt sent after the first had finished
+   produced a fresh reply, with both turns present in the transcript) — a real resume, not a mere re-attach to
+   old output — but **only when no other flag accompanies `--resume`**. Passing `-n`, `--model`,
+   `--append-system-prompt-file`, or any other flag alongside `--resume` makes the CLI fork an unrelated copy
+   under a fresh id instead of continuing the named session, every time it was tried, regardless of whether the
+   original session was still live. The build therefore issues a bare `['--bg', '--resume', <id>, <prompt>]` for
+   the resume attempt (no `-n`, no system-prompt file, no extra args) and relies on the id-mismatch check named
+   above to catch every fork this causes — both the "session already running" fork and the "flags differed" fork
+   are the same observable failure and the same recovery.
+2. **Fork 2 — scope is every parked PR the existing conflict-watch predicate already targets, including
+   `review:human`, except a statute-tier hunk.** No blanket `review:human` carve-out: the fix-agent brief already
+   never touches that label for any reason, so a merge conflict is no more dangerous to dispatch at than an
+   ordinary reviewer finding on DISPATCH-ELIGIBILITY grounds. The one real exception is by file CONTENT, not by
+   PR label — a conflict whose overlapping hunk touches a declarative-leash or statute-tier path
+   (`we:scripts/lib/review-escalation.mjs#isDeclarativeLeashPath` / `#isStatutePath`) routes straight to a human
+   stand-down with no dispatch attempt at all, because choosing which side of that hunk wins is drafting
+   principle content, not ordinary code.
+3. **Fork 3 — retry/escalation reuses the existing durable rearm cap and `stand-down.mjs`, with one named brief
+   gap closed.** No dedicated conflict-retry counter: once a conflict is posted as a `review:changes` bounce
+   (Fork 4), it is an ordinary bounced PR to `we:scripts/conveyor/reconcile-core.mjs`, sharing ONE cap
+   (`countRearmComments` against `NEGOTIATION_ROUND_CAP`) across every bounce cause — splitting the counter would
+   silently raise the total unsupervised-repair ceiling for a PR that hits both a conflict and an ordinary
+   finding, the opposite of what the cap exists to prevent. The brief gap this fork's build closed: the
+   fix-agent brief's AUTOMATIC dispatch path only ever posted a completion record
+   (`operations/completion-cli.mjs report --outcome=escalated-conflict`), never the durable
+   `stand-down.mjs --reason=conflict` PR comment the MANUAL `/finish` path already posts — so an auto-dispatched
+   agent that gave up on a conflict was silently re-dispatched at the same unresolved conflict next tick, bounded
+   only by the 5-attempt cap rather than the terminal stand-down exit. The brief now posts the same stand-down
+   call on both paths.
+4. **Fork 4 — the dispatch mechanism is the existing bounce+fix-dispatch pipeline, with a broadened shared
+   banner, never a second dispatcher.** No new, parallel conflict-dispatch pass: when
+   `parked-pr-conflict-watch.mjs` detects a fresh conflict (outside Fork 2's statute-tier exception), it posts
+   the conflict as a `review:changes` bounce via `we:scripts/conveyor/reconcile-finding.mjs` — the exact shape
+   already built for "a mechanical pass found this PR conflicts with a decision made elsewhere." That flips
+   `classifyPr`'s phase to `bounced`, which the EXISTING `reconcile-core.mjs`/`reconcile-fix-dispatch.mjs` already
+   pick up and dispatch against, through the SAME `fix-agent-brief.md`. Two independent dispatchers that could
+   both fire on one PR is the exact double-dispatch hazard `#3416` already found and fixed once; funnelling every
+   "this PR needs a fix agent" decision through one pipeline is the same one-implementation principle
+   [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) already
+   states one layer up. The one wording fix this fork's build owed: `reconcile-finding.mjs`'s shared banner was
+   worded specifically around a semantic/sequencing conflict (its own motivating incident); it is broadened to
+   also name a raw git merge conflict against `main`, rather than forking a second, near-identical banner.
+
+**What this ruling does not settle.** Whether an ORDINARY (non-conflict) `review:changes` fix should also prefer
+resuming its original builder is a real, separate, larger question this item does not answer — the new
+`resumeSessionId` parameter defaults OFF for every existing caller and is turned on only for the new
+conflict-triggered call site.
+
+**Lineage:** ratified via `#xu2krte` (2026-09-06), filed under the background mechanical dispatcher epic `#3383`.
+Full reasoning, prior-art survey, the skeptic pass and the two-confusion screen:
+[#xu2krte](/backlog/xu2krte-automate-merge-conflict-resolution-on-parked-prs-dispatch-an/), research topic
+[parked-pr-conflict-auto-resolution](/reports/2026-09-06-parked-pr-conflict-auto-resolution-research/). Composes
+with [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (the
+one-spawn-implementation statute this item's Fork 1 and Fork 4 both implement within, not alongside).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
