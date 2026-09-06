@@ -1173,7 +1173,14 @@ function cost() {
 // primary: a lane lives under `<workspace>/.lanes/`. Refuse there and name the two places it DOES belong.
 function numberStranded() {
   const dryRun = argv.includes('--dry-run');
-  if (isLaneLocus(resolveReal(process.cwd()), sep)) {
+  // #1961 review r4 — test ROOT, NOT `process.cwd()`. The repair below writes to `ROOT` (this script's own
+  // checkout, resolved from `import.meta.url`), so cwd is the wrong thing to ask: invoked by ABSOLUTE PATH
+  // from an unrelated directory — `cd /tmp && node /…/.lanes/<pool>/lane-1/scripts/backlog.mjs
+  // number-stranded` — the cwd test passed and the verb went on to renumber the LANE's cards, which is the
+  // exact half-applied rename this guard exists to prevent. Verified against the running code before the fix
+  // (it offered to number 2 cards); the inverse mis-invocation also FALSELY refused a legitimate primary run.
+  // A locus guard must test the locus it protects.
+  if (isLaneLocus(resolveReal(ROOT), sep)) {
     die('number-stranded: refusing to run in a LANE clone. The NNN it assigns is only valid when assigned '
       + 'against serialized main (#2288) — assigned here, check:standards rejects the result as "a hand-picked '
       + 'NNN not on origin/main", so the verb would refuse both ways and leave a half-applied rename. Run it '

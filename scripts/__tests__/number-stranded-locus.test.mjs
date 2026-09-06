@@ -1,59 +1,79 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CLI = join(dirname(dirname(fileURLToPath(import.meta.url))), 'backlog.mjs');
+const WE_SCRIPTS_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /**
- * #1961 correctness round 2 — the WIRING, not the predicate.
+ * #1961 — `number-stranded`'s lane refusal, tested at the level that actually runs.
  *
- * Round 1 extracted `isLaneLocus` and tested it, which left the juror's original finding half-fixed: a
- * tested predicate that `numberStranded()` failed to call would still ship a guard that never fires. This
- * spawns the real CLI with a lane-shaped cwd and asserts the refusal, so mutating the call site — not just
- * the predicate — reddens a test.
+ * Round 2 asked for the WIRING, not the predicate: a tested `isLaneLocus` that `numberStranded()` failed to
+ * call would still ship a guard that never fires. Round 3's juror then found the guard was asking the WRONG
+ * QUESTION — it tested `process.cwd()` while the repair writes to `ROOT`, this script's own checkout. Invoked
+ * by absolute path from an unrelated directory the guard passed and the verb went on to renumber the LANE's
+ * cards, which is precisely the half-applied rename it exists to prevent. Confirmed against the running code
+ * before the fix: it offered to number 2 real cards.
  *
- * The cwd is a synthesised `<tmp>/.lanes/<pool>/lane-1`, not the lane this suite happens to run in: the
- * assertion must hold in CI, where the checkout is not a lane at all.
+ * So both cases below decouple cwd from ROOT deliberately, by planting a COPY of the scripts tree at a
+ * chosen locus (the #2274 throwaway-clone substrate `we:scripts/backlog/__tests__/resolve-parent-cli.test.mjs`
+ * uses) and running it from somewhere else entirely. A test that only ever runs `cd <checkout> && node
+ * scripts/backlog.mjs` cannot tell the two apart — which is why the hole survived two rounds.
  */
-describe('number-stranded refuses in a lane clone (#1961)', () => {
-  const run = (cwd) => {
-    try {
-      const stdout = execFileSync(process.execPath, [CLI, 'number-stranded', '--dry-run'],
-        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      return { code: 0, out: stdout };
-    } catch (e) {
-      return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
-    }
-  };
+let laneRoot;   // a LANE-shaped ROOT: <tmp>/.lanes/<pool>/lane-1
+let plainRoot;  // a NON-lane ROOT
+let elsewhere;  // a cwd unrelated to both
 
-  it('refuses, naming the reason and both places it DOES belong', () => {
-    const base = mkdtempSync(join(tmpdir(), 'ns-locus-'));
-    const lane = join(base, '.lanes', 'web-everything', 'lane-1');
-    mkdirSync(lane, { recursive: true });
-    try {
-      const { code, out } = run(lane);
-      expect(code).not.toBe(0);
-      expect(out).toMatch(/refusing to run in a LANE clone/);
-      // The remedy must be in the message — a refusal that does not say where to go is a dead end.
-      expect(out).toMatch(/PRIMARY checkout/);
-      expect(out).toMatch(/drain/);
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
+beforeAll(() => {
+  const base = mkdtempSync(join(tmpdir(), 'ns-locus-'));
+  laneRoot = join(base, '.lanes', 'web-everything', 'lane-1');
+  plainRoot = join(base, 'primary');
+  elsewhere = join(base, 'elsewhere');
+  for (const d of [laneRoot, plainRoot, elsewhere]) mkdirSync(d, { recursive: true });
+  for (const root of [laneRoot, plainRoot]) {
+    cpSync(WE_SCRIPTS_DIR, join(root, 'scripts'), { recursive: true });
+    mkdirSync(join(root, 'backlog'), { recursive: true });
+  }
+});
+afterAll(() => {
+  try { rmSync(join(laneRoot, '..', '..', '..'), { recursive: true, force: true }); } catch { /* best-effort */ }
+});
+
+const run = (root, cwd) => {
+  try {
+    const stdout = execFileSync(process.execPath, [join(root, 'scripts', 'backlog.mjs'), 'number-stranded', '--dry-run'],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { code: 0, out: stdout };
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+  }
+};
+
+describe('number-stranded refuses on the locus it PROTECTS, not the one it is called from (#1961)', () => {
+  it('REFUSES when the script lives in a lane, even invoked from a non-lane cwd', () => {
+    // The hole round 3 closed. Before the fix this returned 0 and offered to renumber the lane's cards.
+    const { code, out } = run(laneRoot, elsewhere);
+    expect(code).not.toBe(0);
+    expect(out).toMatch(/refusing to run in a LANE clone/);
+    // A refusal that does not say where to go is a dead end — both remedies must be named.
+    expect(out).toMatch(/PRIMARY checkout/);
+    expect(out).toMatch(/drain/);
   });
 
-  it('does NOT refuse on locus grounds outside a lane — the guard must not fire everywhere', () => {
-    const base = mkdtempSync(join(tmpdir(), 'ns-primary-'));
-    try {
-      const { out } = run(base);
-      // It may still fail for unrelated reasons (no git repo there); what must NOT appear is the locus
-      // refusal, which would mean the guard fires on a primary checkout too.
-      expect(out).not.toMatch(/refusing to run in a LANE clone/);
-    } finally {
-      rmSync(base, { recursive: true, force: true });
+  it('REFUSES from inside the lane too — the ordinary invocation still holds', () => {
+    const { code, out } = run(laneRoot, laneRoot);
+    expect(code).not.toBe(0);
+    expect(out).toMatch(/refusing to run in a LANE clone/);
+  });
+
+  it('does NOT refuse on locus grounds when the script lives OUTSIDE a lane', () => {
+    // The guard must not fire everywhere. Asserted from a lane-free cwd AND from `elsewhere`, so neither a
+    // cwd-based nor a ROOT-based reading can pass this by accident.
+    for (const cwd of [plainRoot, elsewhere]) {
+      const { out } = run(plainRoot, cwd);
+      expect(out, `cwd=${cwd}`).not.toMatch(/refusing to run in a LANE clone/);
     }
   });
 });
