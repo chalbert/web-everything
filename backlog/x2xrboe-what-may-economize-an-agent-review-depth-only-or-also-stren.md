@@ -13,6 +13,36 @@ An agent review can be made cheaper two ways: **look less hard** (fewer rounds, 
 second is not ruled anywhere — and this card exists because a cost analysis nearly recommended it on evidence
 that does not apply to this repo.
 
+## Ruled — 2026-09-06, operator
+
+**Fork 1 ratified as (a): depth only.** Care dials `rounds` / `lenses` / `jurorsPerLens`. A care band may not
+reach model or effort.
+
+**Amendment raised and accepted at ratification: strength is *operator-settable*, never *care-derived*.**
+The ruling forbids automatic strength reduction as an economizing axis; it does **not** freeze strength against
+a human who deliberately wants to change it — in either direction. Two things make this the right shape:
+
+- **The knob already exists for `model`, and its safety design is already built.** `--model` is a real control
+  flag of the derived command line (#3151), refused twice on a `-`-leading value — once at parse, before a run
+  record exists, and again by `assertSafeJudgeRequest`
+  ([`we:scripts/operations/cli-adapter.mjs`](../scripts/operations/cli-adapter.mjs) line 381) on the merged
+  request, with the override merged **before** the guard runs, never after (line 466). The literals at
+  [`we:scripts/operations/review-pr.mjs`](../scripts/operations/review-pr.mjs) lines 427–443 exist to keep a
+  run's **INPUT** out of argv — they are a *default*, not a prohibition.
+- **`effort` never joined that pattern.** There is no operator `--effort` flag anywhere outside judge-spawn's
+  own argv emission, and `we:scripts/operations/cli-adapter.mjs` line 471 merges `model` only. So today nobody
+  can dial effort **up** either — `xhigh`/`max` for a gnarly security review is as impossible as dialling down.
+  That asymmetry is an oversight, not a ruling.
+
+**The clause, stated so it cannot be read as a back door.** Strength is a configurable dimension whose
+**default is `sonnet` / `high`** and whose value is set only by an explicit operator control flag validated
+against `EFFORT_LEVELS` ([`we:scripts/lib/judge-spawn.mjs`](../scripts/lib/judge-spawn.mjs) line 330), never
+sourced from run input and never derived from a care band. A future change that makes strength a function of
+care re-opens this fork and needs its own ruling. This is `#config-extends-platform-default` applied — a
+concern with more than one legitimate end-state is a dimension with a safe default, not a baked mechanism.
+
+Build carved: **#xbwup67** — give `effort` the operator control-flag treatment `model` already has.
+
 ## How this card got here, recorded because the correction is the point
 
 It was filed as *"effort dial or model cascade"*, framing a choice between economizing inside one model and
