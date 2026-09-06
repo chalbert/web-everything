@@ -20,14 +20,22 @@
  * for the full reconstruction (merge-base, the overlapping #1911 commit, the backlog search ruling out a
  * duplicate).
  *
- * ALERT-ONLY BY DESIGN — NO AUTO-REBASE. A real content conflict has no single mechanically correct resolution
- * (unlike #2824's clean-rebase BEHIND case): resolving it means choosing which side's edit wins in the
- * overlapping region, exactly the judgment #2824's own design already refuses to automate for this same
- * CONFLICTING/DIRTY case ("left as a skip, logged, no escalation to an agent"). Doing so on a PR that is
- * furthermore explicitly parked for review (nobody has signed off on its content yet) would rewrite it out from
- * under an in-flight human review — the same footgun `#3350`'s own invariant names for the CI-restart case, one
- * level up. This pass's job is the one mechanically-safe half: surface the drift, every tick, so a human/`/finish`
- * picks it up — never resolve it.
+ * ALERT-ONLY WAS THE ORIGINAL DESIGN; `#xu2krte` (ratified 2026-09-06,
+ * `docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted`) NARROWED THAT, NOT REVERSED IT.
+ * A real content conflict has no single mechanically-correct resolution for a deterministic SCRIPT: resolving it
+ * means choosing which side's edit wins in the overlapping region, exactly the judgment #2824's own design
+ * already refuses to automate for this same CONFLICTING/DIRTY case. That reasoning does not extend to
+ * dispatching a real AGENT at the same conflict, though — the agent's output still lands through the identical
+ * independent-review gate this file's own alert protects (`review:human`/`review:pending`/`review:changes` is
+ * never touched by a fix agent, conflict or otherwise). So on a FRESH conflict this pass now does TWO things,
+ * not one: it still applies the informative label + one-time alert (below, unchanged), AND it hands the PR to
+ * the SAME bounce+fix-dispatch pipeline `we:scripts/conveyor/reconcile-fix-dispatch.mjs` already runs for an
+ * ordinary reviewer finding — via `we:scripts/conveyor/reconcile-finding.mjs` ({@link postConflictFinding}) —
+ * UNLESS the conflict sits in a declarative-leash/statute-tier file ({@link isStatuteTierConflict}), in which
+ * case it routes straight to a human via `we:scripts/conveyor/stand-down.mjs --reason=conflict`
+ * ({@link postConflictStandDown}) with no dispatch attempt at all. This file itself still never resolves a
+ * conflict or writes a fix — it only decides which of the two existing downstream pipelines a fresh conflict
+ * reaches.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors `we:scripts/conveyor/branch-drift.mjs` and
  * `we:scripts/conveyor/review-status-tag.mjs`):
@@ -46,13 +54,17 @@
  * `we:scripts/conveyor/branch-drift.mjs sweep` line — the SAME "piggyback on a pass the headless runner already
  * ticks" shape #3464 used, so a parked PR's conflict state is checked every tick with no new cron/daemon.
  */
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { hasUnclearedReviewLabel } from '../lib/review-escalation.mjs';
+import { hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -130,18 +142,69 @@ export function buildConflictComment(pr) {
   ].join('\n');
 }
 
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#isStatuteTierConflict — Fork 2's (`#xu2krte`) content-based
+ * exception: does ANY file this PR touches sit in the declarative-leash or statute tier
+ * (`we:scripts/lib/review-escalation.mjs#isDeclarativeLeashPath` / `#isStatutePath` — the SAME predicates
+ * `deriveCareLevel`'s own `humanRequired` derivation keys on)? PURE.
+ *
+ * A CONSERVATIVE, SAFE-DIRECTIONED APPROXIMATION of "the CONFLICTING hunk itself". Isolating the exact
+ * overlapping region would need a real three-way merge of the PR's head against `main` (fetching a ref this
+ * pass does not otherwise fetch, then a `git merge-tree`) — this reads the PR's WHOLE changed-file set instead
+ * (`gh pr list --json files`, a plain `gh` read, no fetch/clone needed). That can occasionally route a PR to a
+ * human over a leash/statute file present in the diff but not actually part of the conflicting region — the
+ * OVER-cautious direction, never the unsafe one, and it never blocks the PR from a normal review; it only
+ * withholds the agent-dispatch shortcut for THIS conflict.
+ * @param {Array<{path?:string}|string>} files - `gh pr list --json files`'s own `files` array.
+ * @returns {boolean}
+ */
+export function isStatuteTierConflict(files) {
+  return (Array.isArray(files) ? files : [])
+    .map((f) => (typeof f === 'string' ? f : f?.path))
+    .filter(Boolean)
+    .some((p) => isDeclarativeLeashPath(p) || isStatutePath(p));
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildConflictFindingBody — the write-up handed to
+ * `we:scripts/conveyor/reconcile-finding.mjs --body-file=` for a DISPATCHABLE (non-statute-tier) fresh
+ * conflict (Fork 4). PURE.
+ *
+ * Says plainly what an ordinary reconcile-finding does not have to: there is no separate reviewer comment to
+ * read here — resolving the conflict IS the whole task this bounce exists for.
+ * @param {{num:number|string, headRefName?:string}} pr
+ * @returns {string}
+ */
+export function buildConflictFindingBody(pr) {
+  const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
+  return [
+    `PR #${pr?.num ?? pr?.number ?? '?'}${ref} has drifted into a real GIT merge conflict against \`main\` — ` +
+      "GitHub reports `mergeable: CONFLICTING`. This is the WHOLE finding; there is no separate reviewer comment " +
+      'to read on this PR for it.',
+    '',
+    '**Resolving the conflict IS the task.** Rebase or merge `main` into this branch, resolve every conflicted ' +
+      "hunk by reading BOTH sides' intent (this diff's own and whatever landed on `main` since), push the " +
+      'resolution, and let the normal fix-agent flow (this bounce) carry it back to independent review.',
+    '',
+    '_Auto-detected by the parked-PR conflict watch (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, ' +
+      '`#xw0odtv`), dispatched per `#xu2krte`._',
+  ].join('\n');
+}
+
 // ── IO SHELL (gh only past this point — the CLI, gated on the main-module check) ───────────────────────────
 
 /**
  * The open-PR discovery query. `exec` is injectable so the argv is assertable with no `gh` on PATH. Narrower
  * `--json` than `we:scripts/merge-ai-prs.mjs`'s main listing — this pass never classifies for merge, so it
- * needs no `body`/`statusCheckRollup`.
+ * needs no `body`/`statusCheckRollup`. `files` was added by `#xu2krte` — {@link isStatuteTierConflict} reads
+ * it to decide whether a fresh conflict is dispatchable at all; it costs nothing on the common no-conflict tick
+ * since it is read off the same `gh pr list` call this pass already makes.
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
 export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
-    '--json', 'number,headRefName,mergeable,mergeStateStatus,labels'];
+    '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files'];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   const parsed = JSON.parse(String(out || '[]'));
@@ -149,14 +212,61 @@ export function defaultListParkedPrs({ exec = execFileSync, repo = null } = {}) 
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictFinding — Fork 4's dispatch entry point:
+ * shell `we:scripts/conveyor/reconcile-finding.mjs` (a real subprocess, NOT an in-process call — that file's
+ * own CLI harness calls `process.exit(0)` on success, which would kill this pass's own tick if invoked
+ * in-process) to post the fresh conflict as a `review:changes` bounce. The body is written to an allowed temp
+ * path (`we:scripts/review-set-label.mjs#bodyFileRoots`) and removed afterward either way.
+ * @param {{pr:object, repo:string|null, exec?:Function}} o
+ */
+export function defaultPostConflictFinding({ pr, repo, exec = execFileSync }) {
+  const bodyPath = join(tmpdir(), `reconcile-finding-conflict-${pr?.number}-${randomUUID()}.md`);
+  writeFileSync(bodyPath, buildConflictFindingBody({ num: pr?.number, headRefName: pr?.headRefName }), 'utf8');
+  try {
+    const argv = [
+      join(REPO_ROOT, 'scripts', 'conveyor', 'reconcile-finding.mjs'), String(pr?.number),
+      `--body-file=${bodyPath}`, '--agent=parked-pr-conflict-watch', '--channel=the parked-PR conflict watch (#xw0odtv, dispatched per #xu2krte)',
+    ];
+    if (repo) argv.push(`--repo=${repo}`);
+    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+  } finally {
+    try { unlinkSync(bodyPath); } catch { /* best-effort cleanup only */ }
+  }
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictStandDown — Fork 2's exception path: a
+ * fresh conflict touching a declarative-leash/statute file routes straight here instead of
+ * {@link defaultPostConflictFinding}. Shells `we:scripts/conveyor/stand-down.mjs --reason=conflict`, which posts
+ * the durable `STAND_DOWN_MARKER` comment `we:scripts/conveyor/reconcile-core.mjs`'s `stood-down` refusal reads
+ * FIRST, before phase/findings are even examined — so this PR is refused a fix dispatch no matter what review
+ * label it carries, until a human clears the marker.
+ * @param {{pr:object, repo:string|null, exec?:Function}} o
+ */
+export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) {
+  const argv = [join(REPO_ROOT, 'scripts', 'conveyor', 'stand-down.mjs'), String(pr?.number),
+    '--reason=conflict', '--actor=parked-pr-conflict-watch (#xu2krte statute-tier exception)'];
+  if (repo) argv.push(`--repo=${repo}`);
+  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+}
+
+/**
  * THE IO SHELL. Lists open PRs, classifies each, applies the label change + posts the one-time comment when a
  * PR newly transitions into conflict, and reports what happened. Never throws on a per-PR write failure — one
  * bad `gh` call must not stop the sweep from checking the rest (mirrors this file's siblings' best-effort
  * contract); the failure is reported in the per-PR result instead.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean}} [o]
- * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string}>}
+ * `#xu2krte`'s Fork 2/4 addition: on `newlyDetected`, ALSO route the PR to exactly one of
+ * {@link defaultPostConflictFinding} (dispatchable — becomes a `review:changes` bounce the existing
+ * fix-dispatch pipeline picks up) or {@link defaultPostConflictStandDown} ({@link isStatuteTierConflict} —
+ * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
+ * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function}} [o]
+ * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
-export function watchParkedPrConflicts({ repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false } = {}) {
+export function watchParkedPrConflicts({
+  repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
+  postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
+} = {}) {
   const prs = listPrs({ repo });
   const results = [];
   // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
@@ -185,6 +295,19 @@ export function watchParkedPrConflicts({ repo = null, listPrs = defaultListParke
       if (plan.newlyDetected) {
         provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr));
         entry.commented = true;
+        // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the
+        // entry the SAME way a label/comment failure already is; the alert above has already posted either way.
+        try {
+          if (isStatuteTierConflict(pr?.files)) {
+            postStandDown({ pr, repo: resolvedRepo });
+            entry.routedTo = 'stand-down';
+          } else {
+            postFinding({ pr, repo: resolvedRepo });
+            entry.routedTo = 'reconcile-finding';
+          }
+        } catch (e2) {
+          entry.error = String((e2 && e2.message) || e2).split('\n')[0];
+        }
       }
     } catch (e) {
       entry.error = String((e && e.message) || e).split('\n')[0];

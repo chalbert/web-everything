@@ -73,6 +73,9 @@ import {
   NON_IMPLEMENTING_REF_RE,
   // #3462 — the manual dispatch path's `blockedBy` awareness.
   findItem,
+  // #xu2krte — resume-or-fresh dispatch.
+  parseBackgroundedId,
+  resumeSucceeded,
 } from '../dispatch-lane-io.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -702,6 +705,22 @@ describe('what the sink actually runs', () => {
     ]);
   });
 
+  it('#xu2krte — resumeSessionId emits a BARE `--bg --resume <id> <prompt>`, no -n/systemPromptFile/extraArgs', () => {
+    // The live build-time probe (docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted)
+    // found any OTHER flag alongside `--resume` makes the CLI fork a copy instead of continuing the named
+    // session — so this branch must emit nothing else, even when the caller supplies extras.
+    const argv = buildAgentArgv({
+      sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
+      systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
+    });
+    expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
+  });
+
+  it('#xu2krte — resumeSessionId still refuses an empty/dash-leading prompt, same as a fresh dispatch', () => {
+    expect(() => buildAgentArgv({ payload: { prompt: '  ' }, resumeSessionId: 'x' })).toThrow(/empty prompt/);
+    expect(() => buildAgentArgv({ payload: { prompt: '--hostile' }, resumeSessionId: 'x' })).toThrow(/begins with `-`/);
+  });
+
   it('REFUSES a brief beginning with a dash — position alone does not stop a parser reading it as a flag', () => {
     expect(() => buildAgentArgv({ sessionId: 'sess-c3', payload: { ...payload, prompt: '--bare and hostile' } }))
       .toThrow(/begins with `-`/);
@@ -767,6 +786,60 @@ describe('what the sink actually runs', () => {
   it('the sink returns a real in-flight marker, not a look-alike', async () => {
     const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-d4' });
     expect(isInFlightResult(await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }))).toBe(true);
+  });
+});
+
+// #xu2krte — reading the CLI's own report of a resume-or-fork outcome, exactly as observed in the live probe.
+describe('parseBackgroundedId / resumeSucceeded — #xu2krte', () => {
+  it('parseBackgroundedId reads the id off both observed stdout shapes', () => {
+    expect(parseBackgroundedId('backgrounded · 76f44314\n  claude agents ...')).toBe('76f44314');
+    expect(parseBackgroundedId('backgrounded · 368b7010 · probe-resume-1-r\n  claude agents ...')).toBe('368b7010');
+  });
+
+  it('parseBackgroundedId returns null on unrecognized text, never throws', () => {
+    expect(parseBackgroundedId('')).toBeNull();
+    expect(parseBackgroundedId('some unrelated error output')).toBeNull();
+    expect(parseBackgroundedId(undefined)).toBeNull();
+  });
+
+  it('resumeSucceeded: true when a fresh listing confirms the printed id resolves to the REQUESTED sessionId', () => {
+    const outcome = resumeSucceeded({
+      printedId: '76f44314',
+      requestedSessionId: '76f44314-45cb-4e70-9fa6-eff7872ed491',
+      agentsAfter: [{ id: '76f44314', sessionId: '76f44314-45cb-4e70-9fa6-eff7872ed491' }],
+    });
+    expect(outcome).toEqual({ resumed: true, actualSessionId: '76f44314-45cb-4e70-9fa6-eff7872ed491', actualShortId: '76f44314' });
+  });
+
+  it('resumeSucceeded: false when the printed id resolves to a DIFFERENT sessionId — a forked copy', () => {
+    const outcome = resumeSucceeded({
+      printedId: '368b7010',
+      requestedSessionId: '76f44314-45cb-4e70-9fa6-eff7872ed491',
+      agentsAfter: [{ id: '368b7010', sessionId: '368b7010-8710-473e-9252-05c9d9f1c7dd' }],
+    });
+    expect(outcome.resumed).toBe(false);
+    expect(outcome.actualSessionId).toBe('368b7010-8710-473e-9252-05c9d9f1c7dd');
+  });
+
+  it('resumeSucceeded: false, with no actualSessionId, when the printed id is not in the listing at all', () => {
+    expect(resumeSucceeded({ printedId: 'ffffffff', requestedSessionId: 'x', agentsAfter: [] }))
+      .toEqual({ resumed: false, actualSessionId: null, actualShortId: 'ffffffff' });
+  });
+
+  it('resumeSucceeded: unknown-outcome shape (no printedId at all) reads as not-resumed, not a throw', () => {
+    expect(resumeSucceeded({ printedId: null, requestedSessionId: 'x', agentsAfter: [] }))
+      .toEqual({ resumed: false, actualSessionId: null, actualShortId: null });
+  });
+
+  it('DELIBERATELY NOT a string-prefix comparison — a row whose `id` looks like a prefix but is a DIFFERENT actual field never matches by accident', () => {
+    // Matching must go through a real listing row, keyed on `id` exactly, never `sessionId.split('-')[0]`.
+    const outcome = resumeSucceeded({
+      printedId: '76f44314',
+      requestedSessionId: '76f44314-0000-0000-0000-000000000000',
+      agentsAfter: [{ id: '76f44314', sessionId: 'some-totally-different-uuid' }],
+    });
+    expect(outcome.resumed).toBe(false);
+    expect(outcome.actualSessionId).toBe('some-totally-different-uuid');
   });
 });
 

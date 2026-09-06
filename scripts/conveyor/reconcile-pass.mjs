@@ -61,8 +61,11 @@ import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS } from './reconcile-core.m
  *   `mergeStateStatus`  — what `classifyPr` reads to spot a conflicted / behind branch.
  *   `comments`          — the durable thread: the findings count, the re-arm count, and the stand-down marker
  *                         all come off it. Dropping it silently zeroes all three.
+ *   `body`              — `#xu2krte` Fork 1: `we:scripts/conveyor/reconcile-fix-dispatch.mjs` reads the PR's own
+ *                         `authored-by-actor` stamp off it to find a conflict-caused bounce's original builder
+ *                         session, for the opt-in resume-preference dispatch. Unused by every other decision.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,labels,statusCheckRollup,mergeStateStatus,comments';
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,labels,statusCheckRollup,mergeStateStatus,comments,body';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */

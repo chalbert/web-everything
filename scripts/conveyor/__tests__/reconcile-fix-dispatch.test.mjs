@@ -10,7 +10,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   dispatchFix, fixBriefPath, freeLaneNumbers, planFixesFromReconcile, runReconcileFixDispatch,
+  findResumeCandidate, buildResumePrompt,
 } from '../reconcile-fix-dispatch.mjs';
+import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
+import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
 // A `checkStaleness` stub that never touches git — every test below injects one.
 const FRESH = () => ({ fresh: true, behind: 0 });
@@ -32,7 +35,22 @@ describe('planFixesFromReconcile', () => {
     ];
     const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(refusals).toEqual([]);
-    expect(planned).toEqual([{ itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope }]);
+    expect(planned).toEqual([{
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      isConflict: false, body: null,
+    }]);
+  });
+
+  it('#xu2krte — a `fix` entry still carrying the conflict-watch label plans `isConflict: true` and threads `body`', () => {
+    const entries = [{
+      kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass',
+      labels: [CONFLICT_LABEL, 'review:pending'], body: 'a PR body',
+    }];
+    const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
+    expect(planned).toEqual([{
+      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
+      isConflict: true, body: 'a PR body',
+    }]);
   });
 
   it('refuses `no-item-num` for a PR whose head ref carries no conveyor item number', () => {
@@ -106,6 +124,73 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(result.itemNum).toBe('3438');
     expect(result.lane).toBe(9);
     expect(result.unknownTokens).toEqual(['{{LIKE_THIS}}']);
+    expect(result.resumed).toBe(false);
+  });
+
+  it('#xu2krte — a non-conflict planned entry never consults `claude agents` at all', () => {
+    let listAgentsAllCalls = 0;
+    dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9, isConflict: false, body: null },
+      {
+        root: '/repo', readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => 'sid',
+        spawnAgent: () => '', listAgentsAll: () => { listAgentsAllCalls += 1; return []; },
+      },
+    );
+    expect(listAgentsAllCalls).toBe(0);
+  });
+
+  it('#xu2krte Fork 1 — a conflict-caused entry with a listed resume candidate attempts a bare resume first, and returns `resumed: true` on success', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const spawnCalls = [];
+    const result = dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9, isConflict: true, body: `some PR body\n\n${marker}\n` },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
+        spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · candxxxx\n'; },
+        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }],
+      },
+    );
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]).toEqual(['--bg', '--resume', 'cand-0000-0000-0000-000000000000', expect.stringContaining('PR #1764')]);
+    expect(result).toEqual({
+      sessionId: 'cand-0000-0000-0000-000000000000', sessionSlug: null, pr: 1764, itemNum: '3438', lane: 9,
+      unknownTokens: [], resumed: true,
+    });
+  });
+
+  it('#xu2krte Fork 1 — a fork (mismatched id) is stopped and falls back to a fresh full dispatch', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const spawnCalls = [];
+    const stopCalls = [];
+    let listCall = 0;
+    const result = dispatchFix(
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9, isConflict: true, body: `some PR body\n\n${marker}\n` },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => 'freshfreshfresh',
+        spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · forkedid\n'; },
+        // Row 1 (before the resume attempt): the candidate is listed, so a resume is attempted.
+        // Row 2 (after the resume attempt): only a DIFFERENT id ("forkedid") is listed — the CLI forked a copy.
+        listAgentsAll: () => {
+          listCall += 1;
+          return listCall === 1
+            ? [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }]
+            : [{ sessionId: 'a-different-session-id', id: 'forkedid', cwd: '/lanes/lane-9' }];
+        },
+        stop: ({ handle }) => stopCalls.push(handle),
+      },
+    );
+    expect(stopCalls).toEqual(['forkedid']);
+    // Fell through to a real fresh dispatch: a second spawn call, with the full filled brief.
+    expect(spawnCalls).toHaveLength(2);
+    expect(spawnCalls[1][1]).toBe('--session-id');
+    expect(spawnCalls[1][2]).toBe('freshfreshfresh');
+    expect(result.resumed).toBe(false);
+    expect(result.sessionId).toBe('freshfreshfresh');
+    expect(result.resumeAttempt).toEqual({ attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true });
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
@@ -135,8 +220,8 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       checkStaleness: FRESH,
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, lane: 9 },
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, isConflict: false, body: null, lane: 2 },
+      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, isConflict: false, body: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
@@ -190,5 +275,49 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
 describe('fixBriefPath', () => {
   it('points at the SAME brief dispatch-lane.mjs\'s own tick-core-driven fix dispatch fills', () => {
     expect(fixBriefPath('/repo')).toBe('/repo/skills-src/conveyor/fix-agent-brief.md');
+  });
+});
+
+describe('findResumeCandidate — #xu2krte Fork 1', () => {
+  it('returns the stamped session id when it is still listed', () => {
+    const marker = buildAuthorActorMarker('11111111-1111-4111-8111-111111111111');
+    const id = findResumeCandidate({
+      body: `some body\n\n${marker}\n`,
+      agentsAll: [{ sessionId: '11111111-1111-4111-8111-111111111111' }],
+    });
+    expect(id).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('returns null when the body carries no stamp at all', () => {
+    expect(findResumeCandidate({ body: 'no stamp here', agentsAll: [{ sessionId: 'x' }] })).toBeNull();
+  });
+
+  it('returns null when the stamped session is no longer listed (fully exited and reaped)', () => {
+    const marker = buildAuthorActorMarker('11111111-1111-4111-8111-111111111111');
+    const id = findResumeCandidate({ body: marker, agentsAll: [{ sessionId: 'some-other-session' }] });
+    expect(id).toBeNull();
+  });
+
+  it('returns null on a conflicting (ambiguous) stamp — agreement-or-nothing, never a guess', () => {
+    const two = `${buildAuthorActorMarker('aaaa')}\n${buildAuthorActorMarker('bbbb')}`;
+    expect(findResumeCandidate({ body: two, agentsAll: [{ sessionId: 'aaaa' }, { sessionId: 'bbbb' }] })).toBeNull();
+  });
+});
+
+describe('buildResumePrompt — #xu2krte Fork 1', () => {
+  it('names the PR, the item, and the escalation stand-down command — never a literal undefined', () => {
+    const prompt = buildResumePrompt({ pr: 1764, itemNum: '3438', cwd: '/lanes/lane-4' });
+    expect(prompt).toContain('PR #1764');
+    expect(prompt).toContain('item #3438');
+    expect(prompt).toContain('/lanes/lane-4');
+    expect(prompt).toContain('stand-down.mjs 1764 --reason=conflict');
+    expect(prompt).not.toContain('undefined');
+    expect(prompt.trimStart().startsWith('-')).toBe(false);
+  });
+
+  it('still renders sensibly with no known cwd', () => {
+    const prompt = buildResumePrompt({ pr: 1, itemNum: '1' });
+    expect(prompt).not.toContain('undefined');
+    expect(prompt).not.toContain('null');
   });
 });

@@ -423,6 +423,10 @@ export function planReconcile({ prs = [], agents = [], durableCounts = {}, now =
       headRefOid: pr?.headRefOid ?? null,
       // EVIDENCE ONLY. No decision in this file reads it — see the liveness block in the file docblock.
       transcriptMtimeMs: Number.isFinite(pr?.transcriptMtimeMs) ? pr.transcriptMtimeMs : null,
+      // #xu2krte Fork 1 — carried on every row (not just `fix` dispatches) for the same "evidence travels with
+      // the row" reason `transcriptMtimeMs` does. `reconcile-fix-dispatch.mjs` reads the `authored-by-actor`
+      // stamp off it, ONLY for a `fix` dispatch that also carries the `merge-status:conflicting` label.
+      body: typeof pr?.body === 'string' ? pr.body : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
 

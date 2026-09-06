@@ -78,10 +78,11 @@ export const RECONCILE_FINDING_BANNER = [
   '**⚠️ Sequencing / cross-cutting-concern finding — not a correctness/security review verdict.**',
   '',
   'This `review:changes` bounce was raised by a mechanical or reconciliation task (a rebase, a branch-sync '
-    + 'pass, or other cross-PR work) that found this PR conflicts with a decision made ELSEWHERE in the repo — '
-    + 'the kind of concern the normal correctness/security review pass does not check for, because that pass '
-    + "reviews this diff's own internal correctness, not whether landing it now is well-sequenced against a "
-    + 'sibling decision on `main`.',
+    + 'pass, or other cross-PR work) that found either (a) this PR conflicts with a decision made ELSEWHERE in '
+    + 'the repo, or (b) this PR has drifted into a real GIT merge conflict against `main` — the kind of concern '
+    + 'the normal correctness/security review pass does not check for, because that pass reviews this diff\'s '
+    + 'own internal correctness, not whether it is well-sequenced or still cleanly mergeable against what has '
+    + 'landed on `main` since.',
 ].join('\n');
 
 /**

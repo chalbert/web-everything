@@ -96,8 +96,21 @@ describe('the fix-agent brief actually CALLS it — the half that would otherwis
     .map((l, i) => (l.includes('stand-down.mjs') ? i + 1 : 0))
     .filter(Boolean);
 
-  it('invokes `scripts/conveyor/stand-down.mjs` at least twice — once per escalation exit', () => {
-    expect(callLines.length).toBeGreaterThanOrEqual(2);
+  it('invokes `scripts/conveyor/stand-down.mjs` at least three times — once per escalation exit', () => {
+    // #xu2krte closed the named gap: the AUTOMATIC conflict exit (brief §3) used to call ONLY
+    // `completion-cli.mjs`, never this script — so an auto-dispatched conflict escalation was silently
+    // re-dispatched at the same unresolved conflict next tick, bounded only by the 5-attempt rearm cap rather
+    // than this terminal stand-down exit. Three now: ambiguous-finding, conflict, gate-red.
+    expect(callLines.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the AUTOMATIC conflict exit calls it before returning (brief §3, #xu2krte)', () => {
+    const exitAt = lines.findIndex((l) => l.includes('fix escalated (conflict with main)')) + 1;
+    expect(exitAt).toBeGreaterThan(0);
+    expect(callLines.some((n) => Math.abs(n - exitAt) <= 12)).toBe(true);
+    // And it passes the SAME reason the manual `/finish` path already does — no new vocabulary invented.
+    const nearby = lines.slice(Math.max(0, exitAt - 12), exitAt).join('\n');
+    expect(nearby).toMatch(/stand-down\.mjs[^\n]*--reason=conflict/);
   });
 
   it('the AMBIGUOUS-FINDING exit calls it before returning (brief §2)', () => {
