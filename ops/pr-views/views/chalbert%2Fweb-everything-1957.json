@@ -1,0 +1,178 @@
+{
+  "body": "## What this lands\n\nOne session's output on token-cost optimisation: the research, the backlog work it surfaced, three rulings recorded, and one new `check:health` gate that the session's own failure mode motivated.\n\n### 1. Research (`reports/`, `/research/`)\n\n- `we:reports/2026-09-06-token-optimisation-research.md` — a wide survey of LLM token-cost optimisation (prompt caching economics, prefix stability, the tools→system→messages invalidation cascade, context-shaping techniques).\n- It carries a **Scope limit** section, added after the skeptic pass found the report was applying **per-token API economics to a subscription-funded system**. This repo's agent spawns run on the operator's subscription (`#agent-runner-cli-backend`); recorded `costUsd` is a rate-table derivation, not money billed. The scarce resource is the **usage window**. That correction is load-bearing for everything downstream and is stated at the top of the report rather than buried.\n- Exposed as a `/research/` topic (`we:src/_data/researchTopics/token-optimisation-research.json` + its `.njk` description), so it is not a hidden report. `npm run gen:inventory` re-ran; the `AGENTS.md` inventory line moves 306 → 307 topics.\n- `we:reports/2026-09-06-backlog-split-analysis.md` (rev 3) and `we:reports/2026-09-06-backlog-consolidation-analysis.md` — the slicing and consolidation passes. The split analysis records **the retractions**, including an auto-resolve hazard caught before it shipped (see below).\n\n### 2. Backlog capture (9 new items)\n\n`xblcmkc`, `x6z6z2j`, `xzdzg3j`, `x2xrboe`, `x5c8zep`, `xbwup67`, `xjktyol`, `xarvjgf`, `xayr3dc`.\n\n### 3. Three rulings recorded\n\n- **#2201** — a region recipe declares a **mid-marker** the region walk treats as a parse-time delimiter, splitting the body into a named-program map. Build slice carved as `xjktyol`.\n- **#3123** — fork **dissolved**: rollup levels are an **open-set dimension configured per project**, not a fixed enum. We ship presets and pick our own by merit (`#config-extends-platform-default`). Carved as `xarvjgf` (the dimension) + `xayr3dc` (the preset flavors).\n- **`x2xrboe`** — **depth only**: care dials `rounds` / `lenses` / `jurorsPerLens`; a care band may not reach model or effort. Amended at ratification: **strength is operator-settable, never care-derived**. Carved as `xbwup67` (give `effort` the operator control-flag treatment `model` already has).\n\n### 4. `check:health` G8 — a prepared decision may not lean on an unruled sibling\n\n`we:scripts/audit-backlog-health.mjs` gains `forkLeansOnUnruled`, a pure exported function: a **prepared, still-open** `decision` whose `## Fork` prose cites a still-**open** sibling `decision` with **no `blockedBy` edge** to it. The bold default rests on a premise nobody has ratified while the DAG stays silent, so readiness ranks the dependent card ahead of its own ground.\n\n- Scoped to `## Fork` sections deliberately — a citation under *Context* is background, not the default leaning on it.\n- Distinct from **G1**, which keys on prerequisite *verbs*: a fork can lean on an unruled sibling without ever saying \"blocked on\", which is exactly how it escapes G1.\n- CANDIDATE-grade like G3/G4/G5 — confirm at claim, then either add the edge or re-ground the default.\n- Documented in `we:docs/agent/backlog-workflow.md` alongside the other gates.\n\nBuilt only after it was shown to catch the real case (#2249 → #2209) at low noise: **9 hits** across 3,495 items. It also surfaced two mutually circular premise pairs.\n\nA **G9** prototype was written and deliberately **not shipped** — it \"caught\" #2224 only via the universal `decision` tag, which is theatre, not a signal.\n\n### 5. The pre-presentation currency step\n\n`we:skills-src/next-backlog-item/SKILL.md` gains a mandatory step: before presenting a prepared decision, re-verify it is still current. This exists because three decisions were presented in-session without that check. G8 is the deterministic half; this is the procedural half.\n\n## Verification\n\n- `npm run check:standards` — **0 errors** (1,599 warnings, all pre-existing repo-wide).\n- `npx vitest run` — **409 files, 10,764 passed / 7 skipped, 0 failed**.\n- `we:scripts/__tests__/audit-backlog-health.test.mjs` — 10/10, of which 5 are new G8 cases.\n- **Mutation-tested**, three guarantees separately: removing the `blockedBy` exemption, removing the `## Fork` section scoping (isolated to G8's own line), and removing the open-decision filter each **redden a named test**. No decorative assertions.\n- `origin/main` merged in; no conflicts.\n\n## Known limits, stated rather than papered over\n\n- **The producer path was bypassed.** This host has no `gh` credential, so `run.mjs open-pr` reports `unrun`. The **decision** was still made by the operation: `scoreEscalation` over the cumulative `merge-base(origin/main, HEAD)…HEAD` basis returns `escalate: true`, `humanRequired: false` (blast-radius on the three `scripts/`/`skills-src/` files, plus size at 1,874 ≥ 400 lines) → `producerReviewLabel` = **`review:pending`**, applied by hand at open. Only the execution moved. Per #3267 this also means the `authored-by-actor` stamp is **absent** — `we:scripts/review-set-label.mjs`'s single home was not in play, so no independence guard ran at open.\n- **`humanRequired` is false on a verified basis, not an assumption**: `isPolicySpecPath` / `isPolicyCorePath` / `isTrustChainPath` return **0 hits** across all 25 changed files, `we:docs/agent/platform-decisions.md` is untouched, and the diff edits no `@principle`/`@invariant` marker. The two-PR rule (`#principle-and-impl-two-pr`) is therefore not triggered.\n- **The branch is `claude/…`, not `lane/*`.** The #1934 carve-out wants a lane ref and `open-pr` refuses this one by name. The session pins this branch and forbids pushing elsewhere without explicit permission, so the PR is opened from it.\n- **Three status splices are still owed** and need a lane clone the guard will accept: `status: resolved` on **#2201** and **`x2xrboe`**, plus `preparedDate` on **`x2xrboe`**. The rulings are recorded in the card bodies; only the frontmatter splice is outstanding.\n- **An auto-resolve hazard was caught, not shipped.** `planEpicResolveOnLand` would have silently closed **#3006** when a child landed — the first grep missed the wiring because `we:scripts/pr-watch.mjs` calls a wrapper, `resolveEpicOnLand`. Defused by wiring `#3006 blockedBy: [\"x2xrboe\"]` and parenting no new stories to it, so it stays childless.\n- **`xzdzg3j`'s justification is weaker than its card reads** — part of it rested on behaviour that is already ratified. Flagged on the card rather than silently corrected.\n\n## The recurring defect in this changeset, named for the reviewer\n\n**Reading a producer's signature and inferring the consumer's behaviour** — six occurrences in one session, each caught only by opening the call sites. Attack any claim in these reports or cards that describes what a function's *callers* do.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM)_",
+  "comments": [],
+  "createdAt": "2026-09-06T18:17:00Z",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/2201-mid-region-marker-else-decision-card.md",
+      "additions": 28,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3006-move-agent-work-onto-the-claude-code-cli-and-optimise-what-i.md",
+      "additions": 2,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3123-name-the-tier-above-feature-rollup-basis-points-vs-outcome-m.md",
+      "additions": 64,
+      "deletions": 7,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3174-git-hosting-pr-provider-abstraction-define-the-interface-now.md",
+      "additions": 114,
+      "deletions": 5,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3188-should-an-agent-session-be-restricted-to-declared-operations.md",
+      "additions": 289,
+      "deletions": 63,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3369-decouple-agent-dispatch-from-the-claude-cli-introduce-a-mult.md",
+      "additions": 1,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/x2xrboe-what-may-economize-an-agent-review-depth-only-or-also-stren.md",
+      "additions": 153,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/x5c8zep-reuse-one-session-id-across-repeat-and-report-reads-per-write.md",
+      "additions": 47,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/x6z6z2j-skip-a-re-review-when-the-net-diff-is-unchanged.md",
+      "additions": 45,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xarvjgf-rollup-levels-are-an-open-set-dimension-not-a-fixed-enum.md",
+      "additions": 46,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xayr3dc-ship-the-rollup-level-preset-flavors.md",
+      "additions": 47,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xblcmkc-the-replacement-dispatcher-must-preserve-prompt-cache-corre.md",
+      "additions": 69,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xbwup67-give-effort-the-operator-control-flag-treatment-model-has.md",
+      "additions": 52,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xjktyol-region-mid-marker-splits-the-body-into-named-programs.md",
+      "additions": 58,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xzdzg3j-surface-cache-hit-rate-from-the-usage-already-in-run-records.md",
+      "additions": 44,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "docs/agent/backlog-workflow.md",
+      "additions": 1,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "reports/2026-09-06-backlog-consolidation-analysis.md",
+      "additions": 116,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "reports/2026-09-06-backlog-split-analysis.md",
+      "additions": 196,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "reports/2026-09-06-token-optimisation-research.md",
+      "additions": 176,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "scripts/__tests__/audit-backlog-health.test.mjs",
+      "additions": 42,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/audit-backlog-health.mjs",
+      "additions": 54,
+      "deletions": 3,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "skills-src/next-backlog-item/SKILL.md",
+      "additions": 17,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "src/_data/researchTopics/token-optimisation-research.json",
+      "additions": 24,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "src/_includes/research-descriptions/token-optimisation-research.njk",
+      "additions": 107,
+      "deletions": 0,
+      "changeType": "ADDED"
+    }
+  ],
+  "headRefName": "claude/token-optimization-research-tx4ntm",
+  "headRefOid": "7f034614865f1d5a6b4e82013b45b80ac27b6ca2",
+  "labels": [
+    {
+      "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
+      "name": "review:pending",
+      "description": "the drain parked this PR — an independent review is owed before merge",
+      "color": "fbca04"
+    },
+    {
+      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
+      "name": "checking",
+      "description": "Required checks are still running — CI truth not yet known (#2281)",
+      "color": "BFD4F2"
+    }
+  ],
+  "number": 1957,
+  "state": "OPEN",
+  "title": "Token-optimisation research, the work it surfaced, three rulings, and check:health G8",
+  "url": "https://github.com/chalbert/web-everything/pull/1957",
+  "repo": "chalbert/web-everything"
+}
