@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:webtheme/tokens.ts"
+graduatedTo: "frontierui:webtheme/tokens.ts"
 tags: [reproduction, gap-sweep, shadcn]
 relatedProject: webtheme
 relatedReport: reports/2026-06-20-1243-shadcn-first-gap-delta.md

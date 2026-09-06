@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webstates/CustomChangeStrategy.ts"
+graduatedTo: "frontierui:plugs/webstates/CustomChangeStrategy.ts"
 tags: []
 ---
 

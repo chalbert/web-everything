@@ -141,3 +141,80 @@ leaves the item Tier A"*. The tier logic already handles them. The genuine defec
 - `gh` was unavailable, so no live PR or label state was verified (#3005, #3016, #3392).
 - #2383's byte-proof was verified structurally against its executed JVM twin — no dotnet SDK on this host.
 - Per-batch detail, card by card with evidence, is in `audits/2026-09-06-open-story-staleness/`.
+
+---
+
+# Part 2 — the resolved-card sweep (2,734 items)
+
+The open-story audit above found one card resolved over work that never landed (#2756). That raised the
+obvious question: **how many more?** So the sweep was extended to every `resolved` item, using the
+deterministic signal #3502 specifies — a `graduatedTo` naming a repo-qualified path that does not exist.
+
+## Result
+
+**100 references were absent from every checkout. 93 were relocation debris; 7 were real.**
+
+| Outcome | Count | Action |
+|---|---:|---|
+| Path relocated — work exists | 93 | corrected automatically |
+| Delivered under a different name | 4 | corrected after verification |
+| Delivered, then **deleted** by a later refactor | 2 | filed as #x0swhio |
+| Resolved over work that never landed | 1 (#2756) | **reopened** |
+
+The headline is reassuring: **only one card in 2,734 was resolved over undelivered work.** The rest was
+bookkeeping debris from three known relocations.
+
+| Relocation | Refs broken |
+|---|---:|
+| WE reference runtimes → `frontierui:` at identical paths (#1294 / #1282) | 46 |
+| plateau-app `src/X` → `packages/{core,saas,tooling,dev-browser,extensions}/src/X` | ~30 |
+| `we:.claude/skills/` → `we:skills-src/`; `we:MEMORY.md` → `we:agent-memory-src/MEMORY.md` | 4 |
+| extension / rename drift (`.ts`→`.json`, `.ts`→`.mjs`, `ButtonTransientElement`→`ButtonHostElement`) | 4 |
+
+## The method — and the guard rail that mattered
+
+Resolution is **longest-matching-tail, unique-hit-only**: drop leading path segments one at a time,
+search all three checkouts, accept only when exactly one candidate survives.
+
+The first version of that resolver was **wrong in an instructive way**. Falling back to a bare basename,
+it mapped `fui:tools/explorer/oracles/conformanceVectors.ts` onto
+`plateau:packages/core/src/conformance-engine/conformanceVectors.ts` — a completely unrelated file that
+merely shares a name. The rule that fixed it: **never accept a basename-only match for a file** (require
+≥2 matching path segments), but **do** allow a single distinctive *directory* name, which is what catches
+the plateau restructure where both prefix and depth changed. Every ambiguous case was left alone and
+resolved by reading the code.
+
+Ironically, the misresolved card (#1176) turned out to be delivered anyway — at
+`plateau:packages/core/src/conformance-engine/conformanceVectors.ts`, reached through two documented
+moves (#1597, then #2341). The right answer for the wrong reason is still a bug.
+
+## Applied in Part 2
+
+- **#2756 reopened** — `status: open`, false `graduatedTo` removed, a dated section recording the
+  evidence. Dependents #2761/#2764 are correctly blocked again. There is no `reopen` verb, so this was a
+  hand edit — filed as #xudsp7g.
+- **97 `graduatedTo` paths corrected** to live artifacts.
+- **#1010 / #1161** `graduatedTo` replaced with the truth (`none`, naming the deleting card), because
+  their artifacts were deleted, not moved.
+- **#2768 corrected** — an *open* card whose premise ("the artifact was never committed") is false: it
+  was committed by `8ac77a8e`, then deliberately deleted by #1730 per #1282, a month before the card was
+  opened. As written, its ask would re-violate #1282.
+
+## New findings that need a decision
+
+1. **Deleted coverage, never ported (#x0swhio).** #1010's plugged browser e2e and #1161's derivation
+   tests both landed and were then deleted by the WE-is-contract-only migration (#1047, #1730). The
+   deletions were correct architecture; whether the *coverage* should have moved with the code was never
+   decided. This class is worse than a stale path — the capability is gone and the card still says it
+   shipped.
+2. **No `reopen` verb (#xudsp7g).** Undoing a bad resolve currently means hand-editing three frontmatter
+   keys — exactly the unguarded write the lane guard exists to prevent.
+3. **No repeatable sweep (#xeubc2o).** The 93 corrections above were a one-off script. The next
+   reorganisation will rot the same way.
+
+## Honest limit
+
+This sweep checks **path existence**, not semantic delivery. A card whose `graduatedTo` points at a file
+that exists but whose acceptance clauses were never met is invisible to it — that is what the
+adversarial pass in Part 1 catches, and it found 7 such cards among only 32 candidates. A full semantic
+re-verification of all 2,734 resolved cards was not attempted and would be a much larger job.

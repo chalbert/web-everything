@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:blocks/renderers/module-service/productionDelivery.ts"
+graduatedTo: "none (landed in we:blocks/renderers/module-service/, deleted by #1730 per #1282; not relocated — see #x0swhio)"
 tags: []
 relatedProject: webmanifests
 ---

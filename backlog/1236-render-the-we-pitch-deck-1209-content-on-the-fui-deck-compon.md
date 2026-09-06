@@ -7,7 +7,7 @@ locus: plateau-app
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "plateau:src/marketing/deck.ts"
+graduatedTo: "plateau:packages/saas/src/marketing/deck.ts"
 relatedProject: webdocs
 tags: [deck, dogfood, conformance, fui]
 ---

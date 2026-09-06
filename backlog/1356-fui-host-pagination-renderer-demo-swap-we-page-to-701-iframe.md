@@ -9,7 +9,7 @@ relatedReport: reports/2026-06-22-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "we:blocks/renderers/pagination/__fixtures__/pagination-goldens.ts"
+graduatedTo: "we:blocks/renderers/pagination/__fixtures__/pagination-goldens.json"
 tags: []
 ---
 

@@ -1,7 +1,10 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 relatedReport: reports/2026-09-06-open-story-staleness-audit.md
 ---

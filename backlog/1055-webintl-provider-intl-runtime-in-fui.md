@@ -7,7 +7,7 @@ blockedBy: ["1054"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
-graduatedTo: "we:intl/provider.ts"
+graduatedTo: "frontierui:intl/provider.ts"
 tags: []
 ---
 

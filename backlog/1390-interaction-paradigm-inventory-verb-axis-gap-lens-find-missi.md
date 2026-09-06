@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "we:.claude/skills/gap-sweep-rerun/SKILL.md"
+graduatedTo: "we:skills-src/gap-sweep-rerun/SKILL.md"
 tags: [method, gap, coverage, interaction-paradigm, verb-axis, book-candidate, gap-sweep]
 ---
 

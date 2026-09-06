@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
-graduatedTo: "we:plugs/__tests__/e2e/webvalidation.spec.ts"
+graduatedTo: "none (landed in we:plugs/__tests__/e2e/, deleted by #1047; plugged seam not ported to FUI — see #x0swhio)"
 tags: []
 ---
 

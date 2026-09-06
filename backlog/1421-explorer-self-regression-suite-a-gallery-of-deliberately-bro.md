@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "fui:tools/explorer/__tests__/fixtures.test.ts"
+graduatedTo: "plateau:tools/explorer/__tests__/fixtures.test.ts"
 tags: []
 ---
 

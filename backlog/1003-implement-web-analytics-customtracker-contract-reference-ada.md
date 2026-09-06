@@ -4,7 +4,7 @@ status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webanalytics/CustomTrackerRegistry.ts"
+graduatedTo: "frontierui:plugs/webanalytics/CustomTrackerRegistry.ts"
 relatedProject: webanalytics
 tags: [webanalytics, build]
 ---

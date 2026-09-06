@@ -7,7 +7,7 @@ blockedBy: ["1125"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
-graduatedTo: "we:plugs/webexpressions/ExplicitHTMLInsertion.patch.ts"
+graduatedTo: "frontierui:plugs/webexpressions/ExplicitHTMLInsertion.patch.ts"
 tags: []
 ---
 

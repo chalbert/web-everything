@@ -7,7 +7,7 @@ blockedBy: ["1148", "1149"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webportals/PortalDirective.ts"
+graduatedTo: "frontierui:plugs/webportals/PortalDirective.ts"
 relatedProject: webportals
 tags: [webportals, build]
 ---
