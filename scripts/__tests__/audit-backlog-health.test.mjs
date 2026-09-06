@@ -85,4 +85,18 @@ describe('forkLeansOnUnruled — G8', () => {
     const hits = forkLeansOnUnruled(body, new Set(), (r) => ['3010', '3129'].includes(r), ranges, norm);
     expect(hits.sort()).toEqual(['3010', '3129']);
   });
+
+  // #1957 review, correctness/coverage-gap: the citation regex was `\d{3,4}`, fitted to the id shape of
+  // every open decision at the time. `norm` strips leading zeros, so `backlog/039-*.md` has id `39` — a
+  // 1-2 digit referent the bound could never see, and 98 items carry one. These two pin both ends of the
+  // range so a future re-narrowing reddens instead of going quietly blind.
+  it('hits on a 1-2 digit id — `norm` strips the leading zeros off `039-*.md`, so the referent is `39`', () => {
+    const body = '## Fork 1 — a vs b\n\nDefault (a), matching #39 attributes.\n';
+    expect(forkLeansOnUnruled(body, new Set(), (r) => r === '39', ranges, norm)).toEqual(['39']);
+  });
+
+  it('still hits on a 4-digit id — widening the low end did not drop the high end', () => {
+    const body = '## Fork 1 — a vs b\n\nDefault (a), matching #3512 attributes.\n';
+    expect(forkLeansOnUnruled(body, new Set(), (r) => r === '3512', ranges, norm)).toEqual(['3512']);
+  });
 });
