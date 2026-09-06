@@ -1,0 +1,24 @@
+{
+  "id": "token-optimisation-research",
+  "title": "Token optimisation for agent workloads — which levers actually move cost, and how good the evidence is",
+  "status": "open",
+  "summary": "Grounding research for #3006's request-optimisation slice and the effort-dial-vs-model-cascade decision carved from it. Six parallel streams (~250 searches) plus in-session tiktoken measurement. Headline: cost is dominated by CACHING and MODEL/EFFORT choice; prompt compression, terser phrasing and format choice are real but an order of magnitude smaller, and several popular techniques are net-negative because they break the cache they meant to help. The levers do NOT compose — each multiplies a different share of the bill. Cache reads bill at 0.1x input against a 1.25x write premium, so caching breaks even after ONE reuse; minimum cacheable prefixes are only 512-4,096 tokens (below which the cache is silently skipped), and invalidation cascades tools -> system -> messages, so any byte change earlier in the prefix is a full miss. Reported production outcomes: 7% -> 74% hit rate from one reordering fix (-59% cost); 41-80% real savings against a marketed 'up to 90%'; below 40% on a stable-prompt workload is a structural bug. This repo already carries a corroborating measurement — #3383's costTokens line is ~162 cache reads per write (99.4% hit rate) across 9 sessions, which also corroborates #3006's own 2026-08-08 sample that prefix stability beats prompt-size reduction. On the carved fork the research favours the EFFORT DIAL over a model cascade on three grounds: caches are model-scoped so a cascade forfeits cross-model reuse; Anthropic measured low-effort-with-retry at ~93% pass for ~$0.70/task versus 91.7% at $1.39 (same quality, half the cost, counting wasted cheap attempts); and the cascade literature is weaker than its reputation (a pre-generation router beat the best cascade policy on 4 of 5 datasets, and routers trained on oracle labels collapse to majority-class prediction under shuffled-label controls). Counterweight kept explicit: routing also buys provider redundancy and reviewer diversity, which #3369 wants for non-cost reasons — this rules the cost axis only. Agent-architecture findings: cost is quadratic in turn count; sub-agents start a COLD prefix sharing no cache with the parent; the tool-definition tax is 550-1,400 tokens per MCP schema paid before any work (which --tools '' already avoids here); and more context is not monotonically better (lost-in-the-middle, context rot, tool confusion), so some savings techniques IMPROVE accuracy. Net-negative techniques documented: compression that breaks caching (one case shrank tool output 38.4% and raised billed cost 6.8%), naive full-context caching, retry compounding, and 'be concise' degrading factuality by up to ~15%. Retired claims: politeness costing real money (2 tokens), word-level abbreviation (configuration/repository/authentication are one BPE token each, and approx. costs MORE than approximately), caveman prompting at the viral 40-65% (a paired coding benchmark found 14-21%, converging to -8.5% at scale), and the non-English token tax (largely eliminated by o200k). SOURCING CAVEAT, load-bearing: arxiv.org, docs.anthropic.com, platform.openai.com and ai.google.dev were egress-blocked during research, so Anthropic figures are first-party via platform.claude.com but much of the rest is search synthesis; non-Anthropic pricing is unverified and sources contradicted each other on OpenAI's cached-input discount (50/75/90%). Treat every specific figure as a pointer to verify. Full grounding in reports/2026-09-06-token-optimisation-research.md.",
+  "dateOpened": "2026-09-06",
+  "lastReviewed": "2026-09-06",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "cost",
+    "prompt-caching",
+    "token-optimisation",
+    "model-routing",
+    "effort-tier",
+    "context-engineering",
+    "agent-dispatch",
+    "measurement",
+    "decision-prep",
+    "conveyor"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}
