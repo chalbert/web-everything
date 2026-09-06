@@ -1,0 +1,77 @@
+{
+  "body": "Five commits. The `#xgmzd0y` fix, plus two corrections to claims I made while building it and one new finding those corrections turned up. **This body supersedes the original — two statements in it were wrong and are marked below.**\n\n## 1 — `review-pr` can judge a sibling repo, for every constellation member\n\n`review-pr` read its diff from local git rooted at one checkout, so a `--repo` naming a different constellation member was refused outright (#3137). **That refusal was right** — it replaced a silent degrade to an empty diff, a false-pass hazard live on plateau-app#139 — but it left the operation unable to judge any FUI or Plateau PR, the impl half of every cross-repo couple, while `review-set-label.mjs` would happily *stamp* a verdict on one.\n\nThe clone was on disk the whole time: the lane pool mints the constellation siblings as real git clones beside the lanes (#2282/#2349). Nothing fetched it because nothing asked.\n\n`resolveSubjectCheckout` derives it from `siblingsFor` — the table `bootstrap-session.mjs` already probes.\n\n**Matched by `git remote get-url origin`, never by directory name.** The constellation answers to more than one basename (`web-everything` / `webeverything`), so a name match would be the wrong fact. Matching on origin also makes the resolver and the #3137 guard agree by construction — the guard re-derives the same fact and still refuses if it disagrees.\n\n**Pool-local before primary (#2123).** `siblingsFor` probes the primary's parent first, so the first cut resolved to `/home/user/frontierui` — the *shared* primary checkout — while the pool's isolated clone sat beside the lane being driven from. Reading a review's diff out of a checkout another agent may be mid-work in is what lane isolation exists to prevent, and the primary's refs move underneath it. Each sibling is now probed pool-local first, falling back to the table's path; off a lane the two collapse and nothing changes.\n\nVerified live from a lane, all three members:\n\n| repo | resolves to |\n|---|---|\n| `chalbert/web-everything` | `.lanes/web-everything/lane-1` |\n| `chalbert/frontierui` | `.lanes/web-everything/frontierui` |\n| `chalbert/plateau-app` | `.lanes/web-everything/plateau-app` |\n\n**Fail-closed is unchanged.** An unresolvable subject returns `null`, the caller passes the original cwd, the guard fires — now naming every checkout probed. Nothing here can produce an empty diff.\n\n**Live case:** `readPr` for chalbert/frontierui#43 resolves a **69,193-byte diff and all 14 changed paths** off base `b2d7b1e`, where it previously refused outright.\n\n**Not proven here:** a full `run.mjs review-pr` needs `gh`, absent on this VM (it now fails at `gh ENOENT` *after* clearing the guard). So the card's judged-verdict criterion is demonstrated only to the `read` step. `#xgmzd0y` stays **open** for that and for the juror-lane half — a tool-bearing juror reviewing FUI should sit in a FUI lane, and the pool mints one shared sibling, not lanes.\n\n**Tests:** 11 new cases — self, sibling, origin-not-name, absent sibling, no match, throwing table, reader wiring, refusal text, pool-local preference, table fallback, all three members. 67 in file, 1,525 across the operations suite.\n\n## 2 — Withdrawing #3503, and correcting how I withdrew it\n\nI filed #3503 claiming a landed item keeps its hash id because JIT numbering runs off the couple manifest. The *cause* was wrong: numbering does run for a hand-opened PR, in a later drain pass, and I filed from a snapshot inside that window.\n\n**~~Then I over-corrected~~** — my first withdrawal note said there was no invariant to gate. There is, and it fired:\n\n> Backlog file … is on main with a NON-NUMERIC leading id — a land route bypassed JIT numbering (#2288) and **stranded a hash (#2319)**\n\n#3503 is withdrawn as a **duplicate of #2319**, which owns the class and has a working repair (`backlog.mjs number-stranded`), not as a non-issue. Original criteria kept below the note.\n\n## 3 — New finding: `#x85pd5x`, the gate that cannot fire where it matters\n\n**~~The original body claimed `check:standards` 0 errors.~~** It did not hold: `main` was carrying the stranded `xgmzd0y` and the gate errors on it locally. I also predicted this PR's CI would inherit that red. **It did not, and finding out why is the interesting part.**\n\n`check-standards.mjs` derives its on-main list with `git ls-tree origin/main` and **fails soft when that ref is unresolvable** — right for a fresh local clone. But the only CI job that runs `check:standards`, the aggregating `test` job, checks out *without* `fetch-depth: 0`. So `origin/main` is absent, the rule is skipped, and the guard is present exactly where it is advisory and absent exactly where it is load-bearing.\n\nTimeline: `xgmzd0y` landed ~13:47, its 180s grace expired ~13:50, the gate errored locally, and this PR's CI ran 13:57–14:03 **green** with the strand on main.\n\n**Update — the strand has since cleared on its own:** `main` now carries `drain: JIT-number xgmzd0y→#3512 at land (#2288)`, roughly 45 minutes after the land. No `number-stranded` run is needed. That **sizes** the finding rather than closing it: for those 45 minutes the gate that exists to catch a strand reported green on every PR, and nothing would have changed had the numbering pass never run. A guard whose enforcement depends on a separate process happening to fix the problem first is not enforcing.\n\nFiled as `#x85pd5x` in this PR, with both candidate fixes left open (give the `test` job `fetch-depth: 0`, as three other workflows already do; or make an unresolvable main report explicitly rather than skip silently).\n\n## Check status\n\n`test` is **green** on the current head. `review-gate` is **red by design** — `check-review-gate ✗ held — a review hold stands: review:pending`. No push clears that; it needs the verdict.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XaeEwEK9t94Km8DSgvTvBs",
+  "comments": [
+    {
+      "id": "IC_kwDORBt1-c8AAAABS2UFWw",
+      "author": {
+        "login": "chalbert"
+      },
+      "authorAssociation": "OWNER",
+      "body": "<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nescalated — awaiting an independent review (review:pending) [blast-radius (scripts/operations/__tests__/review-pr-io.test.mjs, scripts/operations/review-pr-io.mjs)]",
+      "createdAt": "2026-09-06T14:27:21Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/chalbert/web-everything/pull/1956#issuecomment-5559879003",
+      "viewerDidAuthor": false
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABS2WoUw",
+      "author": {
+        "login": "chalbert"
+      },
+      "authorAssociation": "OWNER",
+      "body": "<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold (review:pending) stands, so the \"ready-to-merge\" go-ahead is withheld even though the required check is green (#2832). Clear the review to release it.",
+      "createdAt": "2026-09-06T14:34:28Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/chalbert/web-everything/pull/1956#issuecomment-5559920723",
+      "viewerDidAuthor": false
+    }
+  ],
+  "createdAt": "2026-09-06T13:50:14Z",
+  "files": [
+    {
+      "path": "backlog/3503-a-landed-backlog-item-kept-its-in-flight-hash-id-because-the.md",
+      "additions": 29,
+      "deletions": 2,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/x85pd5x-the-stranded-hash-gate-is-structurally-unable-to-fire-in-ci.md",
+      "additions": 53,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "scripts/operations/__tests__/review-pr-io.test.mjs",
+      "additions": 124,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/operations/review-pr-io.mjs",
+      "additions": 84,
+      "deletions": 8,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "claude/card-progress-decoupled-0uyq2y",
+  "headRefOid": "42596c425530691a2042562fed86c61f2b5c0379",
+  "labels": [
+    {
+      "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
+      "name": "review:pending",
+      "description": "the drain parked this PR — an independent review is owed before merge",
+      "color": "fbca04"
+    }
+  ],
+  "number": 1956,
+  "state": "OPEN",
+  "title": "WE: review-pr resolves a sibling checkout for every constellation repo (#xgmzd0y)",
+  "url": "https://github.com/chalbert/web-everything/pull/1956",
+  "repo": "chalbert/web-everything"
+}
