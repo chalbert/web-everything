@@ -1,4 +1,5 @@
 ---
+bornAs: ximp9d6
 kind: story
 size: 2
 status: open
@@ -18,7 +19,7 @@ an unrelated directory the guard passed and the verb went on to renumber the LAN
 
 ```
 $ cd /tmp/notalane && node /…/.lanes/web-everything/lane-1/scripts/backlog.mjs number-stranded --dry-run
-number-stranded (dry-run): would number 2 — xjdwz4z → #3534, xkomby1 → #3535
+number-stranded (dry-run): would number 2 — 3538 → #3534, 3539 → #3535
 ```
 
 That is exactly the half-applied rename the guard exists to prevent, walking straight through it. The inverse
