@@ -74,6 +74,12 @@
       "changeType": "MODIFIED"
     },
     {
+      "path": "backlog/ximp9d6-a-locus-guard-must-test-the-locus-it-protects-not-the-cwd-it.md",
+      "additions": 48,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
       "path": "backlog/xjdwz4z-a-lane-verify-marker-outlives-its-landed-pr-and-blocks-every.md",
       "additions": 44,
       "deletions": 0,
@@ -99,7 +105,7 @@
     },
     {
       "path": "scripts/__tests__/number-stranded-locus.test.mjs",
-      "additions": 59,
+      "additions": 79,
       "deletions": 0,
       "changeType": "ADDED"
     },
@@ -111,7 +117,7 @@
     },
     {
       "path": "scripts/backlog.mjs",
-      "additions": 19,
+      "additions": 26,
       "deletions": 4,
       "changeType": "MODIFIED"
     },
@@ -171,19 +177,13 @@
     }
   ],
   "headRefName": "lane/xzitlr9-dispatcher-operations",
-  "headRefOid": "9426841c0449a3316747214075c611ae3b552984",
+  "headRefOid": "0c69526f6f3dcbc073dbb612edb79b006bad9a03",
   "labels": [
     {
       "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
       "name": "review:pending",
       "description": "the drain parked this PR — an independent review is owed before merge",
       "color": "fbca04"
-    },
-    {
-      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
-      "name": "checking",
-      "description": "Required checks are still running — CI truth not yet known (#2281)",
-      "color": "BFD4F2"
     },
     {
       "id": "LA_kwDORBt1-c8AAAACzQP_Cg",
