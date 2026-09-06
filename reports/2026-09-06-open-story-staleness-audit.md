@@ -295,3 +295,54 @@ that reds correct cards gets disabled, not fixed.
 The line-drift class itself is now *preventable* (anchors are validated) but not yet *repaired*: ~200 existing
 `:<line>` cites are still position-based. Migrating them is mechanical but large, and is the open half of
 #xyxfjzf. The gate makes new drift visible; it does not retroactively fix old cites.
+
+---
+
+# Part 4 — corrections to this audit's own method
+
+Two mistakes in Parts 1–3, both found after the fact and both worth recording because they are the same
+class of defect the audit is about.
+
+## 1 — the 25 resolves bypassed the declared operation
+
+Part 1 closed 25 cards with 25 raw raw `we:scripts/backlog.mjs` resolve calls calls. That is precisely the bypass
+`we:scripts/operations/resolve.mjs` was written to end — its own header records the measurement: *"a
+1,786-call session audit on 2026-08-21 found 15 raw `we:scripts/backlog.mjs resolve` calls and 0 through any
+operation, because there was none to call."* There is one now, and this session did not use it.
+
+Four guards were skipped as a result: wrong status, an epic with open children (#658), an uncodified
+decision (#911), and **undeclared presentation drift** (#2803) — the self-declared-scope bypass, refused at
+the producer.
+
+**Fixed by replay, not by assertion.** All 25 were reverted to `active` and re-run through
+the declared `resolve` operation, with **no `--force` anywhere** — a refusal was the signal being looked for, not an
+obstacle to step over. All 25 passed. The resolves were sound; the *route* was not, and only the replay
+could establish the difference.
+
+## 2 — two cards were left resolved that are not really done
+
+The Part 2 sweep tested `graduatedTo` **path existence**, and #1010 / #1161 were classified as
+"delivered, then deleted" and filed for a decision (#x0swhio) rather than reopened. That was the wrong
+call. Their acceptance clauses have **no artifact anywhere in the constellation** — a repo-wide grep for
+#1161's `productionDelivery` / `deliverModule` / `PackageManifest` returns zero across all three
+checkouts, and #1010's *plugged* seam exists in neither mirror. A card whose promise does not exist is not
+done, whatever the reason it stopped existing.
+
+Both were reopened, each carrying a dated section with the delivering commit, the deleting card, and what
+is absent today.
+
+**The cascade the gate caught.** Reopening them left their umbrellas — #1002 and #1038 — resolved over
+live work, and `check:standards` refused: *"a resolved epic but has 1 open child slice."* Correct, and not
+something the audit anticipated: if the slice is not done, the epic claiming to cover it is not done
+either. Both parents were reopened too.
+
+## What this says about the root cause
+
+Part 3 blamed the gate for checking a reference's container rather than its content. Both mistakes here are
+the human-shaped version of the same thing: a resolve was routed around the layer that would have checked
+it, and a "delivered then deleted" label was accepted as a *classification* when the question that mattered
+was whether the promised artifact exists **now**. The fix in each case was the same — resolve the claim
+against the tree, and let the refusal be informative.
+
+Final backlog delta from this audit: **25 resolved** (all through the declared operation), **5 reopened**
+(#2756, #1010, #1161, #1002, #1038), **97 `graduatedTo` paths corrected**, **7 follow-ups filed**.
