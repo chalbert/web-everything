@@ -3,12 +3,14 @@ bornAs: x2m32h6
 kind: story
 size: 5
 parent: "2358"
-status: open
+status: resolved
 scope:
   - frontierui:plugs/webdirectives/ssr/rust/
   - frontierui:.github/workflows/ci.yml
 scopeRationale: "Greenfield: stands up a whole new language subtree (frontierui:plugs/webdirectives/ssr/rust/) from scratch — a genuinely dir-spanning build whose exact file set is created here, so a file-level enumeration would under-scope and breach the lease. Mirrors the .NET foundation #2383 scope. The only shared-file touch is frontierui:.github/workflows/ci.yml (adds the Rust conformance-harness CI step, alongside the existing JVM step)."
 dateOpened: "2026-07-28"
+dateResolved: "2026-09-06"
+graduatedTo: "frontierui:plugs/webdirectives/ssr/rust/ (Rust native SSR renderer foundation + if/switch, #2756)"
 tags: []
 ---
 
