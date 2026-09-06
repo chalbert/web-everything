@@ -1,0 +1,58 @@
+{
+  "body": "**Decisions-only PR. Zero executable code.** It carries a ruling, its statute clause, two carved cards, and one `blockedBy` clear — the first half of the two-PR rule (`#principle-and-impl-two-pr`).\n\n## The ruling\n\n**Fork 1 ratified as (b):** script-level discipline is the accepted enforcement layer of the sole-writer invariant. What *accepted* names is a real layered control, not a promise — `assertMayMerge` as the sole `gh pr merge` chokepoint (throwing for any caller that is not the drain unless `WE_MERGE_BREAK_GLASS=1`, logged loudly), `withNumberingLock` / `withLandWriteLock` sharing a key so a merge write and the numbering step stay mutually exclusive, and `duplicateBornAs` / `strandedHashesOnMain` as a build-time catch net that surfaces the artifact an out-of-band write leaves behind even if the live gate were skipped.\n\n## The amendment is the substantive part\n\nThe card was prepared with (a) — `enforce_admins` plus a push allow-list — as **\"rejected for now\"**. The operator's framing at ratification replaced that, and it is what ratified:\n\n> **(a) is a knob that is not turned on, not a branch that lost.**\n\nEnforcement level is a **configurable dimension** whose current value is Rung 1, with Rung 2 a selectable flavor blocked on a *prerequisite* rather than on merit — `#config-extends-platform-default` applied. Three things make that the accurate record rather than a softening of the same call:\n\n- **The mechanism genuinely exists.** The prep's own fact-check already found the \"personal repos cannot do this\" reading too broad: it refers to the **org-only classic `restrictions` field**. Repository **Rulesets** carry a `bypass_actors` list and are available on GitHub Free for **public personal** repos, which this one is.\n- **Nothing about (a) was found wrong on merit.** It fails only because it is *unnameable*: one collaborator holds the only credential, and the drain's merges ride that same human credential (`mergePr()` never passes `--admin`). A minted bot principal changes that fact.\n- **The ladder already says so.** `#pr-flow-rollout-mechanism` specs Rung 2 as the *specced future flip*. Recording (a) as \"rejected\" would have put this card in tension with the very statute it claims to compose with.\n\n**What stays refused today, so this cannot be read as a back door:** flipping `enforce_admins` now either no-ops (an admin acting outside the disciplined scripts is still an admin, allow-listed or not) or blocks the human's own ratified direct-`main` path — and it would regress **#2152**, which set `enforce_admins: false` deliberately to keep `--fallback-git` and `WE_MERGE_BREAK_GLASS` working. The amendment changes how the record reads, not what is safe to do now.\n\nThe card also gains a **framing note at the top**, because its opening paragraph still carries the prep's \"rejected\" language and is left intact as the historical record — the note says plainly that the *Ruled* section governs and how to read every \"rejected\" below it.\n\n## Codification — extend, never mint\n\n`codifiedIn: docs/agent/platform-decisions.md#pr-flow-rollout-mechanism`. An **amendment clause under the existing anchor**, whose authoring scope is exactly this enforcement ladder. A standalone anchor named for \"branch-protection of the sole-writer invariant\" would duplicate a ladder already ratified — the one prep error that cannot be fixed after the call. `npm run check:statute` passes with 0 errors.\n\n**#3373's `blockedBy: [\"3423\"]` edge is cleared** by the ruling, per #3423's own *Done when* item 2.\n\n## The build item you asked for\n\n**`xmheyaw` — make the enforcement rung a declared knob, with Rung 2 as its off-by-default flavor.**\n\nIts value *today* is item 1, not the option: which rung is live is currently **inferred from prose** and reconciled against nothing, so the repo can drift off its own ratified rung silently. Item 2 is the option itself — composing the ruleset call #3423 already wrote out from a **configured** `bypassActorId`, and refusing to run with none configured, so turning it on becomes a config change rather than a code change. The story explicitly does **not** turn it on, and names the human prerequisite (minting a distinct bot principal) as out of scope. It carries no `humanGate` yet, because items 1 and 2 are ordinary agent work; it earns one when only the flip remains.\n\n## A red test found while gating this — not caused by it\n\n`xh1ocqf` files it. `npx vitest run` **unsharded fails on a clean tree at `main`** — `backlog-leverage.test.ts`'s determinism assertion — while **CI stays green**, because it shards four ways and the packing never co-locates the polluter.\n\nEstablished by running it, not by reading it:\n\n| probe | result |\n| --- | --- |\n| full run on a **clean tree at `main`** (my work stashed) | **fails** — pre-existing |\n| the same run, twice | fails both times — not a flake |\n| the file alone · with its two siblings · `src/` · `src/ scripts/` · `src/ blocks/ capabilities/` | passes |\n| CI, 4-way sharded | passes |\n\nThe `process.env.WE_VISUAL_FIXTURES` + `require.cache`-busting in the fixture-mode test is recorded as the **leading hypothesis and explicitly not as a confirmed cause** — running those two together passes, so the card tells the next person to identify the polluter by name before fixing on it. A decisions-only diff with zero executable code cannot cause or fix a test-isolation bug, so it is reported here rather than chased into this PR.\n\n## Verification\n\n- `npm run check:statute` — **0 errors, 0 warnings**.\n- `npm run check:standards` — **0 errors** (1,614 warnings, all pre-existing).\n- `npm run check:health` — **G6 = 3**, unchanged: this ruling does not add a resolved decision missing `codifiedIn`.\n- `node we:scripts/check-backlog-item.mjs` clean on `3423`, `3373`, `xmheyaw`, `xh1ocqf`. #3423 keeps one **pre-existing** digest-length warning (138 → 139 words) — its lead paragraph was already over the 100-word bar before this change, and is deliberately left verbatim as the record the framing note points at.\n- The resolve was performed by `run.mjs resolve --ref=3423 --codifiedTo=…` from a lane, not by hand.\n\n## Standing limits\n\n`review:human` is correct and I cannot clear it: `scoreEscalation` returns `humanRequired: true` on `statute (docs/agent/platform-decisions.md)`, and `decideSetLabel` refuses `→ review:accepted` while `review:human` is present, unconditionally. The one route is the `--to=clear-human` ceremony, which needs an operator instruction naming this PR — I have none, so this stops here for you.\n\nSame host limit as #1957/#1958/#1960: no `gh` credential, so the PR was opened through the API, the label applied by hand, and the `authored-by-actor` stamp is absent (#3267).\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PgZw8NXgV4DxWSTQ2cFSaM)_",
+  "comments": [],
+  "createdAt": "2026-09-06T20:51:00Z",
+  "files": [
+    {
+      "path": "backlog/3373-branch-protection-does-not-structurally-enforce-the-sole-wri.md",
+      "additions": 0,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/3423-branch-protection-enforcement-of-the-sole-writer-invariant-p.md",
+      "additions": 56,
+      "deletions": 6,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "backlog/xh1ocqf-the-unit-suite-is-order-dependent-one-test-fails-only-at-ful.md",
+      "additions": 73,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "backlog/xmheyaw-make-the-enforcement-rung-a-declared-knob-with-rung-2-as-it.md",
+      "additions": 62,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
+      "path": "docs/agent/platform-decisions.md",
+      "additions": 31,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "claude/token-optimization-research-tx4ntm",
+  "headRefOid": "8a6cf47ac36f8e97e7998f9cf56054c6ddc9586c",
+  "labels": [
+    {
+      "id": "LA_kwDORBt1-c8AAAACqL1KIg",
+      "name": "review:human",
+      "description": "conflict-of-interest: gate-self edit, a human must review",
+      "color": "B60205"
+    },
+    {
+      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
+      "name": "checking",
+      "description": "Required checks are still running — CI truth not yet known (#2281)",
+      "color": "BFD4F2"
+    }
+  ],
+  "number": 1962,
+  "state": "OPEN",
+  "title": "Rule #3423 as (b) — and reframe (a) as a knob that is off, not a branch that lost",
+  "url": "https://github.com/chalbert/web-everything/pull/1962",
+  "repo": "chalbert/web-everything"
+}
