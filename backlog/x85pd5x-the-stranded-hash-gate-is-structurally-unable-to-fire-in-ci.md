@@ -12,8 +12,8 @@ we:scripts/check-standards.mjs derives its on-main file list with `git ls-tree o
 ## Done when
 
 1. **Executable** — a CI run on a branch whose `main` carries a hash-led `we:backlog/` file past the 180s
-   grace FAILS the required `test` check. Red before, green after; reproducible today, since `main` is
-   carrying `xgmzd0y` right now.
+   grace FAILS the required `test` check. Red before, green after. Reproducing it needs a strand staged
+   deliberately: the live one has since been cleared (`xgmzd0y` → `#3512`), which is the point below.
 2. Either arm closes it, and picking between them is the call this item carries:
    - give the `test` job `fetch-depth: 0` (three other workflows already do exactly this where they need
      `origin/main`), or
@@ -41,6 +41,13 @@ A shallow CI checkout is not a git hiccup. It is the steady state of that job.
 7-73s drain numbering-commit lag") expired at ~13:50. `check:standards` errors on it in a local checkout.
 The chalbert/web-everything#1956 CI run at 13:57-14:03 passed green with that strand on `main` — and would
 have passed at any later time too.
+
+The strand was later cleared — `main` now carries `drain: JIT-number xgmzd0y→#3512 at land (#2288)`, ~45
+minutes after the land. **That does not close this item, it sizes it.** The window between a strand landing
+and the numbering pass clearing it is unbounded from CI's point of view: for those 45 minutes the gate that
+exists to catch exactly this was reporting green on every PR, and nothing would have changed had the pass
+never run. A guard whose enforcement depends on a separate process happening to fix the problem first is not
+enforcing anything.
 
 Found by predicting the opposite: I told the operator #1956 would inherit a red from main, and it did not.
 The gate that should have made that prediction true cannot see main from CI.
