@@ -134,7 +134,7 @@ what #2690 forbids.
 *preset name* rather than a `kind` enum value, and a preset that ships under that word still collides with the
 statute's term. The presets must name around it.
 
-Carved: **#xarvjgf** (the open-set level dimension + per-level attributes) and **#xayr3dc** (the shipped
+Carved: **#3516** (the open-set level dimension + per-level attributes) and **#3517** (the shipped
 preset flavors, blocked on it). Web Everything's own selection stays with the operator, on merit.
 
 *(The fork below is retained as the record of what was considered — its options are now the Supported-by-default

@@ -1,11 +1,12 @@
 ---
+bornAs: xbwup67
 kind: story
 size: 2
 status: open
 scope: ["we:scripts/operations/cli-adapter.mjs"]
 dateOpened: "2026-09-06"
 tags: [review, dispatch, operations, conveyor]
-crossRef: { url: /backlog/x2xrboe-what-may-economize-an-agent-review-depth-only-or-also-stren/, label: "the ruling that authorizes this knob" }
+crossRef: { url: /backlog/3513-what-may-economize-an-agent-review-depth-only-or-also-stren/, label: "the ruling that authorizes this knob" }
 ---
 
 # Give `effort` the operator control-flag treatment `model` already has
@@ -18,7 +19,7 @@ it up to `xhigh`/`max` for a review that warrants it.
 
 ## Authorized by the ruling, and bounded by it
 
-`#x2xrboe` ruled (2026-09-06) that **strength is operator-settable, never care-derived**. This item builds the
+`#3513` ruled (2026-09-06) that **strength is operator-settable, never care-derived**. This item builds the
 operator half. It must not become the care half: nothing here may make effort a function of a care band —
 `panelRigorForCareLevel` continues to return `rounds` / `lenses` / `jurorsPerLens` and nothing else. A change
 that derives effort from care re-opens that fork.

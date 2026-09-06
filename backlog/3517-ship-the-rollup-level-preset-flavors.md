@@ -1,9 +1,10 @@
 ---
+bornAs: xayr3dc
 kind: story
 size: 3
 status: open
 parent: "2690"
-blockedBy: ["xarvjgf"]
+blockedBy: ["3516"]
 scope: ["we:src/_data/backlog.js"]
 dateOpened: "2026-09-06"
 tags: [rollup, backlog-model, config, presets]

@@ -1,4 +1,5 @@
 ---
+bornAs: x2xrboe
 kind: decision
 status: open
 dateOpened: "2026-09-06"
@@ -41,7 +42,7 @@ sourced from run input and never derived from a care band. A future change that 
 care re-opens this fork and needs its own ruling. This is `#config-extends-platform-default` applied — a
 concern with more than one legitimate end-state is a dimension with a safe default, not a baked mechanism.
 
-Build carved: **#xbwup67** — give `effort` the operator control-flag treatment `model` already has.
+Build carved: **#3519** — give `effort` the operator control-flag treatment `model` already has.
 
 ## How this card got here, recorded because the correction is the point
 

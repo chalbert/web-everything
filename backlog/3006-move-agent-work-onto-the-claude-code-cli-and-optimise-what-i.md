@@ -3,7 +3,7 @@ bornAs: xbxhg6t
 kind: epic
 size: 13
 status: open
-blockedBy: ["x2xrboe"]
+blockedBy: ["3513"]
 dateOpened: "2026-08-08"
 tags: [conveyor, cost, review, orchestration]
 relatedReport: reports/2026-09-06-backlog-split-analysis.md
