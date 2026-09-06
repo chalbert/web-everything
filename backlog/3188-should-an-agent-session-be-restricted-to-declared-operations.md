@@ -147,7 +147,7 @@ Merit basis —* under the free-to-build-and-instantly-maintained test a merit d
 admits an injected disarm and (b) still costs a human round-trip. Neither difference is effort. **Amendment
 folded in:** the sub-decision above (TRUST_CHAIN registration) was added after the attack showed (b)'s
 guarantee was conditional and unstated.
-**Screen:** clear on both axes — *impl-vs-standard*: the escape channel is observable to every caller of the
+**Screen (fresh-context, 2026-09-06): clear on both axes.** Re-run by an agent that had not seen the authoring session, because the method assigns the conditional-vs-conceded call to a fresh context and the authoring pass could not screen itself. **Codification caveat it raised:** when this is written into a statute the ruling sentence must be the *observable property* — *the escape is not expressible in the agent-authored command string* — never the `ctx.operatorEscapes` Set shape used to illustrate it, which is mechanism. Original inline reasoning retained below. — *impl-vs-standard*: the escape channel is observable to every caller of the
 guarded surface (it changes what a refused command can do next), not an internal detail; *merit-vs-prio*:
 see (iii) above. Run inline by the preparing agent, **not** by a fresh-context sub-agent — no sub-agent tool
 was available in this session, so treat this line as an un-independent screen and re-run it at the decision
@@ -206,7 +206,7 @@ the agent's own lane clone") puts on the read side by its own terms. Second atta
 not-yet, so #2092 says dissolve it to ordering." It is not — strip timing, substrate and demand and a warrant
 unknown remains (is the residual channel real, or fully absorbed by the mutation split?), which is exactly
 the conditional-merit case #2092 preserves as a gate.
-**Screen:** clear — *impl-vs-standard*: an egress policy is a capability boundary every caller sees;
+**Screen (fresh-context, 2026-09-06): clear.** The partition test was applied explicitly: stripping timing and substrate-readiness leaves a genuine **warrant** unknown — whether a read-only egress channel is a real residue at all once mutations are fail-closed — so this is the conditional-merit gate the rule preserves (the #1648 shape), not an accepted-on-merit ruling plus an ordering edge. The card denies the delta is established rather than conceding it and deferring, which is the distinction that keeps a not-yet legitimate. Original inline reasoning retained below. — *impl-vs-standard*: an egress policy is a capability boundary every caller sees;
 *merit-vs-prio*: the not-yet rests on an unresolved warrant, not on cost. Same caveat as Fork 1 — self-run,
 not fresh-context.
 
