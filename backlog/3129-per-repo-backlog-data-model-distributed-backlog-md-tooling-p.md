@@ -51,7 +51,7 @@ on the day (a) lands.
 below is an ordinary open, ready item, not `status: parked` and not behind a gate. It is not urgent; it is also
 not conditional on anything.
 
-Build carved: **#xnn9wtv** — accept and resolve an explicit locus on every backlog id, bare `#NNN` continuing to
+Build carved: **#3533** — accept and resolve an explicit locus on every backlog id, bare `#NNN` continuing to
 mean `we:`. Filed under **#2472**, whose own body already asserts the destination this ruling confirms.
 
 **What #2472's premise does now, since the prep expected the opposite.** The prep warned that ratifying (b)

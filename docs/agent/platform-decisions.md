@@ -290,7 +290,7 @@ found no existing anchor governing backlog-*data* placement, so this one mints r
 [#constellation-placement](#constellation-placement) (code implementation),
 [#repo-drain-check-contract](#repo-drain-check-contract) (the drain's CI boundary) and
 [#pool-siblings-real-built-clones](#pool-siblings-real-built-clones) (lane checkouts) govern disjoint turf by a
-different test. First slice: `#xnn9wtv`.
+different test. First slice: `#3533`.
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
@@ -2771,7 +2771,7 @@ own direct-`main` path that the Rung 1 / Rung 3 design depends on — and it wou
 `WE_MERGE_BREAK_GLASS` paths working. **Revisit trigger:** a distinct bot GitHub principal is minted for the
 drain (Rung 2's own stated prerequisite — an App installation or machine-user PAT wired into its `gh` auth), or
 a second human writer joins (Rung 3). Neither holds today. The declared-rung knob and the drift check that
-keeps the declaration honest are build **#xmheyaw**.
+keeps the declaration honest are build **#3532**.
 
 **Lineage:** #1996 (ratified 2026-06-30; report `we:reports/2026-06-30-pr-flow-rollout-mechanism.md`; research
 topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1+4). Implements
