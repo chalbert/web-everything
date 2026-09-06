@@ -218,3 +218,80 @@ This sweep checks **path existence**, not semantic delivery. A card whose `gradu
 that exists but whose acceptance clauses were never met is invisible to it — that is what the
 adversarial pass in Part 1 catches, and it found 7 such cards among only 32 candidates. A full semantic
 re-verification of all 2,734 resolved cards was not attempted and would be a much larger job.
+
+---
+
+# Part 3 — root cause, and the fix
+
+Parts 1 and 2 catalogued symptoms: drifted line cites, rotted `graduatedTo` paths, stale `scope:` entries,
+one resolve over undelivered work. Those are four faces of **one** defect, and it is in the gate, not in
+the authors.
+
+## The root cause
+
+**The citation gate resolves a reference's *container*, never its *content* — and only in one of the three
+repos.**
+
+Read `findDanglingLoci` in `we:scripts/lib/citation-check.mjs` (gate 5, #2821). Given `we:path:NNN` it asks
+two questions: does the file exist, and is `NNN <= EOF`. That is a **bounds check**. It never asks whether
+line `NNN` still holds what the citing prose says it holds.
+
+The consequence is exact and predictable: **a file that grows keeps every stale citation green.**
+`we:docs/agent/platform-decisions.md` reached 4,138 lines, so a cite written when it was 600 lines long is
+still comfortably "in range" — and points at unrelated content. That is why the largest rot class in the
+corpus produced **zero** gate signal. The gate was working as written; what it was written to check is not
+what makes a citation correct.
+
+Three more holes follow from the same design:
+
+| Hole | Consequence |
+|---|---|
+| `CROSS_REPO_LOCI` skips `fui:` / `plateau:` as "not in this checkout" — but the sibling checkouts *do* exist in every agent and dev environment | the WE→FUI relocation moved 46 targets with no signal |
+| `graduatedTo` is checked for *presence* and *canonical shape*, never for *target existence* | #2756 landed `resolved` naming a directory that does not exist; 93 more rotted |
+| the `we:path#symbol` anchor gate 5's own error message **recommends** as the fix had no validator at all | nothing rewarded adopting the drift-immune form, and nothing protected you once you had |
+
+That last one is the sharpest statement of the root cause: the codebase already knew position-based
+references were the problem and already had the content-addressed alternative — it just never checked it,
+so the good form and the bad form were equally unverified.
+
+## What was built
+
+In `we:scripts/lib/citation-check.mjs` (pure core) and `we:scripts/check-standards.mjs` (section 6f-ii-b):
+
+- **`splitRepoRef` / `makeRepoResolver`** — shared prefix→checkout resolution across all three repos.
+  **Detect-or-skip, fail-closed:** an absent sibling resolves to `no-repo` and is reported as *skipped*,
+  never counted present, and the pass says out loud which repos it could not see.
+- **Gate 5b — `findDanglingSymbolAnchors`.** Resolves `we:path#symbol`: the file exists *and* contains that
+  symbol, on a word boundary (so `foo` does not satisfy a file holding only `fooBar`). Migrating a drifting
+  `:<line>` cite to an anchor is now a real improvement rather than a swap of one unchecked form for another.
+- **Gate 5c — `findDanglingGraduatedTargets`.** A resolved item's `graduatedTo` target must exist.
+  **Verified by reproduction:** restoring #2756's original frontmatter makes the gate fire; reverting clears
+  it.
+
+Wired **outside** the Rust-port branch deliberately. `runWeScan('citation-check')` is verified byte-identical
+to the four existing gates; folding a fifth into that path would mean it silently does not run whenever the
+port is active — the very "a gate that cannot see the target reports it present" hole being closed here.
+
+WARN-level, matching `CITATION_GATES_ENFORCED`, for the reason the file already documents: a gate that reds
+the build on a historical corpus nobody is touching gets disabled rather than fixed.
+
+## What was deliberately NOT built
+
+**Gate 5d (`scope:` path existence) was implemented and then removed — the invariant is unsound.**
+
+The motivating defect is real, and `scope:` is machine-read (the dispatcher plans lane collisions from it),
+so a stale entry mis-plans dispatch rather than merely misleading a reader. But *"a live item's scope entries
+must exist"* is false: a greenfield item legitimately scopes the files it is about to **create**. #2756's own
+`scopeRationale` says so — *"stands up a whole new language subtree … a file-level enumeration would
+under-scope and breach the lease."* Enforced as written it fired on #3483, #3484, #3487 and #3323, every one
+a correct card describing work not yet done.
+
+The sound discriminator is *existed-then-deleted* versus *never-existed*, which needs real git history; the
+agent checkouts are shallow clones. Re-scoped on its card rather than shipped as a noisy heuristic — a gate
+that reds correct cards gets disabled, not fixed.
+
+## The residual
+
+The line-drift class itself is now *preventable* (anchors are validated) but not yet *repaired*: ~200 existing
+`:<line>` cites are still position-based. Migrating them is mechanical but large, and is the open half of
+#xyxfjzf. The gate makes new drift visible; it does not retroactively fix old cites.

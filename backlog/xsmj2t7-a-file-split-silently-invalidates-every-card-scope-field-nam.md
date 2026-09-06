@@ -37,3 +37,20 @@ items that genuinely overlap can be scheduled in parallel. That makes it a fail-
 
 #2906, #2958, #2930, #2934, #1770 — all invalidated by the same
 `we:scripts/__tests__/check-standards-rules.test.mjs` six-way split.
+
+## 2026-09-06 — the invariant as filed is UNSOUND; this card needs re-scoping before it is built
+
+Gate 5d ("a live item's `scope:` entries must exist") was implemented and then **removed**. The motivating
+defect is real, but the rule is false: a greenfield item legitimately scopes the files it is about to
+**create**. #2756's own `scopeRationale` says exactly that — *"stands up a whole new language subtree … a
+file-level enumeration would under-scope and breach the lease."*
+
+Enforced as written it fired on **#3483, #3484, #3487 and #3323** — every one a correct card describing work
+not yet done. A gate that reds correct cards gets disabled, not fixed, so it was not shipped.
+
+**The sound signal is narrower:** an entry that *existed at an earlier commit and no longer does* (rotted)
+versus one that *never existed* (planned). That needs real git history, and the agent checkouts are shallow
+clones, so it cannot be computed there. Re-scope this card to that discriminator — a history-backed check
+run where full history is available (CI), not a path-existence check — before building it.
+
+Reasoning recorded in `we:scripts/lib/citation-check.mjs` at the removed gate's former position.

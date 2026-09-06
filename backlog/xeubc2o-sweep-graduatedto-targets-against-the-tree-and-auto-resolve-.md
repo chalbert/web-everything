@@ -1,8 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 relatedReport: reports/2026-09-06-open-story-staleness-audit.md
 ---
@@ -45,3 +47,23 @@ The 2026-09-06 audit swept all 2734 resolved items and found 100 graduatedTo ref
 
 100 refs were absent; 93 were relocation debris and 7 were genuine candidates. Without a repeatable
 sweep the ratio only gets worse with the next reorganisation.
+
+## Delivered 2026-09-06 — as a gate, not a sweep verb
+
+Built as **gate 5c** rather than the `check-graduated --fix` verb this card proposed, because a gate that
+refuses the bad record at land time is strictly better than a verb someone must remember to run:
+
+- `findDanglingGraduatedTargets` in `we:scripts/lib/citation-check.mjs`, wired in
+  `we:scripts/check-standards.mjs` (section 6f-ii-b), with `makeRepoResolver` /`splitRepoRef` as the shared
+  cross-repo resolution.
+- **Reproduced and caught:** re-introducing #2756's original frontmatter makes the gate fire; reverting
+  clears it.
+- Detect-or-skip is fail-closed: an absent sibling checkout reports `no-repo` and warns that those targets
+  were SKIPPED, never counted present.
+- Tests in `we:scripts/__tests__/citation-check.test.mjs` cover the #2756 reproduction, the present case,
+  `none (… deleted …)`, comma-joined multi-artifact graduations (#2210), `{a,b}` brace families (#1954),
+  and a trailing `#fragment` doc anchor (#1932).
+
+The one-off relocation corrections (93 paths) landed in the audit commit. The residual `--fix` half — batch
+re-pointing a future reorganisation's debris — is not built; the gate now makes that debris visible, which
+was the actual problem.
