@@ -68,13 +68,28 @@ import { assertMainNotStale } from '../operations/review-dispatch.mjs';
 import { BRIEF_REQUIRED_BY_KIND, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
-import { runReconcilePass } from './reconcile-pass.mjs';
+import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
 export function fixBriefPath(root = REPO_ROOT) {
   return join(root, 'skills-src', 'conveyor', 'fix-agent-brief.md');
+}
+
+/** we:scripts/conveyor/reconcile-fix-dispatch.mjs#RESUME_CONFIRM_MAX_ATTEMPTS — hardening (2) from the
+ *  independent review of PR #1966 (`#xu2krte`): how many times `dispatchFix` re-reads `claude agents --json
+ *  --all` after a resume attempt before concluding it did not resume. `#3331`'s own research documents the
+ *  listing can lag the CLI's real state; one immediate read is not enough to tell "the listing is stale" apart
+ *  from "the resume genuinely forked". 3 total reads (1 immediate + 2 retries) at a short interval is enough to
+ *  absorb an ordinary propagation delay without turning a real fork into a long stall. */
+export const RESUME_CONFIRM_MAX_ATTEMPTS = 3;
+/** The wait between {@link RESUME_CONFIRM_MAX_ATTEMPTS} retries, in ms. Short — this is absorbing a listing
+ *  propagation delay, not waiting out real agent work. */
+export const RESUME_CONFIRM_WAIT_MS = 300;
+/** The default `wait`, real time. Injected so a test never actually sleeps. */
+export function defaultConfirmWait(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /**
@@ -91,11 +106,11 @@ export function fixBriefPath(root = REPO_ROOT) {
  *   `no-scope`     — the item number resolves, but the backlog loader has no scope for it (deleted item, or one
  *     scaffolded with no `scope:` frontmatter). Mirrors `dispatch-lane.mjs`'s OWN scope-refusal
  *     (`itemScope.length` check) for exactly the same reason: a fix agent with no declared scope has no fence.
- * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
+ * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
- * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],isConflict:boolean,body:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
+ * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
 export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
   const planned = [];
@@ -120,7 +135,12 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
     // `dispatchFix` below; an ordinary reviewer-finding bounce never carries this label and dispatches exactly
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
-    planned.push({ itemNum, pr, laneRef: headRefName, scope: item.scope, isConflict, body: entry.body ?? null });
+    planned.push({
+      itemNum, pr, laneRef: headRefName, scope: item.scope, isConflict, body: entry.body ?? null,
+      // #xu2krte security review finding — needed by `dispatchFix` to confirm a resume CANDIDATE actually
+      // belongs to THIS pr before trusting it (see that function's own docblock).
+      headRefOid: entry.headRefOid ?? null,
+    });
   }
   return { planned, refusals };
 }
@@ -215,7 +235,30 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * carried any flag besides `--resume`, though this call passes none) gets its accidental copy `claude stop`-ped
  * ({@link stopSession} — never a bare `kill`, per `#3383`'s own hard-won lesson) and falls through to the SAME
  * fresh-dispatch path every other (non-conflict) caller already takes, unconditionally, below.
- * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null}} planned
+ *
+ * TWO HARDENINGS ADDED BY THE INDEPENDENT REVIEW OF PR #1966 (both real, both fixed here rather than merely
+ * filed, because both sit on this exact security/correctness-critical dispatch surface):
+ *
+ * (1) OWNERSHIP CHECK BEFORE TRUSTING A CANDIDATE. `findResumeCandidate` alone only proves a session with the
+ * stamped id is STILL LISTED — not that it actually belongs to THIS pr. A PR body's `authored-by-actor` stamp
+ * is plain, editable text, visible in every other open PR's body too, so a forged/copied stamp could redirect a
+ * genuine conflict fix into an unrelated LIVE session, injecting a false task into it. This mirrors exactly the
+ * binding problem `reconcile-core.mjs#bindAgents` PATH 1 already solves for liveness ("is this session actually
+ * working THIS pr, or does a proxy only make it look that way") — reused here rather than re-invented:
+ * {@link resolveLaneHead} (`reconcile-pass.mjs`) reads the candidate's own `cwd`'s real git `HEAD`, and it must
+ * equal `planned.headRefOid` (the PR's own head sha, threaded through by {@link planFixesFromReconcile}) before
+ * a resume is attempted at all. A mismatch (or an unresolvable `cwd`) is treated exactly like "no candidate" —
+ * no resume attempt, no `stop`, straight to a fresh dispatch — because nothing was touched, there is nothing to
+ * undo.
+ *
+ * (2) BOUNDED RETRY ON THE POST-RESUME LISTING READ. `#3331`'s own research already documents that
+ * `claude agents --json` can lag the CLI's real state. A single, immediate post-spawn read could therefore miss
+ * a listing update for a resume that genuinely succeeded, misreading it as a fork and `stop`-ping the very
+ * session that was just handed new work. `resumeSucceeded` is re-checked up to
+ * {@link RESUME_CONFIRM_MAX_ATTEMPTS} times with a short `wait` between attempts before this function concludes
+ * "not resumed" — the same shape `#3331`'s own probe methodology already used (repeat rather than trust one
+ * sample), just applied at dispatch time instead of at probe time.
+ * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned
  * @param {object} [o]
  * @returns {{sessionId:string, sessionSlug:string|null, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:boolean, resumeAttempt?:object}}
  */
@@ -226,6 +269,8 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   listAgentsAll = () => defaultListAgents({ all: true }),
   stop = stopSession,
+  resolveHead = resolveLaneHead,
+  wait = defaultConfirmWait,
   extraArgs = [],
 } = {}) {
   assertNotALaneCheckout(root);
@@ -238,16 +283,42 @@ export function dispatchFix(planned, {
   if (planned.isConflict) {
     const agentsBefore = listAgentsAll();
     const candidate = findResumeCandidate({ body: planned.body, agentsAll: agentsBefore });
-    if (candidate) {
-      const cwd = agentsBefore.find((a) => normalizeHandle(a?.sessionId) === normalizeHandle(candidate))?.cwd || null;
+    const candidateRow = candidate
+      ? agentsBefore.find((a) => normalizeHandle(a?.sessionId) === normalizeHandle(candidate))
+      : null;
+    // Hardening (1) — see the docblock above. A stamp that resolves to a LIVE session which is not actually
+    // sitting on THIS pr's own head is not trusted at all; this is reported as a refusal (`resumeAttempt`),
+    // never as a silent fresh-dispatch with no trace of why the candidate was rejected.
+    const candidateCwd = candidateRow?.cwd || null;
+    const candidateHead = candidate && candidateCwd ? resolveHead(candidateCwd) : null;
+    const ownershipConfirmed = Boolean(
+      candidate && planned.headRefOid && candidateHead && candidateHead === planned.headRefOid,
+    );
+    if (candidate && !ownershipConfirmed) {
+      resumeAttempt = {
+        attempted: false, candidate, forked: false,
+        refused: 'ownership-unconfirmed',
+        why: `candidate session's checkout HEAD (${candidateHead ?? 'unresolved'}) does not match PR #${planned.pr}'s own head (${planned.headRefOid ?? 'unknown'}) — refusing to trust an editable PR-body stamp alone`,
+      };
+    } else if (ownershipConfirmed) {
       const resumeArgv = buildAgentArgv({
-        payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd }) },
+        payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
         resumeSessionId: candidate,
       });
       let stdout = '';
       try { stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? ''); } catch { stdout = ''; }
       const printedId = parseBackgroundedId(stdout);
-      const outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
+
+      // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
+      // fresh `claude agents --json --all` read, so a listing that lags the CLI's real state by one tick still
+      // resolves correctly on the next attempt, without ever risking stopping a genuinely resumed session on
+      // the strength of a single early read.
+      let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
+      for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
+        outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
+        if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
+        wait(RESUME_CONFIRM_WAIT_MS);
+      }
       if (outcome.resumed) {
         return {
           sessionId: candidate, sessionSlug: null, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,

@@ -139,7 +139,7 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
       itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture', scope: item.scope,
-      isConflict: true, body: prBody,
+      isConflict: true, body: prBody, headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
 
@@ -147,7 +147,7 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     // `root` must be a REAL, existing directory whose last path segment is not `lane-<N>` (dispatchFix's own
     // `assertNotALaneCheckout` guard) — `withRealRepo`'s fixture root satisfies both, and doubles as "the
     // checkout the fix agent would actually be dispatched into".
-    await withRealRepo(async ({ root }) => {
+    await withRealRepo(async ({ root, head }) => {
       const fake = withFakeClaude();
       try {
         const env = { ...process.env, ...fake.env };
@@ -155,6 +155,8 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
 
         // Seed the "original builder" session by actually starting one through the real spawn path — this is
         // the SAME defaultSpawnAgent production code the dispatcher itself calls, not a hand-built fixture row.
+        // `cwd: root` is load-bearing beyond the spawn itself: it is also what the SECURITY hardening below
+        // resolves a real `git -C <cwd> rev-parse HEAD` against.
         defaultSpawnAgent(['--bg', '--session-id', originalSessionId, '-n', 'fix-8801', 'original build work'], { env, cwd: root });
         const listedBefore = defaultListAgents({ env, all: true });
         expect(listedBefore.some((a) => a.sessionId === originalSessionId)).toBe(true);
@@ -164,6 +166,10 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
           itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture',
           scope: ['we:scripts/example-conflicting-module.mjs'], lane: 12,
           isConflict: true, body: `Original PR description.\n\n${authorMarker}\n`,
+          // The REAL fixture repo's own current HEAD — proving the security-hardening ownership check
+          // (`resolveLaneHead` against `planned.headRefOid`) with NO stub: `dispatchFix`'s default `resolveHead`
+          // runs a genuine `git -C <cwd> rev-parse HEAD` against `root` and must find this exact value.
+          headRefOid: head(),
         };
 
         // `dispatchFix` itself calls `listAgentsAll()` again AFTER the resume spawn (to confirm the outcome),
@@ -176,6 +182,8 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
           mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
           spawnAgent: (argv, opts) => { resumeArgvSeen = argv; return defaultSpawnAgent(argv, { ...opts, env }); },
           listAgentsAll: () => defaultListAgents({ env, all: true }),
+          // resolveHead is NOT injected here — the REAL default (`resolveLaneHead`, a genuine `git -C <cwd>
+          // rev-parse HEAD`) runs against the real fixture repo, proving the ownership check for real.
           // Never expected to fire on this (successful-resume) path — wired to the REAL stopSession anyway so
           // a regression that DID reach it would exercise real code, not silently no-op.
           stop: ({ handle }) => stopSession({ handle, exec: (cmd, a, o) => execFileSync(cmd, a, { ...o, env }) }),

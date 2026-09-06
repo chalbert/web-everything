@@ -37,19 +37,19 @@ describe('planFixesFromReconcile', () => {
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
       itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
-      isConflict: false, body: null,
+      isConflict: false, body: null, headRefOid: null,
     }]);
   });
 
-  it('#xu2krte — a `fix` entry still carrying the conflict-watch label plans `isConflict: true` and threads `body`', () => {
+  it('#xu2krte — a `fix` entry still carrying the conflict-watch label plans `isConflict: true` and threads `body`/`headRefOid`', () => {
     const entries = [{
       kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass',
-      labels: [CONFLICT_LABEL, 'review:pending'], body: 'a PR body',
+      labels: [CONFLICT_LABEL, 'review:pending'], body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }];
     const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(planned).toEqual([{
       itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope,
-      isConflict: true, body: 'a PR body',
+      isConflict: true, body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
 
@@ -139,17 +139,23 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(listAgentsAllCalls).toBe(0);
   });
 
-  it('#xu2krte Fork 1 — a conflict-caused entry with a listed resume candidate attempts a bare resume first, and returns `resumed: true` on success', () => {
+  const MATCHING_HEAD = 'deadbeef'.repeat(5);
+
+  it('#xu2krte Fork 1 — a conflict-caused entry with a listed, OWNERSHIP-CONFIRMED resume candidate attempts a bare resume first, and returns `resumed: true` on success', () => {
     const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
     const spawnCalls = [];
     const result = dispatchFix(
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9, isConflict: true, body: `some PR body\n\n${marker}\n` },
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
       {
         root: '/repo',
         readBrief: () => REAL_TEMPLATE_STUB,
         mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
         spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · candxxxx\n'; },
         listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }],
+        resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
       },
     );
     expect(spawnCalls).toHaveLength(1);
@@ -160,27 +166,63 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     });
   });
 
+  it('#xu2krte security hardening — a candidate whose checkout HEAD does NOT match the PR is refused, never resumed, with no fresh id minted needlessly early', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const spawnCalls = [];
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => 'freshfreshfresh',
+        spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · x\n'; },
+        // The candidate IS listed under the stamped id, but its checkout sits on a DIFFERENT commit — an
+        // editable PR-body stamp alone is not enough to trust it (the security finding from PR #1966's review).
+        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }],
+        resolveHead: () => 'a-totally-different-sha',
+      },
+    );
+    // No resume attempt was ever made — the ONLY spawn call is the fresh dispatch.
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0][1]).toBe('--session-id');
+    expect(result.resumed).toBe(false);
+    expect(result.sessionId).toBe('freshfreshfresh');
+    expect(result.resumeAttempt).toEqual({
+      attempted: false, candidate: 'cand-0000-0000-0000-000000000000', forked: false,
+      refused: 'ownership-unconfirmed', why: expect.stringContaining('does not match'),
+    });
+  });
+
   it('#xu2krte Fork 1 — a fork (mismatched id) is stopped and falls back to a fresh full dispatch', () => {
     const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
     const spawnCalls = [];
     const stopCalls = [];
     let listCall = 0;
     const result = dispatchFix(
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9, isConflict: true, body: `some PR body\n\n${marker}\n` },
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
       {
         root: '/repo',
         readBrief: () => REAL_TEMPLATE_STUB,
         mintSessionId: () => 'freshfreshfresh',
         spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · forkedid\n'; },
         // Row 1 (before the resume attempt): the candidate is listed, so a resume is attempted.
-        // Row 2 (after the resume attempt): only a DIFFERENT id ("forkedid") is listed — the CLI forked a copy.
+        // Every read AFTER: only a DIFFERENT id ("forkedid") is listed — the CLI forked a copy. The retry
+        // loop (hardening 2) reads this same wrong answer every time, so it correctly exhausts, not stalls.
         listAgentsAll: () => {
           listCall += 1;
           return listCall === 1
             ? [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }]
             : [{ sessionId: 'a-different-session-id', id: 'forkedid', cwd: '/lanes/lane-9' }];
         },
+        resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
         stop: ({ handle }) => stopCalls.push(handle),
+        wait: () => {}, // no real sleeping in a unit test
       },
     );
     expect(stopCalls).toEqual(['forkedid']);
@@ -191,6 +233,36 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(result.resumed).toBe(false);
     expect(result.sessionId).toBe('freshfreshfresh');
     expect(result.resumeAttempt).toEqual({ attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true });
+  });
+
+  it('#xu2krte hardening (2) — a listing that lags by ONE read still resolves as a genuine resume, not a fork', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    let listCall = 0;
+    let waitCalls = 0;
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => { throw new Error('must not mint a fresh id on a successful (delayed) resume'); },
+        spawnAgent: () => 'backgrounded · candxxxx\n',
+        // Call 1: the pre-spawn candidate lookup. Call 2 (the FIRST post-spawn confirm read): the listing has
+        // not caught up yet — no row at all, simulating exactly the propagation lag #3331 documents. Call 3
+        // onward: caught up.
+        listAgentsAll: () => {
+          listCall += 1;
+          if (listCall === 2) return [];
+          return [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }];
+        },
+        resolveHead: () => MATCHING_HEAD,
+        wait: () => { waitCalls += 1; },
+      },
+    );
+    expect(result.resumed).toBe(true);
+    expect(waitCalls).toBe(1); // exactly one retry was needed
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
@@ -220,8 +292,8 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       checkStaleness: FRESH,
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, isConflict: false, body: null, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, isConflict: false, body: null, lane: 9 },
+      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 2 },
+      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
