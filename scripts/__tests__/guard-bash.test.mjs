@@ -12,6 +12,7 @@ import {
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason,
+  isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
@@ -1995,5 +1996,43 @@ describe('guard-bash — git add of an ENUMERATED path set is denied by EFFECT (
     const msg = decide('git add -A', {});
     expect(msg).toMatch(/ENUMERATION/);
     expect(msg).not.toMatch(/^\s*flags?:/i);
+  });
+});
+
+// ── The OPERATION spelling of a guarded raw home, and the truncating pipe (2026-09-06) ───────────────
+// Both gaps are the same shape: the guard knew a raw home and not the operation that declares over it.
+describe('operation forms of guarded commands', () => {
+  it('denies a BACKGROUNDED run.mjs verify — it shells verify-lane, so it is the same #2833 stall', () => {
+    // Measured: four backgrounded `run.mjs verify` calls in one session, two returning `unrun`.
+    expect(backgroundedVerificationReason('node scripts/operations/run.mjs verify --checkout=/x', true))
+      .toMatch(/SYNCHRONOUSLY in the FOREGROUND/);
+  });
+
+  it('still allows a backgrounded operation that is NOT a verification run', () => {
+    expect(backgroundedVerificationReason('node scripts/operations/run.mjs scaffold --title=x', true)).toBeNull();
+  });
+
+  it('derives the operation list from DECLARED_HOMES, so a mere mention is not a run', () => {
+    expect(isVerificationRun('echo "run.mjs verify is the operation"')).toBe(false);
+  });
+});
+
+describe('truncated operation --json', () => {
+  it('denies piping an operation --json into head/tail — it corrupts the value, not the view', () => {
+    expect(truncatedOperationJsonReason('node scripts/operations/run.mjs review-pr --pr=1 --json | tail -40'))
+      .toMatch(/corrupts the VALUE/);
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify --json | head -20')).toBe(true);
+  });
+
+  it('allows the two correct shapes: redirect to a file, or drop --json for the compact render', () => {
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify --json > /tmp/run.json')).toBe(false);
+    expect(isTruncatedOperationJson('node scripts/operations/run.mjs verify | tail -20')).toBe(false);
+  });
+
+  it('names both remedies AND the durable record, so the denial is actionable', () => {
+    const r = truncatedOperationJsonReason('node scripts/operations/run.mjs verify --json | tail -5');
+    expect(r).toMatch(/DROP `--json`/);
+    expect(r).toMatch(/redirect to a file/);
+    expect(r).toMatch(/\.operations\/runs/);
   });
 });

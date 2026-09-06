@@ -107,6 +107,7 @@
  * three cwd/lease contexts.
  */
 import { readFileSync, realpathSync } from 'node:fs';
+import { DECLARED_HOMES } from './operations/declared-homes.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readdirSync } from 'node:fs';
@@ -294,8 +295,46 @@ export function commitIdentityCommandReason(command) {
 const VERIFICATION_RUN =
   /\bnode\s+\S*\bverify-lane\.mjs\b|\b(?:npm|pnpm|yarn|run-s|run-p|npm-run-all)\b[^|;&]*\b(?:check:standards|test:unit)\b|\bnpm\s+(?:run\s+)?test\b/;
 
-/** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit)? Pure. */
-export function isVerificationRun(command) { return VERIFICATION_RUN.test(String(command || '')); }
+// THE OPERATION FORM OF THE SAME RUN (2026-09-06). The regex above anchors on the RAW HOME, and every
+// operation that declares over one is a second spelling of the identical command that the guard did not
+// see: `run.mjs verify` shells `verify-lane.mjs` through `verify-io.mjs`, so backgrounding it is the
+// #2833 stall exactly as backgrounding the home is. Measured the day this landed — four backgrounded
+// `run.mjs verify` calls in one session, two of which returned `unrun` and were nearly reported green.
+//
+// DERIVED from DECLARED_HOMES, never hand-listed, for the reason the #3224 scan's own map states: a second
+// list of the same relationship drifts from the moment it is written. An operation that declares over a
+// guarded home is covered the day it is declared, with no edit here.
+const OPERATIONS_OVER_VERIFICATION = Object.entries(DECLARED_HOMES)
+  .filter(([, homes]) => homes.some((h) => VERIFICATION_RUN.test(`node ${h.replace(/^[a-z-]+:/, '')}`)))
+  .map(([op]) => op);
+
+const VERIFICATION_OPERATION = OPERATIONS_OVER_VERIFICATION.length
+  // Anchored to the RUNNER + script path, exactly as VERIFICATION_RUN is, so a mere MENTION
+  // (`echo "run.mjs verify …"`, a grep pattern, prose in a heredoc) is not matched as a run.
+  ? new RegExp(`\\bnode\\s+\\S*\\brun\\.mjs\\s+(?:${OPERATIONS_OVER_VERIFICATION.join('|')})\\b`)
+  : null;
+
+/** Does this command INVOKE a member of the verification set (verify-lane / check:standards / test:unit)? Pure.
+ *  Matches BOTH spellings: the raw home, and the declared operation that shells it. */
+export function isVerificationRun(command) {
+  const c = String(command || '');
+  return VERIFICATION_RUN.test(c) || (VERIFICATION_OPERATION !== null && VERIFICATION_OPERATION.test(c));
+}
+
+// A TRUNCATING PIPE on an operation's `--json` (2026-09-06). `--json` emits the whole payload — every
+// finding's failure_scenario, rootCause and prevention prose — so it overflows a terminal and invites a
+// `| tail -N` to make it fit. That does not truncate a VIEW, it corrupts the VALUE: the JSON no longer
+// parses, so the verdict is lost entirely rather than partially. Three times in one session, twice
+// recovered only from the durable run record.
+//
+// The fix is free and already built: DROP `--json` and the default render prints exactly the compact
+// verdict (run id, stop reason, verdict, spend, the pending ask, the owning skill). Keep `--json` only to
+// PARSE, and redirect it to a file.
+const OPERATION_JSON_TRUNCATED =
+  /\brun\.mjs\b[^|]*--json\b[^|]*\|\s*(?:head|tail)\b/;
+
+/** Is this an operation `--json` piped into head/tail — corrupting the payload rather than trimming a view? Pure. */
+export function isTruncatedOperationJson(command) { return OPERATION_JSON_TRUNCATED.test(String(command || '')); }
 
 /**
  * Is `command` being BACKGROUNDED? Pure. Two channels the #2833 stall can arrive through:
@@ -324,6 +363,24 @@ export function isBackgrounded(command, runInBackground = false) {
 export function backgroundedVerificationReason(command, runInBackground = false) {
   if (!isVerificationRun(command) || !isBackgrounded(command, runInBackground)) return null;
   return 'the verification set (verify-lane / check:standards / test:unit) must run SYNCHRONOUSLY in the FOREGROUND — never backgrounded (run_in_background, a trailing `&`, nohup/setsid/disown). Backgrounding the suite run and then yielding is the EXACT #2833 subagent stall: the lane sits mid-flight, produces nothing, and never errors, so nothing reclaims it. Re-run it in the foreground and WAIT for it to exit before landing (`node scripts/verify-lane.mjs …`, blocking). There is no override — a synchronous run is the whole point.';
+}
+
+/**
+ * A truncating pipe on an operation's `--json`. Pure. Returns a reason when the command pipes a
+ * `run.mjs … --json` into `head`/`tail`, else null.
+ *
+ * Whole-command, like its neighbours above: the pipe is the defect, and a per-segment split would see the
+ * producer and the consumer separately and match neither.
+ */
+export function truncatedOperationJsonReason(command) {
+  if (!isTruncatedOperationJson(command)) return null;
+  return 'an operation\'s `--json` piped into `head`/`tail` does not truncate a VIEW, it corrupts the VALUE — '
+    + 'the payload stops being parseable, so the verdict is lost ENTIRELY rather than partially (three times in '
+    + 'one session, 2026-09-06; twice recovered only from the durable run record). Two fixes, both free: to READ '
+    + 'the outcome, DROP `--json` — the default render already prints the compact verdict (run id, stop reason, '
+    + 'verdict, spend, the pending ask, and the owning skill). To PARSE it, redirect to a file '
+    + '(`--json > /tmp/run.json`) and query that. The run record under `.operations/runs/<runId>.json` is durable '
+    + 'either way and survives whatever happens to stdout.';
 }
 
 // #2749/#2788 — the 4th `#primary-read-only-lanes-only` guard arm: a build that WRITES the shared PRIMARY
@@ -2158,6 +2215,10 @@ export function decide(command, ctx = {}) {
   // which the per-segment loop below structurally cannot see. Whole-command, same as the check above it.
   const ident = commitIdentityCommandReason(command);
   if (ident) return ident;
+  // 2026-09-06 — also whole-command: the truncating pipe spans the producer and the consumer, so the
+  // per-segment loop below would see each half alone and match neither.
+  const trunc = truncatedOperationJsonReason(command);
+  if (trunc) return trunc;
   // #2968 — the pipe/xargs, while-read, and `-exec` enumerate-then-`git add` sink shapes all need more than
   // one segment to see (the enumeration source is a DIFFERENT segment, or the `git add` sits inside a
   // compound whose head word is `while`/`find`). Whole-command, same shape as the two checks above it.
