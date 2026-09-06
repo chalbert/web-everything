@@ -73,12 +73,27 @@ export function isLaneAcquirable(info, nowMs, ttlMs) {
 /**
  * The lowest-index acquirable lane, or null if the pool is fully held/busy. Deterministic (index order) so
  * concurrent acquirers converge on the same candidate and the atomic O_EXCL create picks exactly one winner.
+ *
+ * `excludeLane` (#xzitlr9 follow-up) is the CALLER'S OWN lane, and auto-pick skips it. Acquiring resets the
+ * lane to the integration branch, so handing back the lane the caller is standing in changes their working
+ * directory out from under them mid-task — observed 2026-09-06, where a bare `acquire --purpose=review-juror`
+ * returned the driving lane and reset its checkout off the working branch.
+ *
+ * This is NOT the data-loss guard: `isLaneAcquirable`'s `dirtyOrAhead` test (#2267) already refuses any lane
+ * holding uncommitted or unpushed work, and it held in that incident — nothing was lost. This is the
+ * narrower surprise of a clean, pushed lane being reset while its owner is still working in it. It is a
+ * PREFERENCE, not a refusal: an explicit `--lane=N` still names whatever the caller names, because someone
+ * asking for a specific lane by number has said what they mean.
  */
-export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
+export function chooseFreeLane(laneInfos, nowMs, ttlMs, { excludeLane = null } = {}) {
   const eligible = laneInfos
     .filter((i) => isLaneAcquirable(i, nowMs, ttlMs))
     .sort((a, b) => a.lane - b.lane);
-  return eligible.length ? eligible[0].lane : null;
+  const notSelf = excludeLane == null ? eligible : eligible.filter((i) => i.lane !== excludeLane);
+  // Fall back to the full set when EVERY free lane is the caller's own: a single-lane pool must still
+  // acquire, and refusing there would be worse than the surprise this avoids.
+  const pick = notSelf.length ? notSelf : eligible;
+  return pick.length ? pick[0].lane : null;
 }
 
 /** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.

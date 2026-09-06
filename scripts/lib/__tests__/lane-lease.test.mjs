@@ -81,6 +81,26 @@ describe('chooseFreeLane', () => {
     const infos = [mk(3), mk(1), mk(2)];
     expect(chooseFreeLane(infos, T0, ttlMs)).toBe(1);
   });
+  // #xzitlr9 follow-up — auto-pick skips the CALLER'S OWN lane. Acquiring resets the lane to the
+  // integration branch, so returning the lane the caller is standing in changes their checkout mid-task.
+  // This is NOT the data-loss guard (dirtyOrAhead, #2267, already covers unpushed work and held here) —
+  // it is the narrower surprise of a clean, pushed lane being reset while its owner is still in it.
+  it("skips the caller's own lane so acquire never resets the checkout underneath them", () => {
+    const infos = [mk(1), mk(2), mk(3)];
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: 1 })).toBe(2);
+  });
+
+  it('falls back to the own lane when it is the ONLY free one — a single-lane pool must still acquire', () => {
+    const infos = [mk(1), mk(2, { lease: leaseAt(0) })];
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: 1 })).toBe(1);
+  });
+
+  it('is unchanged when no own lane is supplied (every existing caller)', () => {
+    const infos = [mk(1), mk(2)];
+    expect(chooseFreeLane(infos, T0, ttlMs)).toBe(1);
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: null })).toBe(1);
+  });
+
   it('skips held/dirty lanes and picks the next free one', () => {
     const infos = [
       mk(1, { lease: leaseAt(0) }),                         // held
