@@ -3,8 +3,11 @@ bornAs: xtv5soc
 kind: story
 size: 1
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-27"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 scope:
   - we:scripts/review-corpus/mine-review-corpus.mjs
 tags: []

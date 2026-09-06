@@ -1,8 +1,11 @@
 ---
 bornAs: xyi0x0h
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-05"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 relatedTo: ["2452", "2919", "2267"]
 tags: [lane-pool, infra, footgun]
 scope:

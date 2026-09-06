@@ -91,6 +91,7 @@ import {
   findDanglingMemoryHashSlugs,
   makeMemoizedLineCounter, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
+  makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN } from './lib/gate-config.mjs';
 import { isHash } from './backlog/id.mjs';
@@ -1357,6 +1358,70 @@ try {
   err(`citation-verification gate failed: ${e.message}`);
 }
 
+// ── 6f-ii-b. REFERENCE-RESOLUTION gates (5b/5c/5d — 2026-09-06 staleness audit) ────────────────────
+// The gates above resolve a reference's CONTAINER; these resolve its CONTENT, and they resolve the two
+// SIBLING repos gate 5 skips by construction.
+//
+// Root cause they close (audit: we:reports/2026-09-06-open-story-staleness-audit.md). Gate 5 passes a
+// `path:line` locus on a BOUNDS check — file exists, line <= EOF. So a citation into a file that GROWS
+// stays green forever while pointing at unrelated content: platform-decisions.md reached 4138 lines and
+// every pre-growth cite in the backlog still passes, off by 130-520 lines. Meanwhile `graduatedTo` and
+// `scope:` were never resolved at all (only shape-checked), which is how a card landed `resolved` naming
+// a subtree that does not exist, and how three repo relocations rotted 93 further targets in silence.
+//
+// DELIBERATELY OUTSIDE the Rust-port branch above. `runWeScan('citation-check')` is verified byte-identical
+// to those FOUR gates combined; folding a fifth into `scanFile` would mean it silently does not run
+// whenever the Rust path is taken — the exact "a gate that cannot see the target reports it present" hole
+// these gates exist to close. When the port grows to cover 5b, move it in and re-verify parity there.
+//
+// WARN-level, matching CITATION_GATES_ENFORCED and for the same reason: the historical corpus carries
+// pre-gate hits, and a gate that reds the build on work nobody is touching gets disabled rather than fixed.
+try {
+  const emit2 = CITATION_GATES_ENFORCED ? err : warn;
+  const { resolvePath, readRepoFile, repoAvailable } = makeRepoResolver({
+    exists: existsSync,
+    read: (abs) => readFileSync(abs, 'utf8'),
+    join,
+    root: ROOT,
+  });
+
+  // 5c — a resolved item's graduatedTo target must exist.
+  for (const f of findDanglingGraduatedTargets(backlog, { resolvePath }))
+    emit2(`Backlog item #${f.num} is resolved with graduatedTo \`${f.ref}\` — that path does not exist in ` +
+      `the ${f.prefix.replace(':', '')} checkout. Either the work never landed (reopen it), or the target ` +
+      `moved and the record is stale (re-point it). A resolve asserts work OUTSIDE its own diff, so this is ` +
+      `the one field nothing else can corroborate (#3502).`,
+      { kind: 'citation-graduated-target', file: 'backlog/' });
+
+  // 5b — the `we:<path>#<symbol>` anchor form gate 5's own message recommends, now actually resolved.
+  const scanAnchors = (dir, exts) => {
+    const abs = join(ROOT, dir);
+    if (!existsSync(abs)) return;
+    for (const name of readdirSync(abs)) {
+      if (!exts.some((e) => name.endsWith(e))) continue;
+      const rel = `${dir}${name}`;
+      for (const f of findDanglingSymbolAnchors(readFileSync(join(abs, name), 'utf8'), { readRepoFile }))
+        emit2(`${rel}: symbol anchor \`${f.locus}\` does not resolve — ${f.reason === 'missing-file'
+          ? 'no such file in that checkout'
+          : `the file exists but contains no \`${f.symbol}\``}. A symbol anchor is the drift-immune ` +
+          `citation form (it survives a file growing or being reformatted, which a \`:<line>\` cite does ` +
+          `not) — keep it pointing at a real definition.`,
+          { kind: 'citation-symbol-anchor', file: rel });
+    }
+  };
+  scanAnchors('backlog/', ['.md']);
+  scanAnchors('docs/agent/', ['.md']);
+  scanAnchors('agent-memory-src/', ['.md']);
+  scanAnchors('reports/', ['.md']);
+
+  const skipped = ['fui:', 'plateau:'].filter((p) => !repoAvailable(p));
+  if (skipped.length)
+    warn(`reference-resolution gates: ${skipped.join(' / ')} checkout(s) absent — targets in those repos ` +
+      `were SKIPPED, not verified (detect-or-skip; a gate that cannot see a target must never report it present).`);
+} catch (e) {
+  err(`reference-resolution gate failed: ${e.message}`);
+}
+
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
 // The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
 // an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency
@@ -2292,7 +2357,14 @@ try {
       const abs = join(dir, ent.name);
       const relPath = rel ? `${rel}/${ent.name}` : ent.name;
       if (ent.isDirectory()) walkMd(abs, relPath);
-      else if (ent.name.endsWith('.md')) skills.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+      // `.md` is where a raw invocation gets HAND-WRITTEN; `.workflow.js` is where one gets GENERATED.
+      // The scan was built against the first and never revisited for the second, so the dispatcher's
+      // `parallel-execute.workflow.js` — which builds `node scripts/backlog.mjs scaffold` / `… resolve`
+      // prompt strings for the agents it launches, i.e. the highest-VOLUME site of this exact bypass —
+      // was structurally invisible to it. A generated instruction bypasses the declared layer exactly as
+      // a typed one does; the file extension is not the thing that makes it a bypass.
+      else if (ent.name.endsWith('.md') || ent.name.endsWith('.workflow.js'))
+        skills.push({ file: relPath, content: readFileSync(abs, 'utf8') });
     }
   };
   if (existsSync(join(ROOT, 'skills-src'))) walkMd(join(ROOT, 'skills-src'), 'skills-src');

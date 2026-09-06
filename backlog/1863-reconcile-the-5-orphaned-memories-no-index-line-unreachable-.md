@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
 dateResolved: "2026-06-27"
-graduatedTo: "we:MEMORY.md orphans reconciled (no_branches folded→commit memory; book indexed; 3 superseded deleted)"
+graduatedTo: "we:agent-memory-src/MEMORY.md orphans reconciled (no_branches folded→commit memory; book indexed; 3 superseded deleted)"
 tags: []
 ---
 

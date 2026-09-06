@@ -4,19 +4,24 @@ parent: "2079"
 status: open
 relatedReport: reports/2026-07-02-spec-register-prior-art.md
 dateOpened: "2026-07-02"
-dateStarted: "2026-07-02"
-preparedDate: "2026-07-02"
+dateStarted: "2026-09-06"
+preparedDate: "2026-09-06"
 tags: [spec-register, normative-specs, rfc-2119, conformance, house-style]
 ---
 
 # Spec register — home, skeleton house style, and scope policy for normative WE specs
 
-**Prepared for ratification.** No normative spec surface exists today (zero RFC-2119 language across all 279
-registry standards), so this is greenfield: the three forks below are grounded in a spec-ecosystem prior-art
-survey (W3C/WHATWG · TC39 · IETF · design-system component specs) published as the
-[spec-register-prior-art](/research/spec-register-prior-art/) research topic (session report via
-`relatedReport`), each with a recommended default in **bold**. Ruling them sets the home, the register, and the
-work-list for every authoring wave of epic
+**Prepared for ratification — RE-PREPARED 2026-09-06 (#1935).** The original prep (2026-07-02) framed this
+as greenfield. **It is not, and that is the single most important thing to know before ruling it:** all three
+recommended defaults have since SHIPPED, and the code asserts a ratification that never happened. See
+*[What changed since the 2026-07-02 prep](#what-changed)* below before reading the forks — it reframes every
+one of them from "choose" to "confirm, or reverse what is already live".
+
+The forks remain grounded in the spec-ecosystem prior-art survey (W3C/WHATWG · TC39 · IETF · design-system
+component specs) published as the [spec-register-prior-art](/research/spec-register-prior-art/) research topic
+(session report via `relatedReport`), each with a recommended default in **bold**. That survey was re-checked
+on 2026-09-06 and still stands — no fork's *reasoning* was invalidated. Ruling them sets the home, the
+register, and the work-list for every authoring wave of epic
 [#2079](/backlog/2079-author-w3c-spec-shaped-normative-standards-for-every-we-stan/).
 
 The concern decomposes into three orthogonal axes. **Home** — the four categories author prose on four
@@ -26,30 +31,91 @@ partials (83, called the block's "behavioral spec",
 [we:docs/agent/design-first.md](docs/agent/design-first.md):138); intents via an inline HTML `description`
 field in the JSON entry ([we:src/_data/intents/action.json](src/_data/intents/action.json)) that the statute
 bars from carrying implementation refs — conformance tiers, DI, type shapes, registries
-([we:docs/agent/platform-decisions.md](docs/agent/platform-decisions.md):464 `#intents-ux-only`;
+([we:docs/agent/platform-decisions.md#intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only);
 [we:docs/agent/design-first.md](docs/agent/design-first.md):160-165); plugs via a registry entry **plus** a
 gate-required `we:src/_includes/plug-descriptions/<id>.njk` mandated to carry the interface/contract definition
-([we:scripts/check-standards.mjs](scripts/check-standards.mjs):141-143;
-[we:docs/agent/design-first.md](docs/agent/design-first.md):155 — 59 partials exist; the original "bare 10-line
+([we:scripts/check-standards.mjs](scripts/check-standards.mjs):184-186;
+[we:docs/agent/design-first.md](docs/agent/design-first.md):155 — 60 partials exist; the original "bare 10-line
 stub" premise was wrong); protocols via a section of the owning project page, named their canonical home
 ([we:docs/agent/design-first.md](docs/agent/design-first.md):50,125;
 [we:src/_includes/project-webcomponents.njk](src/_includes/project-webcomponents.njk):424). **Register** — the
 skeleton, RFC-2119/8174 boilerplate, conformance classes, error model (shape template: the
 [#2074 conformance table](/backlog/2074-customnoderegistry-node-kind-extensibility-standard/), lines 145-162 of
 [we:backlog/2074-customnoderegistry-node-kind-extensibility-standard.md](backlog/2074-customnoderegistry-node-kind-extensibility-standard.md)),
-and interface notation — bounded by `#surface-contract-not-computation`
-([we:docs/agent/platform-decisions.md](docs/agent/platform-decisions.md):912). **Scope** — which of the 279
-entries (81 blocks / 98 intents / 59 plugs / 41 protocols; active = 39/6/31/0 = 76) owe a spec at which
+and interface notation — bounded by [#surface-contract-not-computation](docs/agent/platform-decisions.md#surface-contract-not-computation). **Scope** — which of the 283
+entries (81 blocks / 100 intents / 60 plugs / 42 protocols; active = 39/6/31/0 = 76 — **the active set is
+unchanged since the prep**) owe a spec at which
 lifecycle tier ([we:docs/agent/design-first.md](docs/agent/design-first.md):217-221, the one canonical
 lifecycle).
 
+## What changed since the 2026-07-02 prep {#what-changed}
+
+Re-validated against the tree on 2026-09-06 (`frontierui` `b2d7b1e`, WE `main`). **No fork's reasoning was
+invalidated. What changed is the decision's own nature.**
+
+### The defaults shipped before the ruling
+
+| Fork | Prepared default | State in the tree today |
+|---|---|---|
+| **1** — authoring home | one-file-per-standard partial, rendered at `/specs/<category>/<id>/` | **live** — [we:src/spec-pages.njk](src/spec-pages.njk):14 cites "#2096 Fork 1-a, piloted by #2097" |
+| **2** — skeleton + house style | BCP-14 boilerplate, conformance classes, typed-error table | **live** — the pilot carries 13 RFC-2119 keywords, a `Conformance` section citing RFC 8174, and a conformance-cases/error-model section |
+| **3** — scope + maturity policy | obligation derives from the lifecycle badge | **declared, not enforced** — [we:src/_data/normativeSpecs.js](src/_data/normativeSpecs.js):8 states the policy in a comment; **no gate implements it** |
+
+[we:src/_data/normativeSpecs.js](src/_data/normativeSpecs.js):5 states outright that *"the skeleton and home are
+ratified by #2096"*. **They were not.** #2097 resolved 2026-07-03 — one day after this prep — while still
+carrying `blockedBy: ["2096"]`, which is the shape
+[we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) forbids: *"Pre-filed spin-off builds stay
+`blockedBy` the decision until that ratification — never let them enter the backlog as ready Tier-A work off an
+un-ratified call."*
+
+### What the pilot taught, that the prep could not know
+
+- **The skeleton survives contact.** One spec exists (`plugs/customnoderegistry`) and it instantiates Fork 2
+  as written. Fork 2's "med-high/high" confidence is now backed by a worked example rather than by prior art
+  alone — this is the fork the re-prep *strengthens*.
+- **Fork 3 has no teeth.** The scope policy is a comment. `we:src/_data/normativeSpecs.js` defers enforcement to "the wave
+  that first makes a standard active", and no such wave has run: **0 of the 76 `active` standards has a spec**,
+  and the single pilot is `draft` — it exercises the *permitted* arm, never the *required* one. So Fork 3-a's
+  load-bearing claim (active ⇒ required) has been live for two months and has never once been tested.
+- **The migration work-list is untouched and unchanged.** Registry totals moved 279 → 283, but the active
+  set is still exactly 39/6/31/0 = 76. Fork 3's work-list sizing holds without amendment.
+
+### Red-team of the defaults, re-run 2026-09-06
+
+- **Against Fork 1-a:** the strongest attack is no longer "a second authoring home costs drift" — it is that
+  the home shipped and *nothing about the four existing surfaces changed to transclude it*. One spec at one
+  URL is not yet evidence the composition story works; it is evidence the page renders. **Default holds, but
+  its confidence should not rise on the pilot alone.**
+- **Against Fork 2:** attacked and survived. The pilot is the falsification test the prep asked for, and the
+  skeleton was authorable without amendment.
+- **Against Fork 3-a:** this is where ratifying-as-written is genuinely risky. An unenforced obligation that
+  has never been exercised on its required arm is a policy nobody has paid for yet. Ratifying it converts 76
+  standards into owing a spec, on the strength of one `draft` example. **The default holds only if the ruling
+  also names who authors the gate and when** — otherwise it ratifies an obligation with no enforcement and no
+  measured cost-per-spec.
+
+### What this does to the ruling
+
+The honest options are no longer the prepared ones. They are:
+
+1. **Confirm the shipped shape**, and record in the ruling that the implementation preceded the ratification
+   (so the audit trail is not silently wrong), plus name the owner of Fork 3's gate.
+2. **Treat the pilot as reversible** and rule freshly — the code is one partial, one data file and one
+   template, so reversal is cheap today and gets more expensive with every authoring wave.
+
+Option 1 is the recommended path *provided* the Fork 3 gate gets an owner in the same ruling. What must not
+happen is a silent ratification that leaves `we:src/_data/normativeSpecs.js`'s "ratified by #2096" retroactively true
+without anyone noting it was written before the fact.
+
 ## Recommended path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **Fork 1** — the normative authoring home | **a new one-file-per-standard spec partial (category-qualified) that becomes the single normative home for an in-scope standard — existing surfaces keep explainer prose and transclude/link it; rendered at `/specs/<category>/<id>/`** | keep authoring normative content inside the four existing per-category surfaces | med-high |
-| **Fork 2** — skeleton + house style | **house-adapted W3C register: fixed skeleton, BCP-14 (RFC 2119 + 8174) boilerplate, implementation/document conformance classes, #2074-shaped typed-error table, observable-surface requirements only, TypeScript (a defined declaration subset) notation** | full W3C-clone (WebIDL + Infra-style processing models) | high |
-| **Fork 3** — scope + maturity policy | **the spec obligation derives from the one lifecycle badge: `active` ⇒ required (an explicit amendment of the promotion bar; the 76 current actives are the migration work-list), `draft`/`experimental` ⇒ permitted + required-for-promotion, `concept` ⇒ exempt; pilot = CustomNodeRegistry (#2097)** | an independent spec-maturity axis per entry | high |
+**Read the [re-prep](#what-changed) first — every row below is now "confirm or reverse", not "choose".**
+
+| Fork | Recommended default | Main alternative | Confidence | Live? |
+|---|---|---|---|---|
+| **Fork 1** — the normative authoring home | **a new one-file-per-standard spec partial (category-qualified) that becomes the single normative home for an in-scope standard — existing surfaces keep explainer prose and transclude/link it; rendered at `/specs/<category>/<id>/`** | keep authoring normative content inside the four existing per-category surfaces | med-high | **shipped** — confidence unchanged; one rendered page is not yet proof the transclusion story works |
+| **Fork 2** — skeleton + house style | **house-adapted W3C register: fixed skeleton, BCP-14 (RFC 2119 + 8174) boilerplate, implementation/document conformance classes, #2074-shaped typed-error table, observable-surface requirements only, TypeScript (a defined declaration subset) notation** | full W3C-clone (WebIDL + Infra-style processing models) | high | **shipped**, and strengthened: the pilot instantiated the skeleton without amendment |
+| **Fork 3** — scope + maturity policy | **the spec obligation derives from the one lifecycle badge: `active` ⇒ required (an explicit amendment of the promotion bar; the 76 current actives are the migration work-list), `draft`/`experimental` ⇒ permitted + required-for-promotion, `concept` ⇒ exempt; pilot = CustomNodeRegistry (#2097)** | an independent spec-maturity axis per entry | high | **declared, never enforced** — no gate; 0 of 76 actives has a spec; the required arm has never run |
 
 ## Fork 1 — the normative authoring home: one spec partial per standard
 

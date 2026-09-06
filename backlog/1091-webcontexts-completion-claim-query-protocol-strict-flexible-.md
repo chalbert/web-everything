@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webcontexts/CustomContext.ts"
+graduatedTo: "frontierui:plugs/webcontexts/CustomContext.ts"
 tags: []
 ---
 

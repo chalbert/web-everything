@@ -2,8 +2,11 @@
 bornAs: x8a6jbo
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-08-05"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 preparedDate: "2026-08-15"
 tags: [drain, review, converge-loop, gate]
 ---

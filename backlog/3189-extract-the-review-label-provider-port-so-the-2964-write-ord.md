@@ -2,8 +2,11 @@
 bornAs: x8xf5rl
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-08-19"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 preparedDate: "2026-08-19"
 scope:
   - we:scripts/review-set-label.mjs

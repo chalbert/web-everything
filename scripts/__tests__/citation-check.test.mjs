@@ -33,6 +33,11 @@ import {
   isIndexableSourcePath,
   regionMarkerPayload,
   stripSourceComments,
+  splitRepoRef,
+  REPO_PREFIXES,
+  makeRepoResolver,
+  findDanglingSymbolAnchors,
+  findDanglingGraduatedTargets,
   parseIdentifierSpan,
   codeSpans,
   PROVENANCE_ESCAPE_MARKERS,
@@ -763,3 +768,161 @@ describe('findUnresolvedIdentifiers — degenerate input never throws', () => {
     expect(unclosed.filter((f) => f.kind === 'unresolved')).toEqual([]);
   });
 });
+
+// ── Reference RESOLUTION gates (#2821 gate 5 widened — 2026-09-06 staleness audit) ────────────────
+describe('splitRepoRef', () => {
+  it('splits every recognised prefix, longest-first so plateau-app: beats plateau:', () => {
+    expect(splitRepoRef('we:scripts/a.mjs')).toEqual({ prefix: 'we:', path: 'scripts/a.mjs' });
+    expect(splitRepoRef('plateau-app:src/a.ts')).toEqual({ prefix: 'plateau-app:', path: 'src/a.ts' });
+    expect(splitRepoRef('plateau:src/a.ts')).toEqual({ prefix: 'plateau:', path: 'src/a.ts' });
+    expect(splitRepoRef('frontierui:blocks/b.ts')).toEqual({ prefix: 'frontierui:', path: 'blocks/b.ts' });
+  });
+
+  it('returns null for an UNPREFIXED path — guessing a repo is the mis-resolution this gate exists to avoid', () => {
+    expect(splitRepoRef('scripts/a.mjs')).toBeNull();
+    expect(splitRepoRef('conformanceVectors.ts')).toBeNull();
+  });
+
+  it('refuses an absolute or `..`-escaping path so no traversal reaches an fs reader', () => {
+    expect(splitRepoRef('we:/etc/passwd')).toBeNull();
+    expect(splitRepoRef('we:../../../dev/urandom')).toBeNull();
+  });
+
+  it('strips trailing punctuation a prose sentence leaves on the ref', () => {
+    expect(splitRepoRef('we:scripts/a.mjs.')?.path).toBe('scripts/a.mjs');
+    expect(splitRepoRef('we:scripts/a.mjs,')?.path).toBe('scripts/a.mjs');
+  });
+});
+
+describe('makeRepoResolver', () => {
+  const mk = (present, repos = ['.', '../frontierui', '../plateau-app']) => makeRepoResolver({
+    join: (...p) => join(...p),
+    exists: (p) => repos.some((r) => p === join('.', r)) || present.has(p),
+    read: (p) => (present.has(p) ? present.get(p) : (() => { throw new Error('ENOENT'); })()),
+    root: '.',
+  });
+
+  it('resolves present and missing paths in each checkout', () => {
+    const { resolvePath } = mk(new Map([[join('.', '.', 'scripts/a.mjs'), 'x'], [join('.', '../frontierui', 'blocks/b.ts'), 'y']]));
+    expect(resolvePath('we:', 'scripts/a.mjs')).toBe('present');
+    expect(resolvePath('frontierui:', 'blocks/b.ts')).toBe('present');
+    expect(resolvePath('we:', 'scripts/gone.mjs')).toBe('missing');
+  });
+
+  it('reports no-repo — NOT present — when the sibling checkout is absent (fail-closed, #3502 Done-when 2)', () => {
+    const { resolvePath } = mk(new Map(), ['.']); // only WE checked out
+    expect(resolvePath('plateau:', 'src/anything.ts')).toBe('no-repo');
+    expect(resolvePath('frontierui:', 'blocks/b.ts')).toBe('no-repo');
+  });
+});
+
+describe('findDanglingSymbolAnchors (gate 5b — the drift-immune form, finally validated)', () => {
+  const reader = (files, repos = new Set(['we:', 'frontierui:'])) => (prefix, path) => {
+    if (!repos.has(prefix)) return { status: 'no-repo' };
+    return files.has(path) ? { status: 'ok', text: files.get(path) } : { status: 'missing' };
+  };
+
+  it('passes an anchor whose symbol is present', () => {
+    const files = new Map([['scripts/a.mjs', 'export function doThing() {}']]);
+    expect(findDanglingSymbolAnchors('see we:scripts/a.mjs#doThing', { readRepoFile: reader(files) })).toEqual([]);
+  });
+
+  it('flags an anchor naming a symbol the file does not contain', () => {
+    const files = new Map([['scripts/a.mjs', 'export function doThing() {}']]);
+    const out = findDanglingSymbolAnchors('see we:scripts/a.mjs#doOtherThing', { readRepoFile: reader(files) });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ symbol: 'doOtherThing', reason: 'symbol-not-found' });
+  });
+
+  it('does not accept a PARTIAL identifier match (`foo` must not satisfy a file holding only `fooBar`)', () => {
+    const files = new Map([['scripts/a.mjs', 'const fooBar = 1;']]);
+    const out = findDanglingSymbolAnchors('we:scripts/a.mjs#foo', { readRepoFile: reader(files) });
+    expect(out).toHaveLength(1);
+    expect(out[0].reason).toBe('symbol-not-found');
+  });
+
+  it('flags a missing file, and SKIPS an absent checkout rather than passing it', () => {
+    const r = reader(new Map());
+    expect(findDanglingSymbolAnchors('we:scripts/gone.mjs#x', { readRepoFile: r })[0].reason).toBe('missing-file');
+    expect(findDanglingSymbolAnchors('plateau:src/gone.ts#x', { readRepoFile: r })).toEqual([]);
+  });
+
+  it('scans EVERY prefix splitRepoRef accepts — the alternation is derived, not hand-listed', () => {
+    // The first cut spelled the alternation out and omitted `webeverything:`, so an anchor using it
+    // resolved fine through splitRepoRef/makeRepoResolver and was silently never scanned here.
+    const files = new Map([['scripts/foo.mjs', 'export const other = 1;']]);
+    for (const prefix of REPO_PREFIXES) {
+      const out = findDanglingSymbolAnchors(`see ${prefix}scripts/foo.mjs#bar`, {
+        readRepoFile: () => ({ status: 'ok', text: files.get('scripts/foo.mjs') }),
+      });
+      expect(out, `${prefix} must be scanned`).toHaveLength(1);
+      expect(out[0].reason).toBe('symbol-not-found');
+    }
+  });
+
+  it('ignores a GitHub-style `#L123` line anchor — a line ref, not a symbol assertion', () => {
+    const files = new Map([['blocks/Nav.ts', 'export class Nav {}']]);
+    expect(findDanglingSymbolAnchors('we:blocks/Nav.ts#L47', { readRepoFile: reader(files) })).toEqual([]);
+  });
+
+  it('ignores a hyphenated markdown heading anchor (not an identifier)', () => {
+    const files = new Map([['docs/agent/x.md', '# Some Heading']]);
+    expect(findDanglingSymbolAnchors('we:docs/agent/x.md#some-heading', { readRepoFile: reader(files) })).toEqual([]);
+  });
+});
+
+describe('findDanglingGraduatedTargets (gate 5c — the #2756 class)', () => {
+  const resolvePath = (prefix, path) => {
+    if (prefix === 'plateau:') return 'no-repo';
+    return path === 'plugs/webdirectives/ssr/net/' ? 'present' : 'missing';
+  };
+
+  it('flags a resolved item whose graduatedTo target does not exist (the #2756 reproduction)', () => {
+    const out = findDanglingGraduatedTargets(
+      [{ num: '2756', status: 'resolved', graduatedTo: 'frontierui:plugs/webdirectives/ssr/rust/' }],
+      { resolvePath });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ num: '2756', path: 'plugs/webdirectives/ssr/rust/' });
+  });
+
+  it('passes once the target is present', () => {
+    expect(findDanglingGraduatedTargets(
+      [{ num: '2383', status: 'resolved', graduatedTo: 'frontierui:plugs/webdirectives/ssr/net/ (foundation)' }],
+      { resolvePath })).toEqual([]);
+  });
+
+  it('skips `none`, including a `none (… deleted by #NNNN …)` record naming a real-looking path', () => {
+    expect(findDanglingGraduatedTargets(
+      [{ num: '1010', status: 'resolved', graduatedTo: 'none (landed in we:plugs/__tests__/e2e/, deleted by #1047)' }],
+      { resolvePath })).toEqual([]);
+  });
+
+  it('resolves EACH member of a comma-joined multi-artifact graduation (#2210 names three files)', () => {
+    const out = findDanglingGraduatedTargets(
+      [{ num: '2210', status: 'resolved', graduatedTo: 'frontierui:plugs/webdirectives/ssr/net/,frontierui:gone/a.js' }],
+      { resolvePath });
+    expect(out).toHaveLength(1);
+    expect(out[0].path).toBe('gone/a.js');
+  });
+
+  it('skips a `{a,b}` brace expansion — a family shorthand no fs call can resolve (#1954)', () => {
+    expect(findDanglingGraduatedTargets(
+      [{ num: '1954', status: 'resolved', graduatedTo: 'we:src/_includes/project-{webtheme,weblayout}.njk' }],
+      { resolvePath })).toEqual([]);
+  });
+
+  it('strips a trailing #fragment — a doc anchor is not part of the path (#1932)', () => {
+    const withDoc = (prefix, path) => (path === 'docs/agent/backlog-workflow.md' ? 'present' : 'missing');
+    expect(findDanglingGraduatedTargets(
+      [{ num: '1932', status: 'resolved', graduatedTo: 'we:docs/agent/backlog-workflow.md#red-team-the-default' }],
+      { resolvePath: withDoc })).toEqual([]);
+  });
+
+  it('ignores non-resolved items and an absent checkout', () => {
+    expect(findDanglingGraduatedTargets(
+      [{ num: '1', status: 'open', graduatedTo: 'frontierui:nope/' },
+       { num: '2', status: 'resolved', graduatedTo: 'plateau:src/nope.ts' }],
+      { resolvePath })).toEqual([]);
+  });
+});
+

@@ -8,7 +8,7 @@ relatedTo: ["1666", "1646", "1649"]
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
 dateResolved: "2026-06-23"
-graduatedTo: "plateau:src/dev-browser/capture/"
+graduatedTo: "plateau:packages/dev-browser/src/capture/"
 tags: [dev-browser, capture, trace, replay, substrate]
 ---
 

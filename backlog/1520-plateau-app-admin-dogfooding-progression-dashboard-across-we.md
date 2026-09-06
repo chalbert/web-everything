@@ -6,7 +6,7 @@ locus: plateau-app
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "plateau:src/control-plane/dogfooding-progress.ts"
+graduatedTo: "plateau:packages/saas/src/control-plane/dogfooding-progress.ts"
 tags: [dogfood, plateau-app, admin, dashboard]
 ---
 

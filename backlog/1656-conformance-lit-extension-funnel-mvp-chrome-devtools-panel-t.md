@@ -4,7 +4,7 @@ status: resolved
 locus: plateau-app
 dateOpened: "2026-06-23"
 dateResolved: "2026-07-09"
-graduatedTo: "plateau:src/dev-browser/chrome-extension/"
+graduatedTo: "plateau:packages/extensions/src/chrome-extension/"
 relatedReport: reports/2026-06-22-1391-split-analysis.md
 crossRef: { url: /backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/, label: "#1590 extensions-as-free-funnel ruling" }
 tags: [dev-browser, dev-experience, vscode-extension, chrome-extension, plateau, product]

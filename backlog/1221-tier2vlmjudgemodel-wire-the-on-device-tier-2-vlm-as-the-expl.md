@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/oracles/tier2VlmJudgeModel.ts"
+graduatedTo: "plateau:tools/explorer/oracles/tier2VlmJudgeModel.ts"
 crossRef: { url: /backlog/1176-layer-2-conformance-vector-oracle-layer-3-advisory-llm-judge/, label: "#1176 Layer-3 advisory-judge seam (resolved) — this is its first real model" }
 tags: [fui-devtool, exploratory-testing, vision, tier-2-vlm, on-device, no-leakage]
 ---

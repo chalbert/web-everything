@@ -8,7 +8,7 @@ blockedBy: ["1168", "1169"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/gate.ts"
+graduatedTo: "plateau:tools/explorer/gate.ts"
 tags: []
 ---
 

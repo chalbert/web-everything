@@ -7,7 +7,7 @@ locus: plateau-app
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
 dateResolved: "2026-06-23"
-graduatedTo: "plateau:src/dev-browser/variant-simulator/"
+graduatedTo: "plateau:packages/dev-browser/src/variant-simulator/"
 tags: []
 ---
 

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "fui:tools/explorer/oracles/layoutOverflow.ts"
+graduatedTo: "plateau:tools/explorer/oracles/layoutOverflow.ts"
 tags: []
 ---
 

@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
 dateResolved: "2026-06-23"
-graduatedTo: "plateau:src/dev-browser/chrome-extension/"
+graduatedTo: "plateau:packages/extensions/src/chrome-extension/"
 tags: [dev-browser, chrome-extension, plateau]
 ---
 
