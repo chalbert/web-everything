@@ -20,6 +20,8 @@ import { join } from 'node:path';
 import {
   PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
+  resolveSubjectCheckout,
+  createReviewPrReader,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
@@ -687,5 +689,84 @@ describe('readPr wires the injected view transport', () => {
         pr: 7, repo: 'o/n', exec: execStub, originRepo: originRepoStub, readView: () => ({ ...VIEW, number }),
       })).not.toThrow();
     }
+  });
+});
+
+
+describe('the subject checkout is DERIVED from the constellation siblings (#xgmzd0y)', () => {
+  // Origins keyed by path — the only fact the resolver is allowed to match on.
+  const origins = {
+    '/pool/lane-1': 'chalbert/web-everything',
+    '/pool/frontierui': 'chalbert/frontierui',
+    '/pool/plateau-app': 'chalbert/plateau-app',
+  };
+  const originRepo = (cwd) => origins[cwd] ?? '';
+  const siblings = () => ([
+    { name: 'frontierui', path: '/pool/frontierui', present: true },
+    { name: 'plateau-app', path: '/pool/plateau-app', present: true },
+  ]);
+
+  it('returns the current checkout when it already IS the requested repo', () => {
+    const got = resolveSubjectCheckout({ repo: 'chalbert/web-everything', cwd: '/pool/lane-1', originRepo, siblings });
+    expect(got.path).toBe('/pool/lane-1');
+    // Resolved on the first probe — no sibling walk when the answer is underfoot.
+    expect(got.probed).toEqual(['/pool/lane-1']);
+  });
+
+  it('finds the sibling clone whose ORIGIN matches, which is the whole point', () => {
+    expect(resolveSubjectCheckout({ repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo, siblings }).path)
+      .toBe('/pool/frontierui');
+    expect(resolveSubjectCheckout({ repo: 'chalbert/plateau-app', cwd: '/pool/lane-1', originRepo, siblings }).path)
+      .toBe('/pool/plateau-app');
+  });
+
+  it('matches on origin and NEVER on directory name — the constellation answers to several basenames', () => {
+    // The directory is called `frontierui`, but its origin is somebody else's fork. Name says yes, origin says
+    // no, and origin is the fact that decides.
+    const forked = (cwd) => (cwd === '/pool/frontierui' ? 'someone-else/frontierui' : origins[cwd] ?? '');
+    expect(resolveSubjectCheckout({ repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo: forked, siblings }).path)
+      .toBeNull();
+  });
+
+  it('skips an ABSENT sibling rather than probing a path that is not there', () => {
+    const missing = () => ([{ name: 'frontierui', path: '/pool/frontierui', present: false }]);
+    const got = resolveSubjectCheckout({ repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo, siblings: missing });
+    expect(got.path).toBeNull();
+    expect(got.probed).toEqual(['/pool/lane-1']);
+  });
+
+  it('returns null (never a guess) when no checkout has that origin, naming everywhere it looked', () => {
+    const got = resolveSubjectCheckout({ repo: 'chalbert/nothing-here', cwd: '/pool/lane-1', originRepo, siblings });
+    expect(got.path).toBeNull();
+    expect(got.probed).toEqual(['/pool/lane-1', '/pool/frontierui', '/pool/plateau-app']);
+  });
+
+  it('survives a throwing sibling table — the GUARD speaks, not a crash', () => {
+    const exploding = () => { throw new Error('no constellation table here'); };
+    const got = resolveSubjectCheckout({ repo: 'chalbert/frontierui', cwd: '/pool/lane-1', originRepo, siblings: exploding });
+    expect(got.path).toBeNull();
+  });
+
+  it('the reader roots `readPr` at the resolved sibling, so a FUI PR gets PAST the cross-repo guard', () => {
+    // The guard's own fact is `originRepo(cwd)`, so spying on it records exactly which checkout `readPr` was
+    // rooted at — the thing under test. The read fails afterwards (no `gh` here), which is fine: what is being
+    // pinned is that the failure is NOT the #3137 refusal.
+    const checked = [];
+    const spyOrigin = (cwd) => { checked.push(cwd); return originRepo(cwd); };
+    const reader = createReviewPrReader({ cwd: '/pool/lane-1', originRepo: spyOrigin, siblings });
+
+    let err;
+    try { reader({ pr: 43, repo: 'chalbert/frontierui' }); } catch (e) { err = e; }
+
+    // Rooted at the FUI clone, not the WE lane it was driven from.
+    expect(checked.at(-1)).toBe('/pool/frontierui');
+    // And it cleared the guard: whatever went wrong next, it was not the cross-repo refusal.
+    expect(String(err?.message ?? '')).not.toMatch(/refusing to review/);
+  });
+
+  it('an unresolvable subject still hits the #3137 refusal, which now names where it looked', () => {
+    const reader = createReviewPrReader({ cwd: '/pool/lane-1', originRepo, siblings });
+    expect(() => reader({ pr: 1, repo: 'chalbert/nothing-here' }))
+      .toThrow(/refusing to review chalbert\/nothing-here#1[\s\S]*probed 3 checkout\(s\)[\s\S]*\/pool\/frontierui/);
   });
 });

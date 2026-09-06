@@ -39,6 +39,10 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
 import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
+// #xgmzd0y — the DERIVED sibling table, so the subject checkout is computed rather than typed
+// (`we:docs/agent/vm-sessions.md`: derivable by the repo's own tooling → in the tooling). Importing
+// is safe: `bootstrap-session.mjs` guards its `main` on `import.meta.url === argv[1]`.
+import { siblingsFor } from '../bootstrap-session.mjs';
 import { defaultOriginRepo } from './record-verdict-io.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
@@ -198,6 +202,9 @@ export function resolveViewReader(env = process.env) {
  */
 export function readPr({
   pr, repo, exec = null, cwd = REPO_ROOT, readView = resolveViewReader(), originRepo = defaultOriginRepo,
+  // #xgmzd0y — the checkouts the caller's subject resolution already tried, named in the refusal below so
+  // an operator sees WHERE it looked rather than only that it failed. Message-only; decides nothing.
+  probed = null,
 } = {}) {
   // The net-diff helpers take no `cwd`, so it is baked into the injected `exec` (the drain does the same thing
   // for the opposite reason — see the `escCwd` note in `we:scripts/merge-ai-prs.mjs`).
@@ -220,9 +227,12 @@ export function readPr({
     throw new Error(
       `review-pr-io: refusing to review ${repo}#${pr} — this checkout's origin is ${haveRepo || '(unknown)'}, `
       + `not ${repo}. review-pr's diff comes from LOCAL git rooted at this checkout, so a cross-repo target `
-      + 'cannot be resolved here; it used to silently degrade to an empty diff instead (#3137). Run review-pr '
-      + `from a checkout of ${repo}, or add a lane-cwd override for \`read\` (mirroring `
-      + '`JUDGE_LANE_CWD`) if cross-repo review-pr support becomes a real requirement.',
+      + 'cannot be resolved here; it used to silently degrade to an empty diff instead (#3137). '
+      + (Array.isArray(probed) && probed.length > 1
+        ? `The subject resolver (#xgmzd0y) probed ${probed.length} checkout(s) and none had that origin: `
+          + `${probed.join(', ')}. Clone ${repo} beside this one (the lane pool mints the constellation `
+          + 'siblings for exactly this — `scripts/lane-pool.mjs provision`), then re-run.'
+        : `Run review-pr from a checkout of ${repo}.`),
     );
   }
 
@@ -341,10 +351,60 @@ export function priorRoundsFor(repo, pr) {
   try { return (foldRepo(repo).get(pr)?.outstandingHolds ?? []).length; } catch { return 0; }
 }
 
-export function createReviewPrReader({ exec = null, cwd = REPO_ROOT, originRepo = defaultOriginRepo } = {}) {
-  return ({ pr, repo }) => readPr({
-    pr, repo, exec, cwd, originRepo,
-  });
+/**
+ * THE SUBJECT CHECKOUT for `repo` — the clone `review-pr`'s `read` step takes its LOCAL GIT from (#xgmzd0y).
+ *
+ * WHY THIS EXISTS. `readPr` reads the diff from local git rooted at one checkout, so a `--repo=` naming a
+ * DIFFERENT constellation member could not resolve and was refused outright (#3137, and that refusal was
+ * right — it replaced a silent degrade to an EMPTY diff, a false-pass hazard live on plateau-app#139). But the
+ * refusal made the operation unable to judge ANY Frontier UI or Plateau PR, which is the impl half of every
+ * cross-repo couple — while `we:scripts/review-set-label.mjs` takes `--repo=<owner/name>` and will happily
+ * STAMP a verdict on one. The machinery could record a verdict it had no way to form.
+ *
+ * The clone was already on disk the whole time: the lane pool mints the constellation siblings as REAL git
+ * clones beside the lanes (#2282/#2349, `#pool-siblings-real-built-clones`). Nothing fetched it because
+ * nothing asked. This asks.
+ *
+ * DERIVED, NOT TYPED. The candidates come from {@link siblingsFor} — the same table `bootstrap-session.mjs`
+ * probes, which resolves BOTH plausible parents (beside the primary checkout on a laptop, beside the lane in
+ * a cloud pool). Each candidate is matched by its ACTUAL `git remote get-url origin`, never by directory
+ * name: the constellation answers to more than one basename (`web-everything` vs `webeverything`), so a
+ * name match would be the wrong fact. Matching on origin also means this resolver and the #3137 guard below
+ * agree by construction — the guard re-derives the same fact and still refuses if it disagrees.
+ *
+ * FAIL CLOSED, UNCHANGED. An unresolvable subject returns `null`, the caller passes the ORIGINAL cwd, and
+ * `readPr`'s guard fires with its loud refusal. Nothing here can produce an empty diff: this only ever points
+ * the read at a checkout that PROVABLY is the requested repo, or gives up and lets the refusal stand.
+ *
+ * @param {{repo: string, cwd?: string, originRepo?: Function, siblings?: Function}} o
+ * @returns {{path: string, probed: string[]}|{path: null, probed: string[]}}
+ */
+export function resolveSubjectCheckout({
+  repo, cwd = REPO_ROOT, originRepo = defaultOriginRepo, siblings = siblingsFor,
+} = {}) {
+  const probed = [cwd];
+  if (originRepo(cwd) === repo) return { path: cwd, probed };
+  let candidates = [];
+  // A broken/absent sibling table must not turn a refusal into a crash — the guard is the one that speaks.
+  try { candidates = siblings(cwd) || []; } catch { candidates = []; }
+  for (const sibling of candidates) {
+    if (!sibling?.present || !sibling.path) continue;
+    probed.push(sibling.path);
+    if (originRepo(sibling.path) === repo) return { path: sibling.path, probed };
+  }
+  return { path: null, probed };
+}
+
+export function createReviewPrReader({
+  exec = null, cwd = REPO_ROOT, originRepo = defaultOriginRepo, siblings = siblingsFor,
+} = {}) {
+  return ({ pr, repo }) => {
+    // Resolve per CALL, not per reader: `repo` is run INPUT and is unknown when the reader is constructed
+    // (`we:scripts/operations/run.mjs` builds it with no arguments).
+    const { path, probed } = resolveSubjectCheckout({ repo, cwd, originRepo, siblings });
+    // `path === null` → pass the original cwd so `readPr`'s #3137 guard refuses, naming where it looked.
+    return readPr({ pr, repo, exec, cwd: path ?? cwd, originRepo, probed });
+  };
 }
 
 /**
