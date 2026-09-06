@@ -24,4 +24,4 @@ were then deleted by #1730 per #1282 / #1771, and were never relocated to FUI �
 `productionDelivery`, `deliverModule` and `PackageManifest` returns zero across all three checkouts.
 `check:standards` refused the resulting shape ("a resolved epic with 1 open child slice").
 
-Resolve it again once #1161 is settled — ported, or recorded as intentionally retired (#x0swhio).
+Resolve it again once #1161 is settled — ported, or recorded as intentionally retired (#3523).

@@ -75,6 +75,48 @@ export const REQUEST_DIR = `${TRANSPORT_BRANCH}/requests`;
  * `<owner>-<repo>-<pr>.json` was the naming this transport was first sketched with; it is the collision, and
  * it is not used here.
  */
+/**
+ * The `--json` fields ONE `gh pr view` is asked for — the exact set `assembleReviewDetail` consumes. Named
+ * once so an alternate transport supplies the same shape rather than guessing at it.
+ *
+ * MOVED HERE FROM `we:scripts/operations/review-pr-io.mjs` (#xaoja7a follow-up). It is a TRANSPORT fact —
+ * what the wire carries — and living in the review operation's io shell made the VIEW PRODUCER import that
+ * shell for two constants, dragging `we:scripts/merge-ai-prs.mjs` (4,800+ lines), the verdict ledger, the
+ * review detail assembler and six more modules into a CI job whose whole task is "run one `gh pr view` and
+ * commit the answer". That weight is why the transport could not be onboarded in `frontierui` or
+ * `plateau-app` — the two repos whose PRs are the impl half of every cross-repo couple and therefore need it
+ * most. `review-pr-io.mjs` re-exports both names, so every existing importer is unchanged.
+ */
+export const PR_VIEW_FIELDS = Object.freeze([
+  'number', 'title', 'url', 'body', 'labels', 'comments', 'files', 'headRefName',
+  // #xwp8ioh — `state` rides the SAME call (one more json field, no extra hop). Without it `review-pr` could
+  // not tell a live PR from a merged one, so it paid a juror to review PRs that had already landed.
+  'state',
+  // #xwk0tzu (#3322) — `createdAt` rides that SAME call, for the same reason `state` does. It is #3067's
+  // stamp-regime date input, and `we:scripts/review-set-label.mjs` reads it on its own `gh pr view`, so both
+  // sides feed `decideClearerIndependence` the SAME inputs and cannot compute different statuses (#2644).
+  'createdAt',
+]);
+
+/**
+ * The on-disk name a pre-fetched view is looked up under, keeping the directory flat. PURE.
+ *
+ * THE SEPARATOR MUST NOT BE A CHARACTER A REPO NAME CAN CONTAIN. Flattening the slug with `-` was NOT
+ * injective: a repo name may itself contain `-`, so `foo-bar/baz` and `foo/bar-baz` both produced
+ * `foo-bar-baz-5.json`. Staging both in one `WE_PR_VIEW_DIR` silently overwrote one with the other, and
+ * `filePrView` then returned the WRONG repo's title, body and LABELS for the requested PR — with the diff
+ * still correctly taken from local git, so the mismatch was invisible (review-pr correctness juror on #1466).
+ *
+ * `encodeURIComponent` is injective over the slug charset GitHub allows (`[\w.-]` plus the one `/`): it
+ * touches only the slash, which becomes `%2F`, and `%` cannot appear in a repo name.
+ *
+ * Moved here with {@link PR_VIEW_FIELDS} — `viewPath(prViewFileName(repo, pr))` is one thought, and it was
+ * split across two modules with the heavier half in the review operation.
+ */
+export function prViewFileName(repo, pr) {
+  return `${encodeURIComponent(String(repo))}-${pr}.json`;
+}
+
 export const viewPath = (fileName) => `${VIEW_DIR}/${assertBareName(fileName)}`;
 export const requestPath = (fileName) => `${REQUEST_DIR}/${assertBareName(fileName)}`;
 

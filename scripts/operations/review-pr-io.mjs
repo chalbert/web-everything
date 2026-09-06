@@ -26,7 +26,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assembleReviewDetail } from '../review-detail.mjs';
@@ -39,9 +39,19 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 // #3007 — the real verdict ledger, behind the reserved `verdict-ledger.append` seam. See the LEDGER sink.
 import { appendVerdict, buildVerdictRecord, foldRepo, verdictForLabelTarget, verdictLedgerPath } from '../lib/verdict-ledger.mjs';
 import { notApplied } from './effect-executor.mjs';
+// #xgmzd0y — the DERIVED sibling table, so the subject checkout is computed rather than typed
+// (`we:docs/agent/vm-sessions.md`: derivable by the repo's own tooling → in the tooling). Importing
+// is safe: `bootstrap-session.mjs` guards its `main` on `import.meta.url === argv[1]`.
+import { siblingsFor } from '../bootstrap-session.mjs';
+// #xaoja7a follow-up — `PR_VIEW_FIELDS` and `prViewFileName` are TRANSPORT facts and now live in the
+// transport lib, so the view PRODUCER can import them without dragging this shell (and `merge-ai-prs.mjs`
+// behind it) into a CI job. Re-exported below: every existing importer of this module is unchanged.
+import { PR_VIEW_FIELDS, prViewFileName } from '../lib/pr-view-transport.mjs';
 import { defaultOriginRepo } from './record-verdict-io.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
+
+export { PR_VIEW_FIELDS, prViewFileName };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -98,23 +108,6 @@ export function reviewBodyPath({ root = REPO_ROOT, runId, bodyFile } = {}) {
  */
 const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...opts, cwd });
 
-/** The `--json` fields ONE `gh pr view` is asked for — the exact set `assembleReviewDetail` consumes. Named
- *  once so an alternate transport supplies the same shape rather than guessing at it. */
-export const PR_VIEW_FIELDS = Object.freeze([
-  'number', 'title', 'url', 'body', 'labels', 'comments', 'files', 'headRefName',
-  // #xwp8ioh — `state` rides the SAME call (one more json field, no extra hop — the pattern #2953 and #2844
-  // both used). Without it `review-pr` could not tell a live PR from a merged one, so it paid a juror to
-  // review PRs that had already landed. Consumed by `shapeReadFinding`'s liveness refusal.
-  'state',
-  // #xwk0tzu (#3322) — `createdAt` rides that SAME call, one more json field and no extra hop, for the same
-  // reason `state` does. It is #3067's stamp-regime date input: a PR opened at/after `STAMP_REGIME_START`
-  // that carries no `authored-by-actor` stamp had one STRIPPED, where an older one simply never had one.
-  // `we:scripts/review-set-label.mjs` already reads it on its own `gh pr view`; the read side reads it here
-  // so both sides feed `decideClearerIndependence` the SAME four inputs and cannot compute different
-  // statuses for one PR (#2644).
-  'createdAt',
-]);
-
 /**
  * The default PR-view transport: ONE `gh pr view`, exactly as before.
  * @returns {object} the parsed `--json` view
@@ -130,21 +123,6 @@ export function ghPrView({ pr, repo, cwd = REPO_ROOT } = {}) {
   }
 }
 
-/**
- * The on-disk name a pre-fetched view is looked up under, keeping the directory flat. PURE.
- *
- * THE SEPARATOR MUST NOT BE A CHARACTER A REPO NAME CAN CONTAIN. Flattening the slug with `-` was NOT
- * injective: a repo name may itself contain `-`, so `foo-bar/baz` and `foo/bar-baz` both produced
- * `foo-bar-baz-5.json`. Staging both in one `WE_PR_VIEW_DIR` silently overwrote one with the other, and
- * `filePrView` then returned the WRONG repo's title, body and LABELS for the requested PR — with the diff
- * still correctly taken from local git, so the mismatch was invisible (review-pr correctness juror on #1466).
- *
- * `encodeURIComponent` is injective over the slug charset GitHub allows (`[\w.-]` plus the one `/`): it
- * touches only the slash, which becomes `%2F`, and `%` cannot appear in a repo name.
- */
-export function prViewFileName(repo, pr) {
-  return `${encodeURIComponent(String(repo))}-${pr}.json`;
-}
 
 /**
  * A PR-view transport that reads a PRE-FETCHED view from disk instead of calling `gh`.
@@ -198,6 +176,9 @@ export function resolveViewReader(env = process.env) {
  */
 export function readPr({
   pr, repo, exec = null, cwd = REPO_ROOT, readView = resolveViewReader(), originRepo = defaultOriginRepo,
+  // #xgmzd0y — the checkouts the caller's subject resolution already tried, named in the refusal below so
+  // an operator sees WHERE it looked rather than only that it failed. Message-only; decides nothing.
+  probed = null,
 } = {}) {
   // The net-diff helpers take no `cwd`, so it is baked into the injected `exec` (the drain does the same thing
   // for the opposite reason — see the `escCwd` note in `we:scripts/merge-ai-prs.mjs`).
@@ -220,9 +201,12 @@ export function readPr({
     throw new Error(
       `review-pr-io: refusing to review ${repo}#${pr} — this checkout's origin is ${haveRepo || '(unknown)'}, `
       + `not ${repo}. review-pr's diff comes from LOCAL git rooted at this checkout, so a cross-repo target `
-      + 'cannot be resolved here; it used to silently degrade to an empty diff instead (#3137). Run review-pr '
-      + `from a checkout of ${repo}, or add a lane-cwd override for \`read\` (mirroring `
-      + '`JUDGE_LANE_CWD`) if cross-repo review-pr support becomes a real requirement.',
+      + 'cannot be resolved here; it used to silently degrade to an empty diff instead (#3137). '
+      + (Array.isArray(probed) && probed.length > 1
+        ? `The subject resolver (#xgmzd0y) probed ${probed.length} checkout(s) and none had that origin: `
+          + `${probed.join(', ')}. Clone ${repo} beside this one (the lane pool mints the constellation `
+          + 'siblings for exactly this — `scripts/lane-pool.mjs provision`), then re-run.'
+        : `Run review-pr from a checkout of ${repo}.`),
     );
   }
 
@@ -341,10 +325,76 @@ export function priorRoundsFor(repo, pr) {
   try { return (foldRepo(repo).get(pr)?.outstandingHolds ?? []).length; } catch { return 0; }
 }
 
-export function createReviewPrReader({ exec = null, cwd = REPO_ROOT, originRepo = defaultOriginRepo } = {}) {
-  return ({ pr, repo }) => readPr({
-    pr, repo, exec, cwd, originRepo,
-  });
+/**
+ * THE SUBJECT CHECKOUT for `repo` — the clone `review-pr`'s `read` step takes its LOCAL GIT from (#xgmzd0y).
+ *
+ * WHY THIS EXISTS. `readPr` reads the diff from local git rooted at one checkout, so a `--repo=` naming a
+ * DIFFERENT constellation member could not resolve and was refused outright (#3137, and that refusal was
+ * right — it replaced a silent degrade to an EMPTY diff, a false-pass hazard live on plateau-app#139). But the
+ * refusal made the operation unable to judge ANY Frontier UI or Plateau PR, which is the impl half of every
+ * cross-repo couple — while `we:scripts/review-set-label.mjs` takes `--repo=<owner/name>` and will happily
+ * STAMP a verdict on one. The machinery could record a verdict it had no way to form.
+ *
+ * The clone was already on disk the whole time: the lane pool mints the constellation siblings as REAL git
+ * clones beside the lanes (#2282/#2349, `#pool-siblings-real-built-clones`). Nothing fetched it because
+ * nothing asked. This asks.
+ *
+ * DERIVED, NOT TYPED. The candidates come from {@link siblingsFor} — the same table `bootstrap-session.mjs`
+ * probes, which resolves BOTH plausible parents (beside the primary checkout on a laptop, beside the lane in
+ * a cloud pool). Each candidate is matched by its ACTUAL `git remote get-url origin`, never by directory
+ * name: the constellation answers to more than one basename (`web-everything` vs `webeverything`), so a
+ * name match would be the wrong fact. Matching on origin also means this resolver and the #3137 guard below
+ * agree by construction — the guard re-derives the same fact and still refuses if it disagrees.
+ *
+ * FAIL CLOSED, UNCHANGED. An unresolvable subject returns `null`, the caller passes the ORIGINAL cwd, and
+ * `readPr`'s guard fires with its loud refusal. Nothing here can produce an empty diff: this only ever points
+ * the read at a checkout that PROVABLY is the requested repo, or gives up and lets the refusal stand.
+ *
+ * @param {{repo: string, cwd?: string, originRepo?: Function, siblings?: Function}} o
+ * @returns {{path: string, probed: string[]}|{path: null, probed: string[]}}
+ */
+export function resolveSubjectCheckout({
+  repo, cwd = REPO_ROOT, originRepo = defaultOriginRepo, siblings = siblingsFor,
+} = {}) {
+  const probed = [cwd];
+  if (originRepo(cwd) === repo) return { path: cwd, probed };
+  let candidates = [];
+  // A broken/absent sibling table must not turn a refusal into a crash — the guard is the one that speaks.
+  try { candidates = siblings(cwd) || []; } catch { candidates = []; }
+
+  // POOL-LOCAL BEFORE PRIMARY (#2123). `siblingsFor` probes the primary's parent FIRST, so from a lane it
+  // answers `/home/user/frontierui` — the SHARED primary checkout — while the pool's own isolated clone sits
+  // right beside the lane being driven from. Reading a review's diff out of a checkout another agent may be
+  // mid-work in is the exact thing lane isolation exists to prevent, and it is the wrong default here even
+  // though this operation only reads: the primary's refs move under it. So each sibling is probed at its
+  // POOL-LOCAL path first (same directory name, resolved beside `cwd`), falling back to whatever the table
+  // chose. Off a lane the two collapse to the same path and nothing changes.
+  const poolDir = dirname(cwd);
+  for (const sibling of candidates) {
+    if (!sibling?.path) continue;
+    const poolLocal = join(poolDir, basename(sibling.path));
+    for (const candidate of poolLocal === sibling.path ? [sibling.path] : [poolLocal, sibling.path]) {
+      // `present` gates only the TABLE's path — a pool-local clone the table never looked at is probed on its
+      // own merit, and `originRepo` answers '' for a path that is not a repo, so a miss is free.
+      if (candidate === sibling.path && !sibling.present) continue;
+      if (probed.includes(candidate)) continue;
+      probed.push(candidate);
+      if (originRepo(candidate) === repo) return { path: candidate, probed };
+    }
+  }
+  return { path: null, probed };
+}
+
+export function createReviewPrReader({
+  exec = null, cwd = REPO_ROOT, originRepo = defaultOriginRepo, siblings = siblingsFor,
+} = {}) {
+  return ({ pr, repo }) => {
+    // Resolve per CALL, not per reader: `repo` is run INPUT and is unknown when the reader is constructed
+    // (`we:scripts/operations/run.mjs` builds it with no arguments).
+    const { path, probed } = resolveSubjectCheckout({ repo, cwd, originRepo, siblings });
+    // `path === null` → pass the original cwd so `readPr`'s #3137 guard refuses, naming where it looked.
+    return readPr({ pr, repo, exec, cwd: path ?? cwd, originRepo, probed });
+  };
 }
 
 /**

@@ -109,4 +109,4 @@ epic with 1 open child slice"), which is the correct reading — this umbrella c
 slice under it is not.
 
 Resolve it again once #1010 is settled, either by porting the seam or by recording that it is intentionally
-retired (#x0swhio owns that call).
+retired (#3523 owns that call).

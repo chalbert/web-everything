@@ -248,6 +248,50 @@ MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", 
 #1777 (**relocation granularity** — relocate deps-satisfiable-now, defer not-yet-FUI deps as `blockedBy`
 slices, never reach back into WE; see [relocation granularity](#relocation-granularity)).
 
+### Backlog tracking: one record of truth with locus-filtered views now, distributed per-repo as the destination {#backlog-tracking-locus-now-distributed-next}
+
+**Ratified 2026-09-06 by the operator (Nicolas Gilbert) (#3129).** Where a constellation repo's backlog *lives*
+is a different question from where its *code* lives ([#constellation-placement](#constellation-placement)
+governs the latter and does not reach this). Two rulings, and the second is the load-bearing one:
+
+- **Now — one record of truth, per-repo views are filtered, not separate.** Web Everything's `backlog/*.md` is
+  the single tracker. A per-repo surface is a **locus-filtered virtual view** (`item.locus === slug`) over it —
+  no second `backlog/` directory, no second numbering authority, no migration. Cross-repo landing keeps the
+  already-proven #500 shape: the build lands in the target repo's own PR, and a thin mechanical "WE resolve"
+  step flips the tracking record. This is the interim, and it is what runs today.
+- **Destination — fully distributed, each repo owning its own backlog.** Not a rejected alternative and not a
+  "someday": the declared end state. The ground is **product shape, not our own convenience**. A single central
+  tracker every repo routes through assumes one org owns everything and never hands a repo over; for a customer
+  with **dozens of repos whose ownership moves between owners**, that assumption fails — a repo changing hands
+  either strands its history in a tracker the new owner cannot see, or forces a migration. A repo and its
+  backlog are the same artifact and must move together. **Scale is the consumer**: the earlier "no evidenced
+  need for repo autonomy" reading measured our own three-repo constellation, which is the wrong population for
+  a product built to manage enterprise front-end platforms.
+- **Therefore an item id always carries its locus, and that moves FIRST.** A bare `#NNN` is an implicit `we:`
+  today — true by convention, never by construction. Locus-qualified ids (`we:#3423`, `fui:#118`) are the
+  correct shape and are adopted **always**, not only once distribution lands: the ambiguity already exists, and
+  making it explicit now converts a single all-at-once migration on the day distribution ships into an
+  incremental, reversible one. The additive half — *accept and resolve* an explicit locus while a bare `#NNN`
+  keeps meaning `we:` — comes first and alone; minting new ids with a locus, and migrating the corpus, are
+  separate later slices. The `LOCI` registry (`we:scripts/check-standards-rules.mjs`) stays the single locus
+  vocabulary; a second list is the drift class #1473 had to rewire. An id locus (`we:#3423`) and a **code-path**
+  locus prefix (`we:scripts/x.mjs`) share a spelling and are different things — whatever parses one must not
+  silently accept the other.
+
+**Ordering is deliberate and is part of the ruling:** the destination is **not deferred and not parked**. Its
+first slice is an ordinary ready item to take when there is capacity — not urgent, and not conditional on
+#2456's evidence gate, whose ground this ruling narrows.
+
+**Lineage:** ratified by #3129 (operator, 2026-09-06), carved out of #2475 during its build-readiness prep.
+Confirms rather than overrides #2472's own premise ("each repo holds its own `backlog/*.md`") — the epic was
+right about the end state and imprecise about the timing. Composes with #500 (the shipped cross-repo
+landing/gate registry, which supplies the interim's landing half) and is **new turf**: the prep's statute pass
+found no existing anchor governing backlog-*data* placement, so this one mints rather than extends —
+[#constellation-placement](#constellation-placement) (code implementation),
+[#repo-drain-check-contract](#repo-drain-check-contract) (the drain's CI boundary) and
+[#pool-siblings-real-built-clones](#pool-siblings-real-built-clones) (lane checkouts) govern disjoint turf by a
+different test. First slice: `#3533`.
+
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
 **WE never imports or renders FUI block code.** FUI owns the implementation *and* its rendered
@@ -2697,6 +2741,37 @@ bullet).** The isolate-by-default + human-writes-`main` posture tightens in thre
   direct-`main` path also closes and everyone PR-flows. By then agents are already off direct `main` (Rung 2),
   so only the human's exemption is removed — nearly free. Deferred until the second-writer need is real (a lone
   trusted writer has no one to race, so forcing them to PR buys friction with no safety).
+
+
+**Amendment — the rung is a configurable dimension whose current value is Rung 1; Rung 2 is OFF, not rejected
+(#3423, ratified 2026-09-06 by the operator).** #3373 found that nothing at GitHub's own layer enforces the
+sole-writer invariant JIT numbering depends on — it holds entirely by script discipline. Ruling: **that
+discipline is the accepted enforcement layer**, and what "accepted" names is a real layered control, not a
+promise — `assertMayMerge` (`we:scripts/lib/pr-merge-gate.mjs`) is the sole `gh pr merge` chokepoint and throws
+for any caller that is not the drain unless `WE_MERGE_BREAK_GLASS=1`, which logs loudly on every use;
+`withNumberingLock` / `withLandWriteLock` (`we:scripts/readiness/drain-lock.mjs`) share a key so a merge write
+and the numbering step stay mutually exclusive; and `duplicateBornAs` / `strandedHashesOnMain`
+(`we:scripts/check-standards-rules.mjs`) are a build-time catch net that surfaces the artifact an out-of-band
+write leaves behind — a duplicate or un-numbered hash — even if the live gate were skipped.
+
+**Read the ladder as a dimension, not a verdict.** Rung 2 is **not turned on**; it was not weighed and lost.
+The operator's framing at ratification, which is the ratified one: enforcement level is a **configurable
+dimension** with a safe default, per [#config-extends-platform-default](#config-extends-platform-default) —
+Rung 2 is a selectable flavor blocked on a *prerequisite*, not on merit. The mechanism genuinely exists
+(Repository Rulesets carry a `bypass_actors` list and are available on GitHub Free for **public personal**
+repos, which this repo is — the older "personal repos cannot do this" reading was too broad, and refers to the
+org-only classic `restrictions` field). What is missing is the **actor**: this repo has exactly one
+collaborator, and the drain's merges ride that same human credential, so there is nothing to name that is not
+the human.
+
+**What stays refused today, so the amendment is not a back door.** Flipping `enforce_admins` now either no-ops
+(an admin acting outside the disciplined scripts is still an admin, allow-listed or not) or blocks the human's
+own direct-`main` path that the Rung 1 / Rung 3 design depends on — and it would regress **#2152** (resolved
+2026-07-02), which set `enforce_admins: false` deliberately to keep the `--fallback-git` and
+`WE_MERGE_BREAK_GLASS` paths working. **Revisit trigger:** a distinct bot GitHub principal is minted for the
+drain (Rung 2's own stated prerequisite — an App installation or machine-user PAT wired into its `gh` auth), or
+a second human writer joins (Rung 3). Neither holds today. The declared-rung knob and the drift check that
+keeps the declaration honest are build **#3532**.
 
 **Lineage:** #1996 (ratified 2026-06-30; report `we:reports/2026-06-30-pr-flow-rollout-mechanism.md`; research
 topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1+4). Implements

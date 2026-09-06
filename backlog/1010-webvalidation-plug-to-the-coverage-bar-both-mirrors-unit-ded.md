@@ -40,5 +40,5 @@ Delivered, then deleted, and never ported. Verified during the 2026-09-06 resolv
 So the acceptance clause "plugged `<validity-merge-field>` / `<async-validator-field>` through
 `frontierui:plugs/bootstrap.ts` in a real browser" has **no artifact in either mirror**. The deletion was
 correct architecture; whether the coverage should have moved with the code was never decided. Reopened so
-that decision is made rather than assumed — see #x0swhio. The card stays `open` pending that call; if the
+that decision is made rather than assumed — see #3523. The card stays `open` pending that call; if the
 answer is "intentionally retired", resolve it with that recorded rather than silently.

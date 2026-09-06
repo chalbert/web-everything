@@ -3,7 +3,6 @@ bornAs: xirq9vf
 kind: story
 size: 3
 parent: "3029"
-blockedBy: ["3423"]
 status: open
 dateOpened: "2026-08-27"
 tags: [operations, conveyor, github, branch-protection, sole-writer]
