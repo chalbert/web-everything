@@ -39,8 +39,20 @@ The shape is already proven in this repo by `buildJudgeArgv`
   ahead of the stable region. Invalidation cascades `tools → system → messages`, so one byte early is a full
   miss.
 
-Grounding for the economics is in the [token-optimisation research](/research/token-optimisation-research/);
-the caveat there applies — treat specific figures as pointers to verify.
+## Corrected framing — read this before the economics
+
+A prep skeptic pass (2026-09-06) established two things that narrow this item's justification, and they are
+recorded here rather than left overstated:
+
+- **Spawns here are subscription-funded** (`#agent-runner-cli-backend`), so the "0.1× billing" argument prices
+  a bill this repo does not receive. What cache correctness actually buys on this surface is **usage-window
+  headroom and latency** — the scarce resource, per the 24-lane quota incident — not spend.
+- **On the juror path specifically there is no stable prefix to preserve**: the mandate rides
+  `--append-system-prompt` and embeds per-PR volatile content. This item therefore targets the **dispatcher**
+  path, where a long-lived stable prefix is achievable, not the juror path where it is not.
+
+The requirement stands on those narrower grounds. Grounding is the
+[token-optimisation research](/research/token-optimisation-research/), whose scope limit applies.
 
 ## Deliberately unscoped
 

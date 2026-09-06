@@ -14,6 +14,30 @@ other on OpenAI's cached-input discount (50% / 75% / 90%) and Gemini's implicit-
 
 ---
 
+## Scope limit — added 2026-09-06 after the prep skeptic pass
+
+**This report's economics are per-token API economics. This repo's agent spawns are not billed that way.**
+`#agent-runner-cli-backend` ratifies spawning the `claude` CLI **on the user's subscription**; the recorded
+`costUsd` on backlog cards is derived from a rate table, not money billed. Under flat-rate funding the scarce
+resource is the **usage window**, not spend — and the only recorded catastrophic dispatch failure in this repo
+was quota exhaustion (24 lanes lost), not cost.
+
+Three consequences, found when this research was applied to a real decision and refuted:
+
+- **Cost-per-token arguments do not transfer directly.** A cheaper model saves a bill nobody receives. What a
+  cheaper model *does* buy is usage-window headroom — a different, and much weaker, argument.
+- **The cache argument is near-empty on the juror path specifically.** The juror mandate rides
+  `--append-system-prompt` — the earliest invalidating position — and embeds per-PR volatile content (lens,
+  changed files, PR title). There is no stable reusable prefix there to preserve or forfeit. Caching remains
+  load-bearing on *long-lived interactive sessions*, which is what the ~162 reads-per-write figure below
+  actually measures.
+- **A second provider is capacity, not savings.** Under subscription funding it adds throughput at zero
+  marginal token cost — which strengthens the routing case on capacity grounds while removing it from the cost
+  column entirely.
+
+Read the rest of this report as **applicable to per-token-billed surfaces** (anything on an API key), and as
+*background* rather than authority for subscription-funded CLI dispatch.
+
 ## The one-paragraph answer
 
 Cost is dominated by **caching** and **model/effort choice**. Everything else — prompt compression, terser
@@ -58,25 +82,39 @@ hit rate** across 9 sessions. Read honestly it measures ordinary interactive-ses
 spawn path, but it is real data on the board and it corroborates the direction of #3006's own
 2026-08-08 sample (prefix stability beating prompt-size reduction).
 
-## The fork this report exists to ground
+## The decision this report was written to ground — and how applying it went
 
-The decision card carved from #3006 asks whether agent work should economize by **effort tier inside one
-model** or by **routing across models**. The research favours the effort dial, on three grounds:
+This report was commissioned to ground a decision card. **Applying it refuted its own recommendation**, which
+is worth recording in full because it is the most useful thing here.
 
-1. **Caches are model-scoped.** A two-model cascade forfeits cache reuse across its models — a cost absent
-   from nearly every published cascade evaluation. Given the hit rates above, that is not a rounding error.
-2. **Anthropic's measured alternative.** Running everything at `low` effort and re-running failures at default
-   held **~93% pass at ~$0.70/task versus 91.7% at $1.39** — same quality, half the cost, *counting the wasted
-   cheap attempts*. It needs a cheap failure signal, which this repo's review path has.
-3. **The cascade literature is weaker than its reputation.** FrugalGPT's canonical 50–98% claim has three
-   independent critiques since: *Is Escalation Worth It?* found a lightweight **pre-generation router beat the
-   best cascade policy on 4 of 5 datasets** (a cascade always pays the cheap model's generation before
-   deciding), and a 206,000 query-model-pair study found routers trained on oracle labels **collapse to
-   majority-class prediction**, with shuffled-label controls confirming many published routers are elaborate
-   constant functions.
+The card originally asked whether agent work should economize by effort tier inside one model or by routing
+across models, and this report favoured the effort dial on three grounds: caches are model-scoped so a cascade
+forfeits reuse; Anthropic measured low-effort-with-retry at ~93% pass for ~$0.70/task against 91.7% at $1.39;
+and the cascade literature is weaker than its reputation (a pre-generation router beat the best cascade policy
+on 4 of 5 datasets, and routers trained on oracle labels collapse to majority-class prediction).
 
-Counterweight, stated so the fork stays a fork: routing buys **provider redundancy and reviewer diversity**,
-which #3369 wants for reasons that are not cost at all. This report rules on the cost axis only.
+**The first two grounds do not survive contact with this repo**, per the scope limit above:
+
+- The **$0.70 vs $1.39 result prices a bill this repo does not receive** — spawns are subscription-funded.
+  It also compares `low` against *default*, while this repo's juror runs at `high` **by ruling** (`#xvkjndx`
+  removed the spend ceiling after unbounded runs found ten defects a green suite missed). Wrong arm, wrong
+  billing model.
+- The **cache argument is near-empty on the juror path**, which carries per-PR volatile content in the earliest
+  invalidating position.
+
+The third ground survives, and cuts the other way from how it was first used: a **pre-generation router** is
+exactly what this repo already ships for *build* lanes (`laneModelFor`, born from a 24-lane quota incident) —
+so routing is not hypothetical here, it is deployed where capacity is the constraint.
+
+What the decision became after that correction: the question is **not** how to economize in dollars, but
+**whether review *strength* may be an economizing axis at all**. The answer defaults to no — on merit, not
+cost, because a review's failure mode is an undetectable false negative. Cross-provider routing is accepted on
+**capacity and diversity**, where subscription funding makes its case positive.
+
+**The transferable lesson:** general token-optimisation research is authority for per-token-billed surfaces and
+*background* everywhere else. Applying it to a specific system requires first establishing how that system is
+actually billed and what its scarce resource actually is. This report did not do that up front, and a skeptic
+pass caught it.
 
 ## Findings that bear on agent architecture
 
