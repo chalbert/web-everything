@@ -84,6 +84,7 @@ import {
   isReservedLease,
   isLaneAcquirable,
   chooseFreeLane,
+  ownLaneNumber,
   leaseBody,
   describeLease,
   leaseOwnedBy,
@@ -1111,10 +1112,9 @@ function cmdAcquire(repo) {
     // the integration branch, so returning the lane the caller is working in changes their checkout out from
     // under them (observed 2026-09-06 — a bare `acquire --purpose=review-juror` returned the driving lane).
     // A preference, not a refusal, and only for auto-pick: an explicit `--lane=N` is honoured as asked.
-    const selfLane = (() => {
-      const m = resolveReal(process.cwd()).match(new RegExp(`\\${sep}\\.lanes\\${sep}[^\\${sep}]+\\${sep}lane-(\\d+)(?:\\${sep}|$)`));
-      return m ? Number(m[1]) : null;
-    })();
+    // Pool-SCOPED (#1961 finding 3): a lane number only counts as "mine" when the cwd is inside the pool
+    // being acquired from. Pure helper so the parsing is under test, not an inline regex nothing exercises.
+    const selfLane = ownLaneNumber(resolveReal(process.cwd()), resolveReal(repo.poolDir), sep);
     while (chosen === null) {
       const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
       const pick = chooseFreeLane(infos, Date.now(), ttlMs, { excludeLane: selfLane });

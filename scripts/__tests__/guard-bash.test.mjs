@@ -2036,3 +2036,19 @@ describe('truncated operation --json', () => {
     expect(r).toMatch(/\.operations\/runs/);
   });
 });
+
+// #1961 correctness finding 2 — the predicate was tested, its WIRING into decide() was not. decide() is
+// what the Bash hook actually calls, so a predicate that is never reached from there enforces nothing.
+describe('truncated operation --json — the enforcement path', () => {
+  it('decide() DENIES the truncating pipe, not just the predicate in isolation', () => {
+    // decide(), not reason(): the pipe spans two segments, so the per-segment path cannot see it.
+    const d = decide('node scripts/operations/run.mjs review-pr --pr=1 --json | tail -40');
+    expect(d).toBeTruthy();
+    expect(String(d)).toMatch(/corrupts the VALUE/);
+  });
+
+  it('decide() still allows both correct shapes', () => {
+    expect(decide('node scripts/operations/run.mjs verify --json > /tmp/run.json')).toBeFalsy();
+    expect(decide('node scripts/operations/run.mjs verify | tail -20')).toBeFalsy();
+  });
+});

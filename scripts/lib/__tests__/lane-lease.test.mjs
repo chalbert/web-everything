@@ -10,6 +10,7 @@ import {
   isLeaseStale,
   isLaneAcquirable,
   chooseFreeLane,
+  ownLaneNumber,
   leaseBody,
   describeLease,
   leaseOwnedBy,
@@ -504,5 +505,36 @@ describe('#2997 — leaseOwnedByCaller refuses the ownerSession fallback on a CO
     const reserved = leaseBody({ session: 'memory-lane', acquiredAt: at, ownerSession: 'sess-shared', reserved: true, holder: 'h-res' });
     expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(false);
     expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: false })).toBe(false);
+  });
+});
+
+// #1961 correctness finding 3 — the caller's own lane must be scoped to the POOL BEING ACQUIRED.
+// The first cut matched any `.lanes/<pool>/lane-N`, which leaks across pools; this codebase acquires
+// cross-repo on purpose (the dispatcher's impl-repo lanes), so the mismatch was reachable.
+describe('ownLaneNumber', () => {
+  const POOL = '/w/.lanes/repoA';
+
+  it('returns the lane number when the cwd is inside THIS pool', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2', POOL)).toBe(2);
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2/scripts/x', POOL)).toBe(2);
+  });
+
+  it('returns null for a lane in ANOTHER pool — the cross-repo leak this fixes', () => {
+    expect(ownLaneNumber('/w/.lanes/repoB/lane-2', POOL)).toBeNull();
+  });
+
+  it('returns null outside any lane, and for a non-lane child of the pool', () => {
+    expect(ownLaneNumber('/w/web-everything', POOL)).toBeNull();
+    expect(ownLaneNumber('/w/.lanes/repoA/notes', POOL)).toBeNull();
+    expect(ownLaneNumber('', POOL)).toBeNull();
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2', '')).toBeNull();
+  });
+
+  it('does not confuse a lane whose number merely PREFIXES another', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-20', POOL)).toBe(20);
+  });
+
+  it('tolerates a trailing separator on the pool path', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-3', '/w/.lanes/repoA/')).toBe(3);
   });
 });

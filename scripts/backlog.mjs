@@ -55,7 +55,7 @@ import { parseHolds, emptyHoldState, heldNums, addHold, removeHold, pruneExpired
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { BACKLOG_KINDS } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
-import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
+import { laneGuardDecision, resolveReal, isLaneLocus } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 import { localToday } from './lib/local-date.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
@@ -1173,8 +1173,7 @@ function cost() {
 // primary: a lane lives under `<workspace>/.lanes/`. Refuse there and name the two places it DOES belong.
 function numberStranded() {
   const dryRun = argv.includes('--dry-run');
-  const here = resolveReal(process.cwd());
-  if (here && here.includes(`${sep}.lanes${sep}`)) {
+  if (isLaneLocus(resolveReal(process.cwd()), sep)) {
     die('number-stranded: refusing to run in a LANE clone. The NNN it assigns is only valid when assigned '
       + 'against serialized main (#2288) — assigned here, check:standards rejects the result as "a hand-picked '
       + 'NNN not on origin/main", so the verb would refuse both ways and leave a half-applied rename. Run it '

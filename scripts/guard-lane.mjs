@@ -210,3 +210,13 @@ if (process.argv[1] && realpathSyncSafe(process.argv[1]) === realpathSyncSafe(fi
 }
 
 function realpathSyncSafe(p) { try { return realpathSync(p); } catch { return path.resolve(p); } }
+
+/**
+ * Is this REALPATH inside a lane clone? PURE — the same locus test `laneGuardDecision` applies, exported
+ * so callers that need only the locus (`we:scripts/backlog.mjs`'s `number-stranded` refusal) can share it
+ * rather than re-deriving it, and so it is testable without spawning a CLI (#1961 correctness finding 1).
+ */
+export function isLaneLocus(realPath, sepChar = SEP) {
+  const p = String(realPath || '');
+  return p !== '' && p.includes(`${sepChar}.lanes${sepChar}`);
+}

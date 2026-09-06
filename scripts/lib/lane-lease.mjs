@@ -415,3 +415,30 @@ export function assertedLaneSlug(command) {
   const m = String(command || '').match(/\bLANE_SESSION=([A-Za-z0-9._/-]+)/);
   return m ? m[1] : null;
 }
+
+/**
+ * The caller's own lane NUMBER, for `chooseFreeLane`'s `excludeLane` — or null when the caller is not
+ * standing in a lane OF THE POOL BEING ACQUIRED. PURE: the caller injects both paths.
+ *
+ * SCOPED TO THE TARGET POOL, and that is the whole point (#1961 correctness finding 3). A regex over any
+ * `.lanes/<pool>/lane-N` segment leaks across pools: standing in `.lanes/repoA/lane-2` and acquiring in
+ * repoB would exclude repoB's lane 2 — an unrelated lane that is not the caller's and not at risk. The
+ * effect is only a suboptimal pick (the fallback still prevents exhaustion), but the heuristic would be
+ * measuring the wrong thing, and this codebase acquires cross-repo on purpose (the dispatcher's impl-repo
+ * lanes), so the mismatch is reachable rather than theoretical.
+ *
+ * @param cwdReal   the caller's REALPATH'd working directory.
+ * @param poolDir   the REALPATH'd pool directory being acquired from (`<workspace>/.lanes/<pool>`).
+ * @param sepChar   path separator (injected so the logic is testable on any platform).
+ * @returns the lane number, or null.
+ */
+export function ownLaneNumber(cwdReal, poolDir, sepChar = '/') {
+  const cwd = String(cwdReal || '');
+  const pool = String(poolDir || '').replace(new RegExp(`\\${sepChar}+$`), '');
+  if (!cwd || !pool) return null;
+  // Must be INSIDE this pool — not merely inside some pool.
+  if (cwd !== pool && !cwd.startsWith(pool + sepChar)) return null;
+  const rest = cwd.slice(pool.length).replace(new RegExp(`^\\${sepChar}`), '');
+  const m = rest.match(/^lane-(\d+)(?:$|[/\\])/);
+  return m ? Number(m[1]) : null;
+}
