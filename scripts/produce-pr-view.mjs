@@ -28,8 +28,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { PR_STATE_FIELDS } from './lib/review-label-provider.mjs';
-import { transportViewFields, validateViewRequest } from './lib/pr-view-transport.mjs';
-import { PR_VIEW_FIELDS, prViewFileName } from './operations/review-pr-io.mjs';
+import {
+  PR_VIEW_FIELDS, prViewFileName, transportViewFields, validateViewRequest,
+} from './lib/pr-view-transport.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 
 /**

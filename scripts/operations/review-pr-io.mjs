@@ -43,9 +43,15 @@ import { notApplied } from './effect-executor.mjs';
 // (`we:docs/agent/vm-sessions.md`: derivable by the repo's own tooling → in the tooling). Importing
 // is safe: `bootstrap-session.mjs` guards its `main` on `import.meta.url === argv[1]`.
 import { siblingsFor } from '../bootstrap-session.mjs';
+// #xaoja7a follow-up — `PR_VIEW_FIELDS` and `prViewFileName` are TRANSPORT facts and now live in the
+// transport lib, so the view PRODUCER can import them without dragging this shell (and `merge-ai-prs.mjs`
+// behind it) into a CI job. Re-exported below: every existing importer of this module is unchanged.
+import { PR_VIEW_FIELDS, prViewFileName } from '../lib/pr-view-transport.mjs';
 import { defaultOriginRepo } from './record-verdict-io.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
+
+export { PR_VIEW_FIELDS, prViewFileName };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -102,23 +108,6 @@ export function reviewBodyPath({ root = REPO_ROOT, runId, bodyFile } = {}) {
  */
 const execFileIn = (cwd) => (cmd, args, opts) => execFileSync(cmd, args, { ...opts, cwd });
 
-/** The `--json` fields ONE `gh pr view` is asked for — the exact set `assembleReviewDetail` consumes. Named
- *  once so an alternate transport supplies the same shape rather than guessing at it. */
-export const PR_VIEW_FIELDS = Object.freeze([
-  'number', 'title', 'url', 'body', 'labels', 'comments', 'files', 'headRefName',
-  // #xwp8ioh — `state` rides the SAME call (one more json field, no extra hop — the pattern #2953 and #2844
-  // both used). Without it `review-pr` could not tell a live PR from a merged one, so it paid a juror to
-  // review PRs that had already landed. Consumed by `shapeReadFinding`'s liveness refusal.
-  'state',
-  // #xwk0tzu (#3322) — `createdAt` rides that SAME call, one more json field and no extra hop, for the same
-  // reason `state` does. It is #3067's stamp-regime date input: a PR opened at/after `STAMP_REGIME_START`
-  // that carries no `authored-by-actor` stamp had one STRIPPED, where an older one simply never had one.
-  // `we:scripts/review-set-label.mjs` already reads it on its own `gh pr view`; the read side reads it here
-  // so both sides feed `decideClearerIndependence` the SAME four inputs and cannot compute different
-  // statuses for one PR (#2644).
-  'createdAt',
-]);
-
 /**
  * The default PR-view transport: ONE `gh pr view`, exactly as before.
  * @returns {object} the parsed `--json` view
@@ -134,21 +123,6 @@ export function ghPrView({ pr, repo, cwd = REPO_ROOT } = {}) {
   }
 }
 
-/**
- * The on-disk name a pre-fetched view is looked up under, keeping the directory flat. PURE.
- *
- * THE SEPARATOR MUST NOT BE A CHARACTER A REPO NAME CAN CONTAIN. Flattening the slug with `-` was NOT
- * injective: a repo name may itself contain `-`, so `foo-bar/baz` and `foo/bar-baz` both produced
- * `foo-bar-baz-5.json`. Staging both in one `WE_PR_VIEW_DIR` silently overwrote one with the other, and
- * `filePrView` then returned the WRONG repo's title, body and LABELS for the requested PR — with the diff
- * still correctly taken from local git, so the mismatch was invisible (review-pr correctness juror on #1466).
- *
- * `encodeURIComponent` is injective over the slug charset GitHub allows (`[\w.-]` plus the one `/`): it
- * touches only the slash, which becomes `%2F`, and `%` cannot appear in a repo name.
- */
-export function prViewFileName(repo, pr) {
-  return `${encodeURIComponent(String(repo))}-${pr}.json`;
-}
 
 /**
  * A PR-view transport that reads a PRE-FETCHED view from disk instead of calling `gh`.
