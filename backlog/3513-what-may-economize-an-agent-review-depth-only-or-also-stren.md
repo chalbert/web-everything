@@ -3,6 +3,7 @@ bornAs: x2xrboe
 kind: decision
 status: open
 dateOpened: "2026-09-06"
+preparedDate: "2026-09-06"
 tags: [cost, review, conveyor, dispatch, decision, prompt-caching]
 relatedReport: reports/2026-09-06-token-optimisation-research.md
 ---
