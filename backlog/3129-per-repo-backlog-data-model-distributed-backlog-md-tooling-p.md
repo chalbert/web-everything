@@ -2,13 +2,74 @@
 bornAs: x22ecxe
 kind: decision
 parent: "2475"
-status: open
+status: resolved
 dateOpened: "2026-08-15"
+dateResolved: "2026-09-06"
+codifiedIn: "docs/agent/platform-decisions.md#backlog-tracking-locus-now-distributed-next"
 preparedDate: "2026-08-16"
 tags: []
 ---
 
 # Per-repo backlog data model: distributed backlog/*.md + tooling per repo, or a locus-filtered view over the WE tracker?
+
+## Ruled — 2026-09-06, operator
+
+**Fork 1 ratified as (b) — as the CURRENT POSITION, not as the end state.** The locus-filtered virtual per-repo
+view is what we run now: WE's tracker stays the single record of truth, and the console's `REPOS` registry
+resolves a repo slug to WE's own `backlog/` filtered to `item.locus === slug`. No new files, no second
+numbering authority, no migration.
+
+**Amendment, and the substantive part of this ruling: (a) is the declared destination.** Fully distributed —
+each repo owning its own `backlog/` — is where this goes. That is a reversal of the prep's ground, not a
+softening of it, and the reason is a **product-shape argument the prep never weighed**:
+
+> Assume a team with **dozens of repos whose ownership moves between owners**. Is a distributed backlog not the
+> only real product shape?
+
+It is. A single central tracker every repo must route through silently assumes **one org owns everything and
+never hands a repo over** — neither holds for the customer Plateau is built for. When a repo changes owner, a
+centralized model either strands its history in a tracker the new owner cannot see, or forces a migration; the
+distributed model moves the repo and its backlog together, because they are the same artifact. At dozens of
+repos the locus-filtered view also stops being a *view* and becomes a bottleneck with one writer.
+
+**This overturns the prep's rejection ground for (a), and it is worth naming which one.** (a) was rejected on
+*"no evidenced consumer for the autonomy"* — measured against **our own three-repo constellation** and the
+still-open #2456 evidence gate. That was the wrong population. The consumer is the **product's target
+customer**, and Plateau's stated purpose is managing enterprise front-end platforms at exactly that scale. The
+merit case the prep recorded for (a) — *"a FUI-only or plateau-app-only contributor could file and operate
+backlog items without WE checked out at all"* — is not a nice-to-have at dozens of repos; it is the shape.
+
+**The id scheme follows, and it flips from cost to requirement: an item id should always carry its locus.** The
+prep counted repo-qualified ids as (a)'s *correctness/legibility cost* — "a bare `#NNN` becomes ambiguous the
+moment two repos both have a `#NNN`". Ruled the other way: locus-qualified ids are the **correct shape**, to be
+adopted **always**, not only once distribution lands. The ambiguity the prep feared **already exists** — a bare
+`#NNN` is an implicit `we:` today, true by convention rather than by construction — so making the locus explicit
+removes an ambiguity we already carry, and removes the migration that would otherwise have to happen all at once
+on the day (a) lands.
+
+**Ordering: not deferred, not parked — a slice to take when capacity allows.** Ruled explicitly. The carved item
+below is an ordinary open, ready item, not `status: parked` and not behind a gate. It is not urgent; it is also
+not conditional on anything.
+
+Build carved: **#xnn9wtv** — accept and resolve an explicit locus on every backlog id, bare `#NNN` continuing to
+mean `we:`. Filed under **#2472**, whose own body already asserts the destination this ruling confirms.
+
+**What #2472's premise does now, since the prep expected the opposite.** The prep warned that ratifying (b)
+would **override** #2472's verbatim sentence — *"each repo holds its own `backlog/*.md`"* — and owed the epic a
+correcting edit. It does not. That sentence is **confirmed as the destination**; the epic was right about the
+end state and imprecise only about the timing. The correcting edit is therefore the inverse of the one the prep
+planned: #2472 is annotated with the interim (a locus-filtered view) and the destination it already named, not
+stripped of it. **Flagged, not flipped:** #2472 is `status: open, priority: low` and deferred behind #2456's
+evidence gate. This ruling narrows that deferral's ground — the evidence was sought in the wrong population —
+but changing an epic's deferral state is a separate call, left to the operator rather than taken here.
+
+**Codification — mint, because there is nothing to extend.** The prep's statute pass grepped for every anchor
+touching backlog / locus / registry / repo / numbering turf and found **none governing backlog-data placement**;
+the three near ones ([#constellation-placement](/docs/agent/platform-decisions.md#constellation-placement) for
+code implementation, [#repo-drain-check-contract](/docs/agent/platform-decisions.md#repo-drain-check-contract)
+for the drain's CI boundary, [#pool-siblings-real-built-clones](/docs/agent/platform-decisions.md#pool-siblings-real-built-clones)
+for lane checkouts) govern disjoint turf by a different test. So this one mints a new anchor rather than
+stretching a neighbour — the opposite call from #3423, and for the opposite reason.
 
 ## Digest
 
