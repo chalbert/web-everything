@@ -36,4 +36,4 @@ Delivered, then deleted, and never relocated. Verified during the 2026-09-06 res
   checkouts returns **zero**.
 
 So the acceptance clause "derivation unit/golden tests green" has no artifact. The same dangling reference
-also breaks **#312**, which cites it. Reopened so the port-or-retire call is made explicitly — see #x0swhio.
+also breaks **#312**, which cites it. Reopened so the port-or-retire call is made explicitly — see #3523.

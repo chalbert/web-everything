@@ -1,4 +1,5 @@
 ---
+bornAs: xsmj2t7
 kind: story
 size: 2
 status: open
