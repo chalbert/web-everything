@@ -2357,7 +2357,14 @@ try {
       const abs = join(dir, ent.name);
       const relPath = rel ? `${rel}/${ent.name}` : ent.name;
       if (ent.isDirectory()) walkMd(abs, relPath);
-      else if (ent.name.endsWith('.md')) skills.push({ file: relPath, content: readFileSync(abs, 'utf8') });
+      // `.md` is where a raw invocation gets HAND-WRITTEN; `.workflow.js` is where one gets GENERATED.
+      // The scan was built against the first and never revisited for the second, so the dispatcher's
+      // `parallel-execute.workflow.js` — which builds `node scripts/backlog.mjs scaffold` / `… resolve`
+      // prompt strings for the agents it launches, i.e. the highest-VOLUME site of this exact bypass —
+      // was structurally invisible to it. A generated instruction bypasses the declared layer exactly as
+      // a typed one does; the file extension is not the thing that makes it a bypass.
+      else if (ent.name.endsWith('.md') || ent.name.endsWith('.workflow.js'))
+        skills.push({ file: relPath, content: readFileSync(abs, 'utf8') });
     }
   };
   if (existsSync(join(ROOT, 'skills-src'))) walkMd(join(ROOT, 'skills-src'), 'skills-src');

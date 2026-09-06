@@ -442,3 +442,23 @@ describe('DECLARED_HOMES coverage', () => {
     expect(contrasting.warnings).toEqual([]);
   });
 });
+
+// The scan's INPUT SET is part of its reach (juror finding, PR #1959). `.md` is where a raw invocation is
+// hand-written; `.workflow.js` is where the dispatcher GENERATES one into a prompt it hands an agent. A
+// generated instruction bypasses the declared layer exactly as a typed one does.
+describe('generated invocations are in scope', () => {
+  const ops = [{ name: 'scaffold', declaresOver: [{ home: 'we:scripts/backlog.mjs', command: 'scaffold' }] }];
+  const homeSources = new Map([['scripts/backlog.mjs', "import { claimOperation } from './operations/claim.mjs';"]]);
+
+  it('flags a raw invocation built inside a workflow prompt string', () => {
+    const generated = [
+      'prompt.push(',
+      '  "   node scripts/backlog.mjs scaffold --kind=" + seed.kind + " --json",',
+      ');',
+    ].join('\n');
+    const out = findSkillsNamingUndelegatedHomes(
+      [{ file: 'skills-src/batch/parallel-execute.workflow.js', content: generated }], ops, homeSources);
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0].descriptor?.file ?? out.warnings[0].file).toContain('parallel-execute.workflow.js');
+  });
+});

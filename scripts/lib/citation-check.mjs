@@ -912,7 +912,15 @@ export function findDanglingSymbolAnchors(text, { readRepoFile }) {
   // heading anchor (`docs/x.md#some-heading`, hyphenated) does not match and is left to the anchor gate.
   // The trailing `(?![-\w$])` rejects a hyphenated markdown heading anchor (`x.md#some-heading`), which
   // would otherwise match its first segment (`some`) and be reported as a missing symbol.
-  const rx = /\b(we|fui|frontierui|plateau|plateau-app):([A-Za-z0-9._\-/]+\/[A-Za-z0-9._\-]+)#([A-Za-z_$][A-Za-z0-9_$]*)(?![-\w$])/g;
+  // DERIVED from REPO_PREFIXES, never hand-listed. The first cut spelled the alternation out and omitted
+  // `webeverything:` — a prefix `splitRepoRef` and `makeRepoResolver` both accept — so an anchor using it
+  // resolved fine everywhere else and was silently never scanned here. Two lists of the same thing drift
+  // from the moment they are written; this one now cannot.
+  const prefixAlt = REPO_PREFIXES.map((p) => p.slice(0, -1)).join('|');
+  const rx = new RegExp(
+    String.raw`\b(${prefixAlt}):([A-Za-z0-9._\-/]+\/[A-Za-z0-9._\-]+)#([A-Za-z_$][A-Za-z0-9_$]*)(?![-\w$])`,
+    'g',
+  );
   const seen = new Set();
   for (const m of text.matchAll(rx)) {
     const [, bare, path, symbol] = m;

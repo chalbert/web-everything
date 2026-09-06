@@ -34,6 +34,7 @@ import {
   regionMarkerPayload,
   stripSourceComments,
   splitRepoRef,
+  REPO_PREFIXES,
   makeRepoResolver,
   findDanglingSymbolAnchors,
   findDanglingGraduatedTargets,
@@ -844,6 +845,19 @@ describe('findDanglingSymbolAnchors (gate 5b — the drift-immune form, finally 
     const r = reader(new Map());
     expect(findDanglingSymbolAnchors('we:scripts/gone.mjs#x', { readRepoFile: r })[0].reason).toBe('missing-file');
     expect(findDanglingSymbolAnchors('plateau:src/gone.ts#x', { readRepoFile: r })).toEqual([]);
+  });
+
+  it('scans EVERY prefix splitRepoRef accepts — the alternation is derived, not hand-listed', () => {
+    // The first cut spelled the alternation out and omitted `webeverything:`, so an anchor using it
+    // resolved fine through splitRepoRef/makeRepoResolver and was silently never scanned here.
+    const files = new Map([['scripts/foo.mjs', 'export const other = 1;']]);
+    for (const prefix of REPO_PREFIXES) {
+      const out = findDanglingSymbolAnchors(`see ${prefix}scripts/foo.mjs#bar`, {
+        readRepoFile: () => ({ status: 'ok', text: files.get('scripts/foo.mjs') }),
+      });
+      expect(out, `${prefix} must be scanned`).toHaveLength(1);
+      expect(out[0].reason).toBe('symbol-not-found');
+    }
   });
 
   it('ignores a GitHub-style `#L123` line anchor — a line ref, not a symbol assertion', () => {
