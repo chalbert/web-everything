@@ -22,6 +22,7 @@ import {
   findSkillsNamingUndelegatedHomes, homeDelegates, extractHomeMentions, declaredHomeCovers, hasReasonedMarker,
   findMalformedOperationCalls, extractOperationCalls,
 } from '../skill-operation-wiring.mjs';
+import { DECLARED_HOMES } from '../../operations/declared-homes.mjs';
 import { parseDeclaredHome, op } from '../../operations/registry.mjs';
 import { compute } from '../../operations/step-kinds.mjs';
 
@@ -403,5 +404,41 @@ describe('#3253 — mixed quote kinds must not blank across a real flag (PR #152
   it('whichever quote OPENS first owns the span', () => {
     expect(extractOperationCalls(`node scripts/operations/run.mjs scaffold --title='say "--hi" ok' --json`)[0].flags)
       .toEqual(['title', 'json']);
+  });
+});
+
+// ── The map's COVERAGE, not just its behaviour (2026-09-06) ───────────────────────────────────────
+// The scan can only fire for operations present in DECLARED_HOMES, so the map's contents ARE the gate's
+// reach. It held 5 entries against 17 operations while `resolve` and `scaffold` — the two highest-traffic
+// raw verbs by the operations' own measured counts — sat unwatched. These pin that they stay watched.
+describe('DECLARED_HOMES coverage', () => {
+  it('declares over the two highest-traffic backlog verbs, file-granular so they cannot over-condemn', () => {
+    expect(DECLARED_HOMES.resolve).toEqual(['we:scripts/backlog.mjs resolve']);
+    expect(DECLARED_HOMES.scaffold).toEqual(['we:scripts/backlog.mjs scaffold']);
+  });
+
+  it('keeps every entry subcommand-qualified for backlog.mjs — a bare file entry would condemn every verb', () => {
+    for (const [name, entries] of Object.entries(DECLARED_HOMES)) {
+      for (const e of entries) {
+        if (!e.includes('backlog.mjs')) continue;
+        expect(e, `${name} must name a verb, not the whole CLI`).toMatch(/backlog\.mjs \S+$/);
+      }
+    }
+  });
+
+  it('flags a skill that INVOKES the raw resolve verb, and ignores a prose contrast of it', () => {
+    const ops = [{ name: 'resolve', declaresOver: [{ home: 'we:scripts/backlog.mjs', command: 'resolve' }] }];
+    // backlog.mjs does not import operations/resolve.mjs, so the home is 'raw'.
+    const homeSources = new Map([['scripts/backlog.mjs', "import { claimOperation } from './operations/claim.mjs';"]]);
+
+    const invoking = findSkillsNamingUndelegatedHomes(
+      [{ file: 'skills-src/x/SKILL.md', content: 'Run `node scripts/backlog.mjs resolve <NNN>` to close it.' }],
+      ops, homeSources);
+    expect(invoking.warnings).toHaveLength(1);
+
+    const contrasting = findSkillsNamingUndelegatedHomes(
+      [{ file: 'skills-src/x/SKILL.md', content: 'The raw `we:scripts/backlog.mjs resolve` spells flags kebab-case.' }],
+      ops, homeSources);
+    expect(contrasting.warnings).toEqual([]);
   });
 });
