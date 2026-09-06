@@ -98,6 +98,48 @@ exactly like Fork 1(a)'s PROGRAM semantics, while sidestepping the statute colli
 this as **Fork 1(d)** below since research reshaping the fork set is expected, not a scope violation of
 the parent split.
 
+## Ruled — 2026-09-06, operator: the fork dissolves
+
+**Not (a), (b), (c) or (d).** The operator ruled that the levels cannot be locked in at all: the tier count is
+an **open number configured per project**, each level carrying **its own attributes** — including its rollup
+basis. Web Everything ships **presets**, and picks the one best for its own constellation **on merit**, as a
+separate and smaller call.
+
+This is `#config-extends-platform-default` applied: *a concern with more than one legitimate end-state is a
+configurable strategy dimension, never a baked mechanism.* All three bases below — points-rollup,
+bet-progress, outcome-metrics — are legitimate end-states. So they move from rival branches to
+**Supported by default**, and Fork 1 is dissolved rather than answered.
+
+**Two findings support the reframe, and both were verified against the tree:**
+
+- **#2690 already said N levels.** Its title is *generalize the rollup tree to N levels* and its body reads
+  *"a higher tier is just another indent + rollup level."* This card narrowed that to naming **the one** tier
+  above feature — the narrowing was the mis-framing, and the ruling restores #2690's own shape.
+- **The realization is already ratified.** `#config-extends-platform-default` puts defaults in *a project
+  config that extends a fully-defined platform default (flavors)* with the *core registry itself
+  default-less*, and #1662 states that **an open-set dimension *is* a `CustomRegistry` subclass** with
+  per-dimension storage. An open number of levels is exactly an open-set dimension; no new mechanism is
+  minted.
+
+**The one objection, and how the ruling answers it.** This card's fork-existence justification argued that
+exactly one basis must be canonical, because a node exposing two would force *"the renderer to branch per
+tier"* — the new visual language #2690 exists to avoid. That objection holds against *hard-coded* per-tier
+special-casing, and it does **not** reach the config model: the basis becomes a **declared per-level field**,
+so the renderer reads data through one code path rather than carrying N cases. The distinction is load-bearing
+and belongs in the build's acceptance — a renderer that grows a `switch` on tier name has re-introduced exactly
+what #2690 forbids.
+
+**One constraint survives the dissolution.** The lexical collision with the ratified
+`we:docs/agent/backlog-workflow.md#program-definition` does not go away — it moves. `Program` is now a
+*preset name* rather than a `kind` enum value, and a preset that ships under that word still collides with the
+statute's term. The presets must name around it.
+
+Carved: **#xarvjgf** (the open-set level dimension + per-level attributes) and **#xayr3dc** (the shipped
+preset flavors, blocked on it). Web Everything's own selection stays with the operator, on merit.
+
+*(The fork below is retained as the record of what was considered — its options are now the Supported-by-default
+set, not rival branches.)*
+
 ## Fork 1 — rollup basis (and name) for the tier above feature
 
 **Fork-existence justification:** exactly one aggregation basis can be the tier's canonical
