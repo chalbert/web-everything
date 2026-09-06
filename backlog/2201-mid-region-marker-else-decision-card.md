@@ -31,7 +31,7 @@ map** on the host instead of a single `.content`. `{{#if}}…{{else}}…{{/if}}`
 becomes a labelled map, so `.content` callers migrate to the named-program surface. Taken as a reversible #2074
 extension with lineage, mirroring #2112's `children:'raw'` addition.
 
-Build carved: **#xjktyol** — the #2074-model extension slice under #2094, as this card's *Downstream* section
+Build carved: **#3520** — the #2074-model extension slice under #2094, as this card's *Downstream* section
 directs.
 
 **Verified before presenting** (the #1935 currency check): `check:item` clean with every cited locus resolving;

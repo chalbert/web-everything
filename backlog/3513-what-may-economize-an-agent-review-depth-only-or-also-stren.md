@@ -1,4 +1,5 @@
 ---
+bornAs: x2xrboe
 kind: decision
 status: open
 dateOpened: "2026-09-06"
@@ -41,7 +42,7 @@ sourced from run input and never derived from a care band. A future change that 
 care re-opens this fork and needs its own ruling. This is `#config-extends-platform-default` applied — a
 concern with more than one legitimate end-state is a dimension with a safe default, not a baked mechanism.
 
-Build carved: **#xbwup67** — give `effort` the operator control-flag treatment `model` already has.
+Build carved: **#3519** — give `effort` the operator control-flag treatment `model` already has.
 
 ## How this card got here, recorded because the correction is the point
 
@@ -72,7 +73,7 @@ behaviour. This is its sixth occurrence in one session.
 
 **Fork-existence justification (forced invariant).** The branches cannot coexist: either a care band is allowed
 to reach model/effort, or it is not. And one branch is already **broken** by standing rules — the memory rule
-`right-size-the-panel-count-not-model-tier` states *"Count is the lever; tier is not"*, and `#xvkjndx`
+`right-size-the-panel-count-not-model-tier` states *"Count is the lever; tier is not"*, and `#3187`
 (operator, 2026-08-18) **removed** the juror spend ceiling because four unbounded runs found ten defects that a
 green suite and `check:standards` both missed. A ruling that dials strength down to save money would reverse a
 ruling made on evidence.
