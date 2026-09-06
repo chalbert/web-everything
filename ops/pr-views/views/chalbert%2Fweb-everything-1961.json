@@ -34,8 +34,14 @@
       "changeType": "MODIFIED"
     },
     {
+      "path": "scripts/__tests__/backlog-lane-locus.test.mjs",
+      "additions": 28,
+      "deletions": 0,
+      "changeType": "ADDED"
+    },
+    {
       "path": "scripts/__tests__/guard-bash.test.mjs",
-      "additions": 39,
+      "additions": 55,
       "deletions": 0,
       "changeType": "MODIFIED"
     },
@@ -48,13 +54,19 @@
     {
       "path": "scripts/backlog.mjs",
       "additions": 19,
-      "deletions": 3,
+      "deletions": 4,
       "changeType": "MODIFIED"
     },
     {
       "path": "scripts/guard-bash.mjs",
       "additions": 63,
       "deletions": 2,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/guard-lane.mjs",
+      "additions": 10,
+      "deletions": 0,
       "changeType": "MODIFIED"
     },
     {
@@ -65,13 +77,13 @@
     },
     {
       "path": "scripts/lib/__tests__/lane-lease.test.mjs",
-      "additions": 20,
+      "additions": 52,
       "deletions": 0,
       "changeType": "MODIFIED"
     },
     {
       "path": "scripts/lib/lane-lease.mjs",
-      "additions": 17,
+      "additions": 44,
       "deletions": 2,
       "changeType": "MODIFIED"
     },
@@ -83,13 +95,19 @@
     }
   ],
   "headRefName": "lane/xzitlr9-dispatcher-operations",
-  "headRefOid": "ef2496229e01c59841072a6187782a77f7d12601",
+  "headRefOid": "5a7cd35606c816d7b1580dc796e95a9916c1ed53",
   "labels": [
     {
       "id": "LA_kwDORBt1-c8AAAACqLiMxQ",
       "name": "review:pending",
       "description": "the drain parked this PR — an independent review is owed before merge",
       "color": "fbca04"
+    },
+    {
+      "id": "LA_kwDORBt1-c8AAAACrQ29dQ",
+      "name": "checking",
+      "description": "Required checks are still running — CI truth not yet known (#2281)",
+      "color": "BFD4F2"
     }
   ],
   "number": 1961,
