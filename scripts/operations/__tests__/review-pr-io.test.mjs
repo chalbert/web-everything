@@ -21,7 +21,6 @@ import {
   PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
   resolveSubjectCheckout,
-  createReviewPrReader,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL } from '../review-pr.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
