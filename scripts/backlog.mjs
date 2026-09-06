@@ -32,7 +32,7 @@
  */
 import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { applyTransition, applySettle, readField, setFrontmatterField, removeFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
@@ -55,7 +55,7 @@ import { parseHolds, emptyHoldState, heldNums, addHold, removeHold, pruneExpired
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { BACKLOG_KINDS } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
-import { laneGuardDecision, resolveReal } from './guard-lane.mjs';
+import { laneGuardDecision, resolveReal, isLaneLocus } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
 import { localToday } from './lib/local-date.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
@@ -1160,10 +1160,32 @@ function cost() {
 // #2319 — a one-shot repair: number every TRACKED hash-id backlog file in this checkout (a hash that reached
 // main via a numbering-bypassing land route, e.g. pr-land --fallback-git). Reuses the drain's numberPendingHashes
 // (the same JIT-numbering engine, #2288) so refs (blockedBy/parent/short-refs) are rewritten identically.
-// `--dry-run` reports the planned mapping without touching the tree. Run in the checkout carrying the stray
-// (the drain does this at land automatically; this verb is the manual backstop for one already on main).
+// `--dry-run` reports the planned mapping without touching the tree.
+//
+// IT MUST NOT RUN IN A LANE, and "the checkout carrying the stray" used to read as if it could. A lane
+// carries the stray too — it branched from the main that has it — but the NNN this assigns is only valid
+// when it is assigned against SERIALIZED MAIN (#2288). Assign it in a lane and `check:standards` rejects
+// the result from the other side: *"carries a hand-picked NNN id that is not on origin/main"*. So the verb
+// refuses both ways at once, and the operator is left holding a half-applied rename with no verb to finish
+// it — which is exactly what happened on 2026-09-06 (7 cards, renamed then reverted by hand).
+//
+// The guard is a locus test, the same one `we:scripts/guard-lane.mjs` uses to separate a lane clone from a
+// primary: a lane lives under `<workspace>/.lanes/`. Refuse there and name the two places it DOES belong.
 function numberStranded() {
   const dryRun = argv.includes('--dry-run');
+  // #1961 review r4 — test ROOT, NOT `process.cwd()`. The repair below writes to `ROOT` (this script's own
+  // checkout, resolved from `import.meta.url`), so cwd is the wrong thing to ask: invoked by ABSOLUTE PATH
+  // from an unrelated directory — `cd /tmp && node /…/.lanes/<pool>/lane-1/scripts/backlog.mjs
+  // number-stranded` — the cwd test passed and the verb went on to renumber the LANE's cards, which is the
+  // exact half-applied rename this guard exists to prevent. Verified against the running code before the fix
+  // (it offered to number 2 cards); the inverse mis-invocation also FALSELY refused a legitimate primary run.
+  // A locus guard must test the locus it protects.
+  if (isLaneLocus(resolveReal(ROOT), sep)) {
+    die('number-stranded: refusing to run in a LANE clone. The NNN it assigns is only valid when assigned '
+      + 'against serialized main (#2288) — assigned here, check:standards rejects the result as "a hand-picked '
+      + 'NNN not on origin/main", so the verb would refuse both ways and leave a half-applied rename. Run it '
+      + 'in a PRIMARY checkout, or leave it to the drain, whose at-land pass numbers strays automatically.');
+  }
   const r = numberPendingHashes(ROOT, { dryRun });
   if (r.error) die(`number-stranded: ${r.error}`);
   if (!r.assigned || r.assigned.length === 0) { console.log('number-stranded: no stranded hash-id files — nothing to number.'); return; }

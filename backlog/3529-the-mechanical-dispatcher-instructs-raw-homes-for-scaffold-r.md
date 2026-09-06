@@ -2,8 +2,11 @@
 bornAs: xzitlr9
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 relatedReport: reports/2026-09-06-open-story-staleness-audit.md
 ---
@@ -48,3 +51,37 @@ not the place the machine builds. PR #1959 fixed the reading; this card fixes wh
 
 Rewiring what dispatched agents are told to run is a behavioural change to the delivery path, not a scan
 fix. It earns its own diff and its own review.
+
+## Delivered 2026-09-06 — two of six rewired, four blocked and marked
+
+**Rewired onto the declared operations:**
+
+| Site | Was | Now |
+|---|---|---|
+| :423 | `we:scripts/backlog.mjs scaffold … --blocked-by=` | the `scaffold` operation, `--blockedBy=` |
+| :452 | `we:scripts/backlog.mjs resolve <NNN> --graduated-to=` | the `resolve` operation, `--ref=<NNN> --graduatedTo=` |
+
+Both needed the flag-spelling flip the card warned about: the operations parse camelCase, the raw CLIs
+kebab-case, and the parser is case-sensitive (#3253), so a copied kebab flag is refused as unknown. The
+resolve prompt now says so inline, because the agent reading it is the one who would hit it.
+
+**NOT rewired — four `we:scripts/pr-land.mjs` sites (:499, :514, :647, :648), and this is a finding, not a shortfall.**
+
+the `open-pr` operation (`we:scripts/operations/open-pr.mjs`) declares `ref, base, title, bodyFile, mode, parkLabel, sha, requireVerified, dryRun` — and
+**neither `manifestFile` nor `repo`**. Those calls need both:
+
+- `--manifest-file` carries the couple manifest, which is how #2387's impl-first / WE-last land ordering
+  is expressed at all;
+- `--repo=<laneDir>` is how a sibling repo's PR is opened; without it there is no cross-repo PR.
+
+Rewiring them would drop the manifest and break cross-repo PRs — **a functional regression dressed as
+compliance**. They carry reasoned `@operation-home-ok` markers naming exactly what is missing, which is the
+mechanism's own sanctioned way to record "known, and here is why".
+
+This is the same judgement `we:scripts/operations/declared-homes.mjs` records for withholding `open-pr`'s
+own entry twice: *"an entry would have emitted six findings whose only honest answer was six exemption
+markers — a gate reporting a gap nobody could close, which is how a gate gets ignored."* The unblocking work
+is giving `open-pr` those two inputs; until then the markers are the honest state.
+
+**Verified:** `npm run check:standards` reported six `undelegated raw home` findings against this file
+before the change and **zero** after.

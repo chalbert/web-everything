@@ -73,12 +73,27 @@ export function isLaneAcquirable(info, nowMs, ttlMs) {
 /**
  * The lowest-index acquirable lane, or null if the pool is fully held/busy. Deterministic (index order) so
  * concurrent acquirers converge on the same candidate and the atomic O_EXCL create picks exactly one winner.
+ *
+ * `excludeLane` (#xzitlr9 follow-up) is the CALLER'S OWN lane, and auto-pick skips it. Acquiring resets the
+ * lane to the integration branch, so handing back the lane the caller is standing in changes their working
+ * directory out from under them mid-task — observed 2026-09-06, where a bare `acquire --purpose=review-juror`
+ * returned the driving lane and reset its checkout off the working branch.
+ *
+ * This is NOT the data-loss guard: `isLaneAcquirable`'s `dirtyOrAhead` test (#2267) already refuses any lane
+ * holding uncommitted or unpushed work, and it held in that incident — nothing was lost. This is the
+ * narrower surprise of a clean, pushed lane being reset while its owner is still working in it. It is a
+ * PREFERENCE, not a refusal: an explicit `--lane=N` still names whatever the caller names, because someone
+ * asking for a specific lane by number has said what they mean.
  */
-export function chooseFreeLane(laneInfos, nowMs, ttlMs) {
+export function chooseFreeLane(laneInfos, nowMs, ttlMs, { excludeLane = null } = {}) {
   const eligible = laneInfos
     .filter((i) => isLaneAcquirable(i, nowMs, ttlMs))
     .sort((a, b) => a.lane - b.lane);
-  return eligible.length ? eligible[0].lane : null;
+  const notSelf = excludeLane == null ? eligible : eligible.filter((i) => i.lane !== excludeLane);
+  // Fall back to the full set when EVERY free lane is the caller's own: a single-lane pool must still
+  // acquire, and refusing there would be worse than the surprise this avoids.
+  const pick = notSelf.length ? notSelf : eligible;
+  return pick.length ? pick[0].lane : null;
 }
 
 /** Build a lease marker object. Caller stamps `acquiredAt` (ISO) so this stays clock-free / testable.
@@ -399,4 +414,31 @@ export function laneMarkedSlug(lease) {
 export function assertedLaneSlug(command) {
   const m = String(command || '').match(/\bLANE_SESSION=([A-Za-z0-9._/-]+)/);
   return m ? m[1] : null;
+}
+
+/**
+ * The caller's own lane NUMBER, for `chooseFreeLane`'s `excludeLane` — or null when the caller is not
+ * standing in a lane OF THE POOL BEING ACQUIRED. PURE: the caller injects both paths.
+ *
+ * SCOPED TO THE TARGET POOL, and that is the whole point (#1961 correctness finding 3). A regex over any
+ * `.lanes/<pool>/lane-N` segment leaks across pools: standing in `.lanes/repoA/lane-2` and acquiring in
+ * repoB would exclude repoB's lane 2 — an unrelated lane that is not the caller's and not at risk. The
+ * effect is only a suboptimal pick (the fallback still prevents exhaustion), but the heuristic would be
+ * measuring the wrong thing, and this codebase acquires cross-repo on purpose (the dispatcher's impl-repo
+ * lanes), so the mismatch is reachable rather than theoretical.
+ *
+ * @param cwdReal   the caller's REALPATH'd working directory.
+ * @param poolDir   the REALPATH'd pool directory being acquired from (`<workspace>/.lanes/<pool>`).
+ * @param sepChar   path separator (injected so the logic is testable on any platform).
+ * @returns the lane number, or null.
+ */
+export function ownLaneNumber(cwdReal, poolDir, sepChar = '/') {
+  const cwd = String(cwdReal || '');
+  const pool = String(poolDir || '').replace(new RegExp(`\\${sepChar}+$`), '');
+  if (!cwd || !pool) return null;
+  // Must be INSIDE this pool — not merely inside some pool.
+  if (cwd !== pool && !cwd.startsWith(pool + sepChar)) return null;
+  const rest = cwd.slice(pool.length).replace(new RegExp(`^\\${sepChar}`), '');
+  const m = rest.match(/^lane-(\d+)(?:$|[/\\])/);
+  return m ? Number(m[1]) : null;
 }
