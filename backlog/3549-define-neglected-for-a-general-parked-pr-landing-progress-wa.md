@@ -1,4 +1,5 @@
 ---
+bornAs: x0mo1kx
 kind: decision
 parent: "3383"
 status: open
@@ -9,9 +10,9 @@ tags: [conveyor, review, pr-watch]
 
 # Define "neglected" for a general parked-PR landing-progress watch
 
-What exact, conservative rule should a new mechanical pass (`we:x7llsyo`, the general PR-landing-progress
+What exact, conservative rule should a new mechanical pass (`we:3550`, the general PR-landing-progress
 watch) use to decide a parked PR (`review:pending`/`review:changes`/`review:human`) is **neglected** — making
-no real progress toward landing — versus merely normally waiting its turn. Carved out of `we:x7llsyo` per this
+no real progress toward landing — versus merely normally waiting its turn. Carved out of `we:3550` per this
 repo's own rule that a fork never lives inline in a build item (`we:docs/agent/backlog-workflow.md`, "never
 inline in an idea/epic/story body"); that story is `blockedBy` this item.
 
@@ -89,5 +90,5 @@ further debate, but stated here explicitly rather than picked silently inside th
 
 1. Fork 1 is ratified — a stated choice among (a)/(b)/(c) above, recorded on this item.
 2. Fork 2 is ratified — a stated choice of time source ((a)/(b)/(c)) and a stated `N`, recorded on this item.
-3. `we:x7llsyo` (the general PR-landing-progress watch story) has its `blockedBy` cleared and can proceed to
+3. `we:3550` (the general PR-landing-progress watch story) has its `blockedBy` cleared and can proceed to
    build against the ratified rule.

@@ -1,9 +1,10 @@
 ---
+bornAs: x7llsyo
 kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["x0mo1kx"]
+blockedBy: ["3549"]
 dateOpened: "2026-09-06"
 tags: [conveyor, review, pr-watch, alerting]
 scope:
@@ -22,7 +23,7 @@ two narrow watches already built under `#3383`: neither catches simple neglect, 
 (a real merge conflict, or a duplicate sibling PR).
 
 **NOT build-ready as filed — genuinely blocked, not arbitrarily gated.** The exact rule for "neglected" (which
-signal(s) count, the wall-clock threshold, and its time source) is carved into `we:x0mo1kx` per this repo's own
+signal(s) count, the wall-clock threshold, and its time source) is carved into `we:3549` per this repo's own
 rule that a fork never lives inline in a build item. See that item for the two open forks, each with options,
 tradeoffs, and a recommended default already stated — ratifying it is a fast nod, not fresh research. This
 story is `blockedBy` it and should not be built until it resolves.
@@ -69,7 +70,7 @@ actually making progress toward landing" as its own concern, independent of any 
 - **Detection reuses ground truth already read elsewhere, no new liveness mechanism.** "No independent review
   ever dispatched" is answered by the SAME `claude agents --json` read + session-name-grammar match
   (`review-<pr>`/`fix-<pr>`) that `we:scripts/conveyor/session-reaper.mjs` and
-  `we:scripts/conveyor/review-status-tag.mjs` already use — see `we:x0mo1kx` Fork 1 for the exact rule.
+  `we:scripts/conveyor/review-status-tag.mjs` already use — see `we:3549` Fork 1 for the exact rule.
 - **Alert-only — this pass fixes nothing itself.** Matches the established philosophy from
   `we:scripts/conveyor/parked-pr-conflict-watch.mjs`: detection and judgment-triggering findings are a separate
   concern from auto-fixing. A neglected PR gets a bounce that routes it into the SAME fix→re-review cycle
@@ -87,7 +88,7 @@ actually making progress toward landing" as its own concern, independent of any 
 
 ## Tasks
 
-1. Ratify `we:x0mo1kx` (both forks) — unblocks everything below.
+1. Ratify `we:3549` (both forks) — unblocks everything below.
 2. `we:scripts/conveyor/parked-pr-progress-watch.mjs` — pure core (the neglect predicate per the ratified rule,
    a finding-plan builder) + IO shell (a `gh pr list`/`gh api` read, `we:scripts/operations/dispatch-lane-io.mjs`'s
    own `defaultListAgents` for the session-liveness read, a subprocess call to
