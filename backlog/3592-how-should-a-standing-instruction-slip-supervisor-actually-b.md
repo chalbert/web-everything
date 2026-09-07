@@ -1,6 +1,7 @@
 ---
+bornAs: xoc31xs
 kind: decision
-parent: "xxi3zgv"
+parent: "3593"
 status: open
 dateOpened: "2026-09-07"
 tags: []
@@ -8,7 +9,7 @@ tags: []
 
 # How should a standing instruction-slip supervisor actually be invoked and kept running - dispatched-on-schedule, a persistent process, or something else
 
-Real fork under we:backlog/xxi3zgv-catch-and-correct-agent-instruction-slips-mechanically-a-syn.md, carved out per this repo's own epic/decision split rule rather than left inline in the epic body. Once we:backlog/xyaf9lm-stage-1-fleet-wide-scanner-for-false-monitor-wait-claims-acr.md (Stage 1's report-only scanner) exists and has real flagged-agent output to point at, this decides how a Stage 2 standing supervisor - the piece that actually acts on the judgment half of the split (whether a hand-composed prompt should have used a declared operation, whether an action was redundant because a mechanical pass already handles it) - actually gets invoked and kept running across a session.
+Real fork under we:backlog/3593-catch-and-correct-agent-instruction-slips-mechanically-a-syn.md, carved out per this repo's own epic/decision split rule rather than left inline in the epic body. Once we:backlog/3594-stage-1-fleet-wide-scanner-for-false-monitor-wait-claims-acr.md (Stage 1's report-only scanner) exists and has real flagged-agent output to point at, this decides how a Stage 2 standing supervisor - the piece that actually acts on the judgment half of the split (whether a hand-composed prompt should have used a declared operation, whether an action was redundant because a mechanical pass already handles it) - actually gets invoked and kept running across a session.
 
 Option A: a session the operator/main-session dispatches manually each time, formalized into a reusable skill. This is today's ad hoc pattern (tonight's supervisor was dispatched via a hand-composed Agent() prompt, not a declared, reusable mechanism) just turned into a proper skill with a generic brief, per the epic's own doctrine that dispatch should never run on a bespoke prompt. Cheap to ship, no new resident-process capability needed, but has a real limit: a dispatched session has a context and lifetime limit and needs re-dispatching, so between dispatches there is no supervisor watching at all - the exact gap that let tonight's dozens of catches depend entirely on the operator noticing.
 
