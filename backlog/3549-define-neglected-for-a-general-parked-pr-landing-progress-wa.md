@@ -2,8 +2,11 @@
 bornAs: x0mo1kx
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+codifiedIn: one-off
 preparedDate: "2026-09-06"
 tags: [conveyor, review, pr-watch]
 ---
@@ -86,9 +89,35 @@ never false-flagged, short enough to catch a genuine multi-day silent stall (the
 working day. This specific number is a cheap, low-stakes, easily-revised knob — not worth gating the build on
 further debate, but stated here explicitly rather than picked silently inside the implementation.
 
+## Ruling (ratified 2026-09-07, operator)
+
+**Fork 1 — ratified (c).** Ship signal (a), "no-review-ever-dispatched," now. Signal (b), the
+stale-verdict-label re-check, is carved into its own follow-on story rather than built here or deferred
+indefinitely — the operator's explicit instruction was to file and queue that follow-on now (via `file-item`)
+unless it is genuinely blocked by something real. **Follow-on filed at this ratification:**
+[Stale-verdict re-check: flag a `review:changes` PR whose triggering finding has gone moot](/backlog/xzajv4j-stale-verdict-re-check-flag-a-review-changes-pr-whose-trigge.md)
+(`#xzajv4j`, parent: this item, `blockedBy: ["3550"]` — its natural build home is extending the SAME
+predicate/sweep module `we:3550` builds, per this item's own Fork-1 text "carve (b) into its own follow-on
+story once (a) is live"; it does not exist to build against until `we:3550` lands, a real dependency, not an
+arbitrary gate). A JIT-numbered `#NNN` is assigned when it lands, per this repo's drain convention.
+
+**Fork 2 — ratified (a) + configurable threshold, default 24h.** The neglect watch reads the current
+`review:*` label's apply time off GitHub's own issue-events timeline (`gh api`'s `labeled` event for that
+label) as the durable start-of-park marker — no new state store, ground truth GitHub already keeps. The
+threshold defaults to **24 hours** but MUST be a configurable knob, not hardcoded — following this repo's
+established env-var convention (e.g. `WE_PR_NEGLECT_THRESHOLD_HOURS`).
+
+Both forks ratified by the operator (Nicolas Gilbert), 2026-09-07. `we:3550`'s `blockedBy` is cleared at this
+same ratification so it can proceed to build against this rule — signal (a) + the Fork-2 time
+source/threshold/config-knob only, NOT signal (b), which is the separate follow-on above.
+
+Codified: `one-off` — this ruling defines one mechanical pass's own neglect predicate; it establishes no
+reusable cross-cutting platform rule beyond this feature.
+
 ## Done when
 
-1. Fork 1 is ratified — a stated choice among (a)/(b)/(c) above, recorded on this item.
+1. Fork 1 is ratified — a stated choice among (a)/(b)/(c) above, recorded on this item. **Done — see Ruling.**
 2. Fork 2 is ratified — a stated choice of time source ((a)/(b)/(c)) and a stated `N`, recorded on this item.
+   **Done — see Ruling.**
 3. `we:3550` (the general PR-landing-progress watch story) has its `blockedBy` cleared and can proceed to
-   build against the ratified rule.
+   build against the ratified rule. **Done.**

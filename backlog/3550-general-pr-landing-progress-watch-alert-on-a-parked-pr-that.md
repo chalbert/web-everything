@@ -4,7 +4,6 @@ kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["3549"]
 dateOpened: "2026-09-06"
 tags: [conveyor, review, pr-watch, alerting]
 scope:
@@ -22,11 +21,19 @@ and posts a `review:changes`-shaped finding via `we:scripts/conveyor/reconcile-f
 two narrow watches already built under `#3383`: neither catches simple neglect, only its own single trigger
 (a real merge conflict, or a duplicate sibling PR).
 
-**NOT build-ready as filed — genuinely blocked, not arbitrarily gated.** The exact rule for "neglected" (which
-signal(s) count, the wall-clock threshold, and its time source) is carved into `we:3549` per this repo's own
-rule that a fork never lives inline in a build item. See that item for the two open forks, each with options,
-tradeoffs, and a recommended default already stated — ratifying it is a fast nod, not fresh research. This
-story is `blockedBy` it and should not be built until it resolves.
+**Build-ready — `we:3549` ratified 2026-09-07, `blockedBy` cleared.** The exact rule for "neglected" was
+carved into `we:3549` per this repo's own rule that a fork never lives inline in a build item; both its forks
+are now ratified by the operator:
+
+- **Fork 1 — signal (a) only, no-review-ever-dispatched.** This story builds signal (a) exactly as designed
+  below. Signal (b) (the stale-verdict-label re-check, PR #1939's shape) is a separate follow-on,
+  `#xzajv4j` (`blockedBy` this story) — **out of scope for this build.**
+- **Fork 2 — time source (a) + configurable threshold, default 24h.** Read the current `review:*` label's
+  apply time off GitHub's own issue-events timeline (`gh api`, the `labeled` event) as the durable
+  start-of-park marker — no new store. The threshold defaults to 24 hours but MUST be a configurable knob
+  (env var, e.g. `WE_PR_NEGLECT_THRESHOLD_HOURS`), not hardcoded.
+
+See `we:3549` for the full ratification record and both forks' original option analysis.
 
 ## The evidence (2026-09-06/07, real incidents, neither caught by the two watches already built)
 
@@ -88,7 +95,7 @@ actually making progress toward landing" as its own concern, independent of any 
 
 ## Tasks
 
-1. Ratify `we:3549` (both forks) — unblocks everything below.
+1. ~~Ratify `we:3549` (both forks) — unblocks everything below.~~ **Done — ratified 2026-09-07, see `we:3549`.**
 2. `we:scripts/conveyor/parked-pr-progress-watch.mjs` — pure core (the neglect predicate per the ratified rule,
    a finding-plan builder) + IO shell (a `gh pr list`/`gh api` read, `we:scripts/operations/dispatch-lane-io.mjs`'s
    own `defaultListAgents` for the session-liveness read, a subprocess call to
