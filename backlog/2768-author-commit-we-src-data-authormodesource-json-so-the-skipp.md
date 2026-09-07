@@ -4,13 +4,24 @@ kind: story
 size: 2
 status: open
 dateOpened: "2026-07-28"
+dateStarted: "2026-09-07"
 tags: [maas, authoring, testing]
 scope:
   - we:src/_data/
   - we:blocks/renderers/
-  - we:scripts/
   - fui:tools/maas/
   - fui:vitest.config.ts
+scopeRationale: >-
+  Dropped the bare we:scripts/ entry (2026-09-07 audit): it was a repo-wide top-level prefix matching the
+  entire scripts tree (conveyor/readiness/operations machinery included), holding 32-38 unrelated queued
+  items on scope overlap for an item that never touches we:scripts/ at all. Investigation (git history of
+  8ac77a8e/f0ee0584) shows the ONE file that entry could ever have stood for was
+  we:scripts/gen-author-mode-source.mjs, the generator that emitted we:src/_data/authorModeSource.json —
+  deleted under the ratified #1282/#1730 "WE holds zero executable" rule and never coming back to WE. Per
+  this card's own 2026-09-06 correction, the two live directions forward (point the skipped
+  functionalAuthoringForm describes at fui:workbench/authorModeData.ts, or generate the fixture at test
+  time) are both FUI-resident and touch no file under we:scripts/. we:src/_data/ and we:blocks/renderers/
+  are left as-is (already specific enough, not the reported footgun).
 ---
 
 # Author + commit we:src/_data/authorModeSource.json so the skipped maas authoring tests run
