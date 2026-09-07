@@ -78,3 +78,11 @@ A sibling item, also `blockedBy: ["3277"]`, filed the same session: a **permanen
 ## Cross-reference — build-item sibling, filed 2026-09-07
 
 `we:backlog/3576-generalize-the-leverage-ranked-auto-prepare-docket-pass-beyo.md` generalizes this item's pattern (leverage-ranked top-N, auto-dispatched prep for the un-prepared) to unscoped BUILD items, reusing the same `leverageScore` heuristic and the same env-override convention (`WE_SCOPE_PREP_DOCKET_TARGET_COUNT` / `WE_SCOPE_PREP_DOCKET_WATCH_DISABLED`, mirroring this item's `WE_DECISION_DOCKET_*` knobs). It is a deliberate sibling, not a merge into this item — this item stays decision-scoped (Tier-B, `suggest-next --tier=B`, the Decision Board render half gated on #3277); the sibling needs no render half and no `blockedBy`. Whichever lands first should leave this cross-reference intact for the other to find.
+
+## Placement note (2026-09-07)
+
+The Decision Board this item publishes into is an interim WE-side prototype for the conveyor's own
+operational use, not the permanent home for these mechanics. we:backlog/xw6814m tracks generalizing this
+docket (alongside we:backlog/3560's queue view and we:backlog/x7wehz2's ledger) into a real plateau-app
+console feature under the existing Plateau Loop epic (we:backlog/2445/2505), per
+we:docs/agent/platform-decisions.md#constellation-placement.

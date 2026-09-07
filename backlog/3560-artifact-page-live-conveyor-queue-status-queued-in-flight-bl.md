@@ -124,6 +124,14 @@ Both forks decided by the operator; neither is an open question for the build se
   Default to (1) unless #3277's actual declared operation shape makes (2) meaningfully cheaper — that would be
   a finding against this ruling, not a silent substitution.
 
+## Placement note (2026-09-07)
+
+This page is an interim WE-side prototype for the conveyor's own operational use, not the permanent home
+for these mechanics. we:backlog/xw6814m tracks generalizing it (alongside we:backlog/3562's docket and
+we:backlog/x7wehz2's ledger) into a real plateau-app console feature under the existing Plateau Loop epic
+(we:backlog/2445/2505), per we:docs/agent/platform-decisions.md#constellation-placement. Build this page
+as the operational prototype it is; don't treat it as the product-side end-state.
+
 ## Done when
 
 1. **Executable** — TODO: the literal command depends on #3277's operation shape (not yet declared) —
