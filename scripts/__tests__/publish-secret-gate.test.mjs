@@ -98,12 +98,19 @@ describe('gate 2 — `backlog-guard.mjs --pre` (the Edit/Write path into a card)
   const body = (extra) => `---\nkind: story\nsize: 1\nstatus: open\n---\n\nAn ordinary first paragraph so the summary is non-empty. ${extra}\n`;
   const preEvent = (content) => JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(clone, CARD), content } });
 
+  // #3383 — the hand-authored-new-file DENY (below, gate 2b) now fires for ANY new backlog file, not just a
+  // hand-numbered NNN one, so these two tests (which are about SECRET-SCRUB behaviour on a card body, not
+  // about creation) pre-touch the card so it already exists — an Edit/overwrite of an EXISTING file, exactly
+  // the case #3383's own widening leaves untouched. Gate 2b below tests the CREATION case on its own.
+  beforeAll(() => { writeFileSync(join(clone, CARD), body('placeholder')); });
+
   it('DENIES (exit 2) an edit that would introduce the synthetic marker into a card body', () => {
     const r = run('backlog-guard.mjs', ['--pre'], { input: preEvent(body(`The value was ${MARKER}.`)) });
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/api-key-shaped token/);
     expect(r.stderr).toMatch(/COMMITTED and PUSHED/);
-    expect(existsSync(join(clone, CARD))).toBe(false); // a denied PreToolUse never runs the write
+    // a denied PreToolUse never runs the write — the pre-existing placeholder body is untouched, not the marker
+    expect(readFileSync(join(clone, CARD), 'utf8')).not.toContain(MARKER);
   });
 
   it('PASSES (exit 0) an edit that adds ordinary prose plus a we:-prefixed path', () => {
@@ -127,6 +134,27 @@ describe('gate 2 — `backlog-guard.mjs --pre` (the Edit/Write path into a card)
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/api-key-shaped token/); // the secret-scrub reason
     expect(r.stderr).not.toMatch(/hand-numbered/); // NOT the id-hygiene reason — scrub ran first and exited
+  });
+});
+
+// ── 2b. the WIDENED hand-authored-new-file DENY (#3383) — ANY new id shape, not just numeric ───────────
+describe('gate 2b — `backlog-guard.mjs --pre` DENIES any brand-new backlog file made via the Write tool', () => {
+  const body = 'An ordinary first paragraph so the summary is non-empty.';
+  const preEvent = (rel, content) => JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(clone, rel), content } });
+
+  it('DENIES a hash-shaped (xNNNNNN) brand-new file with a perfectly clean body — no secret involved', () => {
+    const rel = 'backlog/x9f9f9f-brand-new-hash-probe.md';
+    const r = run('backlog-guard.mjs', ['--pre'], { input: preEvent(rel, `---\nkind: task\n---\n\n${body}\n`) });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/hand-authored/);
+    expect(existsSync(join(clone, rel))).toBe(false);
+  });
+
+  it('still DENIES a numeric brand-new file (the original #2288/#2323 rule, unchanged)', () => {
+    const rel = 'backlog/8888-brand-new-numeric-probe.md';
+    const r = run('backlog-guard.mjs', ['--pre'], { input: preEvent(rel, `---\nkind: task\n---\n\n${body}\n`) });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/hand-numbered/);
   });
 });
 
