@@ -945,18 +945,77 @@ export function parseBackgroundedId(stdout) {
  * post-spawn listing (`claude agents --json --all`, read fresh by the caller) by exact `id` match, then compares
  * THAT row's own `sessionId` against the id requested. Both sides run through {@link normalizeHandle}, matching
  * every other session-id comparison in this file.
+ *
+ * `id` ON A `background` ROW, MEASURED, TWICE (`#3541`, follow-up from PR #1966's independent review): a live
+ * `claude agents --json --all` read (CLI 2.1.263, 2026-09-06) found 259/259 `kind:'background'` rows carrying
+ * `id` and 0/4 `kind:'interactive'` rows carrying it — the same split `we:scripts/conveyor/session-reaper.mjs`'s
+ * own header measured for its domain on 2026-09-03 (204/204 vs 0/4). So the scenario this function's own
+ * `#x3gdu12` origin story worried about — a `background` row for a genuinely-resumed session silently missing
+ * `id` — has never once been observed; `listedSessionIds`'s "absent from roughly half the listing" is entirely
+ * the `interactive` half.
+ *
+ * NO POSITIVE FALLBACK — TWO WERE TRIED, TWO WERE FOUND UNSAFE, AND THE SECOND FAILURE MEASURED WHY THE FIRST
+ * COULD NEVER BE PATCHED INTO SAFETY. This item's own build history:
+ *   1. A `sessionId`-only fallback (no `id` needed): "no new session appeared anywhere since `agentsBefore`" ⇒
+ *      resumed. An independent review round found this could resolve `true` on the FIRST post-resume read, on
+ *      the strength of a fork whose row simply had not propagated into the listing yet — the identical lag
+ *      `dispatchFix`'s own Hardening 2 retry loop exists to absorb for the id-match path.
+ *   2. Gated the same fallback on `isFinalAttempt` (only trust the absence-of-evidence once the retry loop's
+ *      last attempt is reached). A SECOND independent review round found this only bounds the wait to
+ *      `RESUME_CONFIRM_MAX_ATTEMPTS × RESUME_CONFIRM_WAIT_MS` (~600ms) — and a fork's row can take far longer
+ *      than that to appear. MEASURED, not assumed: a live probe (2026-09-07) spawned a fresh `claude --bg`
+ *      session and polled `claude agents --json --all` for it every ~700ms — it had STILL not appeared after
+ *      26+ seconds, on this same machine, under its ordinary background-session load. No fixed short retry
+ *      budget can outrun a lag of that shape, and `dispatchFix` cannot afford to block tens of seconds per
+ *      resume attempt either (it "sits synchronously inside a waker pass that promises to stay fail-soft and
+ *      fast per run" — see this file's own `TICK_TIMEOUT_MS`/`SPAWN_TIMEOUT_MS` budgets for the same
+ *      discipline elsewhere).
+ * Both designs answer "no new session — therefore resumed" from ABSENCE of evidence, and absence read against
+ * an unbounded-latency listing can never be trusted at any fixed budget. A REJECTED FIX from the item's own
+ * origin story, restated because it fails for the identical underlying reason: "is `requestedSessionId` still
+ * listed at all" cannot disambiguate either, since the pre-resume session stays listed under EITHER outcome.
+ *
+ * THE CONCLUSION, stated plainly rather than papered over with a third attempt: there is no way to positively
+ * confirm a resume from the listing alone within a budget `dispatchFix` can afford, when the id-match itself
+ * comes back empty. So this function does NOT try — on a missing `id`, it answers `resumed:false`, exactly the
+ * pre-#3541 behavior, and the caller's existing `stop(printedId)` cleans up (correctly, for an actual fork; a
+ * wasted-but-recoverable attempt, for the never-yet-observed missing-`id` shape). This is the safe DIRECTION,
+ * argued once and applied consistently: a false stop costs a wasted resume attempt plus a redundant fresh
+ * dispatch, and the fix still lands; a false resume reports success while the real work silently never happens
+ * (the untouched candidate never sees the new prompt) and leaves an unmanaged forked session running unstopped.
+ * Between a residual that has NEVER been observed (missing `id`) and one just MEASURED to be real and immediate
+ * (unbounded listing lag), the honest choice is to not trade the second for a hedge against the first.
+ *
+ * THE ONE THING ADDED: an `anomaly` DIAGNOSTIC, never a verdict input. When the id-match fails but
+ * `requestedSessionId` is still listed under a row that carries no `id` at all, that IS the never-observed
+ * shape this item was filed to worry about — worth a name on the record for whoever reads the run later, even
+ * though it changes nothing about the (safe) `resumed:false` answer.
  * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>}} o
- * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null}}
+ * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null, anomaly?:string}}
  */
 export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) {
   if (!printedId) return { resumed: false, actualSessionId: null, actualShortId: null };
   const norm = normalizeHandle(printedId);
-  const row = (Array.isArray(agentsAfter) ? agentsAfter : []).find((a) => normalizeHandle(a?.id) === norm);
-  const actualSessionId = row ? normalizeHandle(row.sessionId) || null : null;
+  const after = Array.isArray(agentsAfter) ? agentsAfter : [];
+  const row = after.find((a) => normalizeHandle(a?.id) === norm);
+  if (row) {
+    const actualSessionId = normalizeHandle(row.sessionId) || null;
+    return {
+      resumed: Boolean(actualSessionId) && actualSessionId === normalizeHandle(requestedSessionId),
+      actualSessionId,
+      actualShortId: printedId,
+    };
+  }
+
+  // THE DIAGNOSTIC ONLY — see the docblock above. `sessionId` is present on every row regardless of shape
+  // (unlike `id`), so this can tell "the requested session is listed but its row has no `id`" apart from
+  // "nothing named it at all" without needing a pre-resume snapshot. It NEVER flips `resumed`.
+  const reqNorm = normalizeHandle(requestedSessionId);
+  const requestedRow = after.find((a) => normalizeHandle(a?.sessionId) === reqNorm);
+  const anomaly = requestedRow && !requestedRow.id ? 'requested-session-listed-without-id' : null;
   return {
-    resumed: Boolean(actualSessionId) && actualSessionId === normalizeHandle(requestedSessionId),
-    actualSessionId,
-    actualShortId: printedId,
+    resumed: false, actualSessionId: null, actualShortId: printedId,
+    ...(anomaly ? { anomaly } : {}),
   };
 }
 

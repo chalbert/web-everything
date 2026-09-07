@@ -271,6 +271,18 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * {@link RESUME_CONFIRM_MAX_ATTEMPTS} times with a short `wait` between attempts before this function concludes
  * "not resumed" — the same shape `#3331`'s own probe methodology already used (repeat rather than trust one
  * sample), just applied at dispatch time instead of at probe time.
+ *
+ * (3) `resumeSucceeded` HAS NO POSITIVE FALLBACK FOR A MISSING `id` (`#3541`, follow-up from PR #1966's
+ * independent review — see that function's own docblock for the full story). Two candidate fallbacks were
+ * built and both were found unsafe by independent review, the second time backed by a live measurement: a
+ * fresh session's row can take far longer to appear in `claude agents --json --all` than any retry budget this
+ * synchronous call site can afford (26+ seconds observed, against a ~600ms total retry window here). An `id`
+ * match failing therefore still resolves `resumed:false` here, exactly as before `#3541` — the safe direction,
+ * argued in `resumeSucceeded`'s own docblock: a false stop costs a wasted attempt and a redundant fresh
+ * dispatch (recoverable), a false resume would silently drop the real work and leave a forked session
+ * unmanaged (not recoverable without a person noticing). What DID change: `resumeSucceeded` now surfaces an
+ * `anomaly` diagnostic when this never-yet-observed shape is actually hit, so it is visible on the record
+ * (threaded onto the returned `resumeAttempt` below) rather than indistinguishable from an ordinary fork.
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned -
  *   NOTE: deliberately no `lane` field — this runs before one is ever assigned.
  * @param {object} [o]
@@ -356,9 +368,17 @@ export function tryResumeFix(planned, {
   // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
   // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
   // construction did not reach) and fall through to a fresh dispatch, which the caller performs (and which
-  // is the first point a lane is ever popped for this entry).
+  // is the first point a lane is ever popped for this entry). `outcome.anomaly` (#3541) rides onto the record
+  // here rather than being read for a verdict — see `resumeSucceeded`'s own docblock for why no fallback acts
+  // on it.
   if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
-  return { resumed: false, resumeAttempt: { attempted: true, candidate, forked: Boolean(printedId) } };
+  return {
+    resumed: false,
+    resumeAttempt: {
+      attempted: true, candidate, forked: Boolean(printedId),
+      ...(outcome.anomaly ? { anomaly: outcome.anomaly } : {}),
+    },
+  };
 }
 
 /**

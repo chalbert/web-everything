@@ -843,6 +843,59 @@ describe('parseBackgroundedId / resumeSucceeded — #xu2krte', () => {
     expect(outcome.resumed).toBe(false);
     expect(outcome.actualSessionId).toBe('some-totally-different-uuid');
   });
+
+  // #3541 — follow-up from PR #1966's independent review: harden against a post-resume listing row that omits
+  // `id` (documented as absent from `interactive` rows, never yet observed on a `background` one — see this
+  // function's own docblock). TWO positive fallbacks were tried and both were found unsafe by independent
+  // review (the second backed by a live measurement showing listing propagation lag of 26+ seconds — far past
+  // any retry budget `dispatchFix` can afford). The landed answer: no positive fallback — a missing `id` keeps
+  // resolving `resumed:false`, exactly the pre-#3541 behavior, plus a NEVER-verdict-affecting `anomaly`
+  // diagnostic so the never-yet-observed shape is at least visible on the record.
+  describe('resumeSucceeded — a MISSING `id` on the post-resume row resolves `false`, with an anomaly diagnostic (#3541)', () => {
+    const REQUESTED = '76f44314-45cb-4e70-9fa6-eff7872ed491';
+
+    it('resumed stays false when the requested session IS still listed but its row carries no `id` — the exact card scenario, supplied directly', () => {
+      const agentsAfter = [{ sessionId: REQUESTED, kind: 'background', name: 'conveyor-3438' }];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome).toEqual({
+        resumed: false, actualSessionId: null, actualShortId: '76f44314',
+        anomaly: 'requested-session-listed-without-id',
+      });
+    });
+
+    it('no anomaly is reported when the requested session is not listed at all — that is an ordinary "not found", not the missing-`id` shape', () => {
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: [] });
+      expect(outcome).toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
+      expect(outcome.anomaly).toBeUndefined();
+    });
+
+    it('no anomaly is reported when a DIFFERENT session is listed without `id` — the diagnostic is keyed to the REQUESTED session specifically', () => {
+      const agentsAfter = [{ sessionId: 'some-other-session-id', kind: 'background' }];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.anomaly).toBeUndefined();
+    });
+
+    it('the REJECTED naive fallback still does not work — the requested session merely being listed proves nothing about resume vs. fork, with or without `id`', () => {
+      // The item's own origin story: the pre-resume session stays listed under EITHER outcome, so "is it still
+      // listed" can never disambiguate — restated here for the missing-`id` shape specifically.
+      const agentsAfter = [
+        { sessionId: REQUESTED, kind: 'background' }, // the untouched original — stays listed under EITHER outcome
+        { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // the actual fork
+      ];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.resumed).toBe(false);
+    });
+
+    it('a fork whose row has NOT propagated into the listing at all is still safely read as not-resumed — no fixed retry budget is trusted to prove its absence (#3541 rounds 1-2, both rejected)', () => {
+      // Looks EXACTLY like a clean resume by every field a sessionId-absence check could examine — this is
+      // precisely the shape that made two successive positive fallbacks unsafe. The landed function does not
+      // attempt to read it as a resume at all.
+      const agentsAfter = [{ sessionId: REQUESTED, kind: 'background' }];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.resumed).toBe(false);
+      expect(outcome.anomaly).toBe('requested-session-listed-without-id');
+    });
+  });
 });
 
 // ── 6. the observer answers liveness, and refuses to invent an outcome ──────────────────────────────────────
