@@ -3,10 +3,11 @@ bornAs: x7fkzn0
 kind: story
 size: 3
 parent: "3443"
-status: active
+status: resolved
 scope: ["we:scripts/operations/route-pr-outcome.mjs", "we:scripts/operations/route-pr-outcome-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-04"
 dateStarted: "2026-09-05"
+dateResolved: "2026-09-06"
 tags: []
 ---
 
