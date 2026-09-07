@@ -27,7 +27,7 @@ are now ratified by the operator:
 
 - **Fork 1 — signal (a) only, no-review-ever-dispatched.** This story builds signal (a) exactly as designed
   below. Signal (b) (the stale-verdict-label re-check, PR #1939's shape) is a separate follow-on,
-  `#xzajv4j` (`blockedBy` this story) — **out of scope for this build.**
+  `#3596` (`blockedBy` this story) — **out of scope for this build.**
 - **Fork 2 — time source (a) + configurable threshold, default 24h.** Read the current `review:*` label's
   apply time off GitHub's own issue-events timeline (`gh api`, the `labeled` event) as the durable
   start-of-park marker — no new store. The threshold defaults to 24 hours but MUST be a configurable knob

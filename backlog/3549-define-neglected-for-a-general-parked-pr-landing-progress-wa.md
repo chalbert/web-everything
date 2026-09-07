@@ -95,8 +95,8 @@ further debate, but stated here explicitly rather than picked silently inside th
 stale-verdict-label re-check, is carved into its own follow-on story rather than built here or deferred
 indefinitely — the operator's explicit instruction was to file and queue that follow-on now (via `file-item`)
 unless it is genuinely blocked by something real. **Follow-on filed at this ratification:**
-[Stale-verdict re-check: flag a `review:changes` PR whose triggering finding has gone moot](/backlog/xzajv4j-stale-verdict-re-check-flag-a-review-changes-pr-whose-trigge.md)
-(`#xzajv4j`, parent: this item, `blockedBy: ["3550"]` — its natural build home is extending the SAME
+[Stale-verdict re-check: flag a `review:changes` PR whose triggering finding has gone moot](/backlog/3596-stale-verdict-re-check-flag-a-review-changes-pr-whose-trigge.md)
+(`#3596`, parent: this item, `blockedBy: ["3550"]` — its natural build home is extending the SAME
 predicate/sweep module `we:3550` builds, per this item's own Fork-1 text "carve (b) into its own follow-on
 story once (a) is live"; it does not exist to build against until `we:3550` lands, a real dependency, not an
 arbitrary gate). A JIT-numbered `#NNN` is assigned when it lands, per this repo's drain convention.
