@@ -2,7 +2,7 @@
 kind: decision
 parent: "3383"
 status: open
-relatedTo: ["3456", "xc1idt1", "xhvpyxb", "xqraqab", "xupukxa", "xo94b41", "3593", "3594", "3569"]
+relatedTo: ["3456", "xc1idt1", "xhvpyxb", "xqraqab", "xupukxa", "xo94b41", "3593", "3594", "3569", "xyp1wsl", "xfxt77w", "3427"]
 dateOpened: "2026-09-07"
 tags: [conveyor, capacity, isolation, container, apple-silicon, platform]
 ---
@@ -18,6 +18,64 @@ Researched (cited, current as of 2026-09): Apple's container CLI plus the open-s
 What adoption would change: we:scripts/lane-pool.mjs today provisions lanes as plain filesystem clones on the shared host (git clone --reference, per-lane node_modules, zero process/resource isolation between a lane's running claude session, the host, and every other lane) — adopting per-lane containers means acquire would need to spin up or reuse (via the 1.0 container machine persistent-VM feature) a container instead of a bare directory, bind-mount the lane's git worktree read-write, and switch dispatched sessions to API-key auth.
 
 Real tradeoffs, not glossed over: (1) this becomes a hard Apple-Silicon-only platform requirement for running the mechanical conveyor at all — acceptable per the operator's explicit framing, but a real, stated consequence that should be recorded, not assumed; (2) real migration cost against we:scripts/lane-pool.mjs's existing lease/reap/sibling-clone/port-band machinery; (3) whether a simpler, already-mature alternative solves the actual incident better — Docker Desktop and OrbStack already offer per-container CPU/memory caps on Mac (Intel and Apple Silicon both) via a mature, widely-used VM layer today, against Apple's tool being roughly three months past its 1.0 with open filesystem-throughput and DNS/sleep-wake issues, which is a real is-this-even-the-right-pick fork distinct from is-containerization-the-right-approach; (4) the eventual cross-platform goal (Linux/Windows, much longer down the line per the operator) — a Linux host already has native cgroups and needs no such tool at all, so this could end up being a macOS-specific implementation of what should be a platform-neutral resource-isolation capability the dispatcher calls through, a real design question worth naming rather than building a macOS-only escape hatch that has to be re-abstracted later.
+
+## Amendment (2026-09-07) — could the same container also enforce operations-only + file-scope boundaries?
+
+Folded in per the operator's own follow-up the same night, captured here rather than as a separate item.
+Expanded research question: beyond resource caps, could the SAME container also serve as the enforcement
+boundary for two other things filed separately tonight — (a) restricting a dispatched agent to declared
+operations only (no arbitrary shell commands), and (b) file-scope enforcement (blocking an edit outside an
+item's declared scope, the concern behind we:backlog/xyp1wsl-epic-edit-time-scope-enforcement-with-a-request-extension-es.md
+and its build-ready first slice we:backlog/xfxt77w-block-an-edit-write-outside-a-dispatched-lane-s-own-declared.md,
+both filed but not yet merged, PR #2032). Checked before writing this in: xyp1wsl/xfxt77w cover ONLY the
+file-scope half (b); no existing item covers (a) — searched for any "restrict to declared operations only"
+enforcement mechanism and found only we:backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever.md
+(ratified, codified in we:docs/agent/platform-decisions.md#operations-declared-once-callers-generated), which
+is a software CONVENTION (operations declared once, callers generated) with no technical restriction stopping
+a dispatched agent from calling the Bash tool directly outside any declared operation — (a) is genuinely new
+ground, not a rediscovery.
+
+**The mechanism this would need, to sit alongside the resource-cap ask above:**
+1. A minimal container image whose only reachable entrypoint is the declared-operations CLI (we:scripts/operations/run.mjs
+   `<op>`) — no general shell exposed to the dispatched agent. Structurally stronger than a permission check: the
+   capability to run an arbitrary command would not exist in the environment at all, so there is nothing to bypass.
+2. Read-only filesystem mounts outside the item's own declared `scope:` paths — the same protection
+   xyp1wsl/xfxt77w's guard-hook approach provides, but enforced by the mount itself rather than a PreToolUse
+   hook that has to correctly intercept every Edit/Write call (and, as xyp1wsl's own epic body admits, we:scripts/guard-bash.mjs
+   today has NO scope-vs-edit-target check at all — a dispatched agent writing a file via a raw Bash redirect
+   or `sed -i` rather than the Edit/Write tool would sail past the planned we:scripts/guard-lane.mjs arm entirely;
+   a read-only mount would block that write regardless of which tool or command performed it).
+3. Resource caps (the original ask, above).
+
+**The honest cost, stated plainly rather than glossed over:** this means the ENTIRE dispatched Claude session
+runs inside the container, not just its individual Bash-tool subprocess calls — today we:scripts/operations/dispatch-lane.mjs
+spawns `claude --bg` on the host directly. The container needs real outbound network to Anthropic's API (the
+agent cannot function without it) plus git/npm/gh tooling reachable from inside it — "locked down" here means
+"only the declared-operations entrypoint is reachable from the agent's own shell," not "no network." This is a
+materially bigger architectural shift than either the resource-cap work above or the guard-hook work already
+filed tonight (xyp1wsl/xfxt77w) — not a small addition riding along with either.
+
+**Recommended priority ordering, stated as this research's own view, grounded in tonight's evidence:** hard
+boundaries (this container approach) > scanners (we:backlog/3594's compliance scanner) > prose doctrine
+(we:skills-src/mechanical-delivery-doctrine's rules), in terms of actual trustworthiness. Tonight produced
+dozens of real instruction-slip violations (we:backlog/3593) despite explicit doctrine and direct
+corrections; a structural boundary does not depend on an agent behaving correctly, a scanner catches a known
+bad pattern only after the fact, and prose doctrine is what gets written down once something cannot be fully
+enforced. Future hardening work on this axis should sequence in that order — hard boundary first where one is
+buildable, scanner as the interim/cheaper catch, doctrine as the fallback for whatever neither yet covers.
+
+**Supersede or complement xyp1wsl/xfxt77w? Judgment, with reasoning:** complement in the near term, likely
+supersede for the scope-enforcement half specifically if this container work ever ships. xfxt77w is already a
+build-ready, cheap, incremental win against the two tools (Edit/Write) it actually covers, and it does not
+require the architectural shift above — it should land on its own timeline, not wait on this decision. But it
+is structurally weaker than a read-only mount: it covers Edit/Write only, and by its own epic's admission
+leaves every Bash-tool file mutation unguarded, which is exactly the class of gap a mount-level boundary
+closes for free, regardless of which tool or command the agent used. If the container approach is eventually
+built, its read-only mount would make the we:scripts/guard-lane.mjs scope arm redundant for every
+dispatched-lane session running inside a container — at that point keeping both is unnecessary defense in
+depth rather than a real second line of defense, since the container's boundary cannot be bypassed the way a
+per-tool hook can. Net: build xfxt77w now for its own cheap, real interim value; treat it as scaffolding for
+this container work, not as permanent belt-and-suspenders alongside it.
 
 ## Done when
 
