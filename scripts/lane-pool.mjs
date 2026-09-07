@@ -109,6 +109,10 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
 import { classifyReap, reapPlan, prStatesFromList, itemNumFromSession } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
+// #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
+// `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
+// lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
+import { cleanLaneLitter } from './lib/lane-litter.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -1460,6 +1464,13 @@ function cmdRelease(repo) {
       );
       continue;
     }
+    // #3568 — before dropping the lease, reap the KNOWN-SAFE scratch litter `delivery-agent-brief.md` tells
+    // every delivery agent to write inside its lane (`.commit-msg.txt`, `.pr-body.md`, …). This is what makes
+    // the released lane immediately re-acquirable rather than reading DIRTY on the very next `status`/auto-pick
+    // — the root cause of the 2026-09-07 incident this card documents (46 of 48 lanes DIRTY with only this
+    // litter, the other 2 clean-but-ahead — the whole pool read 0 of 48 acquirable at once). Any
+    // non-allowlisted dirty state (real uncommitted work) is left completely untouched by this call.
+    cleanLaneLitter(dir);
     rmSync(LEASE_MARKER(dir), { force: true });
     // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
     // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's

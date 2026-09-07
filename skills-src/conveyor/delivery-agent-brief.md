@@ -268,7 +268,11 @@ below in place of the single-PR steps 8–10:
 # job-scratch directory (~/.claude/jobs/<id>/tmp/) or /tmp. A write there can be flagged as
 # touching a sensitive file and produce an unanswerable permission prompt with nobody watching
 # (the standing rule in dispatched-agent-system-prompt.md). The lane clone is already fully
-# Edit/Write/Bash-permitted and is where this file belongs anyway.
+# Edit/Write/Bash-permitted and is where this file belongs anyway. Leaving it there is fine —
+# `.commit-msg.txt` (and its `.pr-body.md`/`.pr-body.txt`/`review-*-output.json`/
+# `commit-msg-fix-*.txt` siblings) is on the known-safe scratch-litter allowlist
+# (`we:scripts/lib/lane-litter.mjs#LANE_RELEASE_LITTER_ALLOWLIST`) that `release` reaps
+# automatically (#3568) — you never need to clean it up yourself.
 printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
