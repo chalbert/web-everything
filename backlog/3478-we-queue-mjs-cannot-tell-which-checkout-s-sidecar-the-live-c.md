@@ -3,10 +3,11 @@ bornAs: xyrnzpf
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/conveyor/"]
 relatedTo: ["3472"]
 dateOpened: "2026-09-04"
+dateStarted: "2026-09-05"
 tags: [conveyor, dispatch, delivery]
 ---
 
@@ -78,3 +79,44 @@ alongside it as the preferred entry point is an implementation call for whoever 
 2. Running the new path from a checkout that is *not* where the live runner is rooted must either queue
    into the runner's actual checkout or refuse — it must never again report success while writing to a
    sidecar nobody is reading, the exact failure mode this item documents.
+
+## Progress
+
+- Built `we:scripts/conveyor/resolve-runner-checkout.mjs`: reads every lock dir under the runner-singleton
+  lock root, classifies liveness (`no-live-lock` / `ambiguous` / `resolved`), and derives the live lease's
+  pid to cwd via `lsof -a -p <pid> -d cwd -Fn` — the same flags `we:scripts/pr-status.mjs`'s `listLanes`
+  already shells for lane-owner detection, reused rather than re-derived.
+- Built `we:scripts/conveyor/queue-work.mjs`: the runner-aware sibling of `we:scripts/conveyor/queue.mjs` —
+  resolves the live runner's checkout first, writes into that checkout's `we:.conveyor/queue.json` via the
+  existing `we:scripts/conveyor/queue-store.mjs` core, and refuses (non-zero exit, no write) on
+  `no-live-lock` / `ambiguous` / `no-pid` / `cwd-unresolved` / `process-mismatch` rather than guessing.
+  `we:scripts/conveyor/queue.mjs`
+  is unchanged and remains the cwd-relative entry point for a caller already in the runner's own checkout.
+- Added `CONVEYOR_RUNNER_LOCK_ROOT` env override (parallels `CONVEYOR_QUEUE_FILE`) for test/ops use.
+- Tests: `we:scripts/conveyor/__tests__/resolve-runner-checkout.test.mjs` (pure classifier + lsof-transcript
+  parsing + end-to-end verdicts against a real temp lock root) and
+  `we:scripts/conveyor/__tests__/queue-work.test.mjs` (CLI-level, a fake `lsof` shim on `PATH`, asserts the
+  sidecar lands in the resolved runner checkout and never in the caller's own cwd).
+- Noted the new entry point in `we:skills-src/conveyor/SKILL.md` for an operator unsure which checkout's
+  runner is live.
+- `/converge` round 1 (cosmetic): a recorded pid of exactly 0 is now `no-pid` rather than the less accurate
+  `cwd-unresolved`; added CLI-level tests for the `no-pid`/`cwd-unresolved` refusal paths and a test that
+  exercises the REAL default `lsof` shell-out (a fake binary on `PATH`, no `execFn` override) rather than
+  only the injected-seam path.
+- **Pid-reuse identity check (`verifyRunnerProcess`/`looksLikeRunnerProcess`).** Correctness and security
+  independently flagged, across every review round, that heartbeat freshness alone doesn't prove a resolved
+  pid still belongs to the runner (a crashed runner's pid can be reused by an unrelated process inside the
+  same lease window). Two earlier attempts were each rejected and reverted: a bare substring match on the
+  process command line (spoofable by an unrelated process whose argv merely contains the runner's script-path
+  text) and a fixed-argv-position check (fragile against an interpreter flag ahead of the script path, or a
+  path containing whitespace). The shipped version scans every whitespace-split token of the command line for
+  an EXACT match against the runner's script-path suffix — concedes neither failure mode, since it needs
+  neither a specific token position nor a raw substring anywhere in the line. `resolveRunnerCheckout` now
+  refuses as `process-mismatch` (via `ps -o command=`) when a resolved pid's process no longer looks like the
+  runner, before trusting its cwd.
+- Final review pass: softened the docstring to say the identity check closes an accidental pid-reuse case, not
+  a deliberate local-filesystem-spoofing threat model this item was never scoped to (claim-accuracy); added the
+  one missing test exercising a `resolved` classification through the REAL default `leaseMinutes` rather than
+  only the explicit-override paths (standards-conformance); and documented, explicitly, the accepted residual
+  that `lsof`+`ps` are two non-atomic shell-outs, so no sequence of best-effort shell commands can make this
+  fully transactional — a correct closure of that would be a bigger change than this item's scope.
