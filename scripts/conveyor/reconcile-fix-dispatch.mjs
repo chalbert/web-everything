@@ -239,16 +239,24 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * TWO HARDENINGS ADDED BY THE INDEPENDENT REVIEW OF PR #1966 (both real, both fixed here rather than merely
  * filed, because both sit on this exact security/correctness-critical dispatch surface):
  *
- * (1) OWNERSHIP CHECK BEFORE TRUSTING A CANDIDATE. `findResumeCandidate` alone only proves a session with the
- * stamped id is STILL LISTED — not that it actually belongs to THIS pr. A PR body's `authored-by-actor` stamp
- * is plain, editable text, visible in every other open PR's body too, so a forged/copied stamp could redirect a
- * genuine conflict fix into an unrelated LIVE session, injecting a false task into it. This mirrors exactly the
- * binding problem `reconcile-core.mjs#bindAgents` PATH 1 already solves for liveness ("is this session actually
- * working THIS pr, or does a proxy only make it look that way") — reused here rather than re-invented:
- * {@link resolveLaneHead} (`reconcile-pass.mjs`) reads the candidate's own `cwd`'s real git `HEAD`, and it must
- * equal `planned.headRefOid` (the PR's own head sha, threaded through by {@link planFixesFromReconcile}) before
- * a resume is attempted at all. A mismatch (or an unresolvable `cwd`) is treated exactly like "no candidate" —
- * no resume attempt, no `stop`, straight to a fresh dispatch — because nothing was touched, there is nothing to
+ * (1) OWNERSHIP CHECK BEFORE TRUSTING A CANDIDATE — TWO INDEPENDENT signals, both required (hardened again by
+ * a SECOND review pass on PR #1966, which found the first cut's single HEAD-sha check alone was not enough:
+ * two DIFFERENT lanes/PRs can share an identical HEAD commit, e.g. a lane freshly branched from another lane's
+ * tip before either advances). `findResumeCandidate` alone only proves a session with the stamped id is STILL
+ * LISTED — not that it actually belongs to THIS pr. A PR body's `authored-by-actor` stamp is plain, editable
+ * text, visible in every other open PR's body too, so a forged/copied stamp could redirect a genuine conflict
+ * fix into an unrelated LIVE session, injecting a false task into it. This mirrors exactly the binding problem
+ * `reconcile-core.mjs#bindAgents` already solves for liveness with its OWN two-path union ("a union of weak
+ * proxies raises confidence; either one ALONE does not") — reused here, not re-invented:
+ *   (a) HEAD-SHA — {@link resolveLaneHead} (`reconcile-pass.mjs`) reads the candidate's own `cwd`'s real git
+ *       `HEAD`, and it must equal `planned.headRefOid` (the PR's own head sha, threaded through by
+ *       {@link planFixesFromReconcile}).
+ *   (b) NAME — the candidate's own session `name` (assigned by whichever dispatcher started it, never
+ *       attacker-controlled via a PR-body edit) must be one THIS pr's real original builder could legitimately
+ *       carry: `conveyor-<itemNum>` (an ordinary build) or `fix-<pr>` (a prior fix-dispatch being resumed
+ *       again) — `sessionSlugFor`'s own two relevant conventions, not a new naming scheme.
+ * BOTH must hold. A mismatch on either (or an unresolvable `cwd`) is treated exactly like "no candidate" — no
+ * resume attempt, no `stop`, straight to a fresh dispatch — because nothing was touched, there is nothing to
  * undo.
  *
  * (2) BOUNDED RETRY ON THE POST-RESUME LISTING READ. `#3331`'s own research already documents that
@@ -286,19 +294,33 @@ export function dispatchFix(planned, {
     const candidateRow = candidate
       ? agentsBefore.find((a) => normalizeHandle(a?.sessionId) === normalizeHandle(candidate))
       : null;
-    // Hardening (1) — see the docblock above. A stamp that resolves to a LIVE session which is not actually
-    // sitting on THIS pr's own head is not trusted at all; this is reported as a refusal (`resumeAttempt`),
-    // never as a silent fresh-dispatch with no trace of why the candidate was rejected.
+    // Hardening (1) — see the docblock above. TWO INDEPENDENT signals, both required, mirroring
+    // `reconcile-core.mjs#bindAgents`'s own "union of weak proxies raises confidence; either one ALONE does
+    // not" discipline for the identical binding question ("is this session really working THIS pr"):
+    //   (a) HEAD-SHA — the candidate's real checkout HEAD must equal the PR's own `headRefOid`.
+    //   (b) NAME — the candidate's OWN session name (assigned by whichever dispatcher started it — never
+    //       attacker-controlled via a PR-body edit) must be one of the names THIS pr's own original builder
+    //       could legitimately carry: `conveyor-<itemNum>` (an ordinary build dispatch) or `fix-<pr>` (a prior
+    //       fix-dispatch being resumed again).
+    // (a) alone is not enough: PR #1966's own review found two DIFFERENT lanes/PRs can share an identical HEAD
+    // commit (e.g. a lane freshly branched from another lane's tip, before either advances) — the SAME sha
+    // does not imply the SAME pr. (b) alone is not enough either (a name is a weaker proxy than a sha, per
+    // `bindAgents`'s own docblock). Requiring BOTH closes the gap either check leaves open alone, without a
+    // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
     const candidateCwd = candidateRow?.cwd || null;
     const candidateHead = candidate && candidateCwd ? resolveHead(candidateCwd) : null;
-    const ownershipConfirmed = Boolean(
-      candidate && planned.headRefOid && candidateHead && candidateHead === planned.headRefOid,
-    );
+    const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix')]);
+    const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
+    const headConfirmed = Boolean(candidate && planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
+    const ownershipConfirmed = headConfirmed && nameConfirmed;
     if (candidate && !ownershipConfirmed) {
       resumeAttempt = {
         attempted: false, candidate, forked: false,
         refused: 'ownership-unconfirmed',
-        why: `candidate session's checkout HEAD (${candidateHead ?? 'unresolved'}) does not match PR #${planned.pr}'s own head (${planned.headRefOid ?? 'unknown'}) — refusing to trust an editable PR-body stamp alone`,
+        why: `candidate session ownership not confirmed for PR #${planned.pr} — head match: ${headConfirmed} `
+          + `(candidate ${candidateHead ?? 'unresolved'} vs pr ${planned.headRefOid ?? 'unknown'}), name match: `
+          + `${nameConfirmed} (candidate ${JSON.stringify(candidateRow?.name ?? null)} not in `
+          + `${JSON.stringify([...expectedNames])}) — refusing to trust an editable PR-body stamp alone`,
       };
     } else if (ownershipConfirmed) {
       const resumeArgv = buildAgentArgv({

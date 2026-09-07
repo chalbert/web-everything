@@ -125,17 +125,22 @@ export function planConflictLabelChange({ isConflicting, currentLabels = [] } = 
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictComment(pr) {
+export function buildConflictComment(pr, { isStatuteTier = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
+  const nextStep = isStatuteTier
+    ? 'Left as a **judgment call for a human or `/finish`**, not auto-resolved: the conflicting hunk touches a ' +
+      "declarative-leash/statute-tier file, so choosing which side's edit wins is drafting principle content, " +
+      'not ordinary code — exactly the judgment this repo reserves for a person (`#xu2krte` Fork 2).'
+    : 'A fix agent is being dispatched to resolve it (`#xu2krte`) — the SAME independent-review gate this PR ' +
+      'is already parked behind still applies before anything lands; nobody is rewriting this content ' +
+      'unreviewed. If it cannot be resolved safely, it stands down to a human instead of guessing.';
   return [
     '⚠️ **This parked PR has drifted into a real merge conflict against `main`**',
     '',
     `GitHub reports \`mergeable: CONFLICTING\` on this PR${ref} while it is parked for review — it will not ` +
       'resolve on its own. One or more PRs merged to `main` since this one opened touched overlapping content.',
     '',
-    'Left as a **judgment call for a human or `/finish`**, not auto-rebased: resolving a real content conflict ' +
-      'means choosing which side\'s edit wins in the overlapping region, and rewriting a review-parked PR\'s ' +
-      'content before it has been reviewed is unsafe.',
+    nextStep,
     '',
     '_Auto-detected by the parked-PR conflict watch (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, `#xw0odtv`). ' +
       `This will self-clear (the \`${CONFLICT_LABEL}\` label is removed, no further comment) once the conflict resolves._`,
@@ -293,12 +298,17 @@ export function watchParkedPrConflicts({
       if (plan.add) provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
       provider.setLabels(resolvedRepo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
       if (plan.newlyDetected) {
-        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr));
+        // Computed ONCE, ahead of both the alert comment and the routing decision below, so the two can never
+        // disagree about what happens next — PR #1966's own review found exactly that drift (the alert still
+        // said "not auto-rebased, human/`/finish` only" for a conflict this same call was about to dispatch a
+        // fix agent at).
+        const isStatuteTier = isStatuteTierConflict(pr?.files);
+        provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr, { isStatuteTier }));
         entry.commented = true;
         // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the
         // entry the SAME way a label/comment failure already is; the alert above has already posted either way.
         try {
-          if (isStatuteTierConflict(pr?.files)) {
+          if (isStatuteTier) {
             postStandDown({ pr, repo: resolvedRepo });
             entry.routedTo = 'stand-down';
           } else {

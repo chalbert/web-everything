@@ -143,6 +143,26 @@ describe('buildConflictComment', () => {
     const body = buildConflictComment({ num: 1 });
     expect(body).not.toContain('undefined');
   });
+
+  // #xu2krte — PR #1966's own review: the alert must never claim a different outcome than what Fork 2/4
+  // actually routes this conflict to (previously a dispatchable conflict got the "not auto-rebased,
+  // human/`/finish` only" text while ALSO being auto-dispatched to a fix agent in the same call).
+  it('a dispatchable (non-statute-tier) conflict says a fix agent is being dispatched, and does NOT say "not auto"', () => {
+    const body = buildConflictComment({ num: 1920 }, { isStatuteTier: false });
+    expect(body).toMatch(/fix agent is being dispatched/i);
+    expect(body).not.toMatch(/not auto-rebased|not auto-resolved|left as a \*\*judgment call/i);
+  });
+
+  it('a statute-tier conflict says it is a human/`/finish` judgment call, and does NOT say a fix agent is dispatched', () => {
+    const body = buildConflictComment({ num: 1920 }, { isStatuteTier: true });
+    expect(body).toMatch(/judgment call for a human/i);
+    expect(body).not.toMatch(/fix agent is being dispatched/i);
+  });
+
+  it('defaults to the dispatchable wording when isStatuteTier is omitted (matches the common case)', () => {
+    const body = buildConflictComment({ num: 1920 });
+    expect(body).toMatch(/fix agent is being dispatched/i);
+  });
 });
 
 describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)', () => {

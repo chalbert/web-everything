@@ -154,7 +154,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         readBrief: () => REAL_TEMPLATE_STUB,
         mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
         spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · candxxxx\n'; },
-        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }],
+        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4', name: 'conveyor-3438' }],
         resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
       },
     );
@@ -181,7 +181,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · x\n'; },
         // The candidate IS listed under the stamped id, but its checkout sits on a DIFFERENT commit — an
         // editable PR-body stamp alone is not enough to trust it (the security finding from PR #1966's review).
-        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }],
+        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4', name: 'conveyor-3438' }],
         resolveHead: () => 'a-totally-different-sha',
       },
     );
@@ -192,7 +192,34 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(result.sessionId).toBe('freshfreshfresh');
     expect(result.resumeAttempt).toEqual({
       attempted: false, candidate: 'cand-0000-0000-0000-000000000000', forked: false,
-      refused: 'ownership-unconfirmed', why: expect.stringContaining('does not match'),
+      refused: 'ownership-unconfirmed', why: expect.stringContaining('head match: false'),
+    });
+  });
+
+  it('#xu2krte security hardening — a candidate with the RIGHT head but a name that could not legitimately be this pr\'s builder is also refused', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const spawnCalls = [];
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => 'freshfreshfresh',
+        spawnAgent: (argv) => { spawnCalls.push(argv); return 'backgrounded · x\n'; },
+        // Same HEAD as the pr (a coincidence PR #1966's review named explicitly: two lanes CAN share a commit),
+        // but a name that is neither `conveyor-3438` nor `fix-1764` — an unrelated session, not this pr's own.
+        listAgentsAll: () => [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4', name: 'conveyor-9999' }],
+        resolveHead: () => MATCHING_HEAD,
+      },
+    );
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0][1]).toBe('--session-id');
+    expect(result.resumeAttempt).toEqual({
+      attempted: false, candidate: 'cand-0000-0000-0000-000000000000', forked: false,
+      refused: 'ownership-unconfirmed', why: expect.stringContaining('name match: false'),
     });
   });
 
@@ -217,7 +244,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         listAgentsAll: () => {
           listCall += 1;
           return listCall === 1
-            ? [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }]
+            ? [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4', name: 'conveyor-3438' }]
             : [{ sessionId: 'a-different-session-id', id: 'forkedid', cwd: '/lanes/lane-9' }];
         },
         resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
@@ -255,7 +282,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         listAgentsAll: () => {
           listCall += 1;
           if (listCall === 2) return [];
-          return [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4' }];
+          return [{ sessionId: 'cand-0000-0000-0000-000000000000', id: 'candxxxx', cwd: '/lanes/lane-4', name: 'conveyor-3438' }];
         },
         resolveHead: () => MATCHING_HEAD,
         wait: () => { waitCalls += 1; },
