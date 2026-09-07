@@ -4333,6 +4333,51 @@ Full reasoning, prior-art survey, the skeptic pass and the two-confusion screen:
 [parked-pr-conflict-auto-resolution](/reports/2026-09-06-parked-pr-conflict-auto-resolution-research/). Composes
 with [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (the
 one-spawn-implementation statute this item's Fork 1 and Fork 4 both implement within, not alongside).
+**Extended by `#3556` — see below.**
+
+### A bare-branch merge conflict from `we:scripts/conveyor/branch-sync.mjs`'s escalation is resolved the same way — dispatch a reconciliation agent, never a bespoke script — with a mechanism adapted for having no PR {#branch-sync-conflict-dispatched-not-scripted}
+
+**Ratified 2026-09-07** — the operator ratified `#3556`'s prepared card: all four of its own bolded
+recommended-default forks, with one amendment to Fork 3. Extends
+[#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted) (`#3544`) from a
+PR-scoped conflict to a bare-branch conflict with no PR, no reviewer, and no comment thread to key state off
+of — composes with that statute rather than replacing it. Four clauses:
+
+1. **Fork 1 — same one declared spawn implementation, fresh dispatch only.** `#3556`'s dispatch calls
+   `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` / `#defaultSpawnAgent` directly — the exact
+   primitives `#3544`'s own Fork 1 already established as the one spawn implementation — with no
+   `resumeSessionId`: a branch-wide drift has no "original builder" session the way a single authored PR
+   does, so the resume branch `#3544` added is simply never exercised here.
+2. **Fork 2 — the dispatched agent takes its own lane, exactly like every other dispatch.** Not a new fork;
+   standing doctrine (`we:docs/agent/backlog-workflow.md`, "Work in a lane, not the primary checkout") already
+   settles it, unconditionally, with no primary-checkout carve-out for this dispatch kind either.
+3. **Fork 3 — dispatch is capped at once per distinct conflict signature, and the cap is a CONFIGURABLE
+   product setting, not a bare hardcoded constant.** `we:branch-sync.mjs`'s own existing durable state
+   (`we:.git/branch-sync-state.json` or a sibling file it owns) is extended with a `dispatchedFor: <signature>`
+   marker; a later escalation carrying the identical signature is terminal for auto-dispatch and falls through
+   to the existing human-alert path, upgraded to note an auto-fix was already attempted. Unlike `#3544`'s
+   PR-based flow (which shares the durable, comment-derived `NEGOTIATION_ROUND_CAP` across every bounce
+   cause), a branch-sync dispatch has no PR to carry a durable attempt count and no visible per-attempt audit
+   trail, so it owns its own cap — read from a new env-override constant rather than an inline literal:
+   `Number(process.env.WE_BRANCH_SYNC_DISPATCH_RETRY_CAP || 1)`, following this repo's established
+   env-override convention (default baked in, overridable via `process.env`, e.g.
+   `we:skills-src/batch-backlog-items/workflow-progress.mjs`'s `STALL_S`). Default stays `1` — heavier than a
+   single-PR fix-agent retry, with no per-attempt comment trail to audit — but is now a product setting an
+   operator can raise once real usage data says otherwise, with no code edit.
+4. **Fork 4 — a new, small, generic brief, never a forced reuse of the PR-shaped brief.**
+   `we:skills-src/conveyor/branch-sync-fix-brief.md`, filled only with `{{BRANCH}}`/`{{BASE}}`/`{{REPO_DIR}}`
+   tokens through the same `we:scripts/operations/dispatch-lane.mjs#fillBrief` mechanism every other brief
+   already uses — `we:fix-agent-brief.md` assumes a `{{PR_NUM}}`/`{{ITEM_NUM}}`/`{{SCOPE}}` that don't exist
+   for a branch-wide drift, so it is the wrong shape here, not the reusable one.
+
+**Landing-target note.** `we:scripts/conveyor/branch-sync.mjs` already lives on `main` (confirmed
+byte-identical against `origin/lane/mechanical-dispatcher` at ratification time) — mechanical-delivery-doctrine
+rule 4's ceremony-free direct-push path does not apply merely because the feature *operates on* the prototype
+branch; this build lands on `main` through the normal lane → PR → independent-review pipeline.
+
+**Lineage:** ratified via `#3556` (2026-09-07), filed under the background mechanical dispatcher epic `#3383`,
+extending [#parked-pr-conflict-dispatched-not-scripted](#parked-pr-conflict-dispatched-not-scripted) (`#3544`).
+Full reasoning: [#3556](/backlog/3556-auto-dispatch-a-reconciliation-agent-when-we-branch-sync-mjs/).
 
 ---
 
