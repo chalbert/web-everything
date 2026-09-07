@@ -1,4 +1,5 @@
 ---
+bornAs: xoghq8y
 kind: story
 size: 3
 status: open
@@ -47,5 +48,5 @@ failure.
 
 ## Related, not duplicates
 
-- #xkomby1 — the review SKILL's VM write-path gap (the map). This is the mechanism.
+- #3539 — the review SKILL's VM write-path gap (the map). This is the mechanism.
 - #3267 — the unguarded connector label swap. Different failure: this one never reaches a label at all.
