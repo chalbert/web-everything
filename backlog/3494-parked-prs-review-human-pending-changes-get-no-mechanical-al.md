@@ -2,8 +2,10 @@
 bornAs: xw0odtv
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-09-04"
+dateResolved: "2026-09-07"
+graduatedTo: none
 tags: [drain, conveyor, review, merge, conflict, alerting]
 scope:
   - we:scripts/conveyor/parked-pr-conflict-watch.mjs

@@ -1,12 +1,14 @@
 ---
 bornAs: xoh8fkw
 kind: task
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/parked-pr-conflict-watch.mjs"]
 relatedTo: ["3494"]
 scaffoldedBy: "investigate-15-stuck-prs"
 dateScaffolded: "2026-09-05"
 dateOpened: "2026-09-05"
+dateResolved: "2026-09-07"
+graduatedTo: none
 tags: [conveyor, gh, bug]
 ---
 
