@@ -353,7 +353,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // one shell of the CLI lives entirely in `gap-sweep-status-io.mjs`, behind the sink `../run.mjs` wires it
     // through.
     [GAP_SWEEP_STATUS_OP]: 'gap-sweep-status.mjs',
-    // #3383 — `file-item`'s `write` AND `queueAdd` steps are both
+    // #3383 (PROTOTYPE, `lane/mechanical-dispatcher`) — `file-item`'s `write` AND `queueAdd` steps are both
     // effects, so it is emphatically NOT read-only; listed here for map coverage. The declaring module still
     // reaches nothing that can act — both effects' sinks live in `file-item-io.mjs`, which reuses
     // `scaffold-io.mjs`'s own guarded write sink and adds only a `queue-store.mjs` sink beside it.
