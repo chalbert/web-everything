@@ -128,11 +128,14 @@ export function tickSurface(out) {
 
 /**
  * The runner's WHOLE control flow, as a reducer over injected effects — so it is unit-testable with fakes and
- * carries no IO of its own. Each tick: step the core (`tickOnce`), emit the surface, dispatch the surfaced
- * decisions (`dispatchPass`), run the deterministic mechanical passes, check stop, heartbeat the singleton
- * lease, sleep, then carry the DISPATCH PASS's `nextState` forward (see the file header, #3383, for why that
- * is not the same as this tick's own raw read). A lost lease (another process reclaimed a stale runner) STOPS
- * the loop — the singleton right to drive is gone.
+ * carries no IO of its own. Each tick: step the core (`tickOnce`), emit the surface, run the deterministic
+ * mechanical passes, THEN dispatch the surfaced decisions (`dispatchPass`) — this order, mechanical passes
+ * before dispatch, not the reverse, since xpshzms (2026-09-07): `dispatchPass` is a sequential, blocking,
+ * untimed spawn loop that can run long on a big backlog, and running it FIRST used to starve the (cheap,
+ * bounded) mechanical passes of a timely turn — check stop, heartbeat the singleton lease, sleep, then carry
+ * the DISPATCH PASS's `nextState` forward (see the file header, #3383, for why that is not the same as this
+ * tick's own raw read). A lost lease (another process reclaimed a stale runner) STOPS the loop — the
+ * singleton right to drive is gone.
  *
  * @param {object} effects
  * @param {(payload:object)=>Promise<object>|object} effects.tickOnce  step the tick core → `{ decisions, nextState }`
@@ -174,21 +177,33 @@ export async function runLoop({
     lastOut = out;
     await emit(tickSurface(out), { tick });
 
-    // DISPATCH what this tick decided (#3383), BEFORE the mechanical passes — those are unrelated (infra
-    // recovery, lease reaping) and neither reads nor produces `nextState`. Best-effort, same as
-    // `mechanicalPasses` below: a dispatch failure must not wedge the loop. On a throw, `dispatched` keeps
-    // its default (this tick's own raw `nextState`) — the same degraded-but-safe behaviour the runner had
-    // before this pass existed, never worse.
-    let dispatched = { nextState: (out && out.nextState) || {} };
-    try { dispatched = await dispatchPass({ tick, out }); } catch { /* best-effort */ }
-
     // Best-effort deterministic passes — a throw here must never wedge the loop (mirrors the SKILL's §4b/§4c/§4d
     // "best-effort; its exit never gates the tick"). #3404 — `heartbeat` is threaded IN here so a pass that
     // itself runs longer than the lease TTL (the #3105 verify-dispatch pass: "can legitimately run for as long
     // as the gate itself takes, 150-350s, sometimes longer") can extend the lease MID-PASS, not only after it
     // returns — a single heartbeat call placed after this line, the way it used to be, would still let the
     // lease go stale while the pass that needs it most is still running.
+    //
+    // RUNS BEFORE `dispatchPass` BELOW — deliberately, moved here from AFTER it (xpshzms, live-caught
+    // 2026-09-07). `dispatchPass` is a STRICTLY SEQUENTIAL loop of blocking, untimed `execFileSync` spawns —
+    // one per surfaced build/fix/ci-heal item (see `makeCliDispatchPass`'s own docblock) — that can run for
+    // many minutes on a large backlog, confirmed live via a process sample of the resident runner (100% of a
+    // 5s sample sat inside `node::SyncProcessRunner::Spawn`). With mechanical passes running AFTER dispatch,
+    // as this file used to, a big backlog starved them (and the heartbeat below, called only once both
+    // finish) of a timely turn every tick — the confirmed root cause of PR #1939 sitting with a real merge
+    // conflict `we:scripts/conveyor/parked-pr-conflict-watch.mjs` never caught (compare PR #1932, which the
+    // SAME pass DID catch, hours before that night's backlog built up). Running these cheap, bounded passes
+    // FIRST guarantees they get a turn every ~120s tick regardless of how long the dispatch backlog behind
+    // them takes to drain.
     try { await mechanicalPasses({ tick, out, heartbeat }); } catch { /* best-effort — a pass failure never stalls a tick */ }
+
+    // DISPATCH what this tick decided (#3383) — now AFTER the mechanical passes above, not before (xpshzms).
+    // Still unrelated to them (infra recovery, lease reaping — neither reads nor produces `nextState`).
+    // Best-effort: a dispatch failure must not wedge the loop. On a throw, `dispatched` keeps its default
+    // (this tick's own raw `nextState`) — the same degraded-but-safe behaviour the runner had before this
+    // pass existed, never worse.
+    let dispatched = { nextState: (out && out.nextState) || {} };
+    try { dispatched = await dispatchPass({ tick, out }); } catch { /* best-effort */ }
 
     const stop = shouldStop(out, { tick, maxTicks });
     if (stop.stop) { stoppedReason = stop.reason; break; }
