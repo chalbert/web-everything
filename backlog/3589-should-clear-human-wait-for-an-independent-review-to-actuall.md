@@ -1,4 +1,5 @@
 ---
+bornAs: xmyj37e
 kind: decision
 status: open
 relatedTo: ["2895", "2844", "3279"]
@@ -27,7 +28,7 @@ seconds after the merge had already happened.
 
 **This was a race, not a one-off human slip, and not "clearance was always meant to skip review."** The
 gate already HAS an automatic, unattended independent-review step for exactly this tier —
-`we:scripts/operations/review-pr.mjs`'s `advise` step (#xlw02hw): an `effect` step that runs unconditionally,
+`we:scripts/operations/review-pr.mjs`'s `advise` step (#3453): an `effect` step that runs unconditionally,
 before `confirm`, the moment a `review:human` PR's independent judge panel reduces to a verdict, posting a
 `⚠️ Advisory review (informational only)` comment. It is dispatched onto a genuinely independent session by
 `we:scripts/operations/review-dispatch.mjs` (#3279, mints a fresh `--session-id`) and the conveyor already
@@ -39,7 +40,7 @@ auto-dispatches it for any PR in `needs-review` phase (`we:scripts/conveyor/reco
 | --- | --- |
 | #1913 (`Ratify #3001`) | **yes** — advisory note ("0 findings, human review required") precedes the clear-human comment |
 | #1920 (`#2412` engine-tier auto-land) | **yes** — advisory note precedes clear-human |
-| #1966 (`#xu2krte` parked-PR conflict dispatch) | **yes** — advisory note precedes clear-human |
+| #1966 (`#3557` parked-PR conflict dispatch) | **yes** — advisory note precedes clear-human |
 | #1968 (`#2819` build-brief-discipline detectors) | **yes** — advisory note precedes clear-human |
 | **#2011 (`#3174` ratify+codify)** | **no** — only the park-reason comment, then `clear-human`; no advisory note ever posted |
 
@@ -177,7 +178,7 @@ usually holds to become guaranteed.
   (the precondition below is additive, not a change to who may clear).
 - `#3279` — `we:scripts/operations/review-dispatch.mjs`, the independent-session mechanism this decision
   reuses rather than duplicating.
-- `#xlw02hw` — the `advise` step (`we:scripts/operations/review-pr.mjs`) whose comment is the signal Fork
+- `#3453` — the `advise` step (`we:scripts/operations/review-pr.mjs`) whose comment is the signal Fork
   2(c) checks for.
 - `#2771`/`#2840` — the ratified `review:human` trigger set Fork 1 relies on already being narrow.
 - `#2851` — `#review-pending-clean-verdict-mechanical-accept`, the pipeline Fork 2(a) (the non-default
