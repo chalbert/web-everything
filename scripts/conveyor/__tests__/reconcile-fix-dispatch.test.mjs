@@ -306,6 +306,73 @@ describe('tryResumeFix — #xu2krte Fork 1, and #xazl9u3\'s whole reason to exis
     expect(waitCalls).toBe(1); // exactly one retry was needed
   });
 
+  it('#3541 — a post-resume row MISSING `id` entirely resolves `resumed:false` (the safe direction) and the anomaly rides onto `resumeAttempt`', () => {
+    // Two positive fallbacks for this exact shape were tried and rejected by independent review (see
+    // `resumeSucceeded`'s own docblock) — the landed behavior is the pre-#3541 one: an id-match failure means
+    // `stop(printedId)` and a fresh dispatch (which the caller performs), never a claimed resume. What's new is
+    // visibility: the never-yet-observed missing-`id` shape now names itself on `resumeAttempt.anomaly` instead
+    // of being silently indistinguishable from an ordinary fork.
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const stopCalls = [];
+    const result = tryResumeFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'],
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        spawnAgent: () => 'backgrounded · candxxxx\n',
+        // Call 1 (the pre-resume ownership check): the candidate is listed with its `id`, as always. Every
+        // call AFTER: the SAME session, still listed by `sessionId` — but this time its `id` is gone, the
+        // exact `#x3gdu12` scenario this item was filed to worry about.
+        listAgentsAll: () => [{
+          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background',
+        }],
+        resolveHead: () => MATCHING_HEAD,
+        stop: ({ handle }) => stopCalls.push(handle),
+        wait: () => {},
+      },
+    );
+    expect(result.resumed).toBe(false);
+    expect(stopCalls).toEqual(['candxxxx']);
+    expect(result.resumeAttempt).toEqual({
+      attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true,
+      anomaly: 'requested-session-listed-without-id',
+    });
+  });
+
+  it('#3541 — a fork whose row has NOT propagated into the listing at all is still safely read as not-resumed, no anomaly reported (it is an ordinary fork, not the missing-`id` shape)', () => {
+    // Rounds 1-2 of this item's own build tried to read this shape as a confirmed resume from
+    // absence-of-a-new-session, and both were found unsafe by independent review — a live measurement showed
+    // listing propagation lag of 26+ seconds, far past any retry budget this call site can afford. The landed
+    // function does not attempt it at all: this shape (candidate still listed, its own row DOES carry `id`,
+    // nothing new visible yet) resolves via the id-match branch failing to find `forkedid`, exactly like any
+    // other unmatched id.
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const stopCalls = [];
+    const result = tryResumeFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'],
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        // The CLI actually forked a copy under `forkedid`, but that fork's row never shows up within this
+        // dispatch's retry budget — every read looks identical (candidate still listed, id present, nothing new).
+        spawnAgent: () => 'backgrounded · forkedid\n',
+        listAgentsAll: () => [{
+          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', id: 'candxxxx', kind: 'background',
+        }],
+        resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
+        stop: ({ handle }) => stopCalls.push(handle),
+        wait: () => {},
+      },
+    );
+    expect(result.resumed).toBe(false);
+    expect(stopCalls).toEqual(['forkedid']);
+    expect(result.resumeAttempt).toEqual({ attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true });
+  });
+
   it('refuses to run from inside a lane checkout, same guard dispatch-lane-io.mjs uses — even for a conflict entry', () => {
     expect(() => tryResumeFix(
       { itemNum: '3438', pr: 1, laneRef: 'lane/3438-x', scope: ['we:x'], isConflict: true, body: null },
