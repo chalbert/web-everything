@@ -3,7 +3,7 @@ kind: story
 size: 2
 status: open
 scope: ["we:scripts/backlog.mjs"]
-relatedTo: ["2560", "2679", "2768", "2803"]
+relatedTo: ["2560", "2679", "2768", "2803", "xyp1wsl", "xb93l5b"]
 dateOpened: "2026-09-07"
 tags: [scope-lease, coordination, gap]
 ---
