@@ -313,10 +313,53 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
           sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background',
         }],
         resolveHead: () => MATCHING_HEAD,
+        wait: () => {}, // no real sleeping — the fallback only confirms on the FINAL attempt (#3541 round 2)
       },
     );
     expect(result.resumed).toBe(true);
     expect(result.sessionId).toBe('cand-0000-0000-0000-000000000000');
+  });
+
+  it('#3541 round 2 (second independent review pass) — a fork whose row has NOT propagated on early attempts must not be read as a resume; it is still caught once its row appears on the final attempt', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const stopCalls = [];
+    let listCall = 0;
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => 'freshfreshfresh',
+        // The CLI actually forked a copy under `forkedid` — but a false resume must not be reported on the
+        // strength of an early listing that has not caught up to that fact yet.
+        spawnAgent: () => 'backgrounded · forkedid\n',
+        listAgentsAll: () => {
+          listCall += 1;
+          // Call 1: agentsBefore (the pre-resume ownership check) — only the candidate is listed, as always.
+          if (listCall === 1) {
+            return [{ sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background' }];
+          }
+          // Calls 2-3 (the two EARLY retry attempts): the fork already happened, but its row has not
+          // propagated into this listing yet — it looks EXACTLY like a clean resume (candidate still listed,
+          // nothing new). Must not be trusted at this point.
+          if (listCall <= 3) return [{ sessionId: 'cand-0000-0000-0000-000000000000', kind: 'background' }];
+          // Call 4 (the FINAL attempt): the fork's row finally shows up.
+          return [
+            { sessionId: 'cand-0000-0000-0000-000000000000', kind: 'background' },
+            { id: 'forkedid', sessionId: 'a-different-session-id', kind: 'background' },
+          ];
+        },
+        resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
+        stop: ({ handle }) => stopCalls.push(handle),
+        wait: () => {},
+      },
+    );
+    expect(result.resumed).toBe(false);
+    expect(stopCalls).toEqual(['forkedid']);
+    expect(result.sessionId).toBe('freshfreshfresh');
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {

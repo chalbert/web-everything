@@ -883,6 +883,62 @@ describe('parseBackgroundedId / resumeSucceeded — #xu2krte', () => {
       expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore }).resumed)
         .toBe(false);
     });
+
+    // A SECOND independent review pass on this same PR found this real before it ever shipped: the fallback
+    // above answers from ABSENCE of a new session, and an early read cannot tell "no fork happened" apart
+    // from "a fork happened but its row has not propagated to the listing yet" — the exact lag Hardening (2)'s
+    // retry loop already exists to absorb for the id-match path. `isFinalAttempt` closes it.
+    describe('resumeSucceeded fallback — `isFinalAttempt` gates a listing that may simply be too early (#3541 round 2)', () => {
+      it('an early read (isFinalAttempt: false) must NOT claim resumed, even when the snapshot looks exactly like a clean resume', () => {
+        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+        // A genuine fork just happened, but its row has not propagated into this listing yet — indistinguishable
+        // from a clean resume by `sessionId` alone at this instant.
+        const stillSettling = [{ sessionId: REQUESTED, kind: 'background' }];
+        const early = resumeSucceeded({
+          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: stillSettling, agentsBefore, isFinalAttempt: false,
+        });
+        expect(early.resumed).toBe(false);
+      });
+
+      it('the SAME still-settling snapshot is trusted once it is the final attempt — the best evidence the retry budget can buy', () => {
+        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+        const stillSettling = [{ sessionId: REQUESTED, kind: 'background' }];
+        const final = resumeSucceeded({
+          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: stillSettling, agentsBefore, isFinalAttempt: true,
+        });
+        expect(final).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
+      });
+
+      it('a fork whose row appears only on the LATER (final) attempt is still caught — the early forced-false gate bought the propagation delay time to resolve', () => {
+        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+        const early = [{ sessionId: REQUESTED, kind: 'background' }]; // fork's row not visible yet
+        const late = [
+          { sessionId: REQUESTED, kind: 'background' },
+          { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // now it shows up
+        ];
+        expect(resumeSucceeded({
+          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: early, agentsBefore, isFinalAttempt: false,
+        }).resumed).toBe(false);
+        expect(resumeSucceeded({
+          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: late, agentsBefore, isFinalAttempt: true,
+        }).resumed).toBe(false);
+      });
+
+      it('omitting `isFinalAttempt` defaults to `true` — every pre-existing caller/test keeps evaluating the fallback exactly as before', () => {
+        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+        const agentsAfter = [{ sessionId: REQUESTED, kind: 'background' }];
+        expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore }).resumed)
+          .toBe(true);
+      });
+
+      it('the id-match (positive-evidence) path is UNAFFECTED by `isFinalAttempt` — it can resolve on the very first attempt', () => {
+        const agentsAfter = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+        const outcome = resumeSucceeded({
+          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, isFinalAttempt: false,
+        });
+        expect(outcome).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
+      });
+    });
   });
 });
 

@@ -273,6 +273,14 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * previously indistinguishable from an actual fork, and the two answers pull `dispatchFix` in opposite,
  * high-stakes directions. Threading the SAME pre-resume snapshot this function already captured (as
  * `agentsBefore`, for the ownership check above) costs nothing extra to read — it was already in hand.
+ *
+ * (3b) `isFinalAttempt` RIDES INTO THE SAME CALL (`#3541`, a SECOND independent review pass on this same PR,
+ * found this real before it ever shipped). The `agentsBefore` fallback answers from ABSENCE of a new session,
+ * and an early attempt cannot tell "no fork happened" apart from "a fork happened but has not propagated to
+ * the listing yet" — trusting it on attempt 1 would have reintroduced exactly the false-resume risk this whole
+ * item exists to avoid, just one call deeper. `attempt === RESUME_CONFIRM_MAX_ATTEMPTS` is passed through so
+ * the fallback only ever answers `true` once the SAME propagation window Hardening (2) already grants the
+ * id-match path has elapsed for it too.
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned
  * @param {object} [o]
  * @returns {{sessionId:string, sessionSlug:string|null, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:boolean, resumeAttempt?:object}}
@@ -346,6 +354,10 @@ export function dispatchFix(planned, {
       for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
         outcome = resumeSucceeded({
           printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll(), agentsBefore,
+          // `#3541` second review pass — the sessionId-fallback's absence-of-evidence must not be trusted on
+          // an early read (see `resumeSucceeded`'s own docblock): only the LAST attempt has given a genuine
+          // fork's row the same propagation window Hardening (2) already grants the id-match path.
+          isFinalAttempt: attempt === RESUME_CONFIRM_MAX_ATTEMPTS,
         });
         if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
         wait(RESUME_CONFIRM_WAIT_MS);

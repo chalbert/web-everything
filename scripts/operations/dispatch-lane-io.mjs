@@ -982,9 +982,26 @@ export function parseBackgroundedId(stdout) {
  * window is narrow enough that shipping this fallback is a strict improvement over today's unconditional gap,
  * without claiming to close it completely.
  * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>, agentsBefore?:Array<object>|null}} o
+ * `isFinalAttempt` GATES THE FALLBACK (second independent review pass on `#3541`, itself real): the fallback's
+ * "no new session anywhere" is an ABSENCE-of-evidence signal, and an absence read on the FIRST post-resume
+ * listing cannot tell "no fork happened" apart from "a fork happened but its row has not propagated to the
+ * listing yet" — the identical lag `dispatchFix`'s own retry loop (Hardening 2) already exists to absorb for
+ * the id-match path. Unlike the id-match branch above (a POSITIVE match — direct proof, safe to trust on
+ * attempt 1), the fallback must not resolve `true` on a read that could simply be too early: a real fork's row
+ * that has not shown up yet looks EXACTLY like a clean resume (candidate still listed, nothing new). So the
+ * fallback only ever answers `true` when `isFinalAttempt` is set — i.e. `dispatchFix`'s retry loop has already
+ * given the same {@link RESUME_CONFIRM_MAX_ATTEMPTS}-attempt, `RESUME_CONFIRM_WAIT_MS`-spaced window the
+ * id-match path gets a chance to surface the fork before the fallback trusts its absence. Every non-final call
+ * with the fallback's conditions otherwise met returns `resumed:false` — not a wrong answer, a "not proven
+ * yet" that lets the retry loop's `attempt !== MAX` continue rather than break early on it. Defaults to `true`
+ * so a caller with no retry loop of its own (a bare, one-shot use, or every existing test that predates this
+ * parameter) evaluates the fallback exactly as it did before this hardening.
+ * @param {boolean} [o.isFinalAttempt]
  * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null}}
  */
-export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter, agentsBefore = null }) {
+export function resumeSucceeded({
+  printedId, requestedSessionId, agentsAfter, agentsBefore = null, isFinalAttempt = true,
+}) {
   if (!printedId) return { resumed: false, actualSessionId: null, actualShortId: null };
   const norm = normalizeHandle(printedId);
   const after = Array.isArray(agentsAfter) ? agentsAfter : [];
@@ -1005,7 +1022,7 @@ export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter, ag
   const beforeIds = new Set(agentsBefore.map((a) => normalizeHandle(a?.sessionId)).filter(Boolean));
   const stillRequested = after.some((a) => normalizeHandle(a?.sessionId) === reqNorm);
   const noNewSession = after.every((a) => beforeIds.has(normalizeHandle(a?.sessionId)));
-  const resumed = stillRequested && noNewSession;
+  const resumed = Boolean(isFinalAttempt) && stillRequested && noNewSession;
   return { resumed, actualSessionId: resumed ? reqNorm : null, actualShortId: printedId };
 }
 

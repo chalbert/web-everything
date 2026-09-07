@@ -8,6 +8,7 @@ scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/conveyor/recon
 dateOpened: "2026-09-06"
 dateStarted: "2026-09-06"
 dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 ---
 
@@ -52,3 +53,16 @@ Proven by `we:scripts/operations/__tests__/dispatch-lane.test.mjs`'s "resumeSucc
 row is MISSING `id` (#3541)" block (unit-level, supplies a post-spawn row missing `id` directly) and
 `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`'s "#3541 hardening (3)" test (end-to-end through
 `dispatchFix`, same missing-`id` row shape).
+
+**Round 2 — a real gap the independent review found before this ever shipped.** The fallback above answers from
+ABSENCE of a new session, and the first cut let it resolve `true` on the very first post-resume listing read.
+An independent reviewer (dispatched via `we:scripts/operations/review-dispatch.mjs` against PR #1970) found that
+a genuine fork's row can simply not have propagated to that first read yet — the identical lag `dispatchFix`'s
+own Hardening (2) retry loop already exists to absorb for the `id`-match path — so a fork could look like "no
+new session, still listed" on attempt 1 and be misreported as a genuine resume: exactly the false-resume failure
+mode this item's own docblock calls catastrophic. Fixed by threading `isFinalAttempt`
+(`attempt === RESUME_CONFIRM_MAX_ATTEMPTS`) into `resumeSucceeded`: the fallback only ever answers `true` once
+the retry loop has given a fork the same propagation window the id-match path already gets, never on an early
+read. The id-match (positive-evidence) branch is unaffected and can still resolve on attempt 1. Proven by the
+"#3541 round 2" tests in both files, including one that supplies a fork whose row appears only on the LATER
+attempt and asserts `resumed` stays `false` throughout.
