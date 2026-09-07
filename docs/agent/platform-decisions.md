@@ -4253,9 +4253,9 @@ resuming its original builder is a real, separate, larger question this item doe
 `resumeSessionId` parameter defaults OFF for every existing caller and is turned on only for the new
 conflict-triggered call site.
 
-**Lineage:** ratified via `#xu2krte` (2026-09-06), filed under the background mechanical dispatcher epic `#3383`.
+**Lineage:** ratified via `#3544` (2026-09-06), filed under the background mechanical dispatcher epic `#3383`.
 Full reasoning, prior-art survey, the skeptic pass and the two-confusion screen:
-[#xu2krte](/backlog/xu2krte-automate-merge-conflict-resolution-on-parked-prs-dispatch-an/), research topic
+[#3544](/backlog/3544-automate-merge-conflict-resolution-on-parked-prs-dispatch-an/), research topic
 [parked-pr-conflict-auto-resolution](/reports/2026-09-06-parked-pr-conflict-auto-resolution-research/). Composes
 with [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (the
 one-spawn-implementation statute this item's Fork 1 and Fork 4 both implement within, not alongside).
