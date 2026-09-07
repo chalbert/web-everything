@@ -1,4 +1,5 @@
 ---
+bornAs: xgg50h1
 kind: story
 size: 3
 status: open
