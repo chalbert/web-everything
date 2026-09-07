@@ -195,7 +195,17 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       addLabel: REVIEW_LABELS.accepted,
       // Drops the human gate AND any parked/bounced state: a cleared gate-self PR must not still read as
       // awaiting review or as a live bounce. `presentRemoveLabels` narrows this superset to what the PR carries.
-      removeLabels: [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.changes],
+      // #1920 round-2 review — ALSO strips a stale `redteam:accepted`, same reasoning as `changes`/`rearm` below:
+      // that label carries no SHA marker of its own, and `clear-human` is a ROUTINE recovery ceremony that fires
+      // on a RE-PARK to `review:human` — a PR touching both an engine-tier file (earning `redteam:accepted` at
+      // some earlier head) and a declarative-leash/gate-self file (forcing the human hold) could otherwise carry
+      // that earlier sign-off straight through a later `clear-human` clearance without the independent validator
+      // ever having seen the head it is now being applied to (this is NOT the plain `accepted` target's happy
+      // path, where a fresh `redteam:accepted` and a fresh `review:accepted` are meant to be stacked together for
+      // the SAME head — `accepted` deliberately does NOT strip it, or the two verdicts could never coexist; see
+      // gate-invariants.test.mjs INVARIANT 14/15). `clear-human` instead clears an EXPLICIT hold, like a bounce,
+      // so the same "needs fresh eyes" posture applies.
+      removeLabels: [REVIEW_LABELS.human, REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted],
       keepsHuman: false,
       reason: 'gate-self CLEARED via --to=clear-human — review:human dropped, review:accepted added; drain may merge',
     };
@@ -222,7 +232,10 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       // #2832 — re-arm applies a review-hold (review:pending), so it must atomically strip ready-to-merge: a
       // held PR may never carry the go-ahead. `presentRemoveLabels` narrows this to the labels the PR actually
       // carries, so naming ready-to-merge here is a no-op when it is absent.
-      removeLabels: [REVIEW_LABELS.changes, READY_TO_MERGE_LABEL],
+      // #2412 review-fix — a re-arm hands a repaired bounce back for a fresh, independent re-review (the #2630
+      // invariant this function enforces); same reasoning as the `changes` branch below applies to any stale
+      // `redteam:accepted` the PR still carries from before the fix.
+      removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
       reason: isHuman
         ? 're-armed — review:changes→review:pending; review:human KEPT (gate-self stays human-ceremony-only)'
@@ -289,6 +302,16 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
   // (`lane-resume.mjs#land`, `pr-watch.mjs`'s `PARK_LABELS`/`isReadyToLand`, `status-board.mjs#reviewLabelOf`)
   // read raw with no accepted-first ordering of their own. `presentRemoveLabels` narrows this to labels the PR
   // actually carries, so listing `changes` unconditionally never risks an absent-label error from `gh`.
+  //
+  // DELIBERATELY DOES NOT strip `redteam:accepted` (unlike `clear-human`/`changes`/`rearm` above) — this is the
+  // one target the ordinary engine-tier happy path relies on: the independent hardened validator's
+  // `redteam:accepted` and this reviewer's `review:accepted` are meant to be STACKED for the same head
+  // (gate-invariants.test.mjs INVARIANT 14), in whichever order either sign-off lands first. Stripping it here
+  // would make the two verdicts unable to ever coexist — accepting would immediately erase whatever redteam
+  // sign-off just landed, permanently re-parking every engine-tier PR. The residual this leaves (a SILENT new
+  // commit, no bounce/re-park in between, then a plain re-accept on a now-stale `redteam:accepted`) is real but
+  // narrower and is tracked separately (`backlog/xy5uey0-…md`, needs `redteam:accepted` to earn its own
+  // SHA-marker producer, #2896) rather than fixed by blanket-stripping here.
   if (to === 'accepted') {
     return {
       allowed: true,
@@ -334,7 +357,13 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
     // #2832 — a bounce applies a review-hold (review:changes), so it must atomically strip ready-to-merge too
     // (alongside the stale pending/accepted): a held PR may never carry the go-ahead. `presentRemoveLabels`
     // narrows to what the PR actually carries, so listing ready-to-merge is a no-op when it is absent.
-    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL],
+    // #2412 review-fix (adversarial round 1, finding 3) — ALSO strips a stale `redteam:accepted`: that label
+    // carries no SHA/fingerprint of its own (unlike `review:accepted`'s `acceptanceCoversHead` apparatus — the
+    // independent validator's producer plumbing is #2896's still-open concern), so nothing else in the gate can
+    // tell a `redteam:accepted` that covers THIS diff from one left over from before a bounce sent it back for
+    // changes. A bounce is the one unambiguous "this diff is not good as-is" signal available today; leaving the
+    // old sign-off in place would let a re-accept after the fix ride on a validator verdict that never saw it.
+    removeLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
     keepsHuman: isHuman,
     reason: 'changes — author lane fixes hot-context and re-pushes',
   };
