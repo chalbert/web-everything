@@ -10,8 +10,9 @@
  *   so no caller ever re-derives the mapping.
  *
  *   • `queued-waiting-turn` — a REAL queue member, just waiting on capacity/turn. Nothing to do but wait:
- *     `overlaps lane-<n>` (a running lane, or a higher-ranked rival, owns the same scope) and `no free lane`
- *     (every lane is busy). This is the exact bucket tonight's mistake put in the wrong place.
+ *     `overlaps lane-<n>` (a running lane, or a higher-ranked rival, owns the same scope), `no free lane`
+ *     (every lane is busy), and `capacity-cap` (#xupukxa — a free lane exists, but the concurrent-lane ceiling
+ *     withheld it). This is the exact bucket tonight's mistake put in the wrong place.
  *   • `not-ready` — needs an action (or an external event) before it can ever be picked up, independent of lane
  *     capacity: `blocked`, `unshaped-no-scope`, `needs-slice`, `needs-decision`, `branch-drift-blocked`,
  *     `cleared-but-not-ready`.
@@ -58,7 +59,9 @@ export const QUEUE_REPORT_BUCKETS = Object.freeze(['queued-waiting-turn', 'not-r
 /** Held reasons that are a REAL queue member simply waiting its turn — `overlaps lane-<n>` is matched by
  *  prefix (the `<n>` varies per lease/rival), everything else here is an exact token. */
 const QUEUED_WAITING_TURN_PREFIX = 'overlaps lane-';
-const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane']);
+// `capacity-cap` (#xupukxa) joins `no free lane` here: same bucket, same "nothing to do but wait" semantics —
+// a free lane may physically exist, but the concurrent-lane ceiling is what the item is actually waiting on.
+const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap']);
 
 /** Held reasons that need an action (or an external event) before the item can ever be picked up, independent
  *  of lane capacity — see {@link ../readiness/dispatch-plan.mjs}'s own `HELD_REASONS` docblock for what each
@@ -82,7 +85,7 @@ export const STALE_NOISE_REASONS = Object.freeze(['already-done']);
  */
 export function classifyHeld(reason) {
   const r = String(reason ?? '');
-  if (r === QUEUED_WAITING_TURN_EXACT[0] || r.startsWith(QUEUED_WAITING_TURN_PREFIX)) return 'queued-waiting-turn';
+  if (QUEUED_WAITING_TURN_EXACT.includes(r) || r.startsWith(QUEUED_WAITING_TURN_PREFIX)) return 'queued-waiting-turn';
   if (NOT_READY_REASONS.includes(r)) return 'not-ready';
   if (STALE_NOISE_REASONS.includes(r)) return 'stale-noise';
   throw new Error(
