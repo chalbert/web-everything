@@ -1,6 +1,7 @@
 ---
+bornAs: xzf5v6w
 kind: decision
-parent: "x6jk877"
+parent: "3580"
 status: open
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/review-dispatch.mjs", "we:skills-src/inspect-agent-health/agent-health.mjs", "we:scripts/lib/review-independence.mjs"]
 dateOpened: "2026-09-07"
@@ -39,7 +40,7 @@ whether Codex's dispatch/session model can be trusted with anything, before bett
 
 ## Recommended sequence, stated concretely
 
-1. Land this epic's step 1 (`#x11ujy1` — pure port extraction, unblocked, no new provider).
+1. Land this epic's step 1 (`#3579` — pure port extraction, unblocked, no new provider).
 2. Let `#3371` (already filed, `blockedBy: 3370`) report its Codex-CLI probe verdict against the judge
    contract — reuse it rather than re-probing.
 3. Wire Codex as a second judge/reviewer implementation per `#3369` step 3 (opt-in, one panelist among several)

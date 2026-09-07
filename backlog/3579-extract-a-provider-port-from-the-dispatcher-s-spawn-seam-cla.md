@@ -1,7 +1,8 @@
 ---
+bornAs: x11ujy1
 kind: story
 size: 3
-parent: "x6jk877"
+parent: "3580"
 status: open
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/explore-io.mjs"]
 dateOpened: "2026-09-07"
