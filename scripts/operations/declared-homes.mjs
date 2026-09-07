@@ -110,4 +110,10 @@ export const DECLARED_HOMES = Object.freeze({
   // `scaffold`: its header counts "45 raw `backlog.mjs scaffold` calls — the single most-invoked", the largest
   // raw-verb total measured. Same file-granular shape and the same reason.
   scaffold: Object.freeze(['we:scripts/backlog.mjs scaffold']),
+
+  // `file-item` (#3383) — the FULL filing sequence a session otherwise hand-composes across TWO raw
+  // invocations: `backlog.mjs scaffold` to write the card, then the separately-remembered
+  // `conveyor/queue.mjs add` to clear it for the conveyor. Both are named here because this operation
+  // declares over both ends of that gap, not just the first.
+  'file-item': Object.freeze(['we:scripts/backlog.mjs scaffold', 'we:scripts/conveyor/queue.mjs add']),
 });
