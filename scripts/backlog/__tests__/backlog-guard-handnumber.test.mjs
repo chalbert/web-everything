@@ -1,12 +1,18 @@
-// Regression guard for the backlog-guard.mjs --pre "hand-numbered new file" DENY (#2288/#2323).
+// Regression guard for the backlog-guard.mjs --pre "hand-authored new file" DENY (#2288/#2323, widened #3383).
 //
-// New backlog items must be minted via `scaffold`, which assigns a collision-free hash id (xNNNNNN). An
-// agent that hand-authors a file with a numeric NNN- prefix via the Write tool races concurrent sessions
-// into a duplicate id. "Is this a Write that CREATES a numeric-prefixed backlog file not yet on disk?" is
-// fully script-decidable, so backlog-guard's --pre gate denies it (context-sweep, hookable-vs-judgment #51).
+// New backlog items must be minted via `scaffold` (or the `scaffold`/`file-item` declared operations), which
+// write via `fs` DIRECTLY — never via the Write/Edit tools. That is what makes "is this a Write that CREATES
+// a backlog file not yet on disk?" a clean, script-decidable signal for "this bypassed the declared path",
+// regardless of what the id looks like (context-sweep, hookable-vs-judgment #51).
 //
-// This pins behaviour by spawning the hook with synthetic PreToolUse events. An existing on-disk numeric
-// card (Edit or overwrite) and a scaffold-minted xNNNNNN file are the must-allow cases.
+// WIDENED 2026-09-06 (#3383) from numeric-only to ANY new id shape. The original rule caught only a
+// hand-picked NNN (races concurrent sessions into a duplicate id); it did NOT catch a hand-typed `xNNNNNN`
+// hash, which cannot collide the same way but is the OTHER real failure mode named live that session: every
+// item filed went through a hand-dispatched subagent with a bespoke prompt, not a declared operation. A
+// Write tool call creating ANY new backlog file — hash-prefixed or not — is, by construction, not that path.
+//
+// This pins behaviour by spawning the hook with synthetic PreToolUse events. An existing on-disk card (Edit
+// or overwrite, any id shape) is the must-allow case; ANY brand-new file via Write is now a must-deny case.
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -26,14 +32,14 @@ function runPre(tool_name, file_path, extra = {}) {
   return spawnSync('node', [HOOK, '--pre'], { input: JSON.stringify(ev), encoding: 'utf8' }).status;
 }
 
-describe('backlog-guard --pre — hand-numbered new file DENY', () => {
+describe('backlog-guard --pre — hand-authored new file DENY', () => {
   it('DENIES a Write creating a NEW numeric-NNN backlog file', () => {
     expect(runPre('Write', resolve(BACKLOG_DIR, '99999-hand-picked.md'), { content: GOOD_BODY })).toBe(2);
   });
-  it('ALLOWS a Write creating a scaffold-minted xNNNNNN file (good summary)', () => {
-    expect(runPre('Write', resolve(BACKLOG_DIR, 'xa1b2c3-minted.md'), { content: GOOD_BODY })).toBe(0);
+  it('DENIES a Write creating a NEW hash-prefixed (xNNNNNN) backlog file too (#3383) — scaffold/file-item write via fs, never this tool', () => {
+    expect(runPre('Write', resolve(BACKLOG_DIR, 'xa1b2c3-minted.md'), { content: GOOD_BODY })).toBe(2);
   });
-  it('ALLOWS an Edit of an EXISTING numeric card (not hand-numbering)', () => {
+  it('ALLOWS an Edit of an EXISTING numeric card (not hand-authoring a new one)', () => {
     expect(existing).toBeTruthy();
     expect(runPre('Edit', resolve(BACKLOG_DIR, existing), { old_string: 'x', new_string: 'x' })).toBe(0);
   });
