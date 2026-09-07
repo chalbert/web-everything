@@ -3,10 +3,11 @@ bornAs: xkvfq4a
 kind: story
 size: 3
 parent: "3443"
-status: active
+status: resolved
 scope: ["we:scripts/verify-lane.mjs", "we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/guard-bash.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-04"
 dateStarted: "2026-09-04"
+dateResolved: "2026-09-06"
 tags: []
 ---
 
