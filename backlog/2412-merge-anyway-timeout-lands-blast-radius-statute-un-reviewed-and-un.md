@@ -165,13 +165,13 @@ resolution once merged.
   and discarded this lane's duplicate (both the implementation and its tests) rather than carrying two
   competing definitions of the same export. Nothing to build; recorded here only so the duplication itself is
   legible in history.
-- **Layer 5 — already built on `main`, `#xp2rge9` (filed by this lane) is a DUPLICATE, resolved as such.** This
-  lane filed `#xp2rge9` believing Layer 5 (the required-check backstop) was still open, unaware the paragraph
+- **Layer 5 — already built on `main`, `#3546` (filed by this lane) is a DUPLICATE, resolved as such.** This
+  lane filed `#3546` believing Layer 5 (the required-check backstop) was still open, unaware the paragraph
   above had already built it (`we:scripts/check-review-gate.mjs` + `we:.github/workflows/review-gate.yml`,
   reading `REVIEW_HOLD_LABELS`). No new code was needed for Layer 4 to be covered by it either: Layer 4's park
   applies the ordinary `review:pending` label (alongside the new `awaitingIndependentValidator` flag), which is
   already one of `REVIEW_HOLD_LABELS` — so an engine-tier PR stuck awaiting `redteam:accepted` already reads
-  red on the existing required check, with zero additional work. `#xp2rge9` closed as a duplicate at rebase;
+  red on the existing required check, with zero additional work. `#3546` closed as a duplicate at rebase;
   see its own file for the resolution note.
 - Gap 1 (the statute/leash-forces-human half) was already resolved by #2425/x30jq9n before this lane started;
   confirmed via the codebase's own `#2412` cross-references before building, so this lane's scope narrowed to
@@ -203,7 +203,7 @@ resolution once merged.
      bounce, or a re-arm after one, is the one unambiguous "needs fresh eyes" signal available today). The
      no-bounce variant (a silent new commit + a later re-accept, no explicit bounce in between) is NOT closed —
      it needs `redteam:accepted` to have its own SHA-marker producer, which is #2896's still-open scope. Tracked
-     as part of #xy5uey0.
+     as part of #3547.
   3. *(documented, not fixed)* the bare `/merge` orphan-sweep path (no `--label`) never calls `decideReviewGate`
      at all — it clears on `hasUnclearedReviewLabel`, a label-only predicate with no file-diff access, so an
      engine-tier PR with only an ordinary `review:accepted` still clears there. This is the SAME class of residual
@@ -211,6 +211,6 @@ resolution once merged.
      (a pre-existing, deliberately-scoped gap, not one this item introduced) — closing it needs a new per-candidate
      file-diff fetch on a path that does not currently pay for one at all, which is a bigger, separately-reviewable
      change than folding it in here. Documented in `hasUnclearedReviewLabel`'s docblock and tracked as the other
-     half of #xy5uey0.
-  Follow-up filed: **#xy5uey0** (both residuals above, the no-bounce staleness gap blocked in spirit on #2896's
+     half of #3547.
+  Follow-up filed: **#3547** (both residuals above, the no-bounce staleness gap blocked in spirit on #2896's
   CLI-target work, the bare-sweep gap independently actionable).
