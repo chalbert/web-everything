@@ -377,7 +377,7 @@ This jury binds against the item's predicted scope and is re-checked against the
 ## Notes
 
 (0) **Duplicate, resolved as a mechanical dedup.** `we:scripts/check-standards.mjs`'s duplicate-`bornAs` gate
-flagged this card as a second mint of the same `xu2krte` hash already resolved as `we:backlog/3544-*.md`
+flagged this card as a second mint of the same `3557` hash already resolved as `we:backlog/3544-*.md`
 (ratified `#conveyor-dispatch-calls-the-declared-operation` / `#parked-pr-conflict-dispatched-not-scripted`,
 2026-09-06) — byte-identical content, differing only in resolution frontmatter. A stale hash-named copy swept
 in by a `git add -A` and numbered separately by the drain, per the gate's own diagnosis. Resolved here (never
