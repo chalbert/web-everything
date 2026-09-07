@@ -841,6 +841,49 @@ describe('parseBackgroundedId / resumeSucceeded — #xu2krte', () => {
     expect(outcome.resumed).toBe(false);
     expect(outcome.actualSessionId).toBe('some-totally-different-uuid');
   });
+
+  // #3541 — follow-up from PR #1966's independent review: harden against a post-resume listing row that omits
+  // `id` (documented as absent from `interactive` rows, never yet observed on a `background` one — see this
+  // function's own updated docblock). The fallback below needs only `sessionId`, which is present on every row.
+  describe('resumeSucceeded fallback — the post-resume row is MISSING `id` (#3541)', () => {
+    const REQUESTED = '76f44314-45cb-4e70-9fa6-eff7872ed491';
+
+    it('resumed: true — the requested session is still listed and NO new session exists anywhere, so nothing but a genuine resume explains it', () => {
+      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background', name: 'conveyor-3438' }];
+      // The post-resume row for the SAME session — this time with `id` dropped, exactly the card's scenario.
+      const agentsAfter = [{ sessionId: REQUESTED, kind: 'background', name: 'conveyor-3438' }];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore });
+      expect(outcome).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
+    });
+
+    it('resumed: false — a genuinely NEW session (not in `agentsBefore`) appeared, so a fork cannot be ruled out', () => {
+      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+      const agentsAfter = [
+        { sessionId: REQUESTED, kind: 'background' }, // the untouched original — stays listed under EITHER outcome
+        { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // never seen before → residual ambiguity
+      ];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore });
+      expect(outcome).toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
+    });
+
+    it('resumed: false — no `agentsBefore` given at all falls back to today\'s behavior, never throws', () => {
+      const agentsAfter = [{ sessionId: REQUESTED, kind: 'background' }];
+      expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter }))
+        .toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
+    });
+
+    it('the REJECTED naive fallback still does not work on its own — the requested session alone being listed is not enough without the no-new-session check', () => {
+      // Same shape as a genuine resume EXCEPT a new session also appeared — proves this isn't secretly just
+      // "is requestedSessionId listed", which the item's own origin story already found insufficient.
+      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+      const agentsAfter = [
+        { sessionId: REQUESTED, kind: 'background' },
+        { id: 'zzzzzzzz', sessionId: 'unrelated-new-session', kind: 'background' },
+      ];
+      expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore }).resumed)
+        .toBe(false);
+    });
+  });
 });
 
 // ── 6. the observer answers liveness, and refuses to invent an outcome ──────────────────────────────────────

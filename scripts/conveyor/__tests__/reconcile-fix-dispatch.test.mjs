@@ -292,6 +292,33 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(waitCalls).toBe(1); // exactly one retry was needed
   });
 
+  it('#3541 hardening (3) — a genuine resume is still confirmed when the post-resume row is MISSING `id` entirely', () => {
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
+        spawnAgent: () => 'backgrounded · candxxxx\n',
+        // Call 1 (`agentsBefore`, the pre-resume ownership check): the candidate is listed with its `id`, as
+        // always. Every call AFTER: the SAME session, still listed by `sessionId` — but this time its `id` is
+        // gone, the exact `#x3gdu12` scenario this item hardens against. Nothing NEW appears anywhere, so the
+        // `resumeSucceeded` fallback (no id needed) must still confirm the resume rather than reading the
+        // missing `id` as "not found" and calling this a fork.
+        listAgentsAll: () => [{
+          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background',
+        }],
+        resolveHead: () => MATCHING_HEAD,
+      },
+    );
+    expect(result.resumed).toBe(true);
+    expect(result.sessionId).toBe('cand-0000-0000-0000-000000000000');
+  });
+
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
     expect(() => dispatchFix(
       { itemNum: '3438', pr: 1, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 1 },

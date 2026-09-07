@@ -266,6 +266,13 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * {@link RESUME_CONFIRM_MAX_ATTEMPTS} times with a short `wait` between attempts before this function concludes
  * "not resumed" — the same shape `#3331`'s own probe methodology already used (repeat rather than trust one
  * sample), just applied at dispatch time instead of at probe time.
+ *
+ * (3) `agentsBefore` RIDES INTO `resumeSucceeded` (`#3541`, second follow-up from PR #1966's independent
+ * review). Its own docblock covers why: a `background` listing row missing `id` has never been observed live
+ * (measured twice — this file's own build and `session-reaper.mjs`'s), but the id-match failing there was
+ * previously indistinguishable from an actual fork, and the two answers pull `dispatchFix` in opposite,
+ * high-stakes directions. Threading the SAME pre-resume snapshot this function already captured (as
+ * `agentsBefore`, for the ownership check above) costs nothing extra to read — it was already in hand.
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned
  * @param {object} [o]
  * @returns {{sessionId:string, sessionSlug:string|null, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:boolean, resumeAttempt?:object}}
@@ -337,7 +344,9 @@ export function dispatchFix(planned, {
       // the strength of a single early read.
       let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
       for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
-        outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
+        outcome = resumeSucceeded({
+          printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll(), agentsBefore,
+        });
         if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
         wait(RESUME_CONFIRM_WAIT_MS);
       }

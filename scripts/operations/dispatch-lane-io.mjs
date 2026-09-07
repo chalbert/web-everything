@@ -945,19 +945,68 @@ export function parseBackgroundedId(stdout) {
  * post-spawn listing (`claude agents --json --all`, read fresh by the caller) by exact `id` match, then compares
  * THAT row's own `sessionId` against the id requested. Both sides run through {@link normalizeHandle}, matching
  * every other session-id comparison in this file.
- * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>}} o
+ *
+ * `id` ON A `background` ROW, MEASURED, TWICE (`#3541`, follow-up from PR #1966's independent review): a live
+ * `claude agents --json --all` read (CLI 2.1.263, 2026-09-06) found 259/259 `kind:'background'` rows carrying
+ * `id` and 0/4 `kind:'interactive'` rows carrying it — the same split `we:scripts/conveyor/session-reaper.mjs`'s
+ * own header measured for its domain on 2026-09-03 (204/204 vs 0/4). So the scenario this function's own
+ * `#x3gdu12` origin story worried about — a `background` row for a genuinely-resumed session silently missing
+ * `id` — has never once been observed; `listedSessionIds`'s "absent from roughly half the listing" is entirely
+ * the `interactive` half.
+ *
+ * THE FALLBACK BELOW EXISTS ANYWAY, because "never observed" is not "impossible", and the id-match branch
+ * failing does not merely mean "not resumed" — the caller (`reconcile-fix-dispatch.mjs#dispatchFix`) reads a
+ * `false` here as "the CLI forked a copy" and `claude stop`s the printed id, which is CORRECT for an actual fork
+ * and CATASTROPHIC for a genuine resume misread as one (it kills the very session that was just handed new
+ * work — strictly worse than never attempting the resume). A REJECTED FIX, recorded so it is not retried: "is
+ * `requestedSessionId` still listed at all" cannot disambiguate, because the pre-resume session stays listed
+ * under EITHER outcome — a genuine resume IS that same listing entry, and a fork leaves the untouched original
+ * still sitting there too.
+ *
+ * THE FALLBACK, when `agentsBefore` is given and the id-match found nothing: `sessionId` (unlike `id`) is
+ * present on every row of every shape (see {@link listedSessionIds}'s own docblock), so it needs no id at all.
+ * A genuine resume mints NO new session — it is the SAME session, whose `sessionId` was already present in
+ * `agentsBefore`. A fork, by construction, IS a new session under a fresh `sessionId` never listed before. So:
+ * if nothing in `agentsAfter` carries a `sessionId` that was not already in `agentsBefore` — no new session
+ * exists anywhere — and the requested session is still listed, nothing but a genuine resume explains the
+ * listing, id or no id.
+ *
+ * NOT A FULL DISAMBIGUATOR, and it does not try to be. An unrelated dispatch (a different item's build or fix)
+ * landing in the same narrow window would also introduce a "new" `sessionId` this fallback cannot tell apart
+ * from an actual fork of THIS session — so it only ever WIDENS the set of things read as "not resumed", never
+ * narrows it. That residual failure mode is a false stop, which is the direction `dispatchFix` already accepts
+ * on ambiguity: a false stop costs a wasted resume attempt and a redundant fresh dispatch, but the fix still
+ * gets done; a false resume would report success while the real work silently never happens (the untouched
+ * candidate never sees the new prompt) and leave an unmanaged forked session running unstopped. Compounding a
+ * missing `id` (never yet observed) with a genuinely concurrent unrelated dispatch in the same sub-second retry
+ * window is narrow enough that shipping this fallback is a strict improvement over today's unconditional gap,
+ * without claiming to close it completely.
+ * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>, agentsBefore?:Array<object>|null}} o
  * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null}}
  */
-export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) {
+export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter, agentsBefore = null }) {
   if (!printedId) return { resumed: false, actualSessionId: null, actualShortId: null };
   const norm = normalizeHandle(printedId);
-  const row = (Array.isArray(agentsAfter) ? agentsAfter : []).find((a) => normalizeHandle(a?.id) === norm);
-  const actualSessionId = row ? normalizeHandle(row.sessionId) || null : null;
-  return {
-    resumed: Boolean(actualSessionId) && actualSessionId === normalizeHandle(requestedSessionId),
-    actualSessionId,
-    actualShortId: printedId,
-  };
+  const after = Array.isArray(agentsAfter) ? agentsAfter : [];
+  const row = after.find((a) => normalizeHandle(a?.id) === norm);
+  if (row) {
+    const actualSessionId = normalizeHandle(row.sessionId) || null;
+    return {
+      resumed: Boolean(actualSessionId) && actualSessionId === normalizeHandle(requestedSessionId),
+      actualSessionId,
+      actualShortId: printedId,
+    };
+  }
+
+  // THE FALLBACK — see the docblock above. Only reachable when the id-match found no row at all, and only
+  // usable when the caller actually has a pre-resume snapshot to diff against.
+  if (!Array.isArray(agentsBefore)) return { resumed: false, actualSessionId: null, actualShortId: printedId };
+  const reqNorm = normalizeHandle(requestedSessionId);
+  const beforeIds = new Set(agentsBefore.map((a) => normalizeHandle(a?.sessionId)).filter(Boolean));
+  const stillRequested = after.some((a) => normalizeHandle(a?.sessionId) === reqNorm);
+  const noNewSession = after.every((a) => beforeIds.has(normalizeHandle(a?.sessionId)));
+  const resumed = stillRequested && noNewSession;
+  return { resumed, actualSessionId: resumed ? reqNorm : null, actualShortId: printedId };
 }
 
 /**
