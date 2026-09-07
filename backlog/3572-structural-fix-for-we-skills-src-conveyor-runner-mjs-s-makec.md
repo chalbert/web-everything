@@ -2,8 +2,12 @@
 bornAs: x4dx7f2
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+codifiedIn: one-off
+preparedDate: "2026-09-07"
 tags: [infra, conveyor, contention, decision]
 ---
 
@@ -15,6 +19,30 @@ Fork — structural options to reduce how often new work has to touch this one f
 
 Recommended default: (a) — it's the only option that actually reduces the collision surface (most new passes add a file elsewhere, not a we:skills-src/conveyor/runner.mjs edit) rather than just shrinking or automating around it, and it reuses a pattern (self-contained pass file + sweep verb) already proven safe by every sibling watch this function calls. (b) is a reasonable lower-effort interim step if (a) is judged too large a refactor to prioritize now. Existing test we:scripts/conveyor/__tests__ coverage asserting the exact mechanical-pass set (we:backlog/3501-assert-the-exact-mechanical-pass-set-makeclimechanicalpasses.md) would need updating under either (a) or (b) — flagged, not a blocker.
 
+**Ratified as (a): plugin/registry pattern — 2026-09-07, ratified by the operator (Nicolas Gilbert).** we:skills-src/conveyor/runner.mjs's makeCliMechanicalPasses moves from a hardcoded sequence of runQuiet(...) calls to iterating a declared, ordered registry of pass descriptors; a new simple pass adds one descriptor entry to the registry file and never touches we:skills-src/conveyor/runner.mjs's body. codifiedIn: one-off — this ruling is scoped to one file's internal structure, not a reusable cross-cutting platform rule.
+
+**Landing-target correction, checked before this item was resolved.** The operator's framing assumed we:skills-src/conveyor/runner.mjs "hasn't graduated to main yet" and that this build belongs on origin/lane/mechanical-dispatcher per mechanical-delivery-doctrine rule 4. Checked directly against both branches: makeCliMechanicalPasses already lives on main today — main's copy of we:skills-src/conveyor/runner.mjs is exactly the 485 lines this card's own opening paragraph cites, and `git log --since='14 days ago' -- we:skills-src/conveyor/runner.mjs` on main alone already shows the same 9-commits-in-14-days hotspot pattern the card describes. origin/lane/mechanical-dispatcher carries a LATER, larger copy (727 lines, dispatchPass/bookkeepingForDispatch and inlined review-dispatch logic not yet on main), but that is a different, additional divergence — not evidence the base function itself is prototype-only. Rule 4's own text is explicit that it "does NOT cover fixing code that already lives on main, even when the [issue] was noticed while running the prototype — that always takes the full pipeline." **This build therefore lands on main, through the normal lane → PR → independent-review pipeline, not a direct push to origin/lane/mechanical-dispatcher.** (Build-time note: once this lands on main, origin/lane/mechanical-dispatcher's own copy will need the same registry migration applied during its own eventual graduation/reconciliation — tracked there, not blocking this item.)
+
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+This ruling's own Done-when is the follow-on build item it authorizes: **we:backlog/x2zlc42-registry-plugin-refactor-of-makeclimechanicalpasses.md** ("Registry/plugin refactor of makeCliMechanicalPasses" — filed alongside this resolve, parent: "3572"; a JIT-numbered `#NNN` is assigned when it lands, per this repo's own drain convention), carrying the concrete spec below as its own executable Done-when. Restated here so the ruling is self-contained:
+
+1. **Registry shape.** New we:skills-src/conveyor/passes/registry.mjs exports MECHANICAL_PASSES, an ORDERED array of descriptors, one of two shapes:
+   - `{ name, kind: 'script', modulePath, args? }` — dispatched through the existing runQuiet(modulePath, args) subprocess helper (unchanged: same execFileSync('node', […]) shape, same --repo= threading, same best-effort try/catch + summarizeMechanicalPassError log line).
+   - `{ name, kind: 'inline', run: (ctx) => Promise<void> }` — for a pass whose control flow is more than one subprocess call; run owns its OWN try/catch + process.stderr.write logging, carried over verbatim from today's code (never unified into a generic wrapper — each inline pass's existing log label is preserved byte-for-byte).
+   - ctx passed to every run(...): `{ scriptsDir, repo, out, hiccupSession, execFileSync, runQuiet }`.
+2. **Migration — all 9 current passes move into the registry, same order, zero behavior change:**
+   - script kind (6): we:scripts/conveyor/infra-blocked.mjs retry, we:scripts/conveyor/lease-reaper.mjs, we:scripts/conveyor/session-reaper.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs, we:scripts/conveyor/branch-drift.mjs sweep, we:scripts/conveyor/parked-pr-conflict-watch.mjs sweep, we:scripts/conveyor/duplicate-pr-watch.mjs sweep — each becomes one plain-data descriptor object in we:skills-src/conveyor/passes/registry.mjs; none of these scripts' own internal logic changes.
+   - inline kind (2): the review-reconcile dispatch block (today's we:scripts/conveyor/reconcile-pass.mjs --json call + the per-PR we:scripts/operations/review-dispatch.mjs / we:scripts/conveyor/review-round-tag.mjs / we:scripts/conveyor/review-status-tag.mjs orchestration) moves verbatim into a new we:skills-src/conveyor/passes/review-reconcile-pass.mjs (export async function runReviewReconcilePass(ctx)); the hiccup-sink block moves verbatim into a new we:skills-src/conveyor/passes/hiccup-sink-pass.mjs (export async function runHiccupSinkPass(ctx)). Neither pass's internal logic is rewritten — only relocated and wired as `{ name, kind: 'inline', run }` entries.
+   - we:skills-src/conveyor/runner.mjs#makeCliMechanicalPasses shrinks to a generic loop over MECHANICAL_PASSES (runQuiet(pass.modulePath, pass.args||[]) for script, await pass.run(ctx) for inline) — this loop is the only code left in we:skills-src/conveyor/runner.mjs for this concern; it does not change again when a new simple pass is added.
+   - New-pass recipe going forward: add one descriptor object to we:skills-src/conveyor/passes/registry.mjs's array (+ the pass's own new file under we:scripts/conveyor/, following the existing sweep-verb convention) — zero-line diff to we:skills-src/conveyor/runner.mjs.
+3. **Test coverage — folds in and updates we:backlog/3501-assert-the-exact-mechanical-pass-set-makeclimechanicalpasses.md's guarantee, not a dangling flag:**
+   - New we:skills-src/conveyor/passes/__tests__/registry.test.mjs: asserts MECHANICAL_PASSES' exact ordered `{name, kind, modulePath, args}` shape — the new, direct, no-subprocess-mocking version of "assert the exact mechanical-pass set"; a future add/drop/reorder reddens this test by construction.
+   - we:skills-src/conveyor/__tests__/runner.test.mjs's existing "invokes the exact set of mechanical passes, in order, every tick" test (the one #3501/xb4fjir added) is KEPT with its assertion unchanged (same ordered execFileSync call list) — it is now the black-box integration proof that the loop wires the registry correctly end-to-end. Only its explanatory comment (which currently says "delete/reorder/rename a runQuiet(...) line above") is corrected to describe mutating MECHANICAL_PASSES instead.
+   - The existing "review-reconcile dispatch block never advances review-round on a failed dispatch" describe block moves to a new we:skills-src/conveyor/passes/__tests__/review-reconcile-pass.test.mjs, calling runReviewReconcilePass(ctx) directly with the same mocked execFileSync and the same assertions.
+   - we:backlog/3501-assert-the-exact-mechanical-pass-set-makeclimechanicalpasses.md itself stays resolved as-is (not reopened) — its guarantee is re-proven by the two points above, not merely asserted.
+4. **Executable:**
+   - `npx vitest run we:skills-src/conveyor/__tests__/runner.test.mjs we:skills-src/conveyor/passes/__tests__/*.test.mjs` passes.
+   - Mutation proof (same convention #3501 used): temporarily deleting one entry from MECHANICAL_PASSES reddens BOTH the new registry test and the black-box execFileSync-call-list test in we:skills-src/conveyor/__tests__/runner.test.mjs; verified by hand during the build, then reverted before commit.
+   - `npm run check:standards` stays green.
+   - Live-diff proof: adding one throwaway no-op script-kind descriptor to we:skills-src/conveyor/passes/registry.mjs (then reverting it) touches only that file — zero-line diff to we:skills-src/conveyor/runner.mjs — confirmed by hand during the build.
