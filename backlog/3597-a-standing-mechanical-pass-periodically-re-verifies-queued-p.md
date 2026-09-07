@@ -1,4 +1,5 @@
 ---
+bornAs: xrtows9
 kind: story
 size: 5
 parent: "3383"
@@ -136,7 +137,7 @@ sibling #2803).
 
 - `we:backlog/3108-story-preparation-gets-its-own-staleness-signature-prepareda.md` — the un-built primitive
   this item schedules: `preparedAgainstSha` + `we:scripts/readiness/prep-staleness.mjs`'s `checkPrepStaleness`.
-  Confirmed unbuilt (`we:scripts/readiness/prep-staleness.mjs` not found on disk; no PR/branch for `x8t2w4w`/
+  Confirmed unbuilt (`we:scripts/readiness/prep-staleness.mjs` not found on disk; no PR/branch for `3108`/
   `#3108` beyond its own independent-review commit).
 - `we:backlog/3305-a-backlog-card-cites-a-path-line-and-the-cited-line-no-longe.md` — the citation-drift sibling
   this item deliberately does not duplicate. Confirmed unbuilt (no citation-check hits in
