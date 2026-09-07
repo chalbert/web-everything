@@ -78,7 +78,7 @@ export function fixBriefPath(root = REPO_ROOT) {
 }
 
 /** we:scripts/conveyor/reconcile-fix-dispatch.mjs#RESUME_CONFIRM_MAX_ATTEMPTS — hardening (2) from the
- *  independent review of PR #1966 (`#xu2krte`): how many times `dispatchFix` re-reads `claude agents --json
+ *  independent review of PR #1966 (`#xu2krte`): how many times `tryResumeFix` re-reads `claude agents --json
  *  --all` after a resume attempt before concluding it did not resume. `#3331`'s own research documents the
  *  listing can lag the CLI's real state; one immediate read is not enough to tell "the listing is stale" apart
  *  from "the resume genuinely forked". 3 total reads (1 immediate + 2 retries) at a short interval is enough to
@@ -132,12 +132,12 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems) {
     // #xu2krte Fork 1 — a `fix` dispatch caused by the parked-PR conflict watch still carries the
     // `merge-status:conflicting` label at this point (it self-clears only once the conflict resolves, which a
     // just-detected fresh bounce has not done yet). ONLY this population is offered resume-preference in
-    // `dispatchFix` below; an ordinary reviewer-finding bounce never carries this label and dispatches exactly
+    // `tryResumeFix` below; an ordinary reviewer-finding bounce never carries this label and dispatches exactly
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
       itemNum, pr, laneRef: headRefName, scope: item.scope, isConflict, body: entry.body ?? null,
-      // #xu2krte security review finding — needed by `dispatchFix` to confirm a resume CANDIDATE actually
+      // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
     });
@@ -218,23 +218,28 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
 }
 
 /**
- * we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix — DISPATCH ONE FIX AGENT for one planned entry.
- * Mirrors `we:scripts/operations/review-dispatch.mjs#dispatchReview`'s own composition (plan → fill → mint a
- * fresh session id → spawn), reusing `dispatch-lane.mjs`'s real fill/dispatch primitives rather than this file's
- * own copies.
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#tryResumeFix — `#xu2krte` Fork 1: RESUME-OR-NOTHING, gated to
+ * `planned.isConflict` ONLY, and — `#xazl9u3` — DELIBERATELY LANE-FREE. This is the resume-candidate check
+ * itself, not a peek at one: it is the whole reason {@link runReconcileFixDispatch} can afford to check "will
+ * this entry actually need a lane" BEFORE ever popping one from the free-lane pool. A conflict-caused bounce
+ * that successfully resumes its original session uses NO lane at all — the original bug (#xazl9u3, filed
+ * against PR #1966's own independent review) was that `runReconcileFixDispatch` popped a lane for EVERY planned
+ * fix regardless, including this one, wasting it for nothing whenever a resume succeeded. Calling this function
+ * first, and only falling through to a real `dispatchFix` (which DOES need a lane) when it reports `resumed:
+ * false`, is the fix: a successful resume never removes a lane number from the pool in the first place.
  *
- * `#xu2krte` FORK 1 — RESUME-OR-FRESH, gated to `planned.isConflict` ONLY. When the planned entry is a
- * conflict-caused bounce (Fork 2/4's `merge-status:conflicting` label still present at plan time) AND
- * {@link findResumeCandidate} finds a still-listed original-builder session, this attempts
- * `buildAgentArgv({resumeSessionId})` FIRST — a bare `claude --bg --resume <id>` with no other flag, per that
+ * When the planned entry is a conflict-caused bounce (Fork 2/4's `merge-status:conflicting` label still present
+ * at plan time) AND {@link findResumeCandidate} finds a still-listed original-builder session, this attempts
+ * `buildAgentArgv({resumeSessionId})` — a bare `claude --bg --resume <id>` with no other flag, per that
  * function's own docblock and the live build-time probe backing it
  * (`docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted`). The outcome is checked
  * against a FRESH `claude agents --json --all` read ({@link resumeSucceeded}): a genuine resume returns
  * immediately (the resumed session already has the new work); anything else (the CLI forked a copy — observed
  * both when the original session was still "already running" per its own bookkeeping, and whenever the request
  * carried any flag besides `--resume`, though this call passes none) gets its accidental copy `claude stop`-ped
- * ({@link stopSession} — never a bare `kill`, per `#3383`'s own hard-won lesson) and falls through to the SAME
- * fresh-dispatch path every other (non-conflict) caller already takes, unconditionally, below.
+ * ({@link stopSession} — never a bare `kill`, per `#3383`'s own hard-won lesson), and the caller falls through
+ * to a fresh dispatch (which DOES pop a lane) exactly as every other (non-conflict, or non-resumable) entry
+ * already does.
  *
  * TWO HARDENINGS ADDED BY THE INDEPENDENT REVIEW OF PR #1966 (both real, both fixed here rather than merely
  * filed, because both sit on this exact security/correctness-critical dispatch surface):
@@ -266,95 +271,119 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * {@link RESUME_CONFIRM_MAX_ATTEMPTS} times with a short `wait` between attempts before this function concludes
  * "not resumed" — the same shape `#3331`'s own probe methodology already used (repeat rather than trust one
  * sample), just applied at dispatch time instead of at probe time.
- * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned
+ * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned -
+ *   NOTE: deliberately no `lane` field — this runs before one is ever assigned.
  * @param {object} [o]
- * @returns {{sessionId:string, sessionSlug:string|null, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:boolean, resumeAttempt?:object}}
+ * @returns {{resumed:boolean, result?:{sessionId:string, sessionSlug:null, pr:number, itemNum:string, lane:null, unknownTokens:string[], resumed:true}, resumeAttempt?:object|null}}
  */
-export function dispatchFix(planned, {
+export function tryResumeFix(planned, {
   root = REPO_ROOT,
-  readBrief = (r) => readFileSync(fixBriefPath(r), 'utf8'),
-  mintSessionId = () => randomUUID(),
   spawnAgent = defaultSpawnAgent,
   listAgentsAll = () => defaultListAgents({ all: true }),
   stop = stopSession,
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
-  extraArgs = [],
 } = {}) {
   assertNotALaneCheckout(root);
+  if (!planned.isConflict) return { resumed: false, resumeAttempt: null };
 
-  // #xu2krte Fork 1 — the resume attempt happens BEFORE the full fix-agent-brief is ever filled: a resumed
-  // session is not being handed a fresh assignment (it would re-run the brief's own step 1, "acquire a lane",
-  // over the checkout it is already sitting in), it is being told about ONE new fact in the context it already
-  // holds. {@link buildResumePrompt} is deliberately short for exactly that reason.
-  let resumeAttempt = null;
-  if (planned.isConflict) {
-    const agentsBefore = listAgentsAll();
-    const candidate = findResumeCandidate({ body: planned.body, agentsAll: agentsBefore });
-    const candidateRow = candidate
-      ? agentsBefore.find((a) => normalizeHandle(a?.sessionId) === normalizeHandle(candidate))
-      : null;
-    // Hardening (1) — see the docblock above. TWO INDEPENDENT signals, both required, mirroring
-    // `reconcile-core.mjs#bindAgents`'s own "union of weak proxies raises confidence; either one ALONE does
-    // not" discipline for the identical binding question ("is this session really working THIS pr"):
-    //   (a) HEAD-SHA — the candidate's real checkout HEAD must equal the PR's own `headRefOid`.
-    //   (b) NAME — the candidate's OWN session name (assigned by whichever dispatcher started it — never
-    //       attacker-controlled via a PR-body edit) must be one of the names THIS pr's own original builder
-    //       could legitimately carry: `conveyor-<itemNum>` (an ordinary build dispatch) or `fix-<pr>` (a prior
-    //       fix-dispatch being resumed again).
-    // (a) alone is not enough: PR #1966's own review found two DIFFERENT lanes/PRs can share an identical HEAD
-    // commit (e.g. a lane freshly branched from another lane's tip, before either advances) — the SAME sha
-    // does not imply the SAME pr. (b) alone is not enough either (a name is a weaker proxy than a sha, per
-    // `bindAgents`'s own docblock). Requiring BOTH closes the gap either check leaves open alone, without a
-    // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
-    const candidateCwd = candidateRow?.cwd || null;
-    const candidateHead = candidate && candidateCwd ? resolveHead(candidateCwd) : null;
-    const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix')]);
-    const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
-    const headConfirmed = Boolean(candidate && planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
-    const ownershipConfirmed = headConfirmed && nameConfirmed;
-    if (candidate && !ownershipConfirmed) {
-      resumeAttempt = {
+  const agentsBefore = listAgentsAll();
+  const candidate = findResumeCandidate({ body: planned.body, agentsAll: agentsBefore });
+  if (!candidate) return { resumed: false, resumeAttempt: null };
+
+  const candidateRow = agentsBefore.find((a) => normalizeHandle(a?.sessionId) === normalizeHandle(candidate));
+  // Hardening (1) — see the docblock above. TWO INDEPENDENT signals, both required, mirroring
+  // `reconcile-core.mjs#bindAgents`'s own "union of weak proxies raises confidence; either one ALONE does
+  // not" discipline for the identical binding question ("is this session really working THIS pr"):
+  //   (a) HEAD-SHA — the candidate's real checkout HEAD must equal the PR's own `headRefOid`.
+  //   (b) NAME — the candidate's OWN session name (assigned by whichever dispatcher started it — never
+  //       attacker-controlled via a PR-body edit) must be one of the names THIS pr's own original builder
+  //       could legitimately carry: `conveyor-<itemNum>` (an ordinary build dispatch) or `fix-<pr>` (a prior
+  //       fix-dispatch being resumed again).
+  // (a) alone is not enough: PR #1966's own review found two DIFFERENT lanes/PRs can share an identical HEAD
+  // commit (e.g. a lane freshly branched from another lane's tip, before either advances) — the SAME sha
+  // does not imply the SAME pr. (b) alone is not enough either (a name is a weaker proxy than a sha, per
+  // `bindAgents`'s own docblock). Requiring BOTH closes the gap either check leaves open alone, without a
+  // heavier mechanism (branch tracking, a lane-registry read) this file does not otherwise need.
+  const candidateCwd = candidateRow?.cwd || null;
+  const candidateHead = candidateCwd ? resolveHead(candidateCwd) : null;
+  const expectedNames = new Set([sessionSlugFor(planned.itemNum, 'build'), sessionSlugFor(planned.pr, 'fix')]);
+  const nameConfirmed = Boolean(candidateRow?.name && expectedNames.has(candidateRow.name));
+  const headConfirmed = Boolean(planned.headRefOid && candidateHead && candidateHead === planned.headRefOid);
+  const ownershipConfirmed = headConfirmed && nameConfirmed;
+  if (!ownershipConfirmed) {
+    return {
+      resumed: false,
+      resumeAttempt: {
         attempted: false, candidate, forked: false,
         refused: 'ownership-unconfirmed',
         why: `candidate session ownership not confirmed for PR #${planned.pr} — head match: ${headConfirmed} `
           + `(candidate ${candidateHead ?? 'unresolved'} vs pr ${planned.headRefOid ?? 'unknown'}), name match: `
           + `${nameConfirmed} (candidate ${JSON.stringify(candidateRow?.name ?? null)} not in `
           + `${JSON.stringify([...expectedNames])}) — refusing to trust an editable PR-body stamp alone`,
-      };
-    } else if (ownershipConfirmed) {
-      const resumeArgv = buildAgentArgv({
-        payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
-        resumeSessionId: candidate,
-      });
-      let stdout = '';
-      try { stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? ''); } catch { stdout = ''; }
-      const printedId = parseBackgroundedId(stdout);
-
-      // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
-      // fresh `claude agents --json --all` read, so a listing that lags the CLI's real state by one tick still
-      // resolves correctly on the next attempt, without ever risking stopping a genuinely resumed session on
-      // the strength of a single early read.
-      let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
-      for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
-        outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
-        if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
-        wait(RESUME_CONFIRM_WAIT_MS);
-      }
-      if (outcome.resumed) {
-        return {
-          sessionId: candidate, sessionSlug: null, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
-          unknownTokens: [], resumed: true,
-        };
-      }
-      // NOT a genuine resume: `resumeSucceeded` only answers true when a fresh listing confirms the requested
-      // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
-      // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
-      // construction did not reach) and fall through to a fresh dispatch below.
-      if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
-      resumeAttempt = { attempted: true, candidate, forked: Boolean(printedId) };
-    }
+      },
+    };
   }
+
+  const resumeArgv = buildAgentArgv({
+    payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
+    resumeSessionId: candidate,
+  });
+  let stdout = '';
+  try { stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? ''); } catch { stdout = ''; }
+  const printedId = parseBackgroundedId(stdout);
+
+  // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
+  // fresh `claude agents --json --all` read, so a listing that lags the CLI's real state by one tick still
+  // resolves correctly on the next attempt, without ever risking stopping a genuinely resumed session on
+  // the strength of a single early read.
+  let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
+  for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
+    outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
+    if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
+    wait(RESUME_CONFIRM_WAIT_MS);
+  }
+  if (outcome.resumed) {
+    return {
+      resumed: true,
+      result: {
+        sessionId: candidate, sessionSlug: null, pr: planned.pr, itemNum: planned.itemNum, lane: null,
+        unknownTokens: [], resumed: true,
+      },
+    };
+  }
+  // NOT a genuine resume: `resumeSucceeded` only answers true when a fresh listing confirms the requested
+  // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
+  // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
+  // construction did not reach) and fall through to a fresh dispatch, which the caller performs (and which
+  // is the first point a lane is ever popped for this entry).
+  if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
+  return { resumed: false, resumeAttempt: { attempted: true, candidate, forked: Boolean(printedId) } };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix — DISPATCH ONE FRESH FIX AGENT for one planned
+ * entry that either isn't a conflict-caused resume candidate, or whose {@link tryResumeFix} attempt did not
+ * resume. Mirrors `we:scripts/operations/review-dispatch.mjs#dispatchReview`'s own composition (plan → fill →
+ * mint a fresh session id → spawn), reusing `dispatch-lane.mjs`'s real fill/dispatch primitives rather than this
+ * file's own copies. Requires `planned.lane` — the caller ({@link runReconcileFixDispatch}) only calls this
+ * AFTER popping one from the free-lane pool, which by construction only happens once {@link tryResumeFix} (when
+ * relevant) has already reported `resumed: false` — see that function's own `#xazl9u3` docblock for why.
+ * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
+ * @param {object} [o]
+ * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
+ *   entry, purely for reporting on the returned result (this function never attempts a resume itself).
+ * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
+ */
+export function dispatchFix(planned, {
+  root = REPO_ROOT,
+  readBrief = (r) => readFileSync(fixBriefPath(r), 'utf8'),
+  mintSessionId = () => randomUUID(),
+  spawnAgent = defaultSpawnAgent,
+  extraArgs = [],
+  resumeAttempt = null,
+} = {}) {
+  assertNotALaneCheckout(root);
 
   const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr);
   const { prompt, unknownTokens } = fillBrief(readBrief(root), {
@@ -377,10 +406,21 @@ export function dispatchFix(planned, {
 /**
  * we:scripts/conveyor/reconcile-fix-dispatch.mjs#runReconcileFixDispatch — the WHOLE pass: read
  * `reconcile-pass.mjs`'s plan (reused, not re-run by hand), narrow it to dispatchable fixes
- * ({@link planFixesFromReconcile}), assign each a currently-free lane, and dispatch. Read-then-act, exactly like
- * its siblings; a failure dispatching ONE entry is reported and does not stop the rest.
+ * ({@link planFixesFromReconcile}), and for each — `#xazl9u3` — try a lane-free resume FIRST, only assigning a
+ * currently-free lane and running a full fresh dispatch when that resume attempt does not pan out. Read-then-
+ * act, exactly like its siblings; a failure dispatching ONE entry is reported and does not stop the rest.
+ *
+ * `#xazl9u3` — WHY THE ORDER MATTERS. The bug this fixed: this loop used to pop a lane for EVERY planned entry
+ * unconditionally, before ever asking whether the entry would actually use one — including a conflict-caused
+ * entry that goes on to resume its original session and touches no lane at all. In a tick where free lanes are
+ * scarce, that wasted one for nothing (self-correcting next tick, since {@link freeLaneNumbers} re-reads the
+ * pool fresh, but still a real waste in the meantime). Calling {@link tryResumeFix} BEFORE `lanes.shift()` means
+ * a successful resume returns straight into `dispatched` and `continue`s to the next entry having never touched
+ * `lanes` — the pool is left exactly as {@link pickFreeLanes} produced it for every entry that resolves via
+ * resume.
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.
+ * @param {Function} [o.tryResume] - injectable, defaults to the real {@link tryResumeFix}.
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
  */
 export function runReconcileFixDispatch({
@@ -389,6 +429,7 @@ export function runReconcileFixDispatch({
   findItemFn = findItem,
   loadItems = () => defaultLoadItems(root),
   pickFreeLanes = () => freeLaneNumbers({ root }),
+  tryResume = tryResumeFix,
   dispatch = dispatchFix,
   reconcile = runReconcilePass,
   checkStaleness,
@@ -400,13 +441,40 @@ export function runReconcileFixDispatch({
   const lanes = [...pickFreeLanes()];
   const dispatched = [];
   for (const entry of planned) {
+    // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
+    // is even eligible (tryResumeFix itself returns `resumed: false, resumeAttempt: null` immediately for any
+    // other kind, at no lane cost either way).
+    //
+    // PR #1972 review finding (correctness) — this call must be its OWN try/catch, isolated from the
+    // dispatch try/catch below: `tryResumeFix` does real IO (`claude agents --json --all`, a real `git
+    // rev-parse HEAD` via `resolveHead`) the file's own docblocks already document as a real observed source
+    // of flakiness (#3331's listing lag). Left unguarded, a throw here would abort the WHOLE pass (every
+    // OTHER planned entry in this tick, including unrelated ordinary dispatches that would have succeeded)
+    // rather than refusing just this one entry — the same per-entry isolation `dispatch(...)` below already
+    // gets, now extended to cover this earlier call site too.
+    let resumeAttempt = null;
+    if (entry.isConflict) {
+      let attempt;
+      try {
+        attempt = tryResume(entry, { root });
+      } catch (e) {
+        refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
+        continue;
+      }
+      if (attempt.resumed) {
+        dispatched.push(attempt.result);
+        continue; // no lane ever popped for this entry
+      }
+      resumeAttempt = attempt.resumeAttempt;
+    }
+
     if (lanes.length === 0) {
       refusals.push({ pr: entry.pr, kind: 'no-lane', why: `no free lane to dispatch a fix agent for PR #${entry.pr}` });
       continue;
     }
     const lane = lanes.shift();
     try {
-      dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv() }));
+      dispatched.push(dispatch({ ...entry, lane }, { root, extraArgs: agentArgsFromEnv(), resumeAttempt }));
     } catch (e) {
       refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
     }
@@ -435,7 +503,10 @@ if (IS_CLI) {
     process.stdout.write(JSON.stringify(result) + '\n');
   } else {
     const lines = [`reconcile-fix-dispatch — ${result.dispatched.length} dispatched, ${result.refusals.length} refusal(s)`];
-    for (const d of result.dispatched) lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — session ${d.sessionId} (${d.sessionSlug}), lane-${d.lane}`);
+    for (const d of result.dispatched) {
+      const laneInfo = d.resumed ? 'no lane (resumed)' : `lane-${d.lane}`;
+      lines.push(`  → fix    PR #${d.pr} (item #${d.itemNum}) — session ${d.sessionId} (${d.sessionSlug}), ${laneInfo}`);
+    }
     for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
     process.stdout.write(lines.join('\n') + '\n');
   }

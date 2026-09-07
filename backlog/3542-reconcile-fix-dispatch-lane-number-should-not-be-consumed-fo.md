@@ -3,9 +3,11 @@ bornAs: xazl9u3
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs"]
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
 tags: []
 ---
 

@@ -48,7 +48,7 @@ import {
 } from '../parked-pr-conflict-watch.mjs';
 import { RECONCILE_FINDING_BANNER, buildReconcileFindingBody } from '../reconcile-finding.mjs';
 import { planReconcile } from '../reconcile-core.mjs';
-import { planFixesFromReconcile, dispatchFix } from '../reconcile-fix-dispatch.mjs';
+import { planFixesFromReconcile, dispatchFix, tryResumeFix } from '../reconcile-fix-dispatch.mjs';
 
 const FIX_BRIEF_STUB = [
   '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}})',
@@ -143,8 +143,8 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     }]);
   });
 
-  it('END TO END — a conflict-caused dispatch with a LIVE, listed original-builder session genuinely RESUMES it (real spawnAgent/listAgentsAll/stop, fake-cost-nothing CLI)', async () => {
-    // `root` must be a REAL, existing directory whose last path segment is not `lane-<N>` (dispatchFix's own
+  it('END TO END — a conflict-caused entry with a LIVE, listed original-builder session genuinely RESUMES it, with NO lane ever involved (real spawnAgent/listAgentsAll/stop, fake-cost-nothing CLI)', async () => {
+    // `root` must be a REAL, existing directory whose last path segment is not `lane-<N>` (tryResumeFix's own
     // `assertNotALaneCheckout` guard) — `withRealRepo`'s fixture root satisfies both, and doubles as "the
     // checkout the fix agent would actually be dispatched into".
     await withRealRepo(async ({ root, head }) => {
@@ -162,24 +162,24 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
         expect(listedBefore.some((a) => a.sessionId === originalSessionId)).toBe(true);
 
         const authorMarker = buildAuthorActorMarker(originalSessionId);
+        // #xazl9u3 — deliberately NO `lane` field: `tryResumeFix` runs BEFORE any lane is ever popped from the
+        // free-lane pool, so a planned entry at this stage never carries one.
         const planned = {
           itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture',
-          scope: ['we:scripts/example-conflicting-module.mjs'], lane: 12,
+          scope: ['we:scripts/example-conflicting-module.mjs'],
           isConflict: true, body: `Original PR description.\n\n${authorMarker}\n`,
           // The REAL fixture repo's own current HEAD — proving the security-hardening ownership check
-          // (`resolveLaneHead` against `planned.headRefOid`) with NO stub: `dispatchFix`'s default `resolveHead`
+          // (`resolveLaneHead` against `planned.headRefOid`) with NO stub: `tryResumeFix`'s default `resolveHead`
           // runs a genuine `git -C <cwd> rev-parse HEAD` against `root` and must find this exact value.
           headRefOid: head(),
         };
 
-        // `dispatchFix` itself calls `listAgentsAll()` again AFTER the resume spawn (to confirm the outcome),
+        // `tryResumeFix` itself calls `listAgentsAll()` again AFTER the resume spawn (to confirm the outcome),
         // so `fake.lastArgv()` by the time it RETURNS would read that follow-up `agents` call, not the spawn.
         // Captured here instead, at the moment it happens.
         let resumeArgvSeen = null;
-        const result = dispatchFix(planned, {
+        const attempt = tryResumeFix(planned, {
           root,
-          readBrief: () => FIX_BRIEF_STUB,
-          mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
           spawnAgent: (argv, opts) => { resumeArgvSeen = argv; return defaultSpawnAgent(argv, { ...opts, env }); },
           listAgentsAll: () => defaultListAgents({ env, all: true }),
           // resolveHead is NOT injected here — the REAL default (`resolveLaneHead`, a genuine `git -C <cwd>
@@ -189,8 +189,9 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
           stop: ({ handle }) => stopSession({ handle, exec: (cmd, a, o) => execFileSync(cmd, a, { ...o, env }) }),
         });
 
-        expect(result.resumed).toBe(true);
-        expect(result.sessionId).toBe(originalSessionId);
+        expect(attempt.resumed).toBe(true);
+        expect(attempt.result.sessionId).toBe(originalSessionId);
+        expect(attempt.result.lane).toBeNull(); // #xazl9u3 — a genuine resume never carries a lane at all.
 
         // The ORIGINAL session is still there — a genuine resume, not stop-then-refork.
         const listedAfter = defaultListAgents({ env, all: true });
@@ -203,23 +204,35 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     });
   });
 
-  it('END TO END — a conflict-caused dispatch with NO resume candidate (no author stamp) falls straight to a REAL fresh full dispatch', async () => {
+  it('END TO END — a conflict-caused entry with NO resume candidate (no author stamp) reports `resumed: false` from `tryResumeFix`, and the caller\'s REAL fresh `dispatchFix` then completes it', async () => {
     await withRealRepo(async ({ root }) => {
       const fake = withFakeClaude();
       try {
         const env = { ...process.env, ...fake.env };
         const planned = {
           itemNum: '9099', pr: 8802, laneRef: 'lane/9099-conflict-fixture-b',
-          scope: ['we:scripts/example-conflicting-module.mjs'], lane: 13,
+          scope: ['we:scripts/example-conflicting-module.mjs'],
           isConflict: true, body: 'A PR body with no authored-by-actor stamp at all.',
         };
 
-        const result = dispatchFix(planned, {
+        // First, the SAME lane-free check `runReconcileFixDispatch` runs before ever popping a lane: with no
+        // resume candidate at all, it must report `resumed: false` having made no spawn call whatsoever.
+        let resumeSpawnCalls = 0;
+        const attempt = tryResumeFix(planned, {
+          root,
+          spawnAgent: () => { resumeSpawnCalls += 1; return ''; },
+          listAgentsAll: () => defaultListAgents({ env, all: true }),
+        });
+        expect(attempt).toEqual({ resumed: false, resumeAttempt: null });
+        expect(resumeSpawnCalls).toBe(0);
+
+        // Only NOW — exactly like the real `runReconcileFixDispatch` loop — is a lane assigned and the real
+        // fresh dispatch attempted.
+        const result = dispatchFix({ ...planned, lane: 13 }, {
           root,
           readBrief: () => FIX_BRIEF_STUB,
           mintSessionId: () => 'ffffffff-0000-0000-0000-000000000000',
           spawnAgent: (argv, opts) => defaultSpawnAgent(argv, { ...opts, env }),
-          listAgentsAll: () => defaultListAgents({ env, all: true }),
         });
 
         expect(result.resumed).toBe(false);
