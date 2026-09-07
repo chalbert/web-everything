@@ -374,6 +374,37 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     expect(result.refusals).toEqual([{ pr: 1764, kind: 'dispatch-failed', why: 'lane-9 lost its race to a sibling' }]);
   });
 
+  it('PR #1972 review finding — a THROWING `tryResume` is isolated to a per-entry `dispatch-failed` refusal, and does not abort the rest of the tick', () => {
+    const entries = [
+      // Entry 1: conflict-caused; its `tryResume` call throws (e.g. a transient `claude agents --json` read).
+      { kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass', labels: [CONFLICT_LABEL], body: 'stamped', headRefOid: 'sha' },
+      // Entry 2: an unrelated ordinary bounce that must still be processed in the SAME tick.
+      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3438-wire-reconcile-pass-b' },
+    ];
+    const dispatchCalls = [];
+    const result = runReconcileFixDispatch({
+      root: '/repo',
+      reconcile: reconcileStub(entries),
+      findItemFn: findItemStub,
+      loadItems: () => [],
+      pickFreeLanes: () => [2],
+      tryResume: (entry) => {
+        if (entry.pr === 1764) throw new Error('claude agents --json --all: transient listing failure');
+        return { resumed: false, resumeAttempt: null };
+      },
+      dispatch: (planned) => { dispatchCalls.push(planned.pr); return { sessionId: `s-${planned.pr}`, sessionSlug: `fix-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [], resumed: false }; },
+      checkStaleness: FRESH,
+    });
+    // Entry 1 is refused individually; entry 2 still dispatches — the whole pass did NOT abort.
+    expect(dispatchCalls).toEqual([1765]);
+    expect(result.dispatched).toEqual([
+      { sessionId: 's-1765', sessionSlug: 'fix-1765', pr: 1765, itemNum: '3438', lane: 2, unknownTokens: [], resumed: false },
+    ]);
+    expect(result.refusals).toEqual([
+      { pr: 1764, kind: 'dispatch-failed', why: 'claude agents --json --all: transient listing failure' },
+    ]);
+  });
+
   it('#xazl9u3 — a conflict entry whose resume attempt SUCCEEDS never touches the lane pool at all: the free lane it never needed is still there for the very next entry', () => {
     const entries = [
       // Entry 1: conflict-caused, and (per the injected `tryResume` stub below) resumes successfully.

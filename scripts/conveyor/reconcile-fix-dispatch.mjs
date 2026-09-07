@@ -444,9 +444,23 @@ export function runReconcileFixDispatch({
     // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
     // is even eligible (tryResumeFix itself returns `resumed: false, resumeAttempt: null` immediately for any
     // other kind, at no lane cost either way).
+    //
+    // PR #1972 review finding (correctness) — this call must be its OWN try/catch, isolated from the
+    // dispatch try/catch below: `tryResumeFix` does real IO (`claude agents --json --all`, a real `git
+    // rev-parse HEAD` via `resolveHead`) the file's own docblocks already document as a real observed source
+    // of flakiness (#3331's listing lag). Left unguarded, a throw here would abort the WHOLE pass (every
+    // OTHER planned entry in this tick, including unrelated ordinary dispatches that would have succeeded)
+    // rather than refusing just this one entry — the same per-entry isolation `dispatch(...)` below already
+    // gets, now extended to cover this earlier call site too.
     let resumeAttempt = null;
     if (entry.isConflict) {
-      const attempt = tryResume(entry, { root });
+      let attempt;
+      try {
+        attempt = tryResume(entry, { root });
+      } catch (e) {
+        refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
+        continue;
+      }
       if (attempt.resumed) {
         dispatched.push(attempt.result);
         continue; // no lane ever popped for this entry
