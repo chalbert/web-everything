@@ -1,6 +1,7 @@
 ---
 kind: story
 size: 5
+tier: pinned
 parent: "3383"
 status: open
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/lib/lane-concurrency.mjs"]
