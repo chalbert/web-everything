@@ -1604,7 +1604,9 @@ export function acceptanceCoversHead({
  * `scoreEscalation`'s `basisFiles`), which this bare/secondary path does not currently pay for at all, and
  * bolting a cross-repo diff fetch onto a security-sensitive merge predicate without dedicated review of its own
  * is a worse trade than documenting the gap plainly. Tracked as a residual on the `#2412` follow-up
- * (`backlog/xp2rge9-…md`) rather than silently left to be rediscovered.
+ * (`backlog/xy5uey0-…md` — not `xp2rge9`, which resolved as an unrelated Layer-5 duplicate) rather than
+ * silently left to be rediscovered. Locked down as a named, cross-path invariant test in
+ * `gate-invariants.test.mjs` (INVARIANT 16, #1920 round-2 review).
  * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
  * @param {{allowPending?: boolean}} [opts] - `allowPending: true` on the explicit `--no-review-escalation`
  *   operator override — refuse only `review:human`/`review:changes`, not `review:pending`.

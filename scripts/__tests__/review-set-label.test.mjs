@@ -269,6 +269,14 @@ describe('decideSetLabel — clear-human (#2895, the ONE target that drops revie
     expect(decideSetLabel({ to: 'accepted', currentLabels: human }).allowed).toBe(false);
   });
 
+  // #1920 round-2 review — like `changes`/`rearm`, a `clear-human` clearance must not let a stale independent
+  // validator sign-off (no SHA marker of its own) ride through the ceremony from an earlier, different head.
+  it('also strips a stale redteam:accepted (unlike the plain `accepted` target — see its own comment)', () => {
+    const d = decideSetLabel({ to: 'clear-human', currentLabels: [...human, { name: REVIEW_LABELS.redteamAccepted }] });
+    expect(d.allowed).toBe(true);
+    expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
+  });
+
 });
 
 // #2895 — the `clear-human` PRECONDITIONS, asserted behaviourally. Two separate things are pinned here and it
