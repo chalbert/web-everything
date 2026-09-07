@@ -2,8 +2,10 @@
 bornAs: xwr3jt9
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-09-07"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
 tags: [reuse, discovery, operations, backlog, agent-habit]
 relatedTo: ["3001", "3029", "3277", "3383", "3554"]
 scope:
