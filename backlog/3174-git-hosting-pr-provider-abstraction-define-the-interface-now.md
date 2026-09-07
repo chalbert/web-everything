@@ -1,9 +1,11 @@
 ---
 bornAs: x0oyzc2
 kind: decision
-status: active
+status: resolved
 dateOpened: "2026-08-17"
 dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+codifiedIn: "docs/agent/platform-decisions.md#operations-declared-once-callers-generated"
 relatedTo: ["2626", "3007", "3029", "3369"]
 tags: [operations, drain, provider, vendor-abstraction, forge]
 ratifiedBy: "Nicolas Gilbert (operator)"
