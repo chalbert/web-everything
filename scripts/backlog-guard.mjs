@@ -9,9 +9,20 @@
  *          `**Label:**`, a heading, or a list derives an EMPTY summary; so does a stray body added to
  *          a frontmatter-only `relatedReport` pointer. Both hard-error the gate. Also denies the
  *          retired `childlessReason/unsplittableReason: undecided` sentinels, AND a `Write` that
- *          hand-creates a NEW numeric-`NNN`-prefixed file — new items must be minted via `scaffold`
- *          (collision-free hash id `xNNNNNN`); a hand-picked NNN races concurrent sessions into a
- *          duplicate id (#2288/#2323).
+ *          hand-creates a brand-new backlog file — new items must be minted via `scaffold` (or the
+ *          `file-item`/`scaffold` declared operations, `we:scripts/operations/run.mjs`), never
+ *          hand-authored with the `Write` tool.
+ *
+ *          WIDENED 2026-09-06 (#3383) from NUMERIC-only to ANY new id shape, including a hand-typed
+ *          `xNNNNNN` hash. The original rule only covered a hand-picked NNN (races concurrent sessions
+ *          into a duplicate id, #2288/#2323); a hand-typed hash cannot collide the same way, but it is
+ *          the OTHER real failure mode named live 2026-09-06: every item filed that session went
+ *          through a hand-dispatched subagent with a bespoke prompt rather than a declared operation —
+ *          and `scaffold`'s own write path (`we:scripts/backlog/guarded-write.mjs`) always writes via
+ *          `fs` directly, never via the `Write` tool. So a `Write` tool call CREATING a new backlog
+ *          file, of ANY id shape, is by construction not that path — it is either a hand-typed hash or
+ *          a bypass of the scan/queue-clear a declared operation would have applied. Editing an
+ *          EXISTING file (any id shape, already on disk) is unaffected — only file CREATION is denied.
  *   default (PostToolUse Edit|Write, WARN via exit 2): a `kind: story` carrying a `size` that also
  *          has children (some other item's `parent:`) double-counts in the burndown — a case the gate
  *          only flags for sized epics, not stories.
@@ -99,8 +110,16 @@ if (argv.includes('--pre')) {
   }
 
   const idTok = (file.match(BACKLOG_RE) || [])[1] || '';
-  if (ev.tool_name === 'Write' && /^\d+$/.test(idTok) && !existsSync(file))
-    deny(`new backlog file "${basename(file)}" is hand-numbered — mint items with \`node scripts/backlog.mjs scaffold "<title>"\`, which assigns a collision-free hash id (xNNNNNN). Hand-picking an NNN races concurrent sessions and mints duplicate ids (#2288/#2323). Run scaffold, then edit the file it creates.`);
+  if (ev.tool_name === 'Write' && !existsSync(file)) {
+    if (/^\d+$/.test(idTok))
+      deny(`new backlog file "${basename(file)}" is hand-numbered — mint items with \`node scripts/backlog.mjs scaffold "<title>"\` (or \`node scripts/operations/run.mjs file-item ...\`), which assigns a collision-free hash id (xNNNNNN). Hand-picking an NNN races concurrent sessions and mints duplicate ids (#2288/#2323). Run scaffold/file-item, then edit the file it creates.`);
+    // #3383 — ANY new backlog file created via the Write tool is a hand-authored bypass, not just a
+    // hand-numbered one: `scaffold`'s own write path always writes via `fs` directly (the CLI, or the
+    // `scaffold`/`file-item` declared operations), never via this tool, so a Write tool call landing here
+    // — hash-prefixed or not — did not go through it. Found live 2026-09-06: a session filing an item
+    // by hand can just as easily type a plausible-looking `xNNNNNN` as pick a numeric NNN.
+    deny(`new backlog file "${basename(file)}" was hand-authored with the Write tool — file items with \`node scripts/backlog.mjs scaffold "<title>"\` (or \`node scripts/operations/run.mjs file-item ...\`, which also clears it for the conveyor). Those write via fs directly, never via this tool, so a Write tool call creating a new backlog file — whatever its id looks like — has skipped the #883 locus-prefix scan scaffold's own writer runs (this hook does not run it) and, if \`file-item\` was the intended path, the conveyor clearance too (#3383). Run scaffold/file-item, then edit the file it creates.`);
+  }
 
   if (!text.trim()) process.exit(0); // empty proposal — nothing to judge
   const { fm, body } = split(text);
