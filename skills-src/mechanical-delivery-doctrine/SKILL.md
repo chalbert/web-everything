@@ -130,7 +130,11 @@ history. If a rule itself changes, edit it here first, then note the change on t
     rather than `main` directly — this rule states the TARGET steady state once graduation completes,
     not a claim about today's actual runner configuration; check `#3443`'s live status to know whether
     this rule is fully active yet. (Full rationale: `#3383`'s "Working doctrine (2026-09-04,
-    continued): rule 10" section.)
+    continued): rule 10" section.) **If a manual reconciliation like this one turns up a PR that conflicts
+    with a decision made elsewhere on `main`** (a sequencing conflict, not a text conflict), post it as a
+    finding on that PR rather than only in your own task summary:
+    `node we:scripts/conveyor/reconcile-finding.mjs <pr> --body-file=<path> [--repo=<owner/name>]` (the same
+    tool `we:skills-src/finish/SKILL.md`'s rebase step uses for this).
 11. **A one-off action that relieves a symptom is not a fix.** Landing counts only once the real root
     cause is found — verified, not guessed — and a durable code fix that prevents recurrence is
     landed — verified working, not assumed. This sharpens rule 1 rather than duplicating it: rule 1
