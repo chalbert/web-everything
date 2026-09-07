@@ -415,6 +415,10 @@ export function reviewPrepOperation({ readPrep } = {}) {
       item: 'string',
       repo: 'string',
       actor: { type: 'string', required: false, default: 'operator' },
+      // #3233 — whether `record` may reach `we:scripts/pr-land.mjs`'s GitHub-API leg at all. `record` always
+      // commits AND PUSHES regardless of this flag; `land` only gates the PR-open, which is downgraded to
+      // push-only on a host with no GitHub credential even when this defaults true (see `review-prep-io.mjs`).
+      land: { type: 'boolean', required: false, default: true },
     },
     verdictFrom: 'reduce',
 
@@ -483,18 +487,25 @@ export function reviewPrepOperation({ readPrep } = {}) {
     // compares against `expectedContentHash` captured here at `read` time — see that file's header for why the
     // guard cannot live in this pure declaration (it needs a live re-read, which is io).
     record: effectStep({
-      reads: ['input.item', 'input.repo', 'input.actor', 'verdict', 'findings.read'],
+      // 'input.land' MUST be here (#3233) — `projectReads` (`we:scripts/operations/engine.mjs`) projects only
+      // DECLARED reads, so without this entry `view.input.land` below is `undefined` for every run, new ones
+      // included, and the `?? true` coalesce could never observe a real `false`.
+      reads: ['input.item', 'input.repo', 'input.actor', 'input.land', 'verdict', 'findings.read'],
       effects: (view) => {
         const v = view.verdict || {};
         const read = view.findings.read;
         const item = view.input.item;
         const repo = view.input.repo;
         const actor = view.input.actor;
+        // `?? true`, not a bare read (#3233): a run record suspended before this change stored a payload with
+        // no `land` key at all — `validateInput` (where the declared default applies) runs only at `startRun`
+        // and is never re-applied on resume, so an old record's `view.input.land` is `undefined`, not `true`.
+        const land = view.input.land ?? true;
         const clean = isCleanPrepReview({ confidence: v.confidence, risks: v.risks, fixApplied: v.fixApplied });
         return [
-          // 0 — THE REVIEW ITSELF: append, commit, land or park. NON-idempotent: a replay must not append a
-          //     SECOND "## Independent review" section for one verdict — the same "the remote write is the one
-          //     that matters" classification `review-pr.mjs`'s LABEL effect carries.
+          // 0 — THE REVIEW ITSELF: append, commit, always push, land or push-only. NON-idempotent: a replay
+          //     must not append a SECOND "## Independent review" section for one verdict — the same "the
+          //     remote write is the one that matters" classification `review-pr.mjs`'s LABEL effect carries.
           {
             type: REVIEW_PREP_EFFECTS.RECORD,
             payload: {
@@ -506,6 +517,7 @@ export function reviewPrepOperation({ readPrep } = {}) {
               fixApplied: v.fixApplied,
               note: v.summary,
               actor,
+              land,
               expectedContentHash: read.contentHash,
             },
             idempotent: false,

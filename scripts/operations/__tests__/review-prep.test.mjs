@@ -303,6 +303,20 @@ describe('the record step', () => {
     const { declaration } = registryFor({});
     expect(declaration.stepNames).toEqual(['read', 'judge', 'reduce', 'record']);
   });
+
+  // #3233 — `land` must be declared AND read at the `record` step (`projectReads` projects only DECLARED
+  // reads, `we:scripts/operations/engine.mjs`), or `view.input.land` is `undefined` for every run.
+  it('a requested `land: false` flows through to the RECORD payload verbatim', () => {
+    const { registry } = registryFor({});
+    const declared = atRecord({ registry, input: { ...BASE_INPUT, land: false } });
+    expect(declared.effects[0].payload.land).toBe(false);
+  });
+
+  it('an omitted `land` defaults `true` on the RECORD payload — the `?? true` coalesce', () => {
+    const { registry } = registryFor({});
+    const declared = atRecord({ registry, input: BASE_INPUT });
+    expect(declared.effects[0].payload.land).toBe(true);
+  });
 });
 
 // ── renderJudgeInput ───────────────────────────────────────────────────────────────────────────────────────
@@ -317,12 +331,14 @@ describe('renderJudgeInput', () => {
 
 // ── THE DERIVED COMMAND LINE ──────────────────────────────────────────────────────────────────────────────
 describe('the derived command line', () => {
-  it('derives its flags from the declaration — item/repo/actor, no hand-written parser', () => {
+  it('derives its flags from the declaration — item/repo/actor/land, no hand-written parser', () => {
     const { declaration } = registryFor({});
     const spec = buildCliSpec(declaration);
-    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'item', 'repo']);
+    // #3233 — `land` is a DECLARED input (`op()`'s `input.land`), so the CLI flag is DERIVED, never hand-added.
+    expect(spec.fields.map((f) => f.name).sort()).toEqual(['actor', 'item', 'land', 'repo']);
     expect(spec.usage).toContain('--item=<string>');
     expect(spec.usage).toContain('--repo=<string>');
+    expect(spec.usage).toContain('--land=<boolean>');
     expect(spec.usage).toContain('read(compute) → judge(judge) → reduce(compute) → record(effect)');
   });
 });
