@@ -25,7 +25,7 @@ Recommended default: (a) — it's the only option that actually reduces the coll
 
 ## Done when
 
-This ruling's own Done-when is the follow-on build item it authorizes: **we:backlog/x2zlc42-registry-plugin-refactor-of-makeclimechanicalpasses.md** ("Registry/plugin refactor of makeCliMechanicalPasses" — filed alongside this resolve, parent: "3572"; a JIT-numbered `#NNN` is assigned when it lands, per this repo's own drain convention), carrying the concrete spec below as its own executable Done-when. Restated here so the ruling is self-contained:
+This ruling's own Done-when is the follow-on build item it authorizes: **we:backlog/3577-registry-plugin-refactor-of-makeclimechanicalpasses.md** ("Registry/plugin refactor of makeCliMechanicalPasses" — filed alongside this resolve, parent: "3572"; a JIT-numbered `#NNN` is assigned when it lands, per this repo's own drain convention), carrying the concrete spec below as its own executable Done-when. Restated here so the ruling is self-contained:
 
 1. **Registry shape.** New we:skills-src/conveyor/passes/registry.mjs exports MECHANICAL_PASSES, an ORDERED array of descriptors, one of two shapes:
    - `{ name, kind: 'script', modulePath, args? }` — dispatched through the existing runQuiet(modulePath, args) subprocess helper (unchanged: same execFileSync('node', […]) shape, same --repo= threading, same best-effort try/catch + summarizeMechanicalPassError log line).
