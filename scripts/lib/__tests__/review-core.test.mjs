@@ -97,6 +97,7 @@ import { CARE_LEVEL_ORDER } from '../review-escalation.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { assessPrs, shapeReadFinding, CHECK_STATES, prStatusOperation } from '../../operations/pr-status.mjs';
 
 describe('normalizeFinding', () => {
   it('accepts a well-formed raw finding, coercing types', () => {
@@ -2559,5 +2560,72 @@ describe('PROSE_IMPRECISION_RULE reaches every mandate built on buildMandate', (
     expect(PROSE_IMPRECISION_RULE).toMatch(/NON-BLOCKING/);
     expect(PROSE_IMPRECISION_RULE).toMatch(/wrong ACTION/);
     expect(PROSE_IMPRECISION_RULE).toMatch(/Bounce on behaviour/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE-REGRESSION — same technique, and same reason, as the #2640/#2864/#2908 blocks above: the sandbox loop
+// is not importable. #3555 — `we:scripts/operations/pr-status.mjs` declares the three-valued green/red/pending/
+// unchecked check-state question (built to catch #1510/#1511 sitting 12 hours with `total_count: 0` while the
+// review label claimed `checking`), but its own card never wired it anywhere. The reduce step here used to
+// hand-roll its own `gh pr view --json statusCheckRollup` read of a single named `test` check — exactly the
+// by-hand poll pr-status exists to replace, and a second place the CI-truth exclusion list (`review-gate`) could
+// silently drift from the declared operation's. This proves the reduce prompt now shells the shared operation
+// instead of re-deriving the check state itself.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('review-parked-prs.mjs — required-check read goes through the shared pr-status operation (source regression, #3555)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../workflows/review-parked-prs.mjs'), 'utf8');
+
+  it('no longer hand-rolls a statusCheckRollup read for the required check', () => {
+    expect(src).not.toMatch(/gh pr view \$\{pr\} --repo \$\{repo\} --json statusCheckRollup/);
+  });
+
+  it('shells the declared pr-status operation, scoped to this PR, and reads its reduced state', () => {
+    expect(src).toMatch(/node scripts\/operations\/run\.mjs pr-status --repo=\$\{slug\} --pr=\$\{pr\} --json/);
+    expect(src).toMatch(/\.verdict\.prs\[0\]\.state/);
+    expect(src).toMatch(/requiredTestGreen = true ONLY if that state is `green`/);
+  });
+
+  it('resolves the constellation id to a real gh-resolvable slug through ONE shared helper that FAILS LOUD on an unmapped id (never silently substitutes `we`), used by both reducePrompt and editorPrompt', () => {
+    expect(src).toMatch(/function slugFor\(repo\) \{\s*\n\s*if \(!REPOS\[repo\]\) throw new Error\(/);
+    // the old per-call-site silent-fallback ternary is gone everywhere, not just at the new call site
+    expect(src).not.toMatch(/REPOS\[repo\] \? REPOS\[repo\]\.slug : REPOS\.we\.slug/);
+    expect(src.match(/const slug = slugFor\(repo\);/g) || []).toHaveLength(2); // reducePrompt + editorPrompt
+  });
+
+  // CONTRACT — the prompt above tells an agent to read `.verdict.prs[0].state` off `pr-status --json`'s output
+  // and compare it to the LITERAL string `green`. That is a dependency on pr-status.mjs's actual shape, and prose
+  // matching a regex cannot prove the two sides agree. Two halves close it, neither re-derived here: (1) the
+  // engine's OWN generic contract — a declaration's `verdictFrom: 'x'` step result IS the run's top-level
+  // `.verdict` — is already proven for every operation in `scripts/operations/__tests__/engine.test.mjs`
+  // (`run.verdict` assertion, `// verdictFrom: 'panel'`); (2) this asserts pr-status.mjs's OWN declaration
+  // actually names `assess` as that step, and drives its real read→assess pipeline over a fixture to prove
+  // `.prs[0].state` is a real, populated path whose value is one of the frozen `CHECK_STATES`. Together they
+  // prove the prompt's exact dotted path end to end without re-mocking `gh` (already covered on its own terms
+  // by `scripts/operations/__tests__/pr-status.test.mjs`'s io-shell suite, including a real end-to-end CLI
+  // invocation of `run.mjs pr-status` itself). (#3555)
+  it('the `.verdict.prs[0].state` path the prompt reads is real: pr-status declares verdictFrom: assess, and assess produces it with `green` a member of its frozen CHECK_STATES', () => {
+    const decl = prStatusOperation({ readPrs: () => ({ repo: 'o/r', prs: [] }) });
+    expect(decl.verdictFrom).toBe('assess');
+
+    const finding = shapeReadFinding({
+      repo: 'chalbert/web-everything',
+      prs: [{
+        number: 1,
+        headSha: 'a'.repeat(40),
+        title: 'fixture',
+        labels: [],
+        mergeable: 'mergeable',
+        checks: [{ name: 'test', status: 'completed', conclusion: 'success' }],
+      }],
+    });
+    const verdict = assessPrs(finding);
+    expect(verdict.prs[0].state).toBe('green');
+    expect(CHECK_STATES).toContain(verdict.prs[0].state);
+    // the prompt enumerates `red`/`pending`/`unchecked` as the OTHER states requiredTestGreen must reject —
+    // pin the full frozen set so a drift in either enumeration (prompt prose or pr-status.mjs's own list)
+    // fails a named test, not just the one value this fixture happens to produce.
+    expect(CHECK_STATES).toEqual(['green', 'red', 'pending', 'unchecked']);
   });
 });

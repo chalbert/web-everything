@@ -3,8 +3,10 @@ bornAs: xveqvbr
 kind: story
 size: 2
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
 tags: []
 scope:
   - we:skills-src/drain/
@@ -24,4 +26,17 @@ we:scripts/operations/pr-status.mjs (#3247, resolved 2026-08-21) declares the th
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/review-core.test.mjs -t 3555` fails before this item
+   lands and passes after: `we:scripts/workflows/review-parked-prs.mjs`'s reduce step (#2410 slice D) hand-rolled
+   a `gh pr view --json statusCheckRollup` read of the single named `test` check to decide `requiredTestGreen`.
+   That is exactly "a skill polling open-PR state by hand" — it now shells `node we:scripts/operations/run.mjs
+   pr-status --repo=<slug> --pr=<n>` and reads its reduced `state` instead.
+
+## Progress
+
+- 2026-09-07 — wired the `pr-status` operation into `we:scripts/workflows/review-parked-prs.mjs`'s reduce step
+  (the only manual `gh`-based check-state read found across this item's scope). The other scoped skills/scripts
+  (`drain`, `merge`, `finish`, `conveyor`, `batch-backlog-items`, `we:scripts/merge-ai-prs.mjs`,
+  `we:scripts/lane-resume.mjs`) either already share one `latestRequiredCheck` selector (never hand-rolled
+  per-call) or delegate check-status entirely to `we:scripts/merge-ai-prs.mjs --watch`, so they carried nothing
+  to rewire.
