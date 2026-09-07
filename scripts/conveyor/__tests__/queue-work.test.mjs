@@ -58,7 +58,9 @@ beforeEach(() => {
   fakeBin = join(dir, 'bin');
   runnerCheckout = join(dir, 'the-runners-checkout');
   mkdirSync(fakeBin, { recursive: true });
-  mkdirSync(runnerCheckout, { recursive: true });
+  // A `.git` marker so `runnerCheckout` passes the checkout-verification check by default — tests exercising
+  // that check specifically (below) point `lsof` at a directory built WITHOUT one instead.
+  mkdirSync(join(runnerCheckout, '.git'), { recursive: true });
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -158,5 +160,25 @@ describe('queue-work.mjs — (d) a resolved pid whose process does not verify as
     writeFakePs('node some-unrelated-script.mjs');
     expect(() => run(['add', '3478'])).toThrow();
     expect(existsSync(join(runnerCheckout, '.conveyor', 'queue.json'))).toBe(false);
+  });
+});
+
+describe('queue-work.mjs — (e) a resolved, process-verified cwd with no `.git` entry → refuses (checkout-unverified)', () => {
+  it('a fake `lsof` pointing at a directory with no `.git` exits non-zero and writes nothing', () => {
+    reserve(lockRoot, '<conveyor:runner-singleton-lease>', 'RUNNER', Date.now(), new Date().toISOString(), 4242);
+    const notACheckout = join(dir, 'not-a-checkout');
+    mkdirSync(notACheckout, { recursive: true }); // deliberately no `.git`
+    writeFakeLsof(notACheckout);
+    writeFakePs();
+
+    try {
+      run(['add', '3478', '--json']);
+      throw new Error('should have refused');
+    } catch (e) {
+      const out = JSON.parse(e.stdout);
+      expect(out.ok).toBe(false);
+      expect(out.status).toBe('checkout-unverified');
+    }
+    expect(existsSync(join(notACheckout, '.conveyor', 'queue.json'))).toBe(false);
   });
 });

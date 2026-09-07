@@ -10,10 +10,11 @@
  *   existing add/remove core ({@link ./queue-store.mjs}) — never wherever the caller happens to be `cd`'d.
  *
  * Refuses (non-zero exit, no write) rather than warns when the runner can't be resolved — `no-live-lock`,
- * `ambiguous`, `no-pid`, `cwd-unresolved`, or `process-mismatch` (a resolved pid whose process no longer looks
- * like the runner — a reused pid) — because writing to a guessed checkout is exactly the silent failure this
- * item exists to close; `queue.mjs` remains the cwd-relative entry point for a caller who already knows it is
- * running the runner's own checkout (e.g. the runner's own process).
+ * `ambiguous`, `no-pid`, `cwd-unresolved`, `process-mismatch` (a resolved pid whose process no longer looks
+ * like the runner — a reused pid), or `checkout-unverified` (the resolved cwd has no `.git` entry — not
+ * confirmed to actually be a checkout root) — because writing to a guessed checkout is exactly the silent
+ * failure this item exists to close; `queue.mjs` remains the cwd-relative entry point for a caller who already
+ * knows it is running the runner's own checkout (e.g. the runner's own process).
  *
  * USAGE:
  *   node scripts/conveyor/queue-work.mjs add <NNN> [--json]     # resolve the live runner + clear <NNN> there
@@ -35,6 +36,7 @@ const REFUSAL_REASON = {
   'no-pid': 'the live runner lock has no pid recorded — cannot derive its checkout',
   'cwd-unresolved': 'could not resolve the live runner\'s working directory',
   'process-mismatch': 'the live runner\'s pid resolved to a process that no longer looks like the runner (a reused pid) — not trusted',
+  'checkout-unverified': 'the live runner\'s resolved working directory has no `.git` entry — not confirmed to be a real checkout — not trusted',
 };
 
 function main(argv) {
