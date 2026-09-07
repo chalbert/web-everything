@@ -1,1 +1,1 @@
-{"branch":"lane/mechanical-dispatcher","target":"main","checkedAt":"2026-09-07T20:38:34.950Z","ahead":51,"behind":64,"conflict":false,"maxBehind":40,"status":"blocked","reason":"64 commits behind (ceiling 40) — reconciliation required before further dispatch onto this scope"}
+{"branch":"lane/mechanical-dispatcher","target":"main","checkedAt":"2026-09-07T21:34:22.524Z","ahead":51,"behind":65,"conflict":false,"maxBehind":40,"status":"blocked","reason":"65 commits behind (ceiling 40) — reconciliation required before further dispatch onto this scope"}
