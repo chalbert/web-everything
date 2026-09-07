@@ -1,7 +1,6 @@
 ---
 bornAs: xo83x9i
-kind: story
-size: 3
+kind: epic
 parent: "3383"
 status: active
 dateOpened: "2026-09-01"
@@ -104,3 +103,63 @@ origin/lane/mechanical-dispatcher (38 ahead of main, drifts session to session) 
   and the three parts of slice 4/5 are filed but intentionally NOT queued yet: their `blockedBy` edges mean
   the conveyor can't dispatch them until their prerequisite lands, and slice 4(c) in particular needs a human
   or a very deliberate agent turn at land time, not blind automated dispatch.
+
+- **2026-09-06/07 (standing-agent iteration, heavy concurrent-activity night).** Re-measured fresh:
+  `origin/main...origin/lane/mechanical-dispatcher` was `126`/`33` at the start of this pass (main had moved
+  ~120 commits from unrelated concurrent work since the last measurement; the branch itself also grew by a
+  few commits, mostly session-log noise plus one new `file-item` prototype unrelated to this item's scope).
+  Landed this pass:
+
+  - **#3481** (`we:scripts/lane-pool.mjs` hardening) — found ALREADY BUILT with an open-but-stuck PR (#1930,
+    `CONFLICTING`/stale, opened 2026-09-05 by an earlier session and never finished). Used the finish skill:
+    cloned the existing `lane/3481b-graduate-lane-pool-hardening` ref, merged `origin/main`, resolved one real
+    conflict in `we:scripts/lib/__tests__/lane-lease.test.mjs` (both sides had independently added a new,
+    non-overlapping `describe` block at the same insertion point — kept both), reran the full gate green,
+    pushed, and landed via `we:scripts/lane-resume.mjs land`. Merged as `a57be8a09`.
+  - **#3484** (`we:scripts/verify-lane.mjs` request/check mode) — same situation: open-but-stuck PR #1926
+    (`CONFLICTING`, failing `review-gate` checks). Same finish-style repair: merged `origin/main`, resolved a
+    real conflict in `we:scripts/guard-bash.mjs` + its test — `main` had independently landed a DIFFERENT new
+    guard (`truncatedOperationJsonReason`, the `--json`-into-`head`/`tail` corruption guard, 2026-09-06) at the
+    exact same insertion point as this lane's `dispatchedAgentVerificationReason` (#3105). Both are genuine,
+    non-overlapping additions — kept both, in sequence, and merged their import lists. Full gate green, pushed,
+    independent review dispatched via `we:scripts/operations/review-dispatch.mjs` (verdict: accept, converged
+    round 1; one non-blocking test-coverage-gap finding on `fetchOriginPruneWithRetry`, filed as prose in the
+    review, not a new backlog item). PR still open pending drain at the time of this note.
+  - **#3483** (`we:skills-src/conveyor/supervisor.mjs`) — built fresh (not previously attempted): confirmed by
+    reading the actual code, not the card's inferred grouping, that `we:skills-src/conveyor/supervisor.mjs`
+    depends on nothing from the sibling `route-pr-outcome` slice — only `RUNNER_LOCK_ROOT` from
+    `we:skills-src/conveyor/runner-lock.mjs` (already on `main`) and node builtins. Ported byte-identical + its
+    64-test suite + the launchd example, resolved #3483, and in the same lane fixed **#3482**'s stale
+    bookkeeping (`status: active` left over from an earlier session that had actually already landed its
+    content under `9ff2f774c` but never flipped the card to `resolved`). Landed as PR #1978 → merged
+    `1d66d33a9`.
+
+  **Operational friction hit this pass, worth naming for the next session:** the shared lane pool was fully
+  saturated (44/44 held-or-dirty) for most of this pass — both this session's own new-slice work and BOTH
+  independent review dispatches (#1930, #1926) initially failed with `blocked-on-infra` before any of them got
+  a lane. Recovered by `we:scripts/lane-pool.mjs provision --count=N --acquirable` (needs a large `--count` to
+  push the cap past the existing pool size — `count=1` only re-checks lane-1, it does not grow the pool). Also
+  hit: (a) `we:scripts/operations/run.mjs open-pr --mode=land` reads "the HEAD being landed" from the CALLING
+  checkout's own `HEAD`, not from the pushed `--ref` — it must be run from inside the lane clone whose tip was
+  verified, not from the primary checkout, or it spuriously reports the verification as stale; (b) a foreground
+  `open-pr`/`review-pr` call that legitimately takes long (waiting on CI, or on a lane) can get killed by an
+  external tool timeout mid-effect, leaving the run record's effect at `pending`/`unknown` even though the
+  underlying `gh` side effect (PR opened, label swapped) already fired — recovered each time by checking the
+  ACTUAL GitHub state by hand, then hand-patching that one effect's `status` field in the run record to
+  `applied` or `failed` (matching reality) before `--resume`; (c) GitHub's own API rate limit was hit mid-session
+  from the sheer concurrent `gh` call volume across every agent active tonight. None of this is unique to this
+  item — see the freshly-filed #3553/#3554 (skill-coverage gaps for `we:scripts/conveyor/branch-sync.mjs` /
+  `we:scripts/conveyor/reconcile-finding.mjs`) for related tooling gaps; a fresh item for "resume vs re-verify"
+  ergonomics on `open-pr`/`review-pr` would be worth filing if this recurs.
+
+  **Still ahead after this pass:** `origin/main...origin/lane/mechanical-dispatcher` should drop by the 3
+  slices above once #3484's PR clears the drain, but the ahead-COUNT itself won't hit 0 from content landing
+  alone (these land as fresh commits on `main`, not cherry-picks — this item's Done-when #1 is tracked by
+  slice completion, not by the raw `git rev-list` count reaching 0 organically). Remaining unblocked/next:
+  **#3488** (`we:scripts/operations/dispatch-lane.mjs`/`we:scripts/operations/dispatch-lane-io.mjs` hardening,
+  `blockedBy: 3484` — now unblockable once #3484 lands) and **#3485** (fold request/check into
+  `we:scripts/operations/verify.mjs`, same `blockedBy`). **#3486** (the `we:skills-src/conveyor/runner.mjs`
+  reconcile-pass wiring, ~430 lines of diff remaining, a named-busy hot file tonight per this session's own
+  dispatch instructions) was deliberately NOT attempted this pass — it needs the dedicated, low-contention,
+  most-scrutiny turn its own card calls for, not a slot in a night this saturated. **#3487** stays
+  `blockedBy: 3483, 3486` as before, now half-unblocked (3483 landed).
