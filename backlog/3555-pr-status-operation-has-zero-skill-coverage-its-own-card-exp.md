@@ -6,6 +6,16 @@ parent: "3029"
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:skills-src/drain/
+  - we:skills-src/merge/
+  - we:skills-src/finish/
+  - we:skills-src/conveyor/
+  - we:skills-src/batch-backlog-items/
+  - we:scripts/conveyor/
+  - we:scripts/merge-ai-prs.mjs
+  - we:scripts/lane-resume.mjs
+  - we:scripts/workflows/review-parked-prs.mjs
 ---
 
 # pr-status operation has zero skill coverage — its own card explicitly deferred wiring it
