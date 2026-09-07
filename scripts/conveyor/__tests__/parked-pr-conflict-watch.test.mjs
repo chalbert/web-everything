@@ -17,6 +17,8 @@ import {
   buildConflictFindingBody,
   defaultPostConflictFinding,
   defaultPostConflictStandDown,
+  defaultListPrFiles,
+  GH_FILES_GRAPHQL_CAP,
 } from '../parked-pr-conflict-watch.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
@@ -183,6 +185,28 @@ describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)',
   });
 });
 
+describe('defaultListPrFiles — argv shape (exec injected, no real gh call) — #xgfzlj1', () => {
+  it('paginates the REST files endpoint with an explicit repo', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return 'a.mjs\nb.mjs\n'; };
+    const out = defaultListPrFiles({ number: 42, repo: 'o/n', exec });
+    expect(capturedArgv).toEqual(['api', '--paginate', '-F', 'per_page=100', 'repos/o/n/pulls/42/files', '--jq', '.[].filename']);
+    expect(out).toEqual(['a.mjs', 'b.mjs']);
+  });
+
+  it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
+    defaultListPrFiles({ number: 7, exec });
+    expect(capturedArgv[4]).toBe('repos/{owner}/{repo}/pulls/7/files');
+  });
+
+  it('returns an empty array for a PR touching no files (never blank/undefined entries)', () => {
+    const exec = () => '\n\n';
+    expect(defaultListPrFiles({ number: 1, repo: 'o/n', exec })).toEqual([]);
+  });
+});
+
 describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process)', () => {
   const fakeProvider = () => {
     const calls = [];
@@ -226,6 +250,75 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     });
     expect(results[0].routedTo).toBe('stand-down');
     expect(routed).toEqual([['stand-down', 1921]]);
+  });
+
+  // #xgfzlj1 — PR #1966's own independent review, security finding: `gh pr list --json files` resolves over
+  // gh's own GraphQL query, hardcoded `files(first: 100)` with NO pagination (confirmed live against gh 2.95.0
+  // / cli/cli@trunk's api/query_builder.go; cli/cli discussion #6930 / issue #5368 track it upstream as a bug).
+  // A statute-tier file sitting past file #100 in a big PR would silently vanish from `pr.files` and this pass
+  // would wrongly dispatch a fix agent at a conflict Fork 2 exists specifically to keep away from automation.
+  it('#xgfzlj1 — a files array UNDER the gh 100-file cap is trusted as-is, no extra gh call', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let listPrFilesCalls = 0;
+    const listPrs = () => [{
+      number: 1922, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: Array.from({ length: GH_FILES_GRAPHQL_CAP - 1 }, (_, i) => ({ path: `scripts/f${i}.mjs` })),
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => { listPrFilesCalls += 1; return []; },
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(listPrFilesCalls).toBe(0);
+  });
+
+  it('#xgfzlj1 — a files array AT the gh 100-file cap is untrusted: re-fetches the complete list and finds the statute-tier file past the truncation boundary', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let listPrFilesArgs;
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` }));
+    const listPrs = () => [{ number: 1923, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: (o) => { listPrFilesArgs = o; return [...truncated.map((f) => f.path), 'docs/agent/platform-decisions.md']; },
+    });
+    expect(listPrFilesArgs).toEqual({ number: 1923, repo: 'o/n' });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 1923]]);
+  });
+
+  it('#xgfzlj1 — the verified re-fetch clearing the PR (no statute file in the complete list) still dispatches normally', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` }));
+    const listPrs = () => [{ number: 1925, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => truncated.map((f) => f.path).concat(['scripts/f100.mjs']), // one more ordinary file, still no statute path
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+  });
+
+  it('#xgfzlj1 — the re-fetch itself failing fails OVER-cautious (stand-down), never silently trusts the truncated list', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` })); // no statute file at all
+    const listPrs = () => [{ number: 1924, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => { throw new Error('gh api failed'); },
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 1924]]);
   });
 
   it('is idempotent — a second sweep on an already-labelled, still-conflicting PR makes zero gh calls', () => {
