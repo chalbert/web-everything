@@ -3,9 +3,10 @@ bornAs: x9650wc
 kind: story
 size: 5
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/file-item.mjs", "we:scripts/operations/file-item-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/declared-homes.mjs", "we:skills-src/file-item/SKILL.md"]
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-07"
 tags: []
 ---
 
