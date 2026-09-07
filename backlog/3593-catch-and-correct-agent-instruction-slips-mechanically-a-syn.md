@@ -3,7 +3,6 @@ bornAs: xxi3zgv
 kind: epic
 parent: "3383"
 status: open
-blockedBy: ["3592"]
 relatedTo: ["3594", "3559", "2833", "2881"]
 dateOpened: "2026-09-07"
 tags: []
