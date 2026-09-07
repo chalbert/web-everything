@@ -5,6 +5,11 @@ size: 2
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:scripts/verify-lane.mjs
+  - we:scripts/lib/lane-verify.mjs
+  - we:scripts/__tests__/verify-lane.test.mjs
+  - we:scripts/__tests__/lane-verify.test.mjs
 ---
 
 # A lane verify marker outlives its landed PR and blocks every later verification in that lane
