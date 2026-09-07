@@ -120,3 +120,12 @@ Researched in-session via web search rather than assumed. Sources:
 - Gemini CLI daemon mode — [google-gemini/gemini-cli PR #20700](https://github.com/google-gemini/gemini-cli/pull/20700)
 - Gemini quotas and pricing — [geminicli.com docs](https://geminicli.com/docs/resources/quota-and-pricing/)
 - Gemini model tiers — [Team AI: Gemini models explained](https://platform.teamai.com/blog/large-language-models-llms/gemini-models-explained-the-complete-2026-guide/)
+
+## Placement note (2026-09-07)
+
+we:backlog/2444 (ratified) already fixes the Loop's own agent-runner interface as backend-agnostic, with a
+later backend "slotting in behind the same interface" — the identical shape this epic's provider-port
+extraction builds for WE's own judge/dispatch seams. we:backlog/xhg3r91 tracks that the Loop's eventual
+runner build (we:backlog/2444/2530) should reuse this proven port pattern rather than re-deriving it, under
+the existing Plateau Loop epic (we:backlog/2445). Build and land this epic for WE's own dispatcher
+regardless; this note is a forward pointer, not a dependency.

@@ -28,3 +28,12 @@ Staged as: Stage 1 (this epic's first buildable slice, filed as its own story) -
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Placement note (2026-09-07)
+
+This epic generalizes we:backlog/2445's own framing that the coordinator "spawns agents as supervised
+children" into an actual behavioral-compliance signal — something none of we:backlog/2445's ~40 existing
+children (including its own crash-recovery-scoped we:backlog/2468 "supervisor") currently cover.
+we:backlog/x5dj56t tracks generalizing it into the Loop's own child-agent supervision under the existing
+Plateau Loop epic (we:backlog/2445). Build and land this epic for WE's own dispatcher regardless; this note
+is a forward pointer, not a dependency.
