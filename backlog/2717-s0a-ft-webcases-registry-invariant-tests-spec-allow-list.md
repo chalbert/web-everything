@@ -3,10 +3,13 @@ bornAs: x06qgn8
 kind: story
 size: 3
 parent: "2705"
-status: open
+status: resolved
 blockedBy: ["2716"]
 scope: ["plateau-app:src/feature-tracker/feature-tracking.webcases.ts", "plateau-app:src/feature-tracker/feature-tracking.webcases.test.ts"]
 dateOpened: "2026-07-27"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+graduatedTo: "plateau-app:src/feature-tracker/feature-tracking.webcases.ts"
 tags: []
 ---
 
