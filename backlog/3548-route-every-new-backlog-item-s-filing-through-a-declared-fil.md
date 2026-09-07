@@ -25,3 +25,13 @@ Filing an item today is a card plus a separately-remembered `we:scripts/conveyor
 3. A decision is recorded (here, or as a follow-up item) on whether `we:scripts/backlog-guard.mjs`'s
    hand-numbered-file DENY should widen from numeric-only to any new backlog file created via the `Write`
    tool — and, if yes, that widening has landed with its own updated regression test.
+
+## Update — 2026-09-07
+
+Done-when item 1 is now satisfied: `we:scripts/operations/file-item.mjs`/`we:scripts/operations/file-item-io.mjs`
+and their `we:scripts/operations/run.mjs` + `we:scripts/operations/declared-homes.mjs` wiring graduated from
+`origin/lane/mechanical-dispatcher` to `main` in this PR (cherry-picked from `2056414d7`, "not yet graduated"
+language in the code/comments/skill reworded to reflect landing). `we:scripts/operations/run.mjs file-item
+--help` and an end-to-end filing + queue-add smoke test both passed from a checkout tracking `main`. Items 2
+(skill migration to the `file-item` verb) and 3 (the `we:scripts/backlog-guard.mjs` DENY-widening decision)
+remain open follow-up work — this PR does not touch either, so `status` stays `open`.

@@ -138,7 +138,7 @@ export const OPERATIONS = Object.freeze({
   // `we:scripts/conveyor/tick-core.mjs#planTick` until a session separately remembers `queue.mjs add`. This
   // wraps scaffold's own read/plan/write (unchanged) and adds the clear-for-build hand-off as a second effect,
   // so filing an item has ONE declared call end to end instead of a card + a separately-remembered gesture.
-  // PROTOTYPE (`origin/lane/mechanical-dispatcher`) — not yet graduated; see `file-item.mjs`'s own header.
+  // Graduated from `origin/lane/mechanical-dispatcher` (#3548); see `file-item.mjs`'s own header.
   [FILE_ITEM_OP]: () => ({
     declaration: fileItemOperation({ readScaffoldContext: createFileItemReader() }),
     sinks: createFileItemSinks(),

@@ -2,8 +2,7 @@
  * @file scripts/operations/file-item.mjs
  * @description THE `file-item` DECLARATION — file a new backlog card AND clear it for the conveyor to pull,
  *   as one callable unit (epic #3383's own machinery, "every new backlog item files through the mechanical
- *   conveyor"). PROTOTYPE, built on `origin/lane/mechanical-dispatcher` per this epic's rule 7/4 — not yet
- *   graduated to `main`.
+ *   conveyor"). Graduated to `main` from `origin/lane/mechanical-dispatcher` per #3548.
  *
  * WHY THIS EXISTS. `we:scripts/operations/scaffold.mjs` already declares the BIRTH of a card, and #3383's own
  * mechanical-delivery-doctrine rule 2 ("mechanical dispatch runs on the card + the generic brief, never a

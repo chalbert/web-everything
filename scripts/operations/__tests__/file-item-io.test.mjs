@@ -1,5 +1,5 @@
 /**
- * @file file-item-io.test.mjs — the `file-item` IO SHELL (#3383, PROTOTYPE).
+ * @file file-item-io.test.mjs — the `file-item` IO SHELL (#3383).
  *
  * WHY THIS FILE EXISTS AT ALL: `scaffold-io.test.mjs`'s own header names the exact failure mode a pure
  * declaration suite cannot see — a wiring bug in the injected reader/sink (PR #1510's blocker, PR #1511's

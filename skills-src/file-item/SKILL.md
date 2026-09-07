@@ -5,9 +5,8 @@ description: File a new backlog item through the declared `file-item` operation 
 
 # File a backlog item the mechanical way (#3383)
 
-**PROTOTYPE — lives on `origin/lane/mechanical-dispatcher` only, not yet on `main`.** This skill and the
-`file-item` operation it wraps have not graduated; see `we:scripts/operations/file-item.mjs`'s own header for
-graduation status. Do not expect `run.mjs file-item` to exist in a checkout tracking `main` directly.
+**Live on `main` (#3548).** This skill and the `file-item` operation it wraps graduated from
+`origin/lane/mechanical-dispatcher`; see `we:scripts/operations/file-item.mjs`'s own header for history.
 
 ## Never hand-roll a backlog item file
 
@@ -75,9 +74,10 @@ Land the new card the normal way, from the SAME lane:
 
 ## If you find `file-item` is missing on your checkout
 
-You are on a checkout tracking `main`, and this capability has not graduated yet. Fall back to
-`we:scripts/operations/scaffold.mjs` (`run.mjs scaffold`) for the write, then run
-<!-- @operation-home-ok: #3383 — the deliberate fallback for a checkout where file-item has not graduated yet; this is the documented path, not a bypass of it. -->
+`file-item` is live on `main` (#3548); if your checkout is missing it, it is behind — sync it first. If you
+cannot sync and must proceed anyway, fall back to `we:scripts/operations/scaffold.mjs` (`run.mjs scaffold`)
+for the write, then run
+<!-- @operation-home-ok: #3383 — the deliberate fallback for a checkout that is behind main and missing file-item; this is the documented path, not a bypass of it. -->
 `node scripts/conveyor/queue.mjs add <the new id>` yourself as a SEPARATE step — and note, in the item you are
-filing or in your own session notes, that you had to do the hand-off by hand, so the graduation gap stays
-visible rather than silently absorbed.
+filing or in your own session notes, that you had to do the hand-off by hand, so the staleness stays visible
+rather than silently absorbed.

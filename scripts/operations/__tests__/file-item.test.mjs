@@ -1,5 +1,5 @@
 /**
- * @file file-item.test.mjs — the `file-item` declaration (#3383, PROTOTYPE on `lane/mechanical-dispatcher`).
+ * @file file-item.test.mjs — the `file-item` declaration (#3383).
  *
  * THREE PROPERTIES CARRY THIS FILE:
  *   1. THE SCAFFOLD VERDICT IS UNCHANGED — `plan` here must produce byte-identical output to
