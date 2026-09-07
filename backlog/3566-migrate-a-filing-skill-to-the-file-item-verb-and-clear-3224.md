@@ -6,6 +6,15 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-07"
 tags: []
+scope:
+  - we:skills-src/next-backlog-item/
+  - we:skills-src/prepare-decision-item/
+  - we:skills-src/new-standard/
+  - we:skills-src/split-backlog-item/
+  - we:skills-src/batch-backlog-items/
+  - we:skills-src/consolidate-backlog-items/
+  - we:scripts/check-standards.mjs
+  - we:scripts/operations/declared-homes.mjs
 ---
 
 # Migrate a filing skill to the file-item verb and clear #3224's skill-wiring scan
