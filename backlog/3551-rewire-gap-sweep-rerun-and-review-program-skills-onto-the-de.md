@@ -2,6 +2,7 @@
 bornAs: x1hj9c4
 kind: story
 size: 2
+tier: pinned
 parent: "3273"
 status: open
 dateOpened: "2026-09-06"
