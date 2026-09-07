@@ -11,10 +11,15 @@
  * WHAT THIS IS NOT. A card has no PR, no diff, no GitHub label. `readPrep` reads ONE markdown file's
  * frontmatter + body off disk (via `gray-matter`, the SAME parser `we:scripts/backlog.mjs`'s `readScopeList`
  * uses for a block-list `scope:` field, so this reader and the backlog gate never disagree on what the field
- * says). `recordPrepVerdict` appends a review section, commits, and shells the SAME `we:scripts/pr-land.mjs`
- * transport every other AI-edit path in this repo lands through (#2138) — it does not reimplement `git push` /
- * `gh pr create` sequencing, the same "shell the single home, do not re-derive it" discipline
- * `we:scripts/operations/review-pr-io.mjs` documents for `review-set-label.mjs`.
+ * says). `recordPrepVerdict` appends a review section, commits, and ALWAYS PUSHES that one commit — the push
+ * needs only the git transport, which is credentialed on every host including a cloud VM (#3233;
+ * `we:agent-memory-src/workflow-cloud-vm-github-api-boundary.md`). Opening/landing the PR is a SEPARATE leg,
+ * through the SAME `we:scripts/pr-land.mjs` transport every other AI-edit path in this repo lands through
+ * (#2138) — it does not reimplement `git push` / `gh pr create` sequencing, the same "shell the single home, do
+ * not re-derive it" discipline `we:scripts/operations/review-pr-io.mjs` documents for `review-set-label.mjs`.
+ * That leg needs the GitHub API, which a cloud VM cannot reach, so it is DOWNGRADED to push-only there (a
+ * credential probe decides this up front, before any mutation) and the result carries a `followUp` — the
+ * argv a credentialed host should run to finish the land — instead of silently stranding the pushed verdict.
  *
  * THE RACE GUARD (the corrected card's "Watch for": a card mid-review by a human must not be silently
  * overwritten by a mechanized pass racing it — and with no `confirm` step there is no human to ask). `readPrep`
@@ -152,6 +157,50 @@ export function sectionRecorded(content, section) {
 }
 
 /**
+ * Whether a REAL GitHub credential is usable in this process — #3233's step-0 probe, decided before any
+ * mutation, by shelling `gh auth status` (the exact probe the memory note documents). A laptop with `gh`
+ * authenticated (via keychain or a real env token) exits 0. A cloud VM's proxy injects a 14-char `prox…`
+ * sentinel into `GH_TOKEN`, which is not a credential at all — `gh auth status` calls it "invalid" (misleadingly:
+ * it was never a token, not a stale one) and exits non-zero. See
+ * `we:agent-memory-src/workflow-cloud-vm-github-api-boundary.md` for the measured boundary this mirrors. A bare
+ * env-var shape check would wrongly downgrade every laptop whose `gh` credential lives outside `GH_TOKEN` (the
+ * common case), which is exactly the "every laptop caller keeps exactly today's behaviour" ruling this must not
+ * violate — so this shells the real probe rather than guessing from env. Exported (and separately injectable as
+ * `hasCredential`) so a test can stub a credential-less (or -full) host without touching a real `gh` process.
+ * @param {{cwd?: string}} [o]
+ * @returns {boolean}
+ */
+export function defaultHasCredential({ cwd = REPO_ROOT } = {}) {
+  try {
+    execFileSync('gh', ['auth', 'status'], { cwd, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The exact follow-up argv a credentialed host should run to finish landing a pushed-but-not-landed verdict
+ * (#3233) — a returned field, not advice in a log line, so a caller can act on it rather than the ref going
+ * undiscovered like the 21 orphans this card exists to stop.
+ * @param {{ref: string, sha: string, bodyPath: string, cwd: string}} o
+ * @returns {string[]}
+ */
+function buildFollowUp({ ref, sha, bodyPath, cwd }) {
+  const bodyRel = bodyPath.startsWith(cwd) ? bodyPath.slice(cwd.length + 1) : bodyPath;
+  // `--no-require-verified` is spelled out explicitly (never left implicit) so this string DECLARES ITS POSTURE
+  // per #3321's caller sweep (`we:scripts/__tests__/lane-verify.test.mjs`) on its own — it is handed to a
+  // DIFFERENT host to run at an unknown LATER time, so unlike the `argv` array a few lines below it, it cannot
+  // lean on an adjacent verify-lane run in THIS source text to prove the gate means anything (source adjacency
+  // is a proxy for "the verify precedes the land in the SAME run", which does not hold across a hand-off to a
+  // separate session). The opt-out is also the honest posture here: `verified` (this run's own content check,
+  // above) already vetted the pushed commit; there is no fresh HEAD to gate a second time.
+  return [
+    `node scripts/pr-land.mjs --ref=${ref} --sha=${sha} --base=main --body-file=${bodyRel} --label-on-green --no-require-verified`,
+  ];
+}
+
+/**
  * Append the "## Independent review — <date>" section, commit, and land or park — the `recordPrepVerdict` the
  * declaration's `record` step is shelled through.
  *
@@ -171,19 +220,35 @@ export function sectionRecorded(content, section) {
  * further happens on a write that did not land. Present ⇒ commit proceeds and the success return carries
  * `verified: true`.
  *
- * LANDS OR PARKS (never both). A clean review (`isCleanPrepReview`) is committed and handed to
+ * `land` (#3233, default `true`) DECIDES WHETHER `pr-land.mjs` RUNS AT ALL — it does not choose land-vs-park
+ * (that is `isCleanPrepReview`, unconditional). STEP 0, before any mutation: the effective land is the
+ * requested `land` AND a GitHub credential being usable (`hasCredential`, default shells `gh auth status` —
+ * see {@link defaultHasCredential}). No credential downgrades the request to push-only with `reason:
+ * 'no-credential'`; an explicit `land: false` takes the same push-only path with no reason (nothing was
+ * downgraded — it was asked for).
+ *
+ * EFFECTIVE LAND: a clean review (`isCleanPrepReview`) is committed and handed to
  * `we:scripts/pr-land.mjs --label-on-green` — the SAME transport every AI-edit path in this repo lands through
  * (#2138), so this operation adds no second way to reach `main`. Anything else is parked `--park=review:pending`
  * (pr-land's OWN `PARK_LABELS`, #2622 — `review:changes` is `review-pr`'s DIFFERENT label vocabulary and
  * `resolveParkLabel` refuses anything outside `review:human`/`review:pending`; a real live-fire run against
  * #1637 hit this refusal, caught it as INDETERMINATE post-commit, and is why this is `review:pending` now, not
  * `review:changes` — a prep review parks for a first LOOK, it is not `review:human`'s gate-self ceremony) so a
- * person sees the corrections before it lands.
+ * person sees the corrections before it lands. Returns `{..., pushed: true, landed: true, disposition, land}`
+ * (`land` here is `pr-land.mjs`'s own JSON result, unrelated to the `land` INPUT flag of the same name).
+ *
+ * NOT EFFECTIVE LAND (downgraded or explicit `land: false`): pushes this ONE commit — never the caller's
+ * accumulated branch — to `lane/review-prep-<item>-<sha8>` and returns `{..., pushed, landed: false,
+ * followUp}` with no `disposition`/`land` (pr-land was never shelled). `followUp` is the exact argv a
+ * credentialed host should run to finish the land — a returned field, not a log line, so the pushed verdict
+ * is a hand-off rather than an orphan. A failed push still returns determinately: `pushed: false`, the local
+ * commit intact, `followUp` owed — never a throw (see the race-guard rationale above for why).
  *
  * @param {{item: string, repo: string, cwd?: string, confidence: string,
  *   risks?: Array<{risk: string, addressed: boolean, note?: string}>, corrections?: string[],
- *   fixApplied?: boolean, note?: string, actor?: string, expectedContentHash?: string|null,
- *   exec?: Function, runNode?: Function, readStagedContent?: (relPath: string) => string}} o
+ *   fixApplied?: boolean, note?: string, actor?: string, land?: boolean, expectedContentHash?: string|null,
+ *   exec?: Function, runNode?: Function, readStagedContent?: (relPath: string) => string,
+ *   hasCredential?: (env?: NodeJS.ProcessEnv) => boolean}} o
  * @returns {Promise<object>}
  */
 export async function recordPrepVerdict({
@@ -196,11 +261,24 @@ export async function recordPrepVerdict({
   fixApplied = false,
   note = '',
   actor = 'operator',
+  land = true,
   expectedContentHash = null,
   exec = execFileIn(cwd),
   runNode = (argv, opts) => execFileSync(process.execPath, argv, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...opts }),
   readStagedContent = (relPath) => exec('git', ['show', `:${relPath}`], { cwd, encoding: 'utf8' }),
+  hasCredential = () => defaultHasCredential({ cwd }),
 } = {}) {
+  // ── STEP 0 — resolve the EFFECTIVE `land`, before any mutation (#3233). requested `land` AND a credential
+  //    being present; no credential downgrades to push-only rather than refusing (the cloud-VM population this
+  //    exists for gets served, not blocked). An explicit `land: false` needs no probe and carries no reason —
+  //    nothing was downgraded, it was asked for. ─────────────────────────────────────────────────────────────
+  let effectiveLand = Boolean(land);
+  let downgradeReason;
+  if (effectiveLand && !hasCredential()) {
+    effectiveLand = false;
+    downgradeReason = 'no-credential';
+  }
+
   const path = resolveCardPath({ item, cwd });
   const raw = readFileSync(path, 'utf8');
   const liveHash = contentHashOf(raw);
@@ -275,6 +353,24 @@ export async function recordPrepVerdict({
   mkdirSync(bodyDir, { recursive: true });
   const bodyPath = join(bodyDir, `${String(item).replace(/[^\w.-]+/g, '-')}-${sha.slice(0, 8)}-body.md`);
   writeFileSync(bodyPath, prBody, 'utf8');
+
+  // ── NOT LANDING (#3233) — push ONLY this commit, onto a ref named for the item, and hand back the exact
+  //    follow-up. Never both this AND the pr-land shell below (mutually exclusive with the branch past it). ──
+  if (!effectiveLand) {
+    const followUp = buildFollowUp({ ref, sha, bodyPath, cwd });
+    const base = {
+      recorded: true, verified: true, aborted: false, path, sha, ref, clean, actor, followUp,
+      ...(downgradeReason ? { reason: downgradeReason } : {}),
+    };
+    try {
+      exec('git', ['push', 'origin', `${sha}:refs/heads/${ref}`], { cwd, encoding: 'utf8' });
+    } catch {
+      // Determinate, not a throw — the commit stands and the push is owed and reported (see file header).
+      return { ...base, pushed: false, landed: false };
+    }
+    return { ...base, pushed: true, landed: false };
+  }
+
   const argv = [
     join(cwd, 'scripts', 'pr-land.mjs'),
     `--ref=${ref}`,
@@ -310,6 +406,8 @@ export async function recordPrepVerdict({
     clean,
     disposition: clean ? 'landed' : 'parked',
     actor,
+    pushed: true,
+    landed: true,
     land: landResult,
   };
 }

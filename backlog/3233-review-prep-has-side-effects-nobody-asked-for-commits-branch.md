@@ -3,8 +3,9 @@ bornAs: xh9pwf3
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: active
 dateOpened: "2026-08-21"
+dateStarted: "2026-09-06"
 preparedDate: "2026-08-25"
 tags: [operations, epic-3029, review-prep, preparation]
 scope:

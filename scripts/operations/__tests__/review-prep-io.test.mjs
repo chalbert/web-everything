@@ -12,7 +12,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   contentHashOf, createReviewPrepReader, createReviewPrepSinks, readPrep, recordPrepVerdict, resolveCardPath,
@@ -154,8 +155,11 @@ describe('recordPrepVerdict — the race guard', () => {
       exec: (cmd, args) => { calls.push([cmd, args]); return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''; },
       runNode: (argv) => { calls.push(['node', argv]); return JSON.stringify({ ok: true }); },
       readStagedContent: (relPath) => readFileSync(join(root, relPath), 'utf8'),
+      hasCredential: () => true, // a credentialed host — the default `land: true` path, byte-identical to today
     });
-    expect(result).toMatchObject({ recorded: true, verified: true, aborted: false, clean: true, disposition: 'landed' });
+    expect(result).toMatchObject({
+      recorded: true, verified: true, aborted: false, clean: true, disposition: 'landed', pushed: true, landed: true,
+    });
     const updated = readFileSync(path, 'utf8');
     expect(updated).toContain('## Independent review — ');
     expect(updated).toContain('Confidence: **High**');
@@ -180,6 +184,96 @@ describe('recordPrepVerdict — the race guard', () => {
     const stagedBody = readFileSync(bodyFilePath, 'utf8');
     expect(stagedBody).toContain('Independent review of #9999');
     expect(stagedBody).toContain('## Independent review — ');
+    // EXACT count (#3233) — a stray `git push` at calls[4] would leave this green while violating the very
+    // sentence this criterion protects: the default path pushes exactly once, THROUGH pr-land, never twice.
+    expect(calls).toHaveLength(4);
+  });
+});
+
+describe('recordPrepVerdict — `land` (#3233): always pushes, `pr-land` only when landing', () => {
+  const baseArgs = (overrides = {}) => ({
+    item: '9999',
+    repo: 'chalbert/web-everything',
+    cwd: root,
+    confidence: 'High',
+    risks: [{ risk: 'premise', addressed: true }],
+    corrections: [],
+    fixApplied: false,
+    note: '',
+    expectedContentHash: contentHashOf(CARD_RAW),
+    readStagedContent: (relPath) => readFileSync(join(root, relPath), 'utf8'),
+    ...overrides,
+  });
+
+  it('an explicit `land: false` pushes exactly once — by SHA, not a branch tip — and never shells pr-land', async () => {
+    writeCard('9999-a-fake-card.md');
+    const gitCalls = [];
+    const runNodeCalls = [];
+    const result = await recordPrepVerdict(baseArgs({
+      land: false,
+      hasCredential: () => true, // present but irrelevant — an explicit `false` needs no probe
+      exec: (cmd, args) => { gitCalls.push(args); return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''; },
+      runNode: (argv) => { runNodeCalls.push(argv); return '{}'; },
+    }));
+    expect(runNodeCalls).toHaveLength(0); // pr-land never shelled
+    const pushCalls = gitCalls.filter((a) => a[0] === 'push');
+    expect(pushCalls).toHaveLength(1);
+    expect(pushCalls[0]).toEqual(['push', 'origin', 'deadbeefcafe:refs/heads/lane/review-prep-9999-deadbeef']);
+    expect(result).toMatchObject({
+      recorded: true, verified: true, pushed: true, landed: false, clean: true, sha: 'deadbeefcafe',
+      ref: 'lane/review-prep-9999-deadbeef',
+    });
+    expect(result.reason).toBeUndefined(); // asked for, not downgraded
+    expect(result.disposition).toBeUndefined();
+    expect(result.land).toBeUndefined();
+    expect(Array.isArray(result.followUp)).toBe(true);
+    expect(result.followUp[0]).toContain('--ref=lane/review-prep-9999-deadbeef');
+  });
+
+  it('the default `land: true` DOWNGRADES to push-only on a credential-less host — never refuses', async () => {
+    writeCard('9999-a-fake-card.md');
+    const gitCalls = [];
+    const runNodeCalls = [];
+    const result = await recordPrepVerdict(baseArgs({
+      hasCredential: () => false, // the stubbed cloud-VM host this card exists for
+      exec: (cmd, args) => { gitCalls.push(args); return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''; },
+      runNode: (argv) => { runNodeCalls.push(argv); return '{}'; },
+    }));
+    expect(gitCalls.some((a) => a[0] === 'add')).toBe(true);
+    expect(gitCalls.some((a) => a[0] === 'commit')).toBe(true);
+    expect(gitCalls.some((a) => a[0] === 'push')).toBe(true);
+    expect(runNodeCalls).toHaveLength(0);
+    expect(result).toMatchObject({ landed: false, reason: 'no-credential', clean: true, pushed: true });
+    expect(Array.isArray(result.followUp)).toBe(true);
+  });
+
+  it('resuming a run record with NO `land` key at all still lands — `?? true` reads today\'s behaviour', async () => {
+    writeCard('9999-a-fake-card.md');
+    const runNodeCalls = [];
+    // `land` is simply absent from the call, the exact shape a pre-#3233 suspended run's stored payload has.
+    const result = await recordPrepVerdict(baseArgs({
+      hasCredential: () => true,
+      exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
+      runNode: (argv) => { runNodeCalls.push(argv); return '{}'; },
+    }));
+    expect(runNodeCalls).toHaveLength(1);
+    expect(result).toMatchObject({ landed: true, pushed: true, disposition: 'landed' });
+  });
+
+  it('a failed push is determinate — commit intact, `pushed: false`, `followUp` owed, never a throw', async () => {
+    writeCard('9999-a-fake-card.md');
+    const result = await recordPrepVerdict(baseArgs({
+      land: false,
+      exec: (cmd, args) => {
+        if (args[0] === 'push') throw new Error('remote: permission denied');
+        return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : '';
+      },
+      runNode: () => { throw new Error('must not be reached'); },
+    }));
+    expect(result).toMatchObject({
+      recorded: true, verified: true, pushed: false, landed: false, sha: 'deadbeefcafe',
+    });
+    expect(Array.isArray(result.followUp)).toBe(true);
   });
 });
 
@@ -254,6 +348,7 @@ describe('recordPrepVerdict — the post-write verify (#3230)', () => {
       },
       runNode: () => '{}',
       readStagedContent: () => stagedSnapshot,
+      hasCredential: () => true,
     });
     expect(result).toMatchObject({ recorded: true, verified: true });
     // the working tree is now garbage — proving the check did not read it.
@@ -294,6 +389,7 @@ describe('recordPrepVerdict — real git, no mocked `exec`: the actual commit ca
         return out;
       },
       runNode: () => '{}',
+      hasCredential: () => true,
       // `readStagedContent` left at its DEFAULT (real `git show :path`) — this is the line #3230 exists for.
     });
 
@@ -315,6 +411,7 @@ describe('recordPrepVerdict — land vs park', () => {
     exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
     runNode: () => '{}',
     readStagedContent: (relPath) => readFileSync(join(root, relPath), 'utf8'),
+    hasCredential: () => true, // a credentialed host — land vs park is orthogonal to #3233's downgrade
     ...overrides,
   });
 
@@ -387,6 +484,7 @@ describe('recordPrepVerdict — failure classification', () => {
       exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
       runNode: () => { throw new Error('gh: network unreachable'); },
       readStagedContent: () => readFileSync(path, 'utf8'),
+      hasCredential: () => true, // must take the landing branch for `runNode` (pr-land) to be reached at all
     }).catch((e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.notApplied).toBeUndefined();
@@ -416,5 +514,21 @@ describe('createReviewPrepSinks', () => {
 describe('notApplied', () => {
   it('marks an error so the executor retries rather than replays it as indeterminate', () => {
     expect(notApplied('x').notApplied).toBe(true);
+  });
+});
+
+describe('review-prep-io.mjs — the docs describe the credential downgrade, not automatic landing (#3233)', () => {
+  const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'review-prep-io.mjs'), 'utf8');
+  const fileHeader = SOURCE.split('\n').slice(0, 31).join('\n'); // the `@file`/`@description` block
+
+  it('the file header no longer describes landing as automatic — it names the credential downgrade', () => {
+    expect(fileHeader).not.toMatch(/LANDS OR PARKS/);
+    expect(fileHeader).toMatch(/downgrad/i);
+    expect(fileHeader).toMatch(/followUp/);
+  });
+
+  it('`recordPrepVerdict`\'s own JSDoc no longer contains the stale "LANDS OR PARKS" string', () => {
+    expect(SOURCE).not.toContain('LANDS OR PARKS');
+    expect(SOURCE).toMatch(/downgrad/i);
   });
 });
