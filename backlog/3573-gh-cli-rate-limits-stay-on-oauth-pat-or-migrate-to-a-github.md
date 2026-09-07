@@ -29,7 +29,7 @@ cost of a wide, security-sensitive auth-surface migration absent evidence of rea
 **Follow-on build scaffolded at ratification:**
 
 - [Log gh api rate_limit remaining/used on every we:scripts/conveyor/infra-blocked.mjs retry
-  trip](/backlog/xmxeiz2-log-gh-api-rate-limit-remaining-used-on-every-we-scripts-con/) (parent: this item,
+  trip](/backlog/3586-log-gh-api-rate-limit-remaining-used-on-every-we-scripts-con/) (parent: this item,
   `blockedBy` this item) — the concrete, build-ready first slice: on each
   `we:scripts/conveyor/infra-blocked.mjs` retry trip, call `gh api rate_limit` and log the core bucket's
   `remaining`/`used` figures alongside the existing per-attempt log line, so a future revisit of this
