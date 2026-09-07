@@ -3,8 +3,10 @@ bornAs: xrzo6ud
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-06"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
 tags: []
 scope:
   - we:skills-src/finish/

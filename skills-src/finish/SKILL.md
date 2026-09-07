@@ -131,6 +131,14 @@ gap.
 | generated artifacts — grammar-scorecard report, `we:AGENTS.md`, parity report | **REGENERATE, don't hand-merge** — re-run the generator (`gen:inventory`, `grammar-scorecard.mjs`, the parity report) so the output matches the merged inputs. |
 | code | **union additive by intent** (keep both sides' additions when they're independent). A genuine **same-line overlap** → **STOP and report** — never guess which side wins. |
 
+**A sequencing conflict against a sibling decision is not in that table — post it, don't just report it.**
+If, while rebasing onto `main`, you find the PR conflicts with a decision `main` already made elsewhere (e.g.
+a sibling item deliberately deferred the exact feature this PR builds) — a cross-cutting concern
+`review-pr` never checks for, since it only reviews a diff's own internal correctness — post it as a finding
+directly on the PR: `node we:scripts/conveyor/reconcile-finding.mjs <pr> --body-file=<path> [--repo=<owner/name>]`.
+This bounces the PR to `review:changes` so the finding enters the normal fix-and-re-review cycle, instead of
+surfacing only in your own task summary where the operator has to ask before learning it exists.
+
 **Recurring test-red root causes (fix MINIMALLY — never weaken or delete a test):**
 
 - **epic-closeout** — resolving the last child of an epic ⇒ the umbrella epic must be resolved too (the
