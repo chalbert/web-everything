@@ -342,6 +342,18 @@ describe('runLoop — dispatchPass (#3383): carries the dispatch pass\'s nextSta
     expect(res.ticks).toBe(2);
     expect(seenPayloads[1].bookkeeping).toEqual({ tick: 1, from: 'raw' });
   });
+
+  it('xpshzms (#3571) — calls mechanicalPasses BEFORE dispatchPass every tick, so a long dispatch backlog can never starve the monitoring sweeps of a turn', async () => {
+    const calls = [];
+    const res = await runLoop({
+      tickOnce: () => ({ decisions: { idleStop: true }, nextState: {} }),
+      mechanicalPasses: async () => { calls.push('mechanicalPasses'); },
+      dispatchPass: async () => { calls.push('dispatchPass'); return { nextState: {} }; },
+      sleep: () => {},
+    });
+    expect(calls).toEqual(['mechanicalPasses', 'dispatchPass']);
+    expect(res.stoppedReason).toBe('idle-stop');
+  });
 });
 
 // ── (3) driveConveyor — the lease lifecycle: ALWAYS released, never behind process.exit ─────────────────────
