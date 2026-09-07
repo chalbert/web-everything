@@ -4184,35 +4184,53 @@ engine the closing catalog builds onto).
 
 ---
 
-### Build-brief discipline: name edge-cases, require integration tests, forbid overclaiming — caught by a deterministic proposer gap, not a human re-read {#build-brief-discipline}
+### Build-brief discipline: name edge-cases, require integration tests, forbid overclaiming — caught by a deterministic proposer gap AND a build-time habit, not a human re-read {#build-brief-discipline}
 
 **Every delegated build brief — the backlog item body a build lane implements to spec — must (1) name the
 edge-cases it wants handled or explicitly rejected, (2) require an integration/wiring test and not only a
-unit test, and (3) never claim to "close" something the slice does not close end-to-end.** This closed the
-root cause traced from the UI-Fidelity foundation PRs (#2805/#2802, PRs #951/#952, both ACCEPT-WITH-NITS): the build agents
-built faithfully to spec, but the spec itself under-specified the edge-cases to reject, asked for tests
-without naming which kind, and echoed a slice title as a scope claim it hadn't earned. The nits were the
-brief's gaps, reproduced faithfully — no amount of build-time care fixes a spec that never named the case.
+unit test, and (3) never claim to "close" something the slice does not close end-to-end (whether that claim
+lives in the body's prose or in the item's own title).** This closed the root cause traced from the
+UI-Fidelity foundation PRs (#2805/#2802, PRs #951/#952, both ACCEPT-WITH-NITS): the build agents built
+faithfully to spec, but the spec itself under-specified the edge-cases to reject, asked for tests without
+naming which kind, and echoed a slice title ("closes the data-layer dodge") as a scope claim it hadn't
+earned. The nits were the brief's gaps, reproduced faithfully — no amount of build-time care fixes a spec
+that never named the case.
 
-**Enforcement is the same deterministic, propose-and-verify gap detector already used for thin specs
-(#252), never a new human re-read pass.** `we:scripts/readiness/proposer.mjs`'s existing
+**Enforcement is two-sided — an authoring-time gate plus a build-time habit, not one mechanism doing both
+jobs.** `we:scripts/readiness/proposer.mjs` carries the deterministic half: its existing
 `selectProposalCandidates` already flags a decided-but-thin item on two structural proxies — missing
 acceptance criteria, missing a concrete file path — and drafts (never auto-applies) candidate fixes. This
-statute adds three more proxies to the same pure, quarantined engine: a body naming no edge-case is
-flagged `edge-cases`; a body naming no integration/wiring test is flagged `integration-tests`; a body that
-claims to "close" something without demonstrating it end-to-end is flagged `overclaim-scope`. Same
-precedent shape, same conservative bias (a missed real edge-case only means the human isn't nudged to add
-one; it never blocks a build), same never-splices-prose boundary.
+statute adds four more proxies to the same pure, quarantined engine, same conservative bias throughout (a
+missed real gap only means the human isn't nudged to add one; it never blocks a build), same
+never-splices-prose boundary:
 
-**Lineage:** #2819 (traced from #2805/#2802's ACCEPT-WITH-NITS foundation PRs). Reuses the spec-gap
-proposer #252 and its quarantine-from-`check:readiness` boundary. Reflected in the delivery-agent brief
-(`we:skills-src/conveyor/delivery-agent-brief.md`), which applies this same lens when scaffolding a
-leftover-work item rather than half-doing it. The fix-agent briefs
-(`we:skills-src/conveyor/fix-agent-brief.md`, `we:skills-src/conveyor/fix-agent-ci-brief.md`) carry no
-equivalent leftover-work-scaffolding instruction today, so there is nothing there yet to extend — a
-follow-on item owes this the moment either brief grows one. Composes with
-[#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the gap detection is
-script-decidable; drafting a fix and accepting it stay human/model judgment).
+- `edge-cases` — the body names no edge-case to handle or explicitly reject.
+- `integration-tests` — the body's testing language never rises above "unit test" (also accepts
+  "integration"/"wiring"/"end-to-end"/"e2e" as satisfying synonyms).
+- `overclaim-scope` — the BODY's prose claims to "close" something without demonstrating it end-to-end in
+  the same paragraph as the claim (excludes the bare verb "close", the "closes over" JS-closure idiom, and
+  a GitHub-style "closes #123" auto-link — none of those are a prose scope claim).
+- `overclaim-title` — the item's own TITLE claims full closure ("closes"/"fixes"/"resolves"/"solves") while
+  the item is a slice of a parent — the exact "closes the data-layer dodge" shape from the diagnosis above,
+  independent of whatever the body says. A standalone item (no parent) claiming its own closure is not a
+  slice-vs-whole mismatch and is not flagged.
+
+A readiness-time gate cannot rewrite an already-thin upstream spec, so the build-time half lives in the
+delegated-agent templates themselves (`we:skills-src/conveyor/delivery-agent-brief.md`,
+`fix-agent-brief.md`, `fix-agent-ci-brief.md`) as a standing instruction to the executing agent: name the
+concrete edge-cases yourself when the spec under-specifies them, cover the change with an
+integration/wiring test exercising the real call path, and never echo a title or slice name back as an
+earned "closes X" claim.
+
+**Lineage:** #2819 (traced from #2805/#2802's ACCEPT-WITH-NITS foundation PRs). Fixes #2563 (advisory
+care-level / convergence) — the warm-lane-convergence half of that fix is the pre-existing `/converge` step
+already in `delivery-agent-brief.md` (#2971/#2969); this statute closes the remaining root cause (the
+under-specified brief itself). Reuses the spec-gap proposer #252 and its quarantine-from-`check:readiness`
+boundary. Reflected in `we:scripts/readiness/proposer.mjs` (the four detectors above) and in all three
+conveyor build-brief templates named above — the delivery-agent brief applies this lens both when
+scaffolding a new leftover-work item and to its own current build, and the fix-agent briefs apply it to a
+repair. Composes with [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the gap
+detection is script-decidable; drafting a fix and accepting it stay human/model judgment).
 
 ---
 

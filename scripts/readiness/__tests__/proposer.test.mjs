@@ -10,9 +10,10 @@
  *   - with no provider registered, degrades gracefully — reports the gap, exits clean.
  *
  * Also covers the build-brief-discipline extension (#2819,
- * docs/agent/platform-decisions.md#build-brief-discipline): three more gap proxies — no named
- * edge-case, no integration/wiring test, an unearned "closes X" claim — on the same deterministic,
- * propose-and-verify engine.
+ * docs/agent/platform-decisions.md#build-brief-discipline): four more gap proxies — no named
+ * edge-case, no integration/wiring test, an unearned "closes X" claim in the BODY (`overclaim-scope`),
+ * and a slice TITLE that claims full closure on its own (`overclaim-title`) — on the same
+ * deterministic, propose-and-verify engine.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -233,6 +234,63 @@ describe('build-brief discipline (#2819) — edge-cases / integration-tests / ov
     expect(diff).toContain('Integration-test note');
     expect(diff).toContain('Overclaim check');
     expect(diff.split('\n').every((l) => l.startsWith('+') || l.startsWith('---'))).toBe(true);
+  });
+
+  it('accepts the "e2e test" shorthand as an integration-test synonym too', () => {
+    const body = FLESHED.replace('an integration test that wires the real caller', 'an e2e test that wires the real caller');
+    const cands = selectProposalCandidates([item(10)], bodyMapReader({ 'backlog/10-slug.md': body }));
+    expect(cands).toEqual([]);
+  });
+});
+
+describe('build-brief discipline (#2819) — overclaim-title: a SLICE TITLE claiming full closure', () => {
+  // Distinct from overclaim-scope above: that one reads the BODY's prose for an unbacked "closes"
+  // claim; this one reads the item's own TITLE — the root-cause example was a slice literally titled
+  // "closes the data-layer dodge", independent of whatever its body says.
+  it('flags overclaim-title on a slice (has a parent) whose title claims full closure', () => {
+    const items = [item(10, { title: 'Closes the data-layer dodge', parent: '2527' })];
+    const [c] = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(c.gaps).toEqual(['overclaim-title']); // fleshed body → only the title-level gap fires
+  });
+
+  it('does not flag overclaim-title on a standalone item (no parent) with the same title', () => {
+    const items = [item(10, { title: 'Closes the data-layer dodge' })]; // no parent
+    const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(cands).toEqual([]); // fully fleshed, no parent → nothing to flag
+  });
+
+  it('does not flag overclaim-title on a slice whose title makes no closure claim', () => {
+    const items = [item(10, { title: 'Add a retry to the fetch helper', parent: '2527' })];
+    const cands = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+    expect(cands).toEqual([]);
+  });
+
+  it('also recognizes "fixes"/"resolves"/"solves" as closure verbs, not only "closes"', () => {
+    for (const verb of ['Fixes', 'Resolves', 'Solves']) {
+      const items = [item(10, { title: `${verb} the data-layer dodge`, parent: '2527' })];
+      const [c] = selectProposalCandidates(items, bodyMapReader({ 'backlog/10-slug.md': FLESHED }));
+      expect(c.gaps).toEqual(['overclaim-title']);
+    }
+  });
+
+  it('drafts a note (never a criterion or path) for overclaim-title, and is not refused', async () => {
+    const registry = registerReferenceProposers();
+    const items = [item(10, { title: 'Closes the data-layer dodge', parent: '2527' })];
+    const [r] = await propose(items, { readBody: bodyMapReader({ 'backlog/10-slug.md': FLESHED }), registry });
+    expect(r.status).toBe('proposed');
+    expect(r.proposal.notes).toBeTruthy();
+    expect(r.proposal.criteria).toBeUndefined();
+    expect(r.proposal.paths).toBeUndefined();
+    const diff = renderProposalDiff(r);
+    expect(diff).toMatch(/<!-- Notes/);
+    expect(diff.split('\n').every((l) => l.startsWith('+') || l.startsWith('---'))).toBe(true);
+  });
+
+  it('a provider that returns only notes is proposed, not refused — notes alone are a real draft', async () => {
+    const registry = new CustomProposerRegistry();
+    registry.register({ id: 'notes-only', handles: () => true, propose: () => ({ notes: ['review by hand'] }) });
+    const [r] = await propose([item(10)], { readBody: bodyMapReader({ 'backlog/10-slug.md': THIN }), registry });
+    expect(r.status).toBe('proposed');
   });
 });
 

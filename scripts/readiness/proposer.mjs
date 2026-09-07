@@ -5,8 +5,8 @@
  * The non-deterministic *assist* that was deliberately carved OUT of the deterministic readiness
  * fixer (#250): for an `open` issue/idea that is decided-but-thin (no acceptance criteria, no
  * concrete file paths — and, per the build-brief-discipline extension #2819, no named edge-cases,
- * no integration/wiring test, or an unearned "closes X" claim), draft candidate fixes for a human to
- * accept. It is the
+ * no integration/wiring test, an unearned "closes X" claim in the body, or a slice title that claims
+ * full closure on its own), draft candidate fixes for a human to accept. It is the
  * readiness analogue of the conformance auto-fix `model` fixer (#196) — AI is a swappable provider
  * behind a stable contract (`CustomProposerRegistry`, mirroring `CustomFixerRegistry` in
  * `scripts/autofix/engine.mjs`), not architecture.
@@ -114,11 +114,12 @@ function hasEdgeCases(body) {
 }
 
 /**
- * Does the body require an integration/wiring test, not only a unit test? Also accepts "end-to-end" as
- * a synonym — the exact phrase this file's own `overclaimsScope` nudges authors toward using.
+ * Does the body require an integration/wiring test, not only a unit test? Also accepts "end-to-end"
+ * (the exact phrase this file's own `overclaimsScope` nudges authors toward using) and its "e2e"
+ * shorthand as synonyms.
  */
 function hasIntegrationTests(body) {
-  return hasAffirmativeMention(body, /\b(?:integration|wiring|end-to-end)[\s-]tests?\b/i);
+  return hasAffirmativeMention(body, /\b(?:integration|wiring|end-to-end|e2e)[\s-]tests?\b/i);
 }
 
 /**
@@ -139,6 +140,17 @@ function hasIntegrationTests(body) {
 function overclaimsScope(body) {
   return body.split(/\n\s*\n/).some((para) =>
     /\bcloses\b(?!\s+over\b)(?!\s*:?\s*\[?#\d)/i.test(para) && !/\bend-to-end\b/i.test(para));
+}
+
+/**
+ * Is this item's own TITLE an overclaim risk? Distinct from `overclaimsScope` above (which reads the
+ * BODY's prose for an unbacked "closes" claim): this catches the root-cause example the same statute
+ * traces — a *slice title* like "closes the data-layer dodge" — where the claim lives in the title
+ * itself rather than in the body. Only fires on a slice (an item with a `parent`): a standalone item
+ * claiming its own closure is not a slice-vs-whole mismatch, so nothing to flag.
+ */
+function hasOverclaimTitleRisk(title, it) {
+  return Boolean(it.parent) && /\b(?:closes|fixes|resolves|solves)\b/i.test(title ?? '');
 }
 
 /**
@@ -170,6 +182,7 @@ export function selectProposalCandidates(items, readBody) {
     if (!hasEdgeCases(body)) gaps.push('edge-cases');
     if (!hasIntegrationTests(body)) gaps.push('integration-tests');
     if (overclaimsScope(body)) gaps.push('overclaim-scope');
+    if (hasOverclaimTitleRisk(it.title, it)) gaps.push('overclaim-title');
     if (gaps.length === 0) continue; // already fleshed out — not thin
     out.push({
       num: it.num, id: it.id, title: it.title ?? it.id, summary: it.summary ?? '',
@@ -191,14 +204,18 @@ export function selectProposalCandidates(items, readBody) {
  * @property {string} file
  * @property {string} body
  * @property {string[]} gaps   Which of `acceptance-criteria` / `file-paths` / `edge-cases` /
- *   `integration-tests` / `overclaim-scope` apply (#2819 build-brief discipline).
+ *   `integration-tests` / `overclaim-scope` / `overclaim-title` apply (#2819 build-brief discipline).
  *
  * @typedef {Object} Proposal
  * @property {string[]} [criteria]    Candidate acceptance criteria (only when `acceptance-criteria` gap).
  * @property {string[]} [paths]       Candidate likely repo file paths (only when `file-paths` gap).
  * @property {string[]} [edgeCases]   Candidate edge-cases to name (only when `edge-cases` gap).
  * @property {string} [integrationNote]   A wiring/integration-test nudge (only when `integration-tests` gap).
- * @property {string} [overclaimWarning]  A soften-the-claim nudge (only when `overclaim-scope` gap).
+ * @property {string} [overclaimWarning]  A soften-the-claim nudge (only when `overclaim-scope` gap — an
+ *   unbacked "closes" claim found in the BODY).
+ * @property {string[]} [notes]     Advisory-only findings with no auto-draftable fix (only when
+ *   `overclaim-title` gap — a slice TITLE that claims full closure) — rendered as a comment for a human
+ *   to resolve by hand, never spliced as a criterion or a path.
  * @property {string} [rationale]   One-line note on how the draft was derived (shown to the human).
  *
  * @typedef {Object} Proposer
@@ -280,6 +297,12 @@ export const referenceProposer = {
       proposal.overclaimWarning =
         'This item claims to "close" something — confirm the slice closes it end-to-end, or soften the claim to describe only what this slice does.';
     }
+    if (c.gaps.includes('overclaim-title')) {
+      proposal.notes = [
+        `Title claims full closure ("closes"/"fixes"/"resolves"/"solves") but this item is a slice of a ` +
+        `parent — confirm the work truly closes it end-to-end, or soften the title language.`,
+      ];
+    }
     return proposal;
   },
 };
@@ -329,7 +352,7 @@ export async function propose(items, { readBody, registry }) {
     }
     const hasDraft = proposal && (
       proposal.criteria?.length || proposal.paths?.length || proposal.edgeCases?.length
-      || proposal.integrationNote || proposal.overclaimWarning
+      || proposal.integrationNote || proposal.overclaimWarning || proposal.notes?.length
     );
     if (!hasDraft) {
       results.push({ candidate, proposal: null, status: 'refused', providerId: provider.id });
@@ -377,6 +400,11 @@ export function renderProposalDiff(result) {
   if (p.overclaimWarning) {
     startBlock();
     lines.push('+ <!-- Overclaim check (candidate — confirm before relying on this): -->', `+ - ${p.overclaimWarning}`);
+  }
+  if (p.notes?.length) {
+    startBlock();
+    lines.push('+ <!-- Notes (advisory — no draft to apply, resolve by hand): -->');
+    for (const note of p.notes) lines.push(`+ <!-- ${note} -->`);
   }
   return lines.join('\n');
 }
