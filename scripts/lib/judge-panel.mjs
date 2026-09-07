@@ -41,7 +41,51 @@
  * caller can NOTICE if that ever stops being true instead of silently trusting one of them.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
- * FOUR REFUSALS, ALL FAIL-CLOSED, ALL BEFORE THE FIRST CHILD STARTS.
+ * #3158 RULING — PANEL SEATS STAY TOOL-FREE BY DESIGN. A juror seated here never gets `allowedTools`, and this
+ * is now enforced (REFUSAL 5), not merely the accidental shape of an unforwarded option.
+ *
+ * THE QUESTION THE CARD ASKED: may a panel seat ever be tool-bearing, given `buildMandate`'s throwaway-clone
+ * offer and `MUTATION_PROBE_RULE`'s "break the line and watch a NAMED test redden" both ask for something a
+ * `--tools ''` juror cannot do? Two branches were on the table — forward `allowedTools` + a per-seat lane
+ * (pricing "N seats need N lanes"), or rule this module tool-free and move the probe elsewhere. This module
+ * takes the SECOND branch, and it is not a fresh call: the operator already ratified the load-bearing half of
+ * it in #3313 (2026-08-26, `we:docs/agent/platform-decisions.md`, "every PR gets a look" §, its Lineage
+ * paragraph — verbatim, re-read at #3158's own close), stating plainly that *"judgePanel's tool-free jurors are
+ * a cost for a deep reviewer and the specification for a diff-only one"* — i.e. tool-free is not this module's
+ * current gap, it is its brief.
+ *
+ * WHY NOT THE FIRST BRANCH. Price it honestly rather than declaring it merely "expensive": a mutation probe
+ * EDITS the file it is checking, so two tool-bearing seats sharing one `cwd` would race each other's edits —
+ * `assertLaneCwd` (`judge-spawn.mjs`) only refuses a cwd that is absent or is the DRIVER's own lane, it does
+ * not (and structurally cannot, from a single seat's view) refuse two SIBLING seats colliding on the same one.
+ * Making that safe would mean this module provisioning N lanes for an N-seat tool-bearing roster — a resource
+ * `we:scripts/lane-pool.mjs` treats as scarce and per-session-leased, not a thing a `judge` step hands out on
+ * demand. `we:scripts/operations/review-pr.mjs`'s `buildReviewJudgeRequest` already carries the alternative
+ * that exists TODAY for a caller that genuinely needs a tool-bearing mutation probe: it runs its two mandatory
+ * lenses SEQUENTIALLY through `judgeSpawn` directly (own `allowedTools`, own lane, one at a time). Its own
+ * `#3319` comment states the rationale precisely: *"`judgePanel` … never forwards `allowedTools`, so wiring the
+ * panel would have made the security seat — and the correctness one with it — `--tools ''`"* — i.e. THIS
+ * module's tool-forwarding gap is why that file chose sequential `judgeSpawn` calls over a concurrent panel.
+ * That path is not reproduced here; a caller that wants it drives `judgeSpawn` itself, exactly as that file does.
+ *
+ * WHAT THIS MEANS FOR THE MANDATE TEXT. `we:scripts/lib/review-core.mjs`'s `buildMandate` / `buildPanelMandate`
+ * now take an explicit `toolsAvailable` parameter (default `true`, so `review-pr.mjs`'s real tool-bearing
+ * `judgeSpawn` callers are unaffected) so a caller that knows its juror is tool-free — every caller that seats
+ * through `judgePanel`, per this ruling, unconditionally — can say so and get mandate text that stops offering
+ * a throwaway clone and stops demanding a mutation result a tool-free juror cannot produce. See that module for
+ * the conditioned text and `MUTATION_PROBE_RULE_TOOL_FREE`.
+ *
+ * WHICH FINDING CLASSES THIS BUYS AND WHICH IT DOES NOT (Done-when #3). A tool-free panel seat reaches: anything
+ * legible from the diff text alone — logic errors, missing/weakened test coverage visible in the diff, an
+ * unhandled case, a scope mismatch against the stated goal, style/naming/simplicity. It does NOT reach: a claim
+ * that only firing the code disproves (a `gh` flag bypass, a guard hole that only reproduces against a real
+ * checkout, a decorative test proven decorative by mutating the source) — the exact class `judge-spawn.mjs`'s
+ * own header says tools are the finding mechanism for. A panel `accept` is therefore a diff-only floor, never a
+ * tool-backed one; `MUTATION_PROBE_RULE_TOOL_FREE` makes a panel juror SAY so in its own findings rather than
+ * silently reading as equivalent to review-pr.mjs's tool-bearing pair.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * FIVE REFUSALS, ALL FAIL-CLOSED, ALL BEFORE THE FIRST CHILD STARTS.
  *
  *  1. DEPTH. `depth >= maxDepth` is refused — and so is a `depth` or `maxDepth` that is absent, null, or not a
  *     finite number. Unknown depth is a REFUSAL, not a default, applying the fail-closed principle ratified in
@@ -105,6 +149,12 @@
  *     still in the path; because this module feeds it the identical arguments it already validated, that inner
  *     call is now belt-and-braces from THIS caller and no test here pretends to reach it. (It IS reached and
  *     pinned from the single-spawn path — see `we:scripts/lib/__tests__/judge-spawn.test.mjs`.)
+ *
+ *  5. NO SEAT, AND NO PANEL-WIDE DEFAULT, MAY DECLARE `allowedTools` (#3158). Refused loud, before anything
+ *     spawns, rather than silently dropped — `judgePanel` never forwarded the field to begin with, so a caller
+ *     that set it on a juror or on the panel-wide options was previously getting a QUIET tool-free seat with no
+ *     signal that its request was ignored. Per the ruling above this is permanent, not a gap: the message names
+ *     `judgeSpawn` (with its own `cwd`) as the transport for a tool-bearing juror instead.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
  * PARTIAL FAILURE IS A RESULT, NOT AN EXCEPTION. One juror rejecting must neither orphan its siblings nor
@@ -219,6 +269,31 @@ export function assertPanelBudget({ budgets = [], maxTotalBudgetUsd } = {}) {
 }
 
 /**
+ * REFUSAL 5 — panel seats stay tool-free by design (#3158; see the file header for the ruling and why). Pure,
+ * checked before anything is spawned. A caller that wants a tool-bearing juror uses `judgeSpawn` directly (its
+ * own `allowedTools` + its own lane), never `judgePanel` — this refusal is what turns a silently-dropped field
+ * into a message that says so.
+ *
+ * @param {Array<{allowedTools?: unknown}>} jurors - the roster, unvalidated.
+ * @param {unknown} panelAllowedTools - the panel-wide `allowedTools` option, if a caller passed one.
+ * @throws when the panel-wide option, or any seat, declares `allowedTools`.
+ */
+export function assertPanelToolFree(jurors, panelAllowedTools) {
+  const REASON = 'panel seats stay tool-free by design (#3158) — a mutation probe cannot share a cwd with a '
+    + 'sibling seat, so a tool-bearing juror needs its own lane; use `judgeSpawn` directly with `allowedTools` '
+    + 'and its own `cwd`, never `judgePanel`.';
+  if (panelAllowedTools !== undefined) {
+    throw new TypeError(`judge-panel: \`allowedTools\` is not a panel-wide option — ${REASON}`);
+  }
+  const list = Array.isArray(jurors) ? jurors : [];
+  list.forEach((juror, i) => {
+    if (juror && typeof juror === 'object' && !Array.isArray(juror) && juror.allowedTools !== undefined) {
+      throw new TypeError(`judge-panel: juror ${i} (\`${juror.lens ?? '?'}\`) declares \`allowedTools\` — ${REASON}`);
+    }
+  });
+}
+
+/**
  * THE PURE SEAM, AND THE PLACE SIBLING DISTINCTNESS IS MADE STRUCTURAL — a roster in, named seats out.
  *
  * Spawns nothing, reads no environment. Each seat gets:
@@ -327,6 +402,7 @@ export function panelSeats({ jurors, runId } = {}) {
  * @param {object} opts
  * @param {Array<{lens: string, slot?: number, id?: string, mandate?: string, input?: string, shape?: object,
  *                model?: string, effort?: string, budget?: number}>} opts.jurors - the roster; one spawn each.
+ *                A seat carrying `allowedTools` is REFUSED (#3158 — panel seats stay tool-free by design).
  * @param {string} opts.runId - run identity every seat's session id derives from. REQUIRED.
  * @param {number} opts.maxTotalBudgetUsd - aggregate USD ceiling over the roster's declared budgets. REQUIRED.
  * @param {number} opts.depth - this panel's nesting depth. REQUIRED, fails closed when unknown.
@@ -342,6 +418,8 @@ export function panelSeats({ jurors, runId } = {}) {
  * @param {string} [opts.cli] - the binary each juror runs as.
  * @param {number} [opts.timeoutMs] - per-juror kill timeout.
  * @param {Function} [opts.spawnFn] - injectable `child_process.spawn`, forwarded to every seat.
+ * @param {unknown} [opts.allowedTools] - NOT a real option — REFUSED if present (#3158). Panel seats stay
+ *   tool-free by design; a tool-bearing juror is `judgeSpawn`'s own `allowedTools`, called directly.
  * @returns {Promise<{runId: string, depth: number, maxDepth: number, maxTotalBudgetUsd: number,
  *                    totalBudgetUsd: number, totalCostUsd: number, wallMs: number, ok: boolean,
  *                    failedCount: number, jurors: PanelJurorResult[]}>}
@@ -363,9 +441,13 @@ export async function judgePanel({
   cli,
   timeoutMs,
   spawnFn,
+  allowedTools,
 } = {}) {
   // ── REFUSAL 1: depth, before anything else is even looked at. ──────────────────────────────────────────
   assertPanelDepth({ depth, maxDepth });
+
+  // ── REFUSAL 5: no seat, and no panel-wide default, may ask for tools (#3158). ────────────────────────────
+  assertPanelToolFree(jurors, allowedTools);
 
   // ── The roster becomes named seats (and pairwise-distinct session ids) or it throws. ───────────────────
   const seats = panelSeats({ jurors, runId });

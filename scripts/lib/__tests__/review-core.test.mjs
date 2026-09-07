@@ -54,7 +54,9 @@ import {
   buildValidatorMandate,
   PROSE_IMPRECISION_RULE,
   GUARANTEE_NEEDS_A_TEST_RULE,
+  GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE,
   MUTATION_PROBE_RULE,
+  MUTATION_PROBE_RULE_TOOL_FREE,
   FENCED_DATA_RULE,
   combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
@@ -269,6 +271,50 @@ describe('buildMandate', () => {
     const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
     expect(text).toContain('PREVENTION INTROSPECTION');
     expect(text).toMatch(/DETERMINISTIC GATE/);
+  });
+
+  describe('#3158 — toolsAvailable', () => {
+    it('defaults to true, so every existing caller is byte-for-byte unchanged', () => {
+      expect(buildMandate()).toBe(buildMandate({ toolsAvailable: true }));
+      expect(buildMandate()).toMatch(/throwaway `git clone`/);
+      expect(buildMandate()).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
+    });
+
+    it('drops the throwaway-clone offer when the juror has no tools, and says so plainly instead', () => {
+      const text = buildMandate({ toolsAvailable: false });
+      expect(text).not.toMatch(/throwaway `git clone`/);
+      expect(text).toMatch(/You have NO tools in this transport/);
+      // The no-checkout isolation line is unrelated to tool availability and must still be present.
+      expect(text).toMatch(/do NOT `git checkout`/);
+    });
+
+    // A round-1 panel review of this very card (2026-09-07, correctness + standards-conformance jurors,
+    // independently) caught that the first pass conditioned MUTATION_PROBE_RULE alone and left
+    // GUARANTEE_NEEDS_A_TEST_RULE — which makes the IDENTICAL "break the line, check a NAMED test" demand,
+    // just scoped to prose guarantees — instructing a tool-free juror to do the same impossible thing.
+    //
+    // #3158 round-3 finding (claim-accuracy, 2026-09-07) — this test originally denylisted the hand-copied
+    // literal `'BREAK the line'`, which is MUTATION_PROBE_RULE's phrasing (`'BREAK the line you say is wrong'`)
+    // and is UNREACHABLE from `buildMandate` at all — only `buildPanelMandate` ever pushes MUTATION_PROBE_RULE.
+    // That assertion could never fail regardless of whether the conditioning worked, i.e. it was vacuous. Fixed
+    // per that finding's own `prevention`: assert against the ACTUAL exported constant reachable from THIS
+    // function, `GUARANTEE_NEEDS_A_TEST_RULE`, never a copied substring of a rule this function cannot reach.
+    it('#3158 — buildMandate\'s own tool-requiring constant is gated (GUARANTEE_NEEDS_A_TEST_RULE)', () => {
+      const toolFree = buildMandate({ toolsAvailable: false });
+      expect(toolFree).not.toMatch(/throwaway `git clone`/);
+      expect(toolFree).not.toContain(GUARANTEE_NEEDS_A_TEST_RULE);
+      expect(toolFree).toContain(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE);
+      // MUTATION_PROBE_RULE is never reachable from buildMandate at all (only buildPanelMandate pushes it) —
+      // asserted so a future change that starts routing it through buildMandate is caught here too.
+      expect(toolFree).not.toContain(MUTATION_PROBE_RULE);
+    });
+
+    it('the tool-free guarantee rule keeps the COVERAGE framing but drops the mutation demand', () => {
+      expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/COVERAGE finding/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/You have NO tools/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toMatch(/BREAK the guarded line/);
+      expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+    });
   });
 });
 
@@ -788,6 +834,38 @@ describe('buildPanelMandate (#2310)', () => {
     });
   });
 
+  // ── #3158 — the probe is conditioned on the transport: tool-free gets the honest substitute, never the ────
+  //    tool-bearing demand it cannot act on. `judgePanel` seats stay tool-free by design (that module's ruling).
+  describe('#3158 — toolsAvailable conditions the mutation probe', () => {
+    it('defaults to true (tool-bearing) — every existing caller is unaffected', () => {
+      for (const lens of PANEL_LENSES) {
+        expect(buildPanelMandate({ lens })).toBe(buildPanelMandate({ lens, toolsAvailable: true }));
+        expect(buildPanelMandate({ lens })).toContain(MUTATION_PROBE_RULE);
+      }
+    });
+
+    it('passing toolsAvailable: false swaps in the tool-free rule and drops the tool-bearing one, for every lens', () => {
+      for (const lens of PANEL_LENSES) {
+        const text = buildPanelMandate({ lens, toolsAvailable: false });
+        expect(text, lens).toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+        expect(text, lens).not.toContain(MUTATION_PROBE_RULE);
+      }
+    });
+
+    it('also drops the throwaway-clone offer from the buildMandate base it wraps', () => {
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, toolsAvailable: false });
+      expect(text).not.toMatch(/throwaway `git clone`/);
+    });
+
+    it('the tool-free rule is honest about the degradation: no attempt claimed, a finding is still worth reporting', () => {
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/NOT AVAILABLE/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/no tools/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/Do NOT claim to have attempted/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/still worth reporting/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).not.toBe(MUTATION_PROBE_RULE);
+    });
+  });
+
   // ── #2914 — diffBasis disclosure: tell the juror when it is holding the degraded three-dot diff ───────────
   describe('#2914 — diffBasis disclosure', () => {
     it('a degraded diffBasis (three-dot) adds an explicit DEGRADED disclosure', () => {
@@ -996,6 +1074,30 @@ describe('buildValidatorMandate (#2439 — the independent hardened validator)',
     expect(text).toMatch(/even when the suite still goes green/);
     // (3) treat author-peer test edits as suspect by default
     expect(text).toMatch(/author-peer edit to a test as suspect/);
+  });
+
+  it('#3158 — toolsAvailable defaults true (unchanged) and false drops the throwaway-clone offer', () => {
+    expect(buildValidatorMandate({ lens: 'correctness' }))
+      .toBe(buildValidatorMandate({ lens: 'correctness', toolsAvailable: true }));
+    const toolFree = buildValidatorMandate({ lens: 'correctness', toolsAvailable: false });
+    expect(toolFree).not.toMatch(/throwaway `git clone`/);
+    expect(toolFree).toMatch(/You have NO tools in this transport/);
+    // the validator-specific framing is unaffected either way
+    expect(toolFree).toContain('INDEPENDENT FINAL VALIDATOR for the correctness lens');
+  });
+
+  // A round-2 red-team pass on this very card (2026-09-07, correctness lens) caught a THIRD instance of the
+  // same defect class: the validator's own hand-rolled ANTI-TEST-GAMING block ("confirm it carries a test that
+  // would FAIL on the PRE-CHANGE behaviour") reads as an execution instruction and was left unconditioned after
+  // MUTATION_PROBE_RULE and GUARANTEE_NEEDS_A_TEST_RULE were already fixed for the identical pattern.
+  it('#3158 round-2 finding — the inline ANTI-TEST-GAMING block is also conditioned on toolsAvailable', () => {
+    const toolBearing = buildValidatorMandate({ lens: 'correctness' });
+    expect(toolBearing).not.toMatch(/You have NO tools: "confirm"/);
+    const toolFree = buildValidatorMandate({ lens: 'correctness', toolsAvailable: false });
+    expect(toolFree).toMatch(/You have NO tools: "confirm" and "satisfy yourself" above mean REASON/);
+    // the substantive anti-gaming rules are unchanged either way
+    expect(toolFree).toContain('ANTI-TEST-GAMING');
+    expect(toolFree).toMatch(/WEAKENS coverage/);
   });
 });
 

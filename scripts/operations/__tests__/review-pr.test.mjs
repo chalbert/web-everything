@@ -64,6 +64,7 @@ import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-sp
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
 import { INDEPENDENCE, buildAuthorActorMarker, buildStampLostMarker } from '../../lib/review-independence.mjs';
 import { ADVISORY_LENSES, CITATION_SCOPES, MANDATORY_LENSES, VERDICTS, deriveVerdict } from '../../lib/jury-core.mjs';
+import { MUTATION_PROBE_RULE, MUTATION_PROBE_RULE_TOOL_FREE } from '../../lib/review-core.mjs';
 
 /** The NET file list, and a DIFFERENT `gh` file list, so "which one reached the juror" is decidable. */
 const NET_PATHS = ['scripts/operations/review-pr.mjs', 'skills-src/review/SKILL.md'];
@@ -1320,6 +1321,21 @@ describe('#3319 the security lens runs on every PR', () => {
     const b = buildReviewJudgeRequest({ read, lens: SECURITY_LENS });
     const differing = Object.keys(a).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
     expect(differing.sort()).toEqual(['lens', 'mandate']);
+  });
+
+  // #3158 round-2 red-team finding — this call site's `buildPanelMandate` deliberately OMITS `toolsAvailable`
+  // (its default, `true`, is exactly correct: both seats are genuinely tool-bearing via `REVIEW_JUROR_TOOLS`).
+  // Nothing previously locked that default in place, so a future edit that accidentally started passing
+  // `toolsAvailable: false` here would silently degrade BOTH mandatory lenses to the tool-free wording with no
+  // test catching it. This is that lock.
+  it('#3158 — both lenses stay tool-bearing: MUTATION_PROBE_RULE, never the tool-free variant', () => {
+    const read = { title: 't', repo: 'r', pr: 1, netChangedFiles: [], degraded: false };
+    for (const lens of [DEFAULT_LENS, SECURITY_LENS]) {
+      const req = buildReviewJudgeRequest({ read, lens });
+      expect(req.mandate, lens).toContain(MUTATION_PROBE_RULE);
+      expect(req.mandate, lens).not.toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+      expect(req.allowedTools, lens).toEqual(REVIEW_JUROR_TOOLS);
+    }
   });
 
   it('REFUSES AT REGISTRATION if the ratified pair stops seating a second lens (#3314)', () => {

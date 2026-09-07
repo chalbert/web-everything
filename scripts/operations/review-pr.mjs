@@ -85,14 +85,17 @@
  *       call object omits `allowedTools`, so EVERY panel seat is `--tools ''`. Today's single juror is
  *       tool-bearing (see `REVIEW_JUROR_TOOLS`), and `we:scripts/lib/judge-spawn.mjs`'s own header records the
  *       trade — *"The tools ARE the finding mechanism."* Wiring it as-is would swap one juror that can run a
- *       gate, reproduce a hole and mutate a line for several that can only read. #3158 is OPEN; this item does
- *       not pay its bill, and it does not need to.
+ *       gate, reproduce a hole and mutate a line for several that can only read. #3158 RULED (2026-09-07):
+ *       `judgePanel` stays tool-free BY DESIGN, permanently, not "not yet" — a tool-bearing seat would need its
+ *       own lane per seat (a mutation probe writes; two seats sharing one `cwd` would race), which that module
+ *       declines to provision. So this item never pays that bill, and per the ruling it never will.
  *   (c) A SECOND DECLARED `judge` STEP — THIS. The engine's vocabulary never said one `judge` step per
  *       operation: `advance` suspends per step and `driveRun` loops on `awaiting-judge`, so N judge steps is
  *       N spawns with no engine change at all. Both jurors are tool-bearing. `judgeSpawn` derives each session
  *       id from `runId` + `lens` (#3028), and the two steps carry DIFFERENT lenses, so the two actors are
  *       pairwise distinct by construction — the same property #3050 was built to buy, obtained here without
- *       #3158's cost.
+ *       #3158's cost. This is now the RATIFIED pattern for a tool-bearing lens, not a workaround for an open
+ *       item — see `we:scripts/lib/judge-panel.mjs`'s header for the ruling.
  *
  * WHAT THIS COSTS, HONESTLY. The two spawns are SEQUENTIAL, not parallel — `driveRun` awaits each judge before
  * it advances — so wall time roughly doubles (measured single-juror runs were 167-312s). A panel would have
@@ -812,7 +815,11 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
     //
     // #3319 — BOTH seats carry it. This is the single line that option (b) could not have: `judgePanel`
     // (`we:scripts/lib/judge-panel.mjs`) never forwards `allowedTools`, so wiring the panel would have made
-    // the security seat — and the correctness one with it — `--tools ''`. That is #3158, and it is open.
+    // the security seat — and the correctness one with it — `--tools ''`. #3158 ruled `judgePanel` stays
+    // tool-free by design (permanently, not pending) — this file's own sequential `judgeSpawn` calls are the
+    // ratified transport for a tool-bearing lens, not a stand-in for an unfinished panel wiring. This call
+    // omits `toolsAvailable` on `buildPanelMandate` above deliberately: its default (`true`) is exactly correct
+    // here, since this juror really does have `allowedTools`.
     allowedTools: REVIEW_JUROR_TOOLS,
   };
 }

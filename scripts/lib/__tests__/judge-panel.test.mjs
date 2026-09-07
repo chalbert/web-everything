@@ -1,5 +1,5 @@
 /**
- * @file judge-panel.test.mjs — the fan-out's four refusals and its one product property (#3050).
+ * @file judge-panel.test.mjs — the fan-out's five refusals and its one product property (#3050).
  *
  * NOTHING HERE SPAWNS A PROCESS. Every test drives `judgePanel` over an injected `spawnFn`, the same seam
  * `judge-spawn.test.mjs` uses — which matters more for a panel than for a single spawn, because a panel bills
@@ -34,6 +34,7 @@ import {
   panelSeats,
   assertPanelDepth,
   assertPanelBudget,
+  assertPanelToolFree,
 } from '../judge-panel.mjs';
 import { deriveSessionId, sessionSeed, buildJudgeArgv, DEFAULT_BUDGET_USD } from '../judge-spawn.mjs';
 import { PANEL_LENSES, panelRigorForCareLevel } from '../jury-core.mjs';
@@ -527,9 +528,11 @@ describe('REFUSAL 3 — synchronous by construction: no detach, no early resolve
     expect(src).not.toMatch(/\bsetImmediate\s*\(/);
   });
 
-  it('exports exactly the four names — none of them hands back a pollable handle', async () => {
+  it('exports exactly the five names — none of them hands back a pollable handle', async () => {
     const mod = await import('../judge-panel.mjs');
-    expect(Object.keys(mod).sort()).toEqual(['assertPanelBudget', 'assertPanelDepth', 'judgePanel', 'panelSeats']);
+    expect(Object.keys(mod).sort()).toEqual([
+      'assertPanelBudget', 'assertPanelDepth', 'assertPanelToolFree', 'judgePanel', 'panelSeats',
+    ]);
   });
 });
 
@@ -616,6 +619,41 @@ describe('REFUSAL 4 — the argv denylist, per seat, before any child starts (#3
       spawnFn: fn,
     })).rejects.toThrow(/seat `security#1` has no `input`/);
     expect(seen.count).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('REFUSAL 5 — panel seats stay tool-free by design, `allowedTools` is refused not dropped (#3158)', () => {
+  it('refuses a panel-wide `allowedTools`, and spawns nothing', async () => {
+    const { fn, seen } = forbiddenSpawn();
+    await expect(judgePanel({ ...BASE, jurors: FOUR_SEATS, allowedTools: ['Read'], spawnFn: fn }))
+      .rejects.toThrow(/`allowedTools` is not a panel-wide option.*#3158/s);
+    expect(seen.count).toBe(0);
+  });
+
+  it('refuses a seat that declares `allowedTools`, naming the seat, and spawns nothing', async () => {
+    const { fn, seen } = forbiddenSpawn();
+    await expect(judgePanel({
+      ...BASE,
+      jurors: [{ lens: 'correctness' }, { lens: 'security', allowedTools: ['Read', 'Bash'] }],
+      spawnFn: fn,
+    })).rejects.toThrow(/juror 1 \(`security`\) declares `allowedTools`.*#3158/s);
+    expect(seen.count).toBe(0);
+  });
+
+  it('admits a roster where no seat and no panel-wide option mentions allowedTools at all', async () => {
+    const spy = panelSpawn();
+    const panel = await judgePanel({ ...BASE, jurors: FOUR_SEATS, spawnFn: spy.fn });
+    expect(spy.count).toBe(4);
+    expect(panel.ok).toBe(true);
+  });
+
+  it('assertPanelToolFree is the pure guard behind all of that', () => {
+    expect(() => assertPanelToolFree(FOUR_SEATS, ['Read'])).toThrow(/panel-wide option/);
+    expect(() => assertPanelToolFree([{ lens: 'security', allowedTools: ['Read'] }], undefined))
+      .toThrow(/juror 0 \(`security`\) declares `allowedTools`/);
+    expect(() => assertPanelToolFree(FOUR_SEATS, undefined)).not.toThrow();
   });
 });
 
