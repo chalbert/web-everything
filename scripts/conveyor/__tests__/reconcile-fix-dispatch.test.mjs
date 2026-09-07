@@ -292,38 +292,14 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(waitCalls).toBe(1); // exactly one retry was needed
   });
 
-  it('#3541 hardening (3) — a genuine resume is still confirmed when the post-resume row is MISSING `id` entirely', () => {
-    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
-    const result = dispatchFix(
-      {
-        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
-        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
-      },
-      {
-        root: '/repo',
-        readBrief: () => REAL_TEMPLATE_STUB,
-        mintSessionId: () => { throw new Error('must not mint a fresh id on a successful resume'); },
-        spawnAgent: () => 'backgrounded · candxxxx\n',
-        // Call 1 (`agentsBefore`, the pre-resume ownership check): the candidate is listed with its `id`, as
-        // always. Every call AFTER: the SAME session, still listed by `sessionId` — but this time its `id` is
-        // gone, the exact `#x3gdu12` scenario this item hardens against. Nothing NEW appears anywhere, so the
-        // `resumeSucceeded` fallback (no id needed) must still confirm the resume rather than reading the
-        // missing `id` as "not found" and calling this a fork.
-        listAgentsAll: () => [{
-          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background',
-        }],
-        resolveHead: () => MATCHING_HEAD,
-        wait: () => {}, // no real sleeping — the fallback only confirms on the FINAL attempt (#3541 round 2)
-      },
-    );
-    expect(result.resumed).toBe(true);
-    expect(result.sessionId).toBe('cand-0000-0000-0000-000000000000');
-  });
-
-  it('#3541 round 2 (second independent review pass) — a fork whose row has NOT propagated on early attempts must not be read as a resume; it is still caught once its row appears on the final attempt', () => {
+  it('#3541 — a post-resume row MISSING `id` entirely resolves `resumed:false` (the safe direction) and the anomaly rides onto `resumeAttempt`', () => {
+    // Two positive fallbacks for this exact shape were tried and rejected by independent review (see
+    // `resumeSucceeded`'s own docblock) — the landed behavior is the pre-#3541 one: an id-match failure means
+    // `stop(printedId)` and a fresh dispatch, never a claimed resume. What's new is visibility: the
+    // never-yet-observed missing-`id` shape now names itself on `resumeAttempt.anomaly` instead of being
+    // silently indistinguishable from an ordinary fork.
     const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
     const stopCalls = [];
-    let listCall = 0;
     const result = dispatchFix(
       {
         itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
@@ -333,25 +309,51 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         root: '/repo',
         readBrief: () => REAL_TEMPLATE_STUB,
         mintSessionId: () => 'freshfreshfresh',
-        // The CLI actually forked a copy under `forkedid` — but a false resume must not be reported on the
-        // strength of an early listing that has not caught up to that fact yet.
+        spawnAgent: () => 'backgrounded · candxxxx\n',
+        // Call 1 (`agentsBefore`, the pre-resume ownership check): the candidate is listed with its `id`, as
+        // always. Every call AFTER: the SAME session, still listed by `sessionId` — but this time its `id` is
+        // gone, the exact `#x3gdu12` scenario this item was filed to worry about.
+        listAgentsAll: () => [{
+          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background',
+        }],
+        resolveHead: () => MATCHING_HEAD,
+        stop: ({ handle }) => stopCalls.push(handle),
+        wait: () => {},
+      },
+    );
+    expect(result.resumed).toBe(false);
+    expect(result.sessionId).toBe('freshfreshfresh');
+    expect(stopCalls).toEqual(['candxxxx']);
+    expect(result.resumeAttempt).toEqual({
+      attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true,
+      anomaly: 'requested-session-listed-without-id',
+    });
+  });
+
+  it('#3541 — a fork whose row has NOT propagated into the listing at all is still safely read as not-resumed, no anomaly reported (it is an ordinary fork, not the missing-`id` shape)', () => {
+    // Rounds 1-2 of this item's own build tried to read this shape as a confirmed resume from
+    // absence-of-a-new-session, and both were found unsafe by independent review — a live measurement showed
+    // listing propagation lag of 26+ seconds, far past any retry budget this call site can afford. The landed
+    // function does not attempt it at all: this shape (candidate still listed, its own row DOES carry `id`,
+    // nothing new visible yet) resolves via the id-match branch failing to find `forkedid`, exactly like any
+    // other unmatched id.
+    const marker = buildAuthorActorMarker('cand-0000-0000-0000-000000000000');
+    const stopCalls = [];
+    const result = dispatchFix(
+      {
+        itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9,
+        isConflict: true, body: `some PR body\n\n${marker}\n`, headRefOid: MATCHING_HEAD,
+      },
+      {
+        root: '/repo',
+        readBrief: () => REAL_TEMPLATE_STUB,
+        mintSessionId: () => 'freshfreshfresh',
+        // The CLI actually forked a copy under `forkedid`, but that fork's row never shows up within this
+        // dispatch's retry budget — every read looks identical (candidate still listed, id present, nothing new).
         spawnAgent: () => 'backgrounded · forkedid\n',
-        listAgentsAll: () => {
-          listCall += 1;
-          // Call 1: agentsBefore (the pre-resume ownership check) — only the candidate is listed, as always.
-          if (listCall === 1) {
-            return [{ sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', kind: 'background' }];
-          }
-          // Calls 2-3 (the two EARLY retry attempts): the fork already happened, but its row has not
-          // propagated into this listing yet — it looks EXACTLY like a clean resume (candidate still listed,
-          // nothing new). Must not be trusted at this point.
-          if (listCall <= 3) return [{ sessionId: 'cand-0000-0000-0000-000000000000', kind: 'background' }];
-          // Call 4 (the FINAL attempt): the fork's row finally shows up.
-          return [
-            { sessionId: 'cand-0000-0000-0000-000000000000', kind: 'background' },
-            { id: 'forkedid', sessionId: 'a-different-session-id', kind: 'background' },
-          ];
-        },
+        listAgentsAll: () => [{
+          sessionId: 'cand-0000-0000-0000-000000000000', cwd: '/lanes/lane-4', name: 'conveyor-3438', id: 'candxxxx', kind: 'background',
+        }],
         resolveHead: (cwd) => (cwd === '/lanes/lane-4' ? MATCHING_HEAD : null),
         stop: ({ handle }) => stopCalls.push(handle),
         wait: () => {},
@@ -360,6 +362,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     expect(result.resumed).toBe(false);
     expect(stopCalls).toEqual(['forkedid']);
     expect(result.sessionId).toBe('freshfreshfresh');
+    expect(result.resumeAttempt).toEqual({ attempted: true, candidate: 'cand-0000-0000-0000-000000000000', forked: true });
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {

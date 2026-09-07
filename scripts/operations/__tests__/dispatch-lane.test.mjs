@@ -844,100 +844,54 @@ describe('parseBackgroundedId / resumeSucceeded — #xu2krte', () => {
 
   // #3541 — follow-up from PR #1966's independent review: harden against a post-resume listing row that omits
   // `id` (documented as absent from `interactive` rows, never yet observed on a `background` one — see this
-  // function's own updated docblock). The fallback below needs only `sessionId`, which is present on every row.
-  describe('resumeSucceeded fallback — the post-resume row is MISSING `id` (#3541)', () => {
+  // function's own docblock). TWO positive fallbacks were tried and both were found unsafe by independent
+  // review (the second backed by a live measurement showing listing propagation lag of 26+ seconds — far past
+  // any retry budget `dispatchFix` can afford). The landed answer: no positive fallback — a missing `id` keeps
+  // resolving `resumed:false`, exactly the pre-#3541 behavior, plus a NEVER-verdict-affecting `anomaly`
+  // diagnostic so the never-yet-observed shape is at least visible on the record.
+  describe('resumeSucceeded — a MISSING `id` on the post-resume row resolves `false`, with an anomaly diagnostic (#3541)', () => {
     const REQUESTED = '76f44314-45cb-4e70-9fa6-eff7872ed491';
 
-    it('resumed: true — the requested session is still listed and NO new session exists anywhere, so nothing but a genuine resume explains it', () => {
-      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background', name: 'conveyor-3438' }];
-      // The post-resume row for the SAME session — this time with `id` dropped, exactly the card's scenario.
+    it('resumed stays false when the requested session IS still listed but its row carries no `id` — the exact card scenario, supplied directly', () => {
       const agentsAfter = [{ sessionId: REQUESTED, kind: 'background', name: 'conveyor-3438' }];
-      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore });
-      expect(outcome).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome).toEqual({
+        resumed: false, actualSessionId: null, actualShortId: '76f44314',
+        anomaly: 'requested-session-listed-without-id',
+      });
     });
 
-    it('resumed: false — a genuinely NEW session (not in `agentsBefore`) appeared, so a fork cannot be ruled out', () => {
-      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
+    it('no anomaly is reported when the requested session is not listed at all — that is an ordinary "not found", not the missing-`id` shape', () => {
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: [] });
+      expect(outcome).toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
+      expect(outcome.anomaly).toBeUndefined();
+    });
+
+    it('no anomaly is reported when a DIFFERENT session is listed without `id` — the diagnostic is keyed to the REQUESTED session specifically', () => {
+      const agentsAfter = [{ sessionId: 'some-other-session-id', kind: 'background' }];
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.anomaly).toBeUndefined();
+    });
+
+    it('the REJECTED naive fallback still does not work — the requested session merely being listed proves nothing about resume vs. fork, with or without `id`', () => {
+      // The item's own origin story: the pre-resume session stays listed under EITHER outcome, so "is it still
+      // listed" can never disambiguate — restated here for the missing-`id` shape specifically.
       const agentsAfter = [
         { sessionId: REQUESTED, kind: 'background' }, // the untouched original — stays listed under EITHER outcome
-        { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // never seen before → residual ambiguity
+        { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // the actual fork
       ];
-      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore });
-      expect(outcome).toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.resumed).toBe(false);
     });
 
-    it('resumed: false — no `agentsBefore` given at all falls back to today\'s behavior, never throws', () => {
+    it('a fork whose row has NOT propagated into the listing at all is still safely read as not-resumed — no fixed retry budget is trusted to prove its absence (#3541 rounds 1-2, both rejected)', () => {
+      // Looks EXACTLY like a clean resume by every field a sessionId-absence check could examine — this is
+      // precisely the shape that made two successive positive fallbacks unsafe. The landed function does not
+      // attempt to read it as a resume at all.
       const agentsAfter = [{ sessionId: REQUESTED, kind: 'background' }];
-      expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter }))
-        .toEqual({ resumed: false, actualSessionId: null, actualShortId: '76f44314' });
-    });
-
-    it('the REJECTED naive fallback still does not work on its own — the requested session alone being listed is not enough without the no-new-session check', () => {
-      // Same shape as a genuine resume EXCEPT a new session also appeared — proves this isn't secretly just
-      // "is requestedSessionId listed", which the item's own origin story already found insufficient.
-      const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-      const agentsAfter = [
-        { sessionId: REQUESTED, kind: 'background' },
-        { id: 'zzzzzzzz', sessionId: 'unrelated-new-session', kind: 'background' },
-      ];
-      expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore }).resumed)
-        .toBe(false);
-    });
-
-    // A SECOND independent review pass on this same PR found this real before it ever shipped: the fallback
-    // above answers from ABSENCE of a new session, and an early read cannot tell "no fork happened" apart
-    // from "a fork happened but its row has not propagated to the listing yet" — the exact lag Hardening (2)'s
-    // retry loop already exists to absorb for the id-match path. `isFinalAttempt` closes it.
-    describe('resumeSucceeded fallback — `isFinalAttempt` gates a listing that may simply be too early (#3541 round 2)', () => {
-      it('an early read (isFinalAttempt: false) must NOT claim resumed, even when the snapshot looks exactly like a clean resume', () => {
-        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-        // A genuine fork just happened, but its row has not propagated into this listing yet — indistinguishable
-        // from a clean resume by `sessionId` alone at this instant.
-        const stillSettling = [{ sessionId: REQUESTED, kind: 'background' }];
-        const early = resumeSucceeded({
-          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: stillSettling, agentsBefore, isFinalAttempt: false,
-        });
-        expect(early.resumed).toBe(false);
-      });
-
-      it('the SAME still-settling snapshot is trusted once it is the final attempt — the best evidence the retry budget can buy', () => {
-        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-        const stillSettling = [{ sessionId: REQUESTED, kind: 'background' }];
-        const final = resumeSucceeded({
-          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: stillSettling, agentsBefore, isFinalAttempt: true,
-        });
-        expect(final).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
-      });
-
-      it('a fork whose row appears only on the LATER (final) attempt is still caught — the early forced-false gate bought the propagation delay time to resolve', () => {
-        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-        const early = [{ sessionId: REQUESTED, kind: 'background' }]; // fork's row not visible yet
-        const late = [
-          { sessionId: REQUESTED, kind: 'background' },
-          { id: 'forkedid', sessionId: 'a-brand-new-session-id', kind: 'background' }, // now it shows up
-        ];
-        expect(resumeSucceeded({
-          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: early, agentsBefore, isFinalAttempt: false,
-        }).resumed).toBe(false);
-        expect(resumeSucceeded({
-          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter: late, agentsBefore, isFinalAttempt: true,
-        }).resumed).toBe(false);
-      });
-
-      it('omitting `isFinalAttempt` defaults to `true` — every pre-existing caller/test keeps evaluating the fallback exactly as before', () => {
-        const agentsBefore = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-        const agentsAfter = [{ sessionId: REQUESTED, kind: 'background' }];
-        expect(resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, agentsBefore }).resumed)
-          .toBe(true);
-      });
-
-      it('the id-match (positive-evidence) path is UNAFFECTED by `isFinalAttempt` — it can resolve on the very first attempt', () => {
-        const agentsAfter = [{ id: '76f44314', sessionId: REQUESTED, kind: 'background' }];
-        const outcome = resumeSucceeded({
-          printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter, isFinalAttempt: false,
-        });
-        expect(outcome).toEqual({ resumed: true, actualSessionId: REQUESTED, actualShortId: '76f44314' });
-      });
+      const outcome = resumeSucceeded({ printedId: '76f44314', requestedSessionId: REQUESTED, agentsAfter });
+      expect(outcome.resumed).toBe(false);
+      expect(outcome.anomaly).toBe('requested-session-listed-without-id');
     });
   });
 });

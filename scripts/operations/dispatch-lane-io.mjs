@@ -954,54 +954,46 @@ export function parseBackgroundedId(stdout) {
  * `id` — has never once been observed; `listedSessionIds`'s "absent from roughly half the listing" is entirely
  * the `interactive` half.
  *
- * THE FALLBACK BELOW EXISTS ANYWAY, because "never observed" is not "impossible", and the id-match branch
- * failing does not merely mean "not resumed" — the caller (`reconcile-fix-dispatch.mjs#dispatchFix`) reads a
- * `false` here as "the CLI forked a copy" and `claude stop`s the printed id, which is CORRECT for an actual fork
- * and CATASTROPHIC for a genuine resume misread as one (it kills the very session that was just handed new
- * work — strictly worse than never attempting the resume). A REJECTED FIX, recorded so it is not retried: "is
- * `requestedSessionId` still listed at all" cannot disambiguate, because the pre-resume session stays listed
- * under EITHER outcome — a genuine resume IS that same listing entry, and a fork leaves the untouched original
- * still sitting there too.
+ * NO POSITIVE FALLBACK — TWO WERE TRIED, TWO WERE FOUND UNSAFE, AND THE SECOND FAILURE MEASURED WHY THE FIRST
+ * COULD NEVER BE PATCHED INTO SAFETY. This item's own build history:
+ *   1. A `sessionId`-only fallback (no `id` needed): "no new session appeared anywhere since `agentsBefore`" ⇒
+ *      resumed. An independent review round found this could resolve `true` on the FIRST post-resume read, on
+ *      the strength of a fork whose row simply had not propagated into the listing yet — the identical lag
+ *      `dispatchFix`'s own Hardening 2 retry loop exists to absorb for the id-match path.
+ *   2. Gated the same fallback on `isFinalAttempt` (only trust the absence-of-evidence once the retry loop's
+ *      last attempt is reached). A SECOND independent review round found this only bounds the wait to
+ *      `RESUME_CONFIRM_MAX_ATTEMPTS × RESUME_CONFIRM_WAIT_MS` (~600ms) — and a fork's row can take far longer
+ *      than that to appear. MEASURED, not assumed: a live probe (2026-09-07) spawned a fresh `claude --bg`
+ *      session and polled `claude agents --json --all` for it every ~700ms — it had STILL not appeared after
+ *      26+ seconds, on this same machine, under its ordinary background-session load. No fixed short retry
+ *      budget can outrun a lag of that shape, and `dispatchFix` cannot afford to block tens of seconds per
+ *      resume attempt either (it "sits synchronously inside a waker pass that promises to stay fail-soft and
+ *      fast per run" — see this file's own `TICK_TIMEOUT_MS`/`SPAWN_TIMEOUT_MS` budgets for the same
+ *      discipline elsewhere).
+ * Both designs answer "no new session — therefore resumed" from ABSENCE of evidence, and absence read against
+ * an unbounded-latency listing can never be trusted at any fixed budget. A REJECTED FIX from the item's own
+ * origin story, restated because it fails for the identical underlying reason: "is `requestedSessionId` still
+ * listed at all" cannot disambiguate either, since the pre-resume session stays listed under EITHER outcome.
  *
- * THE FALLBACK, when `agentsBefore` is given and the id-match found nothing: `sessionId` (unlike `id`) is
- * present on every row of every shape (see {@link listedSessionIds}'s own docblock), so it needs no id at all.
- * A genuine resume mints NO new session — it is the SAME session, whose `sessionId` was already present in
- * `agentsBefore`. A fork, by construction, IS a new session under a fresh `sessionId` never listed before. So:
- * if nothing in `agentsAfter` carries a `sessionId` that was not already in `agentsBefore` — no new session
- * exists anywhere — and the requested session is still listed, nothing but a genuine resume explains the
- * listing, id or no id.
+ * THE CONCLUSION, stated plainly rather than papered over with a third attempt: there is no way to positively
+ * confirm a resume from the listing alone within a budget `dispatchFix` can afford, when the id-match itself
+ * comes back empty. So this function does NOT try — on a missing `id`, it answers `resumed:false`, exactly the
+ * pre-#3541 behavior, and the caller's existing `stop(printedId)` cleans up (correctly, for an actual fork; a
+ * wasted-but-recoverable attempt, for the never-yet-observed missing-`id` shape). This is the safe DIRECTION,
+ * argued once and applied consistently: a false stop costs a wasted resume attempt plus a redundant fresh
+ * dispatch, and the fix still lands; a false resume reports success while the real work silently never happens
+ * (the untouched candidate never sees the new prompt) and leaves an unmanaged forked session running unstopped.
+ * Between a residual that has NEVER been observed (missing `id`) and one just MEASURED to be real and immediate
+ * (unbounded listing lag), the honest choice is to not trade the second for a hedge against the first.
  *
- * NOT A FULL DISAMBIGUATOR, and it does not try to be. An unrelated dispatch (a different item's build or fix)
- * landing in the same narrow window would also introduce a "new" `sessionId` this fallback cannot tell apart
- * from an actual fork of THIS session — so it only ever WIDENS the set of things read as "not resumed", never
- * narrows it. That residual failure mode is a false stop, which is the direction `dispatchFix` already accepts
- * on ambiguity: a false stop costs a wasted resume attempt and a redundant fresh dispatch, but the fix still
- * gets done; a false resume would report success while the real work silently never happens (the untouched
- * candidate never sees the new prompt) and leave an unmanaged forked session running unstopped. Compounding a
- * missing `id` (never yet observed) with a genuinely concurrent unrelated dispatch in the same sub-second retry
- * window is narrow enough that shipping this fallback is a strict improvement over today's unconditional gap,
- * without claiming to close it completely.
- * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>, agentsBefore?:Array<object>|null}} o
- * `isFinalAttempt` GATES THE FALLBACK (second independent review pass on `#3541`, itself real): the fallback's
- * "no new session anywhere" is an ABSENCE-of-evidence signal, and an absence read on the FIRST post-resume
- * listing cannot tell "no fork happened" apart from "a fork happened but its row has not propagated to the
- * listing yet" — the identical lag `dispatchFix`'s own retry loop (Hardening 2) already exists to absorb for
- * the id-match path. Unlike the id-match branch above (a POSITIVE match — direct proof, safe to trust on
- * attempt 1), the fallback must not resolve `true` on a read that could simply be too early: a real fork's row
- * that has not shown up yet looks EXACTLY like a clean resume (candidate still listed, nothing new). So the
- * fallback only ever answers `true` when `isFinalAttempt` is set — i.e. `dispatchFix`'s retry loop has already
- * given the same {@link RESUME_CONFIRM_MAX_ATTEMPTS}-attempt, `RESUME_CONFIRM_WAIT_MS`-spaced window the
- * id-match path gets a chance to surface the fork before the fallback trusts its absence. Every non-final call
- * with the fallback's conditions otherwise met returns `resumed:false` — not a wrong answer, a "not proven
- * yet" that lets the retry loop's `attempt !== MAX` continue rather than break early on it. Defaults to `true`
- * so a caller with no retry loop of its own (a bare, one-shot use, or every existing test that predates this
- * parameter) evaluates the fallback exactly as it did before this hardening.
- * @param {boolean} [o.isFinalAttempt]
- * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null}}
+ * THE ONE THING ADDED: an `anomaly` DIAGNOSTIC, never a verdict input. When the id-match fails but
+ * `requestedSessionId` is still listed under a row that carries no `id` at all, that IS the never-observed
+ * shape this item was filed to worry about — worth a name on the record for whoever reads the run later, even
+ * though it changes nothing about the (safe) `resumed:false` answer.
+ * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>}} o
+ * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null, anomaly?:string}}
  */
-export function resumeSucceeded({
-  printedId, requestedSessionId, agentsAfter, agentsBefore = null, isFinalAttempt = true,
-}) {
+export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) {
   if (!printedId) return { resumed: false, actualSessionId: null, actualShortId: null };
   const norm = normalizeHandle(printedId);
   const after = Array.isArray(agentsAfter) ? agentsAfter : [];
@@ -1015,15 +1007,16 @@ export function resumeSucceeded({
     };
   }
 
-  // THE FALLBACK — see the docblock above. Only reachable when the id-match found no row at all, and only
-  // usable when the caller actually has a pre-resume snapshot to diff against.
-  if (!Array.isArray(agentsBefore)) return { resumed: false, actualSessionId: null, actualShortId: printedId };
+  // THE DIAGNOSTIC ONLY — see the docblock above. `sessionId` is present on every row regardless of shape
+  // (unlike `id`), so this can tell "the requested session is listed but its row has no `id`" apart from
+  // "nothing named it at all" without needing a pre-resume snapshot. It NEVER flips `resumed`.
   const reqNorm = normalizeHandle(requestedSessionId);
-  const beforeIds = new Set(agentsBefore.map((a) => normalizeHandle(a?.sessionId)).filter(Boolean));
-  const stillRequested = after.some((a) => normalizeHandle(a?.sessionId) === reqNorm);
-  const noNewSession = after.every((a) => beforeIds.has(normalizeHandle(a?.sessionId)));
-  const resumed = Boolean(isFinalAttempt) && stillRequested && noNewSession;
-  return { resumed, actualSessionId: resumed ? reqNorm : null, actualShortId: printedId };
+  const requestedRow = after.find((a) => normalizeHandle(a?.sessionId) === reqNorm);
+  const anomaly = requestedRow && !requestedRow.id ? 'requested-session-listed-without-id' : null;
+  return {
+    resumed: false, actualSessionId: null, actualShortId: printedId,
+    ...(anomaly ? { anomaly } : {}),
+  };
 }
 
 /**

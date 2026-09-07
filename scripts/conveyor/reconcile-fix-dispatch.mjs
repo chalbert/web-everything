@@ -267,20 +267,17 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT } = {}) 
  * "not resumed" — the same shape `#3331`'s own probe methodology already used (repeat rather than trust one
  * sample), just applied at dispatch time instead of at probe time.
  *
- * (3) `agentsBefore` RIDES INTO `resumeSucceeded` (`#3541`, second follow-up from PR #1966's independent
- * review). Its own docblock covers why: a `background` listing row missing `id` has never been observed live
- * (measured twice — this file's own build and `session-reaper.mjs`'s), but the id-match failing there was
- * previously indistinguishable from an actual fork, and the two answers pull `dispatchFix` in opposite,
- * high-stakes directions. Threading the SAME pre-resume snapshot this function already captured (as
- * `agentsBefore`, for the ownership check above) costs nothing extra to read — it was already in hand.
- *
- * (3b) `isFinalAttempt` RIDES INTO THE SAME CALL (`#3541`, a SECOND independent review pass on this same PR,
- * found this real before it ever shipped). The `agentsBefore` fallback answers from ABSENCE of a new session,
- * and an early attempt cannot tell "no fork happened" apart from "a fork happened but has not propagated to
- * the listing yet" — trusting it on attempt 1 would have reintroduced exactly the false-resume risk this whole
- * item exists to avoid, just one call deeper. `attempt === RESUME_CONFIRM_MAX_ATTEMPTS` is passed through so
- * the fallback only ever answers `true` once the SAME propagation window Hardening (2) already grants the
- * id-match path has elapsed for it too.
+ * (3) `resumeSucceeded` HAS NO POSITIVE FALLBACK FOR A MISSING `id` (`#3541`, follow-up from PR #1966's
+ * independent review — see that function's own docblock for the full story). Two candidate fallbacks were
+ * built and both were found unsafe by independent review, the second time backed by a live measurement: a
+ * fresh session's row can take far longer to appear in `claude agents --json --all` than any retry budget this
+ * synchronous call site can afford (26+ seconds observed, against a ~600ms total retry window here). A `id`
+ * match failing therefore still resolves `resumed:false` here, exactly as before `#3541` — the safe direction,
+ * argued in `resumeSucceeded`'s own docblock: a false stop costs a wasted attempt and a redundant fresh
+ * dispatch (recoverable), a false resume would silently drop the real work and leave a forked session
+ * unmanaged (not recoverable without a person noticing). What DID change: `resumeSucceeded` now surfaces an
+ * `anomaly` diagnostic when this never-yet-observed shape is actually hit, so it is visible on the record
+ * rather than indistinguishable from an ordinary fork.
  * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, isConflict?:boolean, body?:string|null, headRefOid?:string|null}} planned
  * @param {object} [o]
  * @returns {{sessionId:string, sessionSlug:string|null, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:boolean, resumeAttempt?:object}}
@@ -352,13 +349,7 @@ export function dispatchFix(planned, {
       // the strength of a single early read.
       let outcome = { resumed: false, actualSessionId: null, actualShortId: null };
       for (let attempt = 1; attempt <= RESUME_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
-        outcome = resumeSucceeded({
-          printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll(), agentsBefore,
-          // `#3541` second review pass — the sessionId-fallback's absence-of-evidence must not be trusted on
-          // an early read (see `resumeSucceeded`'s own docblock): only the LAST attempt has given a genuine
-          // fork's row the same propagation window Hardening (2) already grants the id-match path.
-          isFinalAttempt: attempt === RESUME_CONFIRM_MAX_ATTEMPTS,
-        });
+        outcome = resumeSucceeded({ printedId, requestedSessionId: candidate, agentsAfter: listAgentsAll() });
         if (outcome.resumed || attempt === RESUME_CONFIRM_MAX_ATTEMPTS) break;
         wait(RESUME_CONFIRM_WAIT_MS);
       }
@@ -371,9 +362,14 @@ export function dispatchFix(planned, {
       // NOT a genuine resume: `resumeSucceeded` only answers true when a fresh listing confirms the requested
       // session is what actually resumed. Whatever process the CLI just started under `printedId` is therefore
       // either an accidental copy or unidentifiable — stop it (never the resumed target, which this branch by
-      // construction did not reach) and fall through to a fresh dispatch below.
+      // construction did not reach) and fall through to a fresh dispatch below. `outcome.anomaly` (#3541) rides
+      // onto the record here rather than being read for a verdict — see `resumeSucceeded`'s own docblock for
+      // why no fallback acts on it.
       if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
-      resumeAttempt = { attempted: true, candidate, forked: Boolean(printedId) };
+      resumeAttempt = {
+        attempted: true, candidate, forked: Boolean(printedId),
+        ...(outcome.anomaly ? { anomaly: outcome.anomaly } : {}),
+      };
     }
   }
 
