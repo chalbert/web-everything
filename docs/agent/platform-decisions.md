@@ -3233,6 +3233,30 @@ replacement for it. Build tracked at
 reasoning, skeptic passes and prior art:
 [#3427](/backlog/3427-design-an-operation-manager-a-real-execution-chokepoint-ever/).
 
+**Extended 2026-09-07 (operator; #3174)** — the git-forge provider seam (`gh` / GitHub REST+GraphQL), ratified
+across two forks, neither a new competing rule. **Fork 1 (where the seam binds) = (c) split on mutation vs.
+read.** A mutating forge call stays inside the operation's single home and is never importable elsewhere —
+this clause's own "one declaration, derived callers" doctrine carried to the outbound provider axis: a home's
+mutating `gh` call is exactly the sole route a second importer would bypass, the same shape
+[#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism)'s sole-writer invariant already polices on the inbound
+side. A read that owns no operation (the roughly thirty conveyor/readiness watchers) binds instead through a
+**named shared module** (`we:scripts/lib/forge-reader.mjs`), reusing the label port's `PR_STATE_FIELDS`
+(`we:scripts/lib/review-label-provider.mjs:37`) rather than minting a second field list — a module import is
+not a second mutation route, so it does not re-open the "hand-written glue over a declared operation" defect
+clause 1 above names. **Fork 2 (how wide a contract is declared) = (b) per-arc ports fitted to their actual
+callers**, extending the `we:scripts/lib/review-label-provider.mjs` precedent — never one repo-wide neutral
+`ForgeProvider` interface. This is
+[#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates)'s own #2626 vendor-abstraction
+generalization ("the same seam discipline applies to any future vendor-specific infrastructure integration,
+not only this store") *applied* to the git forge, not re-ruled here: a repo-wide interface derived from one
+implementation (GitHub) would encode that vendor's model — integer PR numbers, `mergeStateStatus`, `gh`'s
+check buckets — as though neutral, the exact lock-in the vendor-abstraction seam exists to keep out. The
+completion condition is part of the ratified default, not a footnote: every bare `gh` invocation in
+`we:scripts/` ends up behind one of the named ports (`review-label-provider.mjs`, `forge-reader.mjs`, and the
+per-arc ports the land and drain arcs still need), and the port enumeration is lint-assertable. Full reasoning,
+the fork-existence tests, and the confirmed *Already answered* list:
+[#3174](/backlog/3174-git-hosting-pr-provider-abstraction-define-the-interface-now/).
+
 ---
 
 ### The conveyor's headless dispatch starts agents by CALLING the declared `dispatch-lane` operation — never a second spawn implementation, never a cross-process call into a sibling repo's server {#conveyor-dispatch-calls-the-declared-operation}

@@ -2,8 +2,10 @@
 bornAs: xnvjq2r
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-07"
+codifiedIn: one-off
 tags: [infra, gh, rate-limit, cost, decision]
 ---
 
@@ -15,6 +17,33 @@ Fork — what to do about it: (a) do nothing now: the existing reactive retry al
 
 Recommended default: (c), falling through to (a) unless the data says otherwise — there is no evidence of a live bottleneck tonight, and (b)'s realistic gain for this specific repo's shape (36 repos, no org) is modest, not the 2.5x figure a larger org install would see. This is a genuine infra fork with real migration cost and risk — it should be ratified by the operator, not defaulted into.
 
+## Ruling (ratified 2026-09-07, operator)
+
+**Ratified 2026-09-07** — the operator ratified fork **(c): instrument first.** Log `gh api rate_limit`'s
+remaining/used figures on every `we:scripts/conveyor/infra-blocked.mjs` retry trip — cheap, no auth-surface
+change — and revisit the GitHub App migration only if real usage data later shows sustained pressure. Forks
+(a) and (b) are not adopted now: plain (a) would leave no usage trail to ever justify revisiting this call,
+and (b)'s realistic gain for this repo's current shape (36 repos, no org, ≈+16% headroom) does not clear the
+cost of a wide, security-sensitive auth-surface migration absent evidence of real exhaustion.
+
+**Follow-on build scaffolded at ratification:**
+
+- [Log gh api rate_limit remaining/used on every we:scripts/conveyor/infra-blocked.mjs retry
+  trip](/backlog/xmxeiz2-log-gh-api-rate-limit-remaining-used-on-every-we-scripts-con/) (parent: this item,
+  `blockedBy` this item) — the concrete, build-ready first slice: on each
+  `we:scripts/conveyor/infra-blocked.mjs` retry trip, call `gh api rate_limit` and log the core bucket's
+  `remaining`/`used` figures alongside the existing per-attempt log line, so a future revisit of this
+  decision has real usage data to check against instead of the "no evidence of a live bottleneck tonight"
+  snapshot this ruling was made on.
+
+Codified: `one-off` — a narrow, scoped infra call specific to this repo's current `gh` auth shape; it
+establishes no reusable cluster rule for the statute layer.
+
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Ratified** — fork (c) is ratified above; forks (a) and (b) are not adopted now.
+2. **Spun off** — the instrumentation itself is filed as a separate item, `blockedBy` this decision (see
+   "Follow-on build scaffolded" above), naming the exact log line and file/line location. That item, not this
+   one, carries the executable Done-when — a `kind: decision` is never itself dispatched for build
+   (`we:scripts/readiness/proposer.mjs`'s `isBuildable` excludes `decision`).
+3. This card `resolve`s once ratified — building the follow-on is separate work tracked on its own card.

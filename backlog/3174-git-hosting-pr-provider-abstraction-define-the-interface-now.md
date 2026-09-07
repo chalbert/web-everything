@@ -1,13 +1,52 @@
 ---
 bornAs: x0oyzc2
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
+codifiedIn: "docs/agent/platform-decisions.md#operations-declared-once-callers-generated"
 relatedTo: ["2626", "3007", "3029", "3369"]
 tags: [operations, drain, provider, vendor-abstraction, forge]
+ratifiedBy: "Nicolas Gilbert (operator)"
 ---
 
 # Git hosting/PR provider abstraction — define the interface now, defer multi-provider live testing
+
+## Ruling (2026-09-07) — Fork 1 = (c) split on mutation vs. read, Fork 2 = (b) per-arc ports
+
+**RATIFIED by the operator (Nicolas Gilbert) on 2026-09-07**, both forks at their recommended default:
+
+- **Fork 1 = (c).** Mutations bind only inside the operation's single home — never importable elsewhere, the
+  same sole-route invariant `we:scripts/operations/open-pr-io.mjs:5-7` already states. Reads bind through a
+  named shared module (`we:scripts/lib/forge-reader.mjs`), reusing `PR_STATE_FIELDS`
+  (`we:scripts/lib/review-label-provider.mjs:37`) rather than minting a second field list, so a test stub
+  cannot drift from what the real reader returns.
+- **Fork 2 = (b).** Per-arc ports fitted to their actual callers, extending the
+  `we:scripts/lib/review-label-provider.mjs` precedent — never one repo-wide neutral `ForgeProvider`
+  interface. The completion condition is part of the default, not a footnote: every bare `gh` invocation in
+  `we:scripts/` ends up behind one of the named ports, and the port enumeration is lint-assertable.
+
+Codified as an **extension** of
+[`#operations-declared-once-callers-generated`](../docs/agent/platform-decisions.md#operations-declared-once-callers-generated)
+(Fork 1's home doctrine — mutations stay behind the one declared caller) and
+[`#state-lives-where-its-nature-dictates`](../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
+(Fork 2 applies, rather than re-rules, that statute's #2626 vendor-abstraction generalization — "the same
+seam discipline applies to any future vendor-specific infrastructure integration" — to the git forge) —
+explicitly **not** a new competing rule, per this item's own *Statute overlap* section.
+
+**Already answered — confirmed/corrected 2026-09-07.** Re-verified each of the six items against source rather
+than carrying the filing's numbers forward:
+
+1. Outage failover already has a home (`we:scripts/conveyor/infra-blocked.mjs`, `we:scripts/pr-land.mjs --fallback-git`) — confirmed, unchanged.
+2. The review-label state machine's forge-free rubric (`we:scripts/lib/review-escalation.mjs`) — confirmed, unchanged.
+3. Review-authority carrier is #3007's call, not this one — confirmed, unchanged.
+4. Synchronous-vs-deferred transport is settled by the port's own contract (`we:scripts/lib/review-label-provider.mjs:23-28`) — confirmed, unchanged.
+5. **Corrected.** The filing's "18 of 37 children open" was already stale at filing time; the item's own
+   2026-09-06 census updated it to "112 children, 72 open" — that too is now stale. Re-counted fresh
+   2026-09-07 from `we:backlog/*.md` frontmatter: **#3029 has 116 children, 73 open, 1 active, 42 resolved.**
+   Still prioritization, not a fork branch — the correction is only to the number, not the ruling.
+6. Standing up a second live provider stays out of scope — confirmed, unchanged.
 
 Where the git-forge seam binds, and how wide a contract it declares. Census run 2026-09-06: 40 non-test scripts shell `gh` across ~75 sites and ten subcommand families, while ONE arc — review labels and comments — already sits behind a tested port (`we:scripts/lib/review-label-provider.mjs`). Two forks are live below, each with a **bold default**; four concerns the filing carried as open questions are not forks and are recorded under *Already answered*. The general rule this item might have codified is **already ratified** (see *Statute overlap*), so what is left to rule is the seam's locus and the contract's breadth.
 
