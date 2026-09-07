@@ -3,8 +3,9 @@ bornAs: xc1wd1f
 kind: story
 size: 3
 parent: "2676"
-status: open
+status: active
 dateOpened: "2026-07-26"
+dateStarted: "2026-09-07"
 tags: []
 scope:
   - "plateau-app:src/feature-tracker/design-snapshots.ts"
@@ -163,6 +164,17 @@ with this script.
 Lands as one small, additive PR in `plateau-app` — new files only, nothing existing is edited except the README
 note. No consumer is wired yet (#2728/S6b consumes later, once it itself is unblocked by #2726). Ships behind
 `main` incrementally; does not need a branch spanning multiple items.
+
+## Resolution
+
+Shipped as a cross-locus couple: `plateau-app` PR #150 (`lane/2688-design-snapshots`) carries every file this
+card scoped — `plateau-app:src/feature-tracker/design-snapshots.ts` (+ tests),
+`plateau-app:scripts/record-design-snapshot.mjs` (+ an integration test spawning it as a real subprocess), the
+shared `plateau-app:src/feature-tracker/design-snapshot-kinds.json` allow-list, the committed empty index, and
+the `plateau-app:tests/visual/README.md` note. `plateau-app:scripts/record-design-snapshot.mjs` additionally
+validates `--epic` as numeric (a path-traversal guard a `/converge` security-lens finding surfaced) and
+replaces rather than duplicates a same-day/same-kind re-record. This WE half carries the `active → resolved`
+flip only; the drain lands `plateau-app` first, this PR last.
 
 ## Follow-up filed
 
