@@ -121,6 +121,13 @@ built (this is the one pre-build stop; see *Escalations*).
 Do the actual work in `$LANE`: implement `{{ITEM_SPEC_PATH}}`, keep `## Progress` synced, capture any
 leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rather than half-doing them.
 
+- **Any scaffolded item must itself pass build-brief discipline** (statute:
+  [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+  #2819): name the edge-cases the new item's build should handle or reject, require an
+  integration/wiring test (not only a unit test), and never echo the slice title as a "closes X" claim
+  the item doesn't itself close end-to-end. This is exactly the class of gap `check:readiness`'s
+  spec-gap proposer (`we:scripts/readiness/proposer.mjs`) now flags — write the scaffold so it wouldn't
+  flag it.
 - **Prefer small, single-responsibility, decoupled files; split god-files along their seams** (statute:
   [we:docs/agent/platform-decisions.md#small-file-preference](../../../docs/agent/platform-decisions.md#small-file-preference), #2678). This is a throughput default, not tidiness: a file
   many items must touch is a single scope-lease lock that serializes all of them. When your work would grow a
@@ -128,6 +135,14 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
   outranks line count** — never fragment a truly single-responsibility file just to hit a number; if a large
   file is genuinely cohesive, mark it `// @cohesive: <reason>` to silence the soft-warn. `check:standards`
   only *warns* (never blocks) on the size+collision composite, so this never gates your land.
+
+- **Build-brief discipline — apply this even when the spec above is thin** (statute:
+  [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+  #2819). Where the spec says "reject/handle X" without naming X's concrete shapes, name the edge cases
+  yourself before writing the check — don't ship the first narrow guess. Cover the change with an
+  integration/wiring test that exercises the real call path, not only a unit test of the isolated function.
+  And never echo the item's own title or slice name back as a completion claim ("closes X") in a commit or
+  PR unless the diff truly closes it end-to-end — say what you actually closed instead.
 
 ### 5. Run the gate GREEN (in the item's own locus)
 
