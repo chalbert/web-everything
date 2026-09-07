@@ -137,6 +137,24 @@ describe('classifyPr', () => {
     expect(classifyPr(pr({ labels: ['ready-to-merge', 'review:accepted'] }))).toBe('queued');
   });
 
+  it('does not let review-gate\'s own by-design pre-review failure mask needs-review as ci-red (x3hg6h2)', () => {
+    // The exact live rollup shape confirmed 2026-09-05 on PRs #1928/#1929/#1933/#1926/etc: every real check
+    // (test, smoke, every test-shard) is green; ONLY `review-gate` is red, because that check's whole job is
+    // to report FAILURE for as long as the PR is un-reviewed. Before the fix this read `ci-red` and the
+    // review-dispatch loop could never reach it — a permanent self-referential deadlock.
+    const rollup = [
+      { name: 'review-gate', conclusion: 'FAILURE' },
+      { name: 'test', conclusion: 'SUCCESS' },
+      { name: 'smoke', conclusion: 'SUCCESS' },
+      { name: 'test-shard (1)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (2)', conclusion: 'SUCCESS' },
+    ];
+    expect(ciFailed(rollup)).toBe(false);
+    expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: rollup }))).toBe('needs-review');
+    // A REAL broken required check (any name other than review-gate) must still read ci-red.
+    expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: [...rollup, { name: 'test-shard (3)', conclusion: 'FAILURE' }] }))).toBe('ci-red');
+  });
+
   it('treats a merged pull request as landed whatever its labels say', () => {
     expect(classifyPr(pr({ state: 'MERGED', labels: ['review:human'] }))).toBe('landed');
   });

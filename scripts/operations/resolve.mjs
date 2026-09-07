@@ -7,8 +7,14 @@
  * this declares the CLOSE. They were siblings in `we:scripts/backlog.mjs` all along — the same `transition()`
  * function, the same guarded writer — and the reason to declare this one is measured rather than aesthetic: a
  * 1,786-call session audit on 2026-08-21 found 15 raw `backlog.mjs resolve` calls and 0 through any operation,
- * because there was none to call. Meanwhile `we:skills-src/next-backlog-item/SKILL.md` step 7 still instructs
- * the raw command, so every agent following the skill correctly bypasses the declared layer.
+ * because there was none to call.
+ *
+ * THAT SECOND SENTENCE IS NOW STALE, and it is corrected here rather than left to read as current (2026-09-06).
+ * It said `we:skills-src/next-backlog-item/SKILL.md` step 7 "still instructs the raw command". It does not:
+ * step 7 instructs `run.mjs resolve` (line 274), and `we:.claude/commands/resolve.md` names the operation too,
+ * mentioning the raw form only to contrast its flag spelling. The skills were rewired; this header was not.
+ * The measured 15-raw-calls finding stands as history — what changed is that the prose fix landed and the
+ * justification kept describing the world before it.
  *
  * WHAT A BAD RESOLVE COSTS, and why the guards are not ceremony. PR #1503's round-1 finding was a decision
  * card whose body said RATIFIED while its `status` stayed `open`, leaving four sibling slices blocked. That is
@@ -40,6 +46,7 @@
  * the world, and it is injected, so every refusal below is reachable in a test with no filesystem.
  */
 import { op } from './registry.mjs';
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute, effect as effectStep } from './step-kinds.mjs';
 import { applyTransition } from '../backlog/frontmatter.mjs';
 
@@ -180,6 +187,10 @@ export function resolveOperation({ readResolveContext } = {}) {
       force: { type: 'boolean', required: false, default: false },
     },
     verdictFrom: 'plan',
+    // The raw invocation this operation was built to replace (#3224). Declared, never derived: whether
+    // `we:scripts/backlog.mjs resolve` reaches this module is visible in the import graph (it does not — unlike
+    // `claim`, which routes through `claimViaOperation`), but the INTENT that this replaced it is not.
+    declaresOver: DECLARED_HOMES.resolve,
 
     read: compute({
       reads: ['input.ref'],

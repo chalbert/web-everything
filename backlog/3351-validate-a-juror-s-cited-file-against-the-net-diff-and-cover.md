@@ -3,8 +3,11 @@ bornAs: x6t2z6h
 kind: story
 size: 3
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-26"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 scope:
   - we:scripts/lib/jury-core.mjs
   - we:scripts/lib/review-render.mjs

@@ -3,8 +3,11 @@ bornAs: x9bq900
 kind: story
 size: 2
 parent: "3318"
-status: open
+status: resolved
 dateOpened: "2026-08-27"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 scope:
   - we:scripts/review-corpus/gates.mjs
 tags: []

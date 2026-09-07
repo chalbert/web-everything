@@ -6,7 +6,7 @@ blockedBy: ["725", "950"]
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
 dateResolved: "2026-06-18"
-graduatedTo: "we:plugs/webguards/__tests__/unit/webguards.unplugged.test.ts"
+graduatedTo: "frontierui:plugs/webguards/__tests__/unit/webguards.unplugged.test.ts"
 tags: []
 ---
 

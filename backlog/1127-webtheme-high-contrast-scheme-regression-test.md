@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
-graduatedTo: "we:webtheme/__tests__/schemes.test.ts"
+graduatedTo: "frontierui:webtheme/__tests__/schemes.test.ts"
 tags: []
 ---
 

@@ -4,7 +4,7 @@ status: resolved
 locus: frontierui
 dateOpened: "2026-06-19"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/index.ts"
+graduatedTo: "plateau:tools/explorer/index.ts"
 tags: [fui-devtool, exploratory-testing, conformance, autonomous-agent, a11y, close-out-gate, dogfood, epic]
 relatedReport: reports/2026-06-19-autonomous-exploratory-ui-testing.md
 ---

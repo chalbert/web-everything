@@ -7,7 +7,7 @@ blockedBy: ["1581"]
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "plateau:src/judge-learning/judgeRecipe.ts"
+graduatedTo: "plateau:packages/tooling/src/judge-learning/judgeRecipe.ts"
 locus: plateau-app
 tags: [plateau-app, trainable-judge, "1552", "1553", "1581", "1582"]
 ---

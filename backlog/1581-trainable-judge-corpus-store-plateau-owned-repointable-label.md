@@ -8,7 +8,7 @@ locus: plateau-app
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "plateau:src/judge-corpus/corpusStore.ts"
+graduatedTo: "plateau:packages/tooling/src/judge-corpus/corpusStore.ts"
 tags: []
 ---
 

@@ -33,3 +33,19 @@ for why direct edits to a live-read checkout are risky), then push the resolved 
 
 **Supersede this note once #3464 ships** — proactive manual checking is a stopgap, not the intended
 end state.
+
+**Update (2026-09-04/05, #3472):** the "real mechanical fix" this note deferred to now exists, in two
+halves. #3464's PASSIVE half landed first: `we:scripts/conveyor/branch-drift.mjs sweep` runs
+automatically every `runner.mjs` tick, dry-run-probes `lane/mechanical-dispatcher` against `main` (no
+working tree touched), and persists the verdict as a `git note` any checkout can read back —
+`dispatch-plan.mjs` already gates further dispatch on it (`branch-drift-blocked`). #3472 then found the
+gap that PASSIVE detection alone doesn't close: the scratch checkout's own ACTIVE sync loop (an ad hoc
+`bash -c 'while true; do sleep 180; git fetch; git merge; on conflict: log one line + abort; done'`,
+still live and stuck at the time of filing) retried an identical doomed merge forever with no backoff and
+no escalation past an untailed log line. `we:scripts/conveyor/branch-sync.mjs` replaces it: a tested
+bounded-retry-then-escalate loop (`node scripts/conveyor/branch-sync.mjs loop` in place of the raw bash
+one-liner) that never touches the working tree on a real conflict, backs off exponentially for a few
+attempts, and — once capped — writes a durable alert file, fires a macOS notification, and refreshes the
+`branch-drift.mjs` report immediately, rather than drifting silently. Manual `git fetch`/`rev-list`
+checking at session checkpoints is no longer the only mechanism; a scratch checkout should run the new
+loop instead.

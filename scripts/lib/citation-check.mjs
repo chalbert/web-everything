@@ -789,3 +789,221 @@ export function buildIdentifierIndex(texts, { stripComments = true } = {}) {
   }
   return idx;
 }
+
+// ── Reference RESOLUTION across the constellation (#2821 gate 5, widened) ─────────────────────────
+//
+// The gates above resolve a reference's CONTAINER. `findDanglingLoci` asks "does the file exist, and is
+// the line within it" — a BOUNDS check. It never asks whether the cited line still holds what the prose
+// says, so a citation into a file that GROWS stays green forever while pointing at unrelated content:
+// `docs/agent/platform-decisions.md` reached 4138 lines and every pre-growth `:NNN` cite in the backlog
+// still passes, off by 130–520 lines. That is the largest single staleness class in the corpus (2026-09-06
+// audit, we:reports/2026-09-06-open-story-staleness-audit.md).
+//
+// The four helpers below close that family by resolving a reference's CONTENT, and by resolving the two
+// sibling repos the original gate skipped by construction:
+//
+//   • resolveRepoRef / makeRepoResolver — the shared prefix→checkout resolution, detect-or-skip.
+//   • findDanglingSymbolAnchors — the `we:<path>#<symbol>` form gate 5's own error message RECOMMENDS as
+//     the drift-immune alternative, which until now had no validator at all: nothing rewarded adopting it
+//     and nothing protected you once you had.
+//   • findDanglingGraduatedTargets — a resolved item's `graduatedTo` target must exist. Nothing checked
+//     this, which is how #2756 landed `resolved` naming a Rust subtree that was never created, and how 93
+//     further targets silently rotted through three repo relocations.
+//   • findDanglingScopePaths — a LIVE item's `scope:` entries must exist. These are machine-read (the
+//     dispatcher plans lane collisions from them), so a stale entry mis-plans dispatch rather than merely
+//     misleading a reader.
+
+/** Repo-locus prefix → checkout directory, relative to the WE repo root. */
+export const REPO_ROOTS = Object.freeze({
+  'we:': '.',
+  'webeverything:': '.',
+  'fui:': '../frontierui',
+  'frontierui:': '../frontierui',
+  'plateau:': '../plateau-app',
+  'plateau-app:': '../plateau-app',
+});
+
+/** Every recognised repo-locus prefix, longest first so `plateau-app:` wins over `plateau:`. */
+export const REPO_PREFIXES = Object.freeze(
+  Object.keys(REPO_ROOTS).sort((a, b) => b.length - a.length),
+);
+
+/**
+ * Split a repo-qualified reference into `{ prefix, path }`, or null when it carries no known prefix.
+ * A bare path is deliberately NOT resolved — the #883 locus convention requires a prefix, and guessing
+ * a repo for an unprefixed path is exactly the basename-guessing that mis-resolves (see the audit's
+ * "guard rail that mattered": a bare `conformanceVectors.ts` matched an unrelated file in another repo).
+ */
+export function splitRepoRef(ref) {
+  if (typeof ref !== 'string') return null;
+  const trimmed = ref.trim();
+  for (const prefix of REPO_PREFIXES) {
+    if (!trimmed.startsWith(prefix)) continue;
+    const path = trimmed.slice(prefix.length).replace(/[.,;)]+$/, '');
+    if (path === '') return null;
+    // Absolute or `..`-escaping paths are never valid citations and must never reach an fs reader
+    // (same posture as findDanglingLoci's isInRepoPath: a traversal target can hang or OOM the gate).
+    if (path.startsWith('/') || path.split('/').includes('..')) return null;
+    return { prefix, path };
+  }
+  return null;
+}
+
+/**
+ * Build the `resolvePath` / `readRepoFile` pair the resolution gates inject, over a caller-supplied fs.
+ *
+ * DETECT-OR-SKIP, never fail-open: a prefix whose checkout is absent resolves to `'no-repo'`, which every
+ * gate below reports as SKIPPED rather than counting as present. This mirrors the existing sibling-repo
+ * posture in check-standards.mjs (the FUI block-content arm silently skips without `../frontierui`) and is
+ * the rule the audit's own sweep needed: "a gate that cannot see the target must not report the target as
+ * present" (#3502 Done-when 2).
+ *
+ * @param opts.exists  (absPath:string) => boolean
+ * @param opts.read    (absPath:string) => string   — may throw for missing/unreadable
+ * @param opts.join    (...parts:string[]) => string
+ * @param opts.root    the WE repo root.
+ * @returns { resolvePath, readRepoFile, repoAvailable }
+ */
+export function makeRepoResolver({ exists, read, join, root = '.' }) {
+  const repoDirCache = new Map();
+  const repoAvailable = (prefix) => {
+    const rel = REPO_ROOTS[prefix];
+    if (rel === undefined) return false;
+    if (!repoDirCache.has(prefix)) repoDirCache.set(prefix, exists(join(root, rel)));
+    return repoDirCache.get(prefix);
+  };
+  const resolvePath = (prefix, path) => {
+    if (!repoAvailable(prefix)) return 'no-repo';
+    return exists(join(root, REPO_ROOTS[prefix], path)) ? 'present' : 'missing';
+  };
+  const readRepoFile = (prefix, path) => {
+    if (!repoAvailable(prefix)) return { status: 'no-repo' };
+    const abs = join(root, REPO_ROOTS[prefix], path);
+    if (!exists(abs)) return { status: 'missing' };
+    try {
+      const text = read(abs);
+      return typeof text === 'string' ? { status: 'ok', text } : { status: 'unreadable' };
+    } catch {
+      return { status: 'unreadable' };
+    }
+  };
+  return { resolvePath, readRepoFile, repoAvailable };
+}
+
+/**
+ * Gate 5b — `we:<path>#<symbol>` anchor resolution (the drift-immune citation form).
+ *
+ * A symbol anchor is CONTENT-addressed: it survives a file growing, shrinking, or being reformatted,
+ * which is precisely what a `:<line>` cite does not. Gate 5's error message has always recommended this
+ * form; nothing validated it, so an anchor could name a symbol the file never had and read as rigorous.
+ * Resolving it makes the recommendation real — and makes migrating a drifting `:<line>` cite to an anchor
+ * a strict improvement rather than a swap of one unchecked form for another.
+ *
+ * Absent-checkout and unreadable targets are SKIPPED, never errored (detect-or-skip, see makeRepoResolver).
+ *
+ * @param text the file body (raw).
+ * @param opts.readRepoFile (prefix, path) => {status:'ok',text} | {status:'missing'|'no-repo'|'unreadable'}
+ * @returns array of `{ locus, prefix, path, symbol, reason }` — 'missing-file' | 'symbol-not-found'.
+ */
+export function findDanglingSymbolAnchors(text, { readRepoFile }) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '') return findings;
+  // <prefix>:<path with at least one `/`>#<symbol>. The symbol is an identifier-shaped run, so a markdown
+  // heading anchor (`docs/x.md#some-heading`, hyphenated) does not match and is left to the anchor gate.
+  // The trailing `(?![-\w$])` rejects a hyphenated markdown heading anchor (`x.md#some-heading`), which
+  // would otherwise match its first segment (`some`) and be reported as a missing symbol.
+  // DERIVED from REPO_PREFIXES, never hand-listed. The first cut spelled the alternation out and omitted
+  // `webeverything:` — a prefix `splitRepoRef` and `makeRepoResolver` both accept — so an anchor using it
+  // resolved fine everywhere else and was silently never scanned here. Two lists of the same thing drift
+  // from the moment they are written; this one now cannot.
+  const prefixAlt = REPO_PREFIXES.map((p) => p.slice(0, -1)).join('|');
+  const rx = new RegExp(
+    String.raw`\b(${prefixAlt}):([A-Za-z0-9._\-/]+\/[A-Za-z0-9._\-]+)#([A-Za-z_$][A-Za-z0-9_$]*)(?![-\w$])`,
+    'g',
+  );
+  const seen = new Set();
+  for (const m of text.matchAll(rx)) {
+    const [, bare, path, symbol] = m;
+    const prefix = `${bare}:`;
+    const locus = `${prefix}${path}#${symbol}`;
+    if (seen.has(locus)) continue;
+    seen.add(locus);
+    // `#L123` is a GitHub-style LINE anchor, not a symbol. It is position-based (so it drifts like a
+    // `:<line>` cite), but reporting it as "the file contains no `L123`" would be a false claim about
+    // a symbol that was never asserted. Out of scope here; gate 5's line-range check is its home.
+    if (/^L\d+$/.test(symbol)) continue;
+    const split = splitRepoRef(`${prefix}${path}`);
+    if (!split) continue; // absolute / traversal — never resolved, never errored
+    const res = readRepoFile(prefix, split.path);
+    if (res.status === 'no-repo' || res.status === 'unreadable') continue; // skipped, not passed
+    if (res.status === 'missing') {
+      findings.push({ locus, prefix, path: split.path, symbol, reason: 'missing-file' });
+      continue;
+    }
+    // Word-boundary match so `foo` does not satisfy an anchor naming `fooBar` (or vice versa).
+    const hit = new RegExp(`(?:^|[^A-Za-z0-9_$])${symbol.replace(/\$/g, '\\$')}(?:[^A-Za-z0-9_$]|$)`);
+    if (!hit.test(res.text)) {
+      findings.push({ locus, prefix, path: split.path, symbol, reason: 'symbol-not-found' });
+    }
+  }
+  return findings;
+}
+
+/**
+ * Gate 5c — a resolved item's `graduatedTo` target must exist.
+ *
+ * `graduatedTo` is the one field that asserts something OUTSIDE the item's own diff: *this shipped, and it
+ * landed at `<path>`*. Nothing resolved it. That is how #2756 landed `resolved` naming
+ * `frontierui:plugs/webdirectives/ssr/rust/` — a directory that does not exist, in a repo with zero `.rs`
+ * files — while its two dependents read as ready to build against it. The same blindness let three repo
+ * relocations rot 93 further targets without a single gate signal.
+ *
+ * Only the LEADING entity ref is resolved, matching the canonical-graduatedTo shape the #614 nudge already
+ * enforces. A `none`-prefixed value (including `none (… deleted by #NNNN …)`) is a deliberate record that
+ * no entity was produced and is skipped — narrative paths later in the string are prose, not the target.
+ *
+ * @param items backlog items ({ num, status, graduatedTo }).
+ * @param opts.resolvePath (prefix, path) => 'present' | 'missing' | 'no-repo'
+ * @returns array of `{ num, ref, prefix, path }` for targets that resolve to nothing.
+ */
+export function findDanglingGraduatedTargets(items, { resolvePath }) {
+  const findings = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    if (it?.status !== 'resolved') continue;
+    const raw = it.graduatedTo;
+    if (typeof raw !== 'string' || raw.trim() === '') continue;
+    const lead = raw.trim().split(/\s+/)[0];
+    if (/^none\b/i.test(lead)) continue;
+    // A graduation can name SEVERAL artifacts as one comma-joined leading token (#2210 lists three
+    // extension files). Resolve each; one dangling member is a dangling record.
+    for (const member of lead.split(',')) {
+      // A `{a,b,c}` brace expansion is shorthand for a FAMILY of real files (#1954 names seven njk
+      // partials that way). It is not a path any fs call can resolve, and expanding it here would be a
+      // second, divergent implementation of shell globbing — skip it.
+      if (member.includes('{') || member.includes('}')) continue;
+      // A trailing `#fragment` is a DOC ANCHOR (a markdown heading, a template region), not part of the
+      // path. The file is what must exist; whether the heading exists is the anchor gate's business.
+      const split = splitRepoRef(member.split('#')[0]);
+      if (!split) continue; // unprefixed / non-path — the #614 canonical nudge owns that shape
+      if (resolvePath(split.prefix, split.path) !== 'missing') continue;
+      findings.push({ num: it.num, ref: `${split.prefix}${split.path}`, prefix: split.prefix, path: split.path });
+    }
+  }
+  return findings;
+}
+
+// ── Gate 5d (scope: path existence) was DESIGNED, IMPLEMENTED, AND REMOVED — the invariant is unsound.
+//
+// The motivating defect is real: a six-way split of one test file silently invalidated the `scope:` of
+// five open items, and `scope:` is machine-read (the dispatcher plans lane collisions from it), so a stale
+// entry mis-plans dispatch rather than merely misleading a reader.
+//
+// But "a live item's scope entries must exist" is FALSE. A greenfield item legitimately scopes the files
+// it is about to CREATE — #2756's own scopeRationale says so explicitly ("stands up a whole new language
+// subtree ... a file-level enumeration would under-scope and breach the lease"). Enforced as written, the
+// gate fired on #3483, #3484, #3487 and #3323, every one of them a correct card describing work not yet
+// done. A gate that reds correct cards gets disabled, not fixed.
+//
+// The SOUND signal is narrower: an entry that existed at some earlier commit and no longer does (rotted),
+// versus one that never existed (planned). That needs real history, and this checkout is a shallow clone,
+// so it cannot be computed here. Tracked on the scope-rot card rather than shipped as a noisy heuristic.

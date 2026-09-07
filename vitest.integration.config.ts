@@ -69,6 +69,8 @@ export default defineConfig({
       'scripts/operations/__tests__/mutation-check-integration.test.mjs',
       'scripts/operations/__tests__/record-verdict-integration.test.mjs',
       'scripts/operations/__tests__/stage-pr-view-integration.test.mjs',
+      // #xu2krte — real git-conflict fixture + real (fake, cost-nothing) `claude` CLI round trip.
+      'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
     ],
     poolMatchGlobs: [
       ['scripts/__tests__/stdout-flush.test.mjs', 'forks'],

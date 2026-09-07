@@ -7,7 +7,7 @@ blockedBy: ["1150"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webportals/conformance/ssrVectors.ts"
+graduatedTo: "frontierui:plugs/webportals/conformance/ssrVectors.ts"
 relatedProject: webportals
 tags: [webportals, build]
 ---

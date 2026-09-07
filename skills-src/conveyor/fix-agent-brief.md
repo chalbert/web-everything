@@ -110,13 +110,25 @@ Make the smallest change that addresses the finding, in `$LANE`, on the lane's *
 Keep scope tight: the repair's files should stay within `{{SCOPE}}`. Do not fold in unrelated work, and do not
 weaken or delete a test to sidestep the finding. If `origin/main` advanced under the lane and a **conflict**
 blocks the gate, resolve it the `/finish` way (regenerate derived artifacts, take-main for coordination JSON) —
-or, if it is a genuine same-line code overlap you cannot safely resolve, report the completion record and stop:
+or, if it is a genuine same-line code overlap you cannot safely resolve, **record the stand-down on the PR
+first** (`#xu2krte` — this call was missing here until then; only the *manual* `/finish` path posted it, so an
+auto-dispatched escalation was silently re-dispatched at the same unresolved conflict next tick, bounded only
+by the 5-attempt rearm cap instead of this terminal exit), THEN report the completion record and stop:
 
 ```bash
+node scripts/conveyor/stand-down.mjs {{PR_NUM}} --reason=conflict \
+  --detail="<one line — what made the overlap unsafe to resolve automatically>"
 node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 ```
 
 Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
+
+**Build-brief discipline applies to the repair too** (statute:
+[we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
+#2819): if the reviewer's finding names a category ("reject X") without enumerating its shapes, name the
+concrete edge cases yourself rather than the first narrow guess; cover the repair with an integration/wiring
+test if the finding touches a call path, not only a unit test of the isolated piece; and never claim the repair
+"closes" or "fixes" the item in your commit unless it truly does end-to-end.
 
 ### 4. Run the gate GREEN (the item's own locus gate)
 

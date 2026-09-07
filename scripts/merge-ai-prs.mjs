@@ -110,7 +110,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
 import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
@@ -215,6 +215,14 @@ export function applyEscalationRelief(gate, { relieved = false } = {}) {
   // pending-relief valve must NEVER waive it, even though it carries review:pending — a fresh look is required.
   if (gate.staleAcceptance) {
     return { waive: false, reason: 'stale acceptance (#2409) — head advanced past the reviewed commit; not waivable by the pending-relief valve' };
+  }
+  // #2412 review-fix (adversarial round 1, finding 2) — an ENGINE-tier PR awaiting the independent hardened
+  // validator is NOT a "review never arrived" pending park either, for the same reason a stale acceptance
+  // isn't: this park's applyLabel/humanRequired shape is otherwise indistinguishable from an ordinary one, so
+  // without this check the operator's per-PR relief valve would waive the exact requirement #2412 exists to
+  // enforce on the first stuck-looking engine-tier PR anyone points it at.
+  if (gate.awaitingIndependentValidator) {
+    return { waive: false, reason: 'engine-tier PR awaiting the independent hardened validator (redteam:accepted, #2412) — not waivable by the pending-relief valve; the review is not "stuck", it is genuinely incomplete' };
   }
   if (gate.humanRequired || gate.applyLabel === REVIEW_LABELS.human) {
     return { waive: false, reason: 'review:human is human-only — never waivable by a per-PR relief valve (#2285)' };
@@ -2955,6 +2963,40 @@ function makeAsyncMutex() {
   return { run(fn) { const r = tail.then(() => fn()); tail = r.catch(() => {}); return r; } };
 }
 
+/**
+ * #2412 layer 4 / #3493 — does this candidate's basis (the SAME file set `score` scored blast-radius/gate-self
+ * over, #3317) touch an ENGINE-tier trust-chain member? Pure. This is the real `score.basisFiles`-driven
+ * computation `runCli`'s one call site would feed `decideReviewGate`'s `engineTier` param — extracted to its
+ * own exported, directly-testable function (round-2 #1920 independent review finding: the inline expression
+ * had zero coverage anywhere; every test exercised `decideReviewGate`/`isEngineTierPath` with a hand-supplied
+ * boolean, never this reduction over a real `basisFiles` list) so a future rename/reshape of `basisFiles`, or a
+ * `.every` typo'd in for `.some`, reddens a real test instead of rotting unseen. NOT currently wired into
+ * production (see `engineTierForCandidate` and the call site's own comment for the #3493/#2410 sequencing
+ * deferral) — this is the tested, ready-to-wire predicate for when that deferral lifts.
+ * @param {{basisFiles?: string[]}} score - a `scoreEscalation` result (or anything carrying `basisFiles`)
+ * @returns {boolean}
+ */
+export function basisTouchesEngineTier(score) {
+  return (score?.basisFiles || []).some((f) => isEngineTierPath(f));
+}
+
+/**
+ * #3493 (blockedBy #2410) — the drain's one call site's ACTUAL `engineTier` value, extracted so the current
+ * deferral is itself a named, tested thing rather than an inline `false` a future edit could silently drop or
+ * silently "fix" without noticing it re-enables enforcement ahead of `#3493`'s own unblock. Returns `false`
+ * unconditionally today: no code-level/daemon-reachable writer applies `redteam:accepted` to a live PR yet, so
+ * requiring it here would strand every future engine-tier auto-land with no way to satisfy the requirement (see
+ * the long comment at the call site in `runCli`). Once `#3493`'s `blockedBy` resolves (`#2410` ships that
+ * writer), change this function's body to `return basisTouchesEngineTier(score);` — do not re-inline the
+ * computation at the call site.
+ * @param {{basisFiles?: string[]}} score - a `scoreEscalation` result
+ * @returns {boolean} always `false` until `#3493` unblocks
+ */
+export function engineTierForCandidate(score) { // `score` names the real future param — unused until #3493 unblocks
+  void score;
+  return false; // #3493 (blockedBy #2410) — flip to `basisTouchesEngineTier(score)` once unblocked.
+}
+
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli().catch((e) => { process.stderr.write(`merge-ai-prs ✗ ${String(e && e.stack || e)}\n`); process.exit(1); });
@@ -4050,7 +4092,30 @@ async function runCli() {
         // this flag changes only the REASON and, for a re-hold that would revoke a clearance, the label write.
         liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;
       }
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed });
+      // #2412 layer 4 — this PR's basis (the SAME set `score` scored blast-radius/gate-self over, #3317) touches
+      // ENGINE-tier trust-chain machinery iff any basis file matches `isEngineTierPath` — that real computation
+      // is `basisTouchesEngineTier` below (extracted + directly tested, round-2 #1920 review finding: this
+      // glue previously had zero coverage of its own — every test exercised `decideReviewGate`/`isEngineTierPath`
+      // with a hand-supplied boolean, never this call site's actual `score.basisFiles`-driven reduction). Engine
+      // tier stays agent-reviewable (decideReviewGate does not force `humanRequired` for it), but it ALSO can't
+      // auto-land on `review:accepted` alone — see the gate's own docblock for why.
+      //
+      // NOT WIRED YET — SEQUENCING DEFERRAL (surfaced at the #1920 rebase, 2026-09-05). `main`'s own resolution
+      // of `#2412` deliberately scaffolded this exact enforcement as its own follow-up, `#3493`
+      // ("decideReviewGate must require redteam:accepted before an engine-tier (blast-radius) auto-land"), which
+      // stays `blockedBy: ["2410"]`: no code-level/daemon-reachable writer applies `redteam:accepted` to a live
+      // PR yet (#2410 slice 2, still open — the only existing path is the hand-run `gh pr edit --add-label
+      // redteam:accepted` prose in `skills-src/drain/SKILL.md`). Wiring the real predicate into `engineTier` here
+      // before that writer ships would strand every future engine-tier PR going through the automated/daemon
+      // drain path with no way to ever satisfy the requirement — a regression, not a tightening (`#3493`'s own
+      // body says this verbatim). So the predicate, the gate-config roster, `decideReviewGate`'s `engineTier`
+      // param, and every existing test all land now (this PR's actual scope) — only the VALUE handed to
+      // `decideReviewGate` at THIS call site is held at `false` via `engineTierForCandidate` until `#3493`'s
+      // `blockedBy` resolves. Flip `engineTierForCandidate` to delegate to `basisTouchesEngineTier(score)` once
+      // `#2410` ships that writer — do not re-inline the computation here when that day comes, keep it in one
+      // named, tested place.
+      const engineTier = engineTierForCandidate(score);
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to

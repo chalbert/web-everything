@@ -2,10 +2,13 @@
 bornAs: xk4dkyt
 kind: story
 size: 3
-status: open
+status: resolved
 relatedTo: ["2965", "2971", "2970"]
 scope: ["we:scripts/lib/converge-core.mjs", "we:scripts/converge-cli.mjs"]
 dateOpened: "2026-08-07"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: [converge, gate, fail-closed]
 ---
 

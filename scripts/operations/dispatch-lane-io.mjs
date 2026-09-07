@@ -891,13 +891,27 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  * still read as a flag. Rather than bet on `--` being handled the way this file hopes (untested against the
  * real CLI, and a wrong bet turns into a dispatch with a mangled prompt), the dash is REFUSED outright. Every
  * legitimate brief starts with markdown, so the refusal costs nothing and proves what the position could not.
+ *
+ * `resumeSessionId` (`#xu2krte`) — OPT-IN, and it changes the WHOLE argv shape, not just one flag. A live
+ * build-time probe (CLI 2.1.263, 2026-09-06; see
+ * `docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted`) found `claude --bg --resume
+ * <id>` genuinely continues the named session with NEW work injected — a real resume, not a re-attach to old
+ * output — but ONLY when `--resume` is the ONLY flag passed alongside `--bg`. Adding `-n`, `--model`,
+ * `--append-system-prompt-file`, or any other flag makes the CLI silently fork an unrelated copy under a FRESH
+ * id instead (observed 3/3 tries, regardless of whether the original session was still live). So this branch
+ * emits nothing else — no `-n`, no system-prompt file, no `extraArgs` — and the caller
+ * (`we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix`) is responsible for detecting a fork (the id the
+ * CLI actually resumed under does not match `resumeSessionId`) via {@link parseBackgroundedId} /
+ * {@link resumeSucceeded} and falling back to a fresh, full dispatch (this same function, `resumeSessionId`
+ * omitted) when it does.
  */
-export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null }) {
+export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null }) {
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
     throw notApplied('dispatch-lane: refusing a brief that begins with `-` — an argument parser can read it as a flag');
   }
+  if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
   return [
     '--bg',
     '--session-id', String(sessionId),
@@ -906,6 +920,44 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     ...extraArgs.map(String),
     prompt,
   ];
+}
+
+/**
+ * we:scripts/operations/dispatch-lane-io.mjs#parseBackgroundedId — PURE: read the short handle `claude --bg`
+ * prints back on stdout (`backgrounded · <id>` or `backgrounded · <id> · <name>`), whichever of the two shapes
+ * the CLI used in the live probe above. Returns `null` when the text does not match — a caller must treat that
+ * as "outcome unknown", never as "resume failed" (see {@link resumeSucceeded}).
+ * @param {string} stdout
+ * @returns {string|null}
+ */
+export function parseBackgroundedId(stdout) {
+  const m = /backgrounded\s*(?:·|-)\s*([0-9a-zA-Z-]{6,36})/.exec(String(stdout ?? ''));
+  return m ? m[1] : null;
+}
+
+/**
+ * we:scripts/operations/dispatch-lane-io.mjs#resumeSucceeded — PURE: did a `buildAgentArgv({resumeSessionId})`
+ * dispatch genuinely continue the requested session, or did the CLI fork a copy under a fresh id?
+ *
+ * DELIBERATELY NOT A STRING-PREFIX COMPARISON. `claude agents --json`'s own `id` field is not reliably a
+ * derived prefix of `sessionId` for every listing shape (see {@link listedSessionIds}'s own docblock) — so
+ * rather than assume `id === sessionId.split('-')[0]`, this cross-references the printed handle against a REAL
+ * post-spawn listing (`claude agents --json --all`, read fresh by the caller) by exact `id` match, then compares
+ * THAT row's own `sessionId` against the id requested. Both sides run through {@link normalizeHandle}, matching
+ * every other session-id comparison in this file.
+ * @param {{printedId:string|null, requestedSessionId:string, agentsAfter:Array<object>}} o
+ * @returns {{resumed:boolean, actualSessionId:string|null, actualShortId:string|null}}
+ */
+export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) {
+  if (!printedId) return { resumed: false, actualSessionId: null, actualShortId: null };
+  const norm = normalizeHandle(printedId);
+  const row = (Array.isArray(agentsAfter) ? agentsAfter : []).find((a) => normalizeHandle(a?.id) === norm);
+  const actualSessionId = row ? normalizeHandle(row.sessionId) || null : null;
+  return {
+    resumed: Boolean(actualSessionId) && actualSessionId === normalizeHandle(requestedSessionId),
+    actualSessionId,
+    actualShortId: printedId,
+  };
 }
 
 /**

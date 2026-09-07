@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-07-03"
 dateStarted: "2026-07-03"
 dateResolved: "2026-07-03"
-graduatedTo: "plateau:src/dev-browser/chrome-extension/panel.js,plateau:src/dev-browser/chrome-extension/panel-detect.js,plateau:src/dev-browser/chrome-extension/panel.html"
+graduatedTo: "plateau:packages/extensions/src/chrome-extension/panel.js,plateau:packages/extensions/src/chrome-extension/panel-detect.js,plateau:packages/extensions/src/chrome-extension/panel.html"
 tags: []
 ---
 

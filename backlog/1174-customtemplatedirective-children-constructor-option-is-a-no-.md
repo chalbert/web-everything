@@ -4,7 +4,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:plugs/webdirectives/CustomTemplateDirective.ts"
+graduatedTo: "frontierui:plugs/webdirectives/CustomTemplateDirective.ts"
 tags: []
 ---
 

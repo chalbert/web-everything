@@ -7,7 +7,7 @@ blockedBy: ["1077"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:webpolicy/enforcement.ts"
+graduatedTo: "frontierui:webpolicy/enforcement.ts"
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-we-resident-reference-runtime-placement.md
 codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"

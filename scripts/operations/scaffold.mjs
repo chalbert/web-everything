@@ -32,6 +32,7 @@
  * PURE. No fs, no clock, no process. `./scaffold-io.mjs` is the only place it touches the world.
  */
 import { op } from './registry.mjs';
+import { DECLARED_HOMES } from './declared-homes.mjs';
 import { compute, effect as effectStep } from './step-kinds.mjs';
 import { BACKLOG_KINDS } from '../check-standards-rules.mjs';
 import { nextHash } from '../backlog/id.mjs';
@@ -199,6 +200,10 @@ export function scaffoldOperation({ readScaffoldContext } = {}) {
       session: { type: 'string', required: false, default: '' },
     },
     verdictFrom: 'plan',
+    // The raw invocation this operation was built to replace (#3224). Declared, never derived: whether
+    // `we:scripts/backlog.mjs scaffold` reaches this module is visible in the import graph (it does not — unlike
+    // `claim`, which routes through `claimViaOperation`), but the INTENT that this replaced it is not.
+    declaresOver: DECLARED_HOMES.scaffold,
 
     read: compute({
       reads: [],

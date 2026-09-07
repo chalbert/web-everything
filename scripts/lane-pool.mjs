@@ -73,7 +73,8 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync }
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
-import { join, basename, resolve, dirname } from 'node:path';
+import { join, basename, resolve, dirname, sep } from 'node:path';
+import { resolveReal } from './guard-lane.mjs';
 import { defaultPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
@@ -83,6 +84,7 @@ import {
   isReservedLease,
   isLaneAcquirable,
   chooseFreeLane,
+  ownLaneNumber,
   leaseBody,
   describeLease,
   leaseOwnedBy,
@@ -1106,9 +1108,16 @@ function cmdAcquire(repo) {
     const waitMs = flags['wait-ms'] !== undefined && Number.isFinite(Number(flags['wait-ms'])) ? Math.max(0, Number(flags['wait-ms'])) : 0;
     const deadline = nowMs + waitMs;
     const excluded = new Set();
+    // The caller's OWN lane, if they are standing in one. Auto-pick skips it: acquiring resets the lane to
+    // the integration branch, so returning the lane the caller is working in changes their checkout out from
+    // under them (observed 2026-09-06 — a bare `acquire --purpose=review-juror` returned the driving lane).
+    // A preference, not a refusal, and only for auto-pick: an explicit `--lane=N` is honoured as asked.
+    // Pool-SCOPED (#1961 finding 3): a lane number only counts as "mine" when the cwd is inside the pool
+    // being acquired from. Pure helper so the parsing is under test, not an inline regex nothing exercises.
+    const selfLane = ownLaneNumber(resolveReal(process.cwd()), resolveReal(repo.poolDir), sep);
     while (chosen === null) {
       const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
-      const pick = chooseFreeLane(infos, Date.now(), ttlMs);
+      const pick = chooseFreeLane(infos, Date.now(), ttlMs, { excludeLane: selfLane });
       if (pick === null) {
         if (Date.now() < deadline) {
           sleepSyncMs(ACQUIRE_POLL_MS);

@@ -1,8 +1,7 @@
 ---
 kind: epic
-status: resolved
+status: open
 dateOpened: "2026-06-19"
-dateResolved: "2026-06-19"
 graduatedTo: none
 tags: []
 ---
@@ -100,3 +99,14 @@ don't pre-decompose.
 - **#725** — port WE-only plug domains (webguards/webvalidation); coordinate so webvalidation coverage
   isn't built twice.
 - **#168** — plateau in-browser test harness (the runtime-only behavior harness this can lean on).
+
+## Reopened 2026-09-06 — a slice came back, so the umbrella is not closed
+
+Child **#1010** was reopened on 2026-09-06: its plugged browser e2e landed and was then deleted by #1047
+under the "WE holds zero executable" rule (#1282 / #1771), and the seam was never ported to FUI, so the
+coverage this epic claims does not exist today. `check:standards` refused the resulting shape ("a resolved
+epic with 1 open child slice"), which is the correct reading — this umbrella cannot be complete while the
+slice under it is not.
+
+Resolve it again once #1010 is settled, either by porting the seam or by recording that it is intentionally
+retired (#3523 owns that call).

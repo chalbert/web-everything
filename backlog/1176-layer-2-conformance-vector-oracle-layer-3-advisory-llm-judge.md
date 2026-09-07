@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/oracles/conformanceVectors.ts"
+graduatedTo: "plateau:packages/core/src/conformance-engine/conformanceVectors.ts"
 tags: []
 ---
 

@@ -61,6 +61,18 @@ describe('reduceCheckState — the empty list is the whole point', () => {
     }
   });
 
+  it('excludes review-gate from CI truth — it is BY DESIGN red until a PR is reviewed, not a code-health signal (x3hg6h2)', () => {
+    // Live rollup shape confirmed 2026-09-05: every real check green, only review-gate red. Must read green
+    // (not red) here — this is what let the review-dispatch deadlock happen upstream (reconcile-core.mjs /
+    // classifyPr both read CI truth off this same shape).
+    expect(reduceCheckState([done('success'), done('failure', 'review-gate')]).state).toBe('green');
+    // review-gate alone, nothing else run yet, still reads unchecked (not green, not red) — no real check has
+    // reported anything about this commit yet.
+    expect(reduceCheckState([done('failure', 'review-gate')]).state).toBe('unchecked');
+    // A real failing check beside review-gate's expected failure still reads red.
+    expect(reduceCheckState([done('failure'), done('failure', 'review-gate')]).state).toBe('red');
+  });
+
   it('only ever answers with a declared state', () => {
     const inputs = [[], [running()], [done('success')], [done('failure')], [done('skipped')], [done(null)]];
     for (const i of inputs) expect(CHECK_STATES).toContain(reduceCheckState(i).state);

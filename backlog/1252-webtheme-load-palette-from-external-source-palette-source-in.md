@@ -7,7 +7,7 @@ dateOpened: "2026-06-20"
 blockedBy: ["1274"]
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:webtheme/paletteSource.ts"
+graduatedTo: "frontierui:webtheme/paletteSource.ts"
 relatedReport: "reports/2026-06-20-palette-source-ingest.md"
 tags: []
 ---

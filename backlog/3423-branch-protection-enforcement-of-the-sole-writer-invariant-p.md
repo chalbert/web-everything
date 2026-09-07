@@ -2,8 +2,10 @@
 bornAs: xgbtds5
 kind: decision
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-31"
+dateResolved: "2026-09-06"
+codifiedIn: "docs/agent/platform-decisions.md#pr-flow-rollout-mechanism"
 preparedDate: "2026-08-31"
 relatedTo: ["3373", "2152", "2151", "2153"]
 relatedReport: reports/2026-08-31-branch-protection-sole-writer-enforcement.md
@@ -21,11 +23,59 @@ holds entirely by script discipline (`assertMayMerge` / the numbering lock / the
 there: **(a)** turn on `enforce_admins` plus a `restrictions` push allow-list naming the drain's own credential,
 accepting whatever workflow friction that adds for every other admin actor, vs. **(b)** explicitly ratify that
 script-level discipline — plus the downstream `duplicateBornAs`/`strandedHashesOnMain` catch net in
-`check:standards` — is the accepted enforcement layer, and record why platform-level enforcement is rejected for
-now.
+`check:standards` — is the accepted enforcement layer, and record why platform-level enforcement is not turned
+on today.
 
-**Prepared, not ratified.** This item states the fork, the research behind it, and a recommended bold default;
-the eventual ratification is a separate, later human turn (`/next decision`).
+> **Framing note, added at ratification.** This card was prepared with (a) as *"rejected for now"*, and the
+> language above is the prep's. The operator's ruling replaced that framing: **(a) is a knob that is not turned
+> on, not a branch that lost.** Read every "rejected" below as "the dimension's current value is not this one" —
+> the *Ruled* section immediately following is what ratified, and it governs.
+
+## Ruled — 2026-09-06, operator
+
+**Fork 1 ratified as (b): script-level discipline is the accepted enforcement layer of the sole-writer
+invariant, now.** The live Rung 1 of [`#pr-flow-rollout-mechanism`](/docs/agent/platform-decisions.md#pr-flow-rollout-mechanism)'s
+enforcement ladder is the ratified current state, and the enforcement chain this card cites — `assertMayMerge`
+as the sole `gh pr merge` chokepoint, the shared numbering/land-write lock, and the `duplicateBornAs` /
+`strandedHashesOnMain` catch net in `check:standards` — is what "accepted" now names.
+
+**Amendment raised and accepted at ratification: (a) is a knob that is not turned on, not a branch that lost.**
+This card was prepared with (a) as *"rejected for now"*. The operator's framing at ratification is stronger and
+is what ratified: **enforcement level is a configurable dimension** whose current value is Rung 1, with Rung 2 a
+real, selectable flavor blocked only on an actor to name. Three things make that the right shape rather than a
+softening of the same call:
+
+- **The mechanism genuinely exists.** The prep's own fact-check found the "personal repos cannot do this" read
+  too broad: Repository Rulesets carry a `bypass_actors` list and are available on GitHub Free for **public
+  personal** repos, which this repo is. What is missing is the actor, not the capability.
+- **The blocker is a prerequisite, not a merit defect.** Nothing about (a) was found wrong on merit. It cannot
+  distinguish the drain from an out-of-band admin actor *because there is one collaborator and the drain's
+  merges ride that same human credential* — a fact about today's identity roster, which a minted bot principal
+  changes.
+- **The ladder already says so.** `#pr-flow-rollout-mechanism` specs Rung 2 as the *specced future flip*, not as
+  a rejected alternative. Recording (a) as "rejected" would have put this card in tension with the statute it
+  claims to compose with.
+
+**What this forecloses, stated so the amendment cannot be read as a back door.** Turning `enforce_admins` on
+**today** stays refused, on the card's own grounds: with no distinct credential to allow-list it either no-ops
+(an admin acting outside the disciplined scripts is still an admin) or blocks the human's own ratified
+direct-`main` path — and it would regress **#2152** (resolved 2026-07-02), which set `enforce_admins: false`
+deliberately to keep the `--fallback-git` and `WE_MERGE_BREAK_GLASS` paths working. The amendment changes how
+the *record* reads, not what is safe to do now.
+
+**Revisit trigger, unchanged from the prep:** a distinct bot GitHub principal is minted for the drain (a
+GitHub App installation or machine-user PAT wired into its `gh` auth, separate from the human's), or a second
+human writer joins the repo. Neither holds today.
+
+Build carved: **#3532** — make the enforcement rung a declared knob, with Rung 2 as its off-by-default
+flavor. Item 1 of that story is the part with value today (a dimension that is declared and reconciled against
+the real branch-protection state, so the repo cannot drift off its own ratified rung silently); item 2 is the
+option itself, built from the ruleset call already written out below.
+
+**Codification — extend, never mint.** `codifiedIn` is an **amendment clause under
+`#pr-flow-rollout-mechanism`**, whose authoring scope is exactly this enforcement ladder. A standalone anchor
+named for "branch-protection of the sole-writer invariant" would duplicate a ladder already ratified, which is
+the one prep error that cannot be fixed after the call. #3373 unblocks with this ruling.
 
 ## Context — what was already checked, read from the live repo (2026-08-27, re-verified 2026-08-31)
 

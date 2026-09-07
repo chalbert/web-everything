@@ -1,0 +1,22 @@
+---
+bornAs: xy5uey0
+kind: story
+size: 3
+status: open
+relatedTo: ["2412", "2896"]
+scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/review-set-label.mjs"]
+dateOpened: "2026-09-04"
+tags: [gate, review]
+---
+
+# Close the two residual engine-tier redteam:accepted gaps left by #2412 (bare merge sweep; no-bounce staleness)
+
+Two residuals #2412's adversarial review surfaced and documented rather than fixed in-place, because closing them properly needs infrastructure this item's own scope did not already pay for. (1) The bare /merge orphan-sweep path (no --label) never calls decideReviewGate at all -- eligibility there is decided by hasUnclearedReviewLabel, a label-only predicate with no file-diff access, so it cannot apply the engine-tier auto-land-requires-redteam-accepted requirement; an engine-tier PR with only an ordinary review:accepted still clears on that path. Closing it needs a per-candidate file-diff fetch (mirroring the label-scoped drain's basisFiles) added to that secondary sweep path, scoped carefully so it does not regress cross-repo candidates whose diff cannot be read locally. STILL OPEN — locked down as a named, explicit cross-path invariant test (we:scripts/lib/__tests__/gate-invariants.test.mjs INVARIANT 16) by #1920's round-2 review-fix, so closing this item now means updating that test's expectation deliberately, not leaving the divergence to silently drift further unnoticed. (2) redteam:accepted carries no SHA/fingerprint of its own, unlike review:accepted's acceptanceCoversHead apparatus, so a stale redteam:accepted from an earlier head can still satisfy the engine-tier requirement for a later, different head once a fresh review:accepted is re-applied -- #2412 mitigated the bounce-shaped case (review:changes and rearm now also strip redteamAccepted) but a silent new-commit-then-reaccept path with no explicit bounce is not covered. #2412's round-2 review named a concrete, ROUTINE instance of this same gap: clear-human (the sanctioned recovery step after a re-park, used routinely per its own code comments -- "seven clearances... on byte-identical content") also freshly adds review:accepted without stripping a stale redteamAccepted, so a PR touching both an engine-tier file and a declarative-leash file can carry a redteam sign-off from one head through a clear-human re-clearance at a later head.
+
+**Update (#1920 round-2 review-fix, 2026-09-06) — the `clear-human` variant is now CLOSED, narrowing item (2).** we:scripts/review-set-label.mjs's `clear-human` target now also strips a stale `redteam:accepted` (matching `changes`/`rearm`), tested by we:scripts/lib/__tests__/gate-invariants.test.mjs INVARIANT 15 and we:scripts/__tests__/review-set-label.test.mjs. This uses the same COARSE always-strip posture `changes`/`rearm` already use (no SHA precision needed) rather than waiting on #2896's SHA-marker producer, because `clear-human` — like a bounce — fires on clearing an EXPLICIT hold (`review:human`), where "needs fresh eyes" is already the correct posture regardless of whether the head actually moved. That posture is deliberately NOT extended to the plain `accepted` target (see its own code comment): `accepted` is the ordinary engine-tier happy path, where a fresh `redteam:accepted` and a fresh `review:accepted` are meant to be able to land in either order for the SAME head, stacked (INVARIANT 14) — coarsely stripping there would make the two verdicts unable to ever coexist. So the REMAINING scope of item (2) is exactly the plain-`accepted`, no-hold-cleared, silent re-accept case (a new commit lands with no bounce/re-park in between, then an ordinary reviewer re-accepts on a redteam sign-off that never saw it) — that one genuinely needs `redteam:accepted`'s own SHA-marker producer (#2896) to close without breaking the happy path, as originally scoped below.
+
+Properly closing the remaining half of (2) (the plain re-accept case only, `clear-human` now excluded) needs redteam:accepted to get its own SHA-marker producer, which is #2896's still-open scope (giving redteam:accepted a real CLI target instead of a raw gh pr edit) -- this item is the natural follow-on once #2896 lands.
+
+## Done when
+
+1. **Executable** — TODO: a command that fails before this item lands and passes after.

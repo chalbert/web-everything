@@ -1,0 +1,107 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/3006-move-agent-work-onto-the-claude-code-cli-and-optimise-what-i/">#3006</a> asks for
+    &ldquo;current research on request optimisation&rdquo; before designing how agent work moves onto the CLI.
+    The <code>kind: decision</code> card carved from it &mdash; whether agent work economizes by
+    <strong>effort tier inside one model</strong> or by <strong>routing across models</strong> &mdash; rested on
+    claims with <em>no in-repo grounding</em>. This topic is that grounding.
+</p>
+
+<h2>The short answer</h2>
+<p>
+    Cost is dominated by <strong>caching</strong> and <strong>model/effort choice</strong>. Prompt compression,
+    terser phrasing and format choice are real but roughly an order of magnitude smaller, and several popular
+    techniques are <strong>net-negative</strong> because they break the cache they were meant to help. Crucially
+    the levers <strong>do not compose</strong> &mdash; each multiplies a different share of the bill, so multiply
+    a lever by the fraction of spend it touches before ranking it.
+</p>
+
+<h2>Caching, and the measurement already on this board</h2>
+<p>
+    A cache read bills at <strong>0.1&times; input</strong> against a 1.25&times; write premium at the 5-minute
+    TTL, so it <strong>breaks even after one reuse</strong>. Minimum cacheable prefixes are only
+    <strong>512&ndash;4,096 tokens</strong> &mdash; below which the cache is <em>silently</em> skipped with no
+    error. Invalidation cascades <code>tools &rarr; system &rarr; messages</code>, so a tool-definition change
+    invalidates everything and any earlier byte change is a full miss.
+</p>
+<p>
+    Reported production outcomes: <strong>7% &rarr; 74% hit rate from a single reordering fix</strong>, cutting
+    inference cost 59%; 41&ndash;80% real savings against a marketed &ldquo;up to 90%&rdquo;. Below <strong>40%
+    on a stable-prompt workload is a structural bug</strong>, not a tuning opportunity.
+</p>
+<p>
+    This repo already carries a corroborating figure:
+    <a href="/backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive/">#3383</a>&rsquo;s
+    <code>costTokens</code> line works out to roughly <strong>162 cache reads per write &mdash; a 99.4% hit
+    rate</strong> across 9 sessions. Read honestly it measures ordinary interactive-session caching rather than
+    the juror spawn path, but it is real data on the board and it corroborates #3006&rsquo;s own 2026-08-08
+    sample that <em>prefix stability beats prompt-size reduction</em>.
+</p>
+
+<h2>Recommendation on the carved fork</h2>
+<p>The research favours the <strong>effort dial</strong> over a model cascade, on three grounds:</p>
+<ol>
+    <li><strong>Caches are model-scoped.</strong> A two-model cascade forfeits cache reuse across its models
+        &mdash; a cost absent from nearly every published cascade evaluation, and not a rounding error at the hit
+        rates above.</li>
+    <li><strong>The measured alternative wins.</strong> Running everything at <code>low</code> effort and
+        re-running failures at default held <strong>~93% pass at ~$0.70/task versus 91.7% at $1.39</strong>
+        &mdash; same quality, half the cost, <em>counting the wasted cheap attempts</em>. It needs a cheap failure
+        signal, which this repo&rsquo;s review path has.</li>
+    <li><strong>The cascade literature is weaker than its reputation.</strong> A lightweight pre-generation
+        router beat the best cascade policy on 4 of 5 datasets (a cascade always pays the cheap model&rsquo;s
+        generation before deciding), and a 206,000 query-model-pair study found routers trained on oracle labels
+        <strong>collapse to majority-class prediction</strong> under shuffled-label controls.</li>
+</ol>
+<p>
+    <strong>Counterweight, kept explicit so the fork stays a fork:</strong> routing also buys provider redundancy
+    and reviewer diversity, which
+    <a href="/backlog/3369-decouple-agent-dispatch-from-the-claude-cli-introduce-a-mult/">#3369</a> wants for
+    reasons that are not cost at all. This research rules the <em>cost</em> axis only.
+</p>
+
+<h2>Findings that bear on agent architecture</h2>
+<ul>
+    <li><strong>Cost is quadratic in turn count</strong> &mdash; every turn resends the whole prefix. Agents burn
+        ~4&times; the tokens of chat, multi-agent systems ~15&times;, and on one benchmark token usage alone
+        explained 80% of performance variance.</li>
+    <li><strong>Sub-agents start a cold prefix</strong>, sharing no cache with the parent. Fanning out over shared
+        context pays full uncached rate to re-read the same material N times.</li>
+    <li><strong>More context is not monotonically better</strong> &mdash; lost-in-the-middle, context rot,
+        distraction, tool confusion. Some savings techniques therefore <em>improve</em> accuracy: tool search took
+        one model from 49% to 74% while cutting 85% of tool-definition tokens.</li>
+</ul>
+
+<h2>What is net-negative</h2>
+<p>
+    <strong>Compression that breaks caching</strong> is the flagship own-goal: one measured case shrank tool
+    output 38.4% and <em>increased</em> billed cost 6.8%. Retries compound, because each one re-pays the whole
+    accumulated context. And &ldquo;be concise&rdquo; degrades factuality &mdash; one benchmark measured
+    debunking accuracy dropping up to ~15%, since a model with no room to acknowledge and correct a false premise
+    chooses brevity over correction.
+</p>
+
+<h2>Claims retired</h2>
+<ul>
+    <li><strong>Politeness costing real money</strong> &mdash; <code>"please "</code> is 2 tokens; the real cost is
+        the extra <em>inference round</em> to reply.</li>
+    <li><strong>Word-level abbreviation</strong> &mdash; measured in-session, <code>configuration</code>,
+        <code>repository</code> and <code>authentication</code> are <strong>one BPE token each</strong>, identical
+        to their abbreviations, and <code>approx.</code> costs <em>more</em> than <code>approximately</code>.</li>
+    <li><strong>&ldquo;Caveman&rdquo; prompting at 40&ndash;65%</strong> &mdash; a paired benchmark on real coding
+        tasks found 14&ndash;21%, converging to <strong>&minus;8.5% at scale</strong>, because code and tool calls
+        are preserved. The viral figure is chat-only.</li>
+</ul>
+
+<h2>Sourcing caveat &mdash; load-bearing</h2>
+<p>
+    <code>arxiv.org</code>, <code>docs.anthropic.com</code>, <code>platform.openai.com</code> and
+    <code>ai.google.dev</code> were <strong>egress-blocked</strong> during this research. Anthropic figures are
+    first-party via <code>platform.claude.com</code>; much of the rest is search-engine synthesis of pages that
+    could not be read directly. Non-Anthropic pricing is unverified, and sources actively contradicted each other
+    on OpenAI&rsquo;s cached-input discount (50% / 75% / 90%). <strong>Treat every specific figure as a pointer to
+    verify, not a citation</strong> &mdash; and re-measure rather than re-cite, which is #3006&rsquo;s own standing
+    instruction.
+</p>
+{% endraw %}

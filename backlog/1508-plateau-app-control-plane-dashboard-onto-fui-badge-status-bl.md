@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "plateau:src/control-plane/dashboard.ts"
+graduatedTo: "plateau:packages/saas/src/control-plane/dashboard.ts"
 tags: []
 ---
 

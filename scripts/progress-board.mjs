@@ -88,6 +88,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeOutputMix, ratioLabel } from './lib/output-mix.mjs';
+import { CI_TRUTH_EXCLUDED_CHECKS } from './operations/pr-status.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -443,9 +444,12 @@ function ghPrList(repo, args) {
   }
 }
 
-/** True when the check rollup carries at least one hard failure (vs merely pending). */
+/** True when the check rollup carries at least one hard failure (vs merely pending), IGNORING any check named
+ *  in {@link CI_TRUTH_EXCLUDED_CHECKS} (`we:scripts/operations/pr-status.mjs`) — those checks report
+ *  review/merge-gate state, not code health; see that constant's docblock for the full incident. */
 export function ciFailed(rollup) {
   return (rollup ?? []).some((c) => {
+    if (CI_TRUTH_EXCLUDED_CHECKS.includes(String(c?.name ?? ''))) return false;
     const v = String(c?.conclusion ?? c?.state ?? '').toUpperCase();
     return v === 'FAILURE' || v === 'TIMED_OUT' || v === 'ACTION_REQUIRED' || v === 'STARTUP_FAILURE';
   });

@@ -10,6 +10,7 @@ import {
   isLeaseStale,
   isLaneAcquirable,
   chooseFreeLane,
+  ownLaneNumber,
   leaseBody,
   describeLease,
   leaseOwnedBy,
@@ -81,6 +82,26 @@ describe('chooseFreeLane', () => {
     const infos = [mk(3), mk(1), mk(2)];
     expect(chooseFreeLane(infos, T0, ttlMs)).toBe(1);
   });
+  // #xzitlr9 follow-up — auto-pick skips the CALLER'S OWN lane. Acquiring resets the lane to the
+  // integration branch, so returning the lane the caller is standing in changes their checkout mid-task.
+  // This is NOT the data-loss guard (dirtyOrAhead, #2267, already covers unpushed work and held here) —
+  // it is the narrower surprise of a clean, pushed lane being reset while its owner is still in it.
+  it("skips the caller's own lane so acquire never resets the checkout underneath them", () => {
+    const infos = [mk(1), mk(2), mk(3)];
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: 1 })).toBe(2);
+  });
+
+  it('falls back to the own lane when it is the ONLY free one — a single-lane pool must still acquire', () => {
+    const infos = [mk(1), mk(2, { lease: leaseAt(0) })];
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: 1 })).toBe(1);
+  });
+
+  it('is unchanged when no own lane is supplied (every existing caller)', () => {
+    const infos = [mk(1), mk(2)];
+    expect(chooseFreeLane(infos, T0, ttlMs)).toBe(1);
+    expect(chooseFreeLane(infos, T0, ttlMs, { excludeLane: null })).toBe(1);
+  });
+
   it('skips held/dirty lanes and picks the next free one', () => {
     const infos = [
       mk(1, { lease: leaseAt(0) }),                         // held
@@ -484,5 +505,36 @@ describe('#2997 — leaseOwnedByCaller refuses the ownerSession fallback on a CO
     const reserved = leaseBody({ session: 'memory-lane', acquiredAt: at, ownerSession: 'sess-shared', reserved: true, holder: 'h-res' });
     expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: true })).toBe(false);
     expect(leaseOwnedByCaller({ lease: reserved, session: 'Mac:1', mySessionId: 'sess-shared', targeted: true, contested: false })).toBe(false);
+  });
+});
+
+// #1961 correctness finding 3 — the caller's own lane must be scoped to the POOL BEING ACQUIRED.
+// The first cut matched any `.lanes/<pool>/lane-N`, which leaks across pools; this codebase acquires
+// cross-repo on purpose (the dispatcher's impl-repo lanes), so the mismatch was reachable.
+describe('ownLaneNumber', () => {
+  const POOL = '/w/.lanes/repoA';
+
+  it('returns the lane number when the cwd is inside THIS pool', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2', POOL)).toBe(2);
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2/scripts/x', POOL)).toBe(2);
+  });
+
+  it('returns null for a lane in ANOTHER pool — the cross-repo leak this fixes', () => {
+    expect(ownLaneNumber('/w/.lanes/repoB/lane-2', POOL)).toBeNull();
+  });
+
+  it('returns null outside any lane, and for a non-lane child of the pool', () => {
+    expect(ownLaneNumber('/w/web-everything', POOL)).toBeNull();
+    expect(ownLaneNumber('/w/.lanes/repoA/notes', POOL)).toBeNull();
+    expect(ownLaneNumber('', POOL)).toBeNull();
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-2', '')).toBeNull();
+  });
+
+  it('does not confuse a lane whose number merely PREFIXES another', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-20', POOL)).toBe(20);
+  });
+
+  it('tolerates a trailing separator on the pool path', () => {
+    expect(ownLaneNumber('/w/.lanes/repoA/lane-3', '/w/.lanes/repoA/')).toBe(3);
   });
 });

@@ -1,8 +1,11 @@
 ---
 bornAs: xs6omfp
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-29"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 costTokens: "in:128 cw:132266 cr:6845933 out:18259"
 costUsd: 3.12
 costSessions: 1

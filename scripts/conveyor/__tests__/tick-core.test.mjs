@@ -30,13 +30,16 @@ import {
   assessIdleStop,
   routeWatcherExit,
   buildStatusLine,
+  computeTickCounts,
   planTick,
   HELD_NOTE_EXCLUDED_REASONS,
+  durableBuildNums,
   DEFAULT_BUILD_TTL_TICKS,
   DEFAULT_PREPARE_TTL_TICKS,
   DEFAULT_FIX_RETRY_CAP,
   DEFAULT_CI_HEAL_RETRY_CAP,
 } from '../tick-core.mjs';
+import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 
 // ── The in-flight dispatch (build) guard — filter by num OR lane ──────────────────────────────────────────────
 
@@ -64,6 +67,45 @@ describe('filterLaunches — the in-flight dispatch guard drops by num OR by lan
   it('normalizes ids so a padded/`#`-sigil num still matches its guard', () => {
     const { spawn } = filterLaunches([{ num: '#010', lane: 9 }], [{ num: 10, lane: 4 }]);
     expect(spawn).toEqual([]);
+  });
+});
+
+describe('durableBuildNums — #3403 the restart-surviving build-guard floor', () => {
+  it('extracts a num from a live BUILD session name', () => {
+    expect(durableBuildNums([{ name: 'conveyor-77' }])).toEqual(['77']);
+  });
+
+  it('accepts plain name strings, not only session objects', () => {
+    expect(durableBuildNums(['conveyor-77'])).toEqual(['77']);
+  });
+
+  it('normalizes a padded/`#`-sigil-free numeric id the same way the guard does', () => {
+    expect(durableBuildNums([{ name: 'conveyor-077' }])).toEqual(['77']);
+  });
+
+  it('reads a retry-attempt tag (#3110, e.g. conveyor-77b) as the same num', () => {
+    expect(durableBuildNums([{ name: 'conveyor-77b' }])).toEqual(['77']);
+  });
+
+  it('excludes fix / prepare / prepare-decision / ci-heal sessions — only BUILD counts', () => {
+    expect(durableBuildNums([
+      { name: 'fix-77' }, { name: 'prepare-77' }, { name: 'prepare-decision-77' }, { name: 'ci-heal-77' },
+    ])).toEqual([]);
+  });
+
+  it('ignores unnamed / unrelated sessions and a non-array input', () => {
+    expect(durableBuildNums([{ name: 'some-other-thing' }, {}, { name: null }])).toEqual([]);
+    expect(durableBuildNums(undefined)).toEqual([]);
+    expect(durableBuildNums(null)).toEqual([]);
+  });
+
+  it('agrees with sessionSlugFor(num, "build") — the two must never name a build session differently (#3403)', () => {
+    expect(durableBuildNums([{ name: sessionSlugFor(77, 'build') }])).toEqual(['77']);
+    expect(durableBuildNums([{ name: sessionSlugFor(77, 'build', 'b') }])).toEqual(['77']);
+    // Every OTHER kind's slug must stay excluded, cross-checked against the real function, not a copy of it.
+    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+      expect(durableBuildNums([{ name: sessionSlugFor(77, kind) }])).toEqual([]);
+    }
   });
 });
 
@@ -618,6 +660,95 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.nextState.launchedNums).toContain('10');
   });
 
+  it('#3403 — a supervisor crash-restart (bookkeeping wiped to `{}`) does NOT re-launch a build whose OS session is still alive', () => {
+    // #77 was spawned on lane 4 last tick: it has not yet acquired its lane (state.lanes still empty) or left
+    // the cleared queue (state.queue still shows it buildQueued), so from `state`'s own ground truth alone it
+    // looks exactly like a never-dispatched item — the SAME shape a genuinely fresh #77 would have. Only the
+    // durable floor (`liveAgentSessions`) tells the two apart.
+    const out = planTick({
+      state: { queue: [{ num: 77, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 77, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 5, buildGuards: [] }, // wiped by the crash-restart — fails today without the fix
+      liveAgentSessions: [{ name: 'conveyor-77', pid: 12345 }],
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.suppressedBuilds).toEqual([{ num: 77, lane: 4, by: 'num' }]);
+    // The durable guard is carried into nextState too, so the SAME check holds again next tick even if the
+    // live-session read is momentarily unavailable.
+    expect(out.nextState.buildGuards).toEqual(expect.arrayContaining([
+      expect.objectContaining({ num: '77', lane: null }),
+    ]));
+  });
+
+  it('#3403 — a genuinely fresh item with no live session and no guard launches normally (the fix does not over-suppress)', () => {
+    const out = planTick({
+      state: { queue: [{ num: 78, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 78, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 5, buildGuards: [] },
+      liveAgentSessions: [{ name: 'conveyor-77', pid: 12345 }], // unrelated live session — must not block #78
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 78, lane: 4 }]);
+  });
+
+  it('#3403 FOLLOW-UP — a durable guard entry keeps its ORIGINAL spawnedTick across ticks instead of being re-stamped with the current tick every time it is resynthesized', () => {
+    // #99's durable entry was first seen at tick 2 (as if carried forward from a prior planTick call via
+    // nextState.buildGuards, the same way a real runner threads bookkeeping tick to tick). This call is tick 5 —
+    // three ticks later, exactly the default build-guard TTL. Before the fix, this block re-stamped
+    // `spawnedTick: tick` (5) every time it (re)synthesized the entry, so its age could never be read as 3+ no
+    // matter how many real ticks had actually passed.
+    const out = planTick({
+      state: { queue: [{ num: 99, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, buildGuards: [{ num: '99', lane: null, spawnedTick: 2 }] },
+      liveAgentSessions: [{ name: 'conveyor-99', pid: 1 }],
+    });
+    expect(out.nextState.buildGuards).toEqual(expect.arrayContaining([
+      expect.objectContaining({ num: '99', lane: null, spawnedTick: 2 }),
+    ]));
+  });
+
+  it('#3403 FOLLOW-UP — a durable build-guard entry that never claims stops inflating "building"/decisions.counts once its age reaches the build guard TTL, even though liveAgentSessions keeps reporting the SAME stale session every tick (live bug, epic #3383: wev-scratch-dispatcher-4 showed "building" stuck at 11-15 for 270+ consecutive ticks against 2 genuinely leased lanes)', () => {
+    // #99's session (`conveyor-99`) is durable-live every tick — a `claude agents --json` staleness the fix
+    // guard's own #3454 fix already has to tolerate on dispatch-lane's pre-flight check — but #99 never actually
+    // claims: it stays in the cleared build queue and never shows a leased lane, tick after tick. That is
+    // indistinguishable, from tick-core's own read, from a session that exited without `claude agents --json`
+    // ever noticing.
+    const state = { queue: [{ num: 99, buildQueued: true }], lanes: [], prs: [] };
+    const liveAgentSessions = [{ name: 'conveyor-99', pid: 1 }];
+    let bookkeeping = { tick: 0 };
+    let out;
+    for (let i = 0; i < 5; i += 1) {
+      out = planTick({ state, plan: { launch: [] }, freeLanes: [], bookkeeping, liveAgentSessions });
+      bookkeeping = out.nextState;
+    }
+    // 5 ticks in (past the default 3-tick TTL), the durable floor no longer inflates the DISPLAYED tallies...
+    expect(out.decisions.counts.building).toBe(0);
+    expect(out.decisions.statusLine).toContain('0 building');
+    // ...but the double-dispatch protection #3403 exists for is UNCHANGED: a launch attempt for #99 is still
+    // suppressed — the durable guard is still carried in nextState.buildGuards, only excluded from the tally.
+    const relaunch = planTick({
+      state, plan: { launch: [{ num: 99, lane: 4 }] }, freeLanes: [4], bookkeeping, liveAgentSessions,
+    });
+    expect(relaunch.decisions.spawnBuilds).toEqual([]);
+    expect(relaunch.decisions.suppressedBuilds).toEqual([{ num: 99, lane: 4, by: 'num' }]);
+  });
+
+  it('#3398 — decisions.counts carries the same structured tallies as decisions.statusLine, not re-derived by a caller', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5, 6],
+      bookkeeping: { tick: 0 },
+    });
+    // 10 spawns this tick (now building, excluded from `queued`); 11 has no launch plan entry — still queued.
+    expect(out.decisions.counts).toMatchObject({ queued: 1, building: 1 });
+    expect(out.decisions.statusLine).toContain('1 queued');
+    expect(out.decisions.statusLine).toContain('1 building');
+  });
+
   it('shares the free-lane pool across builds and prepares — a prepare never takes a build lane this tick', () => {
     const out = planTick({
       state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
@@ -986,5 +1117,27 @@ describe('buildStatusLine — the terse per-tick line (SKILL §5)', () => {
     expect(line).toContain('1 infra-blocked');
     expect(line).toContain('health warn');
     expect(line).toContain('lane-7');
+  });
+});
+
+describe('computeTickCounts — the structured tallies behind buildStatusLine (#3398)', () => {
+  it('matches the same inputs buildStatusLine renders, as numbers rather than text', () => {
+    const inputs = {
+      queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }],
+      lanes: [{ lane: 4, num: 12 }],
+      prs: [{ num: 13, prNumber: 99, state: 'OPEN', labels: ['review:human'] }],
+      health: { verdict: 'ok' },
+      liveBuildGuards: [{ num: 10, lane: 5 }],
+      livePrepareGuards: [{ num: 20, lane: 6 }],
+      liveFixGuards: [{ pr: 99, num: 13 }],
+      liveCiHealGuards: [{ pr: 98, num: 14 }],
+      launchedNums: [10, 12, 13, 14, 20],
+    };
+    expect(computeTickCounts(inputs)).toEqual({ building: 2, preparing: 1, fixing: 1, healing: 1, queued: 1, parked: 1, verdict: 'ok' });
+    expect(buildStatusLine(inputs)).toContain('1 queued'); // the two never disagree — same computation, one call site each
+  });
+
+  it('is total on no inputs at all', () => {
+    expect(computeTickCounts()).toEqual({ building: 0, preparing: 0, fixing: 0, healing: 0, queued: 0, parked: 0, verdict: 'ok' });
   });
 });
