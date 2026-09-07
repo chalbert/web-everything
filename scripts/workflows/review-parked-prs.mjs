@@ -213,6 +213,17 @@ function repoPathFlag(repo) {
   return path ? ` --repo=${path}` : '';
 }
 
+/** The real gh-resolvable slug for a constellation repo id. FAILS LOUD on an unmapped id — `repo` is always one
+ *  of the declared REPOS keys (the input schema restricts it to we|frontierui|plateau-app), so an unmapped
+ *  value is a caller bug, not a real constellation id; silently substituting `we`'s slug would query a
+ *  gh-shelling command against the WRONG repo/PR with no visible failure (#3555 convergence finding). ONE
+ *  lookup shared by every call site — reducePrompt and editorPrompt both need it — rather than two copies
+ *  that could drift on whether a miss is loud or silent. */
+function slugFor(repo) {
+  if (!REPOS[repo]) throw new Error(`slugFor: unknown repo id "${repo}" — expected one of ${Object.keys(REPOS).join('|')}`);
+  return REPOS[repo].slug;
+}
+
 /** Canonicalize one decorated escalation reason (`size (602 ≥ 400 changed lines)`) to its bare token (`size`),
  *  or null if it matches none. MIRRORS `canonicalizeReason` in we:scripts/lib/review-core.mjs: a token matches
  *  when the reason IS the token or STARTS with it followed by a space or `(`; longest match wins. */
@@ -761,6 +772,7 @@ function invitePrompt(item, careLevel, seatedLenses, jurorsPerLens, invite) {
  *  `deriveNegotiationOutcome` — the ONE round-cap decision, single-sourced through the CLI. No judgement is
  *  hand-rolled. The step also returns the FLATTENED outstanding findings so the editor round revises against them. */
 function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanRequired, round, roundCap) {
+  const slug = slugFor(repo);
   return [
     RETURN_HYGIENE,
     '',
@@ -781,10 +793,12 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
     '   file, run  node scripts/review-core-cli.mjs reduce --file=<tmp> --json , read its `.verdict`, and record',
     '   lensVerdicts["<lens>"] = <verdict>. For EACH lens that FAILED, record lensVerdicts["<lens>"] = "unknown".',
     '2. FLATTEN the RAN lenses\' findings into ONE array, setting each finding\'s `category` to its lens name.',
-    '2b. #2410 slice D — read the PR\'s required `test` check so the CI-green land clause folds into the outcome.',
-    `    Run  gh pr view ${pr} --repo ${repo} --json statusCheckRollup , find the check named \`test\`, and set`,
-    '    requiredTestGreen = true ONLY if its conclusion is SUCCESS (a red OR still-pending/absent required check',
-    '    ⇒ false — an accept must NOT auto-land over it).',
+    '2b. #2410 slice D — read the PR\'s check state via the shared `pr-status` operation (#3555 — never a',
+    '    hand-rolled `gh pr view --json statusCheckRollup` read; that is exactly the by-hand poll pr-status',
+    '    exists to replace, and it independently drifted from what the CI-truth exclusion list actually is). Run',
+    `    node scripts/operations/run.mjs pr-status --repo=${slug} --pr=${pr} --json > <tmp>.json , read the`,
+    '    single entry\'s `.verdict.prs[0].state`, and set requiredTestGreen = true ONLY if that state is `green`',
+    '    (`red`/`pending`/`unchecked` ⇒ false — an accept must NOT auto-land over it).',
     '3. Write payloadA = { "lensVerdicts": <step 1>, "findings": <step 2>, "requiredTestGreen": <step 2b>, "humanRequired": ' + (humanRequired ? 'true' : 'false') + ',',
     '   "reasons": <the escalation reasons array> } — but OMIT the "reasons" key entirely if that array is empty.',
     `4. Run  node scripts/review-core-cli.mjs reduce --file=payloadA --round=${round} --roundCap=${roundCap} --json`,
@@ -809,7 +823,7 @@ function reducePrompt(pr, repo, okLenses, failedLenses, escalationReason, humanR
  *  dismiss it with a STATED reason (never a silent drop — that becomes the audit trail), commit, and push back to
  *  the SAME PR branch so the existing PR updates in place. Reports what it fixed / dismissed + whether it pushed. */
 function editorPrompt(pr, repo, findings, round, roundCap) {
-  const slug = REPOS[repo] ? REPOS[repo].slug : REPOS.we.slug;
+  const slug = slugFor(repo);
   const where = repoPathFlag(repo) ? `the checkout at ${REPOS[repo].path}` : 'this checkout (your cwd)';
   return [
     RETURN_HYGIENE,

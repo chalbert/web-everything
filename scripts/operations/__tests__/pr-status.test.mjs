@@ -7,7 +7,12 @@
  * suite as green, reading a superseded commit's marks — turns that stall back into something that looks
  * normal. So the tests below are mostly about refusing to be reassured.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   prStatusOperation, reduceCheckState, labelDisagreements, shapeReadFinding, assessPrs,
@@ -302,5 +307,62 @@ describe('the declaration', () => {
     for (const r of ['input.repo', 'input.pr']) expect(readStep.reads).toContain(r);
     readStep.fn({ input: { repo: 'o/r', pr: 42 } });
     expect(seen).toEqual({ repo: 'o/r', pr: 42 });
+  });
+});
+
+// ── END-TO-END CLI (#3555) ──────────────────────────────────────────────────────────────────────────────────
+// we:scripts/workflows/review-parked-prs.mjs's reduce step now tells an agent to run
+// `node scripts/operations/run.mjs pr-status --repo=<slug> --pr=<n> --json` and read `.verdict.prs[0].state`
+// off the result. Every OTHER test in this file drives pr-status.mjs's functions directly in-process — none
+// of them prove `run.mjs` itself accepts these exact flags and prints this exact shape on stdout, which is
+// what the agent following that prompt actually depends on. This spawns the REAL CLI as a subprocess, with a
+// fake `gh` shimmed onto PATH (no network, no credential), and parses its own stdout — the same thing an
+// agent following the prompt would do.
+describe('run.mjs pr-status --json — the real CLI, end to end (#3555, no gh network/credential)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const RUN_MJS = join(here, '..', 'run.mjs');
+  const binDir = mkdtempSync(join(tmpdir(), 'pr-status-fake-gh-'));
+  const ghPath = join(binDir, 'gh');
+  // Answers BOTH calls `createPrReader` makes: `gh pr view <n> --repo <repo> --json …` for the PR itself, and
+  // `gh api --paginate repos/<repo>/commits/<sha>/check-runs --jq …` for its head's check runs. ECHOES BACK
+  // the requested PR number ($3, e.g. `pr view 99 --repo …`) rather than a hardcoded value — a stub that always
+  // answers with a FIXED PR number could pass a "--pr filters correctly" test even if the real code ignored
+  // the flag entirely and requested some other PR, which is exactly what a round-1 red-team finding caught
+  // here (#3555).
+  writeFileSync(ghPath, [
+    '#!/bin/sh',
+    'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then',
+    '  echo "{\\"number\\":$3,\\"title\\":\\"fixture\\",\\"labels\\":[],\\"mergeable\\":\\"MERGEABLE\\",\\"headRefOid\\":\\"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\"}"',
+    'elif [ "$1" = "api" ]; then',
+    '  echo \'{"name":"test","status":"completed","conclusion":"success"}\'',
+    'else',
+    '  echo "fake gh: unexpected argv: $*" 1>&2; exit 1',
+    'fi',
+  ].join('\n'));
+  chmodSync(ghPath, 0o755);
+  afterAll(() => rmSync(binDir, { recursive: true, force: true }));
+
+  it('accepts --repo=/--pr=/--json exactly as the reduce prompt invokes it, and prints .verdict.prs[0].state', () => {
+    const stdout = execFileSync(
+      process.execPath,
+      [RUN_MJS, 'pr-status', '--repo=o/r', '--pr=42', '--json'],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } },
+    );
+    const result = JSON.parse(stdout);
+    expect(result.verdict.prs[0].state).toBe('green');
+    expect(CHECK_STATES).toContain(result.verdict.prs[0].state);
+  });
+
+  it('the --pr flag filters to exactly the requested PR, at index 0 — never a repo-wide list', () => {
+    // a PR number distinct from the OTHER test's (42) — the fake gh echoes back whatever number it was
+    // actually asked for, so this proves the flag's VALUE flows through end to end, not just its presence.
+    const stdout = execFileSync(
+      process.execPath,
+      [RUN_MJS, 'pr-status', '--repo=o/r', '--pr=777', '--json'],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } },
+    );
+    const result = JSON.parse(stdout);
+    expect(result.verdict.prs).toHaveLength(1);
+    expect(result.verdict.prs[0].number).toBe(777);
   });
 });
