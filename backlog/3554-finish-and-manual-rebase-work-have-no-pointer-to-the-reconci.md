@@ -6,6 +6,9 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-06"
 tags: []
+scope:
+  - we:skills-src/finish/
+  - we:skills-src/mechanical-delivery-doctrine/
 ---
 
 # finish and manual rebase work have no pointer to the reconcile-finding operation
