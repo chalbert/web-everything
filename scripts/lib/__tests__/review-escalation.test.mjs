@@ -842,6 +842,45 @@ describe('decideReviewGate — the non-blocking review gate', () => {
       expect(decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234', headSha: null }).action).toBe('merge');
     });
   });
+
+  // #2412 layer 4 — an ENGINE-tier PR (the lander/daemon/dispatch-loop machinery) is agent-reviewable (an
+  // ordinary review:accepted verdict is not refused), but it may not auto-land on that alone: the independent
+  // hardened validator's redteam:accepted (#2439) must ALSO be present.
+  describe('#2412 layer 4 — engineTier requires redteam:accepted in addition to review:accepted', () => {
+    const accepted = [{ name: REVIEW_LABELS.accepted }];
+    it('engineTier:false (the default) is byte-identical to before — review:accepted alone merges', () => {
+      expect(decideReviewGate({ escalate: true, labels: accepted }).action).toBe('merge');
+      expect(decideReviewGate({ escalate: true, labels: accepted, engineTier: false }).action).toBe('merge');
+    });
+    it('engineTier:true + review:accepted alone → park review:pending (awaiting the independent validator)', () => {
+      const g = decideReviewGate({ escalate: true, labels: accepted, engineTier: true });
+      expect(g.action).toBe('park');
+      expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+      expect(g.humanRequired).toBeFalsy();
+      expect(g.reason).toMatch(/redteam:accepted/);
+    });
+    it('engineTier:true + review:accepted + redteam:accepted → merge', () => {
+      const g = decideReviewGate({
+        escalate: true,
+        labels: [...accepted, { name: REVIEW_LABELS.redteamAccepted }],
+        engineTier: true,
+      });
+      expect(g.action).toBe('merge');
+    });
+    it('engineTier:true + redteam:accepted alone (no review:accepted) → still parks (redteam is orthogonal, not a substitute)', () => {
+      const g = decideReviewGate({ escalate: true, labels: [{ name: REVIEW_LABELS.redteamAccepted }], engineTier: true });
+      expect(g.action).toBe('park');
+      expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+    });
+    it('a STALE review:accepted (head moved) re-parks BEFORE the engine-tier check ever runs', () => {
+      // staleness is decided first regardless of engineTier — same re-park behaviour as the non-engine-tier case.
+      const g = decideReviewGate({
+        escalate: true, labels: accepted, engineTier: true, acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb',
+      });
+      expect(g.action).toBe('park');
+      expect(g.staleAcceptance).toBe(true);
+    });
+  });
 });
 
 describe('#2409 — reviewed-SHA marker helpers', () => {

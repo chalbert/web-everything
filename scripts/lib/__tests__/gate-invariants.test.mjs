@@ -40,6 +40,7 @@ import {
   producerReviewLabel,
   hasUnclearedReviewLabel,
   isPolicySpecPath,
+  isEngineTierPath,
   acceptanceCoversHead,
   normalizeDiffFingerprint,
   normalizeContributionFingerprint,
@@ -55,7 +56,8 @@ import {
 } from '../gate-config.mjs';
 import { assertMayMerge, hasNonEmptyBody } from '../pr-merge-gate.mjs';
 import { classifyChecks } from '../../pr-land.mjs';
-import { classifyPr } from '../../merge-ai-prs.mjs';
+import { classifyPr, basisTouchesEngineTier, engineTierForCandidate } from '../../merge-ai-prs.mjs';
+import { decideSetLabel, REVIEW_LABEL_TARGETS } from '../../review-set-label.mjs';
 
 // ── enumeration helpers (deterministic — no Math.random, so a failure reproduces exactly) ────────────────
 /** Every subset of `items` (the powerset), as arrays. */
@@ -672,5 +674,168 @@ describe('INVARIANT 12 — the declarative-leash split is fail-closed and its fl
       const specSide = entry.tier === 'policy' && entry.leash !== POLICY_LEASH.CODE;
       expect(specSide, `leash ${JSON.stringify(bad)} must fall to the HUMAN half`).toBe(true);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 14 — an ENGINE-tier PR never auto-lands on `review:accepted` alone (#2412 layer 4). The lander /
+// resident-daemon / dispatch-loop machinery is the surface that goes on to land every OTHER PR unattended, so
+// stacking a SECOND, independent verdict (`redteam:accepted`, #2439) on top of the ordinary review is the whole
+// point — one compromised or rubber-stamped review must not be enough to clear the machinery that then trusts
+// itself for everything else. Proven over the full cross-product of inputs, exactly like INVARIANT 9 (whose
+// staleness check this composes with, unchanged): `engineTier` is an ADDITIONAL requirement, never a
+// substitute for it. A non-engine-tier PR (`engineTier:false`, every pre-#2412 caller) is UNCHANGED by this —
+// see the complementary "always merges" case below.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 14 — engine tier never auto-lands without redteam:accepted (#2412)', () => {
+  const cases = product(
+    [false, true], // escalate
+    [false, true], // humanRequired
+  );
+  it('every ENGINE_FILES member is classified isEngineTierPath — the roster the invariant below relies on', () => {
+    for (const f of ENGINE_FILES) expect(isEngineTierPath(f)).toBe(true);
+  });
+  it('engineTier:true + review:accepted, NO redteam:accepted ⇒ never merges, for every input arrangement', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired, labels: [REVIEW_LABELS.accepted], engineTier: true,
+        acceptedSha: 'abc1234', headSha: 'abc1234', // fresh accept — isolates the engine-tier check specifically
+      });
+      expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
+      expect(g.action).toBe('park');
+      expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
+    }
+  });
+  it('engineTier:true + review:accepted + redteam:accepted ⇒ always merges (both verdicts stacked)', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired,
+        labels: [REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted],
+        engineTier: true, acceptedSha: 'abc1234', headSha: 'abc1234',
+      });
+      expect(g.action).toBe('merge');
+    }
+  });
+  it('engineTier:false (or omitted) ⇒ review:accepted alone still merges — this story adds no requirement off the engine tier', () => {
+    for (const [escalate, humanRequired] of cases) {
+      const g = decideReviewGate({
+        escalate, humanRequired, labels: [REVIEW_LABELS.accepted],
+        acceptedSha: 'abc1234', headSha: 'abc1234',
+      });
+      expect(g.action).toBe('merge');
+    }
+  });
+
+  // #1920 round-2 review — the drain's ONE live call site (`runCli` in `merge-ai-prs.mjs`) does not yet wire
+  // this invariant's real predicate into production: main's own `#3493` ("decideReviewGate must require
+  // redteam:accepted before an engine-tier auto-land") deliberately stays `blockedBy: ["2410"]` — no code-level
+  // /daemon-reachable writer applies `redteam:accepted` to a live PR yet. `basisTouchesEngineTier` is the real,
+  // tested `score.basisFiles → engineTier` computation (ready to wire in); `engineTierForCandidate` is what the
+  // call site ACTUALLY uses today, and is pinned here at `false` so re-enabling it is a deliberate, reviewed
+  // test change — not a silent side effect of an unrelated refactor.
+  it('the live call site does NOT enforce this yet (#3493 blockedBy #2410) — engineTierForCandidate is pinned false', () => {
+    const engineScore = { basisFiles: [...ENGINE_FILES] };
+    expect(basisTouchesEngineTier(engineScore)).toBe(true); // the real predicate DOES see the engine-tier basis…
+    expect(engineTierForCandidate(engineScore)).toBe(false); // …but the call site's actual value stays false
+  });
+  it('basisTouchesEngineTier is false for a basis with no engine-tier member', () => {
+    expect(basisTouchesEngineTier({ basisFiles: ['docs/README.md'] })).toBe(false);
+    expect(basisTouchesEngineTier({})).toBe(false);
+    expect(basisTouchesEngineTier({ basisFiles: [] })).toBe(false);
+  });
+  it('once wired, the real predicate composes with decideReviewGate exactly like INVARIANT 14 above', () => {
+    const engineScore = { basisFiles: [...ENGINE_FILES] };
+    const wiredEngineTier = basisTouchesEngineTier(engineScore); // what `engineTierForCandidate` will delegate to
+    const g = decideReviewGate({
+      escalate: true, humanRequired: false, labels: [REVIEW_LABELS.accepted], engineTier: wiredEngineTier,
+      acceptedSha: 'abc1234', headSha: 'abc1234',
+    });
+    expect(g.action).toBe('park');
+    expect(g.awaitingIndependentValidator).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 15 — a FRESH `review:accepted` stamped while clearing an EXPLICIT review hold must not let a stale
+// `redteam:accepted` (no SHA marker of its own, #2439) ride through from an earlier, different head (#1920
+// round-2 review — the concrete instance: `clear-human`). The documented EXCEPTION is the plain `accepted`
+// target: it fresh-stamps `review:accepted` too, but from `pending`/`changes` rather than from clearing an
+// explicit hold, and the engine-tier happy path (INVARIANT 14) relies on it PRESERVING a freshly-applied
+// `redteam:accepted` so the two independent verdicts can stack for the same head — stripping it there would
+// make the two sign-offs unable to ever coexist. `restamp` never fresh-stamps at all (its own precondition
+// requires `review:accepted` already present — it carries an existing acceptance across a rebase, deciding
+// nothing new). This enumerates `REVIEW_LABEL_TARGETS` (the closed set) so a newly added target is forced to
+// make the same call deliberately rather than by omission.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 15 — a fresh review:accepted stamped while clearing an explicit hold strips stale redteam:accepted (#1920)', () => {
+  const CLEARS_HOLD_AND_ACCEPTS = ['clear-human'];                    // strips stale redteam:accepted
+  const ACCEPTS_WITHOUT_CLEARING_A_HOLD = ['accepted'];               // deliberately preserves it (INVARIANT 14)
+  const NEVER_FRESH_STAMPS_ACCEPTED = ['changes', 'rearm', 'restamp']; // addLabel is never a FRESH review:accepted
+
+  it('every REVIEW_LABEL_TARGETS member is classified into exactly one bucket — a new target cannot slip through unclassified', () => {
+    for (const t of REVIEW_LABEL_TARGETS) {
+      const buckets = [CLEARS_HOLD_AND_ACCEPTS, ACCEPTS_WITHOUT_CLEARING_A_HOLD, NEVER_FRESH_STAMPS_ACCEPTED]
+        .filter((b) => b.includes(t));
+      expect(buckets.length).toBe(1);
+    }
+  });
+
+  it('clear-human strips a stale redteam:accepted', () => {
+    for (const to of CLEARS_HOLD_AND_ACCEPTS) {
+      const d = decideSetLabel({
+        to, currentLabels: [{ name: REVIEW_LABELS.human }, { name: REVIEW_LABELS.redteamAccepted }],
+      });
+      expect(d.allowed).toBe(true);
+      expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+      expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
+    }
+  });
+
+  it('accepted (no explicit hold cleared) PRESERVES redteam:accepted — the two verdicts must be able to stack', () => {
+    for (const to of ACCEPTS_WITHOUT_CLEARING_A_HOLD) {
+      const d = decideSetLabel({
+        to, currentLabels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.redteamAccepted }],
+      });
+      expect(d.allowed).toBe(true);
+      expect(d.addLabel).toBe(REVIEW_LABELS.accepted);
+      expect(d.removeLabels).not.toContain(REVIEW_LABELS.redteamAccepted);
+    }
+  });
+
+  it('changes/rearm never fresh-stamp review:accepted; restamp carries an EXISTING one forward untouched', () => {
+    for (const to of ['changes', 'rearm']) {
+      const d = decideSetLabel({ to, currentLabels: [{ name: REVIEW_LABELS.changes }] });
+      expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
+    }
+    const restamped = decideSetLabel({
+      to: 'restamp', currentLabels: [{ name: REVIEW_LABELS.accepted }, { name: REVIEW_LABELS.redteamAccepted }],
+    });
+    expect(restamped.allowed).toBe(true);
+    expect(restamped.addLabel).toBe(REVIEW_LABELS.accepted); // re-stamps the SAME acceptance, decides nothing new
+    expect(restamped.removeLabels).not.toContain(REVIEW_LABELS.redteamAccepted); // carries it forward untouched
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 16 — CROSS-PATH DIVERGENCE, DOCUMENTED (#1920 round-2 review). `decideReviewGate` (INVARIANT 14)
+// and `hasUnclearedReviewLabel` (the bare `/merge` orphan-sweep's non-scoring merge-eligibility predicate,
+// INVARIANT 9's own SCOPE note) are TWO SEPARATE checks reached by two separate CLI paths, and #2412's
+// engine-tier requirement is enforced by only ONE of them: `hasUnclearedReviewLabel` has no file-diff access,
+// so it structurally CANNOT apply "does this PR's basis touch an engine-tier member" (see its docblock in
+// `review-escalation.mjs`, and `backlog/xy5uey0-…md`). This is a KNOWN, tracked residual, not an oversight this
+// suite failed to catch — pinning it here as an EXPLICIT, named fact means closing `xy5uey0` means touching
+// THIS test deliberately, rather than the divergence silently drifting further unnoticed.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 16 — the bare /merge orphan-sweep path does not (yet) enforce the engine-tier requirement (#1920, tracked xy5uey0)', () => {
+  it('an engine-tier PR with ONLY review:accepted (no redteam:accepted) is refused by decideReviewGate…', () => {
+    const g = decideReviewGate({
+      escalate: true, humanRequired: false, labels: [REVIEW_LABELS.accepted], engineTier: true,
+      acceptedSha: 'abc1234', headSha: 'abc1234',
+    });
+    expect(AUTO_MERGE_ACTIONS).not.toContain(g.action);
+  });
+  it('…but clears the bare-sweep predicate regardless — hasUnclearedReviewLabel has no file-diff access to know it is engine-tier', () => {
+    expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted])).toBe(false);
+    expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted], { allowPending: true })).toBe(false);
   });
 });

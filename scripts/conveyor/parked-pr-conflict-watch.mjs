@@ -160,7 +160,15 @@ export function buildConflictComment(pr, { isStatuteTier = false } = {}) {
  * human over a leash/statute file present in the diff but not actually part of the conflicting region — the
  * OVER-cautious direction, never the unsafe one, and it never blocks the PR from a normal review; it only
  * withholds the agent-dispatch shortcut for THIS conflict.
- * @param {Array<{path?:string}|string>} files - `gh pr list --json files`'s own `files` array.
+ *
+ * CALLER OWES A COMPLETE LIST — see `#xgfzlj1`. `gh pr list --json ...,files` resolves `files` over `gh`'s own
+ * GraphQL query, which hardcodes `files(first: 100)` with no pagination (confirmed live against `gh` 2.95.0 /
+ * `cli/cli@trunk`'s `api/query_builder.go`, and tracked upstream as a bug, not a documented cap — cli/cli
+ * discussion #6930 / issue #5368). A PR touching ≥100 files gets a SILENTLY truncated `files` array with no
+ * error — this function has no way to tell "100 files, complete" from "100 files, truncated" from the array
+ * alone, so the caller ({@link watchParkedPrConflicts}) is the one that must re-fetch a verified-complete list
+ * (`defaultListPrFiles`, paginated `gh api .../pulls/{n}/files`) before trusting a ≥100-length array here.
+ * @param {Array<{path?:string}|string>} files - a COMPLETE changed-file list (verified, not gh's capped one).
  * @returns {boolean}
  */
 export function isStatuteTierConflict(files) {
@@ -168,6 +176,32 @@ export function isStatuteTierConflict(files) {
     .map((f) => (typeof f === 'string' ? f : f?.path))
     .filter(Boolean)
     .some((p) => isDeclarativeLeashPath(p) || isStatutePath(p));
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#GH_FILES_GRAPHQL_CAP — `#xgfzlj1`. The exact, confirmed
+ * hard cap `gh`'s own `files(first: 100)` GraphQL query imposes on `--json files` (`gh pr list`/`gh pr view`),
+ * with NO pagination and NO truncation signal — a PR with exactly this many or more changed files returns an
+ * array capped at this length regardless of the real count. A returned `files` array whose length is `<` this
+ * cap is therefore PROVABLY complete (gh would have returned every file); a length `>=` this cap is
+ * INDISTINGUISHABLE from truncation and must not be trusted for a safety decision.
+ */
+export const GH_FILES_GRAPHQL_CAP = 100;
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListPrFiles — `#xgfzlj1`'s verified-complete fallback:
+ * a FULLY PAGINATED read of the REST `pulls/{number}/files` endpoint (`gh api ... --paginate`), which follows
+ * every page via the response `Link` header rather than `gh`'s own single-shot, 100-capped GraphQL `files`
+ * field. Only called when {@link watchParkedPrConflicts} suspects the cheap `gh pr list --json files` read may
+ * be truncated (its length hit {@link GH_FILES_GRAPHQL_CAP}) — the common small-PR tick never pays for it.
+ * @param {{number:number|string, repo?:string|null, exec?:Function}} o
+ * @returns {string[]} every changed file's path, real pagination applied — no cap.
+ */
+export function defaultListPrFiles({ number, repo, exec = execFileSync }) {
+  const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
+  const argv = ['api', '--paginate', '-F', 'per_page=100', path, '--jq', '.[].filename'];
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
 /**
@@ -265,12 +299,13 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
  * fix-dispatch pipeline picks up) or {@link defaultPostConflictStandDown} ({@link isStatuteTierConflict} —
  * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
  * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function}} [o]
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, listPrFiles?:Function}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
   repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
+  listPrFiles = defaultListPrFiles,
 } = {}) {
   const prs = listPrs({ repo });
   const results = [];
@@ -302,7 +337,25 @@ export function watchParkedPrConflicts({
         // disagree about what happens next — PR #1966's own review found exactly that drift (the alert still
         // said "not auto-rebased, human/`/finish` only" for a conflict this same call was about to dispatch a
         // fix agent at).
-        const isStatuteTier = isStatuteTierConflict(pr?.files);
+        //
+        // #xgfzlj1 — `pr.files` came off `gh pr list --json ...,files`, which resolves `files` over `gh`'s own
+        // GraphQL query hardcoding `files(first: 100)` with NO pagination (confirmed against `gh` 2.95.0 /
+        // `cli/cli@trunk`; tracked upstream as a bug, cli/cli #6930/#5368). A length under the cap is PROVABLY
+        // complete; a length AT the cap is indistinguishable from truncated, so re-fetch a verified-complete
+        // list via the paginated REST endpoint before trusting it for this safety decision. On the rare case
+        // that re-fetch itself fails, fail OVER-cautious (treat as statute-tier → stand-down), matching this
+        // whole predicate's documented safe direction — never silently fall back to the possibly-truncated list.
+        const rawFiles = Array.isArray(pr?.files) ? pr.files : [];
+        let filesForCheck = rawFiles;
+        let statuteCheckFailed = false;
+        if (rawFiles.length >= GH_FILES_GRAPHQL_CAP) {
+          try {
+            filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo });
+          } catch (eFiles) {
+            statuteCheckFailed = true;
+          }
+        }
+        const isStatuteTier = statuteCheckFailed || isStatuteTierConflict(filesForCheck);
         provider.postComment(resolvedRepo, pr?.number, buildConflictComment(pr, { isStatuteTier }));
         entry.commented = true;
         // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the

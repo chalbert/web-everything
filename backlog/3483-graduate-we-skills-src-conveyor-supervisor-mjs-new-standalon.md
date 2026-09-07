@@ -3,10 +3,11 @@ bornAs: x8tghnd
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3482"]
 scope: ["we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/com.we.conveyor-supervisor.plist.example"]
 dateOpened: "2026-09-04"
+dateResolved: "2026-09-06"
 tags: []
 ---
 
@@ -18,3 +19,11 @@ Part 2 of 3 of the core reconcile-pass payload (see the sibling we:scripts/opera
 
 1. **Executable** — `we:skills-src/conveyor/supervisor.mjs` exists on `main` with `we:skills-src/conveyor/__tests__/supervisor.test.mjs` passing, and `git diff origin/main...origin/lane/mechanical-dispatcher -- we:skills-src/conveyor/supervisor.mjs we:skills-src/conveyor/com.we.conveyor-supervisor.plist.example` reports no diff.
 2. Landed as its own PR through the normal lane → `we:scripts/verify-lane.mjs` → `we:scripts/operations/run.mjs open-pr --mode=land` pipeline, never a direct push, and never before the `blockedBy` slice above.
+
+## Progress
+
+- 2026-09-06: Landed byte-identical from `origin/lane/mechanical-dispatcher`. Confirmed by reading the code
+  (not just the card's inferred grouping) that `we:skills-src/conveyor/supervisor.mjs` imports only
+  `RUNNER_LOCK_ROOT` from `we:skills-src/conveyor/runner-lock.mjs` (already on `main`) plus node builtins — no
+  real dependency on the sibling `we:scripts/operations/route-pr-outcome.mjs` slice (#3482), which had already
+  landed anyway. All 64 `we:skills-src/conveyor/__tests__/supervisor.test.mjs` tests pass; full gate green.
