@@ -2,10 +2,13 @@
 bornAs: xu2krte
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scaffoldedBy: "file-prepare-auto-conflict-resol-lane-16-0981ca21"
 dateScaffolded: "2026-09-06"
 dateOpened: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted"
 preparedDate: "2026-09-06"
 relatedReport: reports/2026-09-06-parked-pr-conflict-auto-resolution-research.md
 tags: [conveyor, drain, review, merge, conflict, dispatch]
@@ -372,6 +375,14 @@ Predicted touch-set (#2619 probe, coarse/prefix-shaped): `we:scripts/conveyor/pa
 This jury binds against the item's predicted scope and is re-checked against the real diff at PR open.
 
 ## Notes
+
+(0) **Duplicate, resolved as a mechanical dedup.** `we:scripts/check-standards.mjs`'s duplicate-`bornAs` gate
+flagged this card as a second mint of the same `xu2krte` hash already resolved as `we:backlog/3544-*.md`
+(ratified `#conveyor-dispatch-calls-the-declared-operation` / `#parked-pr-conflict-dispatched-not-scripted`,
+2026-09-06) — byte-identical content, differing only in resolution frontmatter. A stale hash-named copy swept
+in by a `git add -A` and numbered separately by the drain, per the gate's own diagnosis. Resolved here (never
+ratified independently) naming `we:backlog/3544-*.md` as the original it duplicates, with the SAME
+`codifiedIn` — this card contributes no separate ruling.
 
 (1) This item does not itself change any code — ratifying it authorizes the follow-on build(s), which per
 `#3383`'s own build strategy should land as small, individually reviewable pieces (Fork 1's resume-support
