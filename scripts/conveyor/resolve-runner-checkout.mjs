@@ -10,7 +10,8 @@
  * PURE / IMPURE split (mirrors file-locks.mjs): {@link classifyRunnerLocks} and {@link parseCwdFromLsof} take
  *   no fs/process input — a fixture list of lock entries / a captured `lsof` transcript drives them in tests.
  *   {@link readAllLockEntries} and {@link pidToCwd} are the thin impure shell; {@link resolveRunnerCheckout}
- *   orchestrates the two into one caller-facing verdict.
+ *   orchestrates the two into one caller-facing verdict. {@link looksLikeCheckout} is a cheap, real fs check
+ *   (a `.git` entry) confirming a resolved cwd is actually a checkout root before it is ever trusted.
  *
  * Never assumes exactly one lock dir exists under the lock root: it enumerates EVERY dir there (not just the
  * runner's current fixed sentinel key) and classifies by liveness, so a corrupted/legacy lock root with more
@@ -132,6 +133,21 @@ export function looksLikeRunnerProcess(commandLine) {
   return tokens.some((t) => t === 'skills-src/conveyor/runner.mjs' || t.endsWith('/skills-src/conveyor/runner.mjs'));
 }
 
+/**
+ * Does `cwd` look like a real git checkout — cheaply, via a `.git` entry — rather than some arbitrary
+ * directory the runner process's cwd happened to resolve to? `verifyRunnerProcess` proves the pid's command
+ * line still looks like the runner invocation; it says nothing about whether the DIRECTORY `lsof` reported is
+ * actually a checkout root the sidecar write would land inside — e.g. the runner started from a subdirectory
+ * of a checkout, or `lsof`'s resolution is otherwise off, would silently pass every check above and write
+ * `.conveyor/queue.json` under a directory with no `.git`, defeating this item's whole point of never queuing
+ * into a sidecar nothing reads. A cheap, real marker check closes that gap before the caller ever trusts `cwd`.
+ * @param {string} cwd
+ * @returns {boolean}
+ */
+export function looksLikeCheckout(cwd) {
+  try { return existsSync(join(cwd, '.git')); } catch { return false; }
+}
+
 /** Default `ps` shell-out for a pid's full command line — fail-soft, mirroring {@link defaultLsof}. */
 function defaultPs(pid) {
   try {
@@ -164,6 +180,9 @@ export function verifyRunnerProcess(pid, execFn = defaultPs) {
  *   • `{ status: 'cwd-unresolved', owner, pid }` — `lsof` could not derive the pid's cwd.
  *   • `{ status: 'process-mismatch', owner, pid, cwd }` — the pid resolved to a cwd, but its command line does
  *     not look like the runner (a reused pid) — the cwd is reported for diagnostics only, never trusted.
+ *   • `{ status: 'checkout-unverified', owner, pid, cwd }` — the pid verified as the runner and its cwd
+ *     resolved, but that cwd has no `.git` entry — not confirmed to actually be a checkout root — the cwd is
+ *     reported for diagnostics only, never trusted.
  *   • `{ status: 'resolved', cwd, owner, pid, heartbeatAt }` — the runner's checkout, ready to use.
  * `lockRoot` defaults to the real machine-global runner-lock home ({@link RUNNER_LOCK_ROOT}), overridable by a
  * `CONVEYOR_RUNNER_LOCK_ROOT` env var (read here, not by each caller) so a test/ops caller can point at a
@@ -179,6 +198,7 @@ export function verifyRunnerProcess(pid, execFn = defaultPs) {
  */
 export function resolveRunnerCheckout({
   lockRoot, nowMs = Date.now(), leaseMinutes = DEFAULT_LEASE_MINUTES, execFn, verifyProcess = verifyRunnerProcess,
+  verifyCheckout = looksLikeCheckout,
 } = {}) {
   const envRoot = process.env.CONVEYOR_RUNNER_LOCK_ROOT;
   const root = lockRoot || (envRoot && envRoot.trim()) || RUNNER_LOCK_ROOT;
@@ -213,6 +233,13 @@ export function resolveRunnerCheckout({
     return {
       status: 'process-mismatch', cwd,
       reason: `pid ${entry.pid} resolved to a cwd but its process does not look like the conveyor runner — a reused pid is not trusted`,
+      owner: entry.owner, pid: entry.pid,
+    };
+  }
+  if (!verifyCheckout(cwd)) {
+    return {
+      status: 'checkout-unverified', cwd,
+      reason: `pid ${entry.pid}'s resolved working directory (${cwd}) has no \`.git\` entry — not confirmed to be a real checkout; refusing rather than writing a queue sidecar into an arbitrary directory`,
       owner: entry.owner, pid: entry.pid,
     };
   }

@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { reserve, makeLockEntry } from '../../readiness/file-locks.mjs';
 import {
   classifyRunnerLocks, parseCwdFromLsof, readAllLockEntries, pidToCwd, resolveRunnerCheckout,
-  looksLikeRunnerProcess, verifyRunnerProcess,
+  looksLikeRunnerProcess, verifyRunnerProcess, looksLikeCheckout,
 } from '../resolve-runner-checkout.mjs';
 
 const T0 = Date.parse('2026-09-05T12:00:00.000Z');
@@ -119,7 +119,9 @@ describe('resolveRunnerCheckout — end-to-end verdicts (acceptance criteria a/b
   it('(a) a live lock whose pid resolves and whose process verifies → the resolved checkout, not the caller\'s cwd', () => {
     reserve(root, '<conveyor:runner-singleton-lease>', 'RUNNER', T0, new Date(T0).toISOString(), 4242);
     const execFn = (pid) => `p${pid}\nn/workspace/the-runners-real-checkout\n`;
-    const out = resolveRunnerCheckout({ lockRoot: root, nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true });
+    const out = resolveRunnerCheckout({
+      lockRoot: root, nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true, verifyCheckout: () => true,
+    });
     expect(out).toMatchObject({ status: 'resolved', cwd: '/workspace/the-runners-real-checkout', pid: 4242 });
   });
 
@@ -129,7 +131,9 @@ describe('resolveRunnerCheckout — end-to-end verdicts (acceptance criteria a/b
     // was previously exercised only for the empty-root case, never for classifying a fresh heartbeat as live.
     reserve(root, '<conveyor:runner-singleton-lease>', 'RUNNER', T0, new Date(T0).toISOString(), 4242);
     const execFn = (pid) => `p${pid}\nn/workspace/the-runners-real-checkout\n`;
-    const out = resolveRunnerCheckout({ lockRoot: root, nowMs: T0 + MIN, execFn, verifyProcess: () => true });
+    const out = resolveRunnerCheckout({
+      lockRoot: root, nowMs: T0 + MIN, execFn, verifyProcess: () => true, verifyCheckout: () => true,
+    });
     expect(out.status).toBe('resolved');
   });
 
@@ -184,13 +188,36 @@ describe('resolveRunnerCheckout — end-to-end verdicts (acceptance criteria a/b
     expect(out.status).toBe('no-pid');
   });
 
+  it('a resolved cwd + a verified process, but the cwd has no `.git` entry → checkout-unverified, refuses (real fs, default verifyCheckout)', () => {
+    reserve(root, '<conveyor:runner-singleton-lease>', 'RUNNER', T0, new Date(T0).toISOString(), 4242);
+    const notACheckout = mkdtempSync(join(tmpdir(), 'not-a-checkout-')); // deliberately no `.git`
+    const execFn = (pid) => `p${pid}\nn${notACheckout}\n`;
+    try {
+      const out = resolveRunnerCheckout({ lockRoot: root, nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true });
+      expect(out).toMatchObject({ status: 'checkout-unverified', cwd: notACheckout, pid: 4242 });
+    } finally { rmSync(notACheckout, { recursive: true, force: true }); }
+  });
+
+  it('a resolved cwd that IS a real checkout (has `.git`) → resolved, using the real default verifyCheckout', () => {
+    reserve(root, '<conveyor:runner-singleton-lease>', 'RUNNER', T0, new Date(T0).toISOString(), 4242);
+    const realCheckout = mkdtempSync(join(tmpdir(), 'a-real-checkout-'));
+    mkdirSync(join(realCheckout, '.git'), { recursive: true });
+    const execFn = (pid) => `p${pid}\nn${realCheckout}\n`;
+    try {
+      const out = resolveRunnerCheckout({ lockRoot: root, nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true });
+      expect(out).toMatchObject({ status: 'resolved', cwd: realCheckout, pid: 4242 });
+    } finally { rmSync(realCheckout, { recursive: true, force: true }); }
+  });
+
   it('CONVEYOR_RUNNER_LOCK_ROOT is used when no lockRoot is passed — the default-wiring path (#3478 review)', () => {
     reserve(root, '<conveyor:runner-singleton-lease>', 'RUNNER', T0, new Date(T0).toISOString(), 4242);
     const execFn = (pid) => `p${pid}\nn/from/env/override\n`;
     const prev = process.env.CONVEYOR_RUNNER_LOCK_ROOT;
     process.env.CONVEYOR_RUNNER_LOCK_ROOT = root;
     try {
-      const out = resolveRunnerCheckout({ nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true });
+      const out = resolveRunnerCheckout({
+        nowMs: T0 + MIN, leaseMinutes: 15, execFn, verifyProcess: () => true, verifyCheckout: () => true,
+      });
       expect(out).toMatchObject({ status: 'resolved', cwd: '/from/env/override' });
     } finally {
       if (prev === undefined) delete process.env.CONVEYOR_RUNNER_LOCK_ROOT; else process.env.CONVEYOR_RUNNER_LOCK_ROOT = prev;
@@ -220,6 +247,30 @@ describe('pidToCwd — the REAL default `lsof` shell-out (#3478 review: never ex
     writeFileSync(join(fakeBin, 'lsof'), '#!/usr/bin/env node\nprocess.exit(1);\n', 'utf8');
     chmodSync(join(fakeBin, 'lsof'), 0o755);
     expect(pidToCwd(4242)).toBe(null);
+  });
+});
+
+describe('looksLikeCheckout — cheap `.git`-marker check that a resolved cwd is a real checkout', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'looks-like-checkout-')); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a directory with a `.git` entry looks like a checkout', () => {
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    expect(looksLikeCheckout(dir)).toBe(true);
+  });
+
+  it('a `.git` FILE (worktree-style, not a directory) still counts — existence is all that is checked', () => {
+    writeFileSync(join(dir, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n', 'utf8');
+    expect(looksLikeCheckout(dir)).toBe(true);
+  });
+
+  it('a directory with no `.git` entry does not look like a checkout', () => {
+    expect(looksLikeCheckout(dir)).toBe(false);
+  });
+
+  it('a nonexistent path does not throw — resolves false', () => {
+    expect(looksLikeCheckout(join(dir, 'nonexistent-nested', 'path'))).toBe(false);
   });
 });
 
