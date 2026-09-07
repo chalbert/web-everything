@@ -76,7 +76,7 @@ nothing to wire the periodic call into until the operation is declared.
   enhancement, noted here but **not scoped into this item** — it is not a trivial add on top of a file-backed
   sidecar read.
 
-## Open forks (flagged, not decided here)
+## Forks (ratified — see Ruling below)
 
 1. **Exact page layout.** `we:scripts/conveyor/status-artifact.mjs`'s existing five-section layout (KPI row,
    four-stage flow, lane pool, per-epic progress, buildable table) is proven and stylistically established, but
@@ -88,6 +88,41 @@ nothing to wire the periodic call into until the operation is declared.
 2. **How much history to show.** `mergedToday` (`we:scripts/conveyor/status-artifact.mjs`'s existing window) is
    the obvious cheap default for "recently completed," but whether that's the right window (vs. e.g. last N
    items, or last hour) for THIS page's purpose is an open call — flagged rather than decided.
+
+## Ruling (ratified 2026-09-07, operator)
+
+Both forks decided by the operator; neither is an open question for the build session anymore.
+
+- **Fork 1 → reuse `we:scripts/conveyor/status-artifact.mjs`'s existing five-section layout as-is, for now.**
+  No new template, no dedicated leaner shell, no CSS/section fork — ship the proven five-section layout (KPI
+  row, four-stage flow, lane pool, per-epic progress, buildable table) unchanged for the first cut of this
+  page. Iterate on layout later if it under- or over-serves the queue-observability job; that iteration is
+  explicitly deferred, not blocking this item.
+
+- **Fork 2 → show the last 24h of completed items by default, plus a button to reveal/fetch more/older
+  history beyond that window.** Default view is a rolling trailing-24h window (deliberately not
+  `we:scripts/conveyor/status-artifact.mjs`'s `mergedToday`/since-midnight window, which varies in size by
+  time of day).
+
+  **Mechanism constraint for "fetch more" (read before building #3277/#3560):** this item deliberately does
+  **not** use the Artifact `db` capability (see "Not in scope" above — that's a later-enhancement option) and
+  is `blockedBy: #3277`; the page is republished fresh on each conveyor tick, not live-queried. So the "fetch
+  more" button **cannot** be a live server/query call — there is no live backend for it to call. It must work
+  one of two ways:
+  1. **(Recommended default.)** At publish time, embed a wider bounded history window (e.g. the last 7 days of
+     completed items, or the last N completed items, whichever is smaller — cap it for page size) as inline
+     JSON/data in the static HTML, alongside a rendered default view limited to the trailing 24h. The button
+     reveals/paginates through that already-embedded data client-side (a plain JS slice / show-hide over data
+     already on the page) — no network call, no new capability, nothing further needed from #3277 beyond what
+     this item already asked for. This is the mechanically clean option: it fits the file-backed,
+     tick-republish model exactly as-is, at the cost of a bit more embedded HTML/JSON per publish.
+  2. Widen how much history gets embedded *at the next publish* (e.g. a stored per-viewer or per-page
+     preference nudges the next tick's publish to embed a wider window). Not recommended as the default: it
+     doesn't let a viewer actually see more history within the page they're looking at, only after the next
+     tick republishes — worse interaction than (1) for no mechanical benefit.
+
+  Default to (1) unless #3277's actual declared operation shape makes (2) meaningfully cheaper — that would be
+  a finding against this ruling, not a silent substitution.
 
 ## Done when
 
