@@ -1,7 +1,8 @@
 ---
+bornAs: xeiyft0
 kind: story
 size: 3
-parent: "x4e6mib"
+parent: "3598"
 status: open
 scope: ["we:scripts/operations/file-item.mjs", "we:scripts/operations/file-item-io.mjs", "we:scripts/operations/__tests__/file-item.test.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-07"

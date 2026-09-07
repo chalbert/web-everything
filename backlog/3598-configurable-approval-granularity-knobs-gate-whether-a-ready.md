@@ -1,4 +1,5 @@
 ---
+bornAs: x4e6mib
 kind: epic
 parent: "3383"
 status: open
@@ -24,7 +25,7 @@ Today we:scripts/operations/file-item.mjs's planQueueing auto-clears every newly
   call `addToQueue`. This epic decides what gets **QUEUED** (cleared for the conveyor to actually build) once an
   item is ALREADY prepared/ready — a strictly later stage in the same pipeline. A decision can be top-5-leverage
   and mechanically prepared by #3562's watch, then still sit un-queued under this epic's `manual` policy; the two
-  layers are adjacent, not overlapping. we:backlog/xiluli3's *Grounding* also cites this.
+  layers are adjacent, not overlapping. we:backlog/3601's *Grounding* also cites this.
 - **Distinct from `clear-human` (PR-merge) and `/prepare`+ratify (decision ratification) — the two gates the
   operator explicitly named as NOT what this epic is.** `clear-human` (we:.claude/skills/review/SKILL.md) governs
   whether a REVIEWED PR may land on `main`; `/prepare`+ratify governs whether a `kind:decision` item's ruling is
@@ -40,10 +41,10 @@ Today we:scripts/operations/file-item.mjs's planQueueing auto-clears every newly
 
 ## Staged breakdown
 
-1. **First buildable slice — we:backlog/xeiyft0**: per-epic `approvalPolicy: auto | manual` frontmatter field,
+1. **First buildable slice — we:backlog/3599**: per-epic `approvalPolicy: auto | manual` frontmatter field,
    consulted by `planQueueing` before auto-clearing that epic's children; `auto` (today's implicit default)
    preserved when the field is absent, so every existing epic is unaffected until it opts in.
-2. **Open decision — we:backlog/xiluli3**: which granularity levels ship in v1 (epic-only vs. epic+category vs.
+2. **Open decision — we:backlog/3601**: which granularity levels ship in v1 (epic-only vs. epic+category vs.
    all three), where the policy config lives (frontmatter vs. env var vs. sidecar file), and what the default
    should be — each fork carries a recommended default with reasoning, none decided silently.
 3. **A natural third slice, explicitly OUT of this repo's own build:** the operator's personal `/wip` command
@@ -57,10 +58,10 @@ Today we:scripts/operations/file-item.mjs's planQueueing auto-clears every newly
 
 ## Done when
 
-1. we:backlog/xeiyft0 (or its v1-scope-adjusted successor, once we:backlog/xiluli3 rules) is resolved: an epic can
+1. we:backlog/3599 (or its v1-scope-adjusted successor, once we:backlog/3601 rules) is resolved: an epic can
    carry `approvalPolicy: manual` and its children file successfully but are not auto-cleared, verified by a real
    lane-clone smoke test.
-2. we:backlog/xiluli3 is ratified, and any slice whose assumptions it overturns (e.g. Fork 2 picking a config
+2. we:backlog/3601 is ratified, and any slice whose assumptions it overturns (e.g. Fork 2 picking a config
    location other than epic frontmatter) is corrected to match before it resolves.
 3. we:docs/agent/backlog-workflow.md documents the new `approvalPolicy` field and its default.
 4. This epic resolves once every child slice/decision above is resolved (the standard no-open-slice gate) — no
@@ -78,6 +79,6 @@ Today we:scripts/operations/file-item.mjs's planQueueing auto-clears every newly
 - we:backlog/3587-file-item-can-never-queue-a-decision-or-epic-even-on-explici.md — confirms the `add` action's
   real always-clears-with-warning behavior, the precedent this epic's own refusal-reason shape follows.
 - we:.claude/skills/review/SKILL.md — `clear-human`, the PR-merge gate this epic is explicitly NOT duplicating.
-- we:backlog/xeiyft0-per-epic-approval-policy-gates-file-item-s-auto-queue-decisi.md — this epic's first buildable
+- we:backlog/3599-per-epic-approval-policy-gates-file-item-s-auto-queue-decisi.md — this epic's first buildable
   slice.
-- we:backlog/xiluli3-approval-granularity-v1-scope-which-levels-ship-where-the-po.md — this epic's open decision.
+- we:backlog/3601-approval-granularity-v1-scope-which-levels-ship-where-the-po.md — this epic's open decision.

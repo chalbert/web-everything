@@ -1,6 +1,7 @@
 ---
+bornAs: xiluli3
 kind: decision
-parent: "x4e6mib"
+parent: "3598"
 status: open
 dateOpened: "2026-09-07"
 tags: []
@@ -8,7 +9,7 @@ tags: []
 
 # Approval-granularity v1 scope: which levels ship, where the policy config lives, and what the default should be
 
-Three genuinely open forks for we:backlog/x4e6mib's approval-granularity project, flagged rather than silently picked: (1) which granularity levels ship in v1 -- epic-only vs epic+category vs all three (epic/category/global-manual) at once; (2) where the approvalPolicy config lives -- a frontmatter field on the epic card vs an env var vs a separate policy file/sidecar; (3) what the default policy should be when unset -- keep today's implicit auto-queue-everything-except-epic-decision behavior, or flip the default to manual. Each fork states a bold recommended default with reasoning; none is decided silently in the epic or its first slice.
+Three genuinely open forks for we:backlog/3598's approval-granularity project, flagged rather than silently picked: (1) which granularity levels ship in v1 -- epic-only vs epic+category vs all three (epic/category/global-manual) at once; (2) where the approvalPolicy config lives -- a frontmatter field on the epic card vs an env var vs a separate policy file/sidecar; (3) what the default policy should be when unset -- keep today's implicit auto-queue-everything-except-epic-decision behavior, or flip the default to manual. Each fork states a bold recommended default with reasoning; none is decided silently in the epic or its first slice.
 
 ## Fork 1 — which granularity levels ship in v1
 
@@ -19,7 +20,7 @@ predicate, since this repo has no formal `kind:bug` or `type:bug` field today, o
 policy that overrides every epic's own setting). Building all three in one slice is a real scope choice, not a
 default everyone agrees on — this fork picks which subset ships first.
 
-- **(a) Epic-only.** we:backlog/xeiyft0's slice: an `approvalPolicy` field on the epic card, consulted by
+- **(a) Epic-only.** we:backlog/3599's slice: an `approvalPolicy` field on the epic card, consulted by
   we:scripts/operations/file-item.mjs's `planQueueing` for that epic's children only.
 - **(b) Epic + category together in v1.** Adds a second axis (e.g. `tags: [bug]` ⇒ auto-approve) in the same slice.
 - **(c) All three at once, including a global manual-everything switch.**
@@ -66,7 +67,7 @@ prejudged here.
 
 **Recommended default: (a).** Flipping to `manual` ((b)) would silently stop auto-queueing on every existing,
 un-annotated epic the moment this ships — a surprising regression with no upside, and a direct violation of this
-slice's own stated backward-compatibility bar (we:backlog/xeiyft0's Done-when #2). An operator who genuinely wants
+slice's own stated backward-compatibility bar (we:backlog/3599's Done-when #2). An operator who genuinely wants
 "manual, everything, always" gets there deliberately via Fork 2(d)'s global env-var override — an explicit,
 reversible, one-line opt-in — never as the silent out-of-the-box behavior.
 
@@ -82,7 +83,7 @@ recommended defaults with reasoning per the filing session's own brief, but has 
 
 1. Each of the three forks above is ratified (kept as recommended, or overridden) with a dated ruling recorded
    inline, per we:docs/agent/backlog-workflow.md's decision-resolution convention.
-2. we:backlog/xeiyft0 (the epic-level slice) is re-read against the ruling — if Fork 2 lands differently than its
+2. we:backlog/3599 (the epic-level slice) is re-read against the ruling — if Fork 2 lands differently than its
    own `approvalPolicy`-on-epic-frontmatter assumption, that slice is corrected before/while it builds, not after.
 3. On resolve, this decision is codified: if the ruling establishes a reusable rule (e.g. "approval-policy config
    always lives in frontmatter, never a sidecar"), it is added to we:docs/agent/platform-decisions.md (or the
