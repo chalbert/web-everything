@@ -1,11 +1,11 @@
 ---
 name: mechanical-delivery-doctrine
-description: The eleven standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state — and a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The twelve standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, the runner's normal operating mode is tracking `main` directly — a long-lived divergent branch is a temporary build tool, not the default steady state — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
 
-Eleven rules accumulated while building and live-firing `#3383`'s own machinery (the background
+Twelve rules accumulated while building and live-firing `#3383`'s own machinery (the background
 mechanical dispatcher that replaces an interactive session as delivery supervisor). Each rule below
 is enough to act on without reading further — the full evidence and reasoning for each sits in the
 named section of `#3383`'s own card
@@ -145,6 +145,25 @@ history. If a rule itself changes, edit it here first, then note the change on t
     were. A one-off workaround is fine as an immediate mitigation, but only when named explicitly as
     temporary, with the real fix still owed and tracked, not quietly dropped once the symptom is gone.
     (Full rationale: `#3383`'s "Working doctrine (2026-09-04, continued): rule 11" section.)
+12. **Default to routing THROUGH the conveyor itself, not a hand-dispatched subagent, wherever the
+    conveyor's own dispatch already covers the work kind.** Before spinning up an `Agent`-tool
+    subagent to file, build, or investigate something live, file it via `file-item` (composing the
+    title/digest/scope is still your own job — `file-item`'s own SKILL.md says so, and that doesn't
+    change here) and, if it's urgent, prioritize it the declared way
+    (`we:scripts/backlog.mjs tier <NNN> --to=pinned`) — then let the conveyor's own dispatch cycle
+    build it, rather than reaching for a bespoke `Agent()` call to do the work directly. This sharpens
+    rules 2/3/9 rather than replacing them: those say the orchestrating session must delegate rather
+    than hold the pen; this one adds WHICH delegate to prefer when both exist. It applies only where
+    the conveyor's dispatch already covers the work kind — build does, today; investigation-shaped
+    work doesn't yet (`#3567`, in progress), so a hand-dispatched investigator stays legitimate until
+    that lands, same as for any work kind the conveyor genuinely can't dispatch yet. Grounded the night
+    of 2026-09-06→07: the conveyor's own tick loop built and landed real items completely unattended
+    all night — no subagent involved — while several live-conversation requests that same night still
+    got hand-dispatched purely for turnaround speed, even though `tier --to=pinned` already exists as
+    the declared way to get something built fast through the SAME mechanical path instead of bypassing
+    it. The gap was concrete enough to spawn its own follow-on decision, filed that night, on
+    distinguishing conveyor-origin throughput from a "session-driven burst (like the one that filed
+    this very card)" (`#3383`'s dispatch-origin-attribution decision).
 
 ## Not `/conveyor`, on purpose
 
