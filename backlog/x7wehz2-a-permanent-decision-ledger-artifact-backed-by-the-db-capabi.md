@@ -7,9 +7,16 @@ dateOpened: "2026-09-07"
 tags: []
 ---
 
-# A permanent decision-ledger Artifact, backed by the db capability, records ratified decisions durably
+# The "Decision Board": a permanent Artifact, backed by the db capability, that records ratified decisions durably
 
-A published Artifact page that permanently records RATIFIED decisions -- which fork/option was chosen, who decided, when, why -- as durable db-capability documents (e.g. decisions/<id>/rulings/<id>), queryable later via read_db. Not a view of what is pending; a durable audit trail scratch files and chat history do not have. Distinct from we:backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision.md (the publish/refresh operation, rendering-focused). Open fork: same artifact as the pending-decisions docket (two sections) vs. a separate page -- recommended default: same artifact, ruling in place beats context-switching.
+A published Artifact page -- named **"Decision Board"** -- that permanently records RATIFIED decisions --
+which fork/option was chosen, who decided, when, why -- as durable db-capability documents (e.g.
+decisions/<id>/rulings/<id>), queryable later via read_db. Not a view of what is pending; a durable audit
+trail scratch files and chat history do not have. Distinct from we:backlog/3277-declare-an-operation-that-publishes-and-refreshes-a-decision.md
+(the publish/refresh operation, rendering-focused). **RATIFIED (2026-09-07):** this ledger and the
+top-5-leverage decision docket (the "what to decide" surface, being filed separately -- cross-reference its
+number here once it lands) publish to the SAME Artifact, as two sections of one page -- see "Ratified
+design" below.
 
 ## Origin (2026-09-06/07, the operator's own words)
 
@@ -34,26 +41,42 @@ back later.
   detail" item was expected to already exist from earlier the same session (a "what to decide" docket, as
   opposed to this item's "what WAS decided" ledger) but a thorough backlog search (title/body grep for
   leverage/docket/monitor/top-5/highest-leverage, files opened 2026-09-06/07, the #3029 epic's own child
-  list) did not turn one up. **Flagging, not assuming:** either it was not actually filed, or it exists under
-  wording this search missed. If/when it turns up, revisit the fork below with it named directly.
+  list) did not turn one up as of this item's filing. The operator has since confirmed a sibling agent is
+  filing it and ratified that it shares this same "Decision Board" Artifact -- see "Ratified design" below
+  for the up-to-date relationship; it had still not landed as of this update, so its number is not yet
+  filled in here.
 - `grep -rl "capabilities.*db\|claude.use(\"db\")"` across the repo: only we:backlog/204 (an unrelated
   capability-vocabulary matrix) and an unrelated agent-memory file matched. No existing use of the Artifact
   `db` capability in this repo. Confirmed genuinely new.
 
-## Open fork -- flagged, not decided here
+## Ratified design (2026-09-07, operator)
 
-**Same artifact as the pending-decisions docket, two sections (ledger + docket) vs. two separate pages.**
-Recommended default: **same artifact, two sections** -- ruling a decision right where its forks are already
-being read beats a context-switch to a second page, and a single `db`-backed page can hold both a
-`decisions/*` (pending, mirrors #3277's rendering) and `decisions/*/rulings/*` (ratified) collection without
-conflict. Counter-consideration: the docket item (once found or filed) may already have committed to a
-specific page shape that doesn't want a ledger section grafted on, or may want a different refresh cadence
-than a ledger (rulings are append-only and rare; the docket's forks change more often). Ratify this once the
-docket item is located or filed, before or during build -- do not guess silently.
+The fork raised at filing time -- same artifact as the pending-decisions docket vs. a separate page -- is
+**closed**: they publish to the **same Artifact**, as two sections of one page, per the operator's own
+ruling (ruling in place beats a context switch, the reasoning this item's own recommended default already
+gave). The shared page is named **"Decision Board"** -- neither "docket" nor "ledger" alone describes it
+once it carries both halves (what to decide + what was decided), so this is the one name both this item and
+its sibling should use going forward, not a placeholder.
 
-## Scope (build-ready once the fork above is ratified)
+- **"Decision Board" = one Artifact, two sections:**
+  - *Docket section* -- the top-5 highest-leverage OPEN decisions, continuously prepared and shown with
+    full fork detail. Owned by the sibling item below (not this one) -- filed separately, not yet landed as
+    of this update. **Cross-reference: the top-5-leverage docket item, once it lands, is the sibling half of
+    this same Board** -- add its number here when it is filed (search for it again before building either
+    half, since a search at filing time did not find it).
+  - *Ledger section* -- this item's own scope: the durable record of RATIFIED decisions, described below.
+- Both sections read/write the same page's `db` capability; the docket's pending-fork collection and the
+  ledger's `decisions/*/rulings/*` collection coexist without conflict (different collection paths, no
+  shared keys).
+- Neither section blocks the other's initial build -- they land as separate items against the same target
+  page -- but whichever lands first should declare the page's `capabilities: {db: {}}` and its "Decision
+  Board" title/shell, so the second item extends rather than re-publishes it.
 
-- Declare `capabilities: {db: {}}` on the published page (per we:.claude/skills/artifact-capabilities).
+## Scope (build-ready)
+
+- Declare `capabilities: {db: {}}` on the published "Decision Board" page (per
+  we:.claude/skills/artifact-capabilities) -- or extend it, if the docket sibling publishes the page shell
+  first.
 - A ruling form/button per open fork writes `decisions/<decisionId>/rulings/<rulingId>` with `actor`,
   `timestamp`, `choice`, `rationale` -- the clearance-note fields already used tonight, structured instead of
   prose.
