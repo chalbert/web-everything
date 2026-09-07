@@ -2,9 +2,12 @@
 bornAs: xoc31xs
 kind: decision
 parent: "3593"
-status: open
+status: resolved
 dateOpened: "2026-09-07"
-tags: []
+dateResolved: "2026-09-07"
+codifiedIn: one-off
+relatedTo: ["3049"]
+tags: [supervisor-invocation, interim, product-distribution-model]
 ---
 
 # How should a standing instruction-slip supervisor actually be invoked and kept running - dispatched-on-schedule, a persistent process, or something else
@@ -19,6 +22,14 @@ Option C: something else - e.g. a scheduled recurring dispatch (the /loop or /sc
 
 Recommended default: start with Option A (a formalized, reusable dispatched-session skill), with Option C's cheap-periodic-check idea folded in as how it gets triggered (a scheduled recurring dispatch rather than the operator remembering to invoke it) - this needs no new resident-process capability, matches how tonight's actual supervisor was run, and avoids committing to Option B's operational overhead before there is any evidence a report-only scanner plus periodic judgment passes are insufficient. Option B should be revisited only if Stage 1 data shows instruction-slips recur faster than a periodic dispatch cadence can catch them. Not yet prepared to Definition-of-Ready (no dedicated /research/ topic, no Skeptic/Screen pass) - needs a /prepare pass once Stage 1's scanner has run for real and produced actual flagged-agent evidence to ground the choice in, rather than projection.
 
-## Done when
+## Ratified (Option A + C) — 2026-09-07
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+**Ratified 2026-09-07 by the operator (Nicolas Gilbert), for now.** Recommended default taken: **Option A + Option C combined** — a formalized, reusable dispatched-session skill (Option A), triggered via a scheduled recurring dispatch rather than the operator remembering to invoke it manually (Option C's cheap-periodic-check idea folded in as the trigger mechanism, using the `/loop`/`/schedule` mechanism already available in this environment). Option B (a genuinely persistent resident process, analogous to `we:skills-src/conveyor/supervisor.mjs`) is explicitly deferred — revisit only if Stage 1's real scanner data (`we:backlog/3594-stage-1-fleet-wide-scanner-for-false-monitor-wait-claims-acr.md`) shows instruction-slips recurring faster than a periodic dispatch cadence can catch. `codifiedIn: one-off` — this is a narrow implementation-shape call for this repo's own internal tooling, not a generalizable platform rule.
+
+The operator's own words, verbatim: *"Ok ratified for now, we will have to revisit what is need for real app product / installed and saas."*
+
+## Scope caveat — interim ruling, scoped to WE's own internal delivery tooling only (not part of the ruling above)
+
+This ratification decides how **this repo's own internal delivery-supervision tooling** gets invoked today — it is explicitly **not** an answer for how a real, shipped product's own supervision or compliance-checking would be deployed and run. The operator flagged this in the same breath as ratifying: once the product's actual distribution model is clear (an **installed app** vs a **SaaS/hosted service**), the real requirements could look quite different — e.g. an installed app can't assume access to a `claude` CLI session the way this internal tooling does today, and a SaaS deployment has real daemons/services available as a supervision primitive, not just a dispatched agent session (Option B's operational overhead, rejected here on cost grounds, could be the *right* answer once genuine process-supervision primitives exist).
+
+No dedicated decision item covers that question yet, and this note does not try to answer it. The closest existing standing anchor for "does this kind of tooling ever become an externally-shipped/installed/hosted product" is **#3049**'s validation gate ("package the conveyor/delivery-loop machinery as an external product, or keep it internal?", verdict **NOT-YET**, gated on a real prospective customer/partner ask) — that gate is the natural place a future supervision-deployment decision would compose with once it fires. Flagged here, per the operator's own "for now," so this interim ruling is never silently read as settled for a real deployed product.
