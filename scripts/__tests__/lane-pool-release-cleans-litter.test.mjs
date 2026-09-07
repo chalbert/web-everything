@@ -113,6 +113,11 @@ describe('lane-pool release reaps known-safe litter (#3568)', () => {
   it('a TRACKED file whose name collides with an allowlist entry is never touched by release, even modified', () => {
     const { lane } = acquireOneLane();
     const dir = laneDir(lane);
+    // A fresh clone carries no LOCAL git identity of its own (config is per-repo, never inherited from the
+    // reference repo it was cloned from) — a CI runner with no global identity configured cannot `commit`
+    // here without this, even though it works locally on a machine with an ambient global identity set.
+    git(['config', 'user.email', 't@t.com'], dir);
+    git(['config', 'user.name', 't'], dir);
     writeFileSync(join(dir, '.commit-msg.txt'), 'a real tracked file, not litter\n');
     git(['add', '.commit-msg.txt'], dir);
     git(['commit', '--quiet', '-m', 'track a file that happens to share the litter allowlist name'], dir);
@@ -145,6 +150,9 @@ describe('lane-pool release reaps known-safe litter (#3568)', () => {
   it('a lane that is only commits-ahead (not dirty) is untouched by the cleanup step', () => {
     const { lane } = acquireOneLane();
     const dir = laneDir(lane);
+    // See the identical comment above — a fresh clone has no LOCAL git identity of its own.
+    git(['config', 'user.email', 't@t.com'], dir);
+    git(['config', 'user.name', 't'], dir);
     writeFileSync(join(dir, 'file.txt'), 'v2\n');
     git(['add', 'file.txt'], dir);
     git(['commit', '--quiet', '-m', 'ahead commit'], dir);
