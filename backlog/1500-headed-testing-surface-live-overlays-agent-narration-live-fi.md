@@ -7,7 +7,7 @@ blockedBy: []
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-23"
 dateResolved: "2026-06-23"
-graduatedTo: "plateau:src/dev-browser/headed-surface/"
+graduatedTo: "plateau:packages/dev-browser/src/headed-surface/"
 tags: [dev-browser, explorer, testing, visualization, plateau, product]
 ---
 

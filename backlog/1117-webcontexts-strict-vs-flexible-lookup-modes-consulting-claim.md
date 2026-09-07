@@ -7,7 +7,7 @@ blockedBy: ["1115"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
-graduatedTo: "we:plugs/webcontexts/Node.contexts.patch.ts"
+graduatedTo: "frontierui:plugs/webcontexts/Node.contexts.patch.ts"
 tags: []
 ---
 

@@ -7,7 +7,7 @@ blockedBy: []
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "fui:tools/explorer/__tests__/fixtures.smoke.spec.ts"
+graduatedTo: "plateau:tools/explorer/__tests__/fixtures.smoke.spec.ts"
 tags: [explorer, regression, fixtures, frontierui, smoke]
 ---
 

@@ -8,7 +8,7 @@ blockedBy: ["1168"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/oracles/index.ts"
+graduatedTo: "plateau:tools/explorer/oracles/index.ts"
 tags: []
 ---
 

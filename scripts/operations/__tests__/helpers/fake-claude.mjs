@@ -62,19 +62,34 @@ if (argv[0] === 'agents') {
   process.exit(0);
 }
 
+// \`claude stop <id>\` — #xu2krte's resume-or-fresh fallback calls this on an accidental fork. Deregisters the
+// session (removes it from the listing) the same way the real CLI's own docblock says it does, unlike a bare
+// \`kill\` which the dispatch-abort.mjs file header explains at length is NOT equivalent.
+if (argv[0] === 'stop') {
+  const id = argv[1];
+  const before = state.sessions.length;
+  state.sessions = state.sessions.filter((s) => s.id !== id && s.sessionId !== id);
+  write(state);
+  if (state.sessions.length === before) { process.stderr.write('No job matching \\'' + id + '\\'\\n'); process.exit(1); }
+  process.stdout.write('stopped ' + id + '\\n');
+  process.exit(0);
+}
+
 // Parse the way a commander-style CLI would: options first, operands wherever they fall. A lone operand
 // beginning with '-' is read as an unknown FLAG and rejected — which is exactly the failure the real
 // dispatcher refuses a leading-dash brief to avoid, so the refusal can now be proven rather than assumed.
-let sessionId = null, name = null, bg = false, systemPromptFile = null;
+let sessionId = null, name = null, bg = false, systemPromptFile = null, resumeId = null;
+let extraFlagCount = 0;
 const operands = [];
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--bg') { bg = true; continue; }
   if (a === '--session-id') { sessionId = argv[i += 1]; continue; }
-  if (a === '-n' || a === '--name') { name = argv[i += 1]; continue; }
+  if (a === '--resume') { resumeId = argv[i += 1]; continue; }
+  if (a === '-n' || a === '--name') { name = argv[i += 1]; extraFlagCount += 1; continue; }
   // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
   // acceptance (the real CLI's own --help lists this flag), not file contents.
-  if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; continue; }
+  if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; extraFlagCount += 1; continue; }
   // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
   // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
   // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.
@@ -93,12 +108,36 @@ if (process.env.FAKE_CLAUDE_FAIL === '1') {
   write(state); process.exit(1);
 }
 
+// #xu2krte — \`--resume <id>\`. Models the ONE rule the live build-time probe against the real CLI actually
+// found (docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted): ANY flag besides
+// \`--resume\` itself forks a copy under a FRESH id instead of continuing the named session. (The real CLI's
+// OTHER fork trigger — the target session still being "already running" — is not modelled here: this shim's
+// sessions never persist across calls the way a real background process does, so there is nothing honest to
+// simulate for that half; the flag-based trigger is the deterministic, reproducible one and is what this
+// fixture exists to prove the dispatcher's own fork-detection/fallback correctly reacts to.)
+if (bg && resumeId) {
+  const match = state.sessions.find((s) => s.sessionId === resumeId || s.id === resumeId);
+  if (extraFlagCount > 0 || !match) {
+    const id = 'forked-' + state.sessions.length;
+    state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
+    write(state);
+    process.stdout.write('note: started a copy\\n');
+    process.stdout.write('backgrounded · ' + id.slice(0, 8) + '\\n');
+    process.exit(0);
+  }
+  write(state);
+  process.stdout.write('note: woke session ' + match.id + ' with its saved options\\n');
+  process.stdout.write('backgrounded · ' + match.id + '\\n');
+  process.exit(0);
+}
+
 if (bg) {
   // The real CLI returns IMMEDIATELY and the session may not be listed yet. It is listed here so the round
   // trip is assertable; the not-yet-listed grace window is the dispatcher's own concern and is unit-tested.
   const id = sessionId || 'generated-' + state.sessions.length;
   state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
   write(state);
+  process.stdout.write('backgrounded · ' + id.slice(0, 8) + (name ? ' · ' + name : '') + '\\n');
   process.stdout.write('  claude attach ' + id.slice(0, 8) + '    open in this terminal\\n');
   process.exit(0);
 }
@@ -127,9 +166,14 @@ process.exit(0);
  * file whose headline promise is that no model runs. Its refusal IS exercised — see the case that calls it
  * without the override, which pins both not-the-fake outcomes: a different binary, and none at all.
  *
+ * `sessions()` was removed in an earlier cut as unread dead surface and is re-added here, for real use this
+ * time: `#xu2krte`'s resume-or-fresh integration test needs to read back what the shim's `agents --json`
+ * listing would report (id/sessionId pairs) WITHOUT shelling a second `exec` call just to get JSON it already
+ * has on disk in `state.sessions`.
  * @returns {{
  *   env: Record<string,string>,
  *   lastArgv: () => string[] | null,
+ *   sessions: () => Array<object>,
  *   assertWins: (env: Record<string,string>) => void,
  *   cleanup: () => void,
  * }}
@@ -150,6 +194,7 @@ export function withFakeClaude() {
       const c = read().calls;
       return c.length ? c[c.length - 1].argv : null;
     },
+    sessions: () => read().sessions,
     /**
      * Refuse to proceed unless THIS `claude` is the one the given env would run. Resolved the way the OS
      * resolves it, not by inspecting the `PATH` string — a check that only read `PATH` would agree with

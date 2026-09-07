@@ -8,7 +8,7 @@ relatedReport: reports/2026-06-22-backlog-split-analysis.md
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "we:blocks/renderers/data-table/__fixtures__/data-table-goldens.ts"
+graduatedTo: "we:blocks/renderers/data-table/__fixtures__/data-table-goldens.json"
 tags: []
 ---
 

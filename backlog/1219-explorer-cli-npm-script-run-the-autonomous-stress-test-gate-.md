@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "frontierui:tools/explorer/cli.ts"
+graduatedTo: "plateau:tools/explorer/cli.ts"
 crossRef: { url: /backlog/1167-autonomous-exploratory-ui-testing-tool-fui-owned-engine-that/, label: "#1167 autonomous UI tester epic (resolved) — this adds its missing run entrypoint" }
 tags: [fui-devtool, exploratory-testing, cli, dx]
 ---

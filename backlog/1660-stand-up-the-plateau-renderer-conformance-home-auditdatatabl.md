@@ -7,7 +7,7 @@ blockedBy: []
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
 dateResolved: "2026-06-23"
-graduatedTo: "plateau:src/conformance-engine/renderer-audit/"
+graduatedTo: "plateau:packages/core/src/conformance-engine/renderer-audit/"
 tags: [conformance, renderers, data-table, pagination, plateau, "1566", "1576", "899"]
 ---
 

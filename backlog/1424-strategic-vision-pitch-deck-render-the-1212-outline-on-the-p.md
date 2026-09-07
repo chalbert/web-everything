@@ -8,7 +8,7 @@ blockedBy: ["1236"]
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "plateau:src/marketing/deck-strategic.ts"
+graduatedTo: "plateau:packages/saas/src/marketing/deck-strategic.ts"
 tags: []
 ---
 

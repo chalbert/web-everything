@@ -11,6 +11,34 @@ tags: [custom-nodes, delimiter-grammar, region, mid-marker, decision]
 
 # Mid-region-marker (`{{else}}` / `{:else}` / `@else`) decision card
 
+## Ruled — 2026-09-06, operator
+
+**Fork 1 ratified as (a): named body programs / labelled-segment bodies.** A region recipe declares a
+**mid-marker** that the region walk treats as a parse-time delimiter, splitting the body into a **named-program
+map** on the host instead of a single `.content`. `{{#if}}…{{else}}…{{/if}}` materializes as `{ main, inverse }`;
+`{{else if}}` recurses.
+
+**The two firewall constraints ratify with it** — they are part of the ruling, not commentary:
+
+1. The IDL specifies the **abstract labelled-segment contract** — *a region exposes N named body programs split
+   at a declared mid-marker* — and leaves the concrete host materialization to Frontier UI, per #2074 rule 2's
+   "never name a concrete host class".
+2. The mid-marker is an **in-region parse token consumed by the region walk, NOT a registered recipe `open`**.
+   It mints no second dispatch key `(open, regionName)` and raises no `ReservedDelimiterError` — which is
+   precisely the trap option (c) falls into by spelling `{{#else}}` as its own region.
+
+**Accepted cost, stated plainly:** this is a standard-layer contract change. A region's single `.content`
+becomes a labelled map, so `.content` callers migrate to the named-program surface. Taken as a reversible #2074
+extension with lineage, mirroring #2112's `children:'raw'` addition.
+
+Build carved: **#3520** — the #2074-model extension slice under #2094, as this card's *Downstream* section
+directs.
+
+**Verified before presenting** (the #1935 currency check): `check:item` clean with every cited locus resolving;
+no `check:health` G8 — parent #2094 is open because it is the programme this serves, and the two other
+references (#2112, #2074) are *resolved*, cited as precedent, which is the correct use of a settled item; and
+nothing on region or recipe turf has been ratified since the 2026-07-04 stamp.
+
 ## Context
 
 The #2114 Handlebars/Mustache delimiter-bundle grammar-fidelity scorecard (scored via #2113) confirmed the

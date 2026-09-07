@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/index.ts"
+graduatedTo: "plateau:tools/explorer/index.ts"
 tags: []
 ---
 

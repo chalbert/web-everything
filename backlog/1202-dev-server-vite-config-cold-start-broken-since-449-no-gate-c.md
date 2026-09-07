@@ -4,7 +4,7 @@ status: resolved
 locus: webeverything
 dateOpened: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "we:tools/maas/vite-plugin.ts"
+graduatedTo: "frontierui:tools/maas/vite-plugin.mjs"
 size: 5
 tags: [dev-server, vite, tooling, regression, gate-gap, frontierui-plugs, 449]
 ---

@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "2360"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: "frontierui:plugs/webdirectives/ssr/net/ (native .NET SSR renderer foundation + if/switch, #2383)"
 tags: []
 scope:
   - frontierui:plugs/webdirectives/ssr/net/

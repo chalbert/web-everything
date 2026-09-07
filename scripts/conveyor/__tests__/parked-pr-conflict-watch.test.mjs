@@ -7,12 +7,25 @@ import { describe, it, expect } from 'vitest';
 
 import {
   CONFLICT_LABEL,
+  CONFLICT_LABEL_META,
   isParkedConflictTarget,
   planConflictLabelChange,
   buildConflictComment,
   watchParkedPrConflicts,
   defaultListParkedPrs,
+  isStatuteTierConflict,
+  buildConflictFindingBody,
+  defaultPostConflictFinding,
+  defaultPostConflictStandDown,
+  defaultListPrFiles,
+  GH_FILES_GRAPHQL_CAP,
 } from '../parked-pr-conflict-watch.mjs';
+
+// #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
+// `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
+// injects a no-op fake for both, exactly as it already fakes `provider` — no real `node`/`gh` process runs from
+// this file.
+const noopRouting = () => ({ postFinding: () => {}, postStandDown: () => {} });
 
 describe('the real incident that motivated this pass — WE PR #1920, captured live 2026-09-04T23:26Z', () => {
   // The EXACT `gh pr view 1920 --json ...` payload shape observed while diagnosing this gap (before the
@@ -36,8 +49,8 @@ describe('the real incident that motivated this pass — WE PR #1920, captured l
       setLabels: (repo, pr, spec) => calls.push(['setLabels', repo, pr, spec]),
       postComment: (repo, pr, body) => calls.push(['postComment', repo, pr, body]),
     };
-    const results = watchParkedPrConflicts({ repo: 'chalbert/web-everything', listPrs: () => [REAL_1920_SNAPSHOT], provider });
-    expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true }]);
+    const results = watchParkedPrConflicts({ repo: 'chalbert/web-everything', listPrs: () => [REAL_1920_SNAPSHOT], provider, ...noopRouting() });
+    expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
     expect(calls[0]).toEqual(['ensureLabel', 'chalbert/web-everything', CONFLICT_LABEL]);
     expect(calls[1]).toEqual(['setLabels', 'chalbert/web-everything', 1920, { add: CONFLICT_LABEL, remove: [] }]);
     expect(calls[2][3]).toContain('lane/2412c-engine-tier-redteam-gate');
@@ -132,6 +145,26 @@ describe('buildConflictComment', () => {
     const body = buildConflictComment({ num: 1 });
     expect(body).not.toContain('undefined');
   });
+
+  // #xu2krte — PR #1966's own review: the alert must never claim a different outcome than what Fork 2/4
+  // actually routes this conflict to (previously a dispatchable conflict got the "not auto-rebased,
+  // human/`/finish` only" text while ALSO being auto-dispatched to a fix agent in the same call).
+  it('a dispatchable (non-statute-tier) conflict says a fix agent is being dispatched, and does NOT say "not auto"', () => {
+    const body = buildConflictComment({ num: 1920 }, { isStatuteTier: false });
+    expect(body).toMatch(/fix agent is being dispatched/i);
+    expect(body).not.toMatch(/not auto-rebased|not auto-resolved|left as a \*\*judgment call/i);
+  });
+
+  it('a statute-tier conflict says it is a human/`/finish` judgment call, and does NOT say a fix agent is dispatched', () => {
+    const body = buildConflictComment({ num: 1920 }, { isStatuteTier: true });
+    expect(body).toMatch(/judgment call for a human/i);
+    expect(body).not.toMatch(/fix agent is being dispatched/i);
+  });
+
+  it('defaults to the dispatchable wording when isStatuteTier is omitted (matches the common case)', () => {
+    const body = buildConflictComment({ num: 1920 });
+    expect(body).toMatch(/fix agent is being dispatched/i);
+  });
 });
 
 describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)', () => {
@@ -140,7 +173,7 @@ describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)',
     const exec = (cmd, argv) => { capturedArgv = argv; return '[]'; };
     defaultListParkedPrs({ exec });
     expect(capturedArgv).toEqual(['pr', 'list', '--state', 'open', '--limit', '200',
-      '--json', 'number,headRefName,mergeable,mergeStateStatus,labels']);
+      '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files']);
   });
 
   it('appends --repo when given', () => {
@@ -148,7 +181,29 @@ describe('defaultListParkedPrs — argv shape (exec injected, no real gh call)',
     const exec = (cmd, argv) => { capturedArgv = argv; return '[]'; };
     defaultListParkedPrs({ exec, repo: 'o/n' });
     expect(capturedArgv).toEqual(['pr', 'list', '--state', 'open', '--limit', '200',
-      '--json', 'number,headRefName,mergeable,mergeStateStatus,labels', '--repo', 'o/n']);
+      '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files', '--repo', 'o/n']);
+  });
+});
+
+describe('defaultListPrFiles — argv shape (exec injected, no real gh call) — #xgfzlj1', () => {
+  it('paginates the REST files endpoint with an explicit repo', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return 'a.mjs\nb.mjs\n'; };
+    const out = defaultListPrFiles({ number: 42, repo: 'o/n', exec });
+    expect(capturedArgv).toEqual(['api', '--paginate', '-F', 'per_page=100', 'repos/o/n/pulls/42/files', '--jq', '.[].filename']);
+    expect(out).toEqual(['a.mjs', 'b.mjs']);
+  });
+
+  it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
+    defaultListPrFiles({ number: 7, exec });
+    expect(capturedArgv[4]).toBe('repos/{owner}/{repo}/pulls/7/files');
+  });
+
+  it('returns an empty array for a PR touching no files (never blank/undefined entries)', () => {
+    const exec = () => '\n\n';
+    expect(defaultListPrFiles({ number: 1, repo: 'o/n', exec })).toEqual([]);
   });
 });
 
@@ -163,16 +218,107 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     };
   };
 
-  it('labels + comments a newly-conflicting parked PR', () => {
+  it('labels + comments a newly-conflicting parked PR, and dispatches it as a reconcile-finding bounce', () => {
     const provider = fakeProvider();
+    const routed = [];
     const listPrs = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] }];
-    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
-    expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true }]);
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number, o.repo]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number, o.repo]),
+    });
+    expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
     expect(provider.calls).toEqual([
       ['ensureLabel', 'o/n', CONFLICT_LABEL],
       ['setLabels', 'o/n', 1920, { add: CONFLICT_LABEL, remove: [] }],
       ['postComment', 'o/n', 1920],
     ]);
+    expect(routed).toEqual([['finding', 1920, 'o/n']]);
+  });
+
+  it('#xu2krte Fork 2 — a statute-tier file in the conflicting PR routes to stand-down, not reconcile-finding', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 1921, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: [{ path: 'docs/agent/platform-decisions.md' }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 1921]]);
+  });
+
+  // #xgfzlj1 — PR #1966's own independent review, security finding: `gh pr list --json files` resolves over
+  // gh's own GraphQL query, hardcoded `files(first: 100)` with NO pagination (confirmed live against gh 2.95.0
+  // / cli/cli@trunk's api/query_builder.go; cli/cli discussion #6930 / issue #5368 track it upstream as a bug).
+  // A statute-tier file sitting past file #100 in a big PR would silently vanish from `pr.files` and this pass
+  // would wrongly dispatch a fix agent at a conflict Fork 2 exists specifically to keep away from automation.
+  it('#xgfzlj1 — a files array UNDER the gh 100-file cap is trusted as-is, no extra gh call', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let listPrFilesCalls = 0;
+    const listPrs = () => [{
+      number: 1922, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }],
+      files: Array.from({ length: GH_FILES_GRAPHQL_CAP - 1 }, (_, i) => ({ path: `scripts/f${i}.mjs` })),
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => { listPrFilesCalls += 1; return []; },
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(listPrFilesCalls).toBe(0);
+  });
+
+  it('#xgfzlj1 — a files array AT the gh 100-file cap is untrusted: re-fetches the complete list and finds the statute-tier file past the truncation boundary', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let listPrFilesArgs;
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` }));
+    const listPrs = () => [{ number: 1923, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: (o) => { listPrFilesArgs = o; return [...truncated.map((f) => f.path), 'docs/agent/platform-decisions.md']; },
+    });
+    expect(listPrFilesArgs).toEqual({ number: 1923, repo: 'o/n' });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 1923]]);
+  });
+
+  it('#xgfzlj1 — the verified re-fetch clearing the PR (no statute file in the complete list) still dispatches normally', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` }));
+    const listPrs = () => [{ number: 1925, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => truncated.map((f) => f.path).concat(['scripts/f100.mjs']), // one more ordinary file, still no statute path
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+  });
+
+  it('#xgfzlj1 — the re-fetch itself failing fails OVER-cautious (stand-down), never silently trusts the truncated list', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const truncated = Array.from({ length: GH_FILES_GRAPHQL_CAP }, (_, i) => ({ path: `scripts/f${i}.mjs` })); // no statute file at all
+    const listPrs = () => [{ number: 1924, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: truncated }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      listPrFiles: () => { throw new Error('gh api failed'); },
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', 1924]]);
   });
 
   it('is idempotent — a second sweep on an already-labelled, still-conflicting PR makes zero gh calls', () => {
@@ -217,5 +363,96 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.error === 'boom')).toBe(true);
+  });
+
+  // xoh8fkw — live 2026-09-05: `repo` reaches `ensureLabel`/`setLabels`/`postComment` as a bare `null` when the
+  // caller (the runner's default `runQuiet(..., ['sweep'])` invocation, with no `--repo`) never supplies one,
+  // and `review-label-provider.mjs`'s own `GH_ARGV` builders splice `--repo, repo` unconditionally — so every
+  // write failed `gh … got "null"` while the pass kept reporting a correct detection. `provider.currentRepo()`
+  // must be consulted and its result used for every write when `repo` is omitted.
+  it('resolves an omitted repo via provider.currentRepo() and uses it for every write (xoh8fkw)', () => {
+    const provider = fakeProvider();
+    provider.currentRepo = () => 'resolved/repo';
+    const listPrs = () => [{ number: 1932, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] }];
+    const results = watchParkedPrConflicts({ repo: null, listPrs, provider, ...noopRouting() }); // no --repo given
+    expect(results).toEqual([{ num: 1932, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
+    expect(provider.calls).toEqual([
+      ['ensureLabel', 'resolved/repo', CONFLICT_LABEL],
+      ['setLabels', 'resolved/repo', 1932, { add: CONFLICT_LABEL, remove: [] }],
+      ['postComment', 'resolved/repo', 1932],
+    ]);
+  });
+
+  it('CONFLICT_LABEL_META.description stays within GitHub\'s 100-char label-description cap (xoh8fkw)', () => {
+    // The original 163-char text made every `gh label create` call fail `HTTP 422: description is too long`,
+    // confirmed live 2026-09-05 — this is a hard external limit, not a style preference.
+    expect(CONFLICT_LABEL_META.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it('never calls currentRepo() when repo was already supplied, or when nothing needs a write', () => {
+    let currentRepoCalls = 0;
+    const provider = fakeProvider();
+    provider.currentRepo = () => { currentRepoCalls += 1; return 'should-not-be-used'; };
+    // Case 1: repo supplied — currentRepo must stay unconsulted.
+    const listPrsA = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] }];
+    watchParkedPrConflicts({ repo: 'o/n', listPrs: listPrsA, provider, ...noopRouting() });
+    expect(currentRepoCalls).toBe(0);
+    // Case 2: repo omitted, but nothing to write (already labelled) — no gh repo view call either.
+    const listPrsB = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }] }];
+    watchParkedPrConflicts({ repo: null, listPrs: listPrsB, provider, ...noopRouting() });
+    expect(currentRepoCalls).toBe(0);
+  });
+});
+
+// #xu2krte Fork 2 — the content-based statute-tier exception.
+describe('isStatuteTierConflict', () => {
+  it('true: the conflicting PR touches a statute-tier doc', () => {
+    expect(isStatuteTierConflict([{ path: 'docs/agent/platform-decisions.md' }])).toBe(true);
+  });
+
+  it('true: a bare-string files array (tolerated shape)', () => {
+    expect(isStatuteTierConflict(['docs/agent/platform-decisions.md'])).toBe(true);
+  });
+
+  it('false: an ordinary code file', () => {
+    expect(isStatuteTierConflict([{ path: 'scripts/conveyor/reconcile-core.mjs' }])).toBe(false);
+  });
+
+  it('false: no files at all', () => {
+    expect(isStatuteTierConflict([])).toBe(false);
+    expect(isStatuteTierConflict(undefined)).toBe(false);
+  });
+});
+
+describe('buildConflictFindingBody', () => {
+  it('names the PR, the branch, and says resolving the conflict IS the task', () => {
+    const body = buildConflictFindingBody({ num: 1920, headRefName: 'lane/2412c-engine-tier-redteam-gate' });
+    expect(body).toContain('PR #1920');
+    expect(body).toContain('lane/2412c-engine-tier-redteam-gate');
+    expect(body).toMatch(/Resolving the conflict IS the task/);
+    expect(body).not.toContain('undefined');
+  });
+});
+
+describe('defaultPostConflictFinding / defaultPostConflictStandDown — argv shape (exec injected, no real gh/node)', () => {
+  it('shells reconcile-finding.mjs with a --body-file, --agent and --repo', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
+    defaultPostConflictFinding({ pr: { number: 1920, headRefName: 'lane/x' }, repo: 'o/n', exec });
+    expect(capturedArgv[0]).toMatch(/reconcile-finding\.mjs$/);
+    expect(capturedArgv[1]).toBe('1920');
+    expect(capturedArgv.some((a) => a.startsWith('--body-file='))).toBe(true);
+    expect(capturedArgv).toContain('--agent=parked-pr-conflict-watch');
+    expect(capturedArgv).toContain('--repo=o/n');
+  });
+
+  it('shells stand-down.mjs with --reason=conflict and --repo', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return ''; };
+    defaultPostConflictStandDown({ pr: { number: 1921 }, repo: 'o/n', exec });
+    expect(capturedArgv[0]).toMatch(/stand-down\.mjs$/);
+    expect(capturedArgv[1]).toBe('1921');
+    expect(capturedArgv).toContain('--reason=conflict');
+    expect(capturedArgv).toContain('--repo=o/n');
   });
 });

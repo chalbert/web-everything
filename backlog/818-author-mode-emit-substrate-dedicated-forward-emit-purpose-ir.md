@@ -10,7 +10,7 @@ relatedReport: reports/2026-06-18-backlog-split-analysis.md
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "we:src/_data/authorModeSource.json + fui:workbench/authorMode.ts"
+graduatedTo: "frontierui:workbench/authorMode.ts"
 tags: [webdocs, adapters, polyglot, generation, component-emit]
 ---
 

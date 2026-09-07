@@ -1,8 +1,10 @@
 ---
 kind: decision
 parent: "1848"
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateResolved: "2026-09-06"
+codifiedIn: one-off
 preparedDate: "2026-08-15"
 tags: [enterprise, saas, account-model, org, seat, role, policy, plateau-app, placement]
 ---
@@ -41,6 +43,55 @@ plateau-app** (today there is none — no settings/preferences surface exists an
 confirmed real and fully built (`we:analytics/dev-metrics.ts:136` +
 `fui:plugs/webanalytics/devMetrics.ts:211` `resolveDevMetricsPolicy`), just not the layer this item's first
 slice needs — see Fork 2.
+
+## Ruled — 2026-09-06, operator
+
+**Fork 1 ratified as (a): a new, plateau-app-owned schema** (`Organization`, `Seat`, `Member`, `OrgRole`),
+purpose-built for platform tenancy and billing. `webpermissions` models **app-domain RBAC** — permissions inside
+one conformant app's own business domain — and "who is a paying seat on this account" is a different axis:
+platform tenancy on a served, credential-holding product, which
+[`#constellation-placement`](/docs/agent/platform-decisions.md#constellation-placement) rule 1 routes to Plateau.
+Option (b), folding org-tenancy roles into `Role`/`PermissionScope`/`RoleGrant`, is **not** taken: a future
+in-app role (`underwriter`) and a platform role (`billing-admin`) would sit in one `roles` array with nothing
+saying which layer governs which.
+
+**Amendment accepted at ratification: (a) is not a permanent home — it is the right home for one consumer, and
+it graduates.** The schema **could be upgraded to a WE standard if it proves valuable and turns out to be a
+common need.** Ratifying (a) settles *where it lives now*, on the evidence available now; it does not rule that
+platform tenancy is forever product-local.
+
+**The graduation trigger, stated concretely so it is not "someday".** Promote the schema to a WE contract when a
+**second, non-Plateau consumer needs the same org / seat / role shape** — another WE-conformant product, or an
+exercise app modelling a tenanted account. That is the same bar the fork's own rejection of (b) rests on and
+keeps the two consistent: (b) was rejected partly because `webpermissions` has **zero real consumers in
+plateau-app**, so reuse bought no shared consumer, only a scope collision. A one-consumer abstraction is a
+product schema; the *second* consumer is what makes it a standard. Until then, generalising would be minting a
+contract from a single sample.
+
+**What does not change on graduation:** the split itself. Even as a WE contract, platform tenancy stays a
+**different axis** from `webpermissions`' app-domain RBAC — graduation would mint a sibling contract, never
+merge the two role sets. That distinction is the ruling; the location is the amendment.
+
+**Fork 2 ratified as (a): reuse `webpolicy`'s DMN PDP/PEP** for precedence resolution. `PolicyRuleSet` already
+carries a `scope?: string` field documented as the tenant scope a ruleset binds to, and the PDP/PEP engine is
+implemented and tested with a proof/audit chain — which the pricing page already promises the Enterprise tier
+("Governance, ownership + approval workflows") at no extra engineering cost. `HitPolicy: 'PRIORITY'` expresses
+"org row wins over member row wins over default row" without a bespoke resolver per setting. Option (b), a
+narrow resolver mirroring `DevMetricsPolicy`, is not taken: it was scoped for **one** setting (#1850,
+dev-metrics consent), and this surface is explicitly multi-setting, so it would reinvent generically-solved
+precedence one setting at a time.
+
+**The two forks pull in opposite directions on purpose, and that is consistent, not contradictory.** Fork 1 puts
+**roster data** in the product; Fork 2 puts the **precedence mechanism** in WE/FUI-owned infrastructure. That is
+exactly #1850's own distinction — a fleet-wide *mechanism* generalises across self-hosted consumers, a
+customer's seat roster does not. Fork 1's graduation trigger is what would eventually move the *data* to where
+Fork 2 already puts the *mechanism*, and only on the evidence that makes it a standard.
+
+**Codification — `one-off`, deliberately.** Neither fork mints a reusable cross-cutting rule. Fork 1 **applies**
+`#constellation-placement` rule 1 to one product schema; Fork 2 **selects an already-shipped engine** for one
+surface. Minting an anchor for either would put a single product's schema choice in the statute layer, which is
+the over-codification error the "extend, never mint" discipline exists to prevent in the other direction. The
+graduation trigger lives on this card, where the next reader of the schema will be.
 
 ## Fork 1 — data-model home: bespoke plateau-app schema vs. extending `webpermissions`
 

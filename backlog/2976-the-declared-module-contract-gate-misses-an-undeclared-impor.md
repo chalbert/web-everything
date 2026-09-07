@@ -2,10 +2,13 @@
 bornAs: xs9x5cm
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2965", "2967"]
 scope: ["we:scripts/check-standards-rules.mjs"]
 dateOpened: "2026-08-07"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: [gate, check-standards]
 ---
 

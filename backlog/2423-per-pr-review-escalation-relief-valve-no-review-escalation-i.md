@@ -2,8 +2,11 @@
 bornAs: x2u9e9d
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-10"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 scope:
   - we:scripts/merge-ai-prs.mjs

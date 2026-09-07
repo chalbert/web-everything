@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "fui:blocks/button/ButtonTransientElement.ts"
+graduatedTo: "frontierui:blocks/button/ButtonHostElement.ts"
 locus: frontierui
 relatedProject: webcomponents
 tags: [packaging, custom-elements, block-model, conversion, transient-element, button, frontierui]

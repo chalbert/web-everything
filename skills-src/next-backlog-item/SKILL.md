@@ -70,6 +70,23 @@ highest-leverage blocker* directly, even if Tier-A items exist:
 - **Claim before discussing** — a decision discussion *is* claimable work; an unclaimed,
   never-flipped, unlabelled discussion is exactly the race this guards against. Claim per step 4,
   *before* presenting the decision's substance.
+- **Re-validate currency BEFORE presenting — the stale-prep rule, `backlog-workflow.md` → *A stale prep is
+  re-prepared before the first presentation* (#1935).** `preparedDate` certifies the research was current
+  *when stamped*, nothing more; a card prepared months ago may rest on a premise the tree has since moved.
+  This step is not optional and not a skim — it is the first thing after claiming, before any substance
+  reaches the user. Three checks, cheap and mechanical:
+  1. **`npm run check:item -- <NNN>`** — structure plus whether every cited `file:line` still resolves.
+  2. **`npm run check:health`, then read the item's own flags** — especially **G8** (a `## Fork` leaning on a
+     still-**open** sibling decision with no `blockedBy` edge: the default rests on an unratified premise, so
+     the card its argument depends on must be ruled *first* or the default re-grounded), plus G4/G5.
+  3. **Statutes ratified since the stamp.** `grep -n '^\*\*Ratified' docs/agent/platform-decisions.md`, take
+     anything dated after `preparedDate`, and read the ones on the card's turf. This half is **judgment, not a
+     gate** — a tag-overlap heuristic was prototyped and rejected as tautological, so nothing will flag it for
+     you. A card cannot cite a statute that postdates it, so silence here is *never* evidence of currency.
+  Present the findings *with* the decision, never after. A card that fails any check is re-prepared in place
+  first — never repaired mid-ratification, which reintroduces the divergence the source-of-truth rule forbids.
+  *(This step exists because it was skipped: a batch of three was presented as ready, and two of them were
+  not — one leaning on an unruled sibling, one predating a statute on its own turf.)*
 - **Then present exactly one (next turn) per the decision rule below.** The user picking off the
   shortlist — a `go`, or naming an item — is the trigger to **claim + present for discussion**, *never*
   ratification authority. There are **two distinct `go`s**: the *selection* go (claim + STOP + present)

@@ -7,7 +7,7 @@ blockedBy: ["1238"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "plateau:src/marketing/legal.ts"
+graduatedTo: "plateau:packages/saas/src/marketing/legal.ts"
 tags: [plateau, plateau-app, logged-off, legal, 404]
 ---
 

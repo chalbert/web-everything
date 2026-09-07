@@ -167,6 +167,9 @@ export default defineConfig({
       'scripts/operations/__tests__/mutation-check-integration.test.mjs',
       'scripts/operations/__tests__/record-verdict-integration.test.mjs',
       'scripts/operations/__tests__/stage-pr-view-integration.test.mjs',
+      // #xu2krte — a real `withRealRepo` git-conflict fixture plus a real (fake, cost-nothing) `claude` CLI
+      // spawn/list/stop round trip; same tier as the two files immediately above it.
+      'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
     ],
   },
   resolve: {

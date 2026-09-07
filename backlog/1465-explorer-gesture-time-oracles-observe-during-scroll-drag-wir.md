@@ -7,7 +7,7 @@ blockedBy: []
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "fui:tools/explorer/oracles/genericInvariants.ts"
+graduatedTo: "plateau:tools/explorer/oracles/genericInvariants.ts"
 tags: [explorer, oracles, gesture, frontierui]
 ---
 

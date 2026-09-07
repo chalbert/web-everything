@@ -248,6 +248,50 @@ MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", 
 #1777 (**relocation granularity** — relocate deps-satisfiable-now, defer not-yet-FUI deps as `blockedBy`
 slices, never reach back into WE; see [relocation granularity](#relocation-granularity)).
 
+### Backlog tracking: one record of truth with locus-filtered views now, distributed per-repo as the destination {#backlog-tracking-locus-now-distributed-next}
+
+**Ratified 2026-09-06 by the operator (Nicolas Gilbert) (#3129).** Where a constellation repo's backlog *lives*
+is a different question from where its *code* lives ([#constellation-placement](#constellation-placement)
+governs the latter and does not reach this). Two rulings, and the second is the load-bearing one:
+
+- **Now — one record of truth, per-repo views are filtered, not separate.** Web Everything's `backlog/*.md` is
+  the single tracker. A per-repo surface is a **locus-filtered virtual view** (`item.locus === slug`) over it —
+  no second `backlog/` directory, no second numbering authority, no migration. Cross-repo landing keeps the
+  already-proven #500 shape: the build lands in the target repo's own PR, and a thin mechanical "WE resolve"
+  step flips the tracking record. This is the interim, and it is what runs today.
+- **Destination — fully distributed, each repo owning its own backlog.** Not a rejected alternative and not a
+  "someday": the declared end state. The ground is **product shape, not our own convenience**. A single central
+  tracker every repo routes through assumes one org owns everything and never hands a repo over; for a customer
+  with **dozens of repos whose ownership moves between owners**, that assumption fails — a repo changing hands
+  either strands its history in a tracker the new owner cannot see, or forces a migration. A repo and its
+  backlog are the same artifact and must move together. **Scale is the consumer**: the earlier "no evidenced
+  need for repo autonomy" reading measured our own three-repo constellation, which is the wrong population for
+  a product built to manage enterprise front-end platforms.
+- **Therefore an item id always carries its locus, and that moves FIRST.** A bare `#NNN` is an implicit `we:`
+  today — true by convention, never by construction. Locus-qualified ids (`we:#3423`, `fui:#118`) are the
+  correct shape and are adopted **always**, not only once distribution lands: the ambiguity already exists, and
+  making it explicit now converts a single all-at-once migration on the day distribution ships into an
+  incremental, reversible one. The additive half — *accept and resolve* an explicit locus while a bare `#NNN`
+  keeps meaning `we:` — comes first and alone; minting new ids with a locus, and migrating the corpus, are
+  separate later slices. The `LOCI` registry (`we:scripts/check-standards-rules.mjs`) stays the single locus
+  vocabulary; a second list is the drift class #1473 had to rewire. An id locus (`we:#3423`) and a **code-path**
+  locus prefix (`we:scripts/x.mjs`) share a spelling and are different things — whatever parses one must not
+  silently accept the other.
+
+**Ordering is deliberate and is part of the ruling:** the destination is **not deferred and not parked**. Its
+first slice is an ordinary ready item to take when there is capacity — not urgent, and not conditional on
+#2456's evidence gate, whose ground this ruling narrows.
+
+**Lineage:** ratified by #3129 (operator, 2026-09-06), carved out of #2475 during its build-readiness prep.
+Confirms rather than overrides #2472's own premise ("each repo holds its own `backlog/*.md`") — the epic was
+right about the end state and imprecise about the timing. Composes with #500 (the shipped cross-repo
+landing/gate registry, which supplies the interim's landing half) and is **new turf**: the prep's statute pass
+found no existing anchor governing backlog-*data* placement, so this one mints rather than extends —
+[#constellation-placement](#constellation-placement) (code implementation),
+[#repo-drain-check-contract](#repo-drain-check-contract) (the drain's CI boundary) and
+[#pool-siblings-real-built-clones](#pool-siblings-real-built-clones) (lane checkouts) govern disjoint turf by a
+different test. First slice: `#3533`.
+
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
 **WE never imports or renders FUI block code.** FUI owns the implementation *and* its rendered
@@ -2698,6 +2742,37 @@ bullet).** The isolate-by-default + human-writes-`main` posture tightens in thre
   so only the human's exemption is removed — nearly free. Deferred until the second-writer need is real (a lone
   trusted writer has no one to race, so forcing them to PR buys friction with no safety).
 
+
+**Amendment — the rung is a configurable dimension whose current value is Rung 1; Rung 2 is OFF, not rejected
+(#3423, ratified 2026-09-06 by the operator).** #3373 found that nothing at GitHub's own layer enforces the
+sole-writer invariant JIT numbering depends on — it holds entirely by script discipline. Ruling: **that
+discipline is the accepted enforcement layer**, and what "accepted" names is a real layered control, not a
+promise — `assertMayMerge` (`we:scripts/lib/pr-merge-gate.mjs`) is the sole `gh pr merge` chokepoint and throws
+for any caller that is not the drain unless `WE_MERGE_BREAK_GLASS=1`, which logs loudly on every use;
+`withNumberingLock` / `withLandWriteLock` (`we:scripts/readiness/drain-lock.mjs`) share a key so a merge write
+and the numbering step stay mutually exclusive; and `duplicateBornAs` / `strandedHashesOnMain`
+(`we:scripts/check-standards-rules.mjs`) are a build-time catch net that surfaces the artifact an out-of-band
+write leaves behind — a duplicate or un-numbered hash — even if the live gate were skipped.
+
+**Read the ladder as a dimension, not a verdict.** Rung 2 is **not turned on**; it was not weighed and lost.
+The operator's framing at ratification, which is the ratified one: enforcement level is a **configurable
+dimension** with a safe default, per [#config-extends-platform-default](#config-extends-platform-default) —
+Rung 2 is a selectable flavor blocked on a *prerequisite*, not on merit. The mechanism genuinely exists
+(Repository Rulesets carry a `bypass_actors` list and are available on GitHub Free for **public personal**
+repos, which this repo is — the older "personal repos cannot do this" reading was too broad, and refers to the
+org-only classic `restrictions` field). What is missing is the **actor**: this repo has exactly one
+collaborator, and the drain's merges ride that same human credential, so there is nothing to name that is not
+the human.
+
+**What stays refused today, so the amendment is not a back door.** Flipping `enforce_admins` now either no-ops
+(an admin acting outside the disciplined scripts is still an admin, allow-listed or not) or blocks the human's
+own direct-`main` path that the Rung 1 / Rung 3 design depends on — and it would regress **#2152** (resolved
+2026-07-02), which set `enforce_admins: false` deliberately to keep the `--fallback-git` and
+`WE_MERGE_BREAK_GLASS` paths working. **Revisit trigger:** a distinct bot GitHub principal is minted for the
+drain (Rung 2's own stated prerequisite — an App installation or machine-user PAT wired into its `gh` auth), or
+a second human writer joins (Rung 3). Neither holds today. The declared-rung knob and the drift check that
+keeps the declaration honest are build **#3532**.
+
 **Lineage:** #1996 (ratified 2026-06-30; report `we:reports/2026-06-30-pr-flow-rollout-mechanism.md`; research
 topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1+4). Implements
 [#1985 Rung 2](#non-destructive-closeout-prflow); builds on the #1933 clone model + #1995 push-retry; composes
@@ -4106,6 +4181,134 @@ then [flip `we:scripts/guard-bash.mjs` to a fail-closed allow-list](/backlog/349
 narrower, already-ratified dispatched-agent case this fork generalizes) and
 [#operations-declared-once-callers-generated](#operations-declared-once-callers-generated) (`#3029`, the
 engine the closing catalog builds onto).
+
+---
+
+### Build-brief discipline: name edge-cases, require integration tests, forbid overclaiming — caught by a deterministic proposer gap AND a build-time habit, not a human re-read {#build-brief-discipline}
+
+**Every delegated build brief — the backlog item body a build lane implements to spec — must (1) name the
+edge-cases it wants handled or explicitly rejected, (2) require an integration/wiring test and not only a
+unit test, and (3) never claim to "close" something the slice does not close end-to-end (whether that claim
+lives in the body's prose or in the item's own title).** This closed the root cause traced from the
+UI-Fidelity foundation PRs (#2805/#2802, PRs #951/#952, both ACCEPT-WITH-NITS): the build agents built
+faithfully to spec, but the spec itself under-specified the edge-cases to reject, asked for tests without
+naming which kind, and echoed a slice title ("closes the data-layer dodge") as a scope claim it hadn't
+earned. The nits were the brief's gaps, reproduced faithfully — no amount of build-time care fixes a spec
+that never named the case.
+
+**Enforcement is two-sided — an authoring-time gate plus a build-time habit, not one mechanism doing both
+jobs.** `we:scripts/readiness/proposer.mjs` carries the deterministic half: its existing
+`selectProposalCandidates` already flags a decided-but-thin item on two structural proxies — missing
+acceptance criteria, missing a concrete file path — and drafts (never auto-applies) candidate fixes. This
+statute adds four more proxies to the same pure, quarantined engine, same conservative bias throughout (a
+missed real gap only means the human isn't nudged to add one; it never blocks a build), same
+never-splices-prose boundary:
+
+- `edge-cases` — the body names no edge-case to handle or explicitly reject.
+- `integration-tests` — the body's testing language never rises above "unit test" (also accepts
+  "integration"/"wiring"/"end-to-end"/"e2e" as satisfying synonyms).
+- `overclaim-scope` — the BODY's prose claims to "close" something without demonstrating it end-to-end in
+  the same paragraph as the claim (excludes the bare verb "close", the "closes over" JS-closure idiom, and
+  a GitHub-style "closes #123" auto-link — none of those are a prose scope claim).
+- `overclaim-title` — the item's own TITLE claims full closure ("closes"/"fixes"/"resolves"/"solves") while
+  the item is a slice of a parent — the exact "closes the data-layer dodge" shape from the diagnosis above,
+  independent of whatever the body says. A standalone item (no parent) claiming its own closure is not a
+  slice-vs-whole mismatch and is not flagged.
+
+A readiness-time gate cannot rewrite an already-thin upstream spec, so the build-time half lives in the
+delegated-agent templates themselves (`we:skills-src/conveyor/delivery-agent-brief.md`,
+`fix-agent-brief.md`, `fix-agent-ci-brief.md`) as a standing instruction to the executing agent: name the
+concrete edge-cases yourself when the spec under-specifies them, cover the change with an
+integration/wiring test exercising the real call path, and never echo a title or slice name back as an
+earned "closes X" claim.
+
+**Lineage:** #2819 (traced from #2805/#2802's ACCEPT-WITH-NITS foundation PRs). Fixes #2563 (advisory
+care-level / convergence) — the warm-lane-convergence half of that fix is the pre-existing `/converge` step
+already in `delivery-agent-brief.md` (#2971/#2969); this statute closes the remaining root cause (the
+under-specified brief itself). Reuses the spec-gap proposer #252 and its quarantine-from-`check:readiness`
+boundary. Reflected in `we:scripts/readiness/proposer.mjs` (the four detectors above) and in all three
+conveyor build-brief templates named above — the delivery-agent brief applies this lens both when
+scaffolding a new leftover-work item and to its own current build, and the fix-agent briefs apply it to a
+repair. Composes with [#deterministic-core-thin-judgment](#deterministic-core-thin-judgment) (the gap
+detection is script-decidable; drafting a fix and accepting it stay human/model judgment).
+
+---
+
+### A parked PR's real merge conflict is resolved by dispatching an agent through the existing bounce+fix pipeline — never a bespoke script, never a second dispatcher {#parked-pr-conflict-dispatched-not-scripted}
+
+**Ratified 2026-09-06** — per the operator's explicit instruction to ratify this card ("ratified"); all four
+forks accepted as the prepared card's own bolded recommended defaults, no alternative picked, no amendment
+beyond what each fork's own prepared reasoning (a skeptic pass and an independent two-confusion screen, both
+already folded into the card) already settled. `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (`#3494`)
+already detects a parked PR drifting into a real `CONFLICTING` state and refused to auto-resolve it — correctly,
+for a deterministic script with no way to choose which side of an overlapping hunk wins. Dispatching a real
+*agent* at the same conflict is a different, lower-risk shape: the result still lands through the identical
+independent-review gate `#3494` itself protects. Four clauses:
+
+1. **Fork 1 — dispatch prefers resuming the PR's original builder session, through the ONE declared spawn
+   implementation, gated on a build-time probe.** An opt-in `resumeSessionId` branch lives INSIDE the existing
+   `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` (never a second spawn path — per
+   [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation)). The
+   session id is read from the PR's own `authored-by-actor` body stamp and looked up in
+   `claude agents --json --all`; if found, the dispatcher attempts `claude --bg --resume <id>` and compares the
+   id the CLI actually resumes under against the id requested — a mismatch means the CLI silently forked a copy,
+   which is `claude stop`-ped and the dispatch falls back to fresh. **This fork's build owed a real probe, not an
+   assumption**, given `#3331`'s own open, adjacent finding that `--bg` discards a request-side `--session-id`.
+   The probe ran live (CLI 2.1.263, 2026-09-06) and found: `claude --bg --resume <id>` genuinely continues the
+   named session with NEW work injected into the SAME context (a second prompt sent after the first had finished
+   produced a fresh reply, with both turns present in the transcript) — a real resume, not a mere re-attach to
+   old output — but **only when no other flag accompanies `--resume`**. Passing `-n`, `--model`,
+   `--append-system-prompt-file`, or any other flag alongside `--resume` makes the CLI fork an unrelated copy
+   under a fresh id instead of continuing the named session, every time it was tried, regardless of whether the
+   original session was still live. The build therefore issues a bare `['--bg', '--resume', <id>, <prompt>]` for
+   the resume attempt (no `-n`, no system-prompt file, no extra args) and relies on the id-mismatch check named
+   above to catch every fork this causes — both the "session already running" fork and the "flags differed" fork
+   are the same observable failure and the same recovery.
+2. **Fork 2 — scope is every parked PR the existing conflict-watch predicate already targets, including
+   `review:human`, except a statute-tier hunk.** No blanket `review:human` carve-out: the fix-agent brief already
+   never touches that label for any reason, so a merge conflict is no more dangerous to dispatch at than an
+   ordinary reviewer finding on DISPATCH-ELIGIBILITY grounds. The one real exception is by file CONTENT, not by
+   PR label — a conflict whose overlapping hunk touches a declarative-leash or statute-tier path
+   (`we:scripts/lib/review-escalation.mjs#isDeclarativeLeashPath` / `#isStatutePath`) routes straight to a human
+   stand-down with no dispatch attempt at all, because choosing which side of that hunk wins is drafting
+   principle content, not ordinary code.
+3. **Fork 3 — retry/escalation reuses the existing durable rearm cap and `stand-down.mjs`, with one named brief
+   gap closed.** No dedicated conflict-retry counter: once a conflict is posted as a `review:changes` bounce
+   (Fork 4), it is an ordinary bounced PR to `we:scripts/conveyor/reconcile-core.mjs`, sharing ONE cap
+   (`countRearmComments` against `NEGOTIATION_ROUND_CAP`) across every bounce cause — splitting the counter would
+   silently raise the total unsupervised-repair ceiling for a PR that hits both a conflict and an ordinary
+   finding, the opposite of what the cap exists to prevent. The brief gap this fork's build closed: the
+   fix-agent brief's AUTOMATIC dispatch path only ever posted a completion record
+   (`operations/completion-cli.mjs report --outcome=escalated-conflict`), never the durable
+   `stand-down.mjs --reason=conflict` PR comment the MANUAL `/finish` path already posts — so an auto-dispatched
+   agent that gave up on a conflict was silently re-dispatched at the same unresolved conflict next tick, bounded
+   only by the 5-attempt cap rather than the terminal stand-down exit. The brief now posts the same stand-down
+   call on both paths.
+4. **Fork 4 — the dispatch mechanism is the existing bounce+fix-dispatch pipeline, with a broadened shared
+   banner, never a second dispatcher.** No new, parallel conflict-dispatch pass: when
+   `parked-pr-conflict-watch.mjs` detects a fresh conflict (outside Fork 2's statute-tier exception), it posts
+   the conflict as a `review:changes` bounce via `we:scripts/conveyor/reconcile-finding.mjs` — the exact shape
+   already built for "a mechanical pass found this PR conflicts with a decision made elsewhere." That flips
+   `classifyPr`'s phase to `bounced`, which the EXISTING `reconcile-core.mjs`/`reconcile-fix-dispatch.mjs` already
+   pick up and dispatch against, through the SAME `fix-agent-brief.md`. Two independent dispatchers that could
+   both fire on one PR is the exact double-dispatch hazard `#3416` already found and fixed once; funnelling every
+   "this PR needs a fix agent" decision through one pipeline is the same one-implementation principle
+   [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) already
+   states one layer up. The one wording fix this fork's build owed: `reconcile-finding.mjs`'s shared banner was
+   worded specifically around a semantic/sequencing conflict (its own motivating incident); it is broadened to
+   also name a raw git merge conflict against `main`, rather than forking a second, near-identical banner.
+
+**What this ruling does not settle.** Whether an ORDINARY (non-conflict) `review:changes` fix should also prefer
+resuming its original builder is a real, separate, larger question this item does not answer — the new
+`resumeSessionId` parameter defaults OFF for every existing caller and is turned on only for the new
+conflict-triggered call site.
+
+**Lineage:** ratified via `#3544` (2026-09-06), filed under the background mechanical dispatcher epic `#3383`.
+Full reasoning, prior-art survey, the skeptic pass and the two-confusion screen:
+[#3544](/backlog/3544-automate-merge-conflict-resolution-on-parked-prs-dispatch-an/), research topic
+[parked-pr-conflict-auto-resolution](/reports/2026-09-06-parked-pr-conflict-auto-resolution-research/). Composes
+with [#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation) (the
+one-spawn-implementation statute this item's Fork 1 and Fork 4 both implement within, not alongside).
 
 ---
 

@@ -98,6 +98,48 @@ exactly like Fork 1(a)'s PROGRAM semantics, while sidestepping the statute colli
 this as **Fork 1(d)** below since research reshaping the fork set is expected, not a scope violation of
 the parent split.
 
+## Ruled — 2026-09-06, operator: the fork dissolves
+
+**Not (a), (b), (c) or (d).** The operator ruled that the levels cannot be locked in at all: the tier count is
+an **open number configured per project**, each level carrying **its own attributes** — including its rollup
+basis. Web Everything ships **presets**, and picks the one best for its own constellation **on merit**, as a
+separate and smaller call.
+
+This is `#config-extends-platform-default` applied: *a concern with more than one legitimate end-state is a
+configurable strategy dimension, never a baked mechanism.* All three bases below — points-rollup,
+bet-progress, outcome-metrics — are legitimate end-states. So they move from rival branches to
+**Supported by default**, and Fork 1 is dissolved rather than answered.
+
+**Two findings support the reframe, and both were verified against the tree:**
+
+- **#2690 already said N levels.** Its title is *generalize the rollup tree to N levels* and its body reads
+  *"a higher tier is just another indent + rollup level."* This card narrowed that to naming **the one** tier
+  above feature — the narrowing was the mis-framing, and the ruling restores #2690's own shape.
+- **The realization is already ratified.** `#config-extends-platform-default` puts defaults in *a project
+  config that extends a fully-defined platform default (flavors)* with the *core registry itself
+  default-less*, and #1662 states that **an open-set dimension *is* a `CustomRegistry` subclass** with
+  per-dimension storage. An open number of levels is exactly an open-set dimension; no new mechanism is
+  minted.
+
+**The one objection, and how the ruling answers it.** This card's fork-existence justification argued that
+exactly one basis must be canonical, because a node exposing two would force *"the renderer to branch per
+tier"* — the new visual language #2690 exists to avoid. That objection holds against *hard-coded* per-tier
+special-casing, and it does **not** reach the config model: the basis becomes a **declared per-level field**,
+so the renderer reads data through one code path rather than carrying N cases. The distinction is load-bearing
+and belongs in the build's acceptance — a renderer that grows a `switch` on tier name has re-introduced exactly
+what #2690 forbids.
+
+**One constraint survives the dissolution.** The lexical collision with the ratified
+`we:docs/agent/backlog-workflow.md#program-definition` does not go away — it moves. `Program` is now a
+*preset name* rather than a `kind` enum value, and a preset that ships under that word still collides with the
+statute's term. The presets must name around it.
+
+Carved: **#3516** (the open-set level dimension + per-level attributes) and **#3517** (the shipped
+preset flavors, blocked on it). Web Everything's own selection stays with the operator, on merit.
+
+*(The fork below is retained as the record of what was considered — its options are now the Supported-by-default
+set, not rival branches.)*
+
 ## Fork 1 — rollup basis (and name) for the tier above feature
 
 **Fork-existence justification:** exactly one aggregation basis can be the tier's canonical
@@ -109,14 +151,16 @@ language the parent story is written to avoid. The branches are not composable a
 level, so this is a real either/or, not a "support both."
 
 - **(a) PROGRAM — points-rollup.** A delivery grouping of features; rolls up the identical unit every
-  lower tier already rolls up (`size`/points). Reuses `throughput()`/`rollUp()` in
-  `we:scripts/readiness/velocity-metrics.mjs:122-149,235` verbatim — no new aggregation primitive. Matches
-  SAFe's Program/ART semantics. **Cost:** collides lexically with the ratified
+  lower tier already rolls up (`size`/points). The tier reports **the same unit every lower tier already reports**, so it
+  composes with the velocity-derived forecast rather than needing a parallel one — the aggregation primitive
+  it needs is `throughput()`/`rollUp()` in `we:scripts/readiness/velocity-metrics.mjs:122-149,235`, already the
+  canonical one. Matches SAFe's Program/ART semantics. **Cost:** collides lexically with the ratified
   `we:docs/agent/backlog-workflow.md#program-definition` "Program" (see statute-overlap check above) if `PROGRAM` is
   also chosen as the `kind` enum name.
 - **(b) INITIATIVE — bespoke bet-progress rollup.** A time-boxed bet; needs its own "how much of this bet
-  is done" measure, which the item correctly notes may or may not be points — that measure does not exist
-  yet and is new scope (a primitive story of its own, the same shape #2718 was for forecast). **Benefit:**
+  is done" measure, which the item correctly notes may or may not be points. **Merit cost:** a bespoke measure
+  is not derivable from throughput, so the tier's number stops composing with the velocity-derived forecast —
+  the same discontinuity (c) carries, in a milder form. **Benefit:**
   the label is lexically uncontested (see above).
 - **(c) OKR OBJECTIVE — outcome-metrics rollup.** An outcome the features serve; rolls up outcome-metrics
   via a weighted-contribution model (per Viva Goals/Asana Goals prior art — contributions summing to
@@ -212,7 +256,20 @@ findings are folded in above, not merely asserted):
 No attack found grounds to prefer (b) or (c) as the *default* — both still require inventing a new
 aggregation primitive with no present consumer.
 
-**Screen:** clear. Two-confusion pass, applied directly (agent dispatch unavailable, same capacity
+**Screen (fresh-context, 2026-09-06): clear.** Re-run by an agent that had not seen the authoring session,
+replacing the earlier self-applied pass. On (1) it first settled the right consumer boundary — not WE↔FUI (no
+intent or block is in play) but the **backlog data model and its ratified vocabulary** against its
+renderers/readers — and found the fork rules on two things squarely model-side: which field the tier exposes
+upward, and which word becomes the `kind` enum value and the term in statute prose. On (2) it ran the
+free-to-build strip and found merit surviving: (a)/(d) make the tier's number the same unit every lower tier
+reports so it composes with the velocity-derived forecast, while (c) is a hand-authored weighted-contribution
+number answering a different question — composability, not price. It noted the per-branch bullets still carried
+effort phrasing that the *not-a-prioritization* rule strips even inside a legitimate fork; that wording is now
+re-expressed on merit axes above. Worth recording: those phrasings (*"no new aggregation primitive"*, *"new
+scope"*) are **not** on `check:health` G4's tell-list, so the keyword scan never saw them — a live example of
+effort dodging the list, which is why the fresh-context screen is not optional.
+
+*(Superseded — the original self-applied note: Two-confusion pass, applied directly (agent dispatch unavailable, same capacity
 constraint as above): (1) this is not an implementation detail invisible across a WE↔FUI-style boundary —
 it is a **data-contract / vocabulary** choice that determines what field(s) a future
 `kind: program`/`initiative`/`objective` node exposes and what word appears in
@@ -222,7 +279,7 @@ four branches "free to build and instantly maintained," a real merit difference 
 composes with the shipped velocity/forecast primitives with zero adaptation and matches the console's
 existing unit system end-to-end, while outcome-metric rollup is a structurally different,
 honestly-incomparable-to-points measure — this is not prioritization in fork costume, it is an actual
-data-shape fork.
+data-shape fork.)*
 
 **Skeptic (fresh-context, 2026-08-16):** Independent four-axis re-run by a throwaway agent with no role
 in authoring these forks (per `we:docs/agent/backlog-workflow.md:421` — the original pass above was run

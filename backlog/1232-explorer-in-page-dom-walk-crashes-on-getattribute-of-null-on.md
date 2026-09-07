@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
-graduatedTo: "fui:tools/explorer/playwrightDriver.ts"
+graduatedTo: "plateau:tools/explorer/playwrightDriver.ts"
 crossRef: { url: /backlog/1219-explorer-cli-npm-script-run-the-autonomous-stress-test-gate-/, label: "#1219 explorer CLI — surfaced this while smoke-testing the gate" }
 tags: [fui-devtool, exploratory-testing, bug]
 ---

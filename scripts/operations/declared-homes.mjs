@@ -29,6 +29,12 @@
  *     relationship at all, and reading it as one is how this map would fill up with false entries.
  *   - `gate-health`, `explore`, `mutation-check` and `suggest-next` had no raw CLI to begin with.
  *
+ * `resolve` and `scaffold` WERE absent for a different reason — nobody added them — and that gap was measured
+ * on 2026-09-06: the map held 5 entries against 17 operations, so the scan's only findings were four
+ * `gap-sweep-status` lines while the two highest-traffic bypasses (60 raw calls between them, per the
+ * operations' own headers) were invisible to it. A gate that can only see a third of its subject reports a
+ * clean bill for the rest. Both are now entered, on their own headers' evidence.
+ *
  * ── A CORRECTION TO #3224'S OWN PREMISE ─────────────────────────────────────────────────────────────────────
  *
  * The card motivates the gate with "14 skills instruct `we:scripts/lane-pool.mjs` while 0 instruct
@@ -75,4 +81,33 @@ export const DECLARED_HOMES = Object.freeze({
   // `gap-sweep-status` SHELLS the home and classifies its fixed text output — its own header states the
   // relationship outright, same as `verify` above. No subcommand: the CLI takes flags only.
   'gap-sweep-status': Object.freeze(['we:scripts/gap-sweep-status.mjs']),
+
+  // `resolve` and `scaffold` — added 2026-09-06, and the delay is the point. Both were absent while the map
+  // held five entries against seventeen operations, so the scan could not fire for either; these two are the
+  // highest-traffic bypasses in the repo BY THE OPERATIONS' OWN MEASUREMENTS, which is exactly the substantiation
+  // bar this file sets ("ONLY ENTRIES SUBSTANTIATED BY THE OPERATION'S OWN HEADER" — no guessing).
+  //
+  // Both are NON-DELEGATING, and that is what separates them from the `claim` negative control above.
+  // `we:scripts/backlog.mjs` imports `operations/claim.mjs` and routes `claim` through `claimViaOperation`,
+  // so naming that home names the declared layer. It imports neither `operations/resolve.mjs` nor
+  // `operations/scaffold.mjs`, so the raw verbs run their own path and skip the declaration's guards outright.
+  //
+  // `resolve` (#911/#658/#2803): its header records "a 1,786-call session audit on 2026-08-21 found 15 raw
+  // `backlog.mjs resolve` calls and 0 through any operation, because there was none to call". The four guards
+  // a raw call skips are wrong-status, an epic with open children, an uncodified decision, and undeclared
+  // presentation drift. File-granular, like `claim`: only the `resolve` verb is declared over, so the entry
+  // cannot condemn every other `backlog.mjs` line in every skill.
+  //
+  // BOTH ENTRIES REPORT CLEAN TODAY, and that is the honest reason to add them rather than an argument against
+  // it. The scanned skills already instruct `run.mjs` for both verbs; the remaining raw mentions are prose
+  // CONTRASTS of flag spelling, which the scan correctly ignores because `HOME_MENTION` matches an invocation
+  // (`node <path>`) and not a bare reference. So these entries buy REGRESSION coverage, not a backlog of
+  // findings — the map went from 5 of 17 operations to 7, and the two highest-traffic verbs moved from
+  // unwatched to watched-and-clean. An unwatched verb that happens to be correct is indistinguishable from one
+  // that is not, which is the whole reason this map exists.
+  resolve: Object.freeze(['we:scripts/backlog.mjs resolve']),
+
+  // `scaffold`: its header counts "45 raw `backlog.mjs scaffold` calls — the single most-invoked", the largest
+  // raw-verb total measured. Same file-granular shape and the same reason.
+  scaffold: Object.freeze(['we:scripts/backlog.mjs scaffold']),
 });

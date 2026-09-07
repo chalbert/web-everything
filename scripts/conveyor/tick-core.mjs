@@ -248,6 +248,43 @@ function clearedQueueNums(queue) {
   return new Set((Array.isArray(queue) ? queue : []).filter((r) => r?.buildQueued).map((r) => normNum(r.num)));
 }
 
+/** The grammar a BUILD dispatch's session slug follows ({@link sessionSlugFor} in `../operations/dispatch-lane.mjs`
+ *  with `kind: 'build'`: `conveyor-<num><attemptTag?>`). MIRRORED, not imported — same reasoning
+ *  `../operations/dispatch-lane.mjs`'s own header gives for mirroring rather than importing across the
+ *  conveyor/operations boundary: importing here would pull the operations module into the pure tick core's graph.
+ *  The agreement is asserted by a test instead (`__tests__/tick-core.test.mjs`, cross-checked against
+ *  `sessionSlugFor`'s own output). Only the BUILD kind matches — `fix-`, `prepare-`, `prepare-decision-`, and
+ *  `ci-heal-` sessions are deliberately excluded, since conflating them would durably-guard the wrong loop's num. */
+const BUILD_SESSION_RE = /^conveyor-(\d+)[a-z]?$/i;
+
+/**
+ * #3403 — THE DURABLE FLOOR for the in-flight BUILD guard. `bookkeeping.buildGuards` is SESSION-EPHEMERAL
+ * (SKILL §5, this file's own header): a supervisor crash-restart (`../../skills-src/conveyor/supervisor.mjs`)
+ * wipes it, and the very next tick would otherwise see a spawned-but-not-yet-claimed build as never-dispatched
+ * and re-launch it — reopening the double-dispatch `#3177` already reproduced live, via the new automatic-
+ * restart path. This mirrors the fix/ci-heal retry-cap's OWN restart-surviving floor (`prRearmCounts`/
+ * `prCiHealCounts`, #2643/#2666): read a fact from the GROUND TRUTH each tick — here, whether the OS session
+ * the dispatch spawned is still alive — rather than trusting only the in-process TTL countdown. Pure: given the
+ * live-session NAMES (the IO shell's one `claude agents --json` read, {@link defaultListAgents} in
+ * `../operations/dispatch-lane-io.mjs`), extract every num with a live BUILD session. A session merely being
+ * LISTED counts as durable-live regardless of `pid`/`state` ambiguity (unlike `reconcile-core.mjs`'s liveness
+ * refusal, which must tell "alive" apart from "unknown" to avoid a WRONG dispatch): here the failure mode this
+ * guards against is a double-dispatch, so erring toward "still guarded" a little longer than strictly necessary
+ * is the safe direction — once the OS session actually exits, `claude agents --json` stops listing it and this
+ * floor clears on its own, no TTL of its own required.
+ * @param {Array<{name?:string}>|Array<string>} sessions - `claude agents --json` rows, or plain name strings.
+ * @returns {string[]} normalized nums with a live BUILD session.
+ */
+export function durableBuildNums(sessions) {
+  const out = [];
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    const name = typeof s === 'string' ? s : s?.name;
+    const m = BUILD_SESSION_RE.exec(String(name ?? ''));
+    if (m) out.push(normNum(m[1]));
+  }
+  return out;
+}
+
 /**
  * RETIRE the in-flight BUILD guard entries (SKILL §2 — three ways). Given the live build guards and the tick's
  * read, split them into the entries that stay LIVE and the entries that RETIRE (each with its reason). Pure.
@@ -746,7 +783,14 @@ export function routeWatcherExit(code, labels = []) {
  *   • infra — `state.infraBlocked` count (only when non-empty).
  * @returns {string}
  */
-export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
+/**
+ * The status line's own per-tick tallies, factored out of {@link buildStatusLine} so a caller that needs the
+ * NUMBERS (not the rendered string) — {@link planTick} attaches this to `decisions.counts` for #3398's
+ * supervisor-alerting "idle with a non-empty queue" detector — never has to parse the line's text back apart.
+ * Same inputs, same tallies `buildStatusLine` renders; this is the one place that counts them. Pure.
+ * @returns {{ building: number, preparing: number, fixing: number, healing: number, queued: number, parked: number, verdict: 'ok'|'warn' }}
+ */
+export function computeTickCounts({ queue = [], lanes = [], prs = [], health = {}, liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
   const prepareNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const buildGuardNums = new Set((Array.isArray(liveBuildGuards) ? liveBuildGuards : []).map((g) => normNum(g.num)));
   // Active build lanes = leased lanes whose item is NOT a live prepare (a prepare also leases a lane).
@@ -767,7 +811,14 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
   const fixing = (Array.isArray(liveFixGuards) ? liveFixGuards : []).length;
   const healing = (Array.isArray(liveCiHealGuards) ? liveCiHealGuards : []).length;
   const verdict = health?.verdict === 'warn' ? 'warn' : 'ok';
-  let line = `conveyor · ${building.size} building · ${prepareNums.size} preparing · ${fixing} fixing · ${healing} healing · ${queued} queued · ${parked.size} parked · health ${verdict}`;
+  return { building: building.size, preparing: prepareNums.size, fixing, healing, queued, parked: parked.size, verdict };
+}
+
+export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {}, infraBlocked = [], liveBuildGuards = [], livePrepareGuards = [], liveFixGuards = [], liveCiHealGuards = [], launchedNums = [] } = {}) {
+  const { building, preparing, fixing, healing, queued, parked, verdict } = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  });
+  let line = `conveyor · ${building} building · ${preparing} preparing · ${fixing} fixing · ${healing} healing · ${queued} queued · ${parked} parked · health ${verdict}`;
   const infra = (Array.isArray(infraBlocked) ? infraBlocked : []).length;
   if (infra) line += ` · ${infra} infra-blocked`;
   if (verdict === 'warn') {
@@ -796,12 +847,13 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   signals?: { returnedBuildNums?:Array<*> },  // async events the shell folds in (Agent returns)
  *   prRearmCounts?: object,              // DURABLE per-PR re-arm-comment counts { [pr]: n } — the restart-surviving retry-cap floor (#2643); the IO shell derives it via `countRearmComments`
  *   admission?: { cap?:number, waiting?:Array<{owner:string, lane?:*, num?:*, requestedAt?:string}> },  // #3461 — the heavy-command admission-queue `status` read; each `waiting` entry surfaces as a `waiting-for-capacity` note
+ *   liveAgentSessions?: Array<{name?:string}>|Array<string>,  // #3403 — the restart-surviving BUILD-guard floor: `claude agents --json` rows (or plain names), fed through {@link durableBuildNums}
  *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -836,10 +888,55 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const ciHeal = retireCiHealGuards(bookkeeping.ciHealGuards, { prs, tick, ttlTicks: cfg.ciHealTtlTicks });
   const ciHealAttempts = clearTerminalCiHealAttempts(bookkeeping.ciHealAttempts, prs);
 
+  // 1b. #3403 — the DURABLE build-guard floor. `build.live` alone is only the in-session bookkeeping, wiped by
+  //     a supervisor crash-restart; union in a synthetic guard for every num a live BUILD session (`conveyor-<num>`)
+  //     is still reporting, so a restart can never re-launch an already-spawned build just because its in-memory
+  //     guard entry is gone. `lane: null` — the durable floor only knows the NUM is live, never re-derives which
+  //     lane it landed on — so it suppresses by num only (filterLaunches' lane exclusion never fires on `null`).
+  //
+  //     STICKY `spawnedTick` (found live-firing the prototype, epic #3383). This block used to re-stamp
+  //     `spawnedTick: tick` — the CURRENT tick — every time a num was (re)synthesized here, so its age never
+  //     advanced: the moment `retireBuildGuards`' own TTL dropped a stale entry from `build.live`, this block
+  //     re-added the SAME num on the SAME tick with a freshly-reset spawnedTick, forever. `claude agents --json`
+  //     can keep listing a session well after it actually exited (the same staleness #3454's fix-guard already
+  //     has to tolerate on dispatch-lane's pre-flight check) — with no way for its age to ever reach `ttlTicks`,
+  //     that alone pinned a phantom entry in `buildGuardNums` permanently, for as long as the stale listing
+  //     persisted. Live evidence: a 09-03 restart of `wev-scratch-dispatcher-4` showed `building` stuck at
+  //     11-15 for 270+ consecutive ticks against 2 genuinely leased lanes. Reusing the PRIOR tick's own durable
+  //     entry for the same num (found in `bookkeeping.buildGuards`, marked by `lane == null`) keeps `spawnedTick`
+  //     pinned to when the num was FIRST seen durable-live, so its age finally grows tick over tick.
+  const priorDurableSpawnedTick = new Map(
+    (Array.isArray(bookkeeping.buildGuards) ? bookkeeping.buildGuards : [])
+      .filter((g) => g && g.lane == null && g.num != null)
+      .map((g) => [normNum(g.num), g.spawnedTick]),
+  );
+  const durableOnly = durableBuildNums(liveAgentSessions)
+    .filter((num) => !build.live.some((g) => normNum(g.num) === num));
+  const durableBuildGuards = durableOnly.map((num) => ({
+    num,
+    lane: null,
+    spawnedTick: priorDurableSpawnedTick.has(num) ? priorDurableSpawnedTick.get(num) : tick,
+  }));
+  const buildLive = [...build.live, ...durableBuildGuards];
+
   // 2. FILTER plan.launch through the live build guard (num OR lane), then record a guard per new build.
-  const launched = filterLaunches(plan.launch, build.live);
+  const launched = filterLaunches(plan.launch, buildLive);
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, spawnedTick: tick }));
-  const liveBuildGuards = [...build.live, ...newBuildGuards];
+  const liveBuildGuards = [...buildLive, ...newBuildGuards];
+
+  // #3403 FOLLOW-UP — the STATUS LINE's "building" tally must not count a durable-floor entry (`lane: null`)
+  // that has sat unclaimed past the build guard's own TTL (`cfg.buildTtlTicks`, same constant `retireBuildGuards`
+  // already uses for a REAL in-session guard). `liveBuildGuards` itself, `nextState.buildGuards`, and the
+  // double-dispatch suppression in `filterLaunches` above are all left carrying the FULL, un-filtered set — the
+  // durable floor's actual protective job (never re-dispatch a genuinely still-running session, even one
+  // `claude agents --json` never stops listing) stays intact, erring safe exactly as #3403 intended. Only the
+  // DISPLAYED count changes: an aged-out synthetic entry that never converted to a real claim stops being
+  // reported as "building" — the same "only count once genuinely claimed, let the TTL backstop cover a guard
+  // that never gets claimed" shape #3454 already established for the fix guard, applied here to the ONE guard
+  // kind (the durable floor) whose synthesis previously had no TTL of its own to inherit.
+  const countableBuildGuards = liveBuildGuards.filter(
+    (g) => g.lane != null || tick - (Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick) < cfg.buildTtlTicks,
+  );
 
   // 3. The free lanes a prepare/fix may take = free lanes MINUS this tick's build launches MINUS every live
   //    guard's lane (build + prepare + fix) — mirror the build guard's lane exclusion so nothing races a lane.
@@ -961,12 +1058,23 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     });
   }
 
+  // Both status computations read `countableBuildGuards` (see its own comment above), NOT the raw
+  // `liveBuildGuards` — the DISPLAYED "building" tally excludes an aged-out, never-claimed durable-floor entry;
+  // `nextState.buildGuards` below still carries the full `liveBuildGuards`, so the double-dispatch suppression
+  // itself is unaffected.
   const statusLine = buildStatusLine({
-    queue, lanes, prs, health, infraBlocked, liveBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+    queue, lanes, prs, health, infraBlocked, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  });
+  // #3398 — the numeric tallies behind the line above, structured (not re-parsed from `statusLine`'s text) so
+  // the supervisor's out-of-band alerting can tell "queued > 0 yet nothing dispatched, tick after tick" apart
+  // from a genuinely empty queue, over its own JSONL history.
+  const counts = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
 
   return {
     decisions: {
+      counts,
       spawnBuilds: launched.spawn,
       suppressedBuilds: launched.suppressed,
       spawnPrepareScope: prep.scopeSpawns,
@@ -1073,6 +1181,16 @@ async function main(argv) {
     .filter((n) => n != null)
     .sort((a, b) => a - b);
 
+  // #3403 — DURABLE build-guard floor: the live `claude agents --json` listing, fed to `durableBuildNums` inside
+  // `planTick`. Best-effort like the `gh` comment reads below — a failure (no `claude` on PATH, a timeout) leaves
+  // the floor unset (`[]`); the in-session guard + its TTL still cover the common case, exactly as an unset
+  // `prRearmCounts` floor leaves the in-session `fixAttempts` tally as the sole guard.
+  let liveAgentSessions = [];
+  try {
+    const { defaultListAgents } = await import('../operations/dispatch-lane-io.mjs');
+    liveAgentSessions = defaultListAgents({});
+  } catch { /* leave the floor unset — the in-session TTL still guards */ }
+
   // DURABLE retry-cap floor (#2643): for each OPEN `review:changes` PR, read its re-arm comments off the PR and
   // count them (`countRearmComments`). This is the restart-surviving source of truth for "how many times this PR
   // was auto-fixed" — the in-session `fixAttempts` map is gone after a restart, so without this the cap could
@@ -1119,7 +1237,7 @@ async function main(argv) {
     admission = JSON.parse(raw);
   } catch { /* best-effort — see comment above */ }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, config, now: Date.now(), lastOperatorTurn });
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn });
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

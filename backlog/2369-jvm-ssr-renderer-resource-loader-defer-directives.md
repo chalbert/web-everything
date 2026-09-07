@@ -1,9 +1,12 @@
 ---
 kind: task
 parent: "2355"
-status: open
+status: resolved
 blockedBy: ["2368"]
 dateOpened: "2026-07-09"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: "frontierui:plugs/webdirectives/ssr/jvm/ (resource:loader + defer directives, #2369)"
 scope:
   - frontierui:plugs/webdirectives/ssr/jvm/src/main/java/com/frontierui/webdirectives/ssr/JvmServerRenderer.java
   - frontierui:plugs/webdirectives/ssr/jvm/src/test/java/com/frontierui/webdirectives/ssr/ConformanceHarness.java

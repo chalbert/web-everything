@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "we:plugs/core/Plug.ts"
+graduatedTo: "frontierui:plugs/core/Plug.ts"
 tags: []
 ---
 

@@ -7,7 +7,7 @@ blockedBy: ["1582", "1583"]
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
-graduatedTo: "plateau:src/judge-eval/evalHarness.ts"
+graduatedTo: "plateau:packages/tooling/src/judge-eval/evalHarness.ts"
 locus: plateau-app
 tags: [plateau-app, trainable-judge, "1552", "1582", "1583"]
 ---

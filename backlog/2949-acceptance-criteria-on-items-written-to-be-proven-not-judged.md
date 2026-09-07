@@ -3,8 +3,11 @@ bornAs: xctebq6
 kind: story
 size: 3
 parent: "2948"
-status: open
+status: resolved
 dateOpened: "2026-08-06"
+dateStarted: "2026-09-06"
+dateResolved: "2026-09-06"
+graduatedTo: none
 tags: []
 scope:
   - we:docs/agent/backlog-workflow.md

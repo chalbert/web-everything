@@ -11,8 +11,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, isRequiredCheckGreen, isRequiredCheckFailed, classifyPr, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, mapWithConcurrency, fetchPrReadsCached } from '../merge-ai-prs.mjs';
-import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
+import { planResolveOnLand, resolveIdsForLandedPass, latestRequiredCheck, rollupRowKind, collapseRollupToLatestPerName, isRequiredCheckGreen, isRequiredCheckFailed, classifyPr, collectFlagOccurrences, parseNoReviewEscalation, applyEscalationRelief, mapWithConcurrency, fetchPrReadsCached, basisTouchesEngineTier, engineTierForCandidate } from '../merge-ai-prs.mjs';
+import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip, scoreEscalation } from '../lib/review-escalation.mjs';
 import { aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
 
@@ -91,6 +91,17 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       expect(stalePark.staleAcceptance).toBe(true);             // …but it is the #2409 outcome
       expect(applyEscalationRelief(stalePark, { relieved: true }).waive).toBe(false);
     });
+    it('#2412 review-fix — an ENGINE-tier park awaiting redteam:accepted is NEVER waived either', () => {
+      // review:accepted alone, on an engine-tier PR → decideReviewGate parks review:pending with
+      // awaitingIndependentValidator:true. Same applyLabel/humanRequired shape as an ordinary pending park —
+      // the relief valve must key on the flag, not the shape, or it silently defeats the whole requirement.
+      const engineTierPark = decideReviewGate({
+        escalate: true, humanRequired: false, labels: [{ name: REVIEW_LABELS.accepted }], engineTier: true,
+      });
+      expect(engineTierPark.applyLabel).toBe(REVIEW_LABELS.pending); // looks like a pending park…
+      expect(engineTierPark.awaitingIndependentValidator).toBe(true); // …but it is the #2412 outcome
+      expect(applyEscalationRelief(engineTierPark, { relieved: true }).waive).toBe(false);
+    });
   });
 
   describe('a scoped =<pr#> relieves ONE PR while the rest of the pass stays gated', () => {
@@ -137,6 +148,61 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       expect(out[0].waived).toBe(false);
       expect(out[0].applyLabel).toBe(REVIEW_LABELS.human);
     });
+  });
+});
+
+// #1920 round-2 review, finding 1/2 — the drain's ONE call site (`runCli`, `merge-ai-prs.mjs` ~line 4065)
+// computes `engineTier` from the REAL `score.basisFiles` (the same `scoreEscalation` output the
+// blast-radius/gate-self signals already score over, #3317), not a hand-supplied boolean like every other test
+// in this file. Every prior engine-tier test (see `applyEscalationRelief` above, and `gate-invariants.test.mjs`
+// INVARIANT 14) exercises `decideReviewGate`/`isEngineTierPath` directly — none of them ever ran
+// `scoreEscalation`'s own `changedFiles → basisFiles` reduction through `basisTouchesEngineTier` first. This
+// closes that gap: a real `scoreEscalation` result, run through the SAME exported function `runCli` uses.
+describe('the real score.basisFiles → engineTier → decideReviewGate path (#1920 round-2 review, faithful mini of runCli)', () => {
+  // Faithful mini of runCli's own sequence at the call site: score = scoreEscalation(...); engineTier =
+  // basisTouchesEngineTier(score) [the real predicate `engineTierForCandidate` will delegate to once #3493
+  // unblocks]; gate = decideReviewGate({ ...score, labels, engineTier }).
+  const runCandidate = (changedFiles, labels) => {
+    const score = scoreEscalation({ changedFiles, diffLines: 40 });
+    const engineTier = basisTouchesEngineTier(score);
+    const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels, engineTier, acceptedSha: 'abc1234', headSha: 'abc1234' });
+    return { score, engineTier, gate };
+  };
+
+  it('a candidate whose basis includes an ENGINE_FILES member, with only review:accepted, does NOT merge — it parks awaiting redteam:accepted', () => {
+    const { score, engineTier, gate } = runCandidate(['scripts/merge-ai-prs.mjs'], [{ name: REVIEW_LABELS.accepted }]);
+    expect(score.basisFiles).toContain('scripts/merge-ai-prs.mjs'); // sanity: this IS the real scoreEscalation basis
+    expect(engineTier).toBe(true); // the real basisFiles → engineTier reduction, not a hand-supplied boolean
+    expect(gate.action).not.toBe('merge');
+    expect(gate.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(gate.awaitingIndependentValidator).toBe(true);
+  });
+
+  it('the SAME candidate merges once redteam:accepted is ALSO present — both independent verdicts stacked', () => {
+    const { gate } = runCandidate(['scripts/merge-ai-prs.mjs'], [{ name: REVIEW_LABELS.accepted }, { name: REVIEW_LABELS.redteamAccepted }]);
+    expect(gate.action).toBe('merge');
+  });
+
+  it('a candidate whose basis touches NO engine-tier file merges on review:accepted alone, exactly as before #2412', () => {
+    const { score, engineTier, gate } = runCandidate(['docs/README.md', 'src/foo.ts'], [{ name: REVIEW_LABELS.accepted }]);
+    expect(score.basisFiles).not.toContain('scripts/merge-ai-prs.mjs');
+    expect(engineTier).toBe(false);
+    expect(gate.action).toBe('merge');
+  });
+
+  // #3493 (blockedBy #2410) — the sequencing deferral surfaced at the #1920 rebase: main's own resolution of
+  // #2412 deliberately did NOT wire this into production yet (no code-level/daemon-reachable redteam:accepted
+  // writer exists). `engineTierForCandidate` is what `runCli`'s call site ACTUALLY uses today — always `false`,
+  // regardless of what the real predicate above would say — so the drain still merges this exact candidate.
+  it('…but engineTierForCandidate (what runCli ACTUALLY calls today) stays false, so the live drain still merges it (#3493 deferred)', () => {
+    const score = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 40 });
+    const liveEngineTier = engineTierForCandidate(score);
+    expect(liveEngineTier).toBe(false);
+    const gate = decideReviewGate({
+      escalate: score.escalate, humanRequired: score.humanRequired, labels: [{ name: REVIEW_LABELS.accepted }],
+      engineTier: liveEngineTier, acceptedSha: 'abc1234', headSha: 'abc1234',
+    });
+    expect(gate.action).toBe('merge'); // pinned: flipping this requires deliberately updating this test too
   });
 });
 

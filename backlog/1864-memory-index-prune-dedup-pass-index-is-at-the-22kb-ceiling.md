@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
 dateResolved: "2026-06-27"
-graduatedTo: "we:MEMORY.md index trims (deep compaction → #1868)"
+graduatedTo: "we:agent-memory-src/MEMORY.md index trims (deep compaction → #1868)"
 tags: []
 ---
 

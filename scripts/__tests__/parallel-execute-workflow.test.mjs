@@ -20,8 +20,29 @@ const SRC = readFileSync(
 describe('parallel-execute workflow — #2215 in-lane new-item scaffold', () => {
   it('has a SCAFFOLD-IN-LANE path that scaffolds a seeded item in its own clone (born active+owned)', () => {
     expect(SRC).toMatch(/SCAFFOLD-IN-LANE/);
-    expect(SRC).toMatch(/backlog\.mjs scaffold --kind=/);
+    // #xzitlr9 — the dispatcher instructs the DECLARED operation, not the raw home. A generated
+    // instruction bypasses the declared layer exactly as a hand-written one does, so this pins the
+    // operation form AND its camelCase flag spelling (the raw CLI's kebab-case is refused, #3253).
+    expect(SRC).toMatch(/run\.mjs scaffold --kind=/);
+    expect(SRC).not.toMatch(/backlog\.mjs scaffold --kind=/);
+    expect(SRC).toMatch(/--blockedBy=/);
     expect(SRC).toMatch(/--session=\$\{batchSlug\}/); // --session → born active+owned (#670), the claim rides it
+  });
+
+  it('instructs the declared resolve operation, with --ref and camelCase flags (#xzitlr9)', () => {
+    expect(SRC).toMatch(/resolve --ref=\$\{N\}/);
+    expect(SRC).not.toMatch(/backlog\.mjs resolve/);
+    expect(SRC).toMatch(/--graduatedTo=/);
+  });
+
+  it('leaves the pr-land sites raw, but each carries a REASONED exemption marker (#xzitlr9)', () => {
+    // open-pr declares neither manifestFile nor repo, so rewiring these would drop #2387's couple
+    // manifest and break cross-repo PRs. The marker is the sanctioned way to record that.
+    const prLandLines = SRC.split('\n').filter((l) => /node scripts\/pr-land\.mjs/.test(l));
+    expect(prLandLines.length).toBeGreaterThan(0);
+    const markers = SRC.split('\n').filter((l) => /@operation-home-ok: #xzitlr9/.test(l));
+    expect(markers.length).toBe(prLandLines.length);
+    for (const m of markers) expect(m).toMatch(/manifestFile|repo/);
   });
 
   it('branches on a per-item `seed` (new item) vs an existing claimed item', () => {

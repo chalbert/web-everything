@@ -6,7 +6,7 @@ blockedBy: ["1427"]
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
-graduatedTo: "we:webtheme/defaultTokens.ts"
+graduatedTo: "frontierui:webtheme/defaultTokens.ts"
 tags: []
 ---
 

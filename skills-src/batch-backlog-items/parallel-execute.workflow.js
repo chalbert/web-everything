@@ -420,7 +420,7 @@ function laneItemPrompt(it, laneDirs) {
       ? [
           `2. SCAFFOLD-IN-LANE (#2215 — the new item is BORN in this lane and rides its PR; it is NEVER scaffolded`,
           `   on main, so no direct push to main is ever needed). In the WE clone run:`,
-          `   \`node scripts/backlog.mjs scaffold --kind=${seed.kind} --size=${seed.size ?? ''} --title=${JSON.stringify(seed.title || it.slug)}${seed.digest ? ` --digest=${JSON.stringify(seed.digest)}` : ''}${seed.blockedBy && seed.blockedBy.length ? ` --blocked-by=${seed.blockedBy.join(',')}` : ''}${seed.parent ? ` --parent=${seed.parent}` : ''} --session=${batchSlug} --json\``,
+          `   \`node scripts/operations/run.mjs scaffold --kind=${seed.kind} --size=${seed.size ?? ''} --title=${JSON.stringify(seed.title || it.slug)}${seed.digest ? ` --digest=${JSON.stringify(seed.digest)}` : ''}${seed.blockedBy && seed.blockedBy.length ? ` --blockedBy=${seed.blockedBy.join(',')}` : ''}${seed.parent ? ` --parent=${seed.parent}` : ''} --session=${batchSlug} --json\``,
           `   — \`--session\` makes it born active+owned (#670), so the claim already rode with the scaffold. The`,
           `   command prints \`{ "num": <id>, "file": "<NNN>-<slug>.md", … }\`. READ the allocated id and, in EVERY`,
           `   command below, SUBSTITUTE that real number wherever these steps write NUM (do NOT use a shell`,
@@ -449,8 +449,10 @@ function laneItemPrompt(it, laneDirs) {
     `   work. Only if it is genuinely un-fixable here → gate:"red", status:"carried", open NO PR. Impl repos run`,
     `   their own repo's gate in their clone; their final authority is the PR's own required \`test\` check on GitHub.`,
     ``,
-    `5. RESOLVE (only after the WE fast-fail is green). In the WE clone: \`node scripts/backlog.mjs resolve`,
-    `   ${N} [--graduated-to=…] [--codified-to=…]\` (a kind:decision resolve REQUIRES --codified-to, #911).`,
+    `5. RESOLVE (only after the WE fast-fail is green). In the WE clone: \`node scripts/operations/run.mjs`,
+    `   resolve --ref=${N} [--graduatedTo=…] [--codifiedTo=…]\` (a kind:decision resolve REQUIRES --codifiedTo,`,
+    `   #911). The operation spells its flags camelCase where the raw CLI spells them kebab-case, and the`,
+    `   parser is case-sensitive — a kebab spelling is refused as an unknown flag (#3253).`,
     `   Then COMMIT each repo's own files (git add <explicit paths>; NEVER -A; NEVER stage another item's files).`,
     `   Commit message per repo: \`backlog: resolve #${N} — ${it.slug}\`.`,
     ``,
@@ -496,6 +498,7 @@ function laneItemPrompt(it, laneDirs) {
     `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
     `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
     `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
+    // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
     `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`), \`labelApplied\`, and \`held\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
@@ -511,6 +514,7 @@ function laneItemPrompt(it, laneDirs) {
     `     wait you need — never build a self-matching process poll.`,
   );
   for (const r of implRepos) {
+    // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
     lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --no-require-verified --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
   }
   lines.push(
@@ -644,7 +648,9 @@ if (toReconcile.length) {
       `For EACH PR, from its repo's checkout dir:`,
       `1. Read its required-check state — \`gh pr view <pr> --json statusCheckRollup\` (or \`gh pr checks <pr>\`).`,
       `2. If the required \`test\` check is GREEN now: run pr-land in label-on-green mode — WE:`,
+      // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
       `   \`node scripts/pr-land.mjs --ref=<ref> --label-on-green --no-require-verified --json\` (from ${PRIMARY_ROOT}); impl repo <r>:`,
+      // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
       `   \`node scripts/pr-land.mjs --repo=<path> --ref=<ref> --label-on-green --no-require-verified --json\`. This LABELS ready-to-merge`,
       `   and STOPS — it never merges (pure producer) and is idempotent on an already-labelled PR. Record <pr>`,
       `   under \`labelled\`.`,
