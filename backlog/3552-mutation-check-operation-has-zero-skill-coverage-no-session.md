@@ -1,4 +1,5 @@
 ---
+bornAs: x47hwpw
 kind: story
 size: 2
 parent: "3029"
