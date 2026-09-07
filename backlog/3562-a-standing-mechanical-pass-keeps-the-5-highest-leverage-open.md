@@ -82,7 +82,7 @@ A sibling item, also `blockedBy: ["3277"]`, filed the same session: a **permanen
 ## Placement note (2026-09-07)
 
 The Decision Board this item publishes into is an interim WE-side prototype for the conveyor's own
-operational use, not the permanent home for these mechanics. we:backlog/xw6814m tracks generalizing this
+operational use, not the permanent home for these mechanics. we:backlog/3595 tracks generalizing this
 docket (alongside we:backlog/3560's queue view and we:backlog/x7wehz2's ledger) into a real plateau-app
 console feature under the existing Plateau Loop epic (we:backlog/2445/2505), per
 we:docs/agent/platform-decisions.md#constellation-placement.

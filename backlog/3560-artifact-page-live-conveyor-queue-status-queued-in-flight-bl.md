@@ -127,7 +127,7 @@ Both forks decided by the operator; neither is an open question for the build se
 ## Placement note (2026-09-07)
 
 This page is an interim WE-side prototype for the conveyor's own operational use, not the permanent home
-for these mechanics. we:backlog/xw6814m tracks generalizing it (alongside we:backlog/3562's docket and
+for these mechanics. we:backlog/3595 tracks generalizing it (alongside we:backlog/3562's docket and
 we:backlog/x7wehz2's ledger) into a real plateau-app console feature under the existing Plateau Loop epic
 (we:backlog/2445/2505), per we:docs/agent/platform-decisions.md#constellation-placement. Build this page
 as the operational prototype it is; don't treat it as the product-side end-state.

@@ -1,4 +1,5 @@
 ---
+bornAs: xw6814m
 kind: story
 size: 3
 parent: "2505"
@@ -85,7 +86,7 @@ kind of forward note for its then-unlanded sibling, we:backlog/3562).
 ## Cross-references added to the 4 existing Decision Board cards
 
 - we:backlog/3277, we:backlog/3560, we:backlog/3562 — each now carries a short pointer to this item
-  (`xw6814m`, this filing's own bornAs id — swap for the real `#NNN` once JIT-numbered at land) so nobody
+  (`3595`, this filing's own bornAs id — swap for the real `#NNN` once JIT-numbered at land) so nobody
   building the Artifact prototype mistakes it for the permanent home.
 - we:backlog/x7wehz2 (PR #1985) — not editable from this lane (unmerged, on another agent's own lane
   branch); flagged instead via a PR comment on #1985 asking the same cross-reference be added before or
