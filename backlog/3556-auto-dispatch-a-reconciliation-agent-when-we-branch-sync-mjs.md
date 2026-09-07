@@ -1,4 +1,5 @@
 ---
+bornAs: xob5py1
 kind: decision
 parent: "3383"
 status: open
@@ -15,12 +16,12 @@ merge conflict it retries a few times with backoff, then ESCALATES: a durable JS
 (`we:.git/branch-sync-alert.json`), a macOS desktop notification, and a loud banner in its human log — but it
 never dispatches anything to actually fix the conflict. A human has to notice the alert and reconcile by
 hand (exactly what happened live on 2026-09-06/07: the branch drifted 124+ commits behind before anyone
-looked). we:docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted (`#xu2krte`,
+looked). we:docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted (`#3544`,
 ratified 2026-09-06) already settled the analogous question for a PARKED PR that drifts into a conflict:
 dispatch a real agent through the existing bounce+fix pipeline rather than a bespoke script, because the
 agent's output still lands through the same independent-review gate. This item asks whether/how the same
 shift applies to we:scripts/conveyor/branch-sync.mjs's escalation — and finds the answer is "yes, but the
-mechanism cannot be identical," because `#xu2krte`'s whole dispatch path (`we:reconcile-finding.mjs` →
+mechanism cannot be identical," because `#3544`'s whole dispatch path (`we:reconcile-finding.mjs` →
 `review:changes` bounce → `we:reconcile-core.mjs`/`we:reconcile-fix-dispatch.mjs`) is keyed on a PR number and a
 review label; a branch-sync escalation has neither — there is no PR, no reviewer, no comment thread, and
 (per the requester's own framing) no "original builder" session to consider resuming. Four forks below.
@@ -36,13 +37,13 @@ review label; a branch-sync escalation has neither — there is no PR, no review
 
 1. **Fork 1 — dispatch mechanism: the one declared spawn implementation, not a bespoke `spawn()` call.**
    we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv already has an opt-in `resumeSessionId`
-   branch (added for `#xu2krte`) alongside its default fresh-dispatch shape (mint a session id via
+   branch (added for `#3544`) alongside its default fresh-dispatch shape (mint a session id via
    `randomUUID()`, `['--bg', '--session-id', <id>, '-n', <slug>, ..., <prompt>]`, spawned through
    `#defaultSpawnAgent`). we:branch-sync.mjs's escalation path calls this SAME function with NO
    `resumeSessionId` (the requester's own framing: there is no "original builder" concept for a
    branch-wide drift the way there is for a single PR someone specifically authored) — never a second,
    parallel `execFile('claude', …)` call invented inside we:branch-sync.mjs. This is the same
-   one-spawn-implementation statute `#xu2krte`'s Fork 1/Fork 4 both already implement within
+   one-spawn-implementation statute `#3544`'s Fork 1/Fork 4 both already implement within
    ([#conveyor-dispatch-calls-the-declared-operation](/docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)).
 2. **Fork 2 — lane requirement is not actually a new fork; standing doctrine already answers it.**
    The requester's own prompt flagged "should the dispatched agent still need a lane" as a possible open
@@ -55,7 +56,7 @@ review label; a branch-sync escalation has neither — there is no PR, no review
    other dispatched brief already opens with, targeting `origin/lane/mechanical-dispatcher` instead of
    `origin/main` as the branch to reconcile against.
 3. **Fork 3 — the genuinely open fork: retry/cap semantics with no PR to carry a durable count.**
-   `#xu2krte` Fork 3 could reuse we:scripts/conveyor/reconcile-core.mjs's existing
+   `#3544` Fork 3 could reuse we:scripts/conveyor/reconcile-core.mjs's existing
    `NEGOTIATION_ROUND_CAP` (counted via `countRearmComments` against a PR's own comment thread) and
    we:scripts/conveyor/stand-down.mjs's durable `STAND_DOWN_MARKER` PR comment — both PR-comment-based,
    both meaningless for a bare branch with no PR and no reviewer. we:branch-sync.mjs already owns exactly
@@ -93,8 +94,8 @@ key on the existing alert file vs. a new sibling file vs. folding it into `we:.g
 is an implementation detail for the build, not a ruling this decision needs to pin down. Also unsettled:
 whether a SUCCESSFUL auto-dispatched reconciliation should itself post any durable record beyond the
 ordinary git history (a landed commit) — this item takes no position and leaves it to the build's own
-judgment, consistent with how `#xu2krte` left its own analogous implementation details to the build.
+judgment, consistent with how `#3544` left its own analogous implementation details to the build.
 
 **Lineage:** filed under the background mechanical dispatcher epic `#3383`, extending
 [#parked-pr-conflict-dispatched-not-scripted](/docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted)
-(`#xu2krte`) from a PR-scoped conflict to a bare-branch conflict with no PR.
+(`#3544`) from a PR-scoped conflict to a bare-branch conflict with no PR.

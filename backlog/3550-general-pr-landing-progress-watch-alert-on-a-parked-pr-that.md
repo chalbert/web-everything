@@ -40,7 +40,7 @@ own header uses:
 
 - `we:scripts/conveyor/parked-pr-conflict-watch.mjs` (`#xw0odtv`) — fires ONLY on `mergeable === 'CONFLICTING'`.
   A parked PR with no conflict at all, like both incidents above, never touches this pass.
-- `we:scripts/conveyor/duplicate-pr-watch.mjs` (`#xs19sz9`) — fires ONLY when 2+ open PRs currently deliver the
+- `we:scripts/conveyor/duplicate-pr-watch.mjs` (`#3500`) — fires ONLY when 2+ open PRs currently deliver the
   SAME item number. #1928 was never a duplicate. #1939 WAS one, once — but the moment `#1942` closed, this
   pass has nothing left to compare it against; it was never designed to notice a finding it once raised has
   gone stale.
