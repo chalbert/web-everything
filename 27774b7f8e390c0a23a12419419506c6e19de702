@@ -1,1 +1,1 @@
-{"branch":"lane/mechanical-dispatcher","target":"main","checkedAt":"2026-09-07T16:08:16.853Z","ahead":51,"behind":23,"conflict":false,"maxBehind":40,"status":"watch","reason":"23 commits behind — approaching the 40-commit reconciliation ceiling"}
+{"branch":"lane/mechanical-dispatcher","target":"main","checkedAt":"2026-09-07T16:21:34.519Z","ahead":51,"behind":30,"conflict":false,"maxBehind":40,"status":"watch","reason":"30 commits behind — approaching the 40-commit reconciliation ceiling"}
