@@ -35,6 +35,25 @@
  *   • otherwise (disjoint) — assign the next free   → launch { num, lane }     (rank order fills free lanes until
  *     lane; once the free lanes run out              the slots run out).
  *                                                    → held "no free lane"      (disjoint but nowhere to run).
+ *                                                    → held "capacity-cap"      (disjoint, a free lane physically
+ *                                                       exists, but launching it would exceed `maxConcurrentLanes`
+ *                                                       — see below; a DIFFERENT reason from "no free lane" on
+ *                                                       purpose, since the fix differs: raise the cap or wait, vs.
+ *                                                       free a lane).
+ *
+ * CONCURRENCY CEILING (#xupukxa, live incident 2026-09-07 — freeing one lane cascaded into 42 concurrent lane
+ * dispatches, 1-min load average 34.95 on a 12-core host). `maxConcurrentLanes` (default from
+ * {@link ../lib/lane-concurrency.mjs resolveMaxConcurrentLanes}, `WE_MAX_CONCURRENT_LANES` env-overridable) caps
+ * `freeLanes` against the ALREADY-ACTIVE lease count via {@link ../lib/lane-concurrency.mjs capToConcurrency}
+ * BEFORE any assignment: `room = maxConcurrentLanes - leases.length`, so this dispatcher's OWN build launches
+ * never alone exceed the ceiling. A SEPARATE, new admission point from
+ * {@link ./heavy-admission.mjs} (#3461/#3456) — that caps concurrent HEAVY COMMANDS running INSIDE an
+ * already-dispatched lane, never whether a lane is dispatched at all; this caps lane dispatch itself, upstream
+ * of heavy-admission entirely. `tick-core.mjs#planTick` applies the SAME shared cap to its OWN
+ * prepare/fix/ci-heal spawns (against `leases.length` PLUS this tick's admitted build launches), so the two
+ * independent lane-consuming decisions share one budget rather than each maxing out the free-lane pool alone —
+ * see its own header for that half. Defaults to unlimited (`Infinity`) when omitted, so every existing direct
+ * caller of the pure core (tests included) keeps its prior unrestricted behavior unless it opts in.
  *
  * AUTO-PREPARE, NOT A SERIAL FLOOR (the corrected design, ruled 2026-07-22 — Nicolas). An UNSCOPED item (scope
  * ABSENT or EMPTY `[]`) is NEVER dispatched to build — not even alone into an idle pool. Building blind is exactly
@@ -60,6 +79,7 @@
 import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
+import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
 
@@ -109,7 +129,7 @@ import { writeLineSync } from '../lib/write-all-sync.mjs';
  *  it only pauses NEW same-scope dispatch until a fresh sweep clears it. The operator gloss is
  *  {@link BRANCH_DRIFT_BLOCKED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -141,6 +161,12 @@ export const ALREADY_DONE_HINT = 'a merged PR already appears to close this out 
  *  found a conflict/ceiling breach against the SAME scope this item wants to touch; reconcile the branch (or
  *  wait for the next sweep to clear it), then re-dispatch. */
 export const BRANCH_DRIFT_BLOCKED_HINT = 'a dispatched-work branch is unreconciled over this scope — reconcile it, then re-dispatch';
+
+/** The operator-facing gloss for a `capacity-cap` hold (#xupukxa) — surfaced beside the token so a held item
+ *  always tells the operator WHY it differs from `no free lane`: a lane physically exists, but launching it
+ *  would exceed `maxConcurrentLanes`. Nothing to reconcile or clear — either raise `WE_MAX_CONCURRENT_LANES`
+ *  (a deliberate, per-machine judgment call) or wait for an active lane to free up. */
+export const CAPACITY_CAP_HINT = 'a free lane exists but launching it would exceed the concurrent-lane cap — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up';
 
 /**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
@@ -213,6 +239,7 @@ function hasOpenBlockers(item) {
  *   leases: Array<{lane:(string|number), scope:string[]}>,
  *   freeLanes: Array<string|number>,
  *   driftBlockedScope?: string[]|null,
+ *   maxConcurrentLanes?: number,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
@@ -236,17 +263,29 @@ function hasOpenBlockers(item) {
  *                   IO shell's drift check itself fails). A scoped item overlapping this holds
  *                   `branch-drift-blocked`, checked ahead of the lease/rival overlap gates — see
  *                   {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *   • `maxConcurrentLanes` — (#xupukxa) the global lane-dispatch concurrency ceiling; `freeLanes` is trimmed
+ *                   against `leases.length` via {@link ../lib/lane-concurrency.mjs capToConcurrency} before any
+ *                   assignment. Defaults to `Infinity` (unlimited — today's pre-#xupukxa behavior) when
+ *                   omitted; the IO shell resolves a real default via
+ *                   {@link ../lib/lane-concurrency.mjs resolveMaxConcurrentLanes}. An item that would otherwise
+ *                   launch but is trimmed away by this holds `capacity-cap`, distinct from `no free lane`.
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
     .map((l) => ({ lane: l.lane ?? null, scope: normScope(l.scope) }));
-  const free = [...(Array.isArray(freeLanes) ? freeLanes : [])]; // consumed front-to-back, rank order
+  // #xupukxa — trim the free-lane list against the concurrency ceiling BEFORE any assignment, using the
+  // ALREADY-ACTIVE lease count this function already computed above. `overflow` is non-empty exactly when a
+  // physical free lane exists but the ceiling withheld it — the signal that distinguishes `capacity-cap` from
+  // a genuine `no free lane` below.
+  const { admitted, overflow } = capToConcurrency(freeLanes, { activeCount: activeLeases.length, cap: maxConcurrentLanes });
+  const free = [...admitted]; // consumed front-to-back, rank order
+  const capacityLimited = overflow.length > 0;
   const driftScope = normScope(driftBlockedScope); // [] when absent/null — scopesOverlap against [] is always false
 
   const launch = [];
@@ -346,9 +385,11 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope } = {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
       continue;
     }
-    // 7. Disjoint — launch it on the next free lane, or hold for want of one.
+    // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
+    //    instead of `no free lane` when a physical free lane exists but the concurrency ceiling withheld it —
+    //    a DIFFERENT reason on purpose, since the remedy differs (raise the cap / wait vs. free a lane).
     if (free.length === 0) {
-      held.push({ num, reason: 'no free lane' });
+      held.push({ num, reason: capacityLimited ? 'capacity-cap' : 'no free lane' });
       continue;
     }
     const lane = free.shift();
@@ -566,7 +607,9 @@ async function main(argv) {
     }
   }
 
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope });
+  // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
+  const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -587,7 +630,8 @@ async function main(argv) {
   } else {
     log(
       `dispatch plan: ${plan.launch.length} launch · ${plan.held.length} held ` +
-        `(${queue.length} queued · ${leases.length} lease(s) · ${freeLanes.length} free lane(s))`,
+        `(${queue.length} queued · ${leases.length} lease(s) · ${freeLanes.length} free lane(s) · ` +
+        `cap ${maxConcurrentLanes} concurrent lane(s))`,
     );
     for (const l of plan.launch) log(`  ▶ #${l.num} → lane-${l.lane}`);
     for (const h of plan.held) {
@@ -599,6 +643,7 @@ async function main(argv) {
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
+              : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
                 : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
