@@ -20,6 +20,8 @@ import {
   PANEL_LENSES,
   careLevelFromReasons,
   panelRigorFromReasons,
+  MUTATION_PROBE_RULE,
+  MUTATION_PROBE_RULE_TOOL_FREE,
 } from '../lib/review-core.mjs';
 
 describe('parseFlags', () => {
@@ -273,6 +275,33 @@ describe('buildMandateText', () => {
     it('kind lens, diffBasis omitted → no disclosure (unaffected callers)', () => {
       const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0] });
       expect(text).not.toContain('DIFF BASIS');
+    });
+  });
+
+  // #3158 — `toolsAvailable` threads through the `lens`/`validator` kinds (never `editor`, which has no
+  // mutation-probe clause at all) and defaults `false`, matching every existing caller of this CLI's mandate
+  // text being tool-free unless it explicitly says otherwise.
+  describe('#3158 — toolsAvailable (kind: lens/validator)', () => {
+    it('kind lens, toolsAvailable omitted → the tool-free mutation-probe flavour (default)', () => {
+      const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0] });
+      expect(text).toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+      expect(text).not.toContain(MUTATION_PROBE_RULE);
+    });
+
+    it('kind lens, toolsAvailable true → the tool-bearing mutation-probe flavour', () => {
+      const text = buildMandateText({ kind: 'lens', lens: MANDATORY_LENSES[0], toolsAvailable: true });
+      expect(text).toContain(MUTATION_PROBE_RULE);
+      expect(text).not.toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+    });
+
+    it('kind validator, toolsAvailable omitted → no throwaway-clone escape hatch offered', () => {
+      const text = buildMandateText({ kind: 'validator', lens: 'security' });
+      expect(text).not.toMatch(/throwaway `git clone`/);
+    });
+
+    it('kind validator, toolsAvailable true → the throwaway-clone escape hatch IS offered', () => {
+      const text = buildMandateText({ kind: 'validator', lens: 'security', toolsAvailable: true });
+      expect(text).toMatch(/throwaway `git clone`/);
     });
   });
 });

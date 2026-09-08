@@ -693,7 +693,9 @@ function lensPrompt(pr, repo, lens, diff, escalationReason, title, round = 1, ju
     `You are the ${lens} reviewer on the review panel for drain-parked PR #${pr} (repo ${repo})${title ? ` — ${title}` : ''}.`,
     juryFraming,
     roundFraming,
-    `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens} --diffBasis=${diffBasis}`,
+    // #3158 — this juror is a Workflow subagent with real tools (Bash, file-write), not a headless `judgePanel`
+    // seat, so it gets the tool-bearing mutation-probe clause via `--toolsAvailable`.
+    `Get your lens mandate and follow it: run  node scripts/review-core-cli.mjs mandate --lens=${lens} --diffBasis=${diffBasis} --toolsAvailable`,
     escalationReason.length ? `The drain escalated this PR for: ${escalationReason.join('; ')}.` : 'No escalation reason block was present on the PR body.',
     'You review ONLY the diff below + the PR description + the escalation reason. NEVER `git checkout`/`switch`',
     'to the PR branch (#2336) — judge from this diff text alone.',

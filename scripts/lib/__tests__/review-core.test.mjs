@@ -55,6 +55,7 @@ import {
   PROSE_IMPRECISION_RULE,
   GUARANTEE_NEEDS_A_TEST_RULE,
   MUTATION_PROBE_RULE,
+  MUTATION_PROBE_RULE_TOOL_FREE,
   FENCED_DATA_RULE,
   combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
@@ -235,7 +236,20 @@ describe('buildMandate', () => {
     // The seed runs inside the drain's shared primary checkout; it must never move HEAD onto the PR branch.
     const text = buildMandate();
     expect(text).toMatch(/do NOT `git checkout`/);
+  });
+
+  // #3158 — the "clone it and run it" escape hatch is conditioned on `toolsAvailable`: a tool-free juror
+  // (the default) cannot clone anything, so it must not be told it may.
+  it('defaults tool-free: tells the juror it has no tools rather than offering a throwaway clone', () => {
+    const text = buildMandate();
+    expect(text).not.toMatch(/throwaway `git clone`/);
+    expect(text).toMatch(/You have no tools and cannot run or clone the code/);
+  });
+
+  it('offers the throwaway-clone escape hatch only when toolsAvailable is true', () => {
+    const text = buildMandate({ toolsAvailable: true });
     expect(text).toMatch(/throwaway `git clone`/);
+    expect(text).not.toMatch(/You have no tools and cannot run or clone the code/);
   });
 
   it('joins a multi-mandate array (the #2285 v3 reviewer-panel shape)', () => {
@@ -710,9 +724,27 @@ describe('buildPanelMandate (#2310)', () => {
       `the full panel: ${PANEL_LENSES.join(', ')})`,
     );
 
-    it('adds the mutation probe and NOTHING else when `aim` is omitted', () => {
-      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+    // #3158 — the fixture was captured with the TOOL-BEARING clone-escape-hatch sentence (the only wording
+    // that existed pre-#3158). The tool-free default swaps that ONE sentence for the tool-free line; nothing
+    // else in the fixture differs, so a targeted substitution — not a second fixture — proves the delta is
+    // exactly that one sentence.
+    const CLONE_LINE = 'If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.';
+    const TOOL_FREE_LINE = 'You have no tools and cannot run or clone the code at all — judge from the diff text alone and say so on any finding a real run would have settled.';
+    const withToolFreeClause = (text) => {
+      expect(text).toContain(CLONE_LINE); // the hatch fires on real fixture text, not a no-op
+      return text.replace(CLONE_LINE, TOOL_FREE_LINE);
+    };
+
+    // #3158 — the fixture was captured against the TOOL-BEARING wording (the only wording that existed pre-#3158),
+    // so this pins `toolsAvailable: true` explicitly rather than drift onto whatever the default becomes.
+    it('adds the mutation probe and NOTHING else when `aim` is omitted (tool-bearing)', () => {
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, toolsAvailable: true }))
         .toBe(`${withCurrentPanel(FIXTURE)} ${MUTATION_PROBE_RULE}`);
+    });
+
+    it('adds the TOOL-FREE mutation probe by default — every `judgePanel` seat is tool-free (#3158)', () => {
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+        .toBe(`${withToolFreeClause(withCurrentPanel(FIXTURE))} ${MUTATION_PROBE_RULE_TOOL_FREE}`);
     });
 
     // WHY THIS TEST WAS REWRITTEN (#3035 r2). The version that shipped here asserted
@@ -758,11 +790,20 @@ describe('buildPanelMandate (#2310)', () => {
     });
   });
 
-  // ── #3094 — THE MUTATION PROBE IS UNCONDITIONAL (the fork ruled 2026-08-14) ─────────────────────────────
-  describe('#3094 — the mutation instruction every mandate carries', () => {
-    it('is present for EVERY lens, with no caller flag to set and none to forget', () => {
+  // ── #3094 — THE MUTATION PROBE IS ALWAYS PRESENT, ONE FLAVOUR OR THE OTHER (#3158 conditioned WHICH) ────
+  describe('#3094/#3158 — the mutation instruction every mandate carries, tool-bearing or tool-free', () => {
+    it('is present for EVERY lens, with no caller flag to set and none to forget — TOOL-BEARING flavour', () => {
       for (const lens of PANEL_LENSES) {
-        expect(buildPanelMandate({ lens }), lens).toContain(MUTATION_PROBE_RULE);
+        expect(buildPanelMandate({ lens, toolsAvailable: true }), lens).toContain(MUTATION_PROBE_RULE);
+      }
+    });
+
+    // #3158 — every `judgePanel` seat is tool-free, so the DEFAULT (no `toolsAvailable`) must carry the
+    // tool-free flavour, never the one that instructs a `--tools ''` juror to break a line and run a test.
+    it('is present for EVERY lens by default — TOOL-FREE flavour, never the tool-bearing one', () => {
+      for (const lens of PANEL_LENSES) {
+        expect(buildPanelMandate({ lens }), lens).toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+        expect(buildPanelMandate({ lens }), lens).not.toContain(MUTATION_PROBE_RULE);
       }
     });
 
@@ -770,19 +811,23 @@ describe('buildPanelMandate (#2310)', () => {
     // sentence itself says it does not apply to a finding that changes no behaviour, so a simplicity juror
     // reads it as inapplicable rather than the operation branching on the lens. If someone ever "simplifies"
     // this by deleting the exemption clause, the instruction starts demanding mutation results for style
-    // findings — and this test is what says so.
+    // findings — and this test is what says so. Checked on BOTH flavours: the exemption is the shared property.
     it('scopes itself by wording — behaviour findings in, pure style/simplicity findings explicitly out', () => {
-      expect(MUTATION_PROBE_RULE).toMatch(/affects correctness or changes/);
+      for (const rule of [MUTATION_PROBE_RULE, MUTATION_PROBE_RULE_TOOL_FREE]) {
+        expect(rule).toMatch(/affects correctness or changes/);
+        expect(rule).toMatch(/does NOT apply to a finding that changes no behaviour/);
+        expect(rule).toMatch(/simplicity/);
+      }
       expect(MUTATION_PROBE_RULE).toMatch(/NAMED test/);
-      expect(MUTATION_PROBE_RULE).toMatch(/does NOT apply to a finding that changes no behaviour/);
-      expect(MUTATION_PROBE_RULE).toMatch(/simplicity/);
       // `simplicity` is a LIVE panel lens, so the carve-out is load-bearing, not hypothetical.
       expect(PANEL_LENSES).toContain(MANDATE_LENSES.SIMPLICITY);
     });
 
     it('is distinct from the prose-guarantee rule, which mutates for one narrower reason', () => {
       expect(MUTATION_PROBE_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
-      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+      expect(MUTATION_PROBE_RULE).not.toBe(MUTATION_PROBE_RULE_TOOL_FREE);
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, toolsAvailable: true });
       expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
       expect(text).toContain(MUTATION_PROBE_RULE);
     });
@@ -1791,7 +1836,8 @@ describe('LENS_HUNT_BRIEF / huntBriefForLens — the lens\'s own method (#3035)'
   // appended before the net-set / aim / probe clauses, so those must all still be present alongside it.
   it('does not displace the rules every mandate carries — probe and prose-imprecision still travel with it', () => {
     const mandate = buildPanelMandate({ lens: MANDATE_LENSES.CLAIM_ACCURACY });
-    expect(mandate).toContain(MUTATION_PROBE_RULE);
+    // #3158 — default is tool-free, so the tool-free probe flavour is what travels with it here.
+    expect(mandate).toContain(MUTATION_PROBE_RULE_TOOL_FREE);
     expect(mandate).toContain(PROSE_IMPRECISION_RULE);
     expect(mandate).toContain(`the full panel: ${PANEL_LENSES.join(', ')})`);
   });

@@ -244,6 +244,24 @@ export const MUTATION_PROBE_RULE = [
   'wording, simplicity — where there is nothing to break: say nothing about mutation for those.',
 ].join(' ');
 
+/**
+ * #3158 — THE TOOL-FREE COUNTERPART TO {@link MUTATION_PROBE_RULE}. Every `judgePanel` seat is `--tools ''`
+ * BY DESIGN (the ruling recorded in `judge-panel.mjs`'s header) — asking that juror to "BREAK the line" is
+ * asking it to do something its transport structurally forbids. This says the honest version of the same
+ * thing instead: the juror is told PLAINLY it has no tools, so it cannot claim a mutation result it never
+ * produced, and it should weigh its own confidence down accordingly — the same "no test catches this is
+ * itself a finding" framing, minus the instruction it cannot carry out. Use this whenever `toolsAvailable`
+ * is false; use {@link MUTATION_PROBE_RULE} only where it is true.
+ */
+export const MUTATION_PROBE_RULE_TOOL_FREE = [
+  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS, TOOL-FREE. You have NO tools and cannot run or clone anything, so',
+  'you CANNOT break a line and watch a test redden — never claim to have done so. If you report a defect that',
+  'affects correctness or changes behaviour, say plainly that no mutation check was possible and weigh your',
+  'confidence accordingly: an assertion of a defect with no mutation result behind it is weaker than one with',
+  'it. This does NOT apply to a finding that changes no behaviour — pure style, naming, wording, simplicity —',
+  'where there is nothing to break: say nothing about mutation for those.',
+].join(' ');
+
 export const PROSE_IMPRECISION_RULE = [
   'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
   'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
@@ -259,16 +277,25 @@ export const PROSE_IMPRECISION_RULE = [
  * subagent and reading its answer remains the caller's action (this module never calls a model, same split
  * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
  * @param {{contextIsolation?: string, mandate?: string|string[], goal?: string, round?: number,
- *   fenced?: boolean}} [o] - #2950: `goal` is what the diff is trying to do (judged against that and the base,
- *   never an ideal); `round` ≥ 2 fires the anti-spiral clause. Both additive — omitted, the text is what it was
- *   before #2950. #2967: `fenced` puts the goal inside the #2438 labelled data fence; pass it whenever the goal
- *   is caller-supplied text (a PR title). It is NOT the only untrusted path in: `contextIsolation` is
- *   interpolated straight into instruction position below and is fence-exempt on the grounds that it names an
- *   isolation MODE — a closedness no code enforces (PR #1235 review, finding 7). No caller passes a non-default
- *   today, so that is a stated gap in the allow-list's rationale, not a live hole.
+ *   fenced?: boolean, toolsAvailable?: boolean}} [o] - #2950: `goal` is what the diff is trying to do (judged
+ *   against that and the base, never an ideal); `round` ≥ 2 fires the anti-spiral clause. Both additive —
+ *   omitted, the text is what it was before #2950. #2967: `fenced` puts the goal inside the #2438 labelled data
+ *   fence; pass it whenever the goal is caller-supplied text (a PR title). It is NOT the only untrusted path in:
+ *   `contextIsolation` is interpolated straight into instruction position below and is fence-exempt on the
+ *   grounds that it names an isolation MODE — a closedness no code enforces (PR #1235 review, finding 7). No
+ *   caller passes a non-default today, so that is a stated gap in the allow-list's rationale, not a live hole.
+ *   #3158: `toolsAvailable` states whether THIS transport actually granted the juror tools — default `false`
+ *   because every existing caller of `buildPanelMandate`/`buildValidatorMandate` runs through `judgePanel`
+ *   (tool-free by design, see that module's header). The one caller that DOES grant tools
+ *   (`we:scripts/operations/review-pr.mjs`'s `buildReviewJudgeRequest`, #3319) passes `true` explicitly. Never
+ *   guess this from context — an absent value must read as "no tools", the fail-closed default, not the other
+ *   way round.
  * @returns {string}
  */
-export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1, fenced = false } = {}) {
+export function buildMandate({
+  contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1, fenced = false,
+  toolsAvailable = false,
+} = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
@@ -291,8 +318,14 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
     fenced,
     bodyLines: [
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
-      'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
-      'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+      'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain.',
+      // #3158 — the "clone it and run it" escape hatch is only real advice for a juror that HAS tools. A
+      // tool-free juror (every `judgePanel` seat) cannot `git clone` anything, so telling it to do so instructs
+      // a transport to act on advice it structurally cannot carry out — conditioned here rather than always
+      // emitted (#3158 Done-when 2).
+      ...(toolsAvailable
+        ? ['If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.']
+        : ['You have no tools and cannot run or clone the code at all — judge from the diff text alone and say so on any finding a real run would have settled.']),
       PROSE_IMPRECISION_RULE,
       GUARANTEE_NEEDS_A_TEST_RULE,
     ],
@@ -1045,17 +1078,21 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * as this PR's scope creep. Omitting it (or passing `'net'`) leaves the mandate BYTE-FOR-BYTE what it is
  * without it — the golden fixture with no `diffBasis` passed is unaffected.
  * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string,
- *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null}} o
+ *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null, toolsAvailable?: boolean}} o -
+ *   #3158: `toolsAvailable` defaults to `false` because every caller reaching this through `judgePanel` is
+ *   tool-free by design (see that module's header). The ONE caller that grants real tools
+ *   (`we:scripts/operations/review-pr.mjs`, #3319) passes `true` explicitly, which swaps in
+ *   {@link MUTATION_PROBE_RULE} for {@link MUTATION_PROBE_RULE_TOOL_FREE} below.
  * @returns {string}
  */
 export function buildPanelMandate({
   lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false,
-  aim = '', diffBasis = null,
+  aim = '', diffBasis = null, toolsAvailable = false,
 } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens, goal, round, fenced });
+  const base = buildMandate({ contextIsolation, mandate: lens, goal, round, fenced, toolsAvailable });
   const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
@@ -1111,12 +1148,15 @@ export function buildPanelMandate({
       'verdict, so your findings are read as a report, not an acceptance signal.',
     );
   }
-  // #3094 — THE MUTATION PROBE, UNCONDITIONAL (the fork ruled on the card, 2026-08-14). Every mandate that has
-  // found a real defect in this loop carried this instruction, so it is not left to a caller to remember: an
-  // opt-in flag is a way to omit the single highest-yield line by forgetting it. It is not gated on the lens
-  // either — the PHRASING makes it a natural no-op for a finding that changes no behaviour, which is what a
-  // `simplicity` juror is looking at, so no branch has to guess which lens is judging what.
-  parts.push(MUTATION_PROBE_RULE);
+  // #3094 — THE MUTATION PROBE. Every mandate that has found a real defect in this loop carried this
+  // instruction, so it is not left to a caller to remember: an opt-in flag is a way to omit the single
+  // highest-yield line by forgetting it. It is not gated on the lens either — the PHRASING makes it a natural
+  // no-op for a finding that changes no behaviour, which is what a `simplicity` juror is looking at, so no
+  // branch has to guess which lens is judging what.
+  // #3158 — WHICH FLAVOUR is no longer unconditional: a `toolsAvailable: false` seat (every `judgePanel` caller
+  // today) gets the TOOL-FREE wording, which tells it plainly it cannot mutate rather than instructing it to
+  // do something its transport forbids. Only the one caller that grants real tools gets the original clause.
+  parts.push(toolsAvailable ? MUTATION_PROBE_RULE : MUTATION_PROBE_RULE_TOOL_FREE);
   return parts.join(' ');
 }
 
@@ -1150,11 +1190,13 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
  * @param {{lens: string, contextIsolation?: string}} o
  * @returns {string}
  */
-export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+export function buildValidatorMandate({ lens, contextIsolation = 'diff-only', toolsAvailable = false } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildValidatorMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens });
+  // #3158 — same default as `buildPanelMandate`: every caller of this validator runs it through `judgePanel`
+  // (tool-free by design), so `toolsAvailable` defaults `false` and only a future tool-granting caller opts in.
+  const base = buildMandate({ contextIsolation, mandate: lens, toolsAvailable });
   return [
     base,
     `You are the INDEPENDENT FINAL VALIDATOR for the ${lens} lens (#2439) — a fresh adversary who took NO part`,

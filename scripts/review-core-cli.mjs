@@ -234,18 +234,20 @@ export function reduceReview(input = {}) {
  * subcommand). Pure — the lib builders it calls are pure; this only routes to the right one. `lens` mandates
  * seed a panel reviewer or the independent validator; `editor` seeds the negotiation-round editor.
  * @param {{kind: 'lens'|'editor'|'validator', lens?: string, findings?: Array<object>, round?: number,
- *   roundCap?: number, diffBasis?: string}} o
+ *   roundCap?: number, diffBasis?: string, toolsAvailable?: boolean}} o - #3158: `toolsAvailable` defaults
+ *   `false` (this CLI's mandate text is judged tool-free unless the caller states otherwise) and is forwarded
+ *   only to the `lens`/`validator` kinds — see `buildPanelMandate`/`buildValidatorMandate`'s own doc for why.
  * @returns {string}
  */
-export function buildMandateText({ kind, lens, findings, round, roundCap, diffBasis } = {}) {
+export function buildMandateText({ kind, lens, findings, round, roundCap, diffBasis, toolsAvailable = false } = {}) {
   switch (kind) {
     case 'lens':
       // #2914 — forwarded ONLY on the `lens` branch: the `editor`/`validator` mandate kinds have no diff-basis
       // concept (the independent validator never sees peer context at all; the editor mandate is round-scoped
       // findings prose, not a diff-provenance signal).
-      return buildPanelMandate({ lens, diffBasis });
+      return buildPanelMandate({ lens, diffBasis, toolsAvailable });
     case 'validator':
-      return buildValidatorMandate({ lens });
+      return buildValidatorMandate({ lens, toolsAvailable });
     case 'editor':
       // `fenced: true` (#2967) — `findings` is juror prose read from `--file`/stdin, and the editor it seeds has
       // WRITE TOOLS on a live tree, so the finding list travels inside the #2438 labelled data fence (the same
@@ -654,6 +656,9 @@ function runMandate(flags, asJson) {
       round: flags.round,
       roundCap: flags.roundCap != null ? Number(flags.roundCap) : undefined,
       diffBasis: typeof flags.diffBasis === 'string' ? flags.diffBasis : undefined,
+      // #3158 — a caller that seats a TOOL-BEARING juror (e.g. a Workflow subagent with real tools, unlike a
+      // headless `judgePanel` seat) states so explicitly; the default stays tool-free.
+      toolsAvailable: flags.toolsAvailable === true || flags.toolsAvailable === 'true',
     });
   } catch (e) {
     return fail(String(e && e.message || e), 1);

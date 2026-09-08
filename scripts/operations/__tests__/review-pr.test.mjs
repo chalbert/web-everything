@@ -59,6 +59,7 @@ import {
   renderEarnedShortfall,
 } from '../review-pr.mjs';
 import { buildJudgeArgv, deriveSessionId, sessionSeed } from '../../lib/judge-spawn.mjs';
+import { MUTATION_PROBE_RULE, MUTATION_PROBE_RULE_TOOL_FREE } from '../../lib/review-core.mjs';
 // #xwk0tzu — the stamps the refusal reads, built through their OWN home rather than hand-written here: a
 // test that spells the marker by hand still passes when the marker's shape changes, which is the mutant the
 // #2844 header warns about (producer and consumer verified independently is exactly how an inversion hides).
@@ -1213,6 +1214,18 @@ describe('#3319 the security lens runs on every PR', () => {
     for (const step of JUDGE_STEPS) {
       expect(requests[step].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
       expect(requests[step].allowedTools).toContain('Bash');
+    }
+  });
+
+  // #3158 — `buildReviewJudgeRequest` must pass `toolsAvailable: true` to `buildPanelMandate`, or the mandate's
+  // wording (tools granted above) and its mutation-probe instruction (tool-free by DEFAULT since #3158) would
+  // contradict each other: a juror told it has Bash but also told it has no tools and cannot mutate anything.
+  it('BOTH seats carry the TOOL-BEARING mutation probe, never the tool-free fallback (#3158)', () => {
+    const { registry } = registryFor({});
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-sec-mutation-probe' });
+    for (const step of JUDGE_STEPS) {
+      expect(requests[step].mandate).toContain(MUTATION_PROBE_RULE);
+      expect(requests[step].mandate).not.toContain(MUTATION_PROBE_RULE_TOOL_FREE);
     }
   });
 

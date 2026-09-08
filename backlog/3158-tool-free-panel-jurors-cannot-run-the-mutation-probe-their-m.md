@@ -2,10 +2,11 @@
 bornAs: x27e4xs
 kind: story
 size: 3
-status: open
+status: active
 blockedBy: ["3145"]
 relatedTo: ["3028", "3050", "3057"]
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-08"
 scope:
   - we:scripts/lib/judge-panel.mjs
   - we:scripts/lib/review-core.mjs

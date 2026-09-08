@@ -792,8 +792,10 @@ export function buildReviewJudgeRequest({ read, lens, aim = '' }) {
     // opened the PR, so it goes to the juror inside the #2438 labelled data fence rather than in
     // instruction position. What that fixes is caller-supplied text reaching the mandate unfenced; whether
     // a crafted title could actually move a verdict is UNMEASURED, so this is hygiene, not a patched hole.
+    // #3158 — this seat IS tool-bearing (see `allowedTools` below), so `toolsAvailable: true` swaps in the
+    // real mutation-probe clause instead of the tool-free fallback `buildPanelMandate` now defaults to.
     mandate: buildPanelMandate({
-      lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim,
+      lens, netChangedFiles: read.netChangedFiles, goal: read.title, fenced: true, aim, toolsAvailable: true,
     }),
     input: renderJudgeInput(read),
     shape: REVIEW_JUDGE_SHAPE,

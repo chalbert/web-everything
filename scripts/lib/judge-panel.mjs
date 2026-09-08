@@ -126,6 +126,58 @@
  * PURE except `judgePanel`, which spawns subprocesses through the injectable `spawnFn` it forwards to
  * `judgeSpawn` — the same seam the unit tests use, so the whole suite spawns nothing. A LEAF module above
  * `judge-spawn.mjs`: it imports that and nothing else from the review/jury seams.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * #3158 RULING — PANEL SEATS STAY TOOL-FREE BY DESIGN. THE PROBE MOVES, THE PLUMBING DOES NOT.
+ *
+ * `judgeSpawn` supports a tool-bearing juror (`allowedTools` + a lane `cwd`, gated by `assertLaneCwd`), but this
+ * module never forwards `allowedTools` per seat — every `judgePanel` seat is `--tools ''`, full stop. #3158 asked
+ * whether that is an oversight to fix or a stance to state. It is a stance, for two reasons that are both
+ * structural, not merely costly:
+ *
+ *  1. THE ONE CALLER THAT REVIEWS ITS OWN LANE CANNOT GRANT TOOLS TO A SEAT, EVER. `/converge`
+ *     (`skills-src/converge/SKILL.md`) seats its panel and red-team through THIS module against the diff of the
+ *     lane it is itself revising. `assertLaneCwd` refuses a tool-bearing spawn whose `cwd` is the DRIVER'S OWN
+ *     lane — that is not a limit of this module, it is the isolation invariant a tool-bearing juror exists to
+ *     respect (a juror that can write must not be pointed at the tree it is judging). So a tool-bearing seat on
+ *     that transport is not merely unbuilt, it is refused by a guard this module correctly relies on and does
+ *     not own.
+ *  2. N SEATS WOULD NEED N LANES NOBODY PROVISIONS. `we:skills-src/jury/panel-fanout.mjs` (the other caller,
+ *     behind `/jury`) reads the judged material itself and puts it on each child's stdin — deliberately, so a
+ *     tool-free juror never needs to open anything. Wiring `allowedTools` through here would still need a
+ *     DISTINCT lane per seat (a tool-bearing juror cannot share the driver's lane OR a sibling seat's), and
+ *     nothing in this repo provisions a lane pool sized to a panel roster. Pricing that infra is real work with
+ *     no caller asking for it today.
+ *
+ * WHERE THE MUTATION PROBE ACTUALLY WENT INSTEAD (#3319, `we:scripts/operations/review-pr.mjs`): the drain's own
+ * auto-review needed a tool-bearing SECOND lens and got it WITHOUT this module — two sequential, tool-bearing
+ * `judgeStep` calls (single `judgeSpawn` seats, not a panel), each granted `allowedTools` directly against its
+ * OWN lane. That is the answer to "a panel seat may be tool-bearing at all": yes, through `judgeSpawn` directly,
+ * never through `judgePanel` — the panel stays the tool-free, concurrent, N-actors-from-one-call primitive it
+ * was built to be (see the header above), and a caller that genuinely needs a tool-bearing multi-lens juror pays
+ * for its own lane(s) and calls `judgeSpawn` per seat, the way #3319 already does.
+ *
+ * WHAT THIS MEANS FOR A MANDATE BUILT FOR A PANEL SEAT: `we:scripts/lib/review-core.mjs`'s `buildMandate` /
+ * `buildPanelMandate` / `buildValidatorMandate` now take a `toolsAvailable` flag (default `false`) that a caller
+ * states explicitly rather than the mandate assuming one way or the other. Every seat THIS module produces is
+ * tool-free, so every caller reaching a mandate through `judgePanel` must pass `toolsAvailable: false` (or omit
+ * it — that is the default) — passing `true` for a seat spawned here would tell a juror it has capabilities
+ * `judgeSpawn` did not grant it, which is a false instruction, not a stronger one.
+ *
+ * WHICH FINDING CLASSES A TOOL-FREE PANEL CAN AND CANNOT REACH, so a caller never reads a tool-free accept as a
+ * tool-backed one: it CAN find anything visible by inspection — logic errors, missing edge cases, a guarantee
+ * stated in prose with no test defending it (`GUARANTEE_NEEDS_A_TEST_RULE`, still fully in force: reading the
+ * test suite and reasoning about coverage needs no tools), naming/structure/simplicity concerns, a scope-creep
+ * or ground-truth mismatch against the stated diff. It CANNOT independently verify a claim by executing
+ * anything — it cannot run the gate, reproduce a failure, or mutate a line and watch a NAMED test redden. On
+ * that class it reports a WEAKER signal by construction ("no mutation check was possible"), never a fabricated
+ * one — see `MUTATION_PROBE_RULE_TOOL_FREE` in `review-core.mjs`, which states this to the juror directly rather
+ * than asking it to do something its transport forbids.
+ *
+ * If a FUTURE caller genuinely needs a tool-bearing panel (concurrent, multi-seat, each with its own lane), that
+ * is a new capability to add here deliberately — `jurors[].allowedTools` + `jurors[].cwd` forwarded to
+ * `judgeSpawn`, admitted only once every seat's lane is proven distinct from the driver's and from every sibling
+ * seat's — not a default this module should silently grow into.
  */
 
 import {
