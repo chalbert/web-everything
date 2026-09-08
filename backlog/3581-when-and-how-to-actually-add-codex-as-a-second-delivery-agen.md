@@ -67,6 +67,25 @@ does not re-open the sequence itself, does not move step 4 ahead of step 3, and 
 reasoning for why review-first is still correct — it only shortens how long step 4 is allowed to sit
 unstarted once step 3 has actually held up.
 
+## Pacing amendment — second provider, Gemini (operator, 2026-09-08)
+
+**Same operator turn as the pacing amendment above, carried forward now as a follow-up.** The operator's
+explicit instruction: "We also will want to integrate Gemini soon after [Codex]." Gemini should be brought in
+as an additional provider on a similarly near-term ("soon after") timeline to the Codex/build-capacity pacing
+already recorded above — not gated behind Codex fully maturing first, and not left as an open-ended "someday."
+
+This does not reopen the "Deliberately NOT in scope" call below. `#3371`'s Codex-over-Gemini pick was a
+narrow, single-seat call for the JUDGE seam specifically (`#3369`'s scope), decided on closest argv/session-
+continuity match for ONE integration point — not a rejection of Gemini generally. Gemini becomes viable once
+the provider-port abstraction this epic (`#3580`) and its step 1 (`#3579`) build actually lands: the port is
+provider-agnostic by design, so Codex is just the first real implementation behind it and Gemini becomes a
+second implementation behind the same port, not a parallel one-off integration.
+
+No surface, sequencing, or fork for Gemini specifically is decided here — which surface it pilots on first,
+and on what timeline relative to Codex's own steps 3/4, is real future scoping work this amendment does not
+do. It only records that the "soon after" pacing intent applies to Gemini too, so that work is not left
+untracked.
+
 ## Ratified (Fork — Option a) — 2026-09-08
 
 **Ratified 2026-09-08 by the operator (Nicolas Gilbert).** Fork default taken as ruled: **(a) — pilot Codex
