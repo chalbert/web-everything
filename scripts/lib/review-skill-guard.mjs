@@ -108,3 +108,53 @@ export function checkReviewLabelSingleHome(docs = []) {
   }
   return { errors };
 }
+
+/**
+ * SINGLE_HOME_CODE_FILES — the only files ALLOWED to perform the review-label write mutation: the single-home
+ * CLI (#2644) and the provider port it shells (#x8xf5rl). `checkReviewLabelSingleHome` above stops a MARKDOWN
+ * doc from INSTRUCTING the raw swap (#2882); it never looked at `.mjs` source, so nothing stopped a SCRIPT from
+ * minting the same raw path in code — the residual #2416 gap: "a `review:human` gate-self PR is never
+ * agent-cleared" is enforced in `decideSetLabel`'s pure core, but only for callers that actually reach it. A
+ * second script that calls `gh pr edit --add-label review:accepted` directly, or drives the provider's
+ * `setLabels` with an `add: review:accepted` of its own, never reaches `decideSetLabel` at all and so never
+ * pays INVARIANT 2 or the #2409 `reviewed-sha` stamp.
+ */
+export const SINGLE_HOME_CODE_FILES = Object.freeze([
+  'scripts/review-set-label.mjs',
+  'scripts/lib/review-label-provider.mjs',
+]);
+
+/**
+ * A raw `execFileSync('gh', …)`-shaped subprocess call carrying `pr edit … --add-label review:accepted`, OR a
+ * `setLabels(...)` write whose `add` resolves to the accepted label (`REVIEW_LABELS.accepted` or the literal
+ * string) — either shape re-implements the single home's write instead of calling it. Bounded + newline-tolerant
+ * like `RAW_SWAP_RE` above, so a multi-line array/object literal still matches; stops at a `)` so it cannot pair
+ * an unrelated call with a `review:accepted` mention far below it.
+ */
+const CODE_SWAP_RE = /(?:execFileSync|spawnSync|spawn|exec)\s*\(\s*['"]gh['"][^)]{0,400}?--add-label['"]?\s*,?\s*['"]review:accepted['"]|\.setLabels\s*\([^)]{0,400}?\badd\s*:\s*(?:REVIEW_LABELS\.accepted|['"]review:accepted['"])/g;
+
+/**
+ * Find every SCRIPT (not doc) file that mints its own `review:accepted` write outside the single home. Pure —
+ * the caller supplies `{file, content}` for every non-test `.mjs` under `scripts/`; the fs walk stays in
+ * `check-standards.mjs` (mirrors `checkReviewLabelSingleHome`'s split).
+ * @param {Array<{file:string, content:string}>} files
+ * @returns {{errors:string[]}}
+ */
+export function checkReviewLabelSingleHomeCode(files = []) {
+  const errors = [];
+  for (const f of Array.isArray(files) ? files : []) {
+    const file = f && typeof f.file === 'string' ? f.file : '';
+    const content = f && typeof f.content === 'string' ? f.content : '';
+    if (!file || !content || SINGLE_HOME_CODE_FILES.includes(file)) continue;
+    for (const m of content.matchAll(CODE_SWAP_RE)) {
+      errors.push(
+        `${file}:${lineOf(content, m.index)}: mints its own \`review:accepted\` write outside the single home — `
+        + `route it through \`we:${SINGLE_HOME}\` (or the provider it shells, \`we:scripts/lib/review-label-provider.mjs\`) `
+        + `instead of calling \`gh pr edit --add-label\` / \`setLabels\` directly. A script that mints this mutation `
+        + `bypasses INVARIANT 2 and the \`reviewed-sha\` stamp exactly like the raw doc instruction \`checkReviewLabelSingleHome\` `
+        + `above forbids (#2416) — this is that same guarantee, for code instead of prose.`,
+      );
+    }
+  }
+  return { errors };
+}

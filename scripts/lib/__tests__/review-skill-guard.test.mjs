@@ -7,8 +7,11 @@
  *   callers that come through the module. Observed on PR #983 — five re-parks.
  */
 import { describe, it, expect } from 'vitest';
-import { checkReviewLabelSingleHome, isGuardedDoc, GUARDED_DOC_PREFIXES } from '../review-skill-guard.mjs';
-import { readFileSync } from 'node:fs';
+import {
+  checkReviewLabelSingleHome, isGuardedDoc, GUARDED_DOC_PREFIXES,
+  checkReviewLabelSingleHomeCode, SINGLE_HOME_CODE_FILES,
+} from '../review-skill-guard.mjs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -144,5 +147,70 @@ describe('the fs walk cannot drift from the guarded set', () => {
     const source = readFileSync(join(ROOT, 'scripts/check-standards.mjs'), 'utf8');
     expect(source).toContain('GUARDED_DOC_PREFIXES.map');
     expect(source).not.toMatch(/scanDirs = \['skills-src', 'docs\/agent'\]/);
+  });
+});
+
+
+describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#2416)', () => {
+  const code = (content, file = 'scripts/some-script.mjs') => [{ file, content }];
+
+  it('flags a raw execFileSync gh swap', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      "execFileSync('gh', ['pr', 'edit', pr, '--repo', repo, '--add-label', 'review:accepted'])",
+    ));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('scripts/some-script.mjs:1');
+    expect(errors[0]).toContain('review-set-label.mjs');
+  });
+
+  it('flags a setLabels() write with a literal review:accepted add', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      "provider.setLabels(repo, pr, { add: 'review:accepted', remove: [] });",
+    ));
+    expect(errors).toHaveLength(1);
+  });
+
+  it('flags a setLabels() write via the REVIEW_LABELS.accepted constant', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      'provider.setLabels(repo, pr, { add: REVIEW_LABELS.accepted, remove: [] });',
+    ));
+    expect(errors).toHaveLength(1);
+  });
+
+  it('allows the single-home files themselves', () => {
+    for (const file of SINGLE_HOME_CODE_FILES) {
+      const { errors } = checkReviewLabelSingleHomeCode([
+        { file, content: "execFileSync('gh', ['pr', 'edit', pr, '--add-label', 'review:accepted'])" },
+      ]);
+      expect(errors).toHaveLength(0);
+    }
+  });
+
+  it('allows an UNRELATED setLabels write (an informative status/round tag)', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      'provider.setLabels(repo, pr, { add: plan.add ?? undefined, remove: plan.remove });',
+    ));
+    expect(errors).toHaveLength(0);
+  });
+
+  it('allows a raw gh swap of an unrelated label', () => {
+    const { errors } = checkReviewLabelSingleHomeCode(code(
+      "execFileSync('gh', ['pr', 'edit', pr, '--add-label', 'ready-to-merge'])",
+    ));
+    expect(errors).toHaveLength(0);
+  });
+
+  it('tolerates a missing/odd files shape', () => {
+    expect(checkReviewLabelSingleHomeCode().errors).toHaveLength(0);
+    expect(checkReviewLabelSingleHomeCode([null, {}, { file: 'scripts/a.mjs' }]).errors).toHaveLength(0);
+  });
+});
+
+describe('the live single-home files obey their own rule, and every OTHER script stays clean', () => {
+  it('scripts/review-set-label.mjs and its provider carry no OTHER caller\'s raw swap', () => {
+    // The files ARE allowlisted (they own the write), so this just proves the fixture files parse & exist.
+    for (const file of SINGLE_HOME_CODE_FILES) {
+      expect(existsSync(join(ROOT, file))).toBe(true);
+    }
   });
 });

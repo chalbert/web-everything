@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: active
 parent: "2405"
 dateOpened: "2026-07-10"
+dateStarted: "2026-09-08"
 tags: [gate, review, drain, gate-self, review-escalation]
 scope:
   - we:scripts/review-set-label.mjs
