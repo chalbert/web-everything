@@ -1209,3 +1209,87 @@ describe('planTick — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 1
     expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
   });
 });
+
+describe('planTick — manual dispatch-pause (#3609): holds ALL new prepare/fix/ci-heal spawns, never touches in-flight work', () => {
+  const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
+  const redPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] });
+
+  it('omitted / false — unchanged from today (spawns everything it normally would)', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], decisions: [{ num: 30, prepared: false }], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      plan: { launch: [] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0, launchedNums: [40, 41] },
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 4 }]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([{ num: 30, lane: 5 }]);
+    expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 6 }]);
+    expect(out.decisions.spawnCiHeals).toEqual([{ pr: 98, num: 41, lane: 7, reason: 'red-ci' }]);
+  });
+
+  it('paused — every new prepare/fix/ci-heal spawn is held; build launches are ALSO empty because dispatch-plan.mjs already emptied plan.launch', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], decisions: [{ num: 30, prepared: false }], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      // dispatch-plan.mjs's own IO shell already read the SAME pause marker and emptied `plan.launch`,
+      // relabeling what would have launched `dispatch-paused` — mirrored here as the realistic composed input.
+      plan: { launch: [], held: [{ num: 10, reason: 'dispatch-paused' }] },
+      freeLanes: [4, 5, 6, 7],
+      bookkeeping: { tick: 0, launchedNums: [40, 41] },
+      dispatchPaused: true,
+      dispatchPausedReason: 'operator emergency pause',
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.spawnPrepareDecision).toEqual([]);
+    expect(out.decisions.spawnFixes).toEqual([]);
+    expect(out.decisions.spawnCiHeals).toEqual([]);
+    // the aggregate note carries the operator's own reason.
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'dispatch-paused', text: expect.stringContaining('operator emergency pause') })]),
+    );
+    // the per-item `plan.held` row still surfaces too (mirrors dispatch-plan.mjs's own CLI text).
+    expect(out.decisions.notes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'held', num: 10, reason: 'dispatch-paused' })]),
+    );
+  });
+
+  it('paused with no reason given — the aggregate note still fires, without a parenthetical', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [4],
+      bookkeeping: { tick: 0 },
+      dispatchPaused: true,
+    });
+    const note = out.decisions.notes.find((n) => n.kind === 'dispatch-paused');
+    expect(note).toBeTruthy();
+    expect(note.text).toBe('⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick');
+  });
+
+  it('NEVER touches an already-running lane/guard — a live fix-guard entry retires normally (claim/TTL) while paused', () => {
+    // A live fix-guard entry from a PRIOR tick (before the pause was set) whose PR no longer carries
+    // review:changes (resolved) must still retire normally — guard RETIREMENT is a property of in-flight work,
+    // not of new dispatch, so pausing must not freeze it.
+    const out = planTick({
+      state: { queue: [], unshaped: [], lanes: [], prs: [{ num: 40, prNumber: 99, state: 'OPEN', labels: [] }] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, fixGuards: [{ pr: 99, num: 40, lane: 3, spawnedTick: 0, claimed: true }] },
+      dispatchPaused: true,
+    });
+    expect(out.decisions.retireGuards.fix.some((r) => r.pr === 99)).toBe(true);
+    expect(out.nextState.fixGuards).toEqual([]); // retired — the label cleared, not held hostage by the pause
+  });
+
+  it('fixAttempts / ciHealAttempts pass through UNCHANGED while paused (no new attempt is spawned to count)', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [], lanes: [], prs: [changesPr(99, 40), redPr(98, 41)] },
+      plan: { launch: [] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0, launchedNums: [40, 41], fixAttempts: { 99: 1 }, ciHealAttempts: { 98: 1 } },
+      dispatchPaused: true,
+    });
+    expect(out.nextState.fixAttempts).toEqual({ 99: 1 });
+    expect(out.nextState.ciHealAttempts).toEqual({ 98: 1 });
+  });
+});

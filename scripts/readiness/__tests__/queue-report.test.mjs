@@ -31,6 +31,9 @@ describe('classifyHeld — covers every dispatch-plan.mjs HELD_REASONS token', (
     // bucket as `no free lane`, not `not-ready` (regression pin: an earlier bug checked only index 0 of the
     // exact-match list, so a second entry silently fell through to the catch-all throw).
     expect(classifyHeld('capacity-cap')).toBe('queued-waiting-turn');
+    // #3609 — the manual dispatch-pause lever: the item itself is fully ready, only a deliberate operator
+    // kill-switch is withholding it, so it belongs in the same "nothing to do but wait" bucket.
+    expect(classifyHeld('dispatch-paused')).toBe('queued-waiting-turn');
   });
 
   it('every NOT_READY_REASONS token is not-ready', () => {

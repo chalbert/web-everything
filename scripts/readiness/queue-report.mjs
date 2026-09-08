@@ -11,8 +11,10 @@
  *
  *   • `queued-waiting-turn` — a REAL queue member, just waiting on capacity/turn. Nothing to do but wait:
  *     `overlaps lane-<n>` (a running lane, or a higher-ranked rival, owns the same scope), `no free lane`
- *     (every lane is busy), and `capacity-cap` (#xupukxa — a free lane exists, but the concurrent-lane ceiling
- *     withheld it). This is the exact bucket tonight's mistake put in the wrong place.
+ *     (every lane is busy), `capacity-cap` (#xupukxa — a free lane exists, but the concurrent-lane ceiling
+ *     withheld it), and `dispatch-paused` (#3609 — the item is otherwise launchable; a manual operator
+ *     kill-switch is withholding it, cleared via `dispatch-pause.mjs clear`). This is the exact bucket tonight's
+ *     mistake put in the wrong place.
  *   • `not-ready` — needs an action (or an external event) before it can ever be picked up, independent of lane
  *     capacity: `blocked`, `unshaped-no-scope`, `needs-slice`, `needs-decision`, `branch-drift-blocked`,
  *     `cleared-but-not-ready`.
@@ -61,7 +63,9 @@ export const QUEUE_REPORT_BUCKETS = Object.freeze(['queued-waiting-turn', 'not-r
 const QUEUED_WAITING_TURN_PREFIX = 'overlaps lane-';
 // `capacity-cap` (#xupukxa) joins `no free lane` here: same bucket, same "nothing to do but wait" semantics —
 // a free lane may physically exist, but the concurrent-lane ceiling is what the item is actually waiting on.
-const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap']);
+// `dispatch-paused` (#3609) joins them too: the item itself is fully ready (dispatch-plan.mjs only assigns this
+// reason at the point it would otherwise have launched), so once the manual pause clears it launches same-tick.
+const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap', 'dispatch-paused']);
 
 /** Held reasons that need an action (or an external event) before the item can ever be picked up, independent
  *  of lane capacity — see {@link ../readiness/dispatch-plan.mjs}'s own `HELD_REASONS` docblock for what each
