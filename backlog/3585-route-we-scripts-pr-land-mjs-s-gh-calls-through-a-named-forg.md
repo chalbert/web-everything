@@ -2,11 +2,12 @@
 bornAs: xnmkay2
 kind: story
 size: 5
-status: active
+status: resolved
 blockedBy: ["3174"]
 scope: ["we:scripts/pr-land.mjs", "we:scripts/lib/forge-land-provider.mjs"]
 dateOpened: "2026-09-07"
 dateStarted: "2026-09-07"
+dateResolved: "2026-09-08"
 tags: []
 ---
 
