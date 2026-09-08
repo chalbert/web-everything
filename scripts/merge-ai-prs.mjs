@@ -1326,6 +1326,9 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       v.headRef = p.headRefName;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
       v.prLabels = p.labels || [];
+      // #2502 — the tip commit's SHA, already in hand from `p.commits` (no new `gh` call). Lets a downstream
+      // consumer (the drain-daemon stuck detector) tell a PR whose head keeps churning from one merely waiting.
+      v.headSha = p.commits[p.commits.length - 1]?.oid ?? null;
       verdicts.push(v);
     }
   }
@@ -1562,7 +1565,7 @@ export function isConfirmSweepSettled({ merged = 0, pendingRebased = 0, consider
  * join on). #xc7p3q9 (R2) — a verdict's `waitOn` is NEVER allowed to name its OWN item (a self-referential wait is
  * structurally unsatisfiable — the livelock); such an edge is stripped.
  * @param {{landedThisPass?:Set, provenOnMain?:Set, coupleIncomplete?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function}} [proof]  the proof bag: positive proof-of-land sets plus (#3004) the NEGATIVE `coupleIncomplete` counter-evidence set (all `asItemId`-keyed)
- * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
+ * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>,headSha:(string|null)}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
  */
 export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
@@ -1659,7 +1662,7 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
       // ALSO waits on a real blockedBy/stackParents edge, or that fails closed on degraded/truncated/incomplete
       // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling.
       const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
-      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
+      deferred.push({ num: c.num, item: c.item, waitOn, headSha: c.headSha ?? null, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}) });
     }
   }
   // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
@@ -3954,7 +3957,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} manifest-tamper baseline mismatch stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: tamper.reasons, headSha: v.headSha ?? null });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} re-parked — manifest baseline mismatch (post-review tamper, HUMAN required): ${tamper.reasons.join('; ')}\n`);
         continue;
       }
@@ -4004,7 +4007,7 @@ async function runCli() {
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason, auditLineFor(v));
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} test-gaming reason stamped on PR\n`);
         }
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: true, reasons: gaming.reasons, headSha: v.headSha ?? null });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
         continue;
       }
@@ -4270,7 +4273,7 @@ async function runCli() {
         v.reviewParked = durableRecorded;
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
-        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons });
+        parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!gate.humanRequired, reasons: parkReasons, headSha: v.headSha ?? null });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${gate.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${parkReasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
@@ -4465,7 +4468,7 @@ async function runCli() {
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
             continue;
           }
-          merged.push({ num: c.num, repo: c.repo }); progressed = true;
+          merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
           // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
           // is stamped) PROVES the couple landed this run: record its item so a descendant that stackParents on
@@ -4497,7 +4500,7 @@ async function runCli() {
             pendingRebased.push(c.num);
             if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(c.repo)}${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
           } else {
-            failedMerges.push({ num: c.num, repo: c.repo, detail });
+            failedMerges.push({ num: c.num, repo: c.repo, detail, headSha: c.headSha ?? null });
             if (!AS_JSON) process.stderr.write(`  ✗ ${repoTag(c.repo)}${c.num} merge failed: ${detail}\n`);
           }
         }
@@ -4719,7 +4722,7 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, headSha: v.headSha ?? null, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
