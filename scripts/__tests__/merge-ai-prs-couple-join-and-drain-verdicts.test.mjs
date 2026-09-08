@@ -124,6 +124,19 @@ describe('merge-ai-prs — #xc7p3q9: couple-join decoupled from the ready-to-mer
     expect(impl.coupleDeferReason).toBe('healthy');
   });
 
+  it('#2502 — the impl verdict carries its tip head SHA end-to-end through the REAL planDrainPass wiring', () => {
+    // Same shape as the AC1 case above but with a real `oid` on the impl PR's fetched commits, driven through
+    // narrowPrsByRepo → buildDrainVerdicts → buildCarrierHealth → joinImplToCouples → planLabelDrain (drivePlan),
+    // never a hand-built verdict — proves the field survives the whole sequence, not just the attach site.
+    const scenario = implOnly(contextWithCarrier({ labels: ['ready-to-merge'] }));
+    scenario.reads = new Map([[`${FUI}::55`, { commits: [claude, { ...claude, oid: 'deadbee5' }], manifest: null }]]);
+    const { verdicts, plan } = drivePlan(scenario);
+    const impl = verdicts.find((v) => v.num === 55);
+    expect(impl.headSha).toBe('deadbee5');
+    expect(plan.ready.map((c) => c.num)).toEqual([55]);
+    expect(plan.ready[0].headSha).toBe('deadbee5'); // the same field survives into the ordered ready/deferred lists
+  });
+
   it('AC1-mirror (B3) — a FULL sweep with an EMPTY/INCOMPLETE context (RECONCILE false) → the impl DEFERS', () => {
     // The old mirror asserted "empty context → impl ready" — that WAS the B3 fail-open. An incomplete context can
     // never prove the carrier landed, so the coupled impl must fail closed. The carrier is a live candidate here
