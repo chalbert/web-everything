@@ -50,6 +50,10 @@ import { execFileSync, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// Root-cause fix for the 2026-09-08 #3623/#3624 stranding incident — see this module's own header for the
+// full story. Split out (PURE-ish/injectable, no top-level side effects) so it stays independently testable
+// without importing this CLI file itself (which runs a real gate + `process.exit()` at top-level import).
+import { numberPendingHashesBeforePush } from './lib/number-pending-hashes-before-push.mjs';
 
 // ── tiny arg parsing (matches lane-pool.mjs) ────────────────────────────────────────────────────────
 const flags = {};
@@ -109,7 +113,7 @@ if (!ASSUME_GREEN) {
 // ── 3. Is there anything to push? Compare local BRANCH to remote-tracking, ff-only ────────────────────
 // Fetch the remote branch WITHOUT modifying the working tree (updates only the remote-tracking ref).
 tryGit(['fetch', REMOTE, BRANCH, '--quiet']);
-const local = git(['rev-parse', BRANCH]);
+let local = git(['rev-parse', BRANCH]);
 const remote = tryGit(['rev-parse', `${REMOTE}/${BRANCH}`]);
 
 if (remote && remote === local) {
@@ -131,6 +135,33 @@ if (remote) {
 
 if (DRY_RUN) {
   emit({ repo: REPO, pushed: false, gate, reason: 'dry-run', detail: `would ff-push local ${BRANCH} (${local.slice(0, 8)}) → ${REMOTE}/${BRANCH}${remote ? ` (from ${remote.slice(0, 8)})` : ' (new remote branch)'}.` }, 0);
+}
+
+// ── 3.5. JIT-number any pending hash-keyed backlog item BEFORE publishing (root-cause fix, #3623/#3624) ──
+// push-if-green is the ONE shared choke point every write path uses to publish `main` (#2073) — INCLUDING a
+// direct commit+push that never went through a lane/PR/drain at all. That is exactly the shape that
+// stranded #3623/#3624 for 44-92 minutes on 2026-09-08: two "File #<hash>"/"WE: file backlog item" commits
+// landed on `origin/main` by a raw push, so neither `scripts/lane-drain.mjs`'s `finalizeLand` nor
+// `scripts/merge-ai-prs.mjs`'s land path — the ONLY two places JIT numbering (#2288) was previously wired to
+// fire — ever ran for them; the next drain pass's `numberPendingHashes` sweep (gated on that SAME pass also
+// landing a local PR) raced the push and missed them too, and nothing surfaced the miss until a human ran
+// `number-stranded` by hand. Numbering HERE, unconditionally, right before every push of `main`, closes the
+// gap structurally instead of relying on every caller going through a PR: a hash-keyed backlog item can no
+// longer reach `origin/main` without being numbered in the exact same push that lands it. A numbering
+// failure REFUSES the push (fail closed) rather than landing an item this script already knows would be
+// un-numbered — strictly better than the old best-effort-after-the-fact shape, since nothing reaches origin
+// un-numbered in the first place. Skipped in `--dry-run` (no mutation) and for any non-`main` branch.
+if (!DRY_RUN && BRANCH === 'main') {
+  const numbering = await numberPendingHashesBeforePush(REPO);
+  if (numbering.attempted && numbering.error) {
+    emit(
+      { repo: REPO, pushed: false, gate, reason: 'numbering-failed', detail: `pending hash-keyed backlog item(s) could not be JIT-numbered before push (${numbering.error}) — refusing to push (would strand an un-numbered item on ${BRANCH}). Fix the numbering failure, then retry.` },
+      3,
+    );
+  }
+  if (numbering.attempted && numbering.committed) {
+    local = git(['rev-parse', BRANCH]); // the numbering commit advanced local BRANCH — refresh for accurate reporting below
+  }
 }
 
 // ── 4. Fast-forward push (explicit refspec; never --force) ────────────────────────────────────────────
