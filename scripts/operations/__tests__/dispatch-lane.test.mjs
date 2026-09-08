@@ -1584,6 +1584,21 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false });
   });
 
+  // ── criterion 2b (#3567) ────────────────────────────────────────────────────────────────────────────────
+  it('a `spawnInvestigations` entry SPAWNS ONCE, with the investigation brief', async () => {
+    const { run, spawned } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnInvestigations', { num: '3150', lane: 9 }), items: [UNSCOPED],
+    });
+    expect(spawned).toHaveLength(1);
+    expect(run.verdict).toMatchObject({ dispatching: true, launchKind: 'investigate', lane: 9, sessionSlug: 'investigate-3150' });
+    const prompt = spawned[0].argv[spawned[0].argv.length - 1];
+    expect(prompt).toBe(expectedPrompt('investigate', {
+      ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 9, SESSION_SLUG: 'investigate-3150', SCOPE: `we:${SPEC_PATH}`,
+    }));
+    expect(prompt).toContain('--purpose=conveyor-investigate');
+    expect(run.findings.read.dispatchedGuard).toBeNull();
+  });
+
   // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────────────────
   it('a BUILD is byte-identical to before — the same brief, the same slug, the same argv', async () => {
     // The additive claim, TESTED rather than asserted in a comment. If any of these three moved, every caller
@@ -1623,10 +1638,10 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
     expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
       .toThrow(/unknown `launchKind`/);
-    // The five that ARE wired all resolve, and to five DISTINCT files (#3332 grew this from three to five) —
-    // one map entry pointing at the wrong brief is the same failure with a quieter face.
+    // The six that ARE wired all resolve, and to six DISTINCT files (#3332 grew this from three to five,
+    // #3567 to six) — one map entry pointing at the wrong brief is the same failure with a quieter face.
     const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
-    expect(new Set(paths).size).toBe(5);
+    expect(new Set(paths).size).toBe(6);
     for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
   });
 

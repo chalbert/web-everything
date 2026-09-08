@@ -14,7 +14,7 @@
  *     (every lane is busy), and `capacity-cap` (#xupukxa — a free lane exists, but the concurrent-lane ceiling
  *     withheld it). This is the exact bucket tonight's mistake put in the wrong place.
  *   • `not-ready` — needs an action (or an external event) before it can ever be picked up, independent of lane
- *     capacity: `blocked`, `unshaped-no-scope`, `needs-slice`, `needs-decision`, `branch-drift-blocked`,
+ *     capacity: `blocked`, `unshaped-no-scope`, `needs-slice`, `needs-decision`, `needs-investigation`, `branch-drift-blocked`,
  *     `cleared-but-not-ready`.
  *   • `stale-noise` — not a real held queue member at all; a signal that something should be verified/cleared,
  *     never waited on: `already-done` (a merged PR appears to already close the item out).
@@ -43,7 +43,8 @@
  * pattern — an honest absence, not a wrong number.
  *
  * `active.preparing` is a NAMED APPROXIMATION, not a live-in-progress confirmation: it lists every armed
- * (cleared-for-build) item the dispatcher would hold `unshaped-no-scope` / `needs-slice` / `needs-decision` —
+ * (cleared-for-build) item the dispatcher would hold `unshaped-no-scope` / `needs-slice` / `needs-decision` /
+ * `needs-investigation` —
  * i.e. an auto-prepare CANDIDATE, not proof an agent is preparing it THIS instant (that too is live guard
  * bookkeeping this script cannot see). Each entry carries its `reason` so a reader is never misled into reading
  * it as ground truth.
@@ -67,7 +68,7 @@ const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap']
  *  of lane capacity — see {@link ../readiness/dispatch-plan.mjs}'s own `HELD_REASONS` docblock for what each
  *  one means and what unblocks it. */
 export const NOT_READY_REASONS = Object.freeze([
-  'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'cleared-but-not-ready',
+  'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'cleared-but-not-ready',
 ]);
 
 /** Held reasons that are not a real held queue member at all — a signal to verify/clear, never to wait on. */
