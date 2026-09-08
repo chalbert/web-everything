@@ -132,6 +132,79 @@ already-open tradeoffs above (Apple-Silicon-only requirement, migration cost aga
 Docker Desktop/OrbStack as a simpler alternative, eventual Linux/Windows portability). Left as an open question
 for whoever prepares or ratifies this decision.
 
+## Amendment (2026-09-08, later same day) — a single git-manager chokepoint for GitHub API calls, and push-notify execution instead of agent polling
+
+Folded in per the operator's own follow-up tonight, later the same day as the lane-count/CPU amendment
+above — same discipline as both prior amendments: a research/idea addendum only, ratifying nothing,
+changing no status, resolving no fork. Two related but distinct ideas from tonight's conversation.
+
+**Idea 1 — a single managed "git manager" bottleneck for GitHub API calls.** Tonight, GitHub's
+*secondary* (burst) rate limit — not the primary 5,000/hr core quota tracked by we:backlog/3573 below —
+got hit repeatedly because dozens of concurrent dispatched sessions each independently called `gh`
+directly. Confirmed via fresh web research tonight (https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api):
+GitHub's secondary limits cap concurrent requests at 100 (shared across REST and GraphQL together), 900
+REST points/min, and 2,000 GraphQL points/min — a SHARED ceiling across the whole account, not raised by
+any plan tier. Checked before writing this in: grepped this repo for every file invoking `gh` via a
+subprocess call (execSync/spawnSync/execFile) — 84 files hit, confirming the decentralized-call pattern
+the operator described is real, not assumed. The operator's proposed fix: route all
+`gh`/GitHub-API-calling commands through a single managed chokepoint (a "git manager") that
+gates/serializes them, the same pattern already built for heavy local commands via
+we:scripts/readiness/heavy-admission.mjs's counting semaphore (`DEFAULT_ADMISSION_CAP`, overridable via
+`WE_HEAVY_ADMISSION_CAP` — see the prior amendment above) — but gating GitHub API calls specifically
+instead of CPU-heavy commands.
+
+**Checked against we:backlog/3573 first, since it looked adjacent:** we:backlog/3573-gh-cli-rate-limits-stay-on-oauth-pat-or-migrate-to-a-github.md
+is already `status: resolved` (ratified 2026-09-07, codified `one-off`) — it ratified fork (c),
+instrument-first: log `gh api rate_limit`'s remaining/used on every we:scripts/conveyor/infra-blocked.mjs
+retry trip, revisit a GitHub App migration only if usage data later shows sustained pressure. That
+decision is about the PRIMARY 5,000/hr core quota and whether to change *auth method* (OAuth/PAT vs.
+GitHub App installation token) to raise it — it does not touch the secondary burst limit at all, and a
+GitHub App migration would not fix a secondary-limit hit anyway, since the secondary limits (concurrency,
+points/min) are enforced per-account regardless of auth method and are not raised by any plan or app
+type. So Idea 1 is adjacent to #3573 (both are "gh rate limit" concerns) but not overlapping in scope:
+#3573 is about which credential to authenticate with against the primary quota; Idea 1 is about
+serializing concurrent callers against the secondary burst limit. Stated plainly rather than treated as
+fully novel ground, since the two are easy to conflate on a skim.
+
+**Idea 2 — stop agents from polling; delegate execution to "the mechanic," which notifies on completion.**
+A broader architectural shift: instead of each dispatched agent independently polling/waiting for a
+result (a backgrounded `verify-lane` run, a PR status check, a `gh` call), delegate the actual execution
+to a central mechanical authority (the conveyor/runner itself) which performs the work and pushes a
+notification back when done — a push model instead of each agent running its own pull/poll loop.
+Operator's stated reasoning: "more reliable and cheaper." Ties directly to two real, repeated problems
+from tonight, both already on record: (a) the passive-wait/false-Monitor-claim anti-pattern documented in
+we:agent-memory-src/subagent-must-not-end-turn-on-passive-wait.md and pinned at the top of this repo's
+we:CLAUDE.md — a subagent kicking off a gating check via a backgrounded Bash call or untracked nested
+child, then ending its turn assuming a notification will wake it, when no such notification exists
+outside a harness-tracked Task/Agent job; and (b) redundant/wasteful polling itself consuming API calls
+and contributing to the very rate-limit pressure Idea 1 addresses — every independent poll loop is itself
+more `gh`/API traffic against the same shared secondary-limit ceiling.
+
+**Why these belong on #3621 specifically, not filed separately:** the operator's own framing tying this
+to "the prototype" suggests both ideas compose with #3621's already-recorded container/isolation work and
+the heavy-task-runner/core-sharing idea in the amendment above. A central git-manager service (Idea 1) and
+a push-notify execution model (Idea 2) are both instances of the same broader shift this item is already
+tracking: centralize/gate shared-resource access through one managed authority, rather than many
+independent dispatched agents each doing it themselves. Recorded here as the same underlying shift, not
+merged into one idea — Idea 1 is specifically about GitHub API access; Idea 2 is the general
+poll-vs-push execution model, which applies well beyond `gh` calls (test runs, PR checks, any
+long-running gating step).
+
+**Cross-reference, not expanded on here:** we:backlog/2660-conveyor-ui-surface-infra-blocked-lanes-distinctly-outage-ba.md
+and the we:scripts/conveyor/infra-blocked.mjs/#2659 auto-retry mechanism discussed tonight are the CURRENT
+reactive handling of rate-limit hits — retry after the fact, once already blocked. Both ideas in this
+amendment are about PREVENTING the hits in the first place (serializing callers so the secondary limit is
+never hit; reducing poll traffic so fewer redundant calls happen at all) — a different but related layer
+sitting upstream of the existing reactive retry path. Noted for whoever prepares or ratifies this decision
+to connect the two, not expanded on further here.
+
+**Explicitly not decided by this amendment:** whether a single git-manager chokepoint should live inside
+this item's eventual container/isolation work or ship independently of it; how a chokepoint process would
+itself be dispatched/supervised without becoming a new single point of failure; what the push-notify
+mechanism in Idea 2 would be built on (a long-poll, a filesystem watch, a socket, something else); how
+either idea interacts with the still-open lane-orchestration/heavy-command core split from the prior
+amendment. Left open for whoever prepares or ratifies this decision.
+
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
