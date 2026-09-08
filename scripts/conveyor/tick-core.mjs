@@ -855,10 +855,17 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *   liveAgentSessions?: Array<{name?:string}>|Array<string>,  // #3403 — the restart-surviving BUILD-guard floor: `claude agents --json` rows (or plain names), fed through {@link durableBuildNums}
  *   config?: { buildTtlTicks?:number, prepareTtlTicks?:number, fixTtlTicks?:number, fixRetryCap?:number, idleWindowMs?:number, maxConcurrentLanes?:number },
  *   now?: number|null, lastOperatorTurn?: number|null,
+ *   dispatchPaused?: boolean,          // #3609 — the manual/emergency dispatch-pause lever's current state
+ *   dispatchPausedReason?: string|null,// (dispatch-pause.mjs#isDispatchPaused / readPauseState), read by the IO
+ *                                      // shell. When true, ALL NEW prepare/fix/ci-heal spawns are held this
+ *                                      // tick (build launches are already held upstream — dispatch-plan.mjs
+ *                                      // empties `plan.launch` to `dispatch-paused` holds when paused, so
+ *                                      // `plan.launch` naturally arrives empty here too); already-running
+ *                                      // lanes/guards/watchers are entirely untouched.
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedReason = null } = {}) {
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
@@ -989,8 +996,14 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const capacityCapNotes = capacityBudget.overflow.map((l) =>
     ({ kind: 'capacity-cap', lane: l, text: `⏸ lane-${l} available but withheld — concurrent-lane cap (${cfg.maxConcurrentLanes}) reached` }));
 
-  // 4. PREPARE spawns (scope + decision) — union re-dispatch gate, lane exclusion; consume lanes.
-  const prep = planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick });
+  // 4. PREPARE spawns (scope + decision) — union re-dispatch gate, lane exclusion; consume lanes. #3609 — a
+  //    manual dispatch-pause holds these too, not just `plan.launch` (which dispatch-plan.mjs already empties
+  //    to `dispatch-paused` holds when paused): these spawns are computed straight off `state.unshaped` /
+  //    `state.decisions` / `state.prs`, never off `plan.launch`, so this tick's OWN `dispatchPaused` input —
+  //    not a re-read of `plan.held` — is what gates them. Already-live guards are untouched either way.
+  const prep = dispatchPaused
+    ? { scopeSpawns: [], decisionSpawns: [], newGuards: [], consumedLanes: [], notes: [] }
+    : planPrepareSpawns({ unshaped, decisions, prs, livePrepareGuards: prepare.live, availableLanes, tick });
   const consumed = new Set(prep.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !consumed.has(String(l)));
   const livePrepareGuards = [...prepare.live, ...prep.newGuards];
@@ -1004,7 +1017,11 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   ]));
 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
-  const fixPlan = planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
+  //    #3609 — held by the same manual dispatch-pause as step 4; `fixAttempts` passes through UNCHANGED (no new
+  //    attempt is spawned to count) rather than being recomputed by `planFixSpawns`.
+  const fixPlan = dispatchPaused
+    ? { spawns: [], newGuards: [], fixAttempts, consumedLanes: [], notes: [] }
+    : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick });
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
   const fixConsumed = new Set(fixPlan.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !fixConsumed.has(String(l)));
@@ -1012,7 +1029,10 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 6b. CI-HEAL spawns — conveyor-launched PRs gone RED / BEHIND after a green open (#2666). The SIBLING of the
   //     fix loop: same entry + counter + cap shape, CI-regression trigger, and the heal repairs ONLY CI — never the
   //     review label. Uses the lanes the builds/prepares/fixes did not take, gated by in-flight test + retry cap.
-  const ciHealPlan = planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
+  //    #3609 — held by the same manual dispatch-pause as steps 4/6; `ciHealAttempts` passes through UNCHANGED.
+  const ciHealPlan = dispatchPaused
+    ? { spawns: [], newGuards: [], ciHealAttempts, consumedLanes: [], notes: [] }
+    : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick });
   const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
@@ -1026,6 +1046,13 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 9. Surface notes — the deterministic, no-agent surfaces (§3d epics, §3e prepared decisions) + guard TTL
   //    re-dispatch warnings, gathered so the skill posts them without re-deriving.
   const notes = [...capacityCapNotes];
+  // #3609 — ONE aggregate note for the manual dispatch-pause (rather than per-spawn-kind notes each spawn
+  // planner would otherwise emit): the individual `plan.held` items already carry their own per-num
+  // `dispatch-paused` note below, so this note covers only what those DON'T — the tick's own prepare/fix/
+  // ci-heal spawns, which never had a `plan.held` row to begin with (see steps 4/6/6b above).
+  if (dispatchPaused) {
+    notes.push({ kind: 'dispatch-paused', text: `⏸ dispatch paused — no new prepare/fix/ci-heal spawns this tick${dispatchPausedReason ? ` (${dispatchPausedReason})` : ''}` });
+  }
   // #xupukxa — a build trimmed by the SAME concurrency ceiling (step 2) is surfaced too, not just the
   // available-lane withholding above: an operator watching the status line otherwise sees a ready build
   // silently vanish rather than being told why.
@@ -1287,7 +1314,22 @@ async function main(argv) {
     admission = JSON.parse(raw);
   } catch { /* best-effort — see comment above */ }
 
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn });
+  // #3609 — the manual/emergency dispatch-pause marker (best-effort direct import, matching the durable-floor
+  // reads above). FAILS OPEN: a missing module or unreadable/corrupt marker leaves `dispatchPaused` false —
+  // dispatch-plan.mjs's own IO shell already reads the SAME marker independently for `plan.launch`, so a
+  // failure here only affects THIS tick's own prepare/fix/ci-heal spawns, never silently re-arms builds.
+  let dispatchPaused = false;
+  let dispatchPausedReason = null;
+  if (!flags['no-pause-check']) {
+    try {
+      const { readPauseState } = await import('../readiness/dispatch-pause.mjs');
+      const pauseState = readPauseState();
+      dispatchPaused = pauseState.paused === true;
+      dispatchPausedReason = pauseState.reason || null;
+    } catch { /* leave unpaused — fail open, same contract as readPauseState's own try/catch */ }
+  }
+
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedReason });
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

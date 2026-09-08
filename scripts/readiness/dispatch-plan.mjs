@@ -127,9 +127,19 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
  *  dispatch, and the branch's own out-of-band one) piling MORE changes onto the same hot files while nothing
  *  reconciles them, until the eventual merge becomes unresolvable. HOLDS — it never auto-reconciles the branch;
  *  it only pauses NEW same-scope dispatch until a fresh sweep clears it. The operator gloss is
- *  {@link BRANCH_DRIFT_BLOCKED_HINT}. */
+ *  {@link BRANCH_DRIFT_BLOCKED_HINT}.
+ *
+ *  `dispatch-paused` (#3609): a MANUAL/EMERGENCY kill-switch, distinct from every reason above — those are all
+ *  properties of the ITEM (its own readiness, scope, or a scope conflict); this is a deliberate OPERATOR
+ *  override that holds every item that would otherwise have launched, regardless of what it is or what scope it
+ *  touches. Set/cleared via `we:scripts/readiness/dispatch-pause.mjs` (`set|clear|status`); checked last, only
+ *  at the point an item would actually be assigned a lane — an item held for any OTHER reason (blocked,
+ *  needs-slice, needs-decision, unshaped-no-scope, an overlap, already-done, branch-drift-blocked) keeps that
+ *  more specific reason, since the pause changes nothing about why THAT item wasn't launching anyway. Never
+ *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
+ *  gloss is {@link DISPATCH_PAUSED_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready',
+  'already-done', 'blocked', 'unshaped-no-scope', 'needs-slice', 'needs-decision', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -161,6 +171,11 @@ export const ALREADY_DONE_HINT = 'a merged PR already appears to close this out 
  *  found a conflict/ceiling breach against the SAME scope this item wants to touch; reconcile the branch (or
  *  wait for the next sweep to clear it), then re-dispatch. */
 export const BRANCH_DRIFT_BLOCKED_HINT = 'a dispatched-work branch is unreconciled over this scope — reconcile it, then re-dispatch';
+
+/** The operator-facing gloss for a `dispatch-paused` hold (#3609) — surfaced beside the token so a held item
+ *  always tells the operator WHAT to do: clear the manual pause (`node scripts/readiness/dispatch-pause.mjs
+ *  clear`) once the emergency has passed; already-running lanes were never touched. */
+export const DISPATCH_PAUSED_HINT = 'manual dispatch-pause is set — clear it (dispatch-pause.mjs clear) to resume new launches';
 
 /** The operator-facing gloss for a `capacity-cap` hold (#xupukxa) — surfaced beside the token so a held item
  *  always tells the operator WHY it differs from `no free lane`: a lane physically exists, but launching it
@@ -240,6 +255,7 @@ function hasOpenBlockers(item) {
  *   freeLanes: Array<string|number>,
  *   driftBlockedScope?: string[]|null,
  *   maxConcurrentLanes?: number,
+ *   dispatchPaused?: boolean,
  * }} input
  *   • `queue`     — the build queue ALREADY IN RANK ORDER (highest-priority first): the `buildQueued` items.
  *                   Each carries its `kind` (so a `kind:epic` container is held `needs-slice` and a `kind:decision`
@@ -269,12 +285,17 @@ function hasOpenBlockers(item) {
  *                   omitted; the IO shell resolves a real default via
  *                   {@link ../lib/lane-concurrency.mjs resolveMaxConcurrentLanes}. An item that would otherwise
  *                   launch but is trimmed away by this holds `capacity-cap`, distinct from `no free lane`.
+ *   • `dispatchPaused` — (#3609) the MANUAL/EMERGENCY dispatch-pause lever's current state
+ *                   (`we:scripts/readiness/dispatch-pause.mjs#isDispatchPaused`). When true, every item that
+ *                   would otherwise be assigned a lane holds `dispatch-paused` instead — checked at the very
+ *                   last step, so it never relabels an item already held for a MORE specific reason. Defaults
+ *                   to `false` (unpaused — today's pre-#3609 behavior) when omitted.
  * @returns {{ launch: Array<{num, lane}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare).
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes = Infinity, dispatchPaused = false } = {}) {
   const items = Array.isArray(queue) ? queue.filter((it) => it && typeof it === 'object') : [];
   const activeLeases = (Array.isArray(leases) ? leases : [])
     .filter((l) => l && typeof l === 'object')
@@ -383,6 +404,15 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxC
     const rival = launched.find((r) => scopesOverlap(scope, r.scope));
     if (rival) {
       held.push({ num, reason: `overlaps lane-${rival.lane}` });
+      continue;
+    }
+    // 6.5. MANUAL DISPATCH-PAUSE (#3609) — the item is otherwise launchable (every gate above passed); a
+    //    deliberate operator kill-switch holds it here instead of assigning a lane. Checked LAST, only at the
+    //    point a lane would actually be handed out, so it never relabels an item already held for a more
+    //    specific reason above (blocked / needs-slice / needs-decision / unshaped-no-scope / branch-drift-blocked
+    //    / an overlap) — pausing changes nothing about why those items weren't launching anyway.
+    if (dispatchPaused) {
+      held.push({ num, reason: 'dispatch-paused' });
       continue;
     }
     // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
@@ -607,9 +637,23 @@ async function main(argv) {
     }
   }
 
+  // 3.6 MANUAL DISPATCH-PAUSE (#3609) — read the operator's advisory pause marker. FAIL-OPEN on any error
+  //     (module missing, unreadable/corrupt file) — an absent/unreadable pause signal must never itself hold
+  //     dispatch; only an explicit `paused:true` marker does. Skippable via `--no-pause-check` (mirrors
+  //     `--no-ground-truth` / `--no-drift-check`).
+  let dispatchPaused = false;
+  if (!flags['no-pause-check']) {
+    try {
+      const { isDispatchPaused } = await import('./dispatch-pause.mjs');
+      dispatchPaused = isDispatchPaused();
+    } catch (e) {
+      log(`  ⚠ dispatch-pause check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
+    }
+  }
+
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, maxConcurrentLanes, dispatchPaused });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -644,7 +688,8 @@ async function main(argv) {
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
               : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
-                : '';
+                : h.reason === 'dispatch-paused' ? ` (${DISPATCH_PAUSED_HINT})`
+                  : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }

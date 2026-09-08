@@ -683,3 +683,94 @@ describe('dispatchPlan — maxConcurrentLanes (#xupukxa, live incident 2026-09-0
     expect(plan.held).toEqual([]);
   });
 });
+
+describe('dispatchPlan — manual dispatch-pause (#3609): a deliberate operator kill-switch, distinct from every other hold', () => {
+  it('omitted / false — unlimited, byte-for-byte the pre-#3609 behavior', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [],
+      freeLanes: [10],
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+    const paused = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [],
+      freeLanes: [10],
+      dispatchPaused: false,
+    });
+    expect(paused).toEqual(plan);
+  });
+
+  it('an otherwise-launchable item holds `dispatch-paused` instead of getting a lane, and NO lane is consumed', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }, { num: 2, scope: ['b/'] }],
+      leases: [],
+      freeLanes: [10, 11],
+      dispatchPaused: true,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([
+      { num: 1, reason: 'dispatch-paused' },
+      { num: 2, reason: 'dispatch-paused' },
+    ]);
+  });
+
+  it('an ACTIVE lease is never touched — dispatchPaused only ever changes NEW launches, never in-flight lanes', () => {
+    // dispatchPlan itself has no lease-release knowledge at all; this pins that leases pass through untouched
+    // (the plan never references `leases` past the overlap check) even while paused.
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [{ lane: 99, scope: ['z/'] }],
+      freeLanes: [10],
+      dispatchPaused: true,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+
+  it('an item held for a MORE SPECIFIC reason keeps that reason — pause never relabels blocked/needs-slice/needs-decision/unshaped/overlap/already-done', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, scope: ['a/'], openBlockers: ['0'] }, // blocked
+        { num: 2, kind: 'epic' }, // needs-slice
+        { num: 3, kind: 'decision' }, // needs-decision
+        { num: 4, scope: [] }, // unshaped-no-scope
+        { num: 5, scope: ['z/'] }, // overlaps the active lease below
+        { num: 6, scope: ['q/'], alreadyDonePr: { url: 'https://x/1' } }, // already-done
+        { num: 7, scope: ['w/'] }, // otherwise-launchable → dispatch-paused
+      ],
+      leases: [{ lane: 1, scope: ['z/'] }],
+      freeLanes: [10, 11],
+      dispatchPaused: true,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([
+      { num: 1, reason: 'blocked' },
+      { num: 2, reason: 'needs-slice' },
+      { num: 3, reason: 'needs-decision' },
+      { num: 4, reason: 'unshaped-no-scope' },
+      { num: 5, reason: 'overlaps lane-1' },
+      { num: 6, reason: 'already-done' },
+      { num: 7, reason: 'dispatch-paused' },
+    ]);
+  });
+
+  it('composes with the concurrency cap: an item BOTH capacity-limited and paused reads `dispatch-paused` (checked before capacity-cap)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [{ lane: 1, scope: ['z/'] }],
+      freeLanes: [10],
+      maxConcurrentLanes: 1, // room = 1 - 1 = 0 → would hold `capacity-cap` even unpaused
+      dispatchPaused: true,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+  it('a genuinely empty free-lane pool while paused still reads `dispatch-paused`, not `no free lane`', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }],
+      leases: [],
+      freeLanes: [],
+      dispatchPaused: true,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+});

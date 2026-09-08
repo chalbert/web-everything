@@ -62,6 +62,10 @@ commitment-policy/**/*.d.ts
 # Red-main dispatch-freeze marker (#2681) — present ⇒ the sole writer STOPS THE LINE (main is red). Operational
 # stop-the-line state raised/lifted by red-main-remediation.mjs; machine-local, never committed.
 .conveyor/red-main-freeze.json
+# Manual/emergency dispatch-pause marker (#3609) — present ⇒ dispatch-plan.mjs and tick-core.mjs hold every
+# otherwise-launchable item/spawn `dispatch-paused`, without touching already-running lanes. Operator-set/cleared
+# via dispatch-pause.mjs set|clear; machine-local advisory state, never committed.
+.conveyor/dispatch-pause.json
 # …and its advisory lock (serializes concurrent record/retry writes) — ephemeral (created+unlinked per
 # critical section), but ignore it so a crashed holder's leftover lock never shows as an untracked file.
 .conveyor/*.lock

@@ -15,4 +15,4 @@ Sibling of 3612 (we:backlog/3612-cap-concurrent-dispatched-lanes-with-a-max-conc
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/readiness/__tests__/dispatch-pause.test.mjs we:scripts/readiness/__tests__/dispatch-plan.test.mjs we:scripts/conveyor/__tests__/tick-core.test.mjs -t "dispatch-pause|dispatch-paused"` — fails before this item lands (`we:scripts/readiness/dispatch-pause.mjs` does not exist, and neither `dispatchPlan` nor `planTick` accepts/honors a `dispatchPaused` input), passes after: `we:scripts/readiness/dispatch-pause.mjs set` raises the marker, `we:scripts/readiness/dispatch-plan.mjs`'s pure core holds every otherwise-launchable item `dispatch-paused` (never relabeling an item already held for a more specific reason, and never touching an active lease), `we:scripts/conveyor/tick-core.mjs`'s `planTick` holds every new prepare/fix/ci-heal spawn the same way while leaving guard retirement/watchers/idle-stop untouched, and `we:scripts/readiness/dispatch-pause.mjs clear` resumes normal dispatch on the next read.
