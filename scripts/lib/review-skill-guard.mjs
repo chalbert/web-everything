@@ -142,17 +142,22 @@ export const SINGLE_HOME_CODE_FILES = Object.freeze([
  *
  * WHAT THIS STILL CANNOT CATCH, on purpose, same posture as `RAW_SWAP_RE`'s own bounds above and #2895's
  * documented actor-provenance residual: a script that assigns the `gh` args array, the label string, or the
- * `setLabels` options object to a variable BEFORE the call defeats textual co-occurrence — no bounded regex can
- * trace data flow, and reaching for one here would be the "carve-out with holes" `RAW_SWAP_RE`'s own header
- * already rejected once. This rule's job is to catch the ORDINARY re-implementation an engineer (or agent) who
- * doesn't know the single home exists would naturally write — exactly how the #2882 doc instance shipped — not
- * to defeat someone deliberately obfuscating a call to route around a lint they know is watching.
+ * `setLabels` options object to a variable or a computed/conditional expression BEFORE the call defeats textual
+ * co-occurrence — no bounded regex can trace data flow, and reaching for one here would be the "carve-out with
+ * holes" `RAW_SWAP_RE`'s own header already rejected once. This rule's job is to catch the ORDINARY
+ * re-implementation an engineer (or agent) who doesn't know the single home exists would naturally write —
+ * exactly how the #2882 doc instance shipped — not to defeat someone deliberately obfuscating a call to route
+ * around a lint they know is watching. A round-2 panel pass (#2416) traced this exact boundary directly: three
+ * MORE idiomatic-but-still-textual shapes (`execFile`, the `-l` short flag, a bare non-method `setLabels(`) were
+ * concrete gaps and are now covered below; a conditional/ternary label expression is the SAME residual as
+ * variable indirection — filed as a follow-on rather than chased here, per we:backlog/xgewdfr-harden-the-2416-review-label-code-scan-gate-against-expressi.md.
  */
 const ACCEPTED_TOKEN = String.raw`\[?['"\`]?(?:review:accepted|REVIEW_LABELS\.accepted)`;
+const GH_ADD_LABEL_FLAG = String.raw`(?:--add-label|-l)`;
 const CODE_SWAP_RE = new RegExp(
-  String.raw`\b(?:execFileSync|spawnSync|spawn|execSync|exec)\s*\(\s*['"\`]?gh['"\`]?[^)]{0,400}?--add-label['"\`]?[=\s,]+${ACCEPTED_TOKEN}`
+  String.raw`\b(?:execFileSync|spawnSync|spawn|execSync|execFile|exec)\s*\(\s*['"\`]?gh['"\`]?[^)]{0,400}?${GH_ADD_LABEL_FLAG}['"\`]?[=\s,]+${ACCEPTED_TOKEN}`
   + '|'
-  + String.raw`\.setLabels\s*\([^)]{0,400}?\badd\s*:\s*${ACCEPTED_TOKEN}`,
+  + String.raw`\.?\bsetLabels\s*\([^)]{0,400}?\badd\s*:\s*${ACCEPTED_TOKEN}`,
   'g',
 );
 

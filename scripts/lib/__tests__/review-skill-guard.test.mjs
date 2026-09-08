@@ -241,6 +241,30 @@ describe('checkReviewLabelSingleHomeCode — the raw swap in CODE is an error (#
     });
   });
 
+  // Round-2 panel review (#2416) traced three MORE idiomatic shapes past the round-1 fix.
+  describe('idiomatic call shapes the round-2 panel found missing', () => {
+    it("flags Node's async execFile (execFileSync's callback-based sibling)", () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        "execFile('gh', ['pr', 'edit', pr, '--add-label', 'review:accepted'], cb)",
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it("flags gh's own short flag -l (an alias for --add-label)", () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        "execFileSync('gh', ['pr', 'edit', pr, '-l', 'review:accepted'])",
+      ));
+      expect(errors).toHaveLength(1);
+    });
+
+    it('flags a bare, directly-imported setLabels(...) call (no object/method prefix)', () => {
+      const { errors } = checkReviewLabelSingleHomeCode(code(
+        'setLabels(repo, pr, { add: REVIEW_LABELS.accepted, remove: [] });',
+      ));
+      expect(errors).toHaveLength(1);
+    });
+  });
+
   it('tolerates a missing/odd files shape', () => {
     expect(checkReviewLabelSingleHomeCode().errors).toHaveLength(0);
     expect(checkReviewLabelSingleHomeCode([null, {}, { file: 'scripts/a.mjs' }]).errors).toHaveLength(0);

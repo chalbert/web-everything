@@ -2210,18 +2210,21 @@ try {
 
 // ── 15b. Review-label single home must hold for CODE too, not just docs (#2416) ──────────────
 // Rule 15 stops a MARKDOWN doc from INSTRUCTING the raw swap; nothing stopped a SCRIPT from minting the same
-// raw `gh pr edit --add-label review:accepted` (or an equivalent `setLabels({add: 'review:accepted'})` write)
-// directly in code — the residual #2416 gap in the "review:human PR is never agent-cleared" invariant: a
+// raw gh-exec label write, or an equivalent `setLabels` add of the accepted label, directly in code — the
+// residual #2416 gap in the "review:human PR is never agent-cleared" invariant: a
 // second write path never reaches `decideSetLabel`, so it never pays INVARIANT 2 or the #2409 `reviewed-sha`
-// stamp. Pure rule in `lib/review-skill-guard.mjs`; scoped to non-test `.mjs` under `scripts/`, the only place
-// a write path could live.
+// stamp. Pure rule in `lib/review-skill-guard.mjs`; scoped to non-test `.mjs`/`.cjs` under `scripts/` — a
+// round-2 panel review (#2416) traced a live `.cjs` sibling family under `scripts/lib/` (e.g. loader hooks) that
+// the first cut's `.mjs`-only walk never visited; `.js` has no callers under `scripts/` today, so it stays out
+// until one exists.
 {
   const SKIP_DIRS = new Set(['node_modules', '.git', '__tests__', '__fixtures__']);
+  const isScannableScript = (name) => (name.endsWith('.mjs') || name.endsWith('.cjs')) && !name.endsWith('.test.mjs');
   const walkMjs = (dir, acc = []) => {
     for (const name of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, name.name);
       if (name.isDirectory()) { if (!SKIP_DIRS.has(name.name)) walkMjs(p, acc); }
-      else if (name.name.endsWith('.mjs') && !name.name.endsWith('.test.mjs')) acc.push(p);
+      else if (isScannableScript(name.name)) acc.push(p);
     }
     return acc;
   };
