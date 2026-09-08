@@ -23,6 +23,7 @@
  *   | `advise`         | `effect`  | (#xlw02hw) `renderAdvisoryNote` — an AUTOMATIC, non-recording PR comment on   |
  *   |                  |           | a `review:human` PR only; `[]` (no-op) on every other PR — DECLARED only      |
  *   | `confirm`        | `confirm` | the engine SUSPENDS — the human stop, as machinery instead of prose           |
+ *   | `stageVerdict`   | `effect`  | (#3540) `planRecordDecision` — stages the write-up LOCALLY, no `gh` needed    |
  *   | `record`         | `effect`  | `decideSetLabel` (`we:scripts/review-set-label.mjs`) + `renderPanelComment`   |
  *   |                  |           | (`we:scripts/lib/review-render.mjs`) + `renderReviewNotice` — DECLARED only   |
  *
@@ -63,8 +64,38 @@
  * class of risk: #3319 inserted `judgeSecurity` the same way, at index 2, with no migration guard either — this
  * item does not introduce the residual, it exercises an already-accepted one. Fixing it for good would be a
  * versioned-declaration or step-name-keyed `pending` record, which is a real, separate item, not this one's bill.
+ * #3540 inserts `stageVerdict` between `confirm` and `record` for the same reason and carries the same residual —
+ * a run that suspended at `record` before this deploy resolves against `stageVerdict` after it. Not migrated
+ * here either, for the reason already given above.
  *
- * ── WHY TWO `judge` STEPS AND NOT A PANEL (#3319) ───────────────────────────────────────────────────────────
+ * ── `stageVerdict`: THE WRITE-UP, STAGED WITH NO `gh` (#3540) ─────────────────────────────────────────────────
+ *
+ * THE DEADLOCK THIS CLOSES. `record-verdict` (`we:scripts/operations/record-verdict.mjs`) carries a verdict from
+ * a host with no GitHub credential to the CI job that has one — but it needs the write-up ALREADY STAGED on
+ * disk, and until this step existed the ONLY thing that staged one was `record`'s own effect 0, bundled in the
+ * SAME step as effect 1 (the label swap, which shells `gh` and fails on a credential-less host). So reaching the
+ * write-up meant answering `confirm` and running `record` in full — which then halted on the label swap it could
+ * never complete, leaving a clean accept recorded as an indistinguishable `effect-halted` run (#3540's own
+ * reproduction: PR #1961, an agent-reviewable zero-finding accept with no operator to hand the halt to).
+ *
+ * WHY A NEW STEP AND NOT `advise`. `advise` runs BEFORE `confirm` — it has no `answer` to render a real
+ * "Decision: `x`" write-up with, only a provisional advisory note for `review:human` PRs. The write-up
+ * `record-verdict` carries has to be the SAME bytes `record`'s label swap posts, and that requires `confirm`'s
+ * answer — so the earliest a write-up can honestly exist is right after `confirm`, which is exactly where
+ * `stageVerdict` sits.
+ *
+ * PURE CORE, SHARED, NOT DUPLICATED. `stageVerdict` and `record` both call {@link planRecordDecision} — the
+ * SAME pure function, so the write-up `stageVerdict` stages locally and the `bodyFile` `record`'s label swap
+ * later posts from disk are guaranteed byte-identical and path-identical, never two independent renders that
+ * could drift. INVARIANT 2 (`decideSetLabel`) and the reasonless-bounce guard both live in `planRecordDecision`,
+ * so they now refuse at `stageVerdict` — BEFORE the write-up is even staged — rather than at `record`, which is
+ * strictly earlier than before, never later.
+ *
+ * WHAT THIS DOES NOT FIX ON ITS OWN. The review-pr run STILL ends up `awaiting-effect` at `record` on a
+ * credential-less host — `record`'s label/ledger/notice effects still need `gh`. The improvement is that the
+ * write-up is now a CLEAN, fully-applied, terminal finding on `stageVerdict` before that happens, rather than
+ * conflated with the label swap's failure in one step's status. `record-verdict-cli.mjs` (#3540) is what makes
+ * calling `record-verdict` alone, with no separate `--resume` of this run, actually reach that clean state.
  *
  * THE EVIDENCE. Across the replayed corpus (`we:scripts/review-corpus/cases`, 92 cases, 87 carrying a lens row)
  * **86 of 87 rows are `correctness`**. `security` ran exactly ONCE — #1457 r2 — and declared exactly ONE
@@ -468,10 +499,31 @@ export const CONFIRM_ACTORS = Object.freeze({ HUMAN: 'human', AGENT: 'agent' });
 export const CONFIRM_OPTIONS = Object.freeze(['accept', 'changes', 'abstain']);
 
 /**
- * The effect types this operation declares. Four belong to `record`; `verdict-ledger.append` is #3032's
- * reserved seam for #3007. `ADVISORY_NOTE` (#xlw02hw) belongs to `advise` and is deliberately its OWN type,
- * never `WRITE_UP`/`LABEL` — those two are the real ceremony's write and a caller (or a sink lookup keyed by
- * type) must never be able to confuse the two kinds of comment this operation can post.
+ * #3540 — MAP `record-verdict`'s `to` VOCABULARY (`accepted`/`changes`/`clear-human`) TO THIS `confirm` STEP'S
+ * OWN ANSWER (`accept`/`changes`/`abstain`), where one exists. PURE.
+ *
+ * `clear-human` maps to `null`, DELIBERATELY: it is the human ceremony's OWN clearance of a gate-self PR
+ * (`review-set-label.mjs --to=clear-human`, #2895), never an answer this operation's `confirm` step could ever
+ * be given — `planRecordDecision`'s INVARIANT 2 guard refuses `accept` on a `review:human` PR unconditionally,
+ * so there is no `confirm` answer this vocabulary could translate a `clear-human` request into. A caller (see
+ * `we:scripts/operations/record-verdict-io.mjs#advanceReviewPrToWriteUp`) reads `null` as "nothing to auto-
+ * answer here", never as a refusal of its own.
+ *
+ * @param {string} to
+ * @returns {'accept'|'changes'|null}
+ */
+export function confirmAnswerFor(to) {
+  if (to === 'accepted') return 'accept';
+  if (to === 'changes') return 'changes';
+  return null;
+}
+
+/**
+ * The effect types this operation declares. `WRITE_UP` belongs to `stageVerdict`; `LABEL`/`LEDGER`/`NOTICE`
+ * belong to `record` (#3540 split the write-up out of `record`, ahead of the label swap); `verdict-ledger.append`
+ * is #3032's reserved seam for #3007. `ADVISORY_NOTE` (#xlw02hw) belongs to `advise` and is deliberately its OWN
+ * type, never `WRITE_UP`/`LABEL` — those two are the real ceremony's write and a caller (or a sink lookup keyed
+ * by type) must never be able to confuse the two kinds of comment this operation can post.
  */
 export const REVIEW_EFFECTS = Object.freeze({
   WRITE_UP: 'review.write-up',
@@ -897,6 +949,95 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
     '',
     `_Recorded through the declared \`${REVIEW_PR_OP}\` operation (#3035)._`,
   ].join('\n');
+}
+
+/**
+ * #3540 — THE record DECISION, DERIVED ONCE. PURE. Both `stageVerdict` and `record` call this so the write-up
+ * `stageVerdict` stages LOCALLY and the label swap `record` posts from disk can never compute two different
+ * bytes, two different `bodyFile` names, or two different answers to "is this allowed" for one run.
+ *
+ * THROWS THE SAME TWO REFUSALS `record` HAS ALWAYS HAD — INVARIANT 2 (`decideSetLabel`) and the reasonless-
+ * bounce guard — moved here so BOTH steps refuse identically. Calling this from `stageVerdict` (which runs
+ * first) means a disallowed target — `accept` on a `review:human` PR, a reasonless `changes` — is refused
+ * BEFORE the write-up is ever staged, not only later at `record`: strictly EARLIER than before, never later.
+ *
+ * `abstain` is the one non-effect answer: `{ abstain: true }` tells both callers to declare nothing, exactly as
+ * `record`'s own `effects` fn always has.
+ *
+ * @param {{input: {pr: number, repo: string, actor: string, reason?: string}, verdict: object,
+ *   findings: {read: object, confirm: string}}} view
+ * @returns {{abstain: true} | {to: string, decision: object, bodyFile: string, body: string, pr: number,
+ *   repo: string, actor: string, read: object, verdict: object}}
+ */
+export function planRecordDecision(view) {
+  const answer = view.findings.confirm;
+  // THE NON-MUTATING EXIT. The operator looked and chose not to record: zero effects, which the engine resolves
+  // in the same `advance` rather than suspending. This is how a run is exercised end to end against a real PR
+  // without touching it.
+  if (answer === 'abstain') return { abstain: true };
+
+  const read = view.findings.read;
+  const verdict = view.verdict || {};
+  const pr = view.input.pr;
+  const repo = view.input.repo;
+  const actor = view.input.actor;
+  const to = answer === 'accept' ? 'accepted' : 'changes';
+
+  // ── THE PURE-CORE GUARD (property 2 in the file header) ──────────────────────────────────────────────────
+  // INVARIANT 2 lives in `decideSetLabel`, imported, unbypassable. On a `review:human` PR `to:'accepted'` comes
+  // back `allowed:false` and this step THROWS — no effect entry is created, so there is nothing to apply,
+  // nothing to replay and nothing half-done. The generated caller therefore cannot clear a gate-self PR any
+  // more than the hand-written one could, and for the same reason: the decision is not its to make. The
+  // sanctioned clearance (`--to=clear-human`, #2895) is DELIBERATELY not reachable from here — it demands an
+  // operator instruction quoted verbatim, which is judgment, not a declared step.
+  // ── THE REASONLESS-BOUNCE REFUSAL (#3035) ─────────────────────────────────────────────────────────────────
+  // A `changes` recorded over a juror that raised NOTHING is an override, and an override with no stated reason
+  // ships a comment that reads "✅ pass — no blocking findings" beside "Decision: `changes`". The author lane
+  // is then bounced with nothing to act on and comes back for another round having changed whatever it
+  // guessed at. Refuse it here, in the pure core, so no caller can post one: either the juror named findings,
+  // or the operator names a reason.
+  //
+  // The check is deliberately narrow. A bounce that CARRIES juror findings needs no `--reason` — the findings
+  // are the reason, and they are already rendered. This only binds the empty case.
+  const overrideReason = typeof view.input.reason === 'string' ? view.input.reason.trim() : '';
+  const jurorFindings = Array.isArray(verdict.findings) ? verdict.findings.length : 0;
+  if (answer === 'changes' && jurorFindings === 0 && overrideReason === '') {
+    throw new Error(
+      `review-pr.record: refusing to record \`changes\` on ${repo}#${pr} with no stated reason — the `
+      // #3319 — ALL of them, named. "the `correctness` juror returned 0 findings" would now be a claim about
+      // one of two seats, and the operator's next question is exactly "which one was silent?".
+      + `${(verdict.lenses ?? []).length} juror(s) (${(verdict.lenses ?? []).join(', ')}) returned 0 `
+      + 'findings between them, so this is an OPERATOR OVERRIDE and the write-up '
+      + 'would post "no blocking findings" above "Decision: `changes`". The author lane cannot act on '
+      + 'that, so it buys another round. Pass `--reason="<what must change>"` on this same --resume, or '
+      + 'record `abstain` to write nothing. (18 bounces across 8 PRs, #1556–#1567, were reasonless in '
+      + 'exactly this way — see the counted sweep and its retractions at the `reason` input above.)',
+    );
+  }
+
+  const decision = decideSetLabel({ to, currentLabels: read.labels });
+  if (!decision.allowed) {
+    throw new Error(
+      `review-pr.record: refusing to record \`${to}\` on ${repo}#${pr} — ${decision.reason}. `
+      + 'The refusal is `decideSetLabel` in `we:scripts/review-set-label.mjs` (INVARIANT 2, #2470/#2644); '
+      + 'this operation does not carry a route around it. A gate-self PR is cleared only by the human '
+      + 'ceremony `review-set-label.mjs --to=clear-human --actor=… --reason="<the operator instruction>"` '
+      + '(#2895), which quotes an instruction and is therefore not a declarable step.',
+    );
+  }
+
+  // DETERMINISTIC, from `repo`+`pr` alone — never from `runId` or anything else that could differ between the
+  // two callers. This is the property that makes `stageVerdict`'s staged file and `record`'s label-swap payload
+  // name the SAME path without either reading the other's finding (#3540).
+  const bodyFile = `${repo.replace(/[^\w.-]+/g, '-')}-${pr}-verdict.md`;
+  // #3319 — the roster travels ON the verdict (`lenses` / `lensVerdicts`), so the renderer is no longer handed
+  // a lens separately: that was the seam through which the write-up could describe a different set of seats
+  // than the reduction was computed over.
+  const body = renderVerdictWriteUp({ read, verdict, answer, actor, reason: overrideReason });
+
+  return {
+    to, decision, bodyFile, body, pr, repo, actor, read, verdict,
+  };
 }
 
 /**
@@ -1460,17 +1601,35 @@ export function reviewPrOperation({ readPr } = {}) {
       options: [...CONFIRM_OPTIONS],
     }),
 
-    // ── 7. record ───────────────────────────────────────────────────────────────────────────────────────────
-    // DECLARES four effects and applies NONE. See the per-effect idempotency notes below — each is decided on
-    // its own, because the executor's refusal to replay an indeterminate attempt is only as strong as the flag.
+    // ── 7. stageVerdict ─────────────────────────────────────────────────────────────────────────────────────
+    // #3540 — THE WRITE-UP, ALONE, NO `gh` NEEDED. Declares exactly ONE effect (the local file write) via
+    // {@link planRecordDecision} — the SAME pure decision `record` below re-derives, so the two can never stage
+    // and later post two different bodies. See the file header's `stageVerdict` section for why this exists as
+    // its own step rather than folded into `advise` or left inside `record`.
+    stageVerdict: effectStep({
+      reads: ['input.pr', 'input.repo', 'input.actor', 'input.reason', 'verdict', 'findings.read', 'findings.confirm'],
+      effects: (view) => {
+        const plan = planRecordDecision(view);
+        if (plan.abstain) return [];
+        return [
+          // IDEMPOTENT: TRUE — see `planRecordDecision`'s own note on `bodyFile`/`body` determinism.
+          { type: REVIEW_EFFECTS.WRITE_UP, payload: { pr: plan.pr, repo: plan.repo, bodyFile: plan.bodyFile, body: plan.body }, idempotent: true },
+        ];
+      },
+    }),
+
+    // ── 8. record ───────────────────────────────────────────────────────────────────────────────────────────
+    // DECLARES three effects and applies NONE (#3540 moved the write-up to `stageVerdict`, ahead of this step).
+    // See the per-effect idempotency notes below — each is decided on its own, because the executor's refusal
+    // to replay an indeterminate attempt is only as strong as the flag.
     //
     // ORDER IS THE SAFETY PROPERTY (the #2964 rule, now declared instead of hand-maintained). Effects apply
     // strictly ascending and the executor HALTS at the first that does not land, so:
-    //   0 stages the write-up LOCALLY (inert — nothing but effect 1 reads it),
-    //   1 makes the one REMOTE write (the single home posts the comment AND swaps the label, itself #2964-ordered),
-    //   2 appends the durable ledger row only AFTER the swap actually landed — an orphan row in the merge
+    //   0 makes the one REMOTE write (the single home posts the write-up `stageVerdict` already staged AND swaps
+    //     the label, itself #2964-ordered),
+    //   1 appends the durable ledger row only AFTER the swap actually landed — an orphan row in the merge
     //     authority is NOT inert, so it must never precede the label it vouches for,
-    //   3 reports to the operator last, when there is something true to report.
+    //   2 reports to the operator last, when there is something true to report.
     record: effectStep({
       // `input.reason` IS NAMED HERE OR THE GUARD BELOW CANNOT FIRE (PR #1572 round 5, the blocking finding).
       // `projectReads` builds `view.input` from exactly these leaves — "an undeclared path is absent, so the
@@ -1480,88 +1639,22 @@ export function reviewPrOperation({ readPr } = {}) {
       // `input.reason`, which made the entire feature unreachable through the documented CLI.
       reads: ['input.pr', 'input.repo', 'input.actor', 'input.reason', 'verdict', 'findings.read', 'findings.confirm'],
       effects: (view) => {
-        const answer = view.findings.confirm;
-        // THE NON-MUTATING EXIT. The operator looked and chose not to record: zero effects, which the engine
-        // resolves in the same `advance` rather than suspending. This is how a run is exercised end to end
-        // against a real PR without touching it.
-        if (answer === 'abstain') return [];
-
-        const read = view.findings.read;
-        const verdict = view.verdict || {};
-        const pr = view.input.pr;
-        const repo = view.input.repo;
-        const actor = view.input.actor;
-        const to = answer === 'accept' ? 'accepted' : 'changes';
-
-        // ── THE PURE-CORE GUARD (property 2 in the header) ────────────────────────────────────────────────
-        // INVARIANT 2 lives in `decideSetLabel`, imported, unbypassable. On a `review:human` PR `to:'accepted'`
-        // comes back `allowed:false` and this step THROWS — no effect entry is created, so there is nothing to
-        // apply, nothing to replay and nothing half-done. The generated caller therefore cannot clear a
-        // gate-self PR any more than the hand-written one could, and for the same reason: the decision is not
-        // its to make. The sanctioned clearance (`--to=clear-human`, #2895) is DELIBERATELY not reachable from
-        // here — it demands an operator instruction quoted verbatim, which is judgment, not a declared step.
-        // ── THE REASONLESS-BOUNCE REFUSAL (#3035) ─────────────────────────────────────────────────────────
-        // A `changes` recorded over a juror that raised NOTHING is an override, and an override with no stated
-        // reason ships a comment that reads "✅ pass — no blocking findings" beside "Decision: `changes`". The
-        // author lane is then bounced with nothing to act on and comes back for another round having changed
-        // whatever it guessed at. Refuse it here, in the pure core, so no caller can post one: either the juror
-        // named findings, or the operator names a reason.
-        //
-        // The check is deliberately narrow. A bounce that CARRIES juror findings needs no `--reason` — the
-        // findings are the reason, and they are already rendered. This only binds the empty case.
-        const overrideReason = typeof view.input.reason === 'string' ? view.input.reason.trim() : '';
-        const jurorFindings = Array.isArray(verdict.findings) ? verdict.findings.length : 0;
-        if (answer === 'changes' && jurorFindings === 0 && overrideReason === '') {
-          throw new Error(
-            `review-pr.record: refusing to record \`changes\` on ${repo}#${pr} with no stated reason — the `
-            // #3319 — ALL of them, named. "the `correctness` juror returned 0 findings" would now be a claim
-            // about one of two seats, and the operator's next question is exactly "which one was silent?".
-            + `${(verdict.lenses ?? []).length} juror(s) (${(verdict.lenses ?? []).join(', ')}) returned 0 `
-            + 'findings between them, so this is an OPERATOR OVERRIDE and the write-up '
-            + 'would post "no blocking findings" above "Decision: `changes`". The author lane cannot act on '
-            + 'that, so it buys another round. Pass `--reason="<what must change>"` on this same --resume, or '
-            + 'record `abstain` to write nothing. (18 bounces across 8 PRs, #1556–#1567, were reasonless in '
-            + 'exactly this way — see the counted sweep and its retractions at the `reason` input above.)',
-          );
-        }
-
-        const decision = decideSetLabel({ to, currentLabels: read.labels });
-        if (!decision.allowed) {
-          throw new Error(
-            `review-pr.record: refusing to record \`${to}\` on ${repo}#${pr} — ${decision.reason}. `
-            + 'The refusal is `decideSetLabel` in `we:scripts/review-set-label.mjs` (INVARIANT 2, #2470/#2644); '
-            + 'this operation does not carry a route around it. A gate-self PR is cleared only by the human '
-            + 'ceremony `review-set-label.mjs --to=clear-human --actor=… --reason="<the operator instruction>"` '
-            + '(#2895), which quotes an instruction and is therefore not a declarable step.',
-          );
-        }
-
-        const bodyFile = `${repo.replace(/[^\w.-]+/g, '-')}-${pr}-verdict.md`;
-        // #3319 — the roster travels ON the verdict (`lenses` / `lensVerdicts`), so the renderer is no longer
-        // handed a lens separately: that was the seam through which the write-up could describe a different set
-        // of seats than the reduction was computed over.
-        const body = renderVerdictWriteUp({ read, verdict, answer, actor, reason: overrideReason });
+        // #3540 — RE-DERIVED, NOT CARRIED. `planRecordDecision` is pure and deterministic over this same `view`,
+        // so calling it again here (rather than reading `findings.stageVerdict`, which only exposes applied/type/
+        // result — see `effectFinding` in `engine.mjs` — never the payload) reproduces the identical `bodyFile`
+        // and `body` `stageVerdict` already wrote to disk, with no second source of truth.
+        const plan = planRecordDecision(view);
+        if (plan.abstain) return [];
+        const {
+          to, decision, bodyFile, pr, repo, actor, read, verdict,
+        } = plan;
 
         return [
-          // 0 — THE COMMENT (its body). IDEMPOTENT: TRUE. It writes bytes that are a pure function of the run
-          //     record to one deterministic path in the operation's own sidecar. Re-writing produces a
-          //     byte-identical file, there is no remote side and nothing accumulates, so an attempt whose
-          //     outcome is unknown is safe to simply redo. Flagging it false would wedge the run on a crash
-          //     that cost nothing.
-          //     The name below is keyed by PR, NOT by run — the io shell stages it under `<runId>/`
-          //     (`reviewBodyPath` in `we:scripts/operations/review-pr-io.mjs`) so two runs on the same PR in
-          //     one checkout cannot cross-stage. That scoping does not weaken the property above: the run id
-          //     belongs to the RECORD, not to the attempt, so a replay of this entry resolves the same path.
-          {
-            type: REVIEW_EFFECTS.WRITE_UP,
-            payload: { pr, repo, bodyFile, body },
-            idempotent: true,
-          },
-          // 1 — THE LABEL SWAP, via `decideSetLabel` and through the SINGLE HOME (`review-set-label.mjs`), which
-          //     posts the write-up above with the `reviewed-sha` / `reviewed-diff` / `reviewed-contribution`
-          //     markers and applies the label in the #2964-correct order. Splitting the comment and the label
-          //     into two effects with two sinks would re-implement that script and lose those markers, which is
-          //     precisely the re-implementation this slice forbids.
+          // 0 — THE LABEL SWAP, via `decideSetLabel` and through the SINGLE HOME (`review-set-label.mjs`), which
+          //     posts the write-up `stageVerdict` staged with the `reviewed-sha` / `reviewed-diff` /
+          //     `reviewed-contribution` markers and applies the label in the #2964-correct order. Splitting the
+          //     comment and the label into two effects with two sinks would re-implement that script and lose
+          //     those markers, which is precisely the re-implementation this slice forbids.
           //     IDEMPOTENT: FALSE — and this is THE one that matters. Adding a label twice is the same label,
           //     but the comment is not: a second run posts a SECOND durable comment. So an attempt whose outcome
           //     is unknown must stop the run for a person rather than guess, which is exactly the acceptance
@@ -1584,10 +1677,10 @@ export function reviewPrOperation({ readPr } = {}) {
             },
             idempotent: false,
           },
-          // 2 — THE LEDGER ROW (#3007's reserved seam, `verdict-ledger.append`).
+          // 1 — THE LEDGER ROW (#3007's reserved seam, `verdict-ledger.append`).
           //     #3007 PHASE 1 has now registered a writer behind this type, and the declaration did not have to
           //     move — which is what the reserved seam was for. The sink is a RECONCILER, not a second writer:
-          //     effect 1 shells `we:scripts/review-set-label.mjs`, the single home, which appends the row, so
+          //     effect 0 shells `we:scripts/review-set-label.mjs`, the single home, which appends the row, so
           //     the sink reads it back and only writes when that fail-soft append missed
           //     (`we:scripts/operations/review-pr-io.mjs`).
           //     IDEMPOTENT: STILL FALSE, deliberately. Reconciliation makes a replay harmless in practice, but
@@ -1620,7 +1713,7 @@ export function reviewPrOperation({ readPr } = {}) {
             },
             idempotent: false,
           },
-          // 3 — THE EVENT: the operator-facing notice, rendered by the SAME `renderReviewNotice` the drain uses
+          // 2 — THE EVENT: the operator-facing notice, rendered by the SAME `renderReviewNotice` the drain uses
           //     for its `escalated` event, so both directions of a PR's review outcome are reported in one
           //     wording (#2433).
           //     IDEMPOTENT: TRUE. It reports; it records nothing and nothing reads it back. The whole cost of a
