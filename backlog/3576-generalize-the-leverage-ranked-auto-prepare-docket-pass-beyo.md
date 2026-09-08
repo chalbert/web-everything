@@ -54,3 +54,12 @@ we:src/_data/backlog.js also computes a second, narrower metric beside `leverage
 - we:scripts/readiness/dispatch-plan.mjs -- today's `unshaped-no-scope` hold, queue-reactive-only, the exact gap this item closes for the build-item side.
 - we:scripts/conveyor/duplicate-pr-watch.mjs, we:scripts/conveyor/parked-pr-conflict-watch.mjs -- the structural templates (pure-core/IO-shell split, `makeCliMechanicalPasses` wiring).
 - we:backlog/3562-a-standing-mechanical-pass-keeps-the-5-highest-leverage-open.md -- the decision-side sibling this item generalizes the pattern from; re-confirmed still unbuilt and still correctly decision-scoped, not to be edited into this item's scope.
+
+## Placement note (2026-09-07)
+
+This item's leverage-ranked item-selection pattern is exactly the "item selection/authoring" AI seam
+we:backlog/2445's own Extraction seams section names as what a Plateau Loop coordinator inherits.
+we:backlog/xd5fws3 tracks generalizing it (alongside we:backlog/3568's lane-pool hygiene and the staged
+hardware-usage-aware admission-control project) into the Loop's own substrate under the existing Plateau Loop
+epic (we:backlog/2445). Build and land this for WE's own dispatcher regardless; this note is a forward
+pointer, not a dependency.
