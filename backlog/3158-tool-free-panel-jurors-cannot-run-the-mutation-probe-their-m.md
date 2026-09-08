@@ -2,10 +2,12 @@
 bornAs: x27e4xs
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["3145"]
 relatedTo: ["3028", "3050", "3057"]
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-08"
+dateResolved: "2026-09-08"
 scope:
   - we:scripts/lib/judge-panel.mjs
   - we:scripts/lib/review-core.mjs
@@ -46,3 +48,39 @@ that lands PRs is now strictly weaker at exactly the class of finding the probe 
 3. Whatever is ruled, the drain's auto-review documents which finding classes its panel can and cannot
    reach, so nobody reads a tool-free `accept` as a tool-backed one.
 4. `npm run check:standards` — 0 new errors.
+
+## Progress
+
+- Read #3145 (blocker, resolved 2026-08-17) and the current we:scripts/lib/judge-panel.mjs /
+  we:scripts/lib/judge-spawn.mjs / we:scripts/lib/review-core.mjs source: confirmed every real caller of
+  buildPanelMandate/buildValidatorMandate today (the drain panel, the converge loop, the jury shim on a PR
+  diff, the review-pr operation) runs through the panel/spawn judge machinery, which always spawns with no
+  tools granted — no forwarding path exists anywhere in the repo.
+- **Ruling (Done-when #1): panel jurors stay tool-free by design.** we:scripts/lib/judge-panel.mjs's own
+  depth-refusal reasoning already treats the unconditional no-tools spawn as what makes juror-spawns-juror
+  recursion structurally impossible; we:scripts/lib/judge-spawn.mjs's header names the identical trade as
+  deliberate (#3035). Recorded in a #3158 RULING doc block in both files.
+- **Done-when #2**: added toolsAvailable (default false) to buildMandate/buildPanelMandate/
+  buildValidatorMandate. Default output now carries a plain no-tools disclosure instead of the throwaway-clone
+  allowance, and a new MUTATION_PROBE_RULE_TOOL_FREE (reason from the diff and its tests, never claim to have
+  run anything) instead of MUTATION_PROBE_RULE. toolsAvailable: true restores the original text byte for byte,
+  for a future tool-bearing seat.
+- **Done-when #3**: the capability boundary (what a tool-free panel can/cannot reach) is documented in both
+  we:scripts/lib/review-core.mjs (beside MUTATION_PROBE_RULE_TOOL_FREE) and we:scripts/lib/judge-panel.mjs
+  (beside REFUSAL 1's depth reasoning), so a tool-free accept is never read as a tool-backed one.
+- Updated we:scripts/lib/__tests__/review-core.test.mjs: the pre-#3094 golden fixture is now asserted twice
+  (tool-bearing byte-identical to the original fixture; tool-free with the execution clause and probe variant
+  swapped, nothing else), and the unconditional describe block is re-asserted per-transport.
+- Done-when #4 (the repo health gate, 0 new errors): queued through the standard request/poll seam, not run
+  directly (per this brief).
+- Ran the real converge loop (elevated care, 5-lens panel + red-team, both via judgePanel, never the Agent
+  tool) against the lane diff. Round 1 landed: a non-author panel accepted and an independent red-team failed
+  to break it. Carve-out findings surfaced two real gaps this ruling had missed on the first pass, both fixed
+  before opening the PR even though the reducer scored them non-blocking:
+  - GUARANTEE_NEEDS_A_TEST_RULE was still unconditionally telling a tool-free juror to BREAK a guarded line —
+    the same defect class as MUTATION_PROBE_RULE, just missed on the first pass. Added
+    GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE and wired it through the same toolsAvailable condition.
+  - buildValidatorMandate's toolsAvailable passthrough had no dedicated test; added one.
+  - Softened the RULING comments' "no forwarding path exists anywhere in the repo" / "unconditionally, today"
+    phrasing to be explicit that it is a fact checked by reading source at authoring time, not an invariant a
+    test or lint rule in this diff enforces.

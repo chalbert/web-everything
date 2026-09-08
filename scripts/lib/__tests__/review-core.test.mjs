@@ -54,7 +54,9 @@ import {
   buildValidatorMandate,
   PROSE_IMPRECISION_RULE,
   GUARANTEE_NEEDS_A_TEST_RULE,
+  GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE,
   MUTATION_PROBE_RULE,
+  MUTATION_PROBE_RULE_TOOL_FREE,
   FENCED_DATA_RULE,
   combineValidatedVerdict,
   REVIEW_NOTICE_EVENTS,
@@ -231,11 +233,26 @@ describe('buildMandate', () => {
     expect(text).toMatch(/Judge only/);
   });
 
-  it('forbids checking out the PR branch in the shared tree (#2336)', () => {
+  it('forbids checking out the PR branch in the shared tree (#2336) regardless of toolsAvailable', () => {
     // The seed runs inside the drain's shared primary checkout; it must never move HEAD onto the PR branch.
-    const text = buildMandate();
-    expect(text).toMatch(/do NOT `git checkout`/);
-    expect(text).toMatch(/throwaway `git clone`/);
+    expect(buildMandate()).toMatch(/do NOT `git checkout`/);
+    expect(buildMandate({ toolsAvailable: true })).toMatch(/do NOT `git checkout`/);
+  });
+
+  // #3158 — the throwaway-clone allowance only makes sense for a transport that can actually clone something.
+  describe('#3158 — the execution clause is conditioned on `toolsAvailable`', () => {
+    it('defaults to tool-free — no clone allowance, an explicit no-tools disclosure instead', () => {
+      const text = buildMandate();
+      expect(text).not.toMatch(/throwaway `git clone`/);
+      expect(text).toMatch(/you have no tools/i);
+      expect(text).toMatch(/must not describe doing so/);
+    });
+
+    it('`toolsAvailable: true` restores the original clone allowance, byte for byte', () => {
+      const text = buildMandate({ toolsAvailable: true });
+      expect(text).toMatch(/throwaway `git clone`/);
+      expect(text).not.toMatch(/you have no tools/i);
+    });
   });
 
   it('joins a multi-mandate array (the #2285 v3 reviewer-panel shape)', () => {
@@ -710,9 +727,31 @@ describe('buildPanelMandate (#2310)', () => {
       `the full panel: ${PANEL_LENSES.join(', ')})`,
     );
 
-    it('adds the mutation probe and NOTHING else when `aim` is omitted', () => {
-      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+    // #3158 — the fixture was captured for a TOOL-BEARING transport (the clone allowance in its own text);
+    // `toolsAvailable: true` is what keeps this assertion byte-identical to that capture. The DEFAULT
+    // (tool-free) transport is asserted separately below, against the same fixture with only the execution
+    // clause and the probe variant swapped — see `withToolFreeExecution`.
+    it('adds the mutation probe and NOTHING else when `aim` is omitted — tool-bearing transport', () => {
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, toolsAvailable: true }))
         .toBe(`${withCurrentPanel(FIXTURE)} ${MUTATION_PROBE_RULE}`);
+    });
+
+    // THE ONLY OTHER LICENSED DELTA (#3158): the clone-or-run sentence becomes a no-tools disclosure, and the
+    // probe becomes the reasoning-only variant — nothing else moves. Named constants (not an inline replace in
+    // the assertion) so a future clause change to either sentence is visible as a diff to THIS test, not a
+    // silent drift in what "the only other delta" means.
+    const CLONE_ALLOWANCE_SENTENCE = 'If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.';
+    const NO_TOOLS_DISCLOSURE_SENTENCE = 'You have no tools — you cannot check out, clone, or run anything, and must not describe doing so.';
+    // #3158 — the second (later) delta: GUARANTEE_NEEDS_A_TEST_RULE swaps to its reasoning-only counterpart too.
+    const withToolFreeExecution = (text) => text
+      .replace(CLONE_ALLOWANCE_SENTENCE, NO_TOOLS_DISCLOSURE_SENTENCE)
+      .replace(GUARANTEE_NEEDS_A_TEST_RULE, GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE);
+
+    it('#3158 — the DEFAULT (tool-free) transport swaps the execution clause, the GUARANTEE rule, and the probe variant, nothing else', () => {
+      const toolFreeFixture = withToolFreeExecution(withCurrentPanel(FIXTURE));
+      expect(toolFreeFixture).not.toBe(withCurrentPanel(FIXTURE)); // the swap actually landed on the fixture
+      expect(buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS }))
+        .toBe(`${toolFreeFixture} ${MUTATION_PROBE_RULE_TOOL_FREE}`);
     });
 
     // WHY THIS TEST WAS REWRITTEN (#3035 r2). The version that shipped here asserted
@@ -758,11 +797,22 @@ describe('buildPanelMandate (#2310)', () => {
     });
   });
 
-  // ── #3094 — THE MUTATION PROBE IS UNCONDITIONAL (the fork ruled 2026-08-14) ─────────────────────────────
-  describe('#3094 — the mutation instruction every mandate carries', () => {
-    it('is present for EVERY lens, with no caller flag to set and none to forget', () => {
+  // ── #3094/#3158 — THE MUTATION INSTRUCTION IS UNCONDITIONAL ON THE LENS, CONDITIONED ON TRANSPORT ────────
+  // #3094 ruled it unconditional across lenses (2026-08-14) so no caller has a flag to forget; #3158 narrowed
+  // that to "unconditional on the lens, conditioned on `toolsAvailable`" once every real transport turned out
+  // to be tool-free (see the `#3158 RULING` comment above `MUTATION_PROBE_RULE_TOOL_FREE` in review-core.mjs).
+  describe('#3094/#3158 — the mutation instruction every mandate carries, transport-conditioned', () => {
+    it('is present for EVERY lens under the DEFAULT (tool-free) transport, with no caller flag to set and none to forget', () => {
       for (const lens of PANEL_LENSES) {
-        expect(buildPanelMandate({ lens }), lens).toContain(MUTATION_PROBE_RULE);
+        const text = buildPanelMandate({ lens });
+        expect(text, lens).toContain(MUTATION_PROBE_RULE_TOOL_FREE);
+        expect(text, lens).not.toContain('BREAK the line');
+      }
+    });
+
+    it('is present for EVERY lens under a tool-bearing transport, with no caller flag to set and none to forget', () => {
+      for (const lens of PANEL_LENSES) {
+        expect(buildPanelMandate({ lens, toolsAvailable: true }), lens).toContain(MUTATION_PROBE_RULE);
       }
     });
 
@@ -770,19 +820,29 @@ describe('buildPanelMandate (#2310)', () => {
     // sentence itself says it does not apply to a finding that changes no behaviour, so a simplicity juror
     // reads it as inapplicable rather than the operation branching on the lens. If someone ever "simplifies"
     // this by deleting the exemption clause, the instruction starts demanding mutation results for style
-    // findings — and this test is what says so.
+    // findings — and this test is what says so. True of BOTH variants.
     it('scopes itself by wording — behaviour findings in, pure style/simplicity findings explicitly out', () => {
-      expect(MUTATION_PROBE_RULE).toMatch(/affects correctness or changes/);
+      for (const rule of [MUTATION_PROBE_RULE, MUTATION_PROBE_RULE_TOOL_FREE]) {
+        expect(rule).toMatch(/affects correctness or changes/);
+        expect(rule).toMatch(/does NOT apply to a finding that changes no behaviour/);
+        expect(rule).toMatch(/simplicity/);
+      }
       expect(MUTATION_PROBE_RULE).toMatch(/NAMED test/);
-      expect(MUTATION_PROBE_RULE).toMatch(/does NOT apply to a finding that changes no behaviour/);
-      expect(MUTATION_PROBE_RULE).toMatch(/simplicity/);
       // `simplicity` is a LIVE panel lens, so the carve-out is load-bearing, not hypothetical.
       expect(PANEL_LENSES).toContain(MANDATE_LENSES.SIMPLICITY);
     });
 
+    // #3158 — the tool-free variant must never let a juror claim an action it structurally cannot take.
+    it('the tool-free variant never asks the juror to run, break, or mutate anything', () => {
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).not.toMatch(/BREAK the line/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/you have no tools/i);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).toMatch(/must not describe an action you did not take/);
+      expect(MUTATION_PROBE_RULE_TOOL_FREE).not.toBe(MUTATION_PROBE_RULE);
+    });
+
     it('is distinct from the prose-guarantee rule, which mutates for one narrower reason', () => {
       expect(MUTATION_PROBE_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
-      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+      const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS, toolsAvailable: true });
       expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
       expect(text).toContain(MUTATION_PROBE_RULE);
     });
@@ -996,6 +1056,19 @@ describe('buildValidatorMandate (#2439 — the independent hardened validator)',
     expect(text).toMatch(/even when the suite still goes green/);
     // (3) treat author-peer test edits as suspect by default
     expect(text).toMatch(/author-peer edit to a test as suspect/);
+  });
+
+  // #3158 — buildValidatorMandate's own toolsAvailable passthrough, asserted directly (not just inherited via
+  // buildMandate's default): a future edit that drops the forward would silently give a tool-bearing validator
+  // seat the tool-free disclosure, or vice versa, with nothing failing red.
+  it('#3158 — forwards toolsAvailable to buildMandate: default is tool-free, true restores the tool-bearing text', () => {
+    const toolFree = buildValidatorMandate({ lens: 'correctness' });
+    expect(toolFree).toMatch(/you have no tools/i);
+    expect(toolFree).not.toMatch(/throwaway `git clone`/);
+
+    const toolBearing = buildValidatorMandate({ lens: 'correctness', toolsAvailable: true });
+    expect(toolBearing).toMatch(/throwaway `git clone`/);
+    expect(toolBearing).not.toMatch(/you have no tools/i);
   });
 });
 
@@ -1791,7 +1864,7 @@ describe('LENS_HUNT_BRIEF / huntBriefForLens — the lens\'s own method (#3035)'
   // appended before the net-set / aim / probe clauses, so those must all still be present alongside it.
   it('does not displace the rules every mandate carries — probe and prose-imprecision still travel with it', () => {
     const mandate = buildPanelMandate({ lens: MANDATE_LENSES.CLAIM_ACCURACY });
-    expect(mandate).toContain(MUTATION_PROBE_RULE);
+    expect(mandate).toContain(MUTATION_PROBE_RULE_TOOL_FREE); // #3158 — default transport is tool-free
     expect(mandate).toContain(PROSE_IMPRECISION_RULE);
     expect(mandate).toContain(`the full panel: ${PANEL_LENSES.join(', ')})`);
   });
@@ -2465,26 +2538,42 @@ describe('review-parked-prs.mjs — the editor is gated on the care band (source
  * one week, every one with a comment describing it and no test.
  */
 describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
-  it('reaches every adversary the prose rule reaches', () => {
+  it('reaches every adversary the prose rule reaches — tool-bearing transport', () => {
+    for (const [name, text] of Object.entries({
+      base: buildMandate({ toolsAvailable: true }),
+      panel: buildPanelMandate({ lens: 'correctness', toolsAvailable: true }),
+      validator: buildValidatorMandate({ lens: 'correctness', toolsAvailable: true }),
+      adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness', toolsAvailable: true }),
+    })) {
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: true`);
+    }
+  });
+
+  // #3158 — the DEFAULT (tool-free) transport gets the reasoning-only variant instead, everywhere the
+  // tool-bearing one lands above.
+  it('reaches every adversary under the DEFAULT (tool-free) transport, as the reasoning-only variant', () => {
     for (const [name, text] of Object.entries({
       base: buildMandate({}),
       panel: buildPanelMandate({ lens: 'correctness' }),
       validator: buildValidatorMandate({ lens: 'correctness' }),
       adapter: PR_DIFF_ADAPTER.buildMandate({ lens: 'correctness', mandate: 'correctness' }),
     })) {
-      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE)}`).toBe(`${name}: true`);
+      expect(`${name}: ${text.includes(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE)}`).toBe(`${name}: true`);
+      expect(`${name}: ${text.includes('BREAK the guarded line')}`).toBe(`${name}: false`);
     }
   });
 
   it('appears exactly once, same as its neighbour', () => {
-    const text = buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs'] });
+    const text = buildPanelMandate({ lens: 'correctness', netChangedFiles: ['a.mjs'], toolsAvailable: true });
     expect(text.split(GUARANTEE_NEEDS_A_TEST_RULE).length - 1).toBe(1);
   });
 
-  // FRAMED AS COVERAGE, not as prose — otherwise the rule beside it makes this unraisable.
+  // FRAMED AS COVERAGE, not as prose — otherwise the rule beside it makes this unraisable. True of both variants.
   it('routes the finding as COVERAGE, so the prose rule does not swallow it', () => {
-    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/COVERAGE finding/);
-    expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/not a prose one/);
+    for (const rule of [GUARANTEE_NEEDS_A_TEST_RULE, GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE]) {
+      expect(rule).toMatch(/COVERAGE finding/);
+      expect(rule).toMatch(/not a prose one/);
+    }
   });
 
   // The technique, not just the instruction: reviewers who found these did it by mutation.
@@ -2493,8 +2582,16 @@ describe('GUARANTEE_NEEDS_A_TEST_RULE rides alongside the prose rule', () => {
     expect(GUARANTEE_NEEDS_A_TEST_RULE).toMatch(/DEFAULTS/);
   });
 
+  // #3158 — the tool-free variant never asks the juror to run or break anything.
+  it('the tool-free variant never asks the juror to run or break anything', () => {
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toMatch(/BREAK a line/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/you have no tools/i);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).toMatch(/DEFAULTS/);
+    expect(GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);
+  });
+
   it('does not contradict the prose rule — both are present and distinct', () => {
-    const text = buildValidatorMandate({ lens: 'correctness' });
+    const text = buildValidatorMandate({ lens: 'correctness', toolsAvailable: true });
     expect(text).toContain(PROSE_IMPRECISION_RULE);
     expect(text).toContain(GUARANTEE_NEEDS_A_TEST_RULE);
     expect(PROSE_IMPRECISION_RULE).not.toBe(GUARANTEE_NEEDS_A_TEST_RULE);

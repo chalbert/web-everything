@@ -218,6 +218,22 @@ export const GUARANTEE_NEEDS_A_TEST_RULE = [
 ].join(' ');
 
 /**
+ * #3158 — the tool-free counterpart of {@link GUARANTEE_NEEDS_A_TEST_RULE}, same reasoning-only substitution
+ * pattern as {@link MUTATION_PROBE_RULE_TOOL_FREE}: a tool-free juror cannot BREAK a line to confirm a test
+ * reddens, so it is asked to name the defending test (or its absence) by reading, not by running anything.
+ * Selected by `buildMandate`'s `toolsAvailable` flag exactly like the mutation-probe pair.
+ */
+export const GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE = [
+  'A COMMENT THAT PROMISES SOMETHING IS A TEST WITH THE WRONG SYNTAX (you have no tools). For each guarantee',
+  'the diff states in prose — "X can never happen", "this refuses Y", "the caller cannot Z" — find, by reading,',
+  'the test that defends it and name it, or say plainly that you see none. You have no tools and must not',
+  'describe breaking a line or running a test: reach this by reading the test file, not by executing anything.',
+  'A guarantee no test defends is a COVERAGE finding, not a prose one, and it is worth raising: prose is the',
+  'only thing in a diff that nothing checks. Watch DEFAULTS in particular — a default value quietly satisfying',
+  'a check written for the explicit value is the single most common shape here.',
+].join(' ');
+
+/**
  * #3094 — THE MUTATION PROBE. What separates a finding that is real from one that merely reads well: break the
  * line and watch whether a NAMED test goes red. Every review in the session that motivated this card found its
  * defects that way ("I broke this line and nothing reddened"), and none of them were asked to — which is the
@@ -244,6 +260,51 @@ export const MUTATION_PROBE_RULE = [
   'wording, simplicity — where there is nothing to break: say nothing about mutation for those.',
 ].join(' ');
 
+/**
+ * #3158 RULING — PANEL SEATS STAY TOOL-FREE BY DESIGN; THE PROBE IS CONDITIONED ON TRANSPORT, NOT DROPPED.
+ *
+ * The card's other fork was making `judgePanel` forward `allowedTools` + a per-seat lane `cwd` (N seats
+ * needing N lanes — a real, priced cost). RULED AGAINST: `we:scripts/lib/judge-panel.mjs`'s own depth-refusal
+ * reasoning already treats `buildJudgeArgv` ALWAYS emitting `--tools ''` as what makes juror-spawns-juror
+ * recursion STRUCTURALLY IMPOSSIBLE at the judge step — granting a seat tools would remove that guarantee for
+ * EVERY caller, not just this one — and `we:scripts/lib/judge-spawn.mjs`'s own header names the identical
+ * trade on purpose: "the mandate permits a throwaway clone, and a tool-free juror cannot make one. That
+ * escalation path is deliberately outside the judge contract (#3035)." So: panel jurors are tool-free BY
+ * DESIGN, and the probe belongs in what the mandate CLAIMS a juror can do, not in a transport nobody grants.
+ *
+ * THIS NARROWS #3094's "UNCONDITIONAL", IT DOES NOT REVERSE IT. The mutation instruction is still on EVERY
+ * mandate `buildPanelMandate` builds — no caller flag to remember, nothing to forget — but WHICH VARIANT
+ * depends on `toolsAvailable` (see `buildMandate` / `buildPanelMandate` / `buildValidatorMandate` below),
+ * defaulting to `false` because that is what every real caller of those three was OBSERVED TO BE, by reading
+ * source, when this ruling was written: `judgePanel` and `judgeSpawn` always spawn `--tools ''` (#3028, #3050),
+ * and no declared operation (`review-pr.mjs`, `converge-cli.mjs`, `review-core-cli.mjs`) forwards a
+ * `toolsAvailable` override. STATED HONESTLY: that is a fact checked at authoring time, not an invariant this
+ * diff adds a test or lint rule to enforce — a future caller CAN pass `toolsAvailable: true`, or a future
+ * `judgePanel` change could start granting tools, without anything here going red. A future tool-bearing seat
+ * passes `toolsAvailable: true` and gets this rule, byte for byte, back.
+ *
+ * THE CAPABILITY BOUNDARY (Done-when #3 — on record here, not only in this comment's own history):
+ *   A TOOL-FREE PANEL CAN reach anything visible by READING alone: a wrong `if`, a missing case, a guarantee
+ *     stated in prose with no test defending it (see {@link GUARANTEE_NEEDS_A_TEST_RULE}), a claim the diff
+ *     makes about itself that the diff's own text contradicts, an argument-order or type mismatch a careful
+ *     read catches.
+ *   A TOOL-FREE PANEL CANNOT reach anything that only surfaces by RUNNING: whether a named test actually
+ *     reddens under a given mutation, a flaky or environment-dependent failure, a runtime value only
+ *     observable by execution. {@link MUTATION_PROBE_RULE_TOOL_FREE} asks the juror to REASON about this and
+ *     say so plainly rather than fabricate a run it never made — "I cannot verify this without tools" is the
+ *     correct, complete answer, and must never be read as though it carried a tool-backed juror's `accept`.
+ */
+export const MUTATION_PROBE_RULE_TOOL_FREE = [
+  'MUTATION PROBE — FOR BEHAVIOUR FINDINGS, REASONING ONLY (you have no tools). If you report a defect that',
+  'affects correctness or changes behaviour, state, in the finding, whether an EXISTING test would catch it —',
+  'name the test if you can point to one from reading it, and say plainly that you see NO test that would catch',
+  'it if you cannot. Reach this by READING the test files and the diff, never by claiming to have run, broken,',
+  'or mutated anything: you have no tools and must not describe an action you did not take. "No test catches',
+  'this" is itself a finding worth reporting; an assertion of a defect with no test-coverage read behind it is',
+  'weaker than one with it. This does NOT apply to a finding that changes no behaviour — pure style, naming,',
+  'wording, simplicity — where there is nothing to check: say nothing about test coverage for those.',
+].join(' ');
+
 export const PROSE_IMPRECISION_RULE = [
   'PROSE IMPRECISION IS NON-BLOCKING. Wording, framing, and claims about history or significance are worth a',
   'NOTE, never a change-request, unless the imprecision would cause a wrong ACTION — a maintainer editing the',
@@ -259,16 +320,23 @@ export const PROSE_IMPRECISION_RULE = [
  * subagent and reading its answer remains the caller's action (this module never calls a model, same split
  * `we:scripts/lane-review.mjs` documents for the pre-PR review seam).
  * @param {{contextIsolation?: string, mandate?: string|string[], goal?: string, round?: number,
- *   fenced?: boolean}} [o] - #2950: `goal` is what the diff is trying to do (judged against that and the base,
- *   never an ideal); `round` ≥ 2 fires the anti-spiral clause. Both additive — omitted, the text is what it was
- *   before #2950. #2967: `fenced` puts the goal inside the #2438 labelled data fence; pass it whenever the goal
- *   is caller-supplied text (a PR title). It is NOT the only untrusted path in: `contextIsolation` is
- *   interpolated straight into instruction position below and is fence-exempt on the grounds that it names an
- *   isolation MODE — a closedness no code enforces (PR #1235 review, finding 7). No caller passes a non-default
- *   today, so that is a stated gap in the allow-list's rationale, not a live hole.
+ *   fenced?: boolean, toolsAvailable?: boolean}} [o] - #2950: `goal` is what the diff is trying to do (judged
+ *   against that and the base, never an ideal); `round` ≥ 2 fires the anti-spiral clause. Both additive —
+ *   omitted, the text is what it was before #2950. #2967: `fenced` puts the goal inside the #2438 labelled data
+ *   fence; pass it whenever the goal is caller-supplied text (a PR title). It is NOT the only untrusted path
+ *   in: `contextIsolation` is interpolated straight into instruction position below and is fence-exempt on the
+ *   grounds that it names an isolation MODE — a closedness no code enforces (PR #1235 review, finding 7). No
+ *   caller passes a non-default today, so that is a stated gap in the allow-list's rationale, not a live hole.
+ *   #3158: `toolsAvailable` (default `false`) picks the execution clause — the throwaway-clone allowance for a
+ *   transport that genuinely has tools, or a plain no-tools disclosure for one that does not. Defaulting
+ *   `false` matches every real caller TODAY (`judgePanel`/`judgeSpawn` always spawn `--tools ''`); see the
+ *   #3158 ruling above {@link MUTATION_PROBE_RULE_TOOL_FREE}.
  * @returns {string}
  */
-export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1, fenced = false } = {}) {
+export function buildMandate({
+  contextIsolation = 'diff-only', mandate = DEFAULT_MANDATE, goal = '', round = 1, fenced = false,
+  toolsAvailable = false,
+} = {}) {
   const isolationLine = contextIsolation === 'diff-only'
     ? 'You see ONLY the diff (and, if supplied, the PR description) — no author framing, no prior session context.'
     : `Context isolation: ${contextIsolation}.`;
@@ -277,6 +345,12 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
   // isolation line, the `file` finding anchor, and the #2336 no-checkout body. The output is byte-identical to the
   // prior inline form. #2336: a review subagent runs inside the drain's shared primary checkout, so it must NEVER
   // `git checkout` the PR branch there (that moves the shared HEAD and violates the never-branch-a-shared-checkout guard).
+  // #3158 — the throwaway-clone allowance only makes sense for a transport that can actually clone something;
+  // a tool-free juror gets an honest disclosure instead, so it never reads an instruction it structurally cannot
+  // follow (see the #3158 ruling above `MUTATION_PROBE_RULE_TOOL_FREE`).
+  const executionLine = toolsAvailable
+    ? 'If you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.'
+    : 'You have no tools — you cannot check out, clone, or run anything, and must not describe doing so.';
   return buildSubjectMandate({
     subjectNoun: 'diff',
     mandate,
@@ -291,10 +365,12 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
     fenced,
     bodyLines: [
       'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
-      'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
-      'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
+      'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain.',
+      executionLine,
       PROSE_IMPRECISION_RULE,
-      GUARANTEE_NEEDS_A_TEST_RULE,
+      // #3158 — same toolsAvailable condition as executionLine/the mutation probe: a tool-free juror gets the
+      // reasoning-only variant, never the "BREAK the guarded line" instruction it structurally cannot follow.
+      toolsAvailable ? GUARANTEE_NEEDS_A_TEST_RULE : GUARANTEE_NEEDS_A_TEST_RULE_TOOL_FREE,
     ],
   });
 }
@@ -1044,18 +1120,24 @@ export const PR_DIFF_ADAPTER = Object.freeze({
  * the three-dot diff, not the net two-tree diff, so a sibling lane's already-landed file must not be reported
  * as this PR's scope creep. Omitting it (or passing `'net'`) leaves the mandate BYTE-FOR-BYTE what it is
  * without it — the golden fixture with no `diffBasis` passed is unaffected.
+ * #3158 — the OPTIONAL `toolsAvailable` param (default `false`). Selects which mutation-probe variant closes
+ * the mandate: `MUTATION_PROBE_RULE` (break the line, run the named test) for a transport that genuinely has
+ * tools, `MUTATION_PROBE_RULE_TOOL_FREE` (reason from the diff and its tests, never claim to have run anything)
+ * for one that does not. Defaults `false` because every real caller today (the drain panel, `/converge`, `/jury`
+ * on a PR diff) runs through `judgePanel`/`judgeSpawn`, which always spawns `--tools ''` — see the #3158 ruling
+ * above `MUTATION_PROBE_RULE_TOOL_FREE`.
  * @param {{lens: string, contextIsolation?: string, netChangedFiles?: string[]|null, goal?: string,
- *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null}} o
+ *   round?: number, fenced?: boolean, aim?: string, diffBasis?: string|null, toolsAvailable?: boolean}} o
  * @returns {string}
  */
 export function buildPanelMandate({
   lens, contextIsolation = 'diff-only', netChangedFiles = null, goal = '', round = 1, fenced = false,
-  aim = '', diffBasis = null,
+  aim = '', diffBasis = null, toolsAvailable = false,
 } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildPanelMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens, goal, round, fenced });
+  const base = buildMandate({ contextIsolation, mandate: lens, goal, round, fenced, toolsAvailable });
   const parts = [
     base,
     `You are ONE of several independent mandate reviewers on this diff, each judging a single lens`,
@@ -1111,12 +1193,16 @@ export function buildPanelMandate({
       'verdict, so your findings are read as a report, not an acceptance signal.',
     );
   }
-  // #3094 — THE MUTATION PROBE, UNCONDITIONAL (the fork ruled on the card, 2026-08-14). Every mandate that has
-  // found a real defect in this loop carried this instruction, so it is not left to a caller to remember: an
-  // opt-in flag is a way to omit the single highest-yield line by forgetting it. It is not gated on the lens
-  // either — the PHRASING makes it a natural no-op for a finding that changes no behaviour, which is what a
-  // `simplicity` juror is looking at, so no branch has to guess which lens is judging what.
-  parts.push(MUTATION_PROBE_RULE);
+  // #3094 — THE MUTATION PROBE, UNCONDITIONAL ON THE LENS (the fork ruled on the card, 2026-08-14). Every
+  // mandate that has found a real defect in this loop carried this instruction, so it is not left to a caller to
+  // remember: an opt-in flag is a way to omit the single highest-yield line by forgetting it. It is not gated on
+  // the lens either — the PHRASING makes it a natural no-op for a finding that changes no behaviour, which is
+  // what a `simplicity` juror is looking at, so no branch has to guess which lens is judging what.
+  // #3158 — narrowed to conditioned-on-TRANSPORT, not dropped: `toolsAvailable` (default `false`, matching every
+  // real caller today) selects the reasoning-only variant a tool-free juror can actually satisfy, so the mandate
+  // never instructs an action its transport structurally forbids. See the #3158 ruling above
+  // `MUTATION_PROBE_RULE_TOOL_FREE`.
+  parts.push(toolsAvailable ? MUTATION_PROBE_RULE : MUTATION_PROBE_RULE_TOOL_FREE);
   return parts.join(' ');
 }
 
@@ -1147,14 +1233,17 @@ export function renderPanelVerdictTable({ lensVerdicts = {}, mandatoryLenses = M
  * value is that it never saw why the peers thought it was right. `combineValidatedVerdict` then gates the panel's
  * accept on this independent verdict, and only a JOINT accept earns `redteam:accepted` (the label lives in
  * `review-escalation.mjs`; this module stays label-free — it JUDGES ONLY).
- * @param {{lens: string, contextIsolation?: string}} o
+ * #3158 — the OPTIONAL `toolsAvailable` param (default `false`) passes straight through to the wrapped
+ * `buildMandate` call, same meaning as on `buildPanelMandate`; this validator does not itself append a mutation
+ * probe today, so the only visible effect is the execution-clause it inherits from `buildMandate`.
+ * @param {{lens: string, contextIsolation?: string, toolsAvailable?: boolean}} o
  * @returns {string}
  */
-export function buildValidatorMandate({ lens, contextIsolation = 'diff-only' } = {}) {
+export function buildValidatorMandate({ lens, contextIsolation = 'diff-only', toolsAvailable = false } = {}) {
   if (!PANEL_LENSES.includes(lens)) {
     throw new Error(`buildValidatorMandate: unknown lens "${lens}" — must be one of ${PANEL_LENSES.join(', ')}`);
   }
-  const base = buildMandate({ contextIsolation, mandate: lens });
+  const base = buildMandate({ contextIsolation, mandate: lens, toolsAvailable });
   return [
     base,
     `You are the INDEPENDENT FINAL VALIDATOR for the ${lens} lens (#2439) — a fresh adversary who took NO part`,

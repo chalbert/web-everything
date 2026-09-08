@@ -14,6 +14,30 @@
  * constant exists to prevent (#3050 "Not in scope").
  *
  * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+ * #3158 RULING — THIS MODULE NEVER FORWARDS `allowedTools`. PANEL SEATS ARE TOOL-FREE BY DESIGN.
+ *
+ * The card this module was audited under (#3158) posed two forks: forward `allowedTools` + a per-seat lane
+ * `cwd` so a seat CAN be tool-bearing (N seats needing N lanes, priced), or rule panel jurors tool-free by
+ * design and fix the mandate instead. RULED AGAINST forwarding: REFUSAL 1's own DEPTH reasoning below already
+ * leans on `buildJudgeArgv` ALWAYS emitting `--tools ''` to make juror-spawns-juror recursion STRUCTURALLY
+ * IMPOSSIBLE at the judge step — a seat that could spawn things would need that guarantee re-derived some
+ * other way, for every caller, not just the one that asked for tools. `judge-spawn.mjs`'s own header names the
+ * identical trade on purpose (a tool-free juror cannot make the throwaway clone the mandate used to dangle in
+ * front of it — "that escalation path is deliberately outside the judge contract", #3035).
+ *
+ * WHAT A TOOL-FREE PANEL CAN AND CANNOT REACH, so a tool-free `accept` is never read as a tool-backed one
+ * (the boundary Done-when #3 asks to be on record): CAN reach anything visible by reading the diff and its
+ * tests — a wrong branch, a missing case, a prose guarantee no test defends. CANNOT reach anything that only
+ * surfaces by RUNNING — whether a named test actually reddens under a mutation, a flaky or environment-
+ * dependent failure. The mandate text carries this boundary, not this module: `we:scripts/lib/review-core.mjs`
+ * conditions `MUTATION_PROBE_RULE` vs. `MUTATION_PROBE_RULE_TOOL_FREE` on a `toolsAvailable` flag that
+ * defaults `false` — because every seat this module spawns IS tool-free today, verified by reading this file
+ * (it forwards no `allowedTools`). Stated honestly: that is a fact checked at authoring time, not an
+ * invariant a test or lint rule here enforces — a later edit that adds `allowedTools` forwarding would not
+ * turn this comment red on its own. See `review-core.mjs`'s own `#3158 RULING` comment for the full boundary
+ * and the counter-fork's reasoning.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────────────────────────
  * THE ONE PROPERTY THAT IS THE PRODUCT: PAIRWISE-DISTINCT SIBLINGS.
  *
  * The fan-out that exists today (`we:skills-src/jury/subject-jury.workflow.js`, #2658) uses the Workflow
