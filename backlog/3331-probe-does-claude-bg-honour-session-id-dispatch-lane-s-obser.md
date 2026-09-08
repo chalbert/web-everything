@@ -3,11 +3,13 @@ bornAs: xhmktct
 kind: story
 size: 3
 parent: "3029"
-status: open
+status: resolved
 scaffoldedBy: "rule3118"
 dateScaffolded: "2026-08-26"
-scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs"]
+scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/explore-io.mjs", "we:scripts/operations/wake.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs", "we:scripts/operations/__tests__/dispatch-abort.test.mjs", "we:scripts/operations/__tests__/dispatch-crosses-processes.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs", "we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs", "we:scripts/operations/__tests__/explore.test.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/wake-cli.test.mjs"]
 dateOpened: "2026-08-26"
+dateStarted: "2026-09-07"
+dateResolved: "2026-09-07"
 relatedTo: ["3118", "3096", "3037"]
 tags: [plateau-loop, delivery, operations, conveyor, dispatch, probe]
 ---
@@ -120,6 +122,31 @@ gate-passing state. As of 2026-08-27 that branch is **53 commits behind `main`**
 current `main` reads as ~70 unrelated files deleted, which is drift, not intent. Whoever picks this up next
 should treat the checkpoint as reference material to read, not a branch to rebase forward; re-verify from
 current `main` rather than trying to carry the stale diff through 53 commits of conflict.
+
+**Remedy LANDED (2026-09-07).** Not from the stale `lane/3331-session-id-probe-salvage` checkpoint above — a
+SEPARATE, complete, already-tested implementation of the same Done-when #3 remedy exists on
+`origin/lane/mechanical-dispatcher` (part of graduation epic #3443's ongoing work), discovered while building
+sibling slice #3488. Verified byte-identical port (`git apply` of the branch's own diff onto current `main`,
+zero manual conflict resolution needed on any of the 13 files): the observer now matches by the CLI's own
+`-n` name (via `investigatorSessionName` in `we:scripts/operations/explore-io.mjs`) or by the SHORT id prefix
+`parseBackgroundedHandle` reads off the `--bg` spawn's own stdout confirmation
+(`we:scripts/operations/dispatch-lane-io.mjs`'s `isHandleListed`, a prefix match since the short id is a hex
+prefix of the full `sessionId` — measured `1ae0905c` ↔ `1ae0905c-314c-4f73-a7c4-3973a9005e82`), never the
+minted-but-discarded `--session-id` value. `we:scripts/operations/wake.mjs`'s `--resolve` liveness check
+updated to the same prefix match. All three sink/observer header comments (`we:scripts/operations/dispatch-lane-io.mjs`'s
+`:509-514`/`:528-534`, `we:scripts/operations/explore-io.mjs`'s file header) corrected to state what is now proven instead of the
+discarded minted-handle assumption — closing Done-when #3's own requirement to correct those comments "in the
+same change". Scope widened from the card's original 2 files to 13 (`we:scripts/operations/explore-io.mjs`
+and `we:scripts/operations/wake.mjs` needed the identical fix since they independently mint+match handles the
+same way; 10 test files carry the new/updated coverage) — see the `scope:` field above.
+
+**`#3118`'s hinge answer (owed per this card's own "Lineage" section):** the dispatcher CAN now address the
+session it started — `isHandleListed`'s short-id prefix is exactly what a future `claude --resume <id>` would
+need, recovered from the same `--bg` confirmation the sink already reads. Stop-then-resume steering is no
+longer blocked on an unrecoverable identity; #3118 clause 3's revisit trigger (ii) does not fire from this
+card's answer.
+
+**Verification:** `git diff origin/main...origin/lane/mechanical-dispatcher -- we:scripts/operations/dispatch-lane-io.mjs we:scripts/operations/explore-io.mjs we:scripts/operations/wake.mjs` (plus the 10 listed test files) is zero post-land. Scoped test run: 373 tests pass across the 8 fast-path files; `we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` and `we:scripts/operations/__tests__/wake-cli.test.mjs` are excluded from the default `vitest run` (live/integration suites, exercised by the full gate's `we:scripts/verify-lane.mjs` instead) — both ported byte-identical, unverified independently here but covered by the full gate before landing.
 
 ## Done when
 
