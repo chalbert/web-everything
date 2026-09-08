@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { classifyPr, planLabelDrain, joinImplToCouples, decideBatchesIdleExit, resolveRepos, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, reviewCoverageGaps } from '../merge-ai-prs.mjs';
+import { classifyPr, planLabelDrain, joinImplToCouples, decideBatchesIdleExit, resolveRepos, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, reviewCoverageGaps, buildDrainVerdicts } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -776,5 +776,53 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     expect(doc).toMatch(/JOIN KEY|join key/);              // what is actually missing
     expect(doc).toMatch(/COST call, not an impossibility/); // the corrected framing, not "unrecoverable"
     expect(doc).toMatch(/gh pr view <num> --json body/);    // the concrete read that makes it recoverable
+  });
+});
+
+describe('merge-ai-prs — #2502: v.headSha threading (buildDrainVerdicts + planLabelDrain)', () => {
+  // #2502 review (correctness, both panel jurors + red-team) — a ONE-commit fixture can't distinguish "picked
+  // the LAST element" from "picked the FIRST", since index 0 === index length-1 there. These use TWO commits,
+  // oldest-first (the real `gh pr view --json commits` ordering), with distinct oids, so a regression that
+  // flips `p.commits[p.commits.length - 1]` to `p.commits[0]` reddens here.
+  const multiCommitPr = (num, overrides = {}) => ({
+    number: num, title: 't', body: 'a real summary', headRefName: `lane/${num}`, baseRefName: 'main',
+    mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+    statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED' }],
+    labels: [{ name: 'ready-to-merge' }],
+    ...overrides,
+  });
+
+  it('buildDrainVerdicts stamps v.headSha from the LAST commit, not the first, of a multi-commit read', () => {
+    const pr = multiCommitPr(901);
+    const readOf = () => ({ commits: [{ oid: 'sha-base' }, { oid: 'sha-tip' }], manifest: null });
+    const verdicts = buildDrainVerdicts({ prsByRepo: new Map([[null, [pr]]]), readOf, repos: [null] });
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].headSha).toBe('sha-tip');
+  });
+
+  it('buildDrainVerdicts: a single-commit read still stamps that commit\'s oid (the common case)', () => {
+    const pr = multiCommitPr(902);
+    const readOf = () => ({ commits: [{ oid: 'sha-only' }], manifest: null });
+    const verdicts = buildDrainVerdicts({ prsByRepo: new Map([[null, [pr]]]), readOf, repos: [null] });
+    expect(verdicts[0].headSha).toBe('sha-only');
+  });
+
+  it('buildDrainVerdicts: an empty/degraded commits read stamps headSha: null (never throws, never guesses)', () => {
+    const pr = multiCommitPr(903);
+    const readOf = () => ({ commits: [], manifest: null });
+    const verdicts = buildDrainVerdicts({ prsByRepo: new Map([[null, [pr]]]), readOf, repos: [null] });
+    expect(verdicts[0].headSha).toBeNull();
+  });
+
+  it('planLabelDrain: a DEFERRED verdict (blockedBy an open item) carries its headSha into the deferred entry', () => {
+    // planLabelDrain reads `c.headSha` straight off the SAME verdict object buildDrainVerdicts stamped — no
+    // second derivation — so this proves the stamp survives into the ONE result bucket (`deferred`) that isn't
+    // built by a bare-object push keyed on `.num`/`.repo` alone (merged/failedMerges/toMerge/skipped/parked are
+    // proven directly by the #2502 gate-entrypoint-integration suite; `deferred`'s shape is `planLabelDrain`'s
+    // own, proven here at the pure-function level instead).
+    const c = { num: 910, item: 2500, decision: 'merge', headSha: 'sha-deferred-910', blockedBy: [2499], stackParents: [] };
+    const plan = planLabelDrain([c], { landedThisPass: new Set(), provenOnMain: new Set(), extraOpenItems: new Set([2499]) });
+    expect(plan.deferred).toHaveLength(1);
+    expect(plan.deferred[0]).toMatchObject({ num: 910, headSha: 'sha-deferred-910' });
   });
 });

@@ -74,6 +74,12 @@ if (a[0] === 'pr' && a[1] === 'view') {
   out({});
 }
 // pr edit / pr comment / label create / api … — succeed silently (dry-run shouldn't reach the mutating ones)
+// #2502 review — force 'pr merge' to fail for a flagged PR, so a live test can exercise the failedMerges path
+// (mirrors the existing _editBodyFail per-PR failure flag above, same shape, different subcommand).
+if (a[0] === 'pr' && a[1] === 'merge') {
+  const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
+  if (pr && pr._mergeFail) { process.stderr.write('forced merge failure\\n'); process.exit(1); }
+}
 process.stdout.write(''); process.exit(0);
 `;
 
@@ -139,6 +145,15 @@ function runDrainLive(fixture, args) {
 const nums = (arr) => (arr || []).map((x) => Number(x.num));
 const GREEN = [{ name: 'test', conclusion: 'SUCCESS', status: 'COMPLETED' }];
 const AI_COMMIT = [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }] }];
+// #2502 — a per-PR AI commit carrying a distinct tip `oid`, for the headSha-threading tests below.
+const aiCommitWithOid = (oid) => [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid }];
+// #2502 review (correctness) — TWO AI commits with DISTINCT oids, oldest-first (`gh pr view --json commits`'s
+// real ordering), so a test using this fixture can tell "picked the LAST element" apart from "picked the
+// FIRST" — `aiCommitWithOid` alone can't, since a one-element array satisfies either index identically.
+const aiCommitsMultiOid = (firstOid, tipOid) => [
+  { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid: firstOid },
+  { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid: tipOid },
+];
 
 describe('the real drain entrypoint consults the gate before merging', () => {
   it('label-scoped drain: a gate-self PR PARKS as review:human and never lands, while a clean leaf PR would merge', () => {
@@ -210,6 +225,108 @@ describe('the real drain entrypoint consults the gate before merging', () => {
 
     // the clean orphan with no review label still lands — the backstop only refuses un-cleared labels
     expect(nums(r.toMerge)).toContain(202);
+  });
+
+  // #2502 — the sweep already fetches each considered PR's tip commit `oid` (for the AI-authorship gate); this
+  // proves the REAL entrypoint now THREADS that SHA onto every emitted result-bucket entry, not just that some
+  // pure helper computes it — toMerge/skipped/parked are proven RIGHT HERE, through the real entrypoint. The
+  // remaining buckets are proven further down this same file / suite: `merged` and `failedMerges` get their OWN
+  // live (non-dry-run) entrypoint tests below ("#2502 live merge" / "#2502 live merge failure" — the merge
+  // cascade genuinely RUNS in both, not merely a pure-function stand-in); `deferred` is proven at the pure-
+  // function level instead (`merge-ai-prs-couple-join-and-drain-verdicts.test.mjs`'s "#2502: v.headSha
+  // threading" block), because `planLabelDrain` is itself an exported, directly-testable pure function — no
+  // live-entrypoint spin-up needed to reach it. The drain-daemon stuck detector reads this field off the
+  // journal to tell a force-pushed (thrashing) lane from one that is simply waiting — it needs the REAL
+  // entrypoint to emit it, not merely a unit-tested helper, which is exactly why the live tests exist.
+  it('#2502 head-SHA threading: toMerge / skipped / parked entries each carry their OWN PR\'s tip commit oid', () => {
+    const fixture = {
+      _id: 'headsha-label',
+      prs: [
+        { number: 801, title: 'clean leaf', body: 'a real summary', headRefName: 'lane/g', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          // #2502 review — TWO commits, oldest-first, so this fixture can only pass if headSha picks the LAST
+          // element ('sha-801-tip'), not the first ('sha-801-base').
+          labels: [{ name: 'ready-to-merge' }], _commits: aiCommitsMultiOid('sha-801-base', 'sha-801-tip'), _files: [{ path: 'backlog/aa.md', additions: 1, deletions: 0 }] },
+        { number: 802, title: 'edits the gate policy itself', body: 'a real summary', headRefName: 'lane/h', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: aiCommitWithOid('sha-802-tip'), _files: [{ path: 'scripts/lib/gate-config.mjs', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    const m801 = r.toMerge.find((x) => Number(x.num) === 801);
+    expect(m801).toBeTruthy();
+    expect(m801.headSha).toBe('sha-801-tip');
+
+    const p802 = r.parked.find((x) => Number(x.num) === 802);
+    expect(p802).toBeTruthy();
+    expect(p802.headSha).toBe('sha-802-tip');
+
+    const bareFixture = {
+      _id: 'headsha-bare',
+      prs: [
+        { number: 803, title: 'parked by a prior drain', body: 'a real summary', headRefName: 'lane/i', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'review:pending' }], _commits: aiCommitWithOid('sha-803-tip'), _files: [{ path: 'backlog/bb.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const rBare = runDrain(bareFixture, []);
+    const s803 = rBare.skipped.find((x) => Number(x.num) === 803);
+    expect(s803).toBeTruthy();
+    expect(s803.headSha).toBe('sha-803-tip');
+  });
+
+  // #2502 review (correctness) — the ONE existing live (non-dry-run) harness, `runDrainLive`, only ever fixtures
+  // held/parked PRs (so `merged` stays empty by construction) — meaning the merged.push({..., headSha}) call
+  // site was, before this test, never actually EXECUTED by anything. This drives a genuinely clean, unheld,
+  // certified PR through `runDrainLive` so the real merge cascade runs (the fake `gh pr merge` succeeds
+  // silently, same as every other unhandled fake-gh subcommand) and asserts the field survives into `merged`.
+  it('#2502 live merge: a genuinely landed PR carries headSha in the `merged` bucket (the merge cascade actually runs)', () => {
+    const fixture = {
+      _id: 'headsha-live-merge',
+      prs: [
+        { number: 804, title: 'clean orphan', body: 'a real summary', headRefName: 'lane/j', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [], _commits: aiCommitWithOid('sha-804-tip'), _files: [{ path: 'backlog/cc.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const { result } = runDrainLive(fixture, []); // bare sweep — no --label — AI-authorship alone certifies it
+    const m804 = result.merged.find((x) => Number(x.num) === 804);
+    expect(m804).toBeTruthy();
+    expect(m804.headSha).toBe('sha-804-tip');
+  });
+
+  it('#2502 live merge failure: a PR whose `gh pr merge` throws carries headSha in the `failedMerges` bucket', () => {
+    // A merge failure exits the drain non-zero (exit 2, "a merge attempt failed" per deriveIncidents' own
+    // taxonomy) — `runDrainLive`'s helper assumes a clean exit, so this drives the same invocation directly and
+    // reads `--json` off `error.stdout`, the documented shape of an execFileSync failure.
+    const fixture = {
+      _id: 'headsha-live-merge-fail',
+      prs: [
+        { number: 805, title: 'clean but merge throws', body: 'a real summary', headRefName: 'lane/k', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [], _commits: aiCommitWithOid('sha-805-tip'), _files: [{ path: 'backlog/dd.md', additions: 1, deletions: 0 }],
+          _mergeFail: true },
+      ],
+    };
+    const fxPath = join(workDir, `fixture-${fixture._id}.json`);
+    writeFileSync(fxPath, JSON.stringify(fixture));
+    let result;
+    try {
+      const stdout = execFileSync('node', [SCRIPT, '--no-drain-lease', '--this-repo', '--json'], {
+        cwd: workDir,
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      result = JSON.parse(stdout.trim().split('\n').filter(Boolean).pop());
+    } catch (e) {
+      expect(e.status).toBe(2); // the drain's documented merge-fail exit code
+      result = JSON.parse(String(e.stdout).trim().split('\n').filter(Boolean).pop());
+    }
+    const f805 = result.failed.find((x) => Number(x.num) === 805);
+    expect(f805).toBeTruthy();
+    expect(f805.headSha).toBe('sha-805-tip');
   });
 
   // #2820-review-fix REGRESSION GUARD — the root cause of the earlier break was "a new not-merge decision
