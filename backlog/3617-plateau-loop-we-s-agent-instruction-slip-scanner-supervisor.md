@@ -1,4 +1,5 @@
 ---
+bornAs: x5dj56t
 kind: story
 size: 3
 parent: "2445"
@@ -27,7 +28,7 @@ we:backlog/2445's own framing is that the coordinator 'spawns agents as supervis
 ## Not in scope
 
 - Rebuilding, rescoping, or re-deciding any of the WE-side items above.
-- Assuming the Loop's own supervision mechanism reuses WE's *transcript format* specifically — a coordinator spawning a non-Claude provider (see we:backlog/xhg3r91) would need an equivalent, provider-neutral behavioral-compliance signal, which this item's own eventual scope should address rather than assume away.
+- Assuming the Loop's own supervision mechanism reuses WE's *transcript format* specifically — a coordinator spawning a non-Claude provider (see we:backlog/3619) would need an equivalent, provider-neutral behavioral-compliance signal, which this item's own eventual scope should address rather than assume away.
 - Any plateau-app-side filing or `locus:` field, per we:docs/agent/platform-decisions.md#backlog-tracking-locus-now-distributed-next.
 
 ## Cross-references added

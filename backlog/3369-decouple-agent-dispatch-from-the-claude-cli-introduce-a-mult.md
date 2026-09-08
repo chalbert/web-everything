@@ -125,7 +125,7 @@ Researched in-session via web search rather than assumed. Sources:
 
 we:backlog/2444 (ratified) already fixes the Loop's own agent-runner interface as backend-agnostic, with a
 later backend "slotting in behind the same interface" — the identical shape this epic's provider-port
-extraction builds for WE's own judge/dispatch seams. we:backlog/xhg3r91 tracks that the Loop's eventual
+extraction builds for WE's own judge/dispatch seams. we:backlog/3619 tracks that the Loop's eventual
 runner build (we:backlog/2444/2530) should reuse this proven port pattern rather than re-deriving it, under
 the existing Plateau Loop epic (we:backlog/2445). Build and land this epic for WE's own dispatcher
 regardless; this note is a forward pointer, not a dependency.

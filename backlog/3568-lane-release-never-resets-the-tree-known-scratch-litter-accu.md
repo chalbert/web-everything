@@ -41,7 +41,7 @@ The original draft of this card offered the release-time fix and a periodic pass
 ## Placement note (2026-09-07)
 
 This lane-pool hygiene mechanic is exactly the "lane-pool + leases" substrate we:backlog/2445's own Extraction
-seams section names as what a Plateau Loop coordinator inherits. we:backlog/xd5fws3 tracks generalizing it
+seams section names as what a Plateau Loop coordinator inherits. we:backlog/3618 tracks generalizing it
 (alongside we:backlog/3576's docket generalization and the staged hardware-usage-aware admission-control
 project) into the Loop's own in-process lane/capacity substrate under the existing Plateau Loop epic
 (we:backlog/2445). Build and land this fix for WE's own dispatcher regardless; this note is a forward

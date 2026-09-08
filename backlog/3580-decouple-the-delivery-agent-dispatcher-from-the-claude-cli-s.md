@@ -67,7 +67,7 @@ deferred ("blocked on #3331/#xnukacf/#x4iwn55 landing for Claude first… do not
 ## Placement note (2026-09-07)
 
 This epic's dispatcher-provider-port extraction is the "lane workers" half of the same backend-agnostic
-runner shape we:backlog/2444 already ratified for the Plateau Loop coordinator. we:backlog/xhg3r91 tracks
+runner shape we:backlog/2444 already ratified for the Plateau Loop coordinator. we:backlog/3619 tracks
 generalizing it (alongside we:backlog/3369's judge-side port) into the Loop's own runner build under the
 existing Plateau Loop epic (we:backlog/2445). Build and land this epic for WE's own dispatcher regardless;
 this note is a forward pointer, not a dependency.

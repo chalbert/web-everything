@@ -40,6 +40,6 @@ Gap found live 2026-09-06/07: build-shaped backlog items auto-get a doctrine-loa
 ## Placement note (2026-09-07)
 
 This item's kind-based dispatch routing generalizes we:backlog/2445's own "item selection/authoring" AI seam
-past the build-only path. we:backlog/xj1h5z5 tracks generalizing it into the Loop's own item-selection
+past the build-only path. we:backlog/3620 tracks generalizing it into the Loop's own item-selection
 substrate under the existing Plateau Loop epic (we:backlog/2445). Build and land this item for WE's own
 conveyor regardless; this note is a forward pointer, not a dependency.

@@ -59,7 +59,7 @@ we:src/_data/backlog.js also computes a second, narrower metric beside `leverage
 
 This item's leverage-ranked item-selection pattern is exactly the "item selection/authoring" AI seam
 we:backlog/2445's own Extraction seams section names as what a Plateau Loop coordinator inherits.
-we:backlog/xd5fws3 tracks generalizing it (alongside we:backlog/3568's lane-pool hygiene and the staged
+we:backlog/3618 tracks generalizing it (alongside we:backlog/3568's lane-pool hygiene and the staged
 hardware-usage-aware admission-control project) into the Loop's own substrate under the existing Plateau Loop
 epic (we:backlog/2445). Build and land this for WE's own dispatcher regardless; this note is a forward
 pointer, not a dependency.
