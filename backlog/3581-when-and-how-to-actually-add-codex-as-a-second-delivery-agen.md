@@ -88,6 +88,68 @@ own ruling (still `#3513`'s to record); it is recorded here because it is what m
 decision live rather than hypothetical — the gate this card's own body says its Fork is "scoped entirely
 inside" has now actually opened.
 
+## Gemini sequencing — pacing amendment (operator, 2026-09-08)
+
+**Supersedes an earlier, looser draft of this same amendment.** A same-day earlier draft (opened as PR #2067,
+branch `lane/3581-gemini-pacing-amendment`, never merged) recorded the operator's mid-session remark that
+Gemini should follow Codex "soon after," "not gated behind Codex fully maturing first." That draft was
+overtaken before it landed: in further discussion the same night, the operator weighed the capacity/usage-limit
+risk of running two still-immature provider integrations at once and revised the pacing to the stricter rule
+below. **The rule stated in this section — wait for Codex to be hooked in before activating Gemini — is the
+operative one and supersedes the earlier "soon after, not gated" language.** The earlier draft is noted here
+only so a future reader who encounters it (e.g. via PR #2067's history) does not mistake it for standing
+guidance; it does not coexist with the rule below as an alternative reading.
+
+**The operator's explicit instruction:** "let's wait for codex to be hooked before we add gemini, but work
+for it can continue." Recorded here as a card-note-only amendment, the same way the step-4 pacing amendment
+above was recorded — no new tracking item filed, for the same reasoning that amendment used.
+
+**What this sequences.** Actually wiring/adding Gemini as a second delivery-agent/review provider waits until
+Codex is genuinely hooked in — meaning this card's own step 3 (Codex wired as an opt-in review/fix-dispatch
+panelist, proven against real PR traffic, per the Recommended sequence above) has actually **landed and held
+up**, not merely been decided or scheduled. Deciding to pilot Codex first is not the same event as Codex
+working in production; this amendment gates Gemini activation on the latter.
+
+**What is explicitly NOT blocked.** Preparatory work FOR Gemini may continue in parallel right now —
+research/probe-shaped work such as a Gemini-CLI probe analogous to what `#3371` ran for Codex against the
+judge contract, or adapter-shape scoping against the provider-port extraction (`#3369` step 1). Only the
+actual wiring-in/activation of Gemini as a live provider waits on Codex's own hook landing; investigation and
+design work do not.
+
+**Why the pacing tightened.** The earlier "soon after, not gated" draft under-weighted a real operational
+risk: running two still-immature cross-provider integrations at once (Codex not yet proven, Gemini freshly
+wired) compounds the failure surface this whole card exists to manage carefully (session-liveness, resume
+semantics, lane-lease ownership — see the epic's own body above) at exactly the moment neither integration has
+track record to lean on. Sequencing Gemini's activation strictly after Codex's step 3 has held up removes that
+compounding risk while still letting Gemini prep work proceed now, which is what "work for it can continue"
+preserves.
+
+**What this does not decide.** This is a sequencing/pacing note only. It does not pick Gemini as the
+confirmed second-provider candidate — that choice, if and when it is made, is still open per this card's own
+"Deliberately NOT in scope" section below (`#3371` decided Codex over Gemini for the *judge* seam specifically;
+this amendment does not extend or reopen that call to the dispatcher/delivery-agent seam). It does not reopen
+anything else this card has already ratified.
+
+## Claude/Codex load balancing — pacing addendum (operator, 2026-09-08)
+
+**Card note only, same doctrine as the amendment above** — nothing to build yet, so no new tracking item
+filed; this depends on this card's own step 3 (Codex wired and proven) landing first to have real numbers to
+tune against.
+
+**Why not fully automatic.** There is no live usage/rate-limit API to read for any provider today — confirmed
+in-session: no `claude usage` CLI command, no local cache file either provider exposes. A fully automatic
+capacity-aware router is not buildable right now for lack of a signal to route on.
+
+**Accepted near-term approach.** Once Codex is actually hooked into review/fix-dispatch (this card's step 3),
+balance load with a manually-tuned routing weight/percentage per provider on the dispatch-lane's provider-port
+selection (e.g. "70% Claude / 30% Codex"), adjusted by the operator over time based on observed rate-limit
+hits — not a fully automatic algorithm.
+
+**Related but separate, not to be built now.** Reactive rate-limit-triggered failover — falling back to the
+other provider when one actually hits a limit — composes with the static weight above as a backstop for when
+the weight guess is wrong. Mentioned here only because the operator raised it alongside the weighting idea; it
+is not scoped or committed by this note.
+
 ## Deliberately NOT in scope
 
 - **Whether to add a second provider at all.** `#3513` already ruled that on merit.
