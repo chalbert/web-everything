@@ -2,9 +2,11 @@
 bornAs: xzf5v6w
 kind: decision
 parent: "3580"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/review-dispatch.mjs", "we:skills-src/inspect-agent-health/agent-health.mjs", "we:scripts/lib/review-independence.mjs"]
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-08"
+codifiedIn: one-off
 tags: []
 ---
 
@@ -51,6 +53,40 @@ whether Codex's dispatch/session model can be trusted with anything, before bett
    Codex on a narrow, reversible slice of full delivery-agent dispatch — never as the default provider, and
    never before `#3513`'s own gate (a real second subscription or a measured usage-window cap) has actually
    fired.
+
+## Recommended sequence — pacing amendment (operator, 2026-09-08)
+
+**Step 4's timeline is tightened.** The sequence above still stands as ordered — step (a)/review-pilot-first
+is still correct, for exactly the risk reasoning stated in the Fork above (blast radius of a bad Codex verdict
+vs. two agents racing one lane clone) — but the *pacing* between step 3 and step 4 is no longer open-ended.
+The operator's explicit instruction tonight: once step 3 (Codex wired as an opt-in review/fix-dispatch
+panelist, proven against real PR traffic) lands cleanly, step 4 (the full delivery-agent build/prepare-capacity
+pilot) should follow **soon after** — not on the indefinite "only once proven, never as default, whenever that
+naturally happens" pacing this card's step 4 text otherwise implies. This is a timeline tightening only: it
+does not re-open the sequence itself, does not move step 4 ahead of step 3, and does not weaken the risk-based
+reasoning for why review-first is still correct — it only shortens how long step 4 is allowed to sit
+unstarted once step 3 has actually held up.
+
+## Ratified (Fork — Option a) — 2026-09-08
+
+**Ratified 2026-09-08 by the operator (Nicolas Gilbert).** Fork default taken as ruled: **(a) — pilot Codex
+narrowly on independent review/fix-dispatch first**, per this card's own recommended default and the
+concretely stated sequence above (land `#3579` → let `#3371`'s Codex-CLI probe report back → wire Codex as an
+opt-in review panelist, extended to `we:scripts/operations/review-dispatch.mjs`'s fix-dispatch path
+specifically → only later, and now on the tightened "soon after" pacing above, pilot full delivery-agent
+builds). Option (b) — starting on full delivery-agent builds first — is not taken, for the reasons this card's
+Fork section already states (the hardest, least-proven machinery this repo has, attempted first, with the
+named worst-case failure — two agents in one lane clone — as the downside).
+
+**`#3513`'s graduation trigger is confirmed FIRED.** `#3513`'s own text (`## Supported by default — not
+forks`) gates any cross-provider routing on "a second subscription actually held, or a measured usage-window
+cap — not a decision." The operator explicitly confirmed tonight that this trigger has now fired: tonight's
+session's real token consumption counts as satisfying it, not merely as a general priority bump. The concrete
+evidence cited is this same session — an extremely high-volume overnight session responding to a real
+capacity incident, involving dozens of concurrent subagents over many hours. This does not reopen `#3513`'s
+own ruling (still `#3513`'s to record); it is recorded here because it is what makes this card's Fork
+decision live rather than hypothetical — the gate this card's own body says its Fork is "scoped entirely
+inside" has now actually opened.
 
 ## Deliberately NOT in scope
 
