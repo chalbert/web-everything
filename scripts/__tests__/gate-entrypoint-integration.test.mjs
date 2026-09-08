@@ -50,6 +50,12 @@ if (a[0] === 'pr' && a[1] === 'edit' && a.includes('--body')) {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
   if (pr && pr._editBodyFail) { process.stderr.write('forced body-edit failure\\n'); process.exit(1); }
 }
+// #2502 — a flagged PR's merge write FAILS (non-zero), proving the FAILED (not merged) path through the real
+// entrypoint records the failed-bucket headSha too. Every other PR's merge succeeds silently (falls to the catchall).
+if (a[0] === 'pr' && a[1] === 'merge') {
+  const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
+  if (pr && pr._mergeFail) { process.stderr.write('forced merge failure\\n'); process.exit(1); }
+}
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
@@ -215,6 +221,54 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     expect(r.toMerge.find((x) => Number(x.num) === 901)?.headSha).toBe('sha-toMerge-901');
     expect(r.parked.find((x) => Number(x.num) === 902)?.headSha).toBe('sha-parked-902');
     expect(r.skipped.find((x) => Number(x.num) === 903)?.headSha).toBe('sha-skipped-903');
+  });
+
+  // #2502 — the `merged`/`failed` buckets ONLY populate on a REAL (non-dry-run) merge attempt, which the
+  // toMerge/parked/skipped test above never exercises (it always runs --dry-run). Proves the actual
+  // `merged.push`/`failedMerges.push` call sites (scripts/merge-ai-prs.mjs, the live cascade) carry the real
+  // headSha through, not just `null` — the exact gap the panel found in every hand-built pure-unit fixture.
+  it('#2502: a REAL merge carries the PR tip commit\'s headSha into the merged bucket', () => {
+    const shaCommits = (oid) => [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid }];
+    const fixture = {
+      _id: 'headsha-live-merge',
+      prs: [
+        { number: 911, title: 'clean leaf, actually merges', body: 'a real summary', headRefName: 'lane/p', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: shaCommits('sha-merged-911'), _files: [{ path: 'backlog/hs4.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const { result } = runDrainLive(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+    expect(result.merged.find((x) => Number(x.num) === 911)?.headSha).toBe('sha-merged-911');
+  });
+
+  // A merge FAILURE makes the real entrypoint exit non-zero (some merge failed this pass), so runDrainLive's
+  // plain execFileSync throws — read the JSON off the thrown error's own captured stdout instead (child_process
+  // still populates it on a non-zero exit; only a genuine spawn failure would leave it empty).
+  it('#2502: a REAL merge failure carries the PR tip commit\'s headSha into the failed bucket', () => {
+    const shaCommits = (oid) => [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid }];
+    const fixture = {
+      _id: 'headsha-live-fail',
+      prs: [
+        { number: 912, title: 'clean leaf, merge write FAILS', body: 'a real summary', headRefName: 'lane/q', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: shaCommits('sha-failed-912'), _files: [{ path: 'backlog/hs5.md', additions: 1, deletions: 0 }], _mergeFail: true },
+      ],
+    };
+    const fxPath = join(workDir, `fixture-${fixture._id}.json`);
+    writeFileSync(fxPath, JSON.stringify(fixture));
+    let result;
+    try {
+      const stdout = execFileSync('node', [SCRIPT, '--label=ready-to-merge', '--no-reconcile-labels', '--no-drain-lease', '--this-repo', '--json'], {
+        cwd: workDir,
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      result = JSON.parse(stdout.trim().split('\n').filter(Boolean).pop());
+    } catch (e) {
+      result = JSON.parse(String(e.stdout).trim().split('\n').filter(Boolean).pop());
+    }
+    expect(result.failed.find((x) => Number(x.num) === 912)?.headSha).toBe('sha-failed-912');
   });
 
   it('bare /merge sweep: the #2366 backstop refuses a PR already carrying review:pending, but lands a clean one', () => {

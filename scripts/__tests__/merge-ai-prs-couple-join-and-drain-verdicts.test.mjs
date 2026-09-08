@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { classifyPr, planLabelDrain, joinImplToCouples, decideBatchesIdleExit, resolveRepos, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, reviewCoverageGaps } from '../merge-ai-prs.mjs';
+import { classifyPr, planLabelDrain, joinImplToCouples, decideBatchesIdleExit, resolveRepos, OPEN_PR_LIST_LIMIT, carrierDeferDecision, buildCarrierHealth, deferralsAllHeldCouple, planDrainPass, resolveContextRepos, reduceOpenPrContext, collectOpenPrContext, isContentsNotFound, readRemoteManifestViaApi, isPassIdle, isConfirmSweepSettled, coupleImplOpen, liveOpenHeadRefs, deriveCoupleIncomplete, reviewCoverageGaps, buildDrainVerdicts } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { buildManifest, asItemId } from '../readiness/lane-manifest.mjs';
 
@@ -776,5 +776,61 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     expect(doc).toMatch(/JOIN KEY|join key/);              // what is actually missing
     expect(doc).toMatch(/COST call, not an impossibility/); // the corrected framing, not "unrecoverable"
     expect(doc).toMatch(/gh pr view <num> --json body/);    // the concrete read that makes it recoverable
+  });
+});
+
+describe('merge-ai-prs — #2502 headSha real-value wiring (buildDrainVerdicts -> planLabelDrain)', () => {
+  // The prior gate-entrypoint-integration test proves toMerge/parked/skipped carry a REAL (non-null) headSha,
+  // but that harness only ever runs --dry-run, so it never exercises the `deferred` bucket's headSha with a
+  // real value either (every existing planLabelDrain unit test builds candidates by hand and never sets
+  // `.headSha`, so their `deferred` assertions are all trivially `null`). This proves the REAL data path —
+  // buildDrainVerdicts attaching `v.headSha` off the PR's real commits, surviving the `{...v}` spread
+  // planLabelDrain's `remaining`/`plan.ready`/`plan.deferred` all copy through — carries a genuine SHA, not
+  // just the always-null shape every other deferred assertion in this file happens to exercise.
+  const green = [{ name: 'test', conclusion: 'SUCCESS' }];
+  const ghPr = (number, headRefName, labels = []) =>
+    ({ number, title: 't', body: 'a real summary', headRefName, statusCheckRollup: green, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', labels: labels.map((name) => ({ name })) });
+
+  it('a blockedBy defer carries the REAL tip SHA (not null) through the production buildDrainVerdicts -> planLabelDrain path', () => {
+    const pr = ghPr(30, 'lane/b-we', ['ready-to-merge']);
+    const prsByRepo = new Map([[null, [pr]]]);
+    const manifest = { item: 101, blockedBy: [100], repos: [], stackParents: [] };
+    const readOf = () => ({ commits: [{ oid: 'sha-real-30' }], manifest });
+    const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos: [null] });
+    expect(verdicts[0].headSha).toBe('sha-real-30'); // buildDrainVerdicts itself attaches the real value
+    const plan = planLabelDrain(verdicts, { extraOpenItems: new Set([100]) });
+    expect(plan.ready).toEqual([]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: 'sha-real-30' }]);
+  });
+
+  it('a landable candidate with NO commits reports headSha: null, never a garbage value', () => {
+    const pr = ghPr(31, 'lane/c-we', ['ready-to-merge']);
+    const prsByRepo = new Map([[null, [pr]]]);
+    const readOf = () => ({ commits: [], manifest: null });
+    const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos: [null] });
+    expect(verdicts[0].headSha).toBeNull();
+  });
+
+  it('a candidate whose tip commit carries a NON-STRING oid (missing / null / number) reports headSha: null too', () => {
+    const cases = [
+      [{ oid: undefined }],
+      [{ oid: null }],
+      [{ oid: 12345 }],
+      [{}], // no oid key at all
+    ];
+    for (const commits of cases) {
+      const pr = ghPr(31, 'lane/c-we', ['ready-to-merge']);
+      const verdicts = buildDrainVerdicts({ prsByRepo: new Map([[null, [pr]]]), readOf: () => ({ commits, manifest: null }), repos: [null] });
+      expect(verdicts[0].headSha, `commits=${JSON.stringify(commits)}`).toBeNull();
+    }
+  });
+
+  it('picks the LAST commit as the tip — `gh pr view --json commits` orders oldest-first, never the first', () => {
+    const pr = ghPr(32, 'lane/d-we', ['ready-to-merge']);
+    const prsByRepo = new Map([[null, [pr]]]);
+    // three commits, oldest-first (the real gh ordering) — the tip is the LAST one, sha-c, never sha-a.
+    const readOf = () => ({ commits: [{ oid: 'sha-a' }, { oid: 'sha-b' }, { oid: 'sha-c' }], manifest: null });
+    const verdicts = buildDrainVerdicts({ prsByRepo, readOf, repos: [null] });
+    expect(verdicts[0].headSha).toBe('sha-c');
   });
 });

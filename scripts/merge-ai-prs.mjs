@@ -1309,11 +1309,16 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       const read = (typeof readOf === 'function' ? readOf(repo, p.number) : null) || {};
       p.commits = read.commits || [];
       const v = classifyPr(p, { requiredCheck, allowPendingReview: (relief.prs || []).includes(Number(p.number)) || (relief.passWide && !!label) });
-      // #2502 — the tip commit's SHA, threaded onto every emitted verdict (and, via the `{...v}` spread used to
-      // build `remaining`/`plan.ready`/`plan.deferred`, onto every downstream result-bucket entry) so a caller
-      // (the drain-daemon stuck detector) can tell a PR whose tip keeps getting force-pushed from one simply
-      // waiting. Already in hand — no new `gh` call.
-      v.headSha = p.commits.length ? (p.commits[p.commits.length - 1]?.oid ?? null) : null;
+      // #2502 — the tip commit's SHA, threaded onto every emitted verdict and, via the `{...v}` spread used to
+      // build `remaining`/`plan.ready`/`plan.deferred`, onto each of the six result buckets a caller (the
+      // drain-daemon stuck detector) actually reads: toMerge/merged/skipped/parked/deferred/failed — NOT
+      // rebased/healed/pendingRebased, which stay plain PR-number arrays (out of this item's scope). Already
+      // in hand — no new `gh` call. The LAST element is the tip because `gh pr view --json commits` returns
+      // GitHub's PullRequest.commits connection, which is chronological (oldest-first) by API contract, not an
+      // incidental ordering — the same assumption `isAiGeneratedPr` above already leans on implicitly (it
+      // never re-sorts `pr.commits` either).
+      const tipOid = p.commits.length ? p.commits[p.commits.length - 1]?.oid : null;
+      v.headSha = typeof tipOid === 'string' && tipOid ? tipOid : null;
       // #3308 (round-2 correctness fix) — the PASS-WIDE half of the relief valve, recorded HERE because it is the
       // only place it is knowable. The scoped `=<pr#>` form stamps `v.reliefWaived` down in the escalation loop,
       // but that whole loop is gated on `REVIEW_ESCALATION = label && !escalationRelief.passWide` — so under a BARE
