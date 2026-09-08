@@ -6,6 +6,9 @@ blockedBy: ["2854"]
 status: open
 dateOpened: "2026-08-02"
 tags: [conveyor, statute-lint, prevention, temporal-token]
+scope:
+  - we:scripts/lib/validate-rules-anchors.cjs
+  - we:scripts/__tests__/rules-anchors.test.mjs
 ---
 
 # Statute-lint: an anchor's interim/point-in-time claim must name the open item that retires it
