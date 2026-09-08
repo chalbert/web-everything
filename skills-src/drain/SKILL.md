@@ -367,13 +367,17 @@ emits it in the `--json` output's `parked` array as `{ num, repo, humanRequired,
      `{ lens: verdict }` map (`lensVerdicts`) and, via `buildPanelFindings()`, one lens-tagged findings list.
 
      > **What a tool-free juror cannot do — stated, not buried.** `judgePanel` seats are always `--tools ''`
-     > (it has no `allowedTools` to forward), so `MUTATION_PROBE_RULE`'s *"break the line and see if a NAMED
-     > test reddens"* and the mandate's throwaway-`git clone` escape are both unrunnable. `panel-fanout` tells
-     > each juror it has no tools and must not claim to have opened anything, so it reports honestly rather
-     > than fabricating — it fails safe. But the panel IS weaker at exactly the class of finding the probe
-     > exists to catch, and that is a trade this change makes deliberately in exchange for jurors that are
-     > actually distinct actors. Tracked as
-     > [#x27e4xs](../../backlog/x27e4xs-tool-free-panel-jurors-cannot-run-the-mutation-probe-their-m.md).
+     > (it forwards no `allowedTools` — RULING in `we:scripts/lib/judge-panel.mjs`, #3158: panel seats stay
+     > tool-free rather than pay the N-seats-need-N-lanes cost of a tool-bearing panel). A tool-free juror
+     > cannot literally break a line or clone the repo, so `MUTATION_PROBE_RULE` and the mandate's isolation
+     > clause now SELF-SCOPE on that fact (same pattern as the mutation probe's own lens-scoping): a tool-free
+     > seat is told to name the test it BELIEVES would redden and say plainly it ran nothing, never to
+     > describe a break or a clone it did not perform. `panel-fanout` separately tells each juror it has no
+     > tools and must not claim to have opened anything, so a seat reports honestly rather than fabricating —
+     > it fails safe. The panel is still weaker at exactly the class of finding a real mutation run catches;
+     > that is a trade this change made deliberately in exchange for jurors that are actually distinct
+     > actors, now stated honestly to the juror itself rather than left as an unrunnable instruction. Ruled in
+     > [#3158](../../backlog/3158-tool-free-panel-jurors-cannot-run-the-mutation-probe-their-m.md).
   2. **Reduce the panel to one verdict** — `derivePanelVerdict({ lensVerdicts, humanRequired, conflict,
      mandatoryLenses, findings: buildPanelFindings(lensFindings) })`. **Pass `findings` — the whole panel's list
      from step 1 — always** (#2823 round-3 finding 1): the prevention scan is derived from the FINDINGS (immune to
