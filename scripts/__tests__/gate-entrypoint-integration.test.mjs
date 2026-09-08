@@ -189,6 +189,34 @@ describe('the real drain entrypoint consults the gate before merging', () => {
     expect(p103.humanRequired).toBe(true);
   });
 
+  // #2502 — the tip commit's head SHA, threaded onto every emitted result-bucket entry (not just `toMerge`),
+  // proven through the REAL entrypoint so a future edit that drops the field on one bucket (parked/skipped) goes
+  // red here, not just in a pure `buildDrainVerdicts` unit test. The stuck detector (plateau-app) reads this
+  // field off EVERY bucket, not only the landed one, to tell a thrashing (force-pushed) PR from one just waiting.
+  it('#2502: every result bucket (toMerge/parked/skipped) carries the PR tip commit\'s headSha', () => {
+    const RED = [{ name: 'test', conclusion: 'FAILURE', status: 'COMPLETED' }];
+    const shaCommits = (oid) => [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid }];
+    const fixture = {
+      _id: 'headsha',
+      prs: [
+        { number: 901, title: 'clean leaf, lands', body: 'a real summary', headRefName: 'lane/m', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }], _commits: shaCommits('sha-toMerge-901'), _files: [{ path: 'backlog/hs1.md', additions: 1, deletions: 0 }] },
+        { number: 902, title: 'held, parks', body: 'a real summary', headRefName: 'lane/n', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN,
+          labels: [{ name: 'ready-to-merge' }, { name: 'review:changes' }], _commits: shaCommits('sha-parked-902'), _files: [{ path: 'backlog/hs2.md', additions: 1, deletions: 0 }] },
+        { number: 903, title: 'red CI, plain skip', body: 'a real summary', headRefName: 'lane/o', baseRefName: 'main',
+          mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: RED,
+          labels: [{ name: 'ready-to-merge' }], _commits: shaCommits('sha-skipped-903'), _files: [{ path: 'backlog/hs3.md', additions: 1, deletions: 0 }] },
+      ],
+    };
+    const r = runDrain(fixture, ['--label=ready-to-merge', '--no-reconcile-labels']);
+
+    expect(r.toMerge.find((x) => Number(x.num) === 901)?.headSha).toBe('sha-toMerge-901');
+    expect(r.parked.find((x) => Number(x.num) === 902)?.headSha).toBe('sha-parked-902');
+    expect(r.skipped.find((x) => Number(x.num) === 903)?.headSha).toBe('sha-skipped-903');
+  });
+
   it('bare /merge sweep: the #2366 backstop refuses a PR already carrying review:pending, but lands a clean one', () => {
     const fixture = {
       _id: 'bare',

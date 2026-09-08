@@ -589,7 +589,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
   it('the reproduction WITH coupleIncomplete yields deferred [30] waiting on item 100', () => {
     const plan = repro({ landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
     expect(plan.ready).toEqual([]);
-    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   // ── 2. the SIBLING predicate — stackProven proof (1) makes the same subtraction ─────────────────────────────
@@ -600,7 +600,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     expect(proven.ready.map((c) => c.num)).toEqual([30]);                 // control: proof (1) alone frees it
     const withCounter = planLabelDrain([stackCand(30, 101, [100])], { landedThisPass: new Set([100]), coupleIncomplete: new Set([100]) });
     expect(withCounter.ready).toEqual([]);
-    expect(withCounter.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(withCounter.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   it('stackProven: the subtraction SHORT-CIRCUITS — a weaker later arm cannot undo the counter-evidence', () => {
@@ -618,7 +618,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
       provenOnMain: new Set([100]), extraOpenItems: new Set([100, 101]), coupleIncomplete: new Set([100]),
     });
     expect(plan.ready).toEqual([]);
-    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100] }]);
+    expect(plan.deferred).toEqual([{ num: 30, item: 101, waitOn: [100], headSha: null }]);
   });
 
   it('an empty coupleIncomplete leaves #999 F1/F2 byte-identical (explicit no-op control)', () => {
@@ -735,7 +735,7 @@ describe('merge-ai-prs — #3004 coupleIncomplete: a half-landed couple no longe
     const run = runCascade({ verdicts: mkVerdicts(), prsByRepo: mkPrsByRepo(), failRefs: new Set(['lane/a-fui']) });
     expect(run.merged).toEqual([77]);                                    // only the WE carrier landed
     expect(run.landedThisPass.has(100)).toBe(true);                      // …and it stamped item 100 as landed
-    expect(run.deferred).toEqual([{ num: 88, item: 101, waitOn: [100] }]);  // the dependent held back
+    expect(run.deferred).toEqual([{ num: 88, item: 101, waitOn: [100], headSha: null }]);  // the dependent held back
   });
 
   it('real window CONTROL: on today\'s wiring (no re-derived set reaching replan) the dependent wrongly LANDS', () => {
