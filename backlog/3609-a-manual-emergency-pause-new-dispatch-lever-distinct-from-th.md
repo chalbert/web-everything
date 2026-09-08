@@ -3,9 +3,10 @@ bornAs: xo94b41
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/readiness/dispatch-pause.mjs"]
 dateOpened: "2026-09-07"
+dateResolved: "2026-09-08"
 tags: []
 ---
 
